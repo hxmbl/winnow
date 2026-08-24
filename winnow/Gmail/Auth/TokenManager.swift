@@ -1,0 +1,167 @@
+import Foundation
+
+/// Owns the lifecycle of the stored `TokenSet`: hand out access tokens that
+/// are known-good, refresh when stale, and hard-fail when the user must
+/// re-consent.
+///
+/// SECURITY MODEL
+/// - The **only** component besides `AuthController` that touches token
+///   values. Everything else asks for a ready-to-use access token string and
+///   can never see the refresh token.
+/// - Access tokens are refreshed 60s before expiry to avoid clock-skew 401s.
+/// - Refresh happens at most once per expiry window (single-flight): a burst
+///   of API calls triggers one refresh, not one per call.
+/// - Google answering `invalid_grant` (revoked/password-changed) clears the
+///   Keychain immediately — a dead refresh token must not sit on disk.
+/// - This type is MainActor like the rest of the app: token handling is not
+///   the concurrency bottleneck, and one isolation domain keeps the audit
+///   surface obvious.
+@MainActor
+final class TokenManager {
+    private let store: TokenStore
+    private let credentialsProvider: () throws -> GmailCredentials
+    private let session: URLSession
+    static let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
+
+    /// Refresh this many seconds before the documented expiry.
+    private let expirySlack: TimeInterval = 60
+    var now: () -> Date = Date.init
+    private(set) var lastError: Error?
+
+    private var cached: TokenSet?
+    private var inflightRefresh: Task<String, Error>?
+
+    init(store: TokenStore, credentialsProvider: @escaping () throws -> GmailCredentials, session: URLSession = .shared) {
+        self.store = store
+        self.credentialsProvider = credentialsProvider
+        self.session = session
+        self.cached = try? store.load()
+    }
+
+    /// True when a stored token set exists (even if stale) — used to decide
+    /// between "restore session silently" and "show the login screen".
+    var hasSession: Bool { cached != nil }
+
+    var hasRefreshToken: Bool { cached?.refreshToken != nil }
+
+    /// Stores the outcome of a fresh interactive sign-in.
+    func adopt(_ tokens: TokenSet) {
+        cached = tokens
+        try? store.save(tokens)
+    }
+
+    /// Forgets everything: Keychain first, then memory.
+    func clear() {
+        cached = nil
+        inflightRefresh?.cancel()
+        inflightRefresh = nil
+        try? store.clear()
+    }
+
+    /// Returns an access token guaranteed valid for at least `expirySlack`.
+    /// Throws `GmailConfigError.reauthRequired` when no usable refresh token
+    /// exists — the caller must send the user through sign-in again.
+    func validAccessToken() async throws -> String {
+        if let cached, cached.expiresAt.timeIntervalSince(now()) > expirySlack {
+            return cached.accessToken
+        }
+        return try await refresh()
+    }
+
+    /// Forces a refresh even if the cached token looks fresh — used after a
+    /// 401 so the retry actually has a new credential.
+    func forceRefresh() async throws -> String {
+        try await refresh()
+    }
+
+    private func refresh() async throws -> String {
+        // Single-flight: the first caller creates the refresh task; concurrent
+        // callers await the same task instead of stacking token requests.
+        if let inflight = inflightRefresh {
+            return try await inflight.value
+        }
+        let task = Task<String, Error> { [weak self] in
+            guard let self else { throw GmailConfigError.reauthRequired }
+            return try await self.performRefresh()
+        }
+        inflightRefresh = task
+        defer { inflightRefresh = nil }
+        do {
+            return try await task.value
+        } catch {
+            lastError = error
+            throw error
+        }
+    }
+
+    private func performRefresh() async throws -> String {
+        guard let tokens = cached, let refreshToken = tokens.refreshToken else {
+            clear()
+            throw GmailConfigError.reauthRequired
+        }
+        let credentials = try credentialsProvider()
+
+        var request = URLRequest(url: Self.tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var form = [
+            "client_id": credentials.clientID,
+            "refresh_token": refreshToken,
+            "grant_type": "refresh_token",
+        ]
+        if let secret = credentials.clientSecret {
+            form["client_secret"] = secret
+        }
+        request.httpBody = Self.formEncode(form)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw GmailAPIError.transport("non-HTTP token response")
+        }
+
+        struct RefreshResponse: Decodable {
+            let accessToken: String
+            let expiresIn: Int
+            let scope: String?
+            enum CodingKeys: String, CodingKey {
+                case accessToken = "access_token"
+                case expiresIn = "expires_in"
+                case scope
+            }
+        }
+
+        guard (200..<300).contains(http.statusCode) else {
+            // invalid_grant / revoked → the stored session is worthless.
+            if http.statusCode == 400 || http.statusCode == 401 {
+                clear()
+                throw GmailConfigError.reauthRequired
+            }
+            throw GmailAPIError.http(status: http.statusCode, bodySnippet: String(data: data.prefix(200), encoding: .utf8) ?? "")
+        }
+
+        let decoded: RefreshResponse
+        do {
+            decoded = try JSONDecoder().decode(RefreshResponse.self, from: data)
+        } catch {
+            throw GmailAPIError.decoding("token refresh: \(error)")
+        }
+
+        let updated = TokenSet(
+            accessToken: decoded.accessToken,
+            refreshToken: refreshToken,
+            expiresAt: now().addingTimeInterval(TimeInterval(decoded.expiresIn)),
+            scope: decoded.scope ?? tokens.scope
+        )
+        cached = updated
+        try? store.save(updated)
+        return updated.accessToken
+    }
+
+    static func formEncode(_ fields: [String: String]) -> Data {
+        var components = URLComponents()
+        components.queryItems = fields.map { URLQueryItem(name: $0.key, value: $0.value) }
+        // queryItems percent-encodes for a URL query, which is also valid
+        // form-urlencoded body encoding for these ASCII field names/values.
+        return Data(components.percentEncodedQuery?.data(using: .utf8) ?? Data())
+    }
+}

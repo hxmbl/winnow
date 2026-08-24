@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App runs sandboxed; these are the only capabilities it requests. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Outbound HTTPS only (Gmail API + Google OAuth endpoints). The app never
+	     listens on a port, so no network.server entitlement exists. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Reply attachments via the file importer: read-only access to files the
+	     user explicitly picked. No blanket disk access. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+</dict>
+</plist>
