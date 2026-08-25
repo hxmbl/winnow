@@ -74,6 +74,18 @@ final class WinnowStore {
     /// even when filters would hide its row.
     var selectedEmailID: Int?
 
+    /// Keyboard cursor: index into `filteredEmails`. Independent of the open
+    /// card — `j/k` move it, `Enter/o` opens it, clicking a row syncs it.
+    private(set) var selectedRowIndex: Int?
+
+    /// Bumped to ask the view to focus the search field (keybind `/`).
+    /// Observed (not ignored) so `.onChange` in views fires on the bump.
+    var searchFocusToken = 0
+    /// Bumped to ask the reader card to focus the reply composer (keybind `r`).
+    var composerFocusToken = 0
+    /// Keyboard-shortcuts cheat sheet visibility (keybind `?`).
+    var showShortcutOverlay = false
+
     /// Tunable/learned classification weights + feedback log. Weight changes
     /// re-run the whole pipeline via `onWeightsChanged`. Injectable so tests can
     /// run against an isolated `UserDefaults` domain.
@@ -99,6 +111,9 @@ final class WinnowStore {
     }
 
     private(set) var liveBackend: LiveBackend?
+    /// Injectable so tests force demo mode even when the host app bundle
+    /// carries real `GmailCredentials.plist`.
+    @ObservationIgnored var isLiveModeAvailable: () -> Bool = { (try? GmailCredentials.load()) != nil }
     /// Last sign-in or sync failure, for display. Never contains token data.
     private(set) var lastAuthError: String?
     private(set) var syncing = false
@@ -300,6 +315,142 @@ final class WinnowStore {
         }
         filteredEmails = rows
         lastFilteredQuery = searchQuery.trimmingCharacters(in: .whitespaces)
+
+        // Keep the keyboard cursor inside the (possibly shrunk) list.
+        if filteredEmails.isEmpty {
+            selectedRowIndex = nil
+        } else if let index = selectedRowIndex {
+            selectedRowIndex = min(max(0, index), filteredEmails.count - 1)
+        }
+    }
+
+    // MARK: - Keyboard navigation
+
+    /// The id the keyboard currently targets: the open card if present, else
+    /// the cursor row.
+    private var focusedEmailID: Int? {
+        selectedEmailID ?? {
+            guard let i = selectedRowIndex, filteredEmails.indices.contains(i) else { return nil }
+            return filteredEmails[i].email.id
+        }()
+    }
+
+    /// Moves the cursor by `delta` rows, clamped. When the reader card is
+    /// open the cursor drag it along — `j/k` become "next/previous message".
+    func moveSelection(_ delta: Int) {
+        guard !filteredEmails.isEmpty else { return }
+        let current = selectedRowIndex ?? (delta > 0 ? -1 : filteredEmails.count)
+        let next = min(max(0, current + delta), filteredEmails.count - 1)
+        selectedRowIndex = next
+        if selectedEmailID != nil {
+            openEmail(filteredEmails[next].email.id)
+        }
+    }
+
+    /// Opens whichever email the keyboard is on.
+    func openSelected() {
+        guard let index = selectedRowIndex, filteredEmails.indices.contains(index) else { return }
+        openEmail(filteredEmails[index].email.id)
+    }
+
+    /// Executes a keybind command. The single place key semantics touch state.
+    func apply(_ command: KeyCommand) {
+        switch command {
+        case .moveSelection(let delta):
+            moveSelection(delta)
+        case .openSelected:
+            openSelected()
+        case .closeViewer:
+            dismissEmail()
+        case .dismissOverlay:
+            showShortcutOverlay = false
+        case .toggleShortcutsOverlay:
+            showShortcutOverlay.toggle()
+        case .toggleStar:
+            if let id = focusedEmailID { toggleStar(id) }
+        case .archive:
+            if let id = focusedEmailID { archiveEmail(id) }
+        case .trash:
+            if let id = focusedEmailID { trashEmail(id) }
+        case .focusReply:
+            guard selectedEmail != nil else { return }
+            composerFocusToken += 1
+        case .focusSearch:
+            searchFocusToken += 1
+        case .toggleFilter(let railIndex):
+            guard railItems.indices.contains(railIndex) else { return }
+            toggleFilter(.builtin(railItems[railIndex].filter.id))
+        case .blurText:
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
+    }
+
+    /// Archive: live mode removes the INBOX label server-side; demo mode just
+    /// drops the row. While reading, this is triage: the next email opens
+    /// automatically so `e j j e` never touches the mouse.
+    func archiveEmail(_ emailID: Int) {
+        applyMailboxRemoval(emailID) { backend, gmailID in
+            if let backend, let gmailID {
+                let client = backend.client
+                Task { [weak self] in
+                    do {
+                        try await client.modify(messageID: gmailID, addLabelIds: nil, removeLabelIds: [GmailLabel.inbox])
+                    } catch {
+                        self?.syncError = error.localizedDescription
+                    }
+                }
+            }
+        }
+    }
+
+    /// Trash: live mode hits the trash endpoint and records the discard in the
+    /// local trash fixture (feeding trash-bias learning); demo mode local-only.
+    func trashEmail(_ emailID: Int) {
+        if let sender = inbox.first(where: { $0.id == emailID })?.sender {
+            trash.append(TrashRow(sender: sender))
+        }
+        applyMailboxRemoval(emailID) { backend, gmailID in
+            if let backend, let gmailID {
+                let client = backend.client
+                Task { [weak self] in
+                    do {
+                        try await client.trash(messageID: gmailID)
+                    } catch {
+                        self?.syncError = error.localizedDescription
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shared removal mechanics: drop from the cache + inbox optimistically,
+    /// then advance the cursor / reader card like a triage client should.
+    private func applyMailboxRemoval(
+        _ emailID: Int,
+        serverAction: (LiveBackend?, String?) -> Void
+    ) {
+        guard let index = inbox.firstIndex(where: { $0.id == emailID }) else { return }
+        let wasOpen = selectedEmailID == emailID
+        let gmailID = liveBackend?.cache.gmailID(for: emailID)
+        if let backend = liveBackend {
+            try? backend.cache.remove(gmailIds: [gmailID].compactMap { $0 })
+        }
+        serverAction(liveBackend, gmailID)
+
+        inbox.remove(at: index)
+
+        // Cursor stays on the same position — which now points at the next
+        // email — and an open card advances to it.
+        if filteredEmails.isEmpty {
+            selectedRowIndex = nil
+            if wasOpen { dismissEmail() }
+        } else {
+            let next = min(max(0, selectedRowIndex ?? index), filteredEmails.count - 1)
+            selectedRowIndex = next
+            if wasOpen {
+                openEmail(filteredEmails[next].email.id)
+            }
+        }
     }
 
     // MARK: - Reader-card selection
@@ -313,6 +464,10 @@ final class WinnowStore {
 
     func openEmail(_ id: Int) {
         selectedEmailID = id
+        // Clicking a row moves the keyboard cursor with it.
+        if let index = filteredEmails.firstIndex(where: { $0.email.id == id }) {
+            selectedRowIndex = index
+        }
     }
 
     func dismissEmail() {
@@ -486,20 +641,20 @@ final class WinnowStore {
     /// `lastAuthError` for the login screen to display.
     func signIn() async {
         lastAuthError = nil
-        guard (try? GmailCredentials.load()) != nil else {
+        guard isLiveModeAvailable() else {
             authed = true
             defaults.set(true, forKey: Self.authDefaultsKey)
             return
         }
         do {
-            let backend = try await makeLiveBackend()
+            let backend = try await makeLiveBackend(interactive: true)
             let emails = try await backend.sync.fullSync()
             liveBackend = backend
             inbox = emails
             authed = true
             defaults.set(true, forKey: Self.authDefaultsKey)
         } catch {
-            lastAuthError = error.localizedDescription
+            lastAuthError = Self.rawDescription(of: error)
             authed = false
         }
     }
@@ -507,25 +662,39 @@ final class WinnowStore {
     /// Relaunch path: `authed` persisted, tokens should be in the Keychain.
     /// Any failure here falls back to the login screen with the reason.
     private func restoreLiveSessionIfPossible() async {
-        guard liveBackend == nil, (try? GmailCredentials.load()) != nil else { return }
+        guard liveBackend == nil, isLiveModeAvailable() else { return }
         do {
-            let backend = try await makeLiveBackend()
+            let backend = try await makeLiveBackend(interactive: false)
             let emails = try await backend.sync.incrementalSync()
             liveBackend = backend
             inbox = emails
         } catch {
-            lastAuthError = error.localizedDescription
+            lastAuthError = Self.rawDescription(of: error)
             authed = false
             defaults.set(false, forKey: Self.authDefaultsKey)
         }
     }
 
-    private func makeLiveBackend() async throws -> LiveBackend {
+    /// Builds the live stack. `interactive` controls the missing-token case:
+    /// sign-in presents the Google web sheet; session-restore does NOT pop a
+    /// browser at launch — it fails and drops the user on the login screen.
+    private func makeLiveBackend(interactive: Bool) async throws -> LiveBackend {
         let tokens = TokenManager(store: KeychainTokenStore(), credentialsProvider: { try GmailCredentials.load() })
+        if !tokens.hasSession {
+            guard interactive else { throw GmailConfigError.reauthRequired }
+            let auth = AuthController(tokenManager: tokens, session: GmailClient.productionSession())
+            try await auth.signIn()
+        }
         let client = GmailClient(tokenManager: tokens, session: GmailClient.productionSession())
         let cache = try EmailCacheStore()
         let sync = GmailSyncEngine(client: client, cache: cache)
         return LiveBackend(client: client, sync: sync, cache: cache, tokens: tokens)
+    }
+
+    /// Pre-release: show the raw error (case + associated values) so failures
+    /// are diagnosable. Swap for friendly copy at launch.
+    private static func rawDescription(of error: Error) -> String {
+        String(describing: error)
     }
 
     /// Reset all state back to the mock fixtures and return to the login screen.

@@ -48,24 +48,15 @@ struct GmailCredentials: Equatable {
         self.clientSecret = secret.isEmpty || secret.hasPrefix("OPTIONAL") ? nil : secret
     }
 
-    /// Google's convention for installed apps: the redirect URI is the client
-    /// ID reversed plus a path, e.g. `123-abc.apps.googleusercontent.com`
-    /// → `com.googleusercontent.apps.123-abc:/oauthredirect`.
-    /// Deriving it here means setup only ever involves pasting the client ID.
-    var redirectURI: String {
-        "com.googleusercontent.apps." + clientID + ":/oauthredirect"
-    }
-
-    /// The custom scheme part of the redirect URI — what
-    /// `ASWebAuthenticationSession` listens for.
-    var callbackScheme: String {
-        String(redirectURI.split(separator: ":").first ?? "")
-    }
+    /// The redirect is a loopback URL (`http://127.0.0.1:<ephemeral port>`)
+    /// constructed per sign-in by `AuthController` — Desktop-type Google
+    /// clients accept any loopback port without pre-registration, so there is
+    /// nothing to configure in Cloud Console.
 
     /// One scope, on purpose: `gmail.modify` covers read, star (STARRED label),
-    /// archive, trash, and send. Broader scopes (`gmail.full_access`? none) and
-    /// narrower ones (`gmail.readonly`) would each break an M1 capability.
-    /// Fewer scopes = smaller consent screen = smaller blast radius.
+    /// archive, trash, and send. Broader scopes and narrower ones would each
+    /// break an M1 capability. Fewer scopes = smaller consent screen = smaller
+    /// blast radius.
     static let scope = "https://www.googleapis.com/auth/gmail.modify"
 }
 

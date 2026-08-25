@@ -13,6 +13,7 @@ struct EmailViewer: View {
     @State private var fontSize: ReplyFontSize = .medium
     @State private var notice: String?
     @State private var sending = false
+    @FocusState private var replyFocused: Bool
 
     /// Cached classification from the store — recomputing it here would run the
     /// rule engine again on every render of the card. A miss is a cache bug,
@@ -210,6 +211,7 @@ struct EmailViewer: View {
             TextEditor(text: $replyText)
                 .font(replyFont)
                 .scrollContentBackground(.hidden)
+                .focused($replyFocused)
                 .padding(.leading, 2)
                 .padding(.top, 2)
         }
@@ -217,10 +219,15 @@ struct EmailViewer: View {
         .background(Color.winnowBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.winnowBorder, lineWidth: 1)
+                .stroke(replyFocused ? Color.accentColor : Color.winnowBorder, lineWidth: 1)
         )
+        .onAppear {
+            if store.composerFocusToken > 0 { replyFocused = false }
+        }
+        .onChange(of: store.composerFocusToken) { _, _ in
+            replyFocused = true
+        }
     }
-
     private var attachmentChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {

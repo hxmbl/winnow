@@ -60,6 +60,7 @@ struct LoginScreen: View {
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 320)
+                        .textSelection(.enabled)
                 }
 
                 Text("Winnow only reads your email to classify and sort it. Nothing is stored on external servers.")

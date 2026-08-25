@@ -1,40 +1,41 @@
 import AppKit
-import AuthenticationServices
 import CryptoKit
 import Foundation
 
 /// Runs the interactive Google sign-in: Authorization Code flow with PKCE,
-/// presented in the system web sheet.
+/// opened in the **user's default browser** and completed via an RFC 8252
+/// loopback redirect (`http://127.0.0.1:<ephemeral port>`).
 ///
 /// SECURITY MODEL
-/// - Uses `ASWebAuthenticationSession` (system-managed, sandbox-respecting)
-///   with `prefersEphemeralWebSession` so the flow never shares the user's
-///   browser cookies and leaves no login state behind.
-/// - `access_type=offline&prompt=consent` guarantees Google returns a refresh
-///   token on every consent, so the app never has to guess whether it holds a
-///   reusable session.
-/// - The state parameter is a random nonce bound to this specific flow; the
-///   callback is rejected unless it echoes it, defeating cross-flow replay
-///   (a malicious app firing the same custom scheme at us).
-/// - The authorization *code* is exchanged server-side-of-the-client (direct
-///   HTTPS POST to Google) with the PKCE verifier; the code never appears in
-///   logs or storage.
+/// - Loopback redirect: the listener binds 127.0.0.1 only (see
+///   `LoopbackRedirectServer`); Desktop-type Google clients accept any
+///   loopback port without pre-registration.
+/// - PKCE (S256): the verifier exists only in memory and is sent solely to
+///   Google's token endpoint over TLS; an intercepted authorize URL cannot be
+///   redeemed.
+/// - The `state` nonce binds the redirect to this flow; mismatches are
+///   rejected before the code is used.
+/// - `access_type=offline&prompt=consent` guarantees a refresh token on every
+///   consent, so the app never guesses whether it holds a reusable session.
 /// - Tokens go straight into `TokenManager` → Keychain. Nothing token-shaped
-///   is persisted anywhere else.
+///   is logged or persisted anywhere else.
 @MainActor
-final class AuthController: NSObject, ASWebAuthenticationPresentationContextProviding {
+final class AuthController {
     static let authorizeURL = URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!
 
     private let tokenManager: TokenManager
     private let session: URLSession
-    private var activeWebSession: ASWebAuthenticationSession?
+    /// Generous window for the user to finish the browser round-trip.
+    private let redirectTimeout: TimeInterval
 
-    init(tokenManager: TokenManager, session: URLSession = .shared) {
+    init(tokenManager: TokenManager, session: URLSession = .shared, redirectTimeout: TimeInterval = 300) {
         self.tokenManager = tokenManager
         self.session = session
+        self.redirectTimeout = redirectTimeout
     }
 
-    /// Presents the Google consent sheet and returns once tokens are stored.
+    /// Opens Google consent in the default browser and returns once tokens
+    /// are stored in the keychain-backed manager.
     func signIn() async throws {
         let credentials = try GmailCredentials.load()
         let pkce = PKCE()
@@ -44,11 +45,14 @@ final class AuthController: NSObject, ASWebAuthenticationPresentationContextProv
             return Data(bytes)
         }())
 
+        let server = try await LoopbackRedirectServer.start()
+        let redirectURI = "http://127.0.0.1:\(server.port)"
+
         var components = URLComponents(url: Self.authorizeURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: credentials.clientID),
-            URLQueryItem(name: "redirect_uri", value: credentials.redirectURI),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
             URLQueryItem(name: "scope", value: GmailCredentials.scope),
             URLQueryItem(name: "code_challenge", value: pkce.challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
@@ -56,52 +60,25 @@ final class AuthController: NSObject, ASWebAuthenticationPresentationContextProv
             URLQueryItem(name: "access_type", value: "offline"),
             URLQueryItem(name: "prompt", value: "consent"),
         ]
+        guard let authorizeURL = components.url else {
+            throw GmailAPIError.transport("could not build authorize URL")
+        }
 
-        let code = try await requestAuthorizationCode(url: components.url!, callbackScheme: credentials.callbackScheme, expectedState: state)
-        let tokens = try await exchange(code: code, pkce: pkce, credentials: credentials)
+        NSWorkspace.shared.open(authorizeURL)
+
+        let code = try await server.awaitCode(expectedState: state, timeout: redirectTimeout)
+        let tokens = try await exchange(code: code, pkce: pkce, credentials: credentials, redirectURI: redirectURI)
         tokenManager.adopt(tokens)
     }
 
-    /// Presents the web sheet and resolves with the callback URL's `code`.
-    private func requestAuthorizationCode(url: URL, callbackScheme: String, expectedState: String) async throws -> String {
-        let code = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            let webSession = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { callbackURL, error in
-                if let error {
-                    // ASWebAuthenticationSessionError.canceledLogin = the user
-                    // closed the sheet; surface as cancellation, not a fault.
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let callbackURL,
-                      let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
-                      let returnedState = components.queryItems?.first(where: { $0.name == "state" })?.value,
-                      returnedState == expectedState else {
-                    continuation.resume(throwing: GmailAPIError.transport("OAuth callback missing or mismatched state"))
-                    return
-                }
-                guard let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
-                    let errorDescription = components.queryItems?.first(where: { $0.name == "error" })?.value
-                    continuation.resume(throwing: GmailAPIError.transport("OAuth callback error: \(errorDescription ?? "no code")"))
-                    return
-                }
-                continuation.resume(returning: code)
-            }
-            webSession.presentationContextProvider = self
-            webSession.prefersEphemeralWebBrowserSession = true
-            webSession.start()
-            self.activeWebSession = webSession
-        }
-        activeWebSession = nil
-        return code
-    }
-
     /// Exchanges the authorization code for tokens (the only network call that
-    /// carries the PKCE verifier or the optional client secret).
-    private func exchange(code: String, pkce: PKCE, credentials: GmailCredentials) async throws -> TokenSet {
+    /// carries the PKCE verifier or the optional client secret). `redirectURI`
+    /// must be byte-identical to the one in the authorize request.
+    private func exchange(code: String, pkce: PKCE, credentials: GmailCredentials, redirectURI: String) async throws -> TokenSet {
         var form = [
             "code": code,
             "client_id": credentials.clientID,
-            "redirect_uri": credentials.redirectURI,
+            "redirect_uri": redirectURI,
             "code_verifier": pkce.verifier,
             "grant_type": "authorization_code",
         ]
@@ -145,11 +122,5 @@ final class AuthController: NSObject, ASWebAuthenticationPresentationContextProv
             expiresAt: Date().addingTimeInterval(TimeInterval(decoded.expiresIn)),
             scope: decoded.scope
         )
-    }
-
-    // MARK: ASWebAuthenticationPresentationContextProviding
-
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        NSApp.mainWindow ?? NSApp.windows.first ?? ASPresentationAnchor()
     }
 }

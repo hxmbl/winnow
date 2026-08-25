@@ -30,8 +30,7 @@ struct GmailAuthTests {
         let credentials = try GmailCredentials(plistData: data)
         #expect(credentials.clientID == "1234-abc.apps.googleusercontent.com")
         #expect(credentials.clientSecret == nil)
-        #expect(credentials.redirectURI == "com.googleusercontent.apps.1234-abc.apps.googleusercontent.com:/oauthredirect")
-        #expect(credentials.callbackScheme == "com.googleusercontent.apps.1234-abc.apps.googleusercontent.com")
+        #expect(GmailCredentials.scope.contains("gmail.modify"))
     }
 
     @Test func placeholderOrMissingClientIDFailsLoudly() throws {
@@ -48,8 +47,11 @@ struct GmailAuthTests {
     }
 
     @Test func missingCredentialsFileThrowsWithSetupCopy() {
-        // The test-host app bundle ships no GmailCredentials.plist.
-        #expect(throws: GmailConfigError.missing) { try GmailCredentials.load(bundle: .main) }
+        // The unit-test bundle ships no GmailCredentials.plist (the app bundle
+        // legitimately may, once the developer adds theirs — so never probe
+        // .main here).
+        let testBundle = Bundle(for: StubURLProtocol.self)
+        #expect(throws: GmailConfigError.missing) { try GmailCredentials.load(bundle: testBundle) }
     }
 
     @Test func formEncodeProducesFormURLEncodedPairs() {

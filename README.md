@@ -13,6 +13,7 @@ Your inbox, intelligently sorted. Winnow is a native macOS email client built wi
 - **Fast, incremental classification** — keyword/regex matchers are compiled once at startup; data changes reclassify only the affected messages, and Settings slider drags are debounced into a single re-sweep, so the UI never stalls.
 - **Tunable weights** — Settings exposes all ten classification signals as sliders with live "learned drift" indicators; reset to factory defaults anytime.
 - **Search & sort** — multi-word AND search across sender/subject/body; sort by date, sender, or smart score. Esc closes the reader, ⌘F focuses search, ⌘R refreshes.
+- **Keyboard-first** — home-row triage: `j/k` move, `o`/`Enter` opens, `s` stars, `e` archives (auto-advancing to the next message), `#`/`⌫` trashes, `r` replies, `/` searches, `1–9` toggle filter pills, `?` shows the cheat sheet. Single keys never hijack typing — while any text field has focus they pass straight through (Esc blurs). Plus ⌘F/⌘R.
 - **Native Mac app** — sidebar navigation, filter pill rail, light/dark/system appearance, and a proper Cmd-, Settings window.
 
 ## Connecting a real Gmail account

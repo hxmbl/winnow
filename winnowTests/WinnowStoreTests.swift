@@ -22,6 +22,9 @@ final class WinnowStoreTests {
 
     private func makeStore(inbox: [WinnowEmail]? = nil) -> WinnowStore {
         let store = WinnowStore(learning: LearningModel(defaults: defaults), defaults: defaults)
+        // Tests never go live — even though the host app bundle now carries
+        // real credentials, signIn() must stay in demo mode here.
+        store.isLiveModeAvailable = { false }
         if let inbox { store.inbox = inbox }
         return store
     }
@@ -207,6 +210,97 @@ final class WinnowStoreTests {
         #else
         #expect(store.railItems.count == builtinFilters.count)
         #endif
+    }
+
+    // MARK: Keyboard navigation & triage
+
+    @Test func selectionMovesClampsAndOpensAlong() {
+        let store = makeStore(inbox: [
+            Fixtures.email(id: 1),
+            Fixtures.email(id: 2),
+            Fixtures.email(id: 3),
+        ])
+
+        store.moveSelection(1)
+        #expect(store.selectedRowIndex == 0)
+        #expect(store.selectedEmailID == nil)          // list mode: cursor only
+
+        store.moveSelection(1)
+        store.moveSelection(1)
+        #expect(store.selectedRowIndex == 2)
+        store.moveSelection(1)                          // clamp at bottom
+        #expect(store.selectedRowIndex == 2)
+        store.moveSelection(-10)                        // clamp at top
+        #expect(store.selectedRowIndex == 0)
+
+        store.openSelected()
+        #expect(store.selectedEmailID == 1)
+
+        // Viewer open: j drags the card to the next message.
+        store.moveSelection(1)
+        #expect(store.selectedEmailID == 2)
+    }
+
+    @Test func clickingARowMovesTheCursorWithIt() {
+        let store = makeStore(inbox: [
+            Fixtures.email(id: 1),
+            Fixtures.email(id: 2),
+        ])
+        store.openEmail(2)
+        #expect(store.selectedRowIndex == 1)
+    }
+
+    @Test func archiveRemovesRowAndAdvancesTriage() {
+        let inbox = (1...4).map { Fixtures.email(id: $0) }
+        let store = makeStore(inbox: inbox)
+        store.openEmail(2)   // cursor on index 1, card open
+
+        store.archiveEmail(2)
+
+        #expect(store.inbox.map(\.id) == [1, 3, 4])
+        #expect(store.filteredEmails.map(\.email.id) == [1, 3, 4])
+        // Triage: the card advanced to what is now at the same position.
+        #expect(store.selectedEmailID == 3)
+        #expect(store.selectedRowIndex == 1)
+    }
+
+    @Test func archivingTheLastRowClosesTheCard() {
+        let inbox = (1...2).map { Fixtures.email(id: $0) }
+        let store = makeStore(inbox: inbox)
+        store.openEmail(2)
+
+        store.archiveEmail(2)
+
+        #expect(store.inbox.map(\.id) == [1])
+        #expect(store.selectedEmailID == 1)             // advanced to the only row left
+        store.archiveEmail(1)
+        #expect(store.filteredEmails.isEmpty)
+        #expect(store.selectedEmailID == nil)
+        #expect(store.selectedRowIndex == nil)
+    }
+
+    @Test func trashRemovesRowAndFeedsTheTrashBias() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, sender: "spam@x.co"), Fixtures.email(id: 2)])
+        let trashBefore = store.trash.count
+
+        store.moveSelection(1)   // cursor onto row 0
+        store.trashEmail(1)
+
+        #expect(!store.inbox.contains { $0.id == 1 })
+        #expect(store.trash.count == trashBefore + 1)
+        #expect(store.trash.last?.sender == "spam@x.co")
+        #expect(store.selectedRowIndex == 0)
+        #expect(store.filteredEmails.first?.email.id == 2)
+    }
+
+    @Test func filterDigitsRouteThroughTheRail() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, starred: true)])
+        store.apply(.toggleFilter(railIndex: 5))   // "Starred" sits at rail index 5
+        #expect(store.activeFilters == [.builtin(.starred)])
+        store.apply(.toggleFilter(railIndex: 5))
+        #expect(store.activeFilters.isEmpty)
+        store.apply(.toggleFilter(railIndex: 999)) // out of range: no-op
+        #expect(store.activeFilters.isEmpty)
     }
 
     // MARK: Session lifecycle

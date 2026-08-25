@@ -6,6 +6,7 @@ struct ContentView: View {
     @Bindable var store: WinnowStore
     @State private var selectedMailbox: Mailbox = .inbox
     @FocusState private var searchFocused: Bool
+    @State private var keybinds: KeybindEngine?
 
     // MARK: - Body
 
@@ -22,20 +23,37 @@ struct ContentView: View {
         .preferredColorScheme(store.chosenScheme)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay { emailPresentation }
+        .overlay { shortcutOverlay }
         .background { keyboardShortcuts }
+        .onAppear {
+            if keybinds == nil {
+                let engine = KeybindEngine(store: store)
+                engine.start()
+                keybinds = engine
+            }
+        }
+        .onChange(of: store.searchFocusToken) { _, _ in searchFocused = true }
     }
 
-    /// Invisible shortcut hosts: Esc closes the reader card, Cmd-F focuses the
-    /// search field. Kept out of the visible layout.
+    /// Modifier-combo shortcuts stay as hidden buttons (⌘F); single-key
+    /// bindings live in `KeybindEngine`.
     private var keyboardShortcuts: some View {
         Group {
-            Button("Close message") { dismissEmail() }
-                .keyboardShortcut(.cancelAction)
             Button("Find") { searchFocused = true }
                 .keyboardShortcut("f", modifiers: .command)
         }
         .opacity(0)
         .accessibilityHidden(true)
+    }
+
+    /// `?` cheat sheet — rendered from the engine's binding table, so it can
+    /// never drift from actual behavior.
+    @ViewBuilder
+    private var shortcutOverlay: some View {
+        if store.showShortcutOverlay {
+            ShortcutSheet(store: store)
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+        }
     }
 
     // MARK: - Floating email card — dims the canvas, dismisses on outside click
@@ -177,17 +195,26 @@ struct ContentView: View {
                     } else { ContentUnavailableView.search }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(store.filteredEmails) { row in
-                            emailListRow(row)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(store.filteredEmails) { row in
+                                emailListRow(row)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        // Clear the floating rail so the last row stays readable.
+                        .padding(.bottom, 48)
+                    }
+                    .background(Color.winnowBackground)
+                    .onChange(of: store.selectedRowIndex) { _, newIndex in
+                        guard let newIndex,
+                              store.filteredEmails.indices.contains(newIndex) else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(store.filteredEmails[newIndex].email.id, anchor: .center)
                         }
                     }
-                    .padding(.vertical, 4)
-                    // Clear the floating rail so the last row stays readable.
-                    .padding(.bottom, 48)
                 }
-                .background(Color.winnowBackground)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -220,6 +247,13 @@ struct ContentView: View {
     }
 
     private func rowBackground(for id: Int) -> Color {
-        store.selectedEmailID == id ? Color.accentColor.opacity(0.08) : Color.clear
+        if store.selectedEmailID == id { return Color.accentColor.opacity(0.08) }
+        // Keyboard cursor: a fainter wash on the row the keys are on.
+        if let cursor = store.selectedRowIndex,
+           store.filteredEmails.indices.contains(cursor),
+           store.filteredEmails[cursor].email.id == id {
+            return Color.accentColor.opacity(0.045)
+        }
+        return Color.clear
     }
 }
