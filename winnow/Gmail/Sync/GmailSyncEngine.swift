@@ -5,9 +5,8 @@ import Foundation
 /// LOGIC (two strategies, chosen by state)
 /// - **Full sync** (first sign-in, or a `historyId` older than Google's
 ///   retention): page through `messages.list` with `in:inbox`, fetch each
-///   message, map, upsert. Sequential fetches keep the logic obvious; at
-///   typical inbox sizes this is seconds, and it runs off the UI's back via
-///   async/await. Trashed messages are dropped at the mapper.
+///   message, map, upsert in batches. Trashed and non-inbox messages are
+///   dropped at the mapper/fetch layer.
 /// - **Incremental sync** (every refresh after that): `history.list` since the
 ///   stored `historyId` — only messages Google says changed are fetched or
 ///   removed. `historyId` is persisted in UserDefaults: it is an opaque sync
@@ -22,6 +21,12 @@ final class GmailSyncEngine {
     private let query: String
 
     static let historyIDKey = "winnow.gmail.historyId"
+    private let batchSize = 25
+
+    /// Messages that failed to download during the last sync (transient
+    /// errors are skipped so one bad message can't abort the run). Surfaced
+    /// by the store after sync completes.
+    private(set) var lastSyncFailureCount = 0
 
     init(client: GmailClient, cache: EmailCacheStore, defaults: UserDefaults = .standard, query: String = "in:inbox") {
         self.client = client
@@ -33,6 +38,8 @@ final class GmailSyncEngine {
     /// Fetches the whole inbox into the cache. Returns the cached view.
     @discardableResult
     func fullSync() async throws -> [WinnowEmail] {
+        lastSyncFailureCount = 0
+
         var stubs: [GmailMessageStub] = []
         var pageToken: String?
         repeat {
@@ -41,9 +48,21 @@ final class GmailSyncEngine {
             pageToken = page.nextPageToken
         } while pageToken != nil
 
-        for stub in stubs {
-            await fetchAndStore(id: stub.id, threadId: stub.threadId)
+        var batch: [(email: WinnowEmail, gmailId: String, threadId: String)] = []
+        batch.reserveCapacity(batchSize)
+        func flush() throws {
+            guard !batch.isEmpty else { return }
+            try cache.upsertAll(batch)
+            batch.removeAll(keepingCapacity: true)
         }
+
+        for stub in stubs {
+            if let item = await fetchAndStore(id: stub.id, threadId: stub.threadId) {
+                batch.append(item)
+                if batch.count >= batchSize { try flush() }
+            }
+        }
+        try flush()
 
         await recordHistoryID()
         return try cache.all()
@@ -55,6 +74,7 @@ final class GmailSyncEngine {
         guard let startHistoryID = defaults.string(forKey: Self.historyIDKey) else {
             return try await fullSync()
         }
+        lastSyncFailureCount = 0
 
         do {
             var pageToken: String?
@@ -84,51 +104,83 @@ final class GmailSyncEngine {
                 if message.hasLabel(GmailLabel.trash) {
                     try cache.remove(gmailIds: [message.id])
                 } else {
-                    await fetchAndStore(id: message.id, threadId: message.threadId)
+                    try await refetchAndStore(id: message.id, threadId: message.threadId)
                 }
             }
-            // Label changes: the two lists carry opposite semantics. For
-            // `labelsAdded`, STARRED in the list means "now starred"; for
-            // `labelsRemoved`, STARRED in the list means "now NOT starred".
-            // Merging the loops would invert every unstar event.
+
+            // Label changes carry opposite semantics per list, and INBOX is
+            // the mailbox boundary: archived-elsewhere mail must leave the
+            // cache, untrashed/unarchived mail must re-enter it.
             for added in record.labelsAdded ?? [] {
-                guard let labelIds = added.message.labelIds else { continue }
-                try cache.setStarred(
-                    numericId: GmailMessageMapper.stableNumericID(for: added.message.id),
-                    starred: labelIds.contains(GmailLabel.starred)
-                )
+                guard let labels = added.message.labelIds else { continue }
+                if labels.contains(GmailLabel.trash) {
+                    try cache.remove(gmailIds: [added.message.id])
+                } else if labels.contains(GmailLabel.inbox) {
+                    try await refetchAndStore(id: added.message.id, threadId: nil)
+                } else if labels.contains(GmailLabel.starred) {
+                    try cache.setStarred(
+                        numericId: GmailMessageMapper.stableNumericID(for: added.message.id),
+                        starred: true
+                    )
+                }
             }
             for removed in record.labelsRemoved ?? [] {
-                guard let labelIds = removed.message.labelIds, labelIds.contains(GmailLabel.starred) else { continue }
-                try cache.setStarred(
-                    numericId: GmailMessageMapper.stableNumericID(for: removed.message.id),
-                    starred: false
-                )
+                guard let labels = removed.message.labelIds else { continue }
+                if labels.contains(GmailLabel.trash) {
+                    // Out of trash: re-fetch — it re-enters only if it is in
+                    // the inbox (fetchAndStore enforces that).
+                    try await refetchAndStore(id: removed.message.id, threadId: nil)
+                } else if labels.contains(GmailLabel.inbox) {
+                    try cache.remove(gmailIds: [removed.message.id])
+                } else if labels.contains(GmailLabel.starred) {
+                    try cache.setStarred(
+                        numericId: GmailMessageMapper.stableNumericID(for: removed.message.id),
+                        starred: false
+                    )
+                }
             }
         }
     }
 
     // MARK: - Fetch & store
 
-    /// Fetches one full message; 404s (deleted between list and get) are
-    /// skipped rather than failing the whole sync.
-    private func fetchAndStore(id: String, threadId: String?) async {
+    /// Fetches one message through `fetchAndStore` and persists it. The
+    /// incremental paths use this — `fetchAndStore` alone only *classifies*
+    /// whether the message belongs in the cache.
+    private func refetchAndStore(id: String, threadId: String?) async throws {
+        if let stored = await fetchAndStore(id: id, threadId: threadId) {
+            try cache.upsert(
+                email: stored.email,
+                gmailId: stored.gmailId,
+                threadId: stored.threadId
+            )
+        }
+    }
+
+    /// Fetches one full message and stores it **only if it is in the inbox** —
+    /// history events cover the whole mailbox, so without this check our own
+    /// sent mail and archived mail would leak into the list. Returns the
+    /// stored item (nil when skipped); 404s are skipped silently, other
+    /// failures are counted in `lastSyncFailureCount` so partial syncs are
+    /// visible.
+    private func fetchAndStore(id: String, threadId: String?) async -> (email: WinnowEmail, gmailId: String, threadId: String)? {
         do {
             let message = try await client.message(id: id)
-            guard let email = GmailMessageMapper.winnowEmail(from: message) else { return }
-            try cache.upsert(
-                email: email,
-                gmailId: message.id,
-                threadId: message.threadId ?? threadId ?? ""
-            )
+            guard message.hasLabel(GmailLabel.inbox), !message.hasLabel(GmailLabel.trash) else {
+                try? cache.remove(gmailIds: [id])
+                return nil
+            }
+            guard let email = GmailMessageMapper.winnowEmail(from: message) else { return nil }
+            let resolvedThreadId = message.threadId ?? threadId ?? ""
+            return (email, message.id, resolvedThreadId)
         } catch GmailAPIError.http(let status, _) where status == 404 {
-            return
+            return nil
         } catch {
-            // One bad message shouldn't abort the sync of the rest; the next
-            // incremental pass will retry it via history.
+            lastSyncFailureCount += 1
             #if DEBUG
             print("[gmail-sync] skipped message \(id): \(error)")
             #endif
+            return nil
         }
     }
 

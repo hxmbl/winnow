@@ -65,14 +65,26 @@ enum GmailMessageMapper {
         guard trimmed.contains("@") else { return (nil, trimmed) }
 
         if let open = trimmed.lastIndex(of: "<"), let close = trimmed.firstIndex(of: ">"), open < close {
-            let address = String(trimmed[trimmed.index(after: open)..<close])
             var name = String(trimmed[trimmed.startIndex..<open]).trimmingCharacters(in: .whitespaces)
             if name.hasPrefix("\""), name.hasSuffix("\""), name.count >= 2 {
                 name = String(name.dropFirst().dropLast())
             }
-            return (name.isEmpty ? nil : name, address)
+            return (name.isEmpty ? nil : name, sanitizeAddress(trimmed[trimmed.index(after: open)..<close]))
         }
-        return (nil, trimmed)
+        // Unclosed `<`: whatever follows it is the best address candidate.
+        if let open = trimmed.lastIndex(of: "<") {
+            return (nil, sanitizeAddress(trimmed[trimmed.index(after: open)...]))
+        }
+        return (nil, sanitizeAddress(trimmed[...]))
+    }
+
+    /// Display-only hygiene: malformed headers must not leak angle brackets
+    /// or stray quotes into what the UI shows as an address.
+    private nonisolated static func sanitizeAddress(_ raw: Substring) -> String {
+        let stripped = raw
+            .replacingOccurrences(of: "<", with: "")
+            .replacingOccurrences(of: ">", with: "")
+        return stripped.trimmingCharacters(in: CharacterSet(charactersIn: " \t\""))
     }
 
     nonisolated static func receivedAtMs(internalDate: String?, dateHeader: String?) -> Int {
@@ -115,8 +127,8 @@ enum GmailMessageMapper {
     }
 
     /// Conservative HTML→text: drops `script`/`style` wholesale, removes all
-    /// remaining tags, decodes the handful of entities that appear constantly,
-    /// and collapses whitespace. Never renders markup.
+    /// remaining tags while letting prose `<` ("a < b") survive, decodes named
+    /// and numeric entities, and collapses whitespace. Never renders markup.
     nonisolated static func stripHTML(_ html: String) -> String? {
         var text = html
         for tag in ["script", "style", "head"] {
@@ -124,7 +136,9 @@ enum GmailMessageMapper {
                 text.replaceSubrange(range, with: " ")
             }
         }
-        text = text.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        // Only a `<` that opens a real tag is markup; a prose comparison like
+        // "3 < 5" has a space/ digit after the bracket and must survive.
+        text = text.replacingOccurrences(of: "<[/!?a-zA-Z][^>]*>", with: " ", options: .regularExpression)
         let entities = [
             "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
             "&#39;": "'", "&apos;": "'", "&nbsp;": " ",
@@ -132,7 +146,32 @@ enum GmailMessageMapper {
         for (entity, replacement) in entities {
             text = text.replacingOccurrences(of: entity, with: replacement)
         }
+        text = decodeNumericEntities(text)
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Decodes decimal (`&#39;`) and hex (`&#x27;`) character references the
+    /// named-entity table above doesn't cover.
+    private nonisolated static func decodeNumericEntities(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "&#([xX][0-9a-fA-F]+|[0-9]+);") else { return text }
+        var result = ""
+        var cursor = text.startIndex
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let wholeRange = Range(match.range, in: text),
+                  let digitsRange = Range(match.range(at: 1), in: text) else { continue }
+            result += text[cursor..<wholeRange.lowerBound]
+            let digits = text[digitsRange]
+            let code: UInt32?
+            if digits.first == "x" || digits.first == "X" {
+                code = UInt32(digits.dropFirst(), radix: 16)
+            } else {
+                code = UInt32(digits, radix: 10)
+            }
+            result += code.flatMap(Unicode.Scalar.init).map(String.init) ?? String(text[wholeRange])
+            cursor = wholeRange.upperBound
+        }
+        result += text[cursor...]
+        return result
     }
 }

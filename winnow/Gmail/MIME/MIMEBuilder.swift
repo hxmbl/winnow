@@ -78,11 +78,40 @@ enum MIMEBuilder {
 
     // MARK: - Helpers
 
-    /// RFC 2047: non-ASCII header text becomes `=?UTF-8?B?<base64>?=`.
+    /// RFC 2047: non-ASCII header text becomes `=?UTF-8?B?<base64>?=` words.
+    /// Each word — including the delimiters — stays within the 75-char
+    /// encoded-word limit (strict MTAs mangle overlong ones), splitting on
+    /// UTF-8-safe boundaries and joining with CRLF+space, which decoders
+    /// ignore between encoded words.
     nonisolated static func encodeHeaderValue(_ value: String) -> String {
         if value.allSatisfy({ $0.isASCII }) { return value }
-        let encoded = Data(value.utf8).base64EncodedString()
-        return "=?UTF-8?B?\(encoded)?="
+
+        let prefix = "=?UTF-8?B?"
+        let suffix = "?="
+        // RFC 2047 §2: an encoded word must be ≤ 75 chars total.
+        let maxEncodedWord = 75
+        let maxBase64Chars = maxEncodedWord - prefix.count - suffix.count   // 63
+        // base64 emits 4 chars per 3 raw bytes; stay under so padding fits.
+        let maxRawBytesPerWord = maxBase64Chars / 4 * 3 - 3                 // 45
+
+        var chunks: [String] = []
+        var current = ""
+        var currentByteCount = 0
+        for scalar in value.unicodeScalars {
+            let scalarBytes = UTF8.width(scalar)
+            if currentByteCount + scalarBytes > maxRawBytesPerWord {
+                chunks.append(current)
+                current = ""
+                currentByteCount = 0
+            }
+            current.unicodeScalars.append(scalar)
+            currentByteCount += scalarBytes
+        }
+        if !current.isEmpty { chunks.append(current) }
+
+        return chunks
+            .map { prefix + Data(String($0).utf8).base64EncodedString() + suffix }
+            .joined(separator: "\r\n ")
     }
 
     /// RFC 5322 date, e.g. `Sat, 23 Aug 2026 14:03:00 +0100`.

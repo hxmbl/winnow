@@ -21,7 +21,7 @@ Your inbox, intelligently sorted. Winnow is a native macOS email client built wi
 1. In [Google Cloud Console](https://console.cloud.google.com/): create a project, enable the **Gmail API**.
 2. *APIs & Services → OAuth consent screen*: External, add yourself as a test user.
 3. *Credentials → Create credentials → OAuth client ID* → type **Desktop app**.
-4. Copy `winnow/GmailCredentials.example.plist` to `winnow/GmailCredentials.plist` (git-ignored) and paste the client ID. The client secret is optional for installed apps — Winnow uses PKCE.
+4. Copy `GmailCredentials.example.plist` (repo root) to `winnow/GmailCredentials.plist` (git-ignored) and paste the client ID. The client secret is optional for installed apps — Winnow uses PKCE.
 5. Build and run; sign in with Google. Sign-out wipes tokens and the local cache.
 
 ## How the Gmail layer is secured

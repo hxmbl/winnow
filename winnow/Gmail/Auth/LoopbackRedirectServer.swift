@@ -134,13 +134,22 @@ final class LoopbackRedirectServer: @unchecked Sendable {
         }
 
         let isRedirectTarget = target.path == "/" && !(target.query ?? "").isEmpty
-        guard isRedirectTarget else {
-            // favicon.ico and friends: answer 404, keep listening.
+        guard isRedirectTarget, Self.looksLikeOAuthRedirect(target) else {
+            // favicon.ico, scanner noise, or a query that isn't an OAuth
+            // redirect (a hostile local process poking the port): answer and
+            // KEEP LISTENING — garbage must not settle the wait.
             send(connection, status: "404 Not Found", body: "Not found", thenSettle: nil)
             return
         }
 
         send(connection, status: "200 OK", body: Self.successPageHTML, thenSettle: .success(target))
+    }
+
+    /// True only for redirects shaped like Google's (`code=…`/`error=…`, with
+    /// the `state` nonce). Anything else can never be a valid completion.
+    private static func looksLikeOAuthRedirect(_ target: URL) -> Bool {
+        let names = Set((URLComponents(url: target, resolvingAgainstBaseURL: false)?.queryItems ?? []).map(\.name))
+        return names.contains("state") && (names.contains("code") || names.contains("error"))
     }
 
     private func send(_ connection: NWConnection, status: String, body: String, thenSettle outcome: Result<URL, Error>?) {

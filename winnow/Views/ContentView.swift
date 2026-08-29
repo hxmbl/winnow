@@ -17,7 +17,12 @@ struct ContentView: View {
                     canvasStack
                 }
             } else {
-                LoginScreen(onSignIn: { Task { await store.signIn() } }, errorMessage: store.lastAuthError)
+                LoginScreen(
+                    onSignIn: { store.startSignIn() },
+                    onCancelSignIn: { store.cancelSignIn() },
+                    errorMessage: store.lastAuthError,
+                    isSigningIn: store.isSigningIn
+                )
             }
         }
         .preferredColorScheme(store.chosenScheme)
@@ -25,14 +30,21 @@ struct ContentView: View {
         .overlay { emailPresentation }
         .overlay { shortcutOverlay }
         .background { keyboardShortcuts }
-        .onAppear {
-            if keybinds == nil {
-                let engine = KeybindEngine(store: store)
-                engine.start()
-                keybinds = engine
-            }
-        }
+        // Keybinds are scoped to *this* window: the Settings scene must never
+        // route `j/k` into the inbox.
+        .background { MainWindowReader { window in attachKeybinds(to: window) } }
         .onChange(of: store.searchFocusToken) { _, _ in searchFocused = true }
+    }
+
+    private func attachKeybinds(to window: NSWindow?) {
+        guard let window else { return }
+        if let engine = keybinds {
+            engine.retarget(to: window)
+        } else {
+            let engine = KeybindEngine(store: store)
+            engine.start(inWindow: window)
+            keybinds = engine
+        }
     }
 
     /// Modifier-combo shortcuts stay as hidden buttons (⌘F); single-key
@@ -44,6 +56,22 @@ struct ContentView: View {
         }
         .opacity(0)
         .accessibilityHidden(true)
+    }
+
+    /// Hands the hosting `NSWindow` to its callback once it exists (async, so
+    /// state mutation never happens during view updates).
+    private struct MainWindowReader: NSViewRepresentable {
+        let onWindow: (NSWindow?) -> Void
+
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            DispatchQueue.main.async { [weak view] in
+                onWindow(view?.window)
+            }
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {}
     }
 
     /// `?` cheat sheet — rendered from the engine's binding table, so it can
@@ -116,6 +144,9 @@ struct ContentView: View {
             Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
             VStack(spacing: 0) {
                 headerBar
+                if let syncError = store.syncError {
+                    SyncErrorBar(message: syncError) { store.dismissSyncError() }
+                }
                 Divider().opacity(0.5)
                 emailList
             }

@@ -108,6 +108,74 @@ struct GmailAuthTests {
         }
     }
 
+    @Test func adoptDuringRefreshStopsTheStaleResultFromWinning() async throws {
+        // M1: a refresh computed from the OLD session must never overwrite or
+        // resurrect state after a concurrent adopt (re-sign-in).
+        try await StubURLProtocol.exclusive {
+            let releaseRefresh = DispatchSemaphore(value: 0)
+            StubURLProtocol.route { _ in
+                _ = releaseRefresh.wait(timeout: .now() + 5)
+                let json = #"{"access_token":"stale-session","expires_in":3600,"token_type":"Bearer"}"#
+                return (200, Data(json.utf8))
+            }
+            let session = URLSession(configuration: StubURLProtocol.config)
+            let store = InMemoryTokenStore()
+            let manager = self.makeManager(store: store, session: session)
+            manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: Date().addingTimeInterval(-60), scope: nil))
+
+            let refreshTask = Task { try await manager.validAccessToken() }
+            // Let the refresh get in flight (the handler parks it there).
+            try await Task.sleep(nanoseconds: 200_000_000)
+
+            // Re-sign-in while the stale refresh is mid-air.
+            manager.adopt(TokenSet(accessToken: "new-session", refreshToken: "r2", expiresAt: Date().addingTimeInterval(3600), scope: nil))
+            releaseRefresh.signal()
+
+            let racedToken = try await refreshTask.value
+
+            // The race loser sees the newer session instead of resurrecting
+            // its own result, and nothing was persisted from the stale run.
+            #expect(racedToken == "new-session")
+            #expect(try await manager.validAccessToken() == "new-session")
+            #expect(manager.hasSession)
+            #expect(store.saveCount == 1)   // adopt only — no stale persist
+            #expect(StubURLProtocol.requestCount(to: "token") == 1)
+        }
+    }
+
+    @Test func clearDuringRefreshStopsTheRevivedTokenFromResurrecting() async throws {
+        try await StubURLProtocol.exclusive {
+            let releaseRefresh = DispatchSemaphore(value: 0)
+            StubURLProtocol.route { _ in
+                _ = releaseRefresh.wait(timeout: .now() + 5)
+                let json = #"{"access_token":"zombie","expires_in":3600,"token_type":"Bearer"}"#
+                return (200, Data(json.utf8))
+            }
+            let session = URLSession(configuration: StubURLProtocol.config)
+            let store = InMemoryTokenStore()
+            let manager = self.makeManager(store: store, session: session)
+            manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: Date().addingTimeInterval(-60), scope: nil))
+
+            let refreshTask = Task { try await manager.validAccessToken() }
+            try await Task.sleep(nanoseconds: 200_000_000)
+
+            // Sign-out (revoked) lands while the refresh is mid-air.
+            manager.clear()
+            releaseRefresh.signal()
+
+            // The raced caller must not hand out the zombie token.
+            await #expect(throws: GmailConfigError.reauthRequired) {
+                _ = try await refreshTask.value
+            }
+            // And the session stays cleared.
+            await #expect(throws: GmailConfigError.reauthRequired) {
+                _ = try await manager.validAccessToken()
+            }
+            #expect(!manager.hasSession)
+            #expect(store.saveCount == 1)   // adopt only
+        }
+    }
+
     @Test func revokedRefreshTokenClearsTheSessionAndDemandsReauth() async throws {
         try await StubURLProtocol.exclusive {
             StubURLProtocol.route { _ in (400, Data(#"{"error":"invalid_grant"}"#.utf8)) }

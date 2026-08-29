@@ -73,4 +73,29 @@ struct LoopbackRedirectServerTests {
         let code = try await waiter.value
         #expect(code == "late")
     }
+
+    @Test func nonOAuthShapedQueriesDoNotFulfillTheWait() async throws {
+        // M6: a hostile local process poking the port with arbitrary query
+        // strings must not settle the listener — only OAuth-shaped redirects
+        // (state + code/error) can.
+        let server = try await LoopbackRedirectServer.start()
+        let waiter = Task { try await server.awaitCode(expectedState: "s", timeout: 10) }
+
+        let probe = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/?probe=1")!)
+        let (_, probeResponse) = try await URLSession.shared.data(for: probe)
+        #expect((probeResponse as? HTTPURLResponse)?.statusCode == 404)
+
+        // A query that carries a code but no state nonce also fails the shape
+        // check without settling.
+        let noState = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/?code=c")!)
+        let (_, noStateResponse) = try await URLSession.shared.data(for: noState)
+        #expect((noStateResponse as? HTTPURLResponse)?.statusCode == 404)
+
+        // The real redirect still lands afterwards.
+        let real = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/?code=late&state=s")!)
+        _ = try await URLSession.shared.data(for: real)
+
+        let code = try await waiter.value
+        #expect(code == "late")
+    }
 }

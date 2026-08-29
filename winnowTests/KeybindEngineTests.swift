@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import winnow
@@ -34,9 +35,39 @@ struct KeybindEngineTests {
     }
 
     @Test func modifierCombosAreNeverCapturedUpstream() {
-        // The engine ignores events with non-shift modifiers before routing;
-        // asserted here via the guard contract: only bare characters route.
-        // (The monitor drops such events before calling command().)
+        // The guard lives in the pure router: any ⌘/⌃/⌥ combo must return nil
+        // even when the bare key would route. Shift alone stays legal — it is
+        // how `#` and `?` are produced.
+        let list = context(hasActionTarget: true, railCount: 12)
+        let command = UInt(NSEvent.ModifierFlags.command.rawValue)
+        let control = UInt(NSEvent.ModifierFlags.control.rawValue)
+        let option = UInt(NSEvent.ModifierFlags.option.rawValue)
+        let shift = UInt(NSEvent.ModifierFlags.shift.rawValue)
+
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: list, modifiers: command) == nil)
+        #expect(KeybindEngine.command(forCharacter: "s", keyCode: 1, context: list, modifiers: control) == nil)
+        #expect(KeybindEngine.command(forCharacter: "e", keyCode: 14, context: list, modifiers: option) == nil)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 51, context: list, modifiers: command | shift) == nil)
+        // Shift-only keeps routing (`#`, `?`).
+        #expect(KeybindEngine.command(forCharacter: "#", keyCode: 18, context: list, modifiers: shift) == .trash)
+    }
+
+    @Test func cheatSheetOpenBlocksKeysBehindIt() {
+        // With the sheet up, only dismissing routes: Esc closes it, `?`
+        // toggles it closed, everything else passes through untouched so no
+        // filter flips behind the sheet.
+        let overlay = context(overlayVisible: true, hasActionTarget: true, railCount: 12)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: overlay) == .dismissOverlay)
+        #expect(KeybindEngine.command(forCharacter: "?", keyCode: 44, context: overlay) == .toggleShortcutsOverlay)
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: overlay) == nil)
+        #expect(KeybindEngine.command(forCharacter: "s", keyCode: 1, context: overlay) == nil)
+        #expect(KeybindEngine.command(forCharacter: "e", keyCode: 14, context: overlay) == nil)
+        #expect(KeybindEngine.command(forCharacter: "/", keyCode: 44, context: overlay) == nil)
+        #expect(KeybindEngine.command(forCharacter: "3", keyCode: 20, context: overlay) == nil)
+
+        // Sheet closed: the same keys route again.
+        let list = context(hasActionTarget: true, railCount: 12)
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: list) == .moveSelection(1))
     }
 
     @Test func signedOutMeansNoKeyDoesAnything() {

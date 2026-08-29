@@ -72,26 +72,35 @@ final class EmailCacheStore {
     }
 
     func upsert(email: WinnowEmail, gmailId: String, threadId: String) throws {
-        let predicate = #Predicate<StoredEmail> { $0.gmailId == gmailId }
-        if let existing = try context.fetch(FetchDescriptor(predicate: predicate)).first {
-            existing.threadId = threadId
-            existing.sender = email.sender
-            existing.name = email.name
-            existing.address = email.email
-            existing.receivedAt = email.receivedAt
-            existing.subject = email.subject
-            existing.body = email.body
-            existing.type = email.type
-            existing.starred = email.starred
-            existing.numericId = email.id
-        } else {
-            context.insert(StoredEmail(gmailId: gmailId, threadId: threadId, email: email))
-        }
-        try context.save()
+        try upsertAll([(email: email, gmailId: gmailId, threadId: threadId)])
     }
 
+    /// Batch upsert: one fetch, one save — a full sync does N/25 round-trips
+    /// instead of 2N.
     func upsertAll(_ items: [(email: WinnowEmail, gmailId: String, threadId: String)]) throws {
-        for item in items { try upsert(email: item.email, gmailId: item.gmailId, threadId: item.threadId) }
+        guard !items.isEmpty else { return }
+        let ids = items.map(\.gmailId)
+        let predicate = #Predicate<StoredEmail> { ids.contains($0.gmailId) }
+        let existing = try context.fetch(FetchDescriptor(predicate: predicate))
+        let byGmailId = Dictionary(uniqueKeysWithValues: existing.map { ($0.gmailId, $0) })
+
+        for item in items {
+            if let stored = byGmailId[item.gmailId] {
+                stored.threadId = item.threadId
+                stored.sender = item.email.sender
+                stored.name = item.email.name
+                stored.address = item.email.email
+                stored.receivedAt = item.email.receivedAt
+                stored.subject = item.email.subject
+                stored.body = item.email.body
+                stored.type = item.email.type
+                stored.starred = item.email.starred
+                stored.numericId = item.email.id
+            } else {
+                context.insert(StoredEmail(gmailId: item.gmailId, threadId: item.threadId, email: item.email))
+            }
+        }
+        try context.save()
     }
 
     /// Cached inbox, newest first.

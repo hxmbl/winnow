@@ -1,13 +1,18 @@
 import SwiftUI
 
-/// Sign-in screen. Tapping "Sign in with Google" proceeds to the mock inbox,
-/// matching the pre-login demo behaviour. Real Gmail OAuth is not implemented.
+/// Sign-in screen. Tapping "Sign in with Google" hands off to the store, whose
+/// sign-in runs the real OAuth round-trip (or instant demo mode).
 struct LoginScreen: View {
-    /// Called to start the (possibly live) sign-in; runs async in the store.
+    /// Starts sign-in in the store. The button stays disabled until the store
+    /// reports completion — a re-enable mid-flight would let a second click
+    /// open a second browser tab.
     let onSignIn: () -> Void
+    /// Cancels an in-flight sign-in; present only while one can be cancelled.
+    var onCancelSignIn: (() -> Void)? = nil
     /// Sign-in failure from the store, shown under the button.
     var errorMessage: String? = nil
-    @State private var loading = false
+    /// True for the entire interactive sign-in (browser round-trip included).
+    var isSigningIn = false
 
     // MARK: - Body
 
@@ -34,14 +39,14 @@ struct LoginScreen: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 280)
                 }
-                Button(action: { Task { await signIn() } }) {
+                Button(action: onSignIn) {
                     HStack(spacing: 12) {
-                        if loading {
+                        if isSigningIn {
                             ProgressView().controlSize(.small).tint(Color.winnowText)
                         } else {
                             googleMark
                         }
-                        Text(loading ? "Connecting..." : "Sign in with Google")
+                        Text(isSigningIn ? "Connecting..." : "Sign in with Google")
                             .font(.headline)
                             .foregroundStyle(Color.winnowText)
                     }
@@ -52,7 +57,15 @@ struct LoginScreen: View {
                     .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
                 }
                 .buttonStyle(.plain)
-                .disabled(loading)
+                .disabled(isSigningIn)
+
+                if isSigningIn, let onCancelSignIn {
+                    Button("Cancel", action: onCancelSignIn)
+                        .buttonStyle(.plain)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.winnowSecondary)
+                        .accessibilityIdentifier("cancel-sign-in")
+                }
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -83,15 +96,5 @@ struct LoginScreen: View {
         Image(systemName: "g.circle.fill")
             .font(.title3)
             .foregroundStyle(Color.blue)
-    }
-
-    // MARK: - Sign-in flow
-
-    private func signIn() async {
-        loading = true
-        // Simulate the async handshake; no real OAuth is performed.
-        try? await Task.sleep(nanoseconds: 400_000_000)
-        onSignIn()
-        loading = false
     }
 }

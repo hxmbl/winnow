@@ -64,7 +64,12 @@ final class AuthController {
             throw GmailAPIError.transport("could not build authorize URL")
         }
 
-        NSWorkspace.shared.open(authorizeURL)
+        // A missing/no-default browser returns false here; fail now rather
+        // than burn the whole redirect timeout waiting for a tab that
+        // will never open.
+        guard NSWorkspace.shared.open(authorizeURL) else {
+            throw GmailAPIError.transport("No default browser available to complete sign-in.")
+        }
 
         let code = try await server.awaitCode(expectedState: state, timeout: redirectTimeout)
         let tokens = try await exchange(code: code, pkce: pkce, credentials: credentials, redirectURI: redirectURI)

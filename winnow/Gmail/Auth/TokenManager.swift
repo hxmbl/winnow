@@ -28,6 +28,15 @@ final class TokenManager {
     var now: () -> Date = Date.init
     private(set) var lastError: Error?
 
+    /// Non-nil when the Keychain itself failed at init — surfaced by the
+    /// store so a keychain problem reads as a keychain problem, not as
+    /// "please sign in again".
+    private(set) var loadError: Error?
+
+    /// Bumped by `adopt`/`clear` so an in-flight refresh computed from the
+    /// OLD session can never overwrite or resurrect newer state.
+    @ObservationIgnored private var generation = 0
+
     private var cached: TokenSet?
     private var inflightRefresh: Task<String, Error>?
 
@@ -35,7 +44,12 @@ final class TokenManager {
         self.store = store
         self.credentialsProvider = credentialsProvider
         self.session = session
-        self.cached = try? store.load()
+        do {
+            self.cached = try store.load()
+        } catch {
+            self.loadError = error
+            self.cached = nil
+        }
     }
 
     /// True when a stored token set exists (even if stale) — used to decide
@@ -44,14 +58,17 @@ final class TokenManager {
 
     var hasRefreshToken: Bool { cached?.refreshToken != nil }
 
-    /// Stores the outcome of a fresh interactive sign-in.
+    /// Stores the outcome of a fresh interactive sign-in. Invalidates any
+    /// in-flight refresh from the previous session.
     func adopt(_ tokens: TokenSet) {
+        generation += 1
         cached = tokens
         try? store.save(tokens)
     }
 
     /// Forgets everything: Keychain first, then memory.
     func clear() {
+        generation += 1
         cached = nil
         inflightRefresh?.cancel()
         inflightRefresh = nil
@@ -100,6 +117,7 @@ final class TokenManager {
             throw GmailConfigError.reauthRequired
         }
         let credentials = try credentialsProvider()
+        let gen = generation
 
         var request = URLRequest(url: Self.tokenURL)
         request.httpMethod = "POST"
@@ -146,12 +164,26 @@ final class TokenManager {
             throw GmailAPIError.decoding("token refresh: \(error)")
         }
 
+        // M10: floor the stored lifetime so a pathological expires_in ≤ slack
+        // can never cause a refresh on every call. A genuinely shorter-lived
+        // token simply 401s once and is force-refreshed by the client.
+        let lifetime = max(TimeInterval(decoded.expiresIn), expirySlack + 5)
         let updated = TokenSet(
             accessToken: decoded.accessToken,
             refreshToken: refreshToken,
-            expiresAt: now().addingTimeInterval(TimeInterval(decoded.expiresIn)),
+            expiresAt: now().addingTimeInterval(lifetime),
             scope: decoded.scope ?? tokens.scope
         )
+
+        // The session changed while we were in flight (re-sign-in or clear):
+        // the stale result must not win.
+        guard gen == generation else {
+            if let current = cached, current.expiresAt.timeIntervalSince(now()) > expirySlack {
+                return current.accessToken
+            }
+            throw GmailConfigError.reauthRequired
+        }
+
         cached = updated
         try? store.save(updated)
         return updated.accessToken

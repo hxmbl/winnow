@@ -97,7 +97,7 @@ final class WinnowStore {
     /// successful sign-in. `nil` ⇒ demo mode on mock data.
     ///
     /// MODE LOGIC (deliberately explicit):
-    /// - `signIn()`: credentials present → live auth + sync; absent → demo.
+    /// - `startSignIn()`: credentials present → live auth + sync; absent → demo.
     ///   A failed live attempt keeps `authed == false` and records
     ///   `lastAuthError` for the login screen.
     /// - Launch with `authed == true` and stored tokens → silent restore.
@@ -119,6 +119,13 @@ final class WinnowStore {
     private(set) var syncing = false
     /// Last background action failure (e.g. a star that didn't reach Google).
     private(set) var syncError: String?
+    /// Clears the visible sync-failure banner once the user has seen it.
+    func dismissSyncError() {
+        syncError = nil
+    }
+    /// True while the interactive sign-in (browser round-trip) is running.
+    private(set) var isSigningIn = false
+    @ObservationIgnored private var signInTask: Task<Void, Never>?
 
     // MARK: - Derived data (cached, read-only)
 
@@ -147,6 +154,18 @@ final class WinnowStore {
     /// full reclassification after the last tick, keeping drags smooth.
     @ObservationIgnored private var weightsSweepTask: Task<Void, Never>?
 
+    /// Deltas larger than this (a first live sync replacing the whole inbox)
+    /// classify **off the main thread**: rows appear progressively instead of
+    /// beachballing. Small deltas (tests, single edits) stay synchronous so
+    /// derived data is immediately consistent.
+    @ObservationIgnored static let syncClassifyThreshold = 200
+    @ObservationIgnored private var backgroundClassifyTask: Task<Void, Never>?
+    @ObservationIgnored private var isClassifyingInBackground = false
+
+    /// Flushes learning weights to disk when the app terminates (the debounced
+    /// persist would otherwise lose the last ~200ms of edits).
+    @ObservationIgnored private var terminateObserver: NSObjectProtocol?
+
     @ObservationIgnored private let defaults: UserDefaults
 
     // MARK: - Lifecycle & rebuilds
@@ -158,6 +177,15 @@ final class WinnowStore {
         self.authed = defaults.bool(forKey: Self.authDefaultsKey)
         learning.onWeightsChanged = { [weak self] in self?.scheduleWeightsSweep() }
         rebuildAllDerived()
+        terminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.learning.flushPendingPersist()
+            }
+        }
         if authed {
             Task { await restoreLiveSessionIfPossible() }
         }
@@ -190,7 +218,9 @@ final class WinnowStore {
 
         profile = newProfile
 
-        if !dirtyIDs.isEmpty {
+        if dirtyIDs.count > Self.syncClassifyThreshold {
+            classifyInBackground(dirtyIDs: dirtyIDs, profile: newProfile)
+        } else if !dirtyIDs.isEmpty {
             var updated = emailSignals
             var updatedBags = searchBags
             let weights = learning.weights
@@ -204,6 +234,52 @@ final class WinnowStore {
             searchBags = updatedBags.filter { liveIDs.contains($0.key) }
         }
 
+        updateRailItems()
+        rebuildFilteredRows()
+    }
+
+    /// Classifies a large delta off the main actor and merges the results back
+    /// when the inbox is still what they were computed from; otherwise the
+    /// rebuild simply re-runs (converging once changes settle).
+    private func classifyInBackground(dirtyIDs: Set<Int>, profile newProfile: UserProfile) {
+        isClassifyingInBackground = true
+        backgroundClassifyTask?.cancel()
+        let capturedInbox = inbox
+        let capturedWeights = learning.weights
+        backgroundClassifyTask = Task { [weak self] in
+            let computed = await Task.detached(priority: .userInitiated) { () -> ([Int: EmailSignals], [Int: String]) in
+                var signals: [Int: EmailSignals] = [:]
+                var bags: [Int: String] = [:]
+                signals.reserveCapacity(dirtyIDs.count)
+                for email in capturedInbox where dirtyIDs.contains(email.id) {
+                    signals[email.id] = classifyEmail(email: email, profile: newProfile, weights: capturedWeights)
+                    bags[email.id] = wordBag(email)
+                }
+                return (signals, bags)
+            }.value
+
+            guard let self, !Task.isCancelled else { return }
+            self.applyBackgroundClassification(signals: computed.0, bags: computed.1, computedFor: capturedInbox)
+        }
+    }
+
+    private func applyBackgroundClassification(
+        signals: [Int: EmailSignals],
+        bags: [Int: String],
+        computedFor capturedInbox: [WinnowEmail]
+    ) {
+        guard inbox == capturedInbox else {
+            // Inbox moved on while we computed — redo against the new state.
+            isClassifyingInBackground = false
+            rebuildAllDerived(previousInbox: nil)
+            return
+        }
+        for (id, sig) in signals { emailSignals[id] = sig }
+        for (id, bag) in bags { searchBags[id] = bag }
+        let liveIDs = Set(inbox.map(\.id))
+        emailSignals = emailSignals.filter { liveIDs.contains($0.key) }
+        searchBags = searchBags.filter { liveIDs.contains($0.key) }
+        isClassifyingInBackground = false
         updateRailItems()
         rebuildFilteredRows()
     }
@@ -308,7 +384,9 @@ final class WinnowStore {
         rows.reserveCapacity(visibleIDs.count)
         for email in visibleIDs {
             guard let sig = emailSignals[email.id] else {
-                assertionFailure("No cached signals for email \(email.id); falling back to neutral")
+                // Pending rows during a background classify window are
+                // expected; outside that window this is a cache bug.
+                assert(isClassifyingInBackground, "No cached signals for email \(email.id)")
                 continue
             }
             rows.append(EmailRowModel(email: email, sig: sig))
@@ -321,6 +399,12 @@ final class WinnowStore {
             selectedRowIndex = nil
         } else if let index = selectedRowIndex {
             selectedRowIndex = min(max(0, index), filteredEmails.count - 1)
+        }
+        // During a background classification pass, rows without signals yet
+        // are "pending", not a bug — they fill in as the pass completes.
+        if !isClassifyingInBackground {
+            let missing = filteredEmails.contains { emailSignals[$0.email.id] == nil }
+            assert(!missing, "Rows without cached signals outside a background classify window")
         }
     }
 
@@ -389,17 +473,8 @@ final class WinnowStore {
     /// drops the row. While reading, this is triage: the next email opens
     /// automatically so `e j j e` never touches the mouse.
     func archiveEmail(_ emailID: Int) {
-        applyMailboxRemoval(emailID) { backend, gmailID in
-            if let backend, let gmailID {
-                let client = backend.client
-                Task { [weak self] in
-                    do {
-                        try await client.modify(messageID: gmailID, addLabelIds: nil, removeLabelIds: [GmailLabel.inbox])
-                    } catch {
-                        self?.syncError = error.localizedDescription
-                    }
-                }
-            }
+        applyMailboxRemoval(emailID) { client, gmailID in
+            try await client.modify(messageID: gmailID, addLabelIds: nil, removeLabelIds: [GmailLabel.inbox])
         }
     }
 
@@ -409,43 +484,69 @@ final class WinnowStore {
         if let sender = inbox.first(where: { $0.id == emailID })?.sender {
             trash.append(TrashRow(sender: sender))
         }
-        applyMailboxRemoval(emailID) { backend, gmailID in
-            if let backend, let gmailID {
-                let client = backend.client
-                Task { [weak self] in
-                    do {
-                        try await client.trash(messageID: gmailID)
-                    } catch {
-                        self?.syncError = error.localizedDescription
-                    }
-                }
-            }
+        applyMailboxRemoval(emailID) { client, gmailID in
+            try await client.trash(messageID: gmailID)
         }
     }
 
     /// Shared removal mechanics: drop from the cache + inbox optimistically,
     /// then advance the cursor / reader card like a triage client should.
+    /// **Rollback**: if the server call fails, the email is restored locally —
+    /// an optimistic removal must never become silently missing mail.
     private func applyMailboxRemoval(
         _ emailID: Int,
-        serverAction: (LiveBackend?, String?) -> Void
+        serverCall: @escaping (GmailClient, String) async throws -> Void
     ) {
         guard let index = inbox.firstIndex(where: { $0.id == emailID }) else { return }
+        let email = inbox[index]
         let wasOpen = selectedEmailID == emailID
         let gmailID = liveBackend?.cache.gmailID(for: emailID)
         if let backend = liveBackend {
             try? backend.cache.remove(gmailIds: [gmailID].compactMap { $0 })
         }
-        serverAction(liveBackend, gmailID)
 
         inbox.remove(at: index)
 
-        // Cursor stays on the same position — which now points at the next
-        // email — and an open card advances to it.
+        if let backend = liveBackend, let gmailID {
+            let client = backend.client
+            Task { [weak self] in
+                do {
+                    try await serverCall(client, gmailID)
+                } catch {
+                    self?.rollbackRemoval(email, gmailID: gmailID, originalIndex: index, wasOpen: wasOpen, error: error)
+                }
+            }
+        }
+
+        applyPostRemovalCursor(removedID: emailID, originalIndex: index, wasOpen: wasOpen)
+    }
+
+    /// Puts a failed-removal email back: same list position (approximately, if
+    /// the list moved), cache entry, cursor, and open card.
+    private func rollbackRemoval(_ email: WinnowEmail, gmailID: String, originalIndex: Int, wasOpen: Bool, error: Error) {
+        syncError = Self.rawDescription(of: error)
+        guard !inbox.contains(where: { $0.id == email.id }) else { return }
+        let insertIndex = min(originalIndex, inbox.count)
+        inbox.insert(email, at: insertIndex)
+        if let backend = liveBackend {
+            try? backend.cache.upsert(email: email, gmailId: gmailID, threadId: backend.cache.threadID(for: email.id) ?? "")
+        }
+        if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
+            selectedRowIndex = row
+        }
+        if wasOpen {
+            openEmail(email.id)
+        }
+    }
+
+    /// Cursor/card bookkeeping after a removal: stay at the same position —
+    /// which now points at the next email — and advance an open card to it.
+    private func applyPostRemovalCursor(removedID: Int, originalIndex: Int, wasOpen: Bool) {
         if filteredEmails.isEmpty {
             selectedRowIndex = nil
             if wasOpen { dismissEmail() }
         } else {
-            let next = min(max(0, selectedRowIndex ?? index), filteredEmails.count - 1)
+            let next = min(max(0, selectedRowIndex ?? originalIndex), filteredEmails.count - 1)
             selectedRowIndex = next
             if wasOpen {
                 openEmail(filteredEmails[next].email.id)
@@ -578,37 +679,43 @@ final class WinnowStore {
 
     /// Sends a reply through Gmail when live; demo mode reports `.demo` so the
     /// UI can say so honestly. Attachment URLs come from the file importer and
-    /// are read under their security scope, then released immediately.
+    /// are read under their security scope **off the main actor** — a large
+    /// PDF must not freeze the list while it's read and base64'd.
     func sendReply(to email: WinnowEmail, body: String, attachmentURLs: [URL]) async -> SendOutcome {
         guard let backend = liveBackend else { return .demo }
         do {
-            let attachments = try attachmentURLs.map { url -> OutgoingAttachment in
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                let data = try Data(contentsOf: url)
-                return OutgoingAttachment(
-                    filename: url.lastPathComponent,
-                    mimeType: Self.mimeType(for: url),
-                    data: data
-                )
-            }
+            let threadID = backend.cache.threadID(for: email.id).flatMap { $0.isEmpty ? nil : $0 }
             let draft = OutgoingDraft(
                 to: email.displayAddress,
                 subject: email.subject.hasPrefix("Re:") ? email.subject : "Re: " + email.subject,
                 body: body,
-                attachments: attachments,
-                threadID: backend.cache.threadID(for: email.id),
+                attachments: [],
+                threadID: threadID,
                 inReplyToMessageID: nil
             )
-            let mime = MIMEBuilder.build(draft)
-            _ = try await backend.client.send(GmailSendRequest(raw: Base64URL.encode(mime), threadId: draft.threadID))
+            let mime = try await Task.detached(priority: .userInitiated) { () -> Data in
+                let attachments = try attachmentURLs.map { url -> OutgoingAttachment in
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let data = try Data(contentsOf: url)
+                    return OutgoingAttachment(
+                        filename: url.lastPathComponent,
+                        mimeType: Self.mimeType(for: url),
+                        data: data
+                    )
+                }
+                return MIMEBuilder.build(OutgoingDraft(to: draft.to, subject: draft.subject, body: draft.body, attachments: attachments, threadID: draft.threadID, inReplyToMessageID: nil))
+            }.value
+            _ = try await backend.client.send(GmailSendRequest(raw: Base64URL.encode(mime), threadId: threadID))
             return .sent
         } catch {
             return .failed(error.localizedDescription)
         }
     }
 
-    private static func mimeType(for url: URL) -> String {
+    /// Runs inside the detached MIME-builder task, so it must stay callable
+    /// off the main actor.
+    nonisolated private static func mimeType(for url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "pdf": return "application/pdf"
         case "png": return "image/png"
@@ -638,10 +745,34 @@ final class WinnowStore {
 
     /// Sign-in: live Gmail session when credentials are configured, demo mode
     /// otherwise. Never throws at the caller — failures land in
-    /// `lastAuthError` for the login screen to display.
+    /// `lastAuthError` for the login screen to display. Cancellable.
     func signIn() async {
+        await performSignIn()
+    }
+
+    /// Entry point for the login button: guards against double-taps opening
+    /// two browser tabs, and exposes the task so it can be cancelled.
+    func startSignIn() {
+        guard !isSigningIn else { return }
+        isSigningIn = true
+        signInTask = Task { [weak self] in
+            await self?.performSignIn()
+        }
+    }
+
+    /// Cancels an in-flight browser sign-in.
+    func cancelSignIn() {
+        signInTask?.cancel()
+    }
+
+    private func performSignIn() async {
         lastAuthError = nil
+        defer { isSigningIn = false }
+
         guard isLiveModeAvailable() else {
+            // Demo mode: a beat of spinner so the click feels acknowledged.
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
             authed = true
             defaults.set(true, forKey: Self.authDefaultsKey)
             return
@@ -649,11 +780,19 @@ final class WinnowStore {
         do {
             let backend = try await makeLiveBackend(interactive: true)
             let emails = try await backend.sync.fullSync()
+            // A cancelled wait must not adopt the session anyway — the user
+            // pressed Cancel; any late-completing browser flow stays dormant
+            // in the Keychain for the next launch to restore.
+            guard !Task.isCancelled else { return }
             liveBackend = backend
             inbox = emails
             authed = true
             defaults.set(true, forKey: Self.authDefaultsKey)
+            if backend.sync.lastSyncFailureCount > 0 {
+                syncError = Self.syncFailureSummary(backend.sync.lastSyncFailureCount)
+            }
         } catch {
+            if Task.isCancelled { return }   // user cancelled: no error copy
             lastAuthError = Self.rawDescription(of: error)
             authed = false
         }
@@ -666,9 +805,16 @@ final class WinnowStore {
         do {
             let backend = try await makeLiveBackend(interactive: false)
             let emails = try await backend.sync.incrementalSync()
+            // M9: the world may have moved on while we awaited the network —
+            // a fast sign-out (or a manual sign-in) must win over this task.
+            guard authed, liveBackend == nil else { return }
             liveBackend = backend
             inbox = emails
+            if backend.sync.lastSyncFailureCount > 0 {
+                syncError = Self.syncFailureSummary(backend.sync.lastSyncFailureCount)
+            }
         } catch {
+            guard authed, liveBackend == nil else { return }
             lastAuthError = Self.rawDescription(of: error)
             authed = false
             defaults.set(false, forKey: Self.authDefaultsKey)
@@ -676,10 +822,16 @@ final class WinnowStore {
     }
 
     /// Builds the live stack. `interactive` controls the missing-token case:
-    /// sign-in presents the Google web sheet; session-restore does NOT pop a
-    /// browser at launch — it fails and drops the user on the login screen.
+    /// sign-in presents the browser; session-restore does NOT pop a browser at
+    /// launch — it fails and drops the user on the login screen.
+    ///
+    /// Nothing is installed until the caller decides the session is real:
+    /// a cancelled or failed build leaves `liveBackend` untouched.
     private func makeLiveBackend(interactive: Bool) async throws -> LiveBackend {
         let tokens = TokenManager(store: KeychainTokenStore(), credentialsProvider: { try GmailCredentials.load() })
+        if let loadError = tokens.loadError {
+            throw loadError   // keychain failure must not silently force re-auth
+        }
         if !tokens.hasSession {
             guard interactive else { throw GmailConfigError.reauthRequired }
             let auth = AuthController(tokenManager: tokens, session: GmailClient.productionSession())
@@ -691,29 +843,50 @@ final class WinnowStore {
         return LiveBackend(client: client, sync: sync, cache: cache, tokens: tokens)
     }
 
+    /// Test seam: installs a prebuilt backend without the OAuth round-trip,
+    /// mirroring the existing `isLiveModeAvailable` injection pattern.
+    func injectLiveBackendForTesting(_ backend: LiveBackend) {
+        liveBackend = backend
+    }
+
     /// Pre-release: show the raw error (case + associated values) so failures
     /// are diagnosable. Swap for friendly copy at launch.
     private static func rawDescription(of error: Error) -> String {
         String(describing: error)
     }
 
+    private static func syncFailureSummary(_ count: Int) -> String {
+        "\(count) message\(count == 1 ? "" : "s") failed to download this sync — refresh to retry."
+    }
+
     /// Reset all state back to the mock fixtures and return to the login screen.
     /// Live teardown order matters: tokens first (Keychain), then the cached
     /// mail, then the backend reference.
     func signOut() {
+        signInTask?.cancel()
+        backgroundClassifyTask?.cancel()
+        isClassifyingInBackground = false
         if let backend = liveBackend {
             backend.tokens.clear()
             try? backend.cache.wipe()
         }
         liveBackend = nil
         lastAuthError = nil
+        syncError = nil
+        syncing = false
+        isSigningIn = false
         authed = false
         defaults.set(false, forKey: Self.authDefaultsKey)
+        // The sync cursor is account-scoped: the next sign-in (possibly a
+        // different account) must not inherit it.
+        defaults.removeObject(forKey: GmailSyncEngine.historyIDKey)
         inbox = mockInbox
         trash = mockTrash
         activeFilters = []
         searchQuery = ""
         selectedEmailID = nil
+        selectedRowIndex = nil
+        showShortcutOverlay = false
     }
 
     /// Jump to the unsafe bucket (used by Settings).
@@ -721,16 +894,21 @@ final class WinnowStore {
         activeFilters = [.builtin(.unsafe)]
     }
 
-    /// Live: incremental server sync. Demo: brief spinner.
+    /// Live: incremental server sync. Demo: brief spinner. Reentry-guarded —
+    /// a second ⌘R while one sync is running is a no-op, not duplicate work.
     func refresh() async {
         if let backend = liveBackend {
+            guard !syncing else { return }
             syncing = true
             defer { syncing = false }
             do {
                 inbox = try await backend.sync.incrementalSync()
                 syncError = nil
+                if backend.sync.lastSyncFailureCount > 0 {
+                    syncError = Self.syncFailureSummary(backend.sync.lastSyncFailureCount)
+                }
             } catch {
-                syncError = error.localizedDescription
+                syncError = Self.rawDescription(of: error)
             }
             return
         }

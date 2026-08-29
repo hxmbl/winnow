@@ -61,11 +61,18 @@ final class KeybindEngine {
 
     // MARK: - Pure routing
 
+    /// Routes one key. `modifiers` carries the event's modifier flags so the
+    /// ⌘/⌃/⌥ guard lives here — in the testable router, not the monitor shell.
     nonisolated static func command(
         forCharacter character: String?,
         keyCode: UInt16,
-        context: Context
+        context: Context,
+        modifiers: UInt = 0
     ) -> KeyCommand? {
+        // ⌘/⌃/⌥ combos (with or without shift) belong to system and menu
+        // shortcuts and are never intercepted.
+        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
+        guard flags.subtracting(.shift).intersection(.deviceIndependentFlagsMask).isEmpty else { return nil }
         guard context.authed else { return nil }
 
         let esc = keyCode == 53
@@ -77,6 +84,12 @@ final class KeybindEngine {
             if context.overlayVisible { return .dismissOverlay }
             if context.viewerOpen { return .closeViewer }
             return nil
+        }
+
+        // Cheat sheet open: keys must never mutate the list hidden behind it.
+        // Only dismissing routes (Esc above; `?` toggles the sheet closed).
+        if context.overlayVisible {
+            return character == "?" ? .toggleShortcutsOverlay : nil
         }
 
         switch keyCode {
@@ -109,18 +122,28 @@ final class KeybindEngine {
     // MARK: - Event monitor
 
     private weak var store: WinnowStore?
+    /// The window whose keys these are. Events from any other window (e.g.
+    /// Settings) pass through untouched — `j` in a Settings field must never
+    /// move an invisible inbox cursor.
+    private weak var contentWindow: NSWindow?
     private var monitor: Any?
 
     init(store: WinnowStore) {
         self.store = store
     }
 
-    /// Installs the local keyDown monitor. Idempotent.
-    func start() {
+    /// Installs the local keyDown monitor, scoped to `window`. Idempotent.
+    func start(inWindow window: NSWindow?) {
+        contentWindow = window
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) ?? event
         }
+    }
+
+    /// Re-points the scope after the view hierarchy moved to a new window.
+    func retarget(to window: NSWindow?) {
+        contentWindow = window
     }
 
     func stop() {
@@ -130,14 +153,13 @@ final class KeybindEngine {
 
     /// Returns nil when the event was consumed, else the event unchanged.
     private func handle(_ event: NSEvent) -> NSEvent? {
+        guard let contentWindow, event.window === contentWindow else { return event }
         guard let store else { return event }
-        // Modifier combos (⌘/⌃/⌥, with or without shift) are never ours.
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard modifiers.subtracting(.shift).isEmpty else { return event }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue
 
         let context = Context(
             authed: store.authed,
-            textEditing: Self.isTextContextActive,
+            textEditing: isTextContextActive,
             viewerOpen: store.selectedEmail != nil,
             overlayVisible: store.showShortcutOverlay,
             hasActionTarget: store.selectedEmail != nil || store.selectedRowIndex != nil,
@@ -151,9 +173,9 @@ final class KeybindEngine {
 
         let command: KeyCommand?
         if let produced, ["#", "?"].contains(produced) {
-            command = Self.command(forCharacter: produced, keyCode: event.keyCode, context: context)
+            command = Self.command(forCharacter: produced, keyCode: event.keyCode, context: context, modifiers: modifiers)
         } else {
-            command = Self.command(forCharacter: character, keyCode: event.keyCode, context: context)
+            command = Self.command(forCharacter: character, keyCode: event.keyCode, context: context, modifiers: modifiers)
         }
 
         guard let command else { return event }
@@ -161,8 +183,10 @@ final class KeybindEngine {
         return nil
     }
 
-    static var isTextContextActive: Bool {
-        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+    /// Text-editing is judged by *our* window's first responder — not
+    /// `NSApp.keyWindow`, which may belong to Settings or another scene.
+    var isTextContextActive: Bool {
+        guard let responder = contentWindow?.firstResponder else { return false }
         return responder is NSTextView
     }
 }

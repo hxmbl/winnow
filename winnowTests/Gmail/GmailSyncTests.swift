@@ -186,6 +186,117 @@ struct GmailSyncTests {
         }
     }
 
+    @Test func remoteArchiveViaLabelsRemovedInboxDropsTheRow() async throws {
+        // H1: archiving from Gmail web/phone arrives as `labelsRemoved`
+        // carrying INBOX — the row must leave the cache, not sit as a ghost.
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                if path.hasSuffix("/history") {
+                    let json = """
+                    {"history":[{"id":"h1","labelsRemoved":[{"message":{"id":"m1","threadId":"t1","labelIds":["INBOX"]}}]}],"historyId":"890"}
+                    """
+                    return (200, Data(json.utf8))
+                }
+                if path.hasSuffix("/profile") {
+                    return (200, Data(#"{"emailAddress":"a@b.c","historyId":"890"}"#.utf8))
+                }
+                return (404, Data())
+            }
+
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            try cache.upsert(
+                email: Fixtures.email(id: GmailMessageMapper.stableNumericID(for: "m1"), subject: "First"),
+                gmailId: "m1",
+                threadId: "t1"
+            )
+            defaults.set("889", forKey: GmailSyncEngine.historyIDKey)
+
+            let emails = try await sync.incrementalSync()
+
+            #expect(emails.isEmpty)
+            #expect(cache.count == 0)
+        }
+    }
+
+    @Test func remoteUnarchiveViaLabelsAddedInboxRefetchesTheMessage() async throws {
+        // The mirror case: unarchiving elsewhere re-adds INBOX — the message
+        // must come back through a fetch, not stay invisible until a full sync.
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                if path.hasSuffix("/history") {
+                    let json = """
+                    {"history":[{"id":"h1","labelsAdded":[{"message":{"id":"m7","threadId":"t7","labelIds":["INBOX"]}}]}],"historyId":"891"}
+                    """
+                    return (200, Data(json.utf8))
+                }
+                if path.contains("/messages/m7") {
+                    return (200, Data(self.fullMessageJSON(id: "m7", subject: "Back again").utf8))
+                }
+                if path.hasSuffix("/profile") {
+                    return (200, Data(#"{"emailAddress":"a@b.c","historyId":"891"}"#.utf8))
+                }
+                return (404, Data())
+            }
+
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            defaults.set("890", forKey: GmailSyncEngine.historyIDKey)
+
+            let emails = try await sync.incrementalSync()
+
+            #expect(emails.map(\.subject) == ["Back again"])
+            #expect(cache.count == 1)
+        }
+    }
+
+    @Test func fullSyncFollowsNextPageTokensAcrossPages() async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                let query = request.url?.query ?? ""
+                if path.hasSuffix("/messages") && request.httpMethod == "GET" {
+                    if query.contains("pageToken=p2") {
+                        return (200, Data(#"{"messages":[{"id":"m3","threadId":"t3"}],"resultSizeEstimate":1}"#.utf8))
+                    }
+                    return (200, Data(#"{"messages":[{"id":"m1","threadId":"t1"},{"id":"m2","threadId":"t2"}],"nextPageToken":"p2","resultSizeEstimate":3}"#.utf8))
+                }
+                if path.contains("/messages/m1") {
+                    return (200, Data(self.fullMessageJSON(id: "m1", subject: "First").utf8))
+                }
+                if path.contains("/messages/m2") {
+                    return (200, Data(self.fullMessageJSON(id: "m2", subject: "Second").utf8))
+                }
+                if path.contains("/messages/m3") {
+                    return (200, Data(self.fullMessageJSON(id: "m3", subject: "Third").utf8))
+                }
+                if path.hasSuffix("/profile") {
+                    return (200, Data(#"{"emailAddress":"ada@example.com","historyId":"777"}"#.utf8))
+                }
+                return (404, Data())
+            }
+
+            let (_, _, sync, _) = try makeStack(defaults: defaults)
+            let emails = try await sync.fullSync()
+
+            #expect(emails.count == 3)
+            #expect(Set(emails.map(\.subject)) == ["First", "Second", "Third"])
+            #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "777")
+        }
+    }
+
     // MARK: Cache
 
     @Test func cacheUpsertIsKeyedByGmailIDAndRoundTrips() throws {

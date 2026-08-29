@@ -310,11 +310,16 @@ final class WinnowStoreTests {
         await store.signIn()
         #expect(store.authed)
 
+        // Mutate every piece of session state, including the pieces earlier
+        // regressions leaked through sign-out (T5).
         store.inbox = [Fixtures.email(id: 555, sender: "mutated@x.co")]
         store.trash = [TrashRow(sender: "mutated@x.co")]
         store.toggleFilter(.builtin(.unsafe))
         store.searchQuery = "mutated"
         store.openEmail(555)
+        store.moveSelection(2)
+        store.showShortcutOverlay = true
+        defaults.set("999", forKey: GmailSyncEngine.historyIDKey)
 
         store.signOut()
 
@@ -324,6 +329,56 @@ final class WinnowStoreTests {
         #expect(store.activeFilters.isEmpty)
         #expect(store.searchQuery.isEmpty)
         #expect(store.selectedEmail == nil)
+        #expect(!store.showShortcutOverlay)          // H2: no stuck cheat sheet on the login screen
+        #expect(store.selectedRowIndex == nil)
+        #expect(store.syncError == nil)
+        #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == nil)   // M5: account-scoped cursor
+    }
+
+    @Test func failedServerRemovalRollsBackInsteadOfLosingMail() async throws {
+        // H3: an optimistic archive whose server call fails must restore the
+        // row — not leave it invisible until a manual full sync.
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.store.rollback.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            StubURLProtocol.route { _ in (503, Data("backend down".utf8)) }
+
+            let manager = TokenManager(store: InMemoryTokenStore(), credentialsProvider: {
+                try GmailCredentials(plistData: try! PropertyListSerialization.data(
+                    fromPropertyList: ["ClientID": "test-client.apps.googleusercontent.com"],
+                    format: .xml, options: 0
+                ))
+            }, session: URLSession(configuration: StubURLProtocol.config))
+            manager.adopt(TokenSet(
+                accessToken: "t",
+                refreshToken: "r",
+                expiresAt: Date().addingTimeInterval(3600),
+                scope: GmailCredentials.scope
+            ))
+            let client = GmailClient(tokenManager: manager, session: URLSession(configuration: StubURLProtocol.config))
+            let cache = try EmailCacheStore(inMemory: true)
+            try cache.upsert(email: Fixtures.email(id: 1), gmailId: "g1", threadId: "t")
+
+            let store = WinnowStore(learning: LearningModel(defaults: defaults), defaults: defaults)
+            store.injectLiveBackendForTesting(.init(client: client, sync: GmailSyncEngine(
+                client: client,
+                cache: cache,
+                defaults: defaults
+            ), cache: cache, tokens: manager))
+            store.inbox = [Fixtures.email(id: 1)]
+
+            store.archiveEmail(1)
+
+            // The removal was optimistic: gone now, back once the failure lands.
+            #expect(store.inbox.isEmpty)
+            await waitFor("the rollback to restore the row") { !store.inbox.isEmpty }
+
+            #expect(store.inbox.map(\.id) == [1])
+            #expect(cache.count == 1)
+            #expect(store.syncError != nil)
+        }
     }
 
     @Test func authStatePersistsAcrossStoresInTheSameDomain() async {
