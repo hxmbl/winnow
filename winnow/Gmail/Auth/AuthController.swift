@@ -38,6 +38,8 @@ final class AuthController {
     /// are stored in the keychain-backed manager.
     func signIn() async throws {
         let credentials = try GmailCredentials.load()
+        print("🔍 Loaded clientID: \(credentials.clientID)")
+        print("🔍 Has clientSecret: \(credentials.clientSecret != nil)")
         let pkce = PKCE()
         let state = PKCE.base64url({
             var bytes = [UInt8](repeating: 0, count: 16)

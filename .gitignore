@@ -25,3 +25,6 @@ Pods/
 
 # Gmail OAuth credentials — never commit real values
 winnow/GmailCredentials.plist
+
+# Working notes — never commit
+ROADMAP.md

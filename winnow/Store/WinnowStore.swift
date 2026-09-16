@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 /// Holds all Winnow UI state. The backend (Gmail OAuth) is intentionally not
 /// implemented — the app runs on mock data, like the pre-login demo it mirrors.
@@ -32,6 +33,8 @@ final class WinnowStore {
     // MARK: - Editable state
 
     static let authDefaultsKey = "winnow.authed.v1"
+    static let blockedSendersKey = "winnow.blockedSenders.v1"
+    static let notificationsEnabledKey = "winnow.notificationsEnabled.v1"
 
     var authed = false
 
@@ -59,6 +62,42 @@ final class WinnowStore {
 
     var inbox: [WinnowEmail] = mockInbox {
         didSet { rebuildAllDerived(previousInbox: oldValue) }
+    }
+
+    /// Archived mail (All Mail minus Inbox/Trash in live mode; empty in demo).
+    /// Not classified — triage happens in the inbox; these are kept for
+    /// browsing and un-archiving.
+    var archived: [WinnowEmail] = [] {
+        didSet { rebuildFilteredRows() }
+    }
+
+    /// Hard-deleted or trashed mail shown in the Trash mailbox.
+    var trashed: [WinnowEmail] = [] {
+        didSet { rebuildFilteredRows() }
+    }
+
+    /// The mailbox currently on screen. Owned here (not in the view) so
+    /// keybinds and actions can act on whatever list the user is looking at.
+    var mailbox: Mailbox = .inbox {
+        didSet {
+            // A mailbox switch resets the reader card and keyboard cursor —
+            // selection is per-list, never carried across views.
+            selectedEmailID = nil
+            selectedRowIndex = nil
+            rebuildFilteredRows()
+        }
+    }
+
+    /// Senders the user has blocked in Settings; their mail is hidden from
+    /// every mailbox list (still present in the cache until the next sync
+    /// drops it — blocking is a view concern, unblocking must bring it back).
+    private(set) var blockedSenders: [String] {
+        didSet { defaults.set(blockedSenders, forKey: Self.blockedSendersKey) }
+    }
+
+    /// User opt-in for new-email notifications (Settings).
+    var notificationsEnabled = false {
+        didSet { defaults.set(notificationsEnabled, forKey: Self.notificationsEnabledKey) }
     }
 
     var trash: [TrashRow] = mockTrash {
@@ -170,11 +209,19 @@ final class WinnowStore {
 
     // MARK: - Lifecycle & rebuilds
 
+    /// True when this process hosts the unit-test bundle (the host app launches
+    /// with the user's real defaults, whose persisted `authed` + Keychain
+    /// tokens would kick off a live sync at startup and stall the runner).
+    @ObservationIgnored nonisolated static let isRunningUnderTestHost =
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     /// Injectable so tests can run against isolated `UserDefaults` domains.
     init(learning: LearningModel, defaults: UserDefaults = .standard) {
         self.learning = learning
         self.defaults = defaults
         self.authed = defaults.bool(forKey: Self.authDefaultsKey)
+        self.blockedSenders = defaults.stringArray(forKey: Self.blockedSendersKey) ?? []
+        self.notificationsEnabled = defaults.bool(forKey: Self.notificationsEnabledKey)
         learning.onWeightsChanged = { [weak self] in self?.scheduleWeightsSweep() }
         rebuildAllDerived()
         terminateObserver = NotificationCenter.default.addObserver(
@@ -186,7 +233,7 @@ final class WinnowStore {
                 self?.learning.flushPendingPersist()
             }
         }
-        if authed {
+        if authed, !Self.isRunningUnderTestHost {
             Task { await restoreLiveSessionIfPossible() }
         }
     }
@@ -371,8 +418,9 @@ final class WinnowStore {
     }
 
     private func rebuildFilteredRows() {
+        let visible = emails(for: mailbox)
         let visibleIDs = filterAndSortInbox(
-            inbox: inbox,
+            inbox: visible,
             filters: activeFilters,
             searchQuery: searchQuery,
             sortBy: sortBy,
@@ -383,12 +431,9 @@ final class WinnowStore {
         var rows: [EmailRowModel] = []
         rows.reserveCapacity(visibleIDs.count)
         for email in visibleIDs {
-            guard let sig = emailSignals[email.id] else {
-                // Pending rows during a background classify window are
-                // expected; outside that window this is a cache bug.
-                assert(isClassifyingInBackground, "No cached signals for email \(email.id)")
-                continue
-            }
+            // Archived/trashed mail is never classified (triage lives in the
+            // inbox), so those rows render with a neutral signal.
+            let sig = emailSignals[email.id] ?? .neutral
             rows.append(EmailRowModel(email: email, sig: sig))
         }
         filteredEmails = rows
@@ -400,11 +445,12 @@ final class WinnowStore {
         } else if let index = selectedRowIndex {
             selectedRowIndex = min(max(0, index), filteredEmails.count - 1)
         }
-        // During a background classification pass, rows without signals yet
-        // are "pending", not a bug — they fill in as the pass completes.
-        if !isClassifyingInBackground {
+        // During a background classification pass, inbox rows without signals
+        // yet are "pending", not a bug — they fill in as the pass completes.
+        // Archived/trashed rows intentionally render with neutral signals.
+        if !isClassifyingInBackground, mailbox == .inbox {
             let missing = filteredEmails.contains { emailSignals[$0.email.id] == nil }
-            assert(!missing, "Rows without cached signals outside a background classify window")
+            assert(!missing, "Inbox rows without cached signals outside a background classify window")
         }
     }
 
@@ -453,9 +499,26 @@ final class WinnowStore {
         case .toggleStar:
             if let id = focusedEmailID { toggleStar(id) }
         case .archive:
-            if let id = focusedEmailID { archiveEmail(id) }
+            if let id = focusedEmailID {
+                // Context-sensitive: `e` archives from the inbox, restores
+                // from the archive, and un-trashes from the trash mailbox.
+                switch mailbox {
+                case .inbox: archiveEmail(id)
+                case .archive: unarchiveEmail(id)
+                case .trash: restoreEmail(id)
+                }
+            }
         case .trash:
-            if let id = focusedEmailID { trashEmail(id) }
+            if let id = focusedEmailID {
+                switch mailbox {
+                case .trash: deleteEmail(id)   // permanent delete in Trash
+                default: trashEmail(id)
+                }
+            }
+        case .restore:
+            if let id = focusedEmailID { restoreEmail(id) }
+        case .toggleRead:
+            if let id = focusedEmailID { toggleRead(id) }
         case .focusReply:
             guard selectedEmail != nil else { return }
             composerFocusToken += 1
@@ -469,84 +532,232 @@ final class WinnowStore {
         }
     }
 
-    /// Archive: live mode removes the INBOX label server-side; demo mode just
-    /// drops the row. While reading, this is triage: the next email opens
-    /// automatically so `e j j e` never touches the mouse.
+    // MARK: - Mailbox plumbing
+
+    /// The email list backing a mailbox view, with blocked senders removed.
+    /// (Unblocking restores the row without a sync — blocking is purely a
+    /// view concern, the cache keeps the message.)
+    func emails(for mailbox: Mailbox) -> [WinnowEmail] {
+        let base: [WinnowEmail]
+        switch mailbox {
+        case .inbox: base = inbox
+        case .archive: base = archived
+        case .trash: base = trashed
+        }
+        return base.filter { !isSenderBlocked($0.sender) }
+    }
+
+    private func email(_ id: Int, in mailbox: Mailbox) -> WinnowEmail? {
+        switch mailbox {
+        case .inbox: return inbox.first { $0.id == id }
+        case .archive: return archived.first { $0.id == id }
+        case .trash: return trashed.first { $0.id == id }
+        }
+    }
+
+    private func setEmail(_ email: WinnowEmail, in mailbox: Mailbox) {
+        switch mailbox {
+        case .inbox:
+            guard let i = inbox.firstIndex(where: { $0.id == email.id }) else { return }
+            inbox[i] = email
+        case .archive:
+            guard let i = archived.firstIndex(where: { $0.id == email.id }) else { return }
+            archived[i] = email
+        case .trash:
+            guard let i = trashed.firstIndex(where: { $0.id == email.id }) else { return }
+            trashed[i] = email
+        }
+    }
+
+    @discardableResult
+    private func removeEmail(_ id: Int, from mailbox: Mailbox) -> WinnowEmail? {
+        switch mailbox {
+        case .inbox:
+            guard let i = inbox.firstIndex(where: { $0.id == id }) else { return nil }
+            return inbox.remove(at: i)
+        case .archive:
+            guard let i = archived.firstIndex(where: { $0.id == id }) else { return nil }
+            return archived.remove(at: i)
+        case .trash:
+            guard let i = trashed.firstIndex(where: { $0.id == id }) else { return nil }
+            return trashed.remove(at: i)
+        }
+    }
+
+    private func insertEmail(_ email: WinnowEmail, into mailbox: Mailbox) {
+        switch mailbox {
+        case .inbox: inbox.insert(email, at: 0)
+        case .archive: archived.insert(email, at: 0)
+        case .trash: trashed.insert(email, at: 0)
+        }
+    }
+
+    /// Which bucket a numeric id currently lives in, if any.
+    private func containingMailbox(of id: Int) -> Mailbox? {
+        if inbox.contains(where: { $0.id == id }) { return .inbox }
+        if archived.contains(where: { $0.id == id }) { return .archive }
+        if trashed.contains(where: { $0.id == id }) { return .trash }
+        return nil
+    }
+
+    // MARK: - Mailbox moves
+
+    /// Archive: live mode removes the INBOX label server-side. Demo mode just
+    /// relocates the email into the archive list. While reading, this is
+    /// triage: the next email opens automatically so `e j j e` never touches
+    /// the mouse.
     func archiveEmail(_ emailID: Int) {
-        applyMailboxRemoval(emailID) { client, gmailID in
+        relocate(emailID, to: .archive) { client, gmailID in
             try await client.modify(messageID: gmailID, addLabelIds: nil, removeLabelIds: [GmailLabel.inbox])
         }
     }
 
-    /// Trash: live mode hits the trash endpoint and records the discard in the
+    /// Brings an archived email back to the inbox (live: adds the INBOX label).
+    func unarchiveEmail(_ emailID: Int) {
+        relocate(emailID, to: .inbox) { client, gmailID in
+            try await client.modify(messageID: gmailID, addLabelIds: [GmailLabel.inbox], removeLabelIds: nil)
+        }
+    }
+
+    /// Trash: live mode hits the trash endpoint and records the sender in the
     /// local trash fixture (feeding trash-bias learning); demo mode local-only.
     func trashEmail(_ emailID: Int) {
-        if let sender = inbox.first(where: { $0.id == emailID })?.sender {
-            trash.append(TrashRow(sender: sender))
-        }
-        applyMailboxRemoval(emailID) { client, gmailID in
+        relocate(emailID, to: .trash) { client, gmailID in
             try await client.trash(messageID: gmailID)
         }
     }
 
-    /// Shared removal mechanics: drop from the cache + inbox optimistically,
-    /// then advance the cursor / reader card like a triage client should.
-    /// **Rollback**: if the server call fails, the email is restored locally —
-    /// an optimistic removal must never become silently missing mail.
-    private func applyMailboxRemoval(
-        _ emailID: Int,
-        serverCall: @escaping (GmailClient, String) async throws -> Void
-    ) {
-        guard let index = inbox.firstIndex(where: { $0.id == emailID }) else { return }
-        let email = inbox[index]
+    /// Restores a trashed message to the inbox (live: drops TRASH, adds INBOX).
+    func restoreEmail(_ emailID: Int) {
+        relocate(emailID, to: .inbox) { client, gmailID in
+            try await client.modify(messageID: gmailID, addLabelIds: [GmailLabel.inbox], removeLabelIds: [GmailLabel.trash])
+        }
+    }
+
+    /// Permanently removes a message from Gmail. Irreversible — only reachable
+    /// from the Trash mailbox (and rolled back if the server round-trip fails).
+    func deleteEmail(_ emailID: Int) {
+        guard let email = removeEmail(emailID, from: .trash) else { return }
         let wasOpen = selectedEmailID == emailID
         let gmailID = liveBackend?.cache.gmailID(for: emailID)
-        if let backend = liveBackend {
-            try? backend.cache.remove(gmailIds: [gmailID].compactMap { $0 })
+        if let backend = liveBackend, let gmailID {
+            try? backend.cache.remove(gmailIds: [gmailID])
+            let client = backend.client
+            let cache = backend.cache
+            Task { [weak self] in
+                do {
+                    try await client.deletePermanent(messageID: gmailID)
+                } catch {
+                    self?.rollbackDelete(email, gmailID: gmailID, cache: cache, wasOpen: wasOpen, error: error)
+                }
+            }
         }
+        applyPostMoveCursor(removedID: emailID, wasOpen: wasOpen)
+    }
 
-        inbox.remove(at: index)
+    /// A permanent delete that hit the network and failed — the message is
+    /// gone from every bucket; put it back in Trash and in the cache.
+    private func rollbackDelete(_ email: WinnowEmail, gmailID: String, cache: EmailCacheStore, wasOpen: Bool, error: Error) {
+        syncError = Self.rawDescription(of: error)
+        guard containingMailbox(of: email.id) == nil else { return }
+        let restored = email
+        insertEmail(restored, into: .trash)
+        try? cache.upsert(
+            email: restored,
+            gmailId: gmailID,
+            threadId: cache.threadID(for: email.id) ?? "",
+            mailbox: .trash
+        )
+        if wasOpen {
+            openEmail(email.id)
+        } else if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
+            selectedRowIndex = row
+        }
+    }
+
+    /// Shared move mechanics: relocate a message across mailbox buckets
+    /// optimistically (cache bucket + view list), then reconcile with the
+    /// server in the background.
+    /// **Rollback**: failed server calls restore the message locally — an
+    /// optimistic move must never become silently missing mail.
+    private func relocate(
+        _ emailID: Int,
+        to destination: Mailbox,
+        serverCall: @escaping (GmailClient, String) async throws -> Void
+    ) {
+        guard let source = containingMailbox(of: emailID), source != destination else { return }
+        var email = removeEmail(emailID, from: source)!
+        let wasOpen = selectedEmailID == emailID
+        let gmailID = liveBackend?.cache.gmailID(for: emailID)
+
+        // Trash-bias learning on mail that leaves the triage pipeline.
+        if destination == .trash { trash.append(TrashRow(sender: email.sender)) }
+
+        // Optimistic local state: moved mail is treated as handled/read.
+        email.unread = false
+        insertEmail(email, into: destination)
+        if let backend = liveBackend {
+            try? backend.cache.setMailbox(numericId: email.id, mailbox: destination.emailMailbox)
+        }
 
         if let backend = liveBackend, let gmailID {
             let client = backend.client
+            let cache = backend.cache
             Task { [weak self] in
                 do {
                     try await serverCall(client, gmailID)
                 } catch {
-                    self?.rollbackRemoval(email, gmailID: gmailID, originalIndex: index, wasOpen: wasOpen, error: error)
+                    self?.rollbackRelocation(
+                        email, gmailID: gmailID, cache: cache,
+                        destination: destination, backTo: source,
+                        wasOpen: wasOpen, error: error
+                    )
                 }
             }
         }
 
-        applyPostRemovalCursor(removedID: emailID, originalIndex: index, wasOpen: wasOpen)
+        applyPostMoveCursor(removedID: emailID, wasOpen: wasOpen)
     }
 
-    /// Puts a failed-removal email back: same list position (approximately, if
-    /// the list moved), cache entry, cursor, and open card.
-    private func rollbackRemoval(_ email: WinnowEmail, gmailID: String, originalIndex: Int, wasOpen: Bool, error: Error) {
+    /// Puts a failed server move back where it started: the email currently
+    /// sits in `destination` (the optimistic home) and must return to `source`.
+    private func rollbackRelocation(
+        _ email: WinnowEmail,
+        gmailID: String,
+        cache: EmailCacheStore,
+        destination: Mailbox,
+        backTo source: Mailbox,
+        wasOpen: Bool,
+        error: Error
+    ) {
         syncError = Self.rawDescription(of: error)
-        guard !inbox.contains(where: { $0.id == email.id }) else { return }
-        let insertIndex = min(originalIndex, inbox.count)
-        inbox.insert(email, at: insertIndex)
-        if let backend = liveBackend {
-            try? backend.cache.upsert(email: email, gmailId: gmailID, threadId: backend.cache.threadID(for: email.id) ?? "")
-        }
-        if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
-            selectedRowIndex = row
-        }
+        guard containingMailbox(of: email.id) == destination else { return }
+        removeEmail(email.id, from: destination)
+        var restored = email
+        restored.unread = true
+        insertEmail(restored, into: source)
+        try? cache.upsert(
+            email: restored,
+            gmailId: gmailID,
+            threadId: cache.threadID(for: email.id) ?? "",
+            mailbox: source.emailMailbox
+        )
         if wasOpen {
             openEmail(email.id)
+        } else if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
+            selectedRowIndex = row
         }
     }
 
-    /// Cursor/card bookkeeping after a removal: stay at the same position —
-    /// which now points at the next email — and advance an open card to it.
-    private func applyPostRemovalCursor(removedID: Int, originalIndex: Int, wasOpen: Bool) {
+    /// Cursor/card bookkeeping after a move or delete: stay at the same
+    /// position — which now points at the next email — and advance an open
+    /// card to it.
+    private func applyPostMoveCursor(removedID: Int, wasOpen: Bool) {
         if filteredEmails.isEmpty {
             selectedRowIndex = nil
             if wasOpen { dismissEmail() }
         } else {
-            let next = min(max(0, selectedRowIndex ?? originalIndex), filteredEmails.count - 1)
+            let next = min(max(0, selectedRowIndex ?? 0), filteredEmails.count - 1)
             selectedRowIndex = next
             if wasOpen {
                 openEmail(filteredEmails[next].email.id)
@@ -554,13 +765,66 @@ final class WinnowStore {
         }
     }
 
+    // MARK: - Read state
+
+    func markRead(_ emailID: Int) { setRead(emailID, unread: false) }
+    func markUnread(_ emailID: Int) { setRead(emailID, unread: true) }
+
+    /// Flip read/unread. `m` in the keybinds.
+    func toggleRead(_ emailID: Int) {
+        let current = email(emailID, in: containingMailbox(of: emailID) ?? mailbox)
+        setRead(emailID, unread: !(current?.unread ?? false))
+    }
+
+    /// Read state is optimistic-live: the UNREAD label flips in the cache and
+    /// the list instantly, the server round-trip happens in the background.
+    private func setRead(_ emailID: Int, unread: Bool) {
+        guard let mailbox = containingMailbox(of: emailID), var email = email(emailID, in: mailbox), email.unread != unread else { return }
+        email.unread = unread
+        setEmail(email, in: mailbox)
+        if let backend = liveBackend, let gmailID = backend.cache.gmailID(for: emailID) {
+            try? backend.cache.setUnread(numericId: emailID, unread: unread)
+            let client = backend.client
+            Task { [weak self] in
+                do {
+                    try await client.modify(
+                        messageID: gmailID,
+                        addLabelIds: unread ? [GmailLabel.unread] : nil,
+                        removeLabelIds: unread ? nil : [GmailLabel.unread]
+                    )
+                } catch {
+                    self?.syncError = Self.rawDescription(of: error)
+                }
+            }
+        }
+    }
+
+    // MARK: - Blocked senders (Settings)
+
+    func isSenderBlocked(_ sender: String) -> Bool {
+        blockedSenders.contains(sender)
+    }
+
+    /// Blocks a sender: their mail hides from every mailbox. Unblock restores.
+    func blockSender(_ sender: String) {
+        guard !isSenderBlocked(sender) else { return }
+        blockedSenders.append(sender)
+        rebuildFilteredRows()
+    }
+
+    func unblockSender(_ sender: String) {
+        guard isSenderBlocked(sender) else { return }
+        blockedSenders.removeAll { $0 == sender }
+        rebuildFilteredRows()
+    }
+
     // MARK: - Reader-card selection
 
-    /// The selected thread resolved against the full inbox, or nil when the id
-    /// no longer exists at all (e.g. after sign-out).
+    /// The selected thread resolved against the **current mailbox**, or nil
+    /// when the id no longer exists there (e.g. after a move or sign-out).
     var selectedEmail: WinnowEmail? {
         guard let id = selectedEmailID else { return nil }
-        return inbox.first(where: { $0.id == id })
+        return emails(for: mailbox).first { $0.id == id }
     }
 
     func openEmail(_ id: Int) {
@@ -568,6 +832,12 @@ final class WinnowStore {
         // Clicking a row moves the keyboard cursor with it.
         if let index = filteredEmails.firstIndex(where: { $0.email.id == id }) {
             selectedRowIndex = index
+        }
+        // Opening a message marks it read — triage that surfaces new mail
+        // straight into the read (and unread-dot-free) pipeline.
+        if let email = emails(for: mailbox).first(where: { $0.id == id }),
+           email.unread {
+            markRead(id)
         }
     }
 
@@ -596,25 +866,27 @@ final class WinnowStore {
 
     // MARK: - Cheap derived values
 
-    /// Title for the list column, derived from the active filters.
+    /// Title for the list column: the mailbox name, or the active filter bucket
+    /// when one is applied inside the inbox.
     var listTitle: String {
-        guard !activeFilters.isEmpty else { return "Inbox" }
-
-        let builtinLabels = activeFilters.compactMap { filter in
-            if case .builtin(let builtin) = filter {
-                builtin.label
-            } else {
-                nil
+        guard mailbox != .inbox else {
+            guard !activeFilters.isEmpty else { return "Inbox" }
+            let builtinLabels = activeFilters.compactMap { filter in
+                if case .builtin(let builtin) = filter {
+                    builtin.label
+                } else {
+                    nil
+                }
             }
-        }
-
-        if builtinLabels.isEmpty {
-            if case .sender(let sender) = activeFilters[0] {
-                return "From \(sender)"
+            if builtinLabels.isEmpty {
+                if case .sender(let sender) = activeFilters[0] {
+                    return "From \(sender)"
+                }
             }
+            // A lone built-in bucket shows its name; any combination shows "Filtered".
+            return builtinLabels.count == 1 ? builtinLabels[0] : "Filtered"
         }
-        // A lone built-in bucket shows its name; any combination shows "Filtered".
-        return builtinLabels.count == 1 ? builtinLabels[0] : "Filtered"
+        return mailbox.label
     }
 
     // MARK: - Actions
@@ -644,12 +916,13 @@ final class WinnowStore {
     /// to the server in the background. A failed round-trip is recorded in
     /// `syncError` but the local star stands (next sync reconciles).
     func toggleStar(_ emailID: Int) {
-        guard let index = inbox.firstIndex(where: { $0.id == emailID }) else { return }
-        let nowStarred = !inbox[index].starred
+        guard let mailbox = containingMailbox(of: emailID), var now = email(emailID, in: mailbox) else { return }
+        let nowStarred = !now.starred
         if let sig = emailSignals[emailID] {
-            learning.record(action: nowStarred ? .starred : .unstarred, email: inbox[index], sig: sig)
+            learning.record(action: nowStarred ? .starred : .unstarred, email: now, sig: sig)
         }
-        inbox[index].starred = nowStarred
+        now.starred = nowStarred
+        setEmail(now, in: mailbox)
 
         if let backend = liveBackend, let gmailID = backend.cache.gmailID(for: emailID) {
             try? backend.cache.setStarred(numericId: emailID, starred: nowStarred)
@@ -779,13 +1052,13 @@ final class WinnowStore {
         }
         do {
             let backend = try await makeLiveBackend(interactive: true)
-            let emails = try await backend.sync.fullSync()
+            let snapshot = try await backend.sync.fullSnapshot()
             // A cancelled wait must not adopt the session anyway — the user
             // pressed Cancel; any late-completing browser flow stays dormant
             // in the Keychain for the next launch to restore.
             guard !Task.isCancelled else { return }
             liveBackend = backend
-            inbox = emails
+            adopt(snapshot)
             authed = true
             defaults.set(true, forKey: Self.authDefaultsKey)
             if backend.sync.lastSyncFailureCount > 0 {
@@ -804,12 +1077,12 @@ final class WinnowStore {
         guard liveBackend == nil, isLiveModeAvailable() else { return }
         do {
             let backend = try await makeLiveBackend(interactive: false)
-            let emails = try await backend.sync.incrementalSync()
+            let snapshot = try await backend.sync.incrementalSnapshot()
             // M9: the world may have moved on while we awaited the network —
             // a fast sign-out (or a manual sign-in) must win over this task.
             guard authed, liveBackend == nil else { return }
             liveBackend = backend
-            inbox = emails
+            adopt(snapshot)
             if backend.sync.lastSyncFailureCount > 0 {
                 syncError = Self.syncFailureSummary(backend.sync.lastSyncFailureCount)
             }
@@ -881,6 +1154,10 @@ final class WinnowStore {
         // different account) must not inherit it.
         defaults.removeObject(forKey: GmailSyncEngine.historyIDKey)
         inbox = mockInbox
+        archived = []
+        trashed = []
+        blockedSenders = []
+        mailbox = .inbox
         trash = mockTrash
         activeFilters = []
         searchQuery = ""
@@ -902,10 +1179,15 @@ final class WinnowStore {
             syncing = true
             defer { syncing = false }
             do {
-                inbox = try await backend.sync.incrementalSync()
+                let snapshot = try await backend.sync.incrementalSnapshot()
+                let previousUnread = Set(unreadObserverKeys(in: inbox))
+                adopt(snapshot)
                 syncError = nil
                 if backend.sync.lastSyncFailureCount > 0 {
                     syncError = Self.syncFailureSummary(backend.sync.lastSyncFailureCount)
+                }
+                if notificationsEnabled {
+                    notifyForNewMail(previousUnread: previousUnread)
                 }
             } catch {
                 syncError = Self.rawDescription(of: error)
@@ -915,5 +1197,37 @@ final class WinnowStore {
         loading = true
         try? await Task.sleep(nanoseconds: 500_000_000)
         loading = false
+    }
+
+    /// Replaces the three mailbox lists with a fresh server snapshot.
+    private func adopt(_ snapshot: GmailMailboxSnapshot) {
+        inbox = snapshot.inbox
+        archived = snapshot.archive
+        trashed = snapshot.trash
+    }
+
+    /// Stable fingerprint of the unread mail the user has already seen.
+    private func unreadObserverKeys(in emails: [WinnowEmail]) -> [String] {
+        emails.filter { $0.unread }.map { "\($0.sender)|\($0.subject)" }
+    }
+
+    /// Surfaces previously-unseen unread mail as a system notification. Fires
+    /// only on incremental refreshes — the initial sign-in sync must not bury
+    /// the user under its baseline, that would be noise, not triage.
+    private func notifyForNewMail(previousUnread: Set<String>) {
+        let fresh = inbox.filter { email in
+            email.unread && !previousUnread.contains("\(email.sender)|\(email.subject)")
+        }
+        guard !fresh.isEmpty else { return }
+        let content = UNMutableNotificationContent()
+        if fresh.count == 1, let only = fresh.first {
+            content.title = only.displayName
+            content.body = only.subject
+        } else {
+            content.title = "\(fresh.count) new messages"
+            content.body = fresh.prefix(3).map(\.displayName).joined(separator: ", ")
+        }
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 }

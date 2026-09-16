@@ -13,12 +13,18 @@ struct EmailRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            // Unread dot: a full-diameter accent dot, faded to near-invisible
+            // once read — triage wants the eye to find what's new.
+            Circle()
+                .fill(email.unread ? Color.accentColor : Color.clear)
+                .frame(width: 7, height: 7)
+                .padding(.top, 15)
             AvatarView(sender: email.sender, size: 36, font: .subheadline)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(email.displayName)
-                            .font(.headline)
+                            .font(titleFont)
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                         Text(email.displayAddress)
@@ -42,15 +48,19 @@ struct EmailRow: View {
                     }
                 }
                 Text(email.subject)
-                    .font(.subheadline.weight(.semibold))
+                    .font(email.unread ? .subheadline.weight(.semibold) : .subheadline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(email.body)
-                    .font(.subheadline)
+                    .font(email.unread ? .footnote.weight(.medium) : .subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private var titleFont: Font {
+        email.unread ? .headline : .body.weight(.semibold)
     }
 }

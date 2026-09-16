@@ -66,11 +66,12 @@ final class TokenManager {
         try? store.save(tokens)
     }
 
-    /// Forgets everything: Keychain first, then memory.
+    /// Forgets everything: Keychain first, then memory. An in-flight refresh
+    /// is left to finish — the generation guard discards its result, so a
+    /// stale refresh can never resurrect a cleared session.
     func clear() {
         generation += 1
         cached = nil
-        inflightRefresh?.cancel()
         inflightRefresh = nil
         try? store.clear()
     }

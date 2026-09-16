@@ -9,22 +9,27 @@ import Foundation
 ///   (`StoredEmail.gmailId`) and *always* used for API round-trips — the hash
 ///   is a UI key, never an API key. 64-bit space ⇒ collisions are vanishingly
 ///   unlikely at inbox scale, and the cache is keyed by the string id anyway.
-/// - **Body**: prefers `text/plain`; falls back to `text/html` run through a
-///   conservative tag-stripper (no HTML rendering anywhere in Winnow, so the
-///   strip is lossy by design — markup must never reach the classifier).
+/// - **Body**: prefers the *longest* `text/plain` leaf (some senders put the
+///   real content in a later part and an empty stub first); falls back to
+///   `text/html` run through a conservative tag-stripper (no HTML rendering
+///   anywhere in Winnow, so the strip is lossy by design — markup must never
+///   reach the classifier). The raw HTML is retained as `bodyHTML` so the
+///   reader could choose to surface it without re-fetching.
 /// - **Sender**: `From:` header is parsed into display name + address; the
 ///   *address* becomes `sender` (what the profile/classifier key on), matching
 ///   how the mock data's real-address entries behave.
-/// - **Flags**: `STARRED` label → `starred`. Gmail's `CATEGORY_PROMOTIONS` is
-///   honored as `type: "promotional"` because Gmail's own classifier is a
-///   legitimate signal; all other labels are ignored here and left to the
-///   rule engine.
-/// - Trashed messages are never mapped — the sync engine filters them before
-///   this runs, so the classifier never sees deleted mail.
+/// - **Flags**: `STARRED` label → `starred`; `UNREAD` label → `unread`.
+///   Gmail's `CATEGORY_PROMOTIONS` is honored as `type: "promotional"` because
+///   Gmail's own classifier is a legitimate signal; all other labels are
+///   ignored here and left to the rule engine.
+/// - **Mailbox**: derived from labels via `mailbox(of:)` — TRASH dominates,
+///   then INBOX, else archived. Trash is mapped (the Trash mailbox needs it);
+///   the *store* decides which buckets each mailbox view reads.
+/// - **Attachments**: any MIME leaf with an `attachmentId` (or an inline
+///   part with a filename) becomes metadata. Payload bytes are fetched
+///   lazily by the reader via `GmailClient.attachment(...)`.
 enum GmailMessageMapper {
     nonisolated static func winnowEmail(from message: GmailMessage) -> WinnowEmail? {
-        guard !message.hasLabel(GmailLabel.trash) else { return nil }
-
         let headers = Dictionary(
             (message.payload?.headers ?? []).map { ($0.name.lowercased(), $0.value) },
             uniquingKeysWith: { _, last in last }
@@ -44,8 +49,18 @@ enum GmailMessageMapper {
             body: body,
             type: message.hasLabel(GmailLabel.categoryPromotions) ? "promotional" : "",
             starred: message.hasLabel(GmailLabel.starred),
-            urgent: false
+            urgent: false,
+            unread: message.hasLabel(GmailLabel.unread),
+            bodyHTML: htmlBody(of: message),
+            attachments: attachments(of: message)
         )
+    }
+
+    /// The mailbox a message lives in, per Gmail's label semantics.
+    nonisolated static func mailbox(of message: GmailMessage) -> EmailMailbox {
+        if message.hasLabel(GmailLabel.trash) { return .trash }
+        if message.hasLabel(GmailLabel.inbox) { return .inbox }
+        return .archive
     }
 
     /// Stable 64-bit FNV-1a over the Gmail id, truncated to `Int`.
@@ -103,16 +118,19 @@ enum GmailMessageMapper {
         return Int(Date().timeIntervalSince1970 * 1000)
     }
 
-    /// Depth-first search of Gmail's MIME tree for the first `text/plain`
+    /// Depth-first search of Gmail's MIME tree for the **longest** `text/plain`
     /// leaf, else the first `text/html` leaf (stripped), else the snippet.
     nonisolated static func body(of message: GmailMessage, fallbackSnippet: String) -> String {
         var plain: String?
+        var plainLen = 0
         var html: String?
 
         func visit(_ part: GmailMessagePart?) {
             guard let part else { return }
-            if part.mimeType == "text/plain", plain == nil, let data = part.body?.data.flatMap(Base64URL.decode) {
-                plain = String(data: data, encoding: .utf8)
+            if part.mimeType == "text/plain", let data = part.body?.data.flatMap(Base64URL.decode),
+               let text = String(data: data, encoding: .utf8), text.count > plainLen {
+                plain = text
+                plainLen = text.count
             }
             if part.mimeType == "text/html", html == nil, let data = part.body?.data.flatMap(Base64URL.decode) {
                 html = String(data: data, encoding: .utf8)
@@ -124,6 +142,46 @@ enum GmailMessageMapper {
         if let plain, !plain.isEmpty { return plain }
         if let html, let stripped = stripHTML(html), !stripped.isEmpty { return stripped }
         return fallbackSnippet
+    }
+
+    /// The raw `text/html` body, if any. Stored for the reader to use without
+    /// re-fetching but never rendered as markup — the security model is
+    /// text-only.
+    nonisolated static func htmlBody(of message: GmailMessage) -> String? {
+        var result: String?
+        func visit(_ part: GmailMessagePart?) {
+            guard let part, result == nil else { return }
+            if part.mimeType == "text/html", let data = part.body?.data.flatMap(Base64URL.decode) {
+                result = String(data: data, encoding: .utf8)
+            }
+            part.parts?.forEach(visit)
+        }
+        visit(message.payload)
+        return result
+    }
+
+    /// Collects attachment metadata from the MIME tree. An attachment is any
+    /// leaf that carries an `attachmentId` or has a non-empty `filename` and
+    /// is not a text body part.
+    nonisolated static func attachments(of message: GmailMessage) -> [EmailAttachment] {
+        var result: [EmailAttachment] = []
+        func visit(_ part: GmailMessagePart?) {
+            guard let part else { return }
+            let isBody = part.mimeType == "text/plain" || part.mimeType == "text/html"
+            let hasAttachmentID = part.body?.attachmentId != nil
+            if !isBody || hasAttachmentID, let attId = part.body?.attachmentId {
+                result.append(EmailAttachment(
+                    id: attId,
+                    partId: part.partId ?? "",
+                    filename: part.filename ?? "attachment",
+                    mimeType: part.mimeType ?? "application/octet-stream",
+                    size: part.body?.size ?? 0
+                ))
+            }
+            part.parts?.forEach(visit)
+        }
+        visit(message.payload)
+        return result
     }
 
     /// Conservative HTML→text: drops `script`/`style` wholesale, removes all

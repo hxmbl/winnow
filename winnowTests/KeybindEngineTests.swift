@@ -107,12 +107,14 @@ struct KeybindEngineTests {
         #expect(KeybindEngine.command(forCharacter: "s", keyCode: 1, context: noTarget) == nil)
         #expect(KeybindEngine.command(forCharacter: "e", keyCode: 14, context: noTarget) == nil)
         #expect(KeybindEngine.command(forCharacter: "#", keyCode: 18, context: noTarget) == nil)
+        #expect(KeybindEngine.command(forCharacter: "m", keyCode: 46, context: noTarget) == nil)
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 51, context: noTarget) == nil)
 
         let withTarget = context(hasActionTarget: true)
         #expect(KeybindEngine.command(forCharacter: "s", keyCode: 1, context: withTarget) == .toggleStar)
         #expect(KeybindEngine.command(forCharacter: "e", keyCode: 14, context: withTarget) == .archive)
         #expect(KeybindEngine.command(forCharacter: "#", keyCode: 18, context: withTarget) == .trash)
+        #expect(KeybindEngine.command(forCharacter: "m", keyCode: 46, context: withTarget) == .toggleRead)
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 51, context: withTarget) == .trash)
     }
 
@@ -157,6 +159,7 @@ struct KeybindEngineTests {
             case "s": (character, keyCode, activeContext) = ("s", 1, listContext)
             case "e": (character, keyCode, activeContext) = ("e", 14, listContext)
             case "# / ⌫": (character, keyCode, activeContext) = ("#", 18, listContext)
+            case "m": (character, keyCode, activeContext) = ("m", 46, listContext)
             case "r": (character, keyCode, activeContext) = ("r", 15, readerContext)
             case "/": (character, keyCode, activeContext) = ("/", 44, listContext)
             case "1–9": (character, keyCode, activeContext) = ("1", 18, listContext)

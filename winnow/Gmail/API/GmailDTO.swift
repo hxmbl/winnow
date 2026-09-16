@@ -105,12 +105,19 @@ struct GmailLabelChangeMessage: Codable, Equatable {
     let labelIds: [String]?
 }
 
+/// `GET /users/me/messages/{id}/attachments/{attachmentId}`
+struct GmailAttachment: Codable, Equatable {
+    let size: Int?
+    let data: String?
+}
+
 /// Gmail's labels that Winnow consumes. Everything else is ignored — the
 /// mapping layer treats unknown labels as noise rather than failing.
 enum GmailLabel {
     nonisolated static let starred = "STARRED"
     nonisolated static let trash = "TRASH"
     nonisolated static let inbox = "INBOX"
+    nonisolated static let unread = "UNREAD"
     nonisolated static let categoryPromotions = "CATEGORY_PROMOTIONS"
 }
 

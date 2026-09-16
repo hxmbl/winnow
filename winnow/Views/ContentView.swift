@@ -4,7 +4,6 @@ import SwiftUI
 /// floating bottom filter rail with the fixed Inbox mailbox menu.
 struct ContentView: View {
     @Bindable var store: WinnowStore
-    @State private var selectedMailbox: Mailbox = .inbox
     @FocusState private var searchFocused: Bool
     @State private var keybinds: KeybindEngine?
 
@@ -157,8 +156,8 @@ struct ContentView: View {
         ZStack(alignment: .leading) {
             FilterRail(store: store)
 
-            // Fixed Inbox menu — does NOT scroll, sits visually over the rail
-            MailboxMenu(selection: $selectedMailbox)
+            // Fixed mailbox menu — does NOT scroll, sits visually over the rail
+            MailboxMenu(selection: $store.mailbox)
                 .padding(.leading, 12)
                 .background {
                     // subtle fade so rail appears to scroll underneath
@@ -211,20 +210,8 @@ struct ContentView: View {
 
     private var emailList: some View {
         Group {
-            if selectedMailbox != .inbox {
-                ContentUnavailableView(
-                    selectedMailbox == .archive ? "Archive is empty" : "Trash is empty",
-                    systemImage: selectedMailbox.icon,
-                    description: Text("Move and delete actions aren't wired up in this demo yet.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if store.filteredEmails.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    if store.inbox.isEmpty {
-                        Text("No emails. Lucky you.").font(.callout.weight(.medium)).foregroundStyle(.secondary)
-                        Text("Only when there's nothing there.").font(.caption).foregroundStyle(.tertiary).padding(.leading, 8)
-                    } else { ContentUnavailableView.search }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            if store.filteredEmails.isEmpty {
+                emptyState
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -249,6 +236,35 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Per-mailbox empty message. Archive and Trash are live Gmail views now —
+    /// they only say "empty" when there really is nothing there.
+    @ViewBuilder
+    private var emptyState: some View {
+        switch store.mailbox {
+        case .inbox:
+            VStack(alignment: .leading, spacing: 4) {
+                if store.inbox.isEmpty {
+                    Text("No emails. Lucky you.").font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                    Text("Only when there's nothing there.").font(.caption).foregroundStyle(.tertiary).padding(.leading, 8)
+                } else { ContentUnavailableView.search }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .archive:
+            ContentUnavailableView(
+                "Archive is empty",
+                systemImage: "archivebox",
+                description: Text("Archived messages appear here.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .trash:
+            ContentUnavailableView(
+                "Trash is empty",
+                systemImage: "trash",
+                description: Text("Trashed messages appear here until permanently deleted.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     /// One inbox row: the email plus its tappable star and smart-filter

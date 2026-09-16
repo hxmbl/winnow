@@ -13,6 +13,7 @@ struct EmailViewer: View {
     @State private var fontSize: ReplyFontSize = .medium
     @State private var notice: String?
     @State private var sending = false
+    @State private var downloadError: String?
     @FocusState private var replyFocused: Bool
 
     /// Cached classification from the store — recomputing it here would run the
@@ -34,11 +35,10 @@ struct EmailViewer: View {
                     if !sig.badgeFilters.isEmpty {
                         badges
                     }
-                    Text(email.subject)
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .padding(.bottom, 12)
+                    headerRow
+                    if !email.attachments.isEmpty {
+                        incomingAttachmentSection
+                    }
                     Text(email.body)
                         .font(.body)
                         .foregroundStyle(.primary)
@@ -87,13 +87,133 @@ struct EmailViewer: View {
                     .textSelection(.enabled)
             }
             Spacer()
-            Text(formatListTime(email.receivedAt))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .textSelection(.enabled)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(formatListTime(email.receivedAt))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .textSelection(.enabled)
+                if !store.isSenderBlocked(email.sender) {
+                    Button {
+                        store.blockSender(email.sender)
+                        store.dismissEmail()
+                    } label: {
+                        Label("Block sender", systemImage: "hand.raised")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Hide future mail from \(email.sender)")
+                }
+            }
         }
         .padding(.bottom, 20)
+    }
+
+    /// Subject plus the read/unread toggle. Opening a message marks it read;
+    /// this button lets the reader flip it back (or forward) manually.
+    private var headerRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(email.subject)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+            Spacer()
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { store.toggleRead(email.id) }
+            } label: {
+                Label(email.unread ? "Unread" : "Mark unread", systemImage: email.unread ? "envelope.badge.fill" : "envelope.open")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle read / unread (m)")
+        }
+        .padding(.bottom, 12)
+    }
+
+    // MARK: - Incoming attachments
+
+    /// Attachments that arrived with the message. Payloads are fetched from
+    /// Gmail on demand and saved via the system panel (sandbox: user-chosen
+    /// read-write scope).
+    private var incomingAttachmentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Attachments")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(email.attachments) { attachment in
+                        incomingAttachmentChip(attachment)
+                    }
+                }
+            }
+            if let downloadError {
+                Text(downloadError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.bottom, 16)
+    }
+
+    private func incomingAttachmentChip(_ attachment: EmailAttachment) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "paperclip")
+                .font(.caption2)
+                .foregroundStyle(Color.winnowSecondary)
+            Text(attachment.filename)
+                .font(.caption)
+                .lineLimit(1)
+                .textSelection(.enabled)
+            Button {
+                saveAttachment(attachment)
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.winnowSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("Save \(attachment.filename)")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.winnowCard, in: Capsule())
+        .overlay(Capsule().stroke(Color.winnowBorder, lineWidth: 1))
+    }
+
+    /// Fetches the (base64url) payload over Gmail and writes it to disk. The
+    /// base64 decode + write runs off the main actor so big binaries don't
+    /// stall the card, and the sandbox write happens under the NSSavePanel's
+    /// user-granted read-write scope.
+    private func saveAttachment(_ attachment: EmailAttachment) {
+        downloadError = nil
+        guard let backend = store.liveBackend,
+              let gmailID = backend.cache.gmailID(for: email.id) else {
+            downloadError = "Attachment downloads need a live Gmail session."
+            return
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = attachment.filename
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let client = backend.client
+        Task {
+            do {
+                let remote = try await client.attachment(messageID: gmailID, attachmentID: attachment.id)
+                guard let data = remote.data.flatMap(Base64URL.decode) else {
+                    downloadError = "Attachment payload was empty."
+                    return
+                }
+                try await Task.detached(priority: .userInitiated) { () throws in
+                    try data.write(to: url, options: .atomic)
+                }.value
+                flashNotice("Saved \(attachment.filename).", seconds: 2)
+            } catch {
+                downloadError = "Couldn't save \(attachment.filename): \(error.localizedDescription)"
+            }
+        }
     }
 
     private var badges: some View {

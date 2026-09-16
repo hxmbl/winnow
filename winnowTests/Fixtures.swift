@@ -18,7 +18,8 @@ enum Fixtures {
         body: String = "Want to grab lunch at noon?",
         type: String = "work",
         starred: Bool = false,
-        urgent: Bool = false
+        urgent: Bool = false,
+        unread: Bool = false
     ) -> WinnowEmail {
         WinnowEmail(
             id: id,
@@ -30,7 +31,8 @@ enum Fixtures {
             body: body,
             type: type,
             starred: starred,
-            urgent: urgent
+            urgent: urgent,
+            unread: unread
         )
     }
 

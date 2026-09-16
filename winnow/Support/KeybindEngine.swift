@@ -9,6 +9,8 @@ enum KeyCommand: Equatable {
     case toggleStar
     case archive
     case trash
+    case restore
+    case toggleRead
     case focusReply
     case focusSearch
     case toggleShortcutsOverlay
@@ -51,8 +53,9 @@ final class KeybindEngine {
         Binding(display: "o / ⏎", help: "Open highlighted message", command: .openSelected),
         Binding(display: "Esc", help: "Close message · dismiss overlay · blur field", command: .closeViewer),
         Binding(display: "s", help: "Star / unstar", command: .toggleStar),
-        Binding(display: "e", help: "Archive", command: .archive),
-        Binding(display: "# / ⌫", help: "Trash", command: .trash),
+        Binding(display: "e", help: "Archive ⇄ unarchive ⇄ restore", command: .archive),
+        Binding(display: "# / ⌫", help: "Trash · delete in Trash", command: .trash),
+        Binding(display: "m", help: "Mark read / unread", command: .toggleRead),
         Binding(display: "r", help: "Reply (focus composer)", command: .focusReply),
         Binding(display: "/", help: "Search", command: .focusSearch),
         Binding(display: "1–9", help: "Toggle filter pill", command: .toggleFilter(railIndex: 0)),
@@ -108,6 +111,7 @@ final class KeybindEngine {
         case "s": return context.hasActionTarget ? .toggleStar : nil
         case "e": return context.hasActionTarget ? .archive : nil
         case "#": return context.hasActionTarget ? .trash : nil
+        case "m": return context.hasActionTarget ? .toggleRead : nil
         case "r": return context.viewerOpen ? .focusReply : nil
         case "/": return .focusSearch
         case "?": return .toggleShortcutsOverlay

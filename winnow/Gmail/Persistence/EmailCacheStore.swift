@@ -24,8 +24,14 @@ final class StoredEmail {
     var body: String
     var type: String
     var starred: Bool
+    var unread: Bool
+    /// Which mailbox bucket this message belongs to (`EmailMailbox.rawValue`).
+    var mailbox: String
+    var bodyHTML: String?
+    /// JSON-encoded `[EmailAttachment]` — metadata only, payloads stay remote.
+    var attachmentsJSON: String?
 
-    init(gmailId: String, threadId: String, email: WinnowEmail) {
+    init(gmailId: String, threadId: String, email: WinnowEmail, mailbox: EmailMailbox) {
         self.gmailId = gmailId
         self.threadId = threadId
         self.numericId = email.id
@@ -37,6 +43,10 @@ final class StoredEmail {
         self.body = email.body
         self.type = email.type
         self.starred = email.starred
+        self.unread = email.unread
+        self.mailbox = mailbox.rawValue
+        self.bodyHTML = email.bodyHTML
+        self.attachmentsJSON = Self.encodeAttachments(email.attachments)
     }
 
     var winnowEmail: WinnowEmail {
@@ -50,8 +60,21 @@ final class StoredEmail {
             body: body,
             type: type,
             starred: starred,
-            urgent: false
+            urgent: false,
+            unread: unread,
+            bodyHTML: bodyHTML,
+            attachments: Self.decodeAttachments(attachmentsJSON)
         )
+    }
+
+    nonisolated static func encodeAttachments(_ list: [EmailAttachment]) -> String? {
+        guard !list.isEmpty else { return nil }
+        return (try? JSONEncoder().encode(list)).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    nonisolated static func decodeAttachments(_ json: String?) -> [EmailAttachment] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([EmailAttachment].self, from: data)) ?? []
     }
 }
 
@@ -71,13 +94,14 @@ final class EmailCacheStore {
         context.autosaveEnabled = false
     }
 
-    func upsert(email: WinnowEmail, gmailId: String, threadId: String) throws {
-        try upsertAll([(email: email, gmailId: gmailId, threadId: threadId)])
+    func upsert(email: WinnowEmail, gmailId: String, threadId: String, mailbox: EmailMailbox = .inbox) throws {
+        try upsertAll([(email: email, gmailId: gmailId, threadId: threadId, mailbox: mailbox)])
     }
 
     /// Batch upsert: one fetch, one save — a full sync does N/25 round-trips
-    /// instead of 2N.
-    func upsertAll(_ items: [(email: WinnowEmail, gmailId: String, threadId: String)]) throws {
+    /// instead of 2N. `mailbox` moves the message between buckets when it
+    /// changes (e.g. an archive arrives as a mailbox flip).
+    func upsertAll(_ items: [(email: WinnowEmail, gmailId: String, threadId: String, mailbox: EmailMailbox)]) throws {
         guard !items.isEmpty else { return }
         let ids = items.map(\.gmailId)
         let predicate = #Predicate<StoredEmail> { ids.contains($0.gmailId) }
@@ -95,18 +119,32 @@ final class EmailCacheStore {
                 stored.body = item.email.body
                 stored.type = item.email.type
                 stored.starred = item.email.starred
+                stored.unread = item.email.unread
+                stored.mailbox = item.mailbox.rawValue
+                stored.bodyHTML = item.email.bodyHTML
+                stored.attachmentsJSON = StoredEmail.encodeAttachments(item.email.attachments)
                 stored.numericId = item.email.id
             } else {
-                context.insert(StoredEmail(gmailId: item.gmailId, threadId: item.threadId, email: item.email))
+                context.insert(StoredEmail(gmailId: item.gmailId, threadId: item.threadId, email: item.email, mailbox: item.mailbox))
             }
         }
         try context.save()
     }
 
-    /// Cached inbox, newest first.
-    func all() throws -> [WinnowEmail] {
-        let descriptor = FetchDescriptor<StoredEmail>(sortBy: [SortDescriptor(\.receivedAt, order: .reverse)])
+    /// Cached mail for one mailbox, newest first.
+    func all(mailbox: EmailMailbox) throws -> [WinnowEmail] {
+        let mailboxRaw = mailbox.rawValue
+        let descriptor = FetchDescriptor<StoredEmail>(
+            predicate: #Predicate { $0.mailbox == mailboxRaw },
+            sortBy: [SortDescriptor(\.receivedAt, order: .reverse)]
+        )
         return try context.fetch(descriptor).map(\.winnowEmail)
+    }
+
+    /// Cached inbox, newest first (backwards-compatible convenience — the
+    /// inbox is the mailbox that has always been stored here).
+    func all() throws -> [WinnowEmail] {
+        try all(mailbox: .inbox)
     }
 
     /// The real Gmail id for a UI-level numeric id — the bridge actions need.
@@ -129,6 +167,28 @@ final class EmailCacheStore {
         try context.save()
     }
 
+    func setUnread(numericId: Int, unread: Bool) throws {
+        let predicate = #Predicate<StoredEmail> { $0.numericId == numericId }
+        guard let stored = try context.fetch(FetchDescriptor(predicate: predicate)).first else { return }
+        stored.unread = unread
+        try context.save()
+    }
+
+    /// Moves a message between mailbox buckets (archive ⇄ inbox ⇄ trash).
+    func setMailbox(numericId: Int, mailbox: EmailMailbox) throws {
+        let predicate = #Predicate<StoredEmail> { $0.numericId == numericId }
+        guard let stored = try context.fetch(FetchDescriptor(predicate: predicate)).first else { return }
+        stored.mailbox = mailbox.rawValue
+        try context.save()
+    }
+
+    /// Attachment metadata for a message, if any.
+    func attachments(numericId: Int) -> [EmailAttachment] {
+        let predicate = #Predicate<StoredEmail> { $0.numericId == numericId }
+        guard let stored = try? context.fetch(FetchDescriptor(predicate: predicate)).first else { return [] }
+        return StoredEmail.decodeAttachments(stored.attachmentsJSON)
+    }
+
     func remove(gmailIds: [String]) throws {
         for gmailId in gmailIds {
             let predicate = #Predicate<StoredEmail> { $0.gmailId == gmailId }
@@ -137,6 +197,18 @@ final class EmailCacheStore {
             }
         }
         try context.save()
+    }
+
+    /// Deletes every cached message whose gmail id is absent from the set —
+    /// permanent deletions / moves out of tracked views surface this way.
+    func keepOnly(gmailIds: Set<String>) throws {
+        let all = try context.fetch(FetchDescriptor<StoredEmail>())
+        var changed = false
+        for stored in all where !gmailIds.contains(stored.gmailId) {
+            context.delete(stored)
+            changed = true
+        }
+        if changed { try context.save() }
     }
 
     func wipe() throws {

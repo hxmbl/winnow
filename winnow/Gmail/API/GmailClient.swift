@@ -101,6 +101,23 @@ final class GmailClient {
         try await post(path: "messages/send", bodyData: JSONEncoder().encode(request))
     }
 
+    /// Fetches one attachment's bytes (base64url in the response `data`).
+    func attachment(messageID: String, attachmentID: String) async throws -> GmailAttachment {
+        try await get(
+            path: "messages/\(messageID)/attachments/\(attachmentID)",
+            query: []
+        )
+    }
+
+    /// Permanently deletes a message from Gmail. Irreversible — only reachable
+    /// from the Trash mailbox.
+    @discardableResult
+    func deletePermanent(messageID: String) async throws -> GmailMessage {
+        var request = URLRequest(url: URL(string: "\(Self.apiBase)/messages/\(messageID)")!)
+        request.httpMethod = "DELETE"
+        return try await execute(request, expect: GmailMessage.self)
+    }
+
     func historyList(startHistoryID: String, pageToken: String? = nil) async throws -> GmailHistoryList {
         var queryItems = [URLQueryItem(name: "startHistoryId", value: startHistoryID)]
         if let pageToken {

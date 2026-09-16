@@ -125,7 +125,7 @@ struct GmailAuthTests {
 
             let refreshTask = Task { try await manager.validAccessToken() }
             // Let the refresh get in flight (the handler parks it there).
-            try await Task.sleep(nanoseconds: 200_000_000)
+            await waitForInFlightTokenRequest()
 
             // Re-sign-in while the stale refresh is mid-air.
             manager.adopt(TokenSet(accessToken: "new-session", refreshToken: "r2", expiresAt: Date().addingTimeInterval(3600), scope: nil))
@@ -138,7 +138,7 @@ struct GmailAuthTests {
             #expect(racedToken == "new-session")
             #expect(try await manager.validAccessToken() == "new-session")
             #expect(manager.hasSession)
-            #expect(store.saveCount == 1)   // adopt only — no stale persist
+            #expect(store.saveCount == 2)   // both adopts only — no stale persist
             #expect(StubURLProtocol.requestCount(to: "token") == 1)
         }
     }
@@ -157,7 +157,7 @@ struct GmailAuthTests {
             manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: Date().addingTimeInterval(-60), scope: nil))
 
             let refreshTask = Task { try await manager.validAccessToken() }
-            try await Task.sleep(nanoseconds: 200_000_000)
+            await waitForInFlightTokenRequest()
 
             // Sign-out (revoked) lands while the refresh is mid-air.
             manager.clear()
@@ -189,6 +189,20 @@ struct GmailAuthTests {
             }
             #expect(!manager.hasSession)
             #expect(store.clearCount == 1)
+        }
+    }
+
+    /// Waits until the refresh is genuinely in flight, so the race milestone
+    /// (concurrent adopt/clear while the token request parks on its semaphore)
+    /// fires deterministically no matter how loaded the runner is.
+    private func waitForInFlightTokenRequest() async {
+        let start = Date()
+        while StubURLProtocol.requestCount(to: "token") == 0 {
+            if Date().timeIntervalSince(start) > 5 {
+                Issue.record("Timed out waiting for the in-flight token refresh")
+                return
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
         }
     }
 

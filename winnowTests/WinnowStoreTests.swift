@@ -279,7 +279,7 @@ final class WinnowStoreTests {
         #expect(store.selectedRowIndex == nil)
     }
 
-    @Test func trashRemovesRowAndFeedsTheTrashBias() {
+    @Test func trashMovesTheRowToTrashAndFeedsTheBias() {
         let store = makeStore(inbox: [Fixtures.email(id: 1, sender: "spam@x.co"), Fixtures.email(id: 2)])
         let trashBefore = store.trash.count
 
@@ -287,10 +287,28 @@ final class WinnowStoreTests {
         store.trashEmail(1)
 
         #expect(!store.inbox.contains { $0.id == 1 })
+        #expect(store.trashed.map(\.id) == [1])
         #expect(store.trash.count == trashBefore + 1)
         #expect(store.trash.last?.sender == "spam@x.co")
         #expect(store.selectedRowIndex == 0)
         #expect(store.filteredEmails.first?.email.id == 2)
+    }
+
+    @Test func archiveMovesTheRowToArchiveAndRestoreBringsItBack() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1), Fixtures.email(id: 2)])
+
+        store.archiveEmail(2)
+        #expect(store.inbox.map(\.id) == [1])
+        #expect(store.archived.map(\.id) == [2])
+
+        store.unarchiveEmail(2)
+        #expect(store.inbox.map(\.id).sorted() == [1, 2])
+        #expect(store.archived.isEmpty)
+
+        store.trashEmail(1)
+        store.restoreEmail(1)
+        #expect(store.inbox.contains { $0.id == 1 })
+        #expect(store.trashed.isEmpty)
     }
 
     @Test func filterDigitsRouteThroughTheRail() {
@@ -423,5 +441,74 @@ final class WinnowStoreTests {
         #expect(!store.filteredEmails.isEmpty)
         #expect(Set(store.filteredEmails.map(\.id)).count == store.filteredEmails.count)
         #expect(store.listTitle == "Inbox")
+    }
+
+    // MARK: Mailbox views
+
+    @Test func mailboxSwitchSwapsTheListAndClearsSelection() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, sender: "a@x.co"), Fixtures.email(id: 2, sender: "b@x.co")])
+        store.archived = [Fixtures.email(id: 9, sender: "old@x.co")]
+        store.trashed = [Fixtures.email(id: 42, sender: "gone@x.co")]
+
+        store.mailbox = .archive
+        #expect(store.filteredEmails.map(\.email.id) == [9])
+        #expect(store.listTitle == "Archive")
+
+        store.mailbox = .trash
+        #expect(store.filteredEmails.map(\.email.id) == [42])
+        #expect(store.listTitle == "Trash")
+    }
+
+    @Test func readingInsideArchiveShowsItsOwnRows() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, sender: "a@x.co")])
+        store.archived = [Fixtures.email(id: 2, sender: "b@x.co")]
+        store.mailbox = .archive
+        store.openEmail(2)
+        #expect(store.selectedEmail?.id == 2)
+        store.trashEmail(2)
+        #expect(store.selectedEmailID == nil)
+        #expect(store.trashed.map(\.id) == [2])
+    }
+
+    // MARK: Read / unread
+
+    @Test func openingAnEmailMarksItRead() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, unread: true)])
+        store.openEmail(1)
+        #expect(store.inbox.first?.unread == false)
+    }
+
+    @Test func toggleReadFlipsStateAndMarkUnreadRecovers() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, unread: false)])
+        store.toggleRead(1)
+        #expect(store.inbox.first?.unread == true)
+        store.markRead(1)
+        #expect(store.inbox.first?.unread == false)
+    }
+
+    // MARK: Blocked senders
+
+    @Test func blockedSendersHideMailButUnblockRestoresIt() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, sender: "spam@x.co"), Fixtures.email(id: 2, sender: "ok@x.co")])
+
+        store.blockSender("spam@x.co")
+        #expect(store.emails(for: .inbox).map(\.id) == [2])
+        // List view follows the same filter.
+        #expect(store.filteredEmails.map(\.email.id) == [2])
+        // The cache-side inbox is unchanged — blocking stays a view concern.
+        #expect(store.inbox.count == 2)
+
+        store.unblockSender("spam@x.co")
+        #expect(store.emails(for: .inbox).map(\.id).sorted() == [1, 2])
+    }
+
+    @Test func blockedSendersPersistInTheDefaultsDomain() {
+        let suite = "winnow.tests.block.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WinnowStore(learning: LearningModel(defaults: defaults), defaults: defaults)
+        store.blockSender("n@x.co")
+        let reloaded = WinnowStore(learning: LearningModel(defaults: defaults), defaults: defaults)
+        #expect(reloaded.isSenderBlocked("n@x.co"))
     }
 }

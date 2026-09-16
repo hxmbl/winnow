@@ -87,6 +87,9 @@ struct GmailSyncTests {
                     """
                     return (200, Data(json.utf8))
                 }
+                if path.contains("/messages/m1") {
+                    return (200, Data(self.fullMessageJSON(id: "m1", subject: "First", starred: true).utf8))
+                }
                 if path.hasSuffix("/profile") {
                     return (200, Data(#"{"emailAddress":"a@b.c","historyId":"888"}"#.utf8))
                 }
@@ -130,6 +133,9 @@ struct GmailSyncTests {
                     {"history":[{"id":"h1","labelsRemoved":[{"message":{"id":"m1","labelIds":["STARRED"]}}]}],"historyId":"889"}
                     """
                     return (200, Data(json.utf8))
+                }
+                if path.contains("/messages/m1") {
+                    return (200, Data(self.fullMessageJSON(id: "m1", subject: "First").utf8))
                 }
                 if path.hasSuffix("/profile") {
                     return (200, Data(#"{"emailAddress":"a@b.c","historyId":"889"}"#.utf8))
@@ -186,13 +192,30 @@ struct GmailSyncTests {
         }
     }
 
-    @Test func remoteArchiveViaLabelsRemovedInboxDropsTheRow() async throws {
-        // H1: archiving from Gmail web/phone arrives as `labelsRemoved`
-        // carrying INBOX — the row must leave the cache, not sit as a ghost.
+    @Test func remoteArchiveViaLabelsRemovedInboxMovesTheRowToArchive() async throws {
+        // Archiving from Gmail web/phone arrives as `labelsRemoved` carrying
+        // INBOX. The message is re-fetched and re-homed into the archive
+        // bucket (it leaves the inbox view but stays in the cache).
         try await StubURLProtocol.exclusive {
             let suite = "winnow.tests.sync.\(UUID().uuidString)"
             let defaults = UserDefaults(suiteName: suite)!
             defer { defaults.removePersistentDomain(forName: suite) }
+
+            let archivedJSON = """
+            {
+              "id": "m1", "threadId": "t1",
+              "labelIds": [],
+              "internalDate": "1778371140000",
+              "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                  {"name": "From", "value": "Ada <ada@example.com>"},
+                  {"name": "Subject", "value": "First"}
+                ],
+                "body": {"data": "\(Base64URL.encode(Data("Body of First".utf8)))"}
+              }
+            }
+            """
 
             StubURLProtocol.route { request in
                 let path = request.url?.path ?? ""
@@ -201,6 +224,9 @@ struct GmailSyncTests {
                     {"history":[{"id":"h1","labelsRemoved":[{"message":{"id":"m1","threadId":"t1","labelIds":["INBOX"]}}]}],"historyId":"890"}
                     """
                     return (200, Data(json.utf8))
+                }
+                if path.contains("/messages/m1") {
+                    return (200, Data(archivedJSON.utf8))
                 }
                 if path.hasSuffix("/profile") {
                     return (200, Data(#"{"emailAddress":"a@b.c","historyId":"890"}"#.utf8))
@@ -218,8 +244,11 @@ struct GmailSyncTests {
 
             let emails = try await sync.incrementalSync()
 
+            // Out of the inbox view…
             #expect(emails.isEmpty)
-            #expect(cache.count == 0)
+            // …but not lost: it moved to the archive bucket.
+            #expect(try cache.all(mailbox: .archive).map(\.subject) == ["First"])
+            #expect(cache.count == 1)
         }
     }
 
@@ -325,5 +354,34 @@ struct GmailSyncTests {
         try cache.upsert(email: Fixtures.email(id: 1), gmailId: "g1", threadId: "t")
         try cache.wipe()
         #expect(cache.count == 0)
+    }
+
+    @Test func cacheStoresMailboxUnreadAndAttachments() throws {
+        let cache = try EmailCacheStore(inMemory: true)
+        let attachment = EmailAttachment(id: "att-1", partId: "1.1", filename: "invoice.pdf", mimeType: "application/pdf", size: 4242)
+        let email = WinnowEmail(
+            id: 7, sender: "a@b.c", name: nil, email: nil,
+            receivedAt: 1_000, subject: "Hi", body: "body", type: "",
+            starred: false, urgent: false, unread: true,
+            bodyHTML: "<b>Hi</b>", attachments: [attachment]
+        )
+
+        try cache.upsert(email: email, gmailId: "g7", threadId: "t7", mailbox: .archive)
+        #expect(try cache.all(mailbox: .archive).map(\.id) == [7])
+        #expect(try cache.all().isEmpty)                     // not in the inbox bucket
+        #expect(try cache.all(mailbox: .archive).first?.unread == true)
+        #expect(try cache.all(mailbox: .archive).first?.bodyHTML == "<b>Hi</b>")
+        #expect(cache.attachments(numericId: 7).first?.filename == "invoice.pdf")
+
+        // Bucket and read-state move independently.
+        try cache.setMailbox(numericId: 7, mailbox: .inbox)
+        try cache.setUnread(numericId: 7, unread: false)
+        #expect(try cache.all().isEmpty == false)
+        #expect(try cache.all().first?.unread == false)
+
+        // keepOnly drops messages that left every tracked view.
+        try cache.upsert(email: Fixtures.email(id: 8), gmailId: "g8", threadId: "t8")
+        try cache.keepOnly(gmailIds: ["g7"])
+        #expect(try cache.all().map(\.id) == [7])
     }
 }

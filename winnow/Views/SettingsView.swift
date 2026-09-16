@@ -28,22 +28,27 @@ struct SettingsView: View {
                 Text("Account")
             }
 
-            // MARK: Preferences (appearance live; blocked senders + notifications are placeholders)
+            // MARK: Preferences — blocked senders + notifications (live)
             Section {
                 Picker("Appearance", selection: $store.appearance) {
                     ForEach(WinnowStore.Appearance.allCases) { appearance in
                         Text(appearance.label).tag(appearance)
                     }
                 }
-                HStack {
-                    Label("Blocked senders", systemImage: "person.slash")
-                    Spacer()
-                    Text("Coming soon").foregroundStyle(.secondary)
+                Toggle(isOn: $store.notificationsEnabled) {
+                    Label("Notifications for new mail", systemImage: "bell")
                 }
-                HStack {
-                    Label("Notifications", systemImage: "bell")
-                    Spacer()
-                    Text("Coming soon").foregroundStyle(.secondary)
+                Text("Winnow pings you when a refresh finds unread mail it hadn't shown yet (needs system notification permission).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                NavigationLink {
+                    BlockedSendersList(store: store)
+                } label: {
+                    LabeledContent {
+                        Text("\(store.blockedSenders.count)").foregroundStyle(.secondary)
+                    } label: {
+                        Label("Blocked senders", systemImage: "person.slash")
+                    }
                 }
             } header: {
                 Text("Preferences")
@@ -137,5 +142,54 @@ struct SettingsView: View {
         default:
             return "—"
         }
+    }
+}
+
+/// Blocked senders list. Blocking hides a sender's mail from every mailbox —
+/// unblocking here brings it straight back (blocking is a view concern, the
+/// cache still holds the messages).
+struct BlockedSendersList: View {
+    @Bindable var store: WinnowStore
+
+    /// Best-effort display name for each blocked address, looked up from any
+    /// mailbox still holding one of their messages.
+    private func displayName(for sender: String) -> String {
+        let all = store.inbox + store.archived + store.trashed
+        return all.first { $0.sender == sender }?.displayName ?? sender
+    }
+
+    var body: some View {
+        Group {
+            if store.blockedSenders.isEmpty {
+                ContentUnavailableView(
+                    "No blocked senders",
+                    systemImage: "person.slash",
+                    description: Text("Block a sender from the message viewer to hide their mail.")
+                )
+            } else {
+                List {
+                    ForEach(store.blockedSenders.sorted(), id: \.self) { sender in
+                        HStack(spacing: 12) {
+                            AvatarView(sender: sender, size: 28, font: .caption)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(displayName(for: sender)).font(.body.weight(.medium))
+                                Text(sender)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            Spacer()
+                            Button("Unblock") {
+                                withAnimation { store.unblockSender(sender) }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .navigationTitle("Blocked Senders")
     }
 }

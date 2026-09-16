@@ -86,4 +86,73 @@ struct GmailMapperTests {
     @Test func stripHTMLDecodesNamedAndNumericEntities() {
         #expect(GmailMessageMapper.stripHTML("it&#39;s &#x27;quoted&#x27; &amp; clean") == "it's 'quoted' & clean")
     }
+
+    // MARK: Read state, HTML body, attachments (mailbox features)
+
+    @Test func unreadLabelFlowsIntoTheEmail() throws {
+        let message = try Self.decode(#"{"id":"u1","labelIds":["INBOX","UNREAD"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.winnowEmail(from: message)?.unread == true)
+    }
+
+    @Test func noUnreadLabelMeansRead() throws {
+        let message = try Self.decode(#"{"id":"u2","labelIds":["INBOX"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.winnowEmail(from: message)?.unread == false)
+    }
+
+    @Test func htmlBodyIsKeptButOnlyAsSource() throws {
+        let html = "<p>Hello</p>"
+        let payload = """
+        {"id":"h1","labelIds":["INBOX"],"payload":{"mimeType":"multipart/alternative","headers":[{"name":"From","value":"a@b.c"}],"parts":[
+          {"mimeType":"text/plain","body":{"data":"\(Base64URL.encode(Data("Hello".utf8)))"}},
+          {"mimeType":"text/html","body":{"data":"\(Base64URL.encode(Data(html.utf8)))"}}
+        ]}}
+        """
+        let message = try Self.decode(payload)
+        let email = try #require(GmailMessageMapper.winnowEmail(from: message))
+        #expect(email.body == "Hello")          // reading text…
+        #expect(email.bodyHTML == html)         // …source retained for the reader
+    }
+
+    @Test func bodyPrefersTheLongestPlainTextLeaf() throws {
+        let payload = """
+        {"id":"p1","labelIds":["INBOX"],"payload":{"mimeType":"multipart/alternative","headers":[],"parts":[
+          {"mimeType":"text/plain","body":{"data":"\(Base64URL.encode(Data("stub".utf8)))"}},
+          {"mimeType":"text/plain","body":{"data":"\(Base64URL.encode(Data("Here is the actual, fuller message body.".utf8)))"}}
+        ]}}
+        """
+        let message = try Self.decode(payload)
+        #expect(GmailMessageMapper.winnowEmail(from: message)?.body == "Here is the actual, fuller message body.")
+    }
+
+    @Test func attachmentsBecomeMetadata() throws {
+        let payload = """
+        {"id":"a1","labelIds":["INBOX"],"payload":{"mimeType":"multipart/mixed","headers":[],"parts":[
+          {"mimeType":"text/plain","body":{"data":"\(Base64URL.encode(Data("body".utf8)))"}},
+          {"mimeType":"application/pdf","filename":"invoice.pdf","partId":"1.1","body":{"attachmentId":"att-1","size":1234}}
+        ]}}
+        """
+        let message = try Self.decode(payload)
+        let email = try #require(GmailMessageMapper.winnowEmail(from: message))
+        #expect(email.attachments.count == 1)
+        #expect(email.attachments.first?.filename == "invoice.pdf")
+        #expect(email.attachments.first?.mimeType == "application/pdf")
+        #expect(email.attachments.first?.size == 1234)
+    }
+
+    @Test func mailboxFollowsGmailLabelSemantics() throws {
+        let inbox = try Self.decode(#"{"id":"1","labelIds":["INBOX"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.mailbox(of: inbox) == .inbox)
+
+        // Archive = present but not in Inbox and not in Trash.
+        let archived = try Self.decode(#"{"id":"2","labelIds":["STARRED"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.mailbox(of: archived) == .archive)
+
+        // TRASH dominates even when INBOX is still set.
+        let trashed = try Self.decode(#"{"id":"3","labelIds":["INBOX","TRASH"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.mailbox(of: trashed) == .trash)
+    }
+
+    private static func decode(_ payload: String) throws -> GmailMessage {
+        try JSONDecoder().decode(GmailMessage.self, from: Data(payload.utf8))
+    }
 }

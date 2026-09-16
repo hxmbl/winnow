@@ -1,27 +1,5 @@
 import SwiftUI
 
-/// Mailboxes selectable from the bottom-left pill. Archive and Trash are
-/// display-only placeholders until move/delete actions exist.
-enum Mailbox: String, CaseIterable {
-    case inbox, archive, trash
-
-    var label: String {
-        switch self {
-        case .inbox: return "Inbox"
-        case .archive: return "Archive"
-        case .trash: return "Trash"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .inbox: return "tray"
-        case .archive: return "archivebox"
-        case .trash: return "trash"
-        }
-    }
-}
-
 /// The fixed mailbox pill at the leading edge of the filter rail, with a
 /// custom iOS-style pull-up card menu. Owns its own open/hover state; the
 /// caller only binds the selection.

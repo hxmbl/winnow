@@ -177,12 +177,15 @@ struct GmailMapperMIMETests {
         #expect(email?.body == "Hello & welcome")
     }
 
-    @Test func trashedMessagesAreNeverMapped() throws {
+    @Test func trashedMessagesAreMappedWithTheTrashBucket() throws {
         let payload = """
         {"id": "m3", "labelIds": ["TRASH"], "payload": {"headers": [], "mimeType": "text/plain"}}
         """
         let message = try messageJSON(payload)
-        #expect(GmailMessageMapper.winnowEmail(from: message) == nil)
+        // Trash is a first-class mailbox now: the message maps…
+        #expect(GmailMessageMapper.winnowEmail(from: message) != nil)
+        // …and its bucket comes from the TRASH label.
+        #expect(GmailMessageMapper.mailbox(of: message) == .trash)
     }
 
     @Test func promotionsCategoryBecomesPromotionalType() throws {
