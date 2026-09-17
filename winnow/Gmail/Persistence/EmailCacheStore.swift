@@ -24,9 +24,9 @@ final class StoredEmail {
     var body: String
     var type: String
     var starred: Bool
-    var unread: Bool
+    var unread: Bool = false
     /// Which mailbox bucket this message belongs to (`EmailMailbox.rawValue`).
-    var mailbox: String
+    var mailbox: String = EmailMailbox.inbox.rawValue
     var bodyHTML: String?
     /// JSON-encoded `[EmailAttachment]` — metadata only, payloads stay remote.
     var attachmentsJSON: String?
@@ -86,12 +86,53 @@ final class EmailCacheStore {
     private let context: ModelContext
 
     /// `inMemory` for tests/previews; production uses the default store in
-    /// Application Support.
-    init(inMemory: Bool = false) throws {
-        let configuration = ModelConfiguration(isStoredInMemoryOnly: inMemory)
-        container = try ModelContainer(for: StoredEmail.self, configurations: configuration)
+    /// Application Support. Pass `url` to place the store elsewhere (tests).
+    ///
+    /// A store written by an older schema — or one corrupted on disk — cannot
+    /// always be loaded by the current model: SwiftData reports that as
+    /// `SwiftDataError._Error.loadIssueModelContainer`. Since this is a
+    /// disposable cache (rebuilt from the server on the next sync), a load
+    /// failure purges the stale files and starts clean instead of wedging the
+    /// app on the login screen.
+    init(inMemory: Bool = false, url: URL? = nil) throws {
+        let configuration: ModelConfiguration
+        if inMemory {
+            configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        } else {
+            configuration = ModelConfiguration(url: url ?? Self.defaultStoreURL())
+        }
+        container = try Self.loadContainer(configuration)
         context = ModelContext(container)
         context.autosaveEnabled = false
+    }
+
+    /// The location SwiftData uses for the default on-disk container:
+    /// `Application Support/default.store` inside the app's sandboxed container.
+    private static func defaultStoreURL() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("default.store")
+    }
+
+    /// Creates the container, recovering from a stale or corrupt store: the
+    /// failed file is removed (with its SQLite WAL/SHM sidecars) and a fresh
+    /// empty store is created in its place.
+    private static func loadContainer(_ configuration: ModelConfiguration) throws -> ModelContainer {
+        do {
+            return try ModelContainer(for: StoredEmail.self, configurations: configuration)
+        } catch {
+            // In-memory containers own no store file — if one ever fails there
+            // is nothing to purge, so surface the error.
+            guard !configuration.isStoredInMemoryOnly else { throw error }
+            purgeStoreFiles(at: configuration.url)
+            return try ModelContainer(for: StoredEmail.self, configurations: configuration)
+        }
+    }
+
+    private static func purgeStoreFiles(at url: URL) {
+        // A SwiftData store is a SQLite database with WAL/SHM sidecars.
+        for path in [url.path, url.path + "-wal", url.path + "-shm"] {
+            try? FileManager.default.removeItem(atPath: path)
+        }
     }
 
     func upsert(email: WinnowEmail, gmailId: String, threadId: String, mailbox: EmailMailbox = .inbox) throws {

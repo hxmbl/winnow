@@ -24,6 +24,25 @@ struct GmailSyncTests {
         return (client, cache, sync, manager)
     }
 
+    @Test func staleOrCorruptStoreIsPurgedAndRebuiltOnLoad() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("winnow-store-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storeURL = dir.appendingPathComponent("cache.store")
+
+        // A store written by an older schema — or any non-SwiftData file —
+        // can't be loaded by the current model. The cache must recover by
+        // purging the stale files and rebuilding, not wedging the app.
+        try Data("stale store".utf8).write(to: storeURL)
+        try Data("stale wal".utf8).write(to: URL(fileURLWithPath: storeURL.path + "-wal"))
+
+        let cache = try EmailCacheStore(url: storeURL)
+        #expect(cache.count == 0)                       // recreated empty, not wedged
+        try cache.upsert(email: Fixtures.email(id: 1), gmailId: "g1", threadId: "t", mailbox: .inbox)
+        #expect(cache.count == 1)                       // and fully usable again
+    }
+
     private func fullMessageJSON(id: String, subject: String, starred: Bool = false) -> String {
         """
         {
