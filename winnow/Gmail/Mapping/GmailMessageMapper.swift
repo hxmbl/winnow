@@ -11,10 +11,10 @@ import Foundation
 ///   unlikely at inbox scale, and the cache is keyed by the string id anyway.
 /// - **Body**: prefers the *longest* `text/plain` leaf (some senders put the
 ///   real content in a later part and an empty stub first); falls back to
-///   `text/html` run through a conservative tag-stripper (no HTML rendering
-///   anywhere in Winnow, so the strip is lossy by design — markup must never
-///   reach the classifier). The raw HTML is retained as `bodyHTML` so the
-///   reader could choose to surface it without re-fetching.
+///   `text/html` run through a conservative tag-stripper (markup must never
+///   reach the classifier — `body`, the signal/search source, stays plain
+///   text even when the reader shows HTML). The raw HTML is retained as
+///   `bodyHTML` for the sandboxed reader to surface without re-fetching.
 /// - **Sender**: `From:` header is parsed into display name + address; the
 ///   *address* becomes `sender` (what the profile/classifier key on), matching
 ///   how the mock data's real-address entries behave.
@@ -144,9 +144,9 @@ enum GmailMessageMapper {
         return fallbackSnippet
     }
 
-    /// The raw `text/html` body, if any. Stored for the reader to use without
-    /// re-fetching but never rendered as markup — the security model is
-    /// text-only.
+    /// The raw `text/html` body, if any. Stored for the sandboxed reader to
+    /// surface without re-fetching; rendering happens in a WKWebView with
+    /// JavaScript disabled (see `EmailHTMLBodyView`).
     nonisolated static func htmlBody(of message: GmailMessage) -> String? {
         var result: String?
         func visit(_ part: GmailMessagePart?) {

@@ -50,9 +50,17 @@ nonisolated func buildUserProfile(inbox: [WinnowEmail], trash: [TrashRow]) -> Us
         .filter { $0.inbox <= 2 }
         .map { $0.sender }
 
+    // First-time senders: exactly one inbox email and never discarded — cold
+    // outreach rather than a sender you've simply gone quiet on.
+    let firstTimeSenders = engagement
+        .filter { $0.inbox == 1 && (trashStats[$0.sender] ?? 0) == 0 }
+        .map { $0.sender }
+        .sorted()
+
     return UserProfile(
         trashBiasBySender: trashBiasBySender,
         topSenders: topSenders,
-        quietSenders: quietSenders
+        quietSenders: quietSenders,
+        firstTimeSenders: firstTimeSenders
     )
 }

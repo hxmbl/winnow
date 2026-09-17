@@ -140,32 +140,30 @@ struct PipelineTests {
 
     // MARK: Filter rail ranking
 
-    @Test func rankFiltersKeepsEveryBuiltinExactlyOnce() {
+    @Test func rankFiltersPinsPermanentBucketsFirstThenRanksByCount() {
         let inbox = makeInbox()
         let ranked = rankFilters(inbox: inbox, signals: makeSignals(for: inbox), profile: Fixtures.profile())
 
-        #expect(ranked.count == builtinFilters.count)
-        #expect(Set(ranked.map(\.id)) == Set(builtinFilters.map(\.id)))
+        // Pinned buckets lead, in their fixed order, even when empty.
+        #expect(ranked.prefix(permanentFilterIds.count).map(\.id) == permanentFilterIds)
+        // The rest surface by current match count (starred: 2, the rest tie at 1),
+        // with the exclusive Unsafe safety-valve pinned last.
+        #expect(Array(ranked.dropFirst(permanentFilterIds.count).map(\.id)) == [.starred, .needsAction, .newsletters, .promotional, .unsafe])
+        // Empty buckets are hidden entirely.
+        for empty in [BuiltinSmartFilter.codes, .travel, .events, .unread, .security] {
+            #expect(!ranked.contains { $0.id == empty })
+        }
+        // No duplicates.
+        #expect(Set(ranked.map(\.id)).count == ranked.count)
     }
 
-    @Test func rankFiltersOrdersHighSignalFirstEngagementNextNoiseThenSafetyLast() {
-        let inbox = makeInbox()
-        let ranked = rankFilters(inbox: inbox, signals: makeSignals(for: inbox), profile: Fixtures.profile()).map(\.id)
+    @Test func rankFiltersHidesEmptyBucketsEvenWithMailFlow() {
+        let inbox = [
+            Fixtures.email(id: 1, subject: "Security alert", body: "Reset your password now."),
+        ]
+        let ranked = rankFilters(inbox: inbox, signals: [:], profile: Fixtures.profile())
+        let ids = ranked.map(\.id)
 
-        let highSignal = Set(ranked.prefix(4))
-        #expect(highSignal == [.important, .urgent, .needsAction, .security])
-
-        #expect(ranked.last == .unsafe)
-
-        guard let starred = ranked.firstIndex(of: .starred),
-              let receipts = ranked.firstIndex(of: .receipts),
-              let newsletters = ranked.firstIndex(of: .newsletters),
-              let promotional = ranked.firstIndex(of: .promotional)
-        else {
-            Issue.record("ranked rail is missing expected filters")
-            return
-        }
-        #expect(starred < newsletters)
-        #expect(receipts < promotional)
+        #expect(ids == [.important, .shipping, .unsafe])
     }
 }

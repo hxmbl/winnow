@@ -99,7 +99,7 @@ struct GmailMapperTests {
         #expect(GmailMessageMapper.winnowEmail(from: message)?.unread == false)
     }
 
-    @Test func htmlBodyIsKeptButOnlyAsSource() throws {
+    @Test func htmlBodyIsKeptForSandboxedReaderRendering() throws {
         let html = "<p>Hello</p>"
         let payload = """
         {"id":"h1","labelIds":["INBOX"],"payload":{"mimeType":"multipart/alternative","headers":[{"name":"From","value":"a@b.c"}],"parts":[

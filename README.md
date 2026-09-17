@@ -6,7 +6,7 @@ Your inbox, intelligently sorted. Winnow is a native macOS email client built wi
 
 ## Features
 
-- **Smart filters** — one-tap buckets for Important, Urgent, Action needed, Security, Receipts, Starred, Top contacts, Quiet contacts, Newsletters, Promos, Read later, and Unsafe.
+- **Smart filters** — a magic rail: permanently-pinned buckets (Important, Deliveries) lead, then every other bucket appears ranked by how much mail it's catching right now — empty buckets hide themselves. One-tap buckets for Important, Urgent, Action needed, Security, Codes, Deliveries, Travel, Events, Receipts, Starred, Unread, Files, New contacts, Top contacts, Quiet contacts, Newsletters, Promos, Read later, Long reads, Social, and Unsafe.
 - **Smart Score sorting** — a 0–100 relevance score per email from intent signals (security language, deadlines, receipts vs. sale/unsubscribe phrasing), sender standing, stars, and a spam drag so unsafe mail never floats to the top.
 - **Spam detection without ML** — keyword lists, regex heuristics, sender-shape checks, and per-sender trash history combine into a junk likelihood; messages at or above `0.4` are hidden by default.
 - **Learning loop** — starring or unstarring nudges tunable signal weights up or down (small, clamped steps), and every action is logged as a `FeedbackEvent` for future training.

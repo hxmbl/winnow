@@ -84,6 +84,46 @@ nonisolated let financeKeywords = KeywordTable([
     "refund", "wire transfer", "direct deposit", "payout", "your bill", "bill is ready",
     "amount due", "credit score",
 ])
+/// One-time login / verification codes → the `.codes` signal. Deliberately
+/// narrower than security — a code is copyable, not an alarm.
+nonisolated let codesKeywords = KeywordTable([
+    "one-time code", "one time code", "verification code", "security code",
+    "sign-in code", "sign in code", "login code", "auth code", "authentication code",
+    "confirmation code", "verification pin", "one-time passcode", "otp", "passcode",
+    "single-use code",
+])
+/// Package / delivery notifications → the `.shipping` signal.
+nonisolated let shippingKeywords = KeywordTable([
+    "tracking number", "tracking update", "your package", "out for delivery",
+    "has shipped", "has been shipped", "shipping confirmation", "delivery date",
+    "delivery scheduled", "delivery attempt", "delivery was", "status of your order",
+    "courier", "parcel", "dispatch confirmation", "is on its way", "arriving tomorrow",
+])
+/// Flight/hotel/itinerary correspondence → the `.travel` signal.
+nonisolated let travelKeywords = KeywordTable([
+    "boarding pass", "flight", "itinerary", "hotel", "reservation",
+    "booking confirmation", "car rental", "airport", "departure gate",
+    "layover", "check-in", "check in", "arrival time", "trip details",
+])
+/// Invitations and calendar events → the `.events` signal. Precise phrases only —
+/// bare "event" is too common to be a useful tell.
+nonisolated let eventsKeywords = KeywordTable([
+    "calendar invite", "you're invited", "you are invited", "invitation",
+    "save the date", "webinar", "meetup", "rsvp", "workshop", "conference",
+    "register for", "reserve your spot", "roundtable",
+])
+/// Social-platform notifications → the `.social` signal (keyword phrasing).
+nonisolated let socialKeywords = KeywordTable([
+    "mentioned you", "commented on", "sent you a message", "new follower",
+    "friend request", "connection request", "replied to your", "liked your",
+    "tagged you", "invited you to join", "you have a new", "added to your",
+])
+/// Social platforms matched by sender domain (e.g. `no-reply@linkedin.com`).
+nonisolated let socialDomains: [String] = [
+    "linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
+    "threads.net", "reddit.com", "pinterest.com", "tiktok.com", "snapchat.com",
+    "discord.com", "youtube.com", "whatsapp.com", "telegram.org",
+]
 
 // MARK: - Regex heuristics
 
@@ -125,4 +165,18 @@ nonisolated func wordBag(_ email: WinnowEmail) -> String {
 /// (`newsletter@…` is a mailbox, not a newsletter keyword).
 nonisolated func contentBag(_ email: WinnowEmail) -> String {
     "\(email.subject) \(email.body)".lowercased()
+}
+
+/// True when the message comes from a social-platform address (mentions,
+/// follows, and friend requests often arrive from a `no-reply@platform.com`).
+nonisolated func matchesSocialDomain(_ email: WinnowEmail) -> Bool {
+    let lines = [email.sender.lowercased(), (email.email ?? "").lowercased()]
+    return lines.contains { line in
+        socialDomains.contains { line.contains($0) }
+    }
+}
+
+/// Word count of the body — gates the "Long reads" bucket.
+nonisolated func bodyWordCount(_ email: WinnowEmail) -> Int {
+    email.body.split(whereSeparator: \.isWhitespace).count
 }

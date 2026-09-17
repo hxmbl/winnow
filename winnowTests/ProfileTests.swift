@@ -103,5 +103,19 @@ struct ProfileTests {
         #expect(profile.topSenders.isEmpty)
         #expect(profile.quietSenders.isEmpty)
         #expect(profile.trashBiasBySender.isEmpty)
+        #expect(profile.firstTimeSenders.isEmpty)
+    }
+
+    @Test func firstTimeSendersAreSingleUnTrashedEmails() {
+        let inbox = inbox([
+            ("cold@example.com", 1, 0),          // one email, never trashed → first-timer
+            ("recurring@example.com", 2, 0),     // two emails → not first-time
+            ("discarded@example.com", 1, 0),     // one email but trashed → excluded
+            ("busy@example.com", 5, 0),          // established sender
+        ])
+        let trash = [TrashRow(sender: "discarded@example.com")]
+        let profile = buildUserProfile(inbox: inbox, trash: trash)
+
+        #expect(profile.firstTimeSenders == ["cold@example.com"])
     }
 }

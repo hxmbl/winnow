@@ -141,6 +141,38 @@ struct KeybindEngineTests {
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 111, context: context()) == nil)
     }
 
+    // MARK: Unmatched keys must not leak into the responder chain (alert beep)
+
+    @Test func unmatchedCanvasKeysAreSwallowed() {
+        // With no binding, the authed non-editing canvas consumes the key so it
+        // never reaches NSResponder.noResponder (the macOS alert beep).
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: 0) == false)
+        let shift = UInt(NSEvent.ModifierFlags.shift.rawValue)
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: shift) == false)
+        // Contexts that block commands (overlay up, no target) still swallow.
+        #expect(KeybindEngine.shouldPassThrough(context: context(overlayVisible: true), modifiers: 0) == false)
+        #expect(KeybindEngine.shouldPassThrough(context: context(viewerOpen: true), modifiers: 0) == false)
+    }
+
+    @Test func keysOwnedElsewhereStillFlowThrough() {
+        let shift = UInt(NSEvent.ModifierFlags.shift.rawValue)
+        let command = UInt(NSEvent.ModifierFlags.command.rawValue)
+        let control = UInt(NSEvent.ModifierFlags.control.rawValue)
+        let option = UInt(NSEvent.ModifierFlags.option.rawValue)
+        let function = UInt(NSEvent.ModifierFlags.function.rawValue)
+
+        // Sign-in and live text fields keep every key.
+        #expect(KeybindEngine.shouldPassThrough(context: context(authed: false), modifiers: 0) == true)
+        #expect(KeybindEngine.shouldPassThrough(context: context(textEditing: true), modifiers: 0) == true)
+        #expect(KeybindEngine.shouldPassThrough(context: context(textEditing: true), modifiers: shift) == true)
+        // ⌘/⌃/⌥ combos belong to system and menu shortcuts.
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: command) == true)
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: control) == true)
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: option) == true)
+        // Function keys keep their system meaning.
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: function) == true)
+    }
+
     @Test func cheatSheetListsEveryRoutedKey() {
         // Documentation cannot drift: every binding entry must produce its
         // command in the context where it is valid.

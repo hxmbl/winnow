@@ -51,6 +51,11 @@ struct BadgeStack: View {
         case .security: return .cyan
         case .newsletters: return .secondary
         case .promotional: return .green
+        case .codes: return .pink
+        case .shipping: return .green
+        case .travel: return .cyan
+        case .events: return .purple
+        case .social: return .blue
         default: return .secondary
         }
     }

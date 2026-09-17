@@ -255,7 +255,20 @@ let mockInbox: [WinnowEmail] = [
         body: "We detected a sign-in attempt from an unrecognized device in Chicago, IL. If this was you, no action needed. Otherwise, reset your password immediately.",
         type: "security",
         starred: false,
-        urgent: true
+        urgent: true,
+        bodyHTML: """
+        <div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; color: #222;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+            <tr>
+              <td style="padding: 24px; border-top: 4px solid #1f4e79;">
+                <div style="color: #1f4e79; font-weight: bold; font-size: 18px; margin-bottom: 12px;">Unusual sign-in attempt</div>
+                <p>We detected a sign-in attempt from an unrecognized device in <strong>Chicago, IL</strong>.</p>
+                <p>If this was you, no action needed. Otherwise, <a href="https://www.chase.com/reset" style="color: #1f4e79;">reset your password</a> immediately.</p>
+              </td>
+            </tr>
+          </table>
+        </div>
+        """
     ),
     WinnowEmail(
         id: 21,
@@ -291,7 +304,14 @@ let mockInbox: [WinnowEmail] = [
         body: "You have been assigned issue ENG-421: \"Fix mobile navigation overflow on smaller screens.\" Priority: High.",
         type: "work",
         starred: false,
-        urgent: true
+        urgent: true,
+        bodyHTML: """
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; color: #1f2328;">
+          <p style="margin: 0 0 16px;">You have been assigned issue <strong>ENG-421</strong>: <em>Fix mobile navigation overflow on smaller screens.</em></p>
+          <p style="margin: 0 0 16px;">Priority: <strong style="color: #b1650b;">High</strong></p>
+          <a href="https://linear.app/winnow/issue/ENG-421" style="display: inline-block; background: #5e6ad2; color: #ffffff; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600;">Open in Linear</a>
+        </div>
+        """
     ),
     WinnowEmail(
         id: 24,
@@ -315,7 +335,21 @@ let mockInbox: [WinnowEmail] = [
         body: "This week: The rise of AI-native databases, a deep dive on WebGPU, and an interview with the creator of Bun.",
         type: "newsletter",
         starred: true,
-        urgent: false
+        urgent: false,
+        bodyHTML: """
+        <div style="font-family: Georgia, 'Times New Roman', serif; font-size: 16px; line-height: 1.6; color: #2b2b2b;">
+          <div style="border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 20px;">
+            <span style="font-weight: 700;">Borderless Weekly</span> &middot; <span style="color: #777;">Issue #204</span>
+          </div>
+          <p>This week: <strong>The rise of AI-native databases</strong>, a deep dive on WebGPU, and an interview with the creator of Bun.</p>
+          <ul>
+            <li style="margin-bottom: 10px;"><a href="https://borderless.co/issue-204/ai-databases" style="color: #0645ad;">The rise of AI-native databases</a></li>
+            <li style="margin-bottom: 10px;"><a href="https://borderless.co/issue-204/webgpu" style="color: #0645ad;">Deep dive on WebGPU</a></li>
+            <li style="margin-bottom: 10px;"><a href="https://borderless.co/issue-204/bun" style="color: #0645ad;">Interview with the creator of Bun</a></li>
+          </ul>
+          <a href="https://borderless.co/issue-204/full" style="display: inline-block; background: #111; color: #fff; padding: 10px 16px; border-radius: 4px; text-decoration: none;">Read the full issue</a>
+        </div>
+        """
     ),
     WinnowEmail(
         id: 26,

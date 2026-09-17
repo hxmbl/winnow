@@ -12,15 +12,20 @@ struct UserProfile {
     var topSenders: [String]
     /// Rare senders still in the inbox — the "cold" side of the habit curve.
     var quietSenders: [String]
+    /// Cold outreach: one inbox email, never trashed — someone you haven't
+    /// engaged yet.
+    var firstTimeSenders: [String]
 
     nonisolated init(
         trashBiasBySender: [String: Double],
         topSenders: [String],
-        quietSenders: [String]
+        quietSenders: [String],
+        firstTimeSenders: [String] = []
     ) {
         self.trashBiasBySender = trashBiasBySender
         self.topSenders = topSenders
         self.quietSenders = quietSenders
+        self.firstTimeSenders = firstTimeSenders
     }
 
     /// The sender's trash bias, capped at `maxTrashBias`. Single source of

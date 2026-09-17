@@ -208,4 +208,48 @@ struct ClassificationTests {
         let sig = Fixtures.classify(Fixtures.email(), profile: profile)
         #expect(sig.importanceScore == 44)   // 50 - quiet-contact penalty
     }
+
+    // MARK: New semantic signals
+
+    @Test func oneTimeCodePhrasesFlagCodes() {
+        let sig = Fixtures.classify(Fixtures.email(subject: "Your verification code", body: "Use 884213 to sign in. It expires in 10 minutes."))
+        #expect(sig.codes)
+        #expect(!sig.security)
+    }
+
+    @Test func codesAreSuppressedForSecurityNotices() {
+        let sig = Fixtures.classify(Fixtures.email(subject: "Security alert", body: "Someone requested a verification code for your account."))
+        #expect(sig.security)
+        #expect(!sig.codes)
+    }
+
+    @Test func trackingLanguageFlagsShipping() {
+        let sig = Fixtures.classify(Fixtures.email(subject: "Your package is on its way", body: "Tracking number 1Z999AA1. Delivery date: Thursday."))
+        #expect(sig.shipping)
+        #expect(!sig.promotional)
+    }
+
+    @Test func itineraryLanguageFlagsTravel() {
+        let sig = Fixtures.classify(Fixtures.email(subject: "Your flight is confirmed", body: "Here is your itinerary and boarding pass for next week."))
+        #expect(sig.travel)
+    }
+
+    @Test func invitationLanguageFlagsEvents() {
+        let sig = Fixtures.classify(Fixtures.email(subject: "You're invited: design review", body: "Join our webinar on Friday. Please RSVP."))
+        #expect(sig.events)
+    }
+
+    @Test func socialDomainsFlagSocialWithoutKeywords() {
+        let sig = Fixtures.classify(Fixtures.email(sender: "no-reply@linkedin.com", subject: "A new post from your network", body: "See what's new."))
+        #expect(sig.social)
+    }
+
+    @Test func longBodiesFlagLongReads() {
+        let short = Fixtures.classify(Fixtures.email(body: "Short note."))
+        #expect(!short.longRead)
+
+        let longBody = Array(repeating: "word", count: 250).joined(separator: " ")
+        let long = Fixtures.classify(Fixtures.email(body: longBody))
+        #expect(long.longRead)
+    }
 }

@@ -29,6 +29,27 @@ nonisolated func matchesBuiltin(
         return sig.needsAction && safe && !sig.newsletter
     case .receipts:
         return sig.finance && safe
+    case .codes:
+        return sig.codes && safe
+    case .shipping:
+        return sig.shipping && safe
+    case .travel:
+        return sig.travel && safe
+    case .events:
+        return sig.events && safe
+    case .social:
+        return sig.social && safe
+    case .newSenders:
+        return safe && profile.firstTimeSenders.contains(email.sender)
+    case .unread:
+        return email.unread && safe
+    case .attachments:
+        return !email.attachments.isEmpty && safe
+    case .longReads:
+        // Substantive weekend reading — long, low-urgency, and nothing risky
+        // or time-sensitive. Overlaps "Read later" by design.
+        return sig.longRead && safe && !sig.newsletter && !sig.promotional
+            && !sig.urgentText && !sig.security && !sig.needsAction
     case .newsletters: return sig.newsletter
     case .promotional: return sig.promotional
     case .lowPriority:

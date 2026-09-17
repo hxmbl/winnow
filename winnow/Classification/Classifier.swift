@@ -35,6 +35,16 @@ nonisolated func classifyEmail(
     // obvious promos ("20% off your next order") are not real receipts.
     let finance = (financeKeywords.any(text) || matches(financeRegex, in: text))
         && !securitySignal && !promotional
+    // Codes, deliveries, travel, and events are separate semantic buckets; all
+    // stop at security, promo, and bulk mail so a bucket never swallows the
+    // mail the other buckets are for.
+    let codes = codesKeywords.any(text) && !securitySignal
+    let shipping = shippingKeywords.any(text) && !securitySignal && !promotional
+    let travel = travelKeywords.any(text) && !securitySignal && !promotional && !newsletter
+    let events = eventsKeywords.any(text) && !securitySignal && !promotional && !newsletter
+    let social = (socialKeywords.any(text) || matchesSocialDomain(email))
+        && !securitySignal && !newsletter && !promotional
+    let longRead = bodyWordCount(email) >= 250
     let phishingSignal = matches(phishingRegex, in: actionText)
 
     // Empty subjects/bodies are a strong spam tell; weight them heavily.
@@ -116,6 +126,12 @@ nonisolated func classifyEmail(
         needsAction: needsAction,
         finance: finance,
         spamLikelihood: spamLikelihood,
-        importanceScore: importanceScore
+        importanceScore: importanceScore,
+        codes: codes,
+        shipping: shipping,
+        travel: travel,
+        events: events,
+        social: social,
+        longRead: longRead
     )
 }

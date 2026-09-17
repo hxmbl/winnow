@@ -201,11 +201,31 @@ final class WinnowStoreTests {
 
     // MARK: Ranked rail
 
-    @Test func railItemsCoverEveryBuiltinAndRefreshWithSignals() {
+    @Test func railItemsOnlySurfaceBucketsWithMailPlusThePinnedOnes() {
         let store = makeStore()
         let ids = store.railItems.map(\.filter.id)
-        #expect(Set(ids) == Set(builtinFilters.map(\.id)))
-        #expect(store.railItems.count == builtinFilters.count)
+
+        // No duplicates; strictly a subset of the catalog.
+        #expect(Set(ids).count == ids.count)
+        #expect(Set(ids).isSubset(of: Set(builtinFilters.map(\.id))))
+        // The always-watch buckets and the exclusive safety valve stay regardless of counts.
+        for pinned in permanentFilterIds + [.unsafe] {
+            #expect(ids.contains(pinned))
+        }
+    }
+
+    @Test func emptyBucketsDisappearFromTheRail() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, starred: true)])
+
+        let ids = store.railItems.map(\.filter.id)
+        #expect(ids.first == .important)
+        #expect(ids.contains(.shipping))
+        #expect(ids.contains(.starred))
+        #expect(ids.last == .unsafe)
+        // Buckets with no mail this period vanish entirely.
+        for hidden in [BuiltinSmartFilter.newsletters, .codes, .travel, .events, .attachments, .unread] {
+            #expect(!ids.contains(hidden))
+        }
     }
 
     // MARK: Keyboard navigation & triage
@@ -309,9 +329,13 @@ final class WinnowStoreTests {
 
     @Test func filterDigitsRouteThroughTheRail() {
         let store = makeStore(inbox: [Fixtures.email(id: 1, starred: true)])
-        store.apply(.toggleFilter(railIndex: 5))   // "Starred" sits at rail index 5
+        guard let starredIndex = store.railItems.firstIndex(where: { $0.filter.id == .starred }) else {
+            Issue.record("Starred is missing from the ranked rail")
+            return
+        }
+        store.apply(.toggleFilter(railIndex: starredIndex))
         #expect(store.activeFilters == [.builtin(.starred)])
-        store.apply(.toggleFilter(railIndex: 5))
+        store.apply(.toggleFilter(railIndex: starredIndex))
         #expect(store.activeFilters.isEmpty)
         store.apply(.toggleFilter(railIndex: 999)) // out of range: no-op
         #expect(store.activeFilters.isEmpty)

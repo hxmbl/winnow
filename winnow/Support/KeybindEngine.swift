@@ -29,6 +29,13 @@ enum KeyCommand: Equatable {
 ///   Typing "s" in a reply must never star an email.
 /// - Only unmodified keys are captured; ⌘/⌃/⌥ combos belong to system and
 ///   menu shortcuts and are never intercepted.
+/// - **No key leaks**: on the authed canvas the engine owns *every* unmodified
+///   key, matched or not. Unmatched keys are swallowed so they never fall out
+///   of the responder chain, where `NSResponder.noResponder` would play the
+///   macOS alert beep on each press. Only text fields, the sign-in screen, and
+///   ⌘/⌃/⌥ combos get to keep their keys.
+/// - `shouldPassThrough(context:modifiers:)` is the pure-function twin that
+///   decides that for the "no binding matched" case.
 @MainActor
 final class KeybindEngine {
     struct Context: Equatable {
@@ -123,6 +130,21 @@ final class KeybindEngine {
         }
     }
 
+    /// Decides whether an *unmatched* key should keep flowing to the responder
+    /// chain. Returning `false` swallows the event before it can reach
+    /// `NSResponder.noResponder`, the source of the macOS alert beep that
+    /// otherwise plays on every key the app does not bind.
+    ///
+    /// Keys the canvas does not own must still survive:
+    /// - Sign-in screen and any live text field keep their keys.
+    /// - ⌘/⌃/⌥ combos belong to system and menu shortcuts.
+    /// - F-keys arrive with `.function`, so they keep their system meaning.
+    nonisolated static func shouldPassThrough(context: Context, modifiers: UInt = 0) -> Bool {
+        if !context.authed || context.textEditing { return true }
+        let flags = NSEvent.ModifierFlags(rawValue: modifiers).subtracting(.shift)
+        return !flags.intersection(.deviceIndependentFlagsMask).isEmpty
+    }
+
     // MARK: - Event monitor
 
     private weak var store: WinnowStore?
@@ -182,7 +204,14 @@ final class KeybindEngine {
             command = Self.command(forCharacter: character, keyCode: event.keyCode, context: context, modifiers: modifiers)
         }
 
-        guard let command else { return event }
+        guard let command else {
+            // No binding matched. If the key must keep flowing (text field,
+            // sign-in, a system combo) hand it back untouched; otherwise
+            // consume it so the responder chain never sees it and macOS's
+            // "unhandled key" alert does not play on every press.
+            let passThrough = Self.shouldPassThrough(context: context, modifiers: modifiers)
+            return passThrough ? event : nil
+        }
         store.apply(command)
         return nil
     }

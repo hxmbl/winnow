@@ -45,8 +45,9 @@ struct WinnowEmail: Identifiable, Equatable {
     /// have no new decision to make.
     var unread = false
 
-    /// The original `text/html` body when the message had one (kept for the
-    /// reader's fidelity; never rendered as markup — always stripped to text).
+    /// The original `text/html` body when the message had one. The reader
+    /// renders it in a sandboxed web view (JavaScript disabled); the stripped
+    /// `body` stays the source of truth for search and classification.
     var bodyHTML: String?
 
     /// Attachments carried by this message (metadata only).

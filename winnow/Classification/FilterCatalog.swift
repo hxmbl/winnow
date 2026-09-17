@@ -13,13 +13,22 @@ nonisolated let builtinFilters: [BuiltinFilter] = [
     BuiltinFilter(id: .urgent, label: "Urgent"),
     BuiltinFilter(id: .needsAction, label: "Action needed"),
     BuiltinFilter(id: .security, label: "Security"),
+    BuiltinFilter(id: .codes, label: "Codes"),
+    BuiltinFilter(id: .shipping, label: "Deliveries"),
+    BuiltinFilter(id: .travel, label: "Travel"),
+    BuiltinFilter(id: .events, label: "Events"),
     BuiltinFilter(id: .receipts, label: "Receipts"),
     BuiltinFilter(id: .starred, label: "Starred"),
+    BuiltinFilter(id: .unread, label: "Unread"),
+    BuiltinFilter(id: .attachments, label: "Files"),
+    BuiltinFilter(id: .newSenders, label: "New contacts"),
     BuiltinFilter(id: .topContacts, label: "Top contacts"),
     BuiltinFilter(id: .quietContacts, label: "Quiet contacts"),
     BuiltinFilter(id: .newsletters, label: "Newsletters"),
     BuiltinFilter(id: .promotional, label: "Promos"),
     BuiltinFilter(id: .lowPriority, label: "Read later"),
+    BuiltinFilter(id: .longReads, label: "Long reads"),
+    BuiltinFilter(id: .social, label: "Social"),
     BuiltinFilter(id: .unsafe, label: "Unsafe"),
 ]
 
@@ -43,18 +52,16 @@ enum FilterRailLayout {
     }
 }
 
-/// Static group ordering — high-signal → engagement → noise → safety. Within a
-/// group, filters are ordered by how many inbox emails they currently match.
-nonisolated private let filterGroup: [BuiltinSmartFilter: Int] = [
-    .important: 0, .urgent: 0, .needsAction: 0, .security: 0,
-    .starred: 1, .receipts: 1, .topContacts: 1, .quietContacts: 1,
-    .newsletters: 2, .promotional: 2, .lowPriority: 2,
-    .unsafe: 3,
-]
+/// Buckets pinned to the front of the rail no matter how much mail they
+/// currently match — the always-watch buckets. Everything else ranks as a
+/// "magic" bucket: it only appears while it has mail, bubbling up by volume.
+nonisolated let permanentFilterIds: [BuiltinSmartFilter] = [.important, .shipping]
 
-/// Orders filters for display: group order first, then by current match count
-/// within the inbox. Consumes already-cached signals so ranking the rail never
-/// re-runs the classifier. Pure function over the given inputs.
+/// Orders the rail for display: permanent buckets first, then — ranked by how
+/// many inbox emails they currently match, empties hidden — the remaining
+/// buckets, and the exclusive Unsafe safety-valve pinned last. Consumes
+/// already-cached signals so ranking never re-runs the classifier. Pure
+/// function over the given inputs.
 nonisolated func rankFilters(
     inbox: [WinnowEmail],
     signals: [Int: EmailSignals],
@@ -69,13 +76,25 @@ nonisolated func rankFilters(
         }
     }
 
-    return builtinFilters.sorted { a, b in
-        let groupA = filterGroup[a.id] ?? 99
-        let groupB = filterGroup[b.id] ?? 99
-        if groupA != groupB { return groupA < groupB }
-        let countA = counts[a.id] ?? 0
-        let countB = counts[b.id] ?? 0
-        if countA != countB { return countA > countB }
-        return a.id.rawValue < b.id.rawValue
+    let byCatalogIndex: (BuiltinSmartFilter) -> Int = { id in
+        builtinFilters.firstIndex { $0.id == id } ?? builtinFilters.count
     }
+    let pinned: [BuiltinFilter] = permanentFilterIds.compactMap { id in
+        builtinFilters.first { $0.id == id }
+    }
+
+    // The "magic" buckets: everything else with mail in it right now, ordered
+    // by how much they currently catch so the busiest buckets surface first.
+    let magic = builtinFilters
+        .filter { !permanentFilterIds.contains($0.id) && $0.id != .unsafe }
+        .filter { (counts[$0.id] ?? 0) > 0 }
+        .sorted { a, b in
+            let countA = counts[a.id] ?? 0
+            let countB = counts[b.id] ?? 0
+            if countA != countB { return countA > countB }
+            return byCatalogIndex(a.id) < byCatalogIndex(b.id)
+        }
+
+    let unsafe = builtinFilters.first { $0.id == .unsafe }
+    return pinned + magic + [unsafe].compactMap { $0 }
 }

@@ -164,6 +164,59 @@ struct ScoreAndFilterTests {
         #expect(!matches(.quietContacts, email: Fixtures.email(sender: "busy@x.co"), sig: Fixtures.signals(), profile: profile))
     }
 
+    @Test func codesBucketFollowsItsSignalAndStaysSafe() {
+        #expect(matches(.codes, sig: Fixtures.signals(codes: true)))
+        #expect(!matches(.codes, sig: Fixtures.signals(spamLikelihood: 0.4, codes: true)))
+        #expect(!matches(.codes, sig: Fixtures.signals()))
+    }
+
+    @Test func shippingTravelAndEventsBucketsGateUnsafeMail() {
+        #expect(matches(.shipping, sig: Fixtures.signals(shipping: true)))
+        #expect(!matches(.shipping, sig: Fixtures.signals(spamLikelihood: 0.5, shipping: true)))
+
+        #expect(matches(.travel, sig: Fixtures.signals(travel: true)))
+        #expect(!matches(.travel, sig: Fixtures.signals(spamLikelihood: 0.5, travel: true)))
+
+        #expect(matches(.events, sig: Fixtures.signals(events: true)))
+        #expect(!matches(.events, sig: Fixtures.signals(spamLikelihood: 0.5, events: true)))
+    }
+
+    @Test func socialBucketFollowsItsSignalAndStaysSafe() {
+        #expect(matches(.social, sig: Fixtures.signals(social: true)))
+        #expect(!matches(.social, sig: Fixtures.signals(spamLikelihood: 0.5, social: true)))
+        #expect(!matches(.social, sig: Fixtures.signals()))
+    }
+
+    @Test func unreadBucketFollowsTheReadState() {
+        #expect(matches(.unread, email: Fixtures.email(unread: true), sig: Fixtures.signals()))
+        #expect(!matches(.unread, email: Fixtures.email(unread: false), sig: Fixtures.signals()))
+        #expect(!matches(.unread, email: Fixtures.email(unread: true), sig: Fixtures.signals(spamLikelihood: 0.4)))
+    }
+
+    @Test func attachmentsBucketNeedsACarriedFile() {
+        let attachment = EmailAttachment(id: "a1", partId: "p1", filename: "invoice.pdf", mimeType: "application/pdf", size: 42)
+        #expect(matches(.attachments, email: Fixtures.email(attachments: [attachment]), sig: Fixtures.signals()))
+        #expect(!matches(.attachments, email: Fixtures.email(), sig: Fixtures.signals()))
+        #expect(!matches(.attachments, email: Fixtures.email(attachments: [attachment]), sig: Fixtures.signals(spamLikelihood: 0.4)))
+    }
+
+    @Test func newContactsMirrorTheProfileList() {
+        let profile = Fixtures.profile(firstTimeSenders: ["cold@x.co"])
+        #expect(matches(.newSenders, email: Fixtures.email(sender: "cold@x.co"), sig: Fixtures.signals(), profile: profile))
+        #expect(!matches(.newSenders, email: Fixtures.email(sender: "known@x.co"), sig: Fixtures.signals(), profile: profile))
+    }
+
+    @Test func longReadsRequireSubstantiveLowUrgencyMail() {
+        #expect(matches(.longReads, sig: Fixtures.signals(longRead: true)))
+        #expect(!matches(.longReads, sig: Fixtures.signals(newsletter: true, longRead: true)))
+        #expect(!matches(.longReads, sig: Fixtures.signals(promotional: true, longRead: true)))
+        #expect(!matches(.longReads, sig: Fixtures.signals(urgentText: true, longRead: true)))
+        #expect(!matches(.longReads, sig: Fixtures.signals(security: true, longRead: true)))
+        #expect(!matches(.longReads, sig: Fixtures.signals(needsAction: true, longRead: true)))
+        #expect(!matches(.longReads, sig: Fixtures.signals(spamLikelihood: 0.4, longRead: true)))
+        #expect(!matches(.longReads, sig: Fixtures.signals()))
+    }
+
     @Test func senderFiltersMatchExactAddressesOnly() {
         #expect(matchesSmartFilter(filter: .sender("bob@x.co"), email: Fixtures.email(sender: "bob@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))
         #expect(!matchesSmartFilter(filter: .sender("BOB@X.CO"), email: Fixtures.email(sender: "bob@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))

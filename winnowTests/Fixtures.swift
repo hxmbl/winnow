@@ -19,7 +19,8 @@ enum Fixtures {
         type: String = "work",
         starred: Bool = false,
         urgent: Bool = false,
-        unread: Bool = false
+        unread: Bool = false,
+        attachments: [EmailAttachment] = []
     ) -> WinnowEmail {
         WinnowEmail(
             id: id,
@@ -32,19 +33,22 @@ enum Fixtures {
             type: type,
             starred: starred,
             urgent: urgent,
-            unread: unread
+            unread: unread,
+            attachments: attachments
         )
     }
 
     static func profile(
         trashBiasBySender: [String: Double] = [:],
         topSenders: [String] = [],
-        quietSenders: [String] = []
+        quietSenders: [String] = [],
+        firstTimeSenders: [String] = []
     ) -> UserProfile {
         UserProfile(
             trashBiasBySender: trashBiasBySender,
             topSenders: topSenders,
-            quietSenders: quietSenders
+            quietSenders: quietSenders,
+            firstTimeSenders: firstTimeSenders
         )
     }
 
@@ -56,7 +60,13 @@ enum Fixtures {
         needsAction: Bool = false,
         finance: Bool = false,
         spamLikelihood: Double = 0,
-        importanceScore: Int = 50
+        importanceScore: Int = 50,
+        codes: Bool = false,
+        shipping: Bool = false,
+        travel: Bool = false,
+        events: Bool = false,
+        social: Bool = false,
+        longRead: Bool = false
     ) -> EmailSignals {
         EmailSignals(
             security: security,
@@ -66,7 +76,13 @@ enum Fixtures {
             needsAction: needsAction,
             finance: finance,
             spamLikelihood: spamLikelihood,
-            importanceScore: importanceScore
+            importanceScore: importanceScore,
+            codes: codes,
+            shipping: shipping,
+            travel: travel,
+            events: events,
+            social: social,
+            longRead: longRead
         )
     }
 

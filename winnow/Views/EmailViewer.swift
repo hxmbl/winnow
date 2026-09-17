@@ -39,11 +39,7 @@ struct EmailViewer: View {
                     if !email.attachments.isEmpty {
                         incomingAttachmentSection
                     }
-                    Text(email.body)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    messageBody
                 }
                 .padding(24)
             }
@@ -130,6 +126,27 @@ struct EmailViewer: View {
             .help("Toggle read / unread (m)")
         }
         .padding(.bottom, 12)
+    }
+
+    // MARK: - Message body
+
+    /// Renders the message content: the sandboxed HTML reader when the email
+    /// carried a `text/html` part, otherwise the stripped plain-text body.
+    /// `.id` keyed per email so the web view (and its measured height) starts
+    /// fresh instead of briefly showing the previous message's dimensions.
+    private var messageBody: some View {
+        Group {
+            if let html = email.bodyHTML, !html.isEmpty {
+                EmailHTMLBodyView(html: html)
+            } else {
+                Text(email.body)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .id(email.id)
     }
 
     // MARK: - Incoming attachments

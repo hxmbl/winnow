@@ -169,7 +169,7 @@ final class WinnowStore {
     // MARK: - Derived data (cached, read-only)
 
     /// Rebuilt only when `inbox`/`trash` change.
-    private(set) var profile: UserProfile = UserProfile(trashBiasBySender: [:], topSenders: [], quietSenders: [])
+    private(set) var profile: UserProfile = UserProfile(trashBiasBySender: [:], topSenders: [], quietSenders: [], firstTimeSenders: [])
 
     /// Per-email classification, keyed by email id — one regex pass per input change.
     private(set) var emailSignals: [Int: EmailSignals] = [:]

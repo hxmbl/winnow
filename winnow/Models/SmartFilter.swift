@@ -8,9 +8,18 @@ enum BuiltinSmartFilter: String, CaseIterable {
     case security
     case needsAction = "needs_action"
     case receipts
+    case codes
+    case shipping
+    case travel
+    case events
+    case social
     case newsletters
     case promotional
     case lowPriority = "low_priority"
+    case longReads = "long_reads"
+    case unread
+    case attachments
+    case newSenders = "new_senders"
     case unsafe
     case topContacts = "top_contacts"
     case quietContacts = "quiet_contacts"

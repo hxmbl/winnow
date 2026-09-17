@@ -13,6 +13,18 @@ struct EmailSignals {
     var needsAction: Bool
     /// Transactional mail: invoices, receipts, payment and billing notices.
     var finance: Bool
+    /// One-time login / verification codes (OTP, 2FA) — distinct from `.security`.
+    var codes: Bool
+    /// Package tracking and delivery notifications.
+    var shipping: Bool
+    /// Flight, hotel, and itinerary correspondence.
+    var travel: Bool
+    /// Calendar invites, RSVPs, webinars, and meet-ups.
+    var events: Bool
+    /// Social-platform notifications (mentions, follows, friend requests).
+    var social: Bool
+    /// Substantive long-form mail, gated by body length.
+    var longRead: Bool
 
     /// 0…1 confidence the message is junk. At or above `unsafeThreshold`
     /// the message is treated as unsafe (see above).
@@ -32,7 +44,13 @@ struct EmailSignals {
         needsAction: Bool,
         finance: Bool,
         spamLikelihood: Double,
-        importanceScore: Int
+        importanceScore: Int,
+        codes: Bool = false,
+        shipping: Bool = false,
+        travel: Bool = false,
+        events: Bool = false,
+        social: Bool = false,
+        longRead: Bool = false
     ) {
         self.security = security
         self.newsletter = newsletter
@@ -42,6 +60,12 @@ struct EmailSignals {
         self.finance = finance
         self.spamLikelihood = spamLikelihood
         self.importanceScore = importanceScore
+        self.codes = codes
+        self.shipping = shipping
+        self.travel = travel
+        self.events = events
+        self.social = social
+        self.longRead = longRead
     }
 
     /// All-clear classification used when a cached signal is missing — the
@@ -62,6 +86,10 @@ extension EmailSignals {
         if needsAction && !newsletter { result.append(.needsAction) }
         if security { result.append(.security) }
         if finance && !isUnsafe { result.append(.receipts) }
+        if codes && !isUnsafe { result.append(.codes) }
+        if shipping && !isUnsafe { result.append(.shipping) }
+        if travel && !isUnsafe { result.append(.travel) }
+        if events && !isUnsafe { result.append(.events) }
         if newsletter { result.append(.newsletters) }
         if promotional { result.append(.promotional) }
         if isUnsafe { result.append(.unsafe) }
@@ -72,6 +100,9 @@ extension EmailSignals {
     /// uncluttered; the viewer shows the full set. Derived from `badgeFilters`
     /// rather than re-encoded, so thresholds can never drift between the two.
     var rowIndicators: [BuiltinSmartFilter] {
-        badgeFilters.filter { $0 != .needsAction && $0 != .receipts }
+        let rowHidden: Set<BuiltinSmartFilter> = [
+            .needsAction, .receipts, .codes, .shipping, .travel, .events,
+        ]
+        return badgeFilters.filter { !rowHidden.contains($0) }
     }
 }
