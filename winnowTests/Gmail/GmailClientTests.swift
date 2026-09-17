@@ -98,10 +98,118 @@ struct GmailClientTests {
                 return (200, Data(#"{"id":"sent-1","threadId":"t1"}"#.utf8))
             }
             let (client, _, _) = makeClient()
-            let mime = MIMEBuilder.build(OutgoingDraft(to: "ada@example.com", subject: "Hi", body: "Hello"))
+            let mime = try MIMEBuilder.build(OutgoingDraft(from: "me@example.com", to: "ada@example.com", subject: "Hi", body: "Hello"))
             let sent = try await client.send(GmailSendRequest(raw: Base64URL.encode(mime), threadId: "t1"))
             #expect(sent.id == "sent-1")
             #expect(decodedMIME?.contains("To: ada@example.com") == true)
+        }
+    }
+
+    @Test(arguments: [false, true]) func replyUsesAuthenticatedSenderAndOriginalThreading(withAttachment: Bool) async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.reply.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let (client, tokens, _) = makeClient()
+            let cache = try EmailCacheStore(inMemory: true)
+            let sync = GmailSyncEngine(client: client, cache: cache, defaults: defaults)
+            let store = WinnowStore(learning: LearningModel(defaults: defaults), defaults: defaults)
+            store.injectLiveBackendForTesting(.init(client: client, sync: sync, cache: cache, tokens: tokens))
+            let email = Fixtures.email(sender: "ada@example.com", subject: "re: Lunch")
+            try cache.upsert(email: email, gmailId: "original", threadId: "stale-thread")
+            var sent: GmailSendRequest?
+            StubURLProtocol.route { request in
+                switch request.url?.lastPathComponent {
+                case "profile":
+                    return (200, Data(#"{"emailAddress":"me@example.com","historyId":"42"}"#.utf8))
+                case "original":
+                    return (200, Data(#"{"id":"original","threadId":"actual-thread","payload":{"headers":[{"name":"Message-ID","value":"<parent@example.com>"},{"name":"References","value":"<root@example.com> <ancestor@example.com>"}]}}"#.utf8))
+                case "send":
+                    sent = try? JSONDecoder().decode(GmailSendRequest.self, from: StubURLProtocol.bodyData(of: request))
+                    return (200, Data(#"{"id":"sent","threadId":"actual-thread"}"#.utf8))
+                default:
+                    return (404, Data())
+                }
+            }
+            let attachments = withAttachment ? [URL(fileURLWithPath: #filePath)] : []
+            let outcome = await store.sendReply(to: email, body: "Reply body", attachmentURLs: attachments)
+            #expect(outcome == .sent)
+            #expect(sent?.threadId == "actual-thread")
+            let raw = String(decoding: try #require(sent.flatMap { Base64URL.decode($0.raw) }), as: UTF8.self)
+            #expect(raw.hasPrefix("From: me@example.com\r\nTo: ada@example.com\r\n"))
+            #expect(raw.contains("Subject: re: Lunch\r\n"))
+            #expect(raw.contains("In-Reply-To: <parent@example.com>\r\n"))
+            #expect(raw.contains("References: <root@example.com>\r\n <ancestor@example.com>\r\n <parent@example.com>\r\n"))
+            #expect(raw.contains(Data("Reply body".utf8).base64EncodedString()))
+            #expect(raw.contains("multipart/mixed") == withAttachment)
+            if withAttachment { #expect(raw.contains("filename=\"GmailClientTests.swift\"")) }
+            #expect(StubURLProtocol.requestCount(to: "/profile") == 1)
+            #expect(StubURLProtocol.requests.first { $0.url?.lastPathComponent == "original" }?.url?.query == "format=full")
+        }
+    }
+
+    @Test(arguments: ["profile-failure", "empty-from", "injected-from", "original-failure", "missing-id", "injected-references", "uncached"])
+    func replyFailsWithoutSendingWhenPrerequisitesAreInvalid(failure: String) async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.reply.failure.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let (client, tokens, _) = makeClient()
+            let cache = try EmailCacheStore(inMemory: true)
+            let sync = GmailSyncEngine(client: client, cache: cache, defaults: defaults)
+            let store = WinnowStore(learning: LearningModel(defaults: defaults), defaults: defaults)
+            store.injectLiveBackendForTesting(.init(client: client, sync: sync, cache: cache, tokens: tokens))
+            let email = Fixtures.email(sender: "ada@example.com")
+            if failure != "uncached" { try cache.upsert(email: email, gmailId: "original", threadId: "t1") }
+            StubURLProtocol.route { request in
+                switch request.url?.lastPathComponent {
+                case "profile":
+                    if failure == "profile-failure" { return (503, Data()) }
+                    let address = failure == "empty-from" ? "" : failure == "injected-from" ? "me@example.com\r\nBcc: other@example.com" : "me@example.com"
+                    return (200, try! JSONEncoder().encode(GmailProfile(emailAddress: address, historyId: "42", messagesTotal: nil)))
+                case "original":
+                    if failure == "original-failure" { return (404, Data()) }
+                    if failure == "missing-id" { return (200, Data(#"{"id":"original","threadId":"t1","payload":{"headers":[]}}"#.utf8)) }
+                    return (200, Data(#"{"id":"original","threadId":"t1","payload":{"headers":[{"name":"Message-ID","value":"<parent@example.com>"},{"name":"References","value":"<root@example.com>\r\nBcc: other@example.com"}]}}"#.utf8))
+                default:
+                    return (500, Data())
+                }
+            }
+            let outcome = await store.sendReply(to: email, body: "Reply", attachmentURLs: [])
+            if case .failed = outcome {} else { Issue.record("Expected a send failure") }
+            #expect(StubURLProtocol.requestCount(to: "/messages/send") == 0)
+            if failure == "uncached" { #expect(StubURLProtocol.requests.isEmpty) }
+        }
+    }
+
+    @Test(arguments: [200, 503])
+    func liveRefreshExposesProgressAndRejectsReentry(status: Int) async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.refresh.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("42", forKey: GmailSyncEngine.historyIDKey)
+            let (client, tokens, _) = makeClient()
+            let cache = try EmailCacheStore(inMemory: true)
+            let store = WinnowStore(learning: LearningModel(defaults: defaults), defaults: defaults)
+            store.injectLiveBackendForTesting(.init(client: client, sync: GmailSyncEngine(
+                client: client, cache: cache, defaults: defaults
+            ), cache: cache, tokens: tokens))
+            var observedProgress = false
+            StubURLProtocol.route { _ in
+                DispatchQueue.main.sync {
+                    observedProgress = store.isRefreshing && !store.loading
+                }
+                return (status, Data(#"{"historyId":"43"}"#.utf8))
+            }
+            let first = Task { await store.refresh() }
+            let second = Task { await store.refresh() }
+            await first.value
+            await second.value
+            #expect(observedProgress)
+            #expect(!store.isRefreshing)
+            #expect(StubURLProtocol.requestCount(to: "/history") == 1)
+            #expect((store.syncError == nil) == (status == 200))
         }
     }
 
@@ -211,7 +319,7 @@ struct GmailMapperMIMETests {
     // MARK: MIME
 
     @Test func simpleMessageBuildsValidRFC5322() throws {
-        let data = MIMEBuilder.build(OutgoingDraft(to: "ada@example.com", subject: "Hello", body: "Body text"))
+        let data = try MIMEBuilder.build(OutgoingDraft(from: "me@example.com", to: "ada@example.com", subject: "Hello", body: "Body text"))
         let raw = String(data: data, encoding: .utf8) ?? ""
         #expect(raw.contains("To: ada@example.com"))
         #expect(raw.contains("Subject: Hello"))
@@ -223,22 +331,23 @@ struct GmailMapperMIMETests {
         #expect(String(decoding: decoded ?? Data(), as: UTF8.self) == "Body text")
     }
 
-    @Test func nonASCIISubjectIsRFC2047Encoded() {
+    @Test func nonASCIISubjectIsRFC2047Encoded() throws {
         let raw = String(
-            decoding: MIMEBuilder.build(OutgoingDraft(to: "a@b.c", subject: "Café ☕", body: "x")),
+            decoding: try MIMEBuilder.build(OutgoingDraft(from: "me@example.com", to: "a@b.c", subject: "Café ☕", body: "x")),
             as: UTF8.self
         )
         #expect(raw.contains("Subject: =?UTF-8?B?"))
     }
 
-    @Test func attachmentsProduceMultipartMixedWithWrappedBase64() {
+    @Test func attachmentsProduceMultipartMixedWithWrappedBase64() throws {
         let draft = OutgoingDraft(
+            from: "me@example.com",
             to: "a@b.c",
             subject: "Files",
             body: "See attached",
             attachments: [OutgoingAttachment(filename: "report.pdf", mimeType: "application/pdf", data: Data(repeating: 0xAB, count: 200))]
         )
-        let raw = String(decoding: MIMEBuilder.build(draft), as: UTF8.self)
+        let raw = String(decoding: try MIMEBuilder.build(draft), as: UTF8.self)
         #expect(raw.contains("multipart/mixed; boundary="))
         #expect(raw.contains("filename=\"report.pdf\""))
         #expect(raw.contains("Content-Disposition: attachment"))

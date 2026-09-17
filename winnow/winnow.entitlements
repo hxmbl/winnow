@@ -13,9 +13,7 @@
 	     No LAN exposure — the endpoint is pinned to loopback in code. -->
 	<key>com.apple.security.network.server</key>
 	<true/>
-	<!-- Reply attachments via the file importer: read-only access to files the
-	     user explicitly picked. No blanket disk access. -->
-	<key>com.apple.security.files.user-selected.read-only</key>
+	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 </dict>
 </plist>

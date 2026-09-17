@@ -4,6 +4,8 @@ import SwiftUI
 /// picker; "Unsafe emails" jumps to that smart mailbox in the main window.
 struct SettingsView: View {
     @Bindable var store: WinnowStore
+    @State private var showSignOutConfirmation = false
+    @State private var showResetConfirmation = false
 
     // MARK: - Body
 
@@ -41,6 +43,11 @@ struct SettingsView: View {
                 Text("Winnow pings you when a refresh finds unread mail it hadn't shown yet (needs system notification permission).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let error = store.notificationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
                 NavigationLink {
                     BlockedSendersList(store: store)
                 } label: {
@@ -87,8 +94,19 @@ struct SettingsView: View {
                 }
 
                 LabeledContent {
-                    Button("Reset") { store.learning.resetAdjustments() }
+                    Button("Reset") { showResetConfirmation = true }
                         .disabled(store.learning.weights == SignalWeights.standard)
+                        .confirmationDialog(
+                            "Reset all learned adjustments?",
+                            isPresented: $showResetConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Reset", role: .destructive) {
+                                store.learning.resetAdjustments()
+                            }
+                        } message: {
+                            Text("This will reset all ML training weights to their defaults. This cannot be undone.")
+                        }
                 } label: {
                     Label("Learned adjustments", systemImage: "slider.horizontal.3")
                 }
@@ -109,7 +127,7 @@ struct SettingsView: View {
                 }
                 Button {
                     store.showUnsafe()
-                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.activate()
                 } label: {
                     Label("View unsafe emails", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
@@ -120,9 +138,20 @@ struct SettingsView: View {
 
             Section {
                 Button(role: .destructive) {
-                    store.signOut()
+                    showSignOutConfirmation = true
                 } label: {
                     Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+                .confirmationDialog(
+                    "Sign out of Winnow?",
+                    isPresented: $showSignOutConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Sign out", role: .destructive) {
+                        store.signOut()
+                    }
+                } message: {
+                    Text("This will clear your authentication tokens and cached mail. You'll need to sign in again.")
                 }
             }
         }

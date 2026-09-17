@@ -56,6 +56,25 @@ enum GmailMessageMapper {
         )
     }
 
+    nonisolated static func replyHeaders(from message: GmailMessage) throws -> (messageID: String, references: [String]) {
+        let headers = message.payload?.headers ?? []
+        let ids = try headers.filter { $0.name.lowercased() == "message-id" }.flatMap {
+            try MIMEBuilder.messageIDs(in: $0.value, name: "Message-ID")
+        }
+        guard ids.count == 1, let messageID = ids.first else { throw MIMEBuilder.BuildError.missingReplyMessageID }
+        let referenceHeaders = headers.filter { $0.name.lowercased() == "references" }
+        var references = try referenceHeaders.flatMap {
+            try MIMEBuilder.messageIDs(in: $0.value, name: "References")
+        }
+        if referenceHeaders.isEmpty {
+            let parents = try headers.filter { $0.name.lowercased() == "in-reply-to" }.flatMap {
+                try MIMEBuilder.messageIDs(in: $0.value, name: "In-Reply-To")
+            }
+            if parents.count == 1 { references = parents }
+        }
+        return (messageID, references)
+    }
+
     /// The mailbox a message lives in, per Gmail's label semantics.
     nonisolated static func mailbox(of message: GmailMessage) -> EmailMailbox {
         if message.hasLabel(GmailLabel.trash) { return .trash }
@@ -190,9 +209,11 @@ enum GmailMessageMapper {
     nonisolated static func stripHTML(_ html: String) -> String? {
         var text = html
         for tag in ["script", "style", "head"] {
-            if let range = text.range(of: "<\(tag)[\\s\\S]*?</\(tag)>", options: [.regularExpression, .caseInsensitive]) {
-                text.replaceSubrange(range, with: " ")
-            }
+            text = text.replacingOccurrences(
+                of: "<\(tag)[\\s\\S]*?</\(tag)>",
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
         }
         // Only a `<` that opens a real tag is markup; a prose comparison like
         // "3 < 5" has a space/ digit after the bracket and must survive.

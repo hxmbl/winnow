@@ -16,7 +16,9 @@ nonisolated private let intentRegexes: [(NSRegularExpression, Int)] = [
     (regex(#"\b(?:sale|discount|promo(?:tion)?|flash sale|\d+%\s*off)\b"#), -8),
     (regex(#"\b(?:unsubscribe|newsletter|weekly digest)\b"#), -10),
     // "due to arrive" is timing, not a past-due bill.
-    (regex(#"\b(?:past due|overdue|late fee|due(?!\s+to\b))\b"#), 10),
+    // Bare "due" only matches when preceded by "amount" or similar — plain
+    // "due tomorrow" must not trigger the past-due penalty.
+    (regex(#"\b(?:past due|overdue|late fee|amount due)\b"#), 10),
 ]
 
 /// Engagement bonus from a sender's standing in `topSenders`, expressed as a

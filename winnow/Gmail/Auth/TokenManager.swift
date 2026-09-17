@@ -62,8 +62,19 @@ final class TokenManager {
     /// in-flight refresh from the previous session.
     func adopt(_ tokens: TokenSet) {
         generation += 1
+        inflightRefresh = nil
+        lastError = nil
         cached = tokens
-        try? store.save(tokens)
+        do {
+            try store.save(tokens)
+        } catch {
+            // Token is in memory but won't survive a restart — surface so
+            // the user knows sign-in may not persist.
+            lastError = error
+            #if DEBUG
+            print("[token-manager] failed to save tokens to Keychain: \(error)")
+            #endif
+        }
     }
 
     /// Forgets everything: Keychain first, then memory. An in-flight refresh
@@ -73,7 +84,15 @@ final class TokenManager {
         generation += 1
         cached = nil
         inflightRefresh = nil
-        try? store.clear()
+        lastError = nil
+        do {
+            try store.clear()
+        } catch {
+            // Dead refresh token may persist on disk — log for diagnostics.
+            #if DEBUG
+            print("[token-manager] failed to clear Keychain: \(error)")
+            #endif
+        }
     }
 
     /// Returns an access token guaranteed valid for at least `expirySlack`.
@@ -95,30 +114,52 @@ final class TokenManager {
     private func refresh() async throws -> String {
         // Single-flight: the first caller creates the refresh task; concurrent
         // callers await the same task instead of stacking token requests.
+        let gen = generation
+        let task: Task<String, Error>
         if let inflight = inflightRefresh {
-            return try await inflight.value
+            task = inflight
+        } else {
+            task = Task<String, Error> { [weak self] in
+                guard let self else { throw GmailConfigError.reauthRequired }
+                guard gen == self.generation else { return try self.currentAccessToken() }
+                defer {
+                    if gen == self.generation {
+                        self.inflightRefresh = nil
+                    }
+                }
+                do {
+                    let token = try await self.performRefresh(generation: gen)
+                    if gen == self.generation {
+                        self.lastError = nil
+                    }
+                    return token
+                } catch {
+                    guard gen == self.generation else { return try self.currentAccessToken() }
+                    self.lastError = error
+                    throw error
+                }
+            }
+            inflightRefresh = task
         }
-        let task = Task<String, Error> { [weak self] in
-            guard let self else { throw GmailConfigError.reauthRequired }
-            return try await self.performRefresh()
-        }
-        inflightRefresh = task
-        defer { inflightRefresh = nil }
-        do {
-            return try await task.value
-        } catch {
-            lastError = error
-            throw error
-        }
+        let result = await task.result
+        guard gen == generation else { return try currentAccessToken() }
+        return try result.get()
     }
 
-    private func performRefresh() async throws -> String {
+    private func currentAccessToken() throws -> String {
+        guard let cached, cached.expiresAt.timeIntervalSince(now()) > expirySlack else {
+            throw GmailConfigError.reauthRequired
+        }
+        return cached.accessToken
+    }
+
+    private func performRefresh(generation gen: Int) async throws -> String {
         guard let tokens = cached, let refreshToken = tokens.refreshToken else {
             clear()
+            lastError = GmailConfigError.reauthRequired
             throw GmailConfigError.reauthRequired
         }
         let credentials = try credentialsProvider()
-        let gen = generation
 
         var request = URLRequest(url: Self.tokenURL)
         request.httpMethod = "POST"
@@ -134,6 +175,7 @@ final class TokenManager {
         request.httpBody = Self.formEncode(form)
 
         let (data, response) = try await session.data(for: request)
+        guard gen == generation else { return try currentAccessToken() }
         guard let http = response as? HTTPURLResponse else {
             throw GmailAPIError.transport("non-HTTP token response")
         }
@@ -153,6 +195,7 @@ final class TokenManager {
             // invalid_grant / revoked → the stored session is worthless.
             if http.statusCode == 400 || http.statusCode == 401 {
                 clear()
+                lastError = GmailConfigError.reauthRequired
                 throw GmailConfigError.reauthRequired
             }
             throw GmailAPIError.http(status: http.statusCode, bodySnippet: String(data: data.prefix(200), encoding: .utf8) ?? "")
@@ -186,7 +229,13 @@ final class TokenManager {
         }
 
         cached = updated
-        try? store.save(updated)
+        do {
+            try store.save(updated)
+        } catch {
+            #if DEBUG
+            print("[token-manager] failed to persist refreshed token: \(error)")
+            #endif
+        }
         return updated.accessToken
     }
 

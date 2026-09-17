@@ -59,6 +59,7 @@ final class WinnowStore {
     }
 
     var loading = false
+    var isRefreshing: Bool { loading || syncing }
 
     var inbox: [WinnowEmail] = mockInbox {
         didSet { rebuildAllDerived(previousInbox: oldValue) }
@@ -97,7 +98,34 @@ final class WinnowStore {
 
     /// User opt-in for new-email notifications (Settings).
     var notificationsEnabled = false {
-        didSet { defaults.set(notificationsEnabled, forKey: Self.notificationsEnabledKey) }
+        didSet {
+            defaults.set(notificationsEnabled, forKey: Self.notificationsEnabledKey)
+            updateNotificationAuthorization()
+        }
+    }
+    private(set) var notificationError: String?
+    @ObservationIgnored var requestNotificationAuthorization: () async throws -> Bool = {
+        try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+    }
+    @ObservationIgnored private var notificationAuthorizationTask: Task<Void, Never>?
+
+    private func updateNotificationAuthorization() {
+        notificationAuthorizationTask?.cancel()
+        notificationError = nil
+        guard notificationsEnabled else { return }
+        notificationAuthorizationTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let granted = try await requestNotificationAuthorization()
+                guard !Task.isCancelled, notificationsEnabled else { return }
+                if !granted {
+                    notificationError = "Notifications are disabled in System Settings. Allow notifications for Winnow to receive new-mail alerts."
+                }
+            } catch {
+                guard !Task.isCancelled, notificationsEnabled else { return }
+                notificationError = "Couldn't enable notifications: \(error.localizedDescription)"
+            }
+        }
     }
 
     var trash: [TrashRow] = mockTrash {
@@ -232,6 +260,9 @@ final class WinnowStore {
             MainActor.assumeIsolated {
                 self?.learning.flushPendingPersist()
             }
+        }
+        if !Self.isRunningUnderTestHost {
+            updateNotificationAuthorization()
         }
         if authed, !Self.isRunningUnderTestHost {
             Task { await restoreLiveSessionIfPossible() }
@@ -641,7 +672,13 @@ final class WinnowStore {
         let wasOpen = selectedEmailID == emailID
         let gmailID = liveBackend?.cache.gmailID(for: emailID)
         if let backend = liveBackend, let gmailID {
-            try? backend.cache.remove(gmailIds: [gmailID])
+            do {
+                try backend.cache.remove(gmailIds: [gmailID])
+            } catch {
+                #if DEBUG
+                print("[winnow] delete cache remove failed: \(error)")
+                #endif
+            }
             let client = backend.client
             let cache = backend.cache
             Task { [weak self] in
@@ -662,12 +699,18 @@ final class WinnowStore {
         guard containingMailbox(of: email.id) == nil else { return }
         let restored = email
         insertEmail(restored, into: .trash)
-        try? cache.upsert(
-            email: restored,
-            gmailId: gmailID,
-            threadId: cache.threadID(for: email.id) ?? "",
-            mailbox: .trash
-        )
+        do {
+            try cache.upsert(
+                email: restored,
+                gmailId: gmailID,
+                threadId: cache.threadID(for: email.id) ?? "",
+                mailbox: .trash
+            )
+        } catch {
+            #if DEBUG
+            print("[winnow] rollback cache upsert failed: \(error)")
+            #endif
+        }
         if wasOpen {
             openEmail(email.id)
         } else if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
@@ -686,7 +729,7 @@ final class WinnowStore {
         serverCall: @escaping (GmailClient, String) async throws -> Void
     ) {
         guard let source = containingMailbox(of: emailID), source != destination else { return }
-        var email = removeEmail(emailID, from: source)!
+        guard var email = removeEmail(emailID, from: source) else { return }
         let wasOpen = selectedEmailID == emailID
         let gmailID = liveBackend?.cache.gmailID(for: emailID)
 
@@ -697,7 +740,13 @@ final class WinnowStore {
         email.unread = false
         insertEmail(email, into: destination)
         if let backend = liveBackend {
-            try? backend.cache.setMailbox(numericId: email.id, mailbox: destination.emailMailbox)
+            do {
+                try backend.cache.setMailbox(numericId: email.id, mailbox: destination.emailMailbox)
+            } catch {
+                #if DEBUG
+                print("[winnow] relocate cache setMailbox failed: \(error)")
+                #endif
+            }
         }
 
         if let backend = liveBackend, let gmailID {
@@ -736,12 +785,18 @@ final class WinnowStore {
         var restored = email
         restored.unread = true
         insertEmail(restored, into: source)
-        try? cache.upsert(
-            email: restored,
-            gmailId: gmailID,
-            threadId: cache.threadID(for: email.id) ?? "",
-            mailbox: source.emailMailbox
-        )
+        do {
+            try cache.upsert(
+                email: restored,
+                gmailId: gmailID,
+                threadId: cache.threadID(for: email.id) ?? "",
+                mailbox: source.emailMailbox
+            )
+        } catch {
+            #if DEBUG
+            print("[winnow] rollback relocation cache upsert failed: \(error)")
+            #endif
+        }
         if wasOpen {
             openEmail(email.id)
         } else if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
@@ -783,7 +838,13 @@ final class WinnowStore {
         email.unread = unread
         setEmail(email, in: mailbox)
         if let backend = liveBackend, let gmailID = backend.cache.gmailID(for: emailID) {
-            try? backend.cache.setUnread(numericId: emailID, unread: unread)
+            do {
+                try backend.cache.setUnread(numericId: emailID, unread: unread)
+            } catch {
+                #if DEBUG
+                print("[winnow] setUnread cache failed: \(error)")
+                #endif
+            }
             let client = backend.client
             Task { [weak self] in
                 do {
@@ -925,7 +986,13 @@ final class WinnowStore {
         setEmail(now, in: mailbox)
 
         if let backend = liveBackend, let gmailID = backend.cache.gmailID(for: emailID) {
-            try? backend.cache.setStarred(numericId: emailID, starred: nowStarred)
+            do {
+                try backend.cache.setStarred(numericId: emailID, starred: nowStarred)
+            } catch {
+                #if DEBUG
+                print("[winnow] setStarred cache failed: \(error)")
+                #endif
+            }
             let labels: [String] = nowStarred ? [GmailLabel.starred] : []
             let removals: [String] = nowStarred ? [] : [GmailLabel.starred]
             Task { [weak self] in
@@ -957,14 +1024,24 @@ final class WinnowStore {
     func sendReply(to email: WinnowEmail, body: String, attachmentURLs: [URL]) async -> SendOutcome {
         guard let backend = liveBackend else { return .demo }
         do {
-            let threadID = backend.cache.threadID(for: email.id).flatMap { $0.isEmpty ? nil : $0 }
+            guard let gmailID = backend.cache.gmailID(for: email.id) else {
+                return .failed("Cannot reply: the original Gmail message is no longer cached. Refresh and try again.")
+            }
+            let account = try await backend.client.profile()
+            try MIMEBuilder.validateAddress(account.emailAddress, name: "From")
+            let original = try await backend.client.message(id: gmailID)
+            guard original.id == gmailID, let threadID = original.threadId, !threadID.isEmpty else {
+                return .failed("Cannot reply: the original Gmail thread is unavailable.")
+            }
+            let headers = try GmailMessageMapper.replyHeaders(from: original)
             let draft = OutgoingDraft(
+                from: account.emailAddress,
                 to: email.displayAddress,
-                subject: email.subject.hasPrefix("Re:") ? email.subject : "Re: " + email.subject,
+                subject: email.subject.lowercased().hasPrefix("re:") ? email.subject : "Re: " + email.subject,
                 body: body,
-                attachments: [],
                 threadID: threadID,
-                inReplyToMessageID: nil
+                inReplyToMessageID: headers.messageID,
+                references: headers.references
             )
             let mime = try await Task.detached(priority: .userInitiated) { () -> Data in
                 let attachments = try attachmentURLs.map { url -> OutgoingAttachment in
@@ -977,8 +1054,14 @@ final class WinnowStore {
                         data: data
                     )
                 }
-                return MIMEBuilder.build(OutgoingDraft(to: draft.to, subject: draft.subject, body: draft.body, attachments: attachments, threadID: draft.threadID, inReplyToMessageID: nil))
+                var completedDraft = draft
+                completedDraft.attachments = attachments
+                return try MIMEBuilder.build(completedDraft)
             }.value
+            try Task.checkCancellation()
+            guard liveBackend?.client === backend.client, backend.tokens.hasSession else {
+                return .failed("Your Google session changed. Try again after signing in.")
+            }
             _ = try await backend.client.send(GmailSendRequest(raw: Base64URL.encode(mime), threadId: threadID))
             return .sent
         } catch {
@@ -1057,9 +1140,11 @@ final class WinnowStore {
             // pressed Cancel; any late-completing browser flow stays dormant
             // in the Keychain for the next launch to restore.
             guard !Task.isCancelled else { return }
+            // Set authed first so any concurrent code that checks mode sees
+            // live mode before the backend reference appears.
+            authed = true
             liveBackend = backend
             adopt(snapshot)
-            authed = true
             defaults.set(true, forKey: Self.authDefaultsKey)
             if backend.sync.lastSyncFailureCount > 0 {
                 syncError = Self.syncFailureSummary(backend.sync.lastSyncFailureCount)
@@ -1141,7 +1226,13 @@ final class WinnowStore {
         isClassifyingInBackground = false
         if let backend = liveBackend {
             backend.tokens.clear()
-            try? backend.cache.wipe()
+            do {
+                try backend.cache.wipe()
+            } catch {
+                #if DEBUG
+                print("[winnow] sign-out cache wipe failed: \(error)")
+                #endif
+            }
         }
         liveBackend = nil
         lastAuthError = nil
@@ -1156,7 +1247,8 @@ final class WinnowStore {
         inbox = mockInbox
         archived = []
         trashed = []
-        blockedSenders = []
+        // blockedSenders is a user preference — preserve across sign-out so
+        // re-signing into the same account keeps the block list intact.
         mailbox = .inbox
         trash = mockTrash
         activeFilters = []
@@ -1194,9 +1286,10 @@ final class WinnowStore {
             }
             return
         }
+        guard !loading else { return }
         loading = true
+        defer { loading = false }
         try? await Task.sleep(nanoseconds: 500_000_000)
-        loading = false
     }
 
     /// Replaces the three mailbox lists with a fresh server snapshot.

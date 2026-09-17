@@ -9,6 +9,7 @@ struct OutgoingAttachment: Equatable {
 
 /// A fully-formed outgoing message before MIME assembly.
 struct OutgoingDraft: Equatable {
+    var from: String
     var to: String
     var subject: String
     var body: String
@@ -18,6 +19,7 @@ struct OutgoingDraft: Equatable {
     /// Raw `Message-ID` of the message being replied to; emitted as
     /// `In-Reply-To`/`References` so threading survives outside Gmail too.
     var inReplyToMessageID: String?
+    var references: [String] = []
 }
 
 /// Assembles RFC 5322 messages for `messages.send`.
@@ -31,21 +33,44 @@ struct OutgoingDraft: Equatable {
 /// - The caller base64url-encodes the finished message once for the API
 ///   envelope (`GmailSendRequest.raw`).
 enum MIMEBuilder {
+    enum BuildError: LocalizedError, Equatable {
+        case invalidHeader(String)
+        case missingReplyMessageID
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidHeader(let name): return "Cannot send: invalid \(name) header."
+            case .missingReplyMessageID: return "Cannot reply: the original message has no valid Message-ID."
+            }
+        }
+    }
+
     nonisolated static func messageID() -> String {
         "<\(UUID().uuidString.lowercased())@winnow.local>"
     }
 
-    nonisolated static func build(_ draft: OutgoingDraft, messageID: String = MIMEBuilder.messageID(), sentAt: Date = Date()) -> Data {
+    nonisolated static func build(_ draft: OutgoingDraft, messageID: String = MIMEBuilder.messageID(), sentAt: Date = Date()) throws -> Data {
+        try validateAddress(draft.from, name: "From")
+        try validateAddress(draft.to, name: "To")
+        try validateHeader(draft.subject, name: "Subject")
+        guard isMessageID(messageID) else { throw BuildError.invalidHeader("Message-ID") }
         let boundary = "=_winnow_\(UUID().uuidString.lowercased())"
         var lines: [String] = []
 
+        lines.append("From: \(draft.from)")
         lines.append("To: \(draft.to)")
         lines.append("Subject: \(encodeHeaderValue(draft.subject))")
         lines.append("Date: \(formatDate(sentAt))")
         lines.append("Message-ID: \(messageID)")
         if let inReplyTo = draft.inReplyToMessageID {
+            guard isMessageID(inReplyTo) else { throw BuildError.invalidHeader("In-Reply-To") }
+            guard draft.references.allSatisfy(isMessageID) else { throw BuildError.invalidHeader("References") }
+            var seen: Set<String> = []
+            let references = (draft.references.filter { $0 != inReplyTo } + [inReplyTo]).filter { seen.insert($0).inserted }
             lines.append("In-Reply-To: \(inReplyTo)")
-            lines.append("References: \(inReplyTo)")
+            lines.append("References: \(references.joined(separator: "\r\n "))")
+        } else if draft.threadID != nil || !draft.references.isEmpty {
+            throw BuildError.missingReplyMessageID
         }
         lines.append("MIME-Version: 1.0")
 
@@ -63,6 +88,10 @@ enum MIMEBuilder {
             lines.append("")
             lines.append(wrapBase64(Base64URL.plainBase64(Data(draft.body.utf8))))
             for attachment in draft.attachments {
+                try validateHeader(attachment.mimeType, name: "Content-Type")
+                guard attachment.mimeType.range(of: #"\A[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+\z"#, options: .regularExpression) != nil else {
+                    throw BuildError.invalidHeader("Content-Type")
+                }
                 lines.append("--\(boundary)")
                 lines.append("Content-Type: \(attachment.mimeType); name=\"\(sanitizeFilename(attachment.filename))\"")
                 lines.append("Content-Disposition: attachment; filename=\"\(sanitizeFilename(attachment.filename))\"")
@@ -74,6 +103,38 @@ enum MIMEBuilder {
         }
 
         return Data(lines.joined(separator: "\r\n").utf8)
+    }
+
+    nonisolated static func validateHeader(_ value: String, name: String) throws {
+        guard !value.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
+            throw BuildError.invalidHeader(name)
+        }
+    }
+
+    nonisolated static func validateAddress(_ value: String, name: String) throws {
+        try validateHeader(value, name: name)
+        guard value.range(of: #"\A[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\z"#, options: .regularExpression) != nil else {
+            throw BuildError.invalidHeader(name)
+        }
+    }
+
+    nonisolated static func isMessageID(_ value: String) -> Bool {
+        guard value.utf8.count <= 900, value.hasPrefix("<"), value.hasSuffix(">") else { return false }
+        let inner = value.dropFirst().dropLast()
+        let parts = inner.split(separator: "@", omittingEmptySubsequences: false)
+        return parts.count == 2 && parts.allSatisfy { !$0.isEmpty } && inner.unicodeScalars.allSatisfy {
+            $0.value > 32 && $0.value < 127 && !"<>\\\"()[]".unicodeScalars.contains($0)
+        }
+    }
+
+    nonisolated static func messageIDs(in value: String, name: String) throws -> [String] {
+        let unfolded = value.replacingOccurrences(of: "\r\n[ \t]+", with: " ", options: .regularExpression)
+        guard !unfolded.contains("\r"), !unfolded.contains("\n") else {
+            throw BuildError.invalidHeader(name)
+        }
+        let ids = unfolded.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        guard ids.allSatisfy(isMessageID) else { throw BuildError.invalidHeader(name) }
+        return ids
     }
 
     // MARK: - Helpers
@@ -134,7 +195,10 @@ enum MIMEBuilder {
 
     /// Quotes/escapes that could break out of a Content-Disposition filename.
     nonisolated static func sanitizeFilename(_ name: String) -> String {
-        name.replacingOccurrences(of: "\"", with: "'").replacingOccurrences(of: "\r", with: "").replacingOccurrences(of: "\n", with: "")
+        String(name.unicodeScalars.filter { $0.value >= 32 && $0.value != 127 })
+            .replacingOccurrences(of: "\\", with: "_")
+            .replacingOccurrences(of: "\"", with: "'")
+            .replacingOccurrences(of: ";", with: "_")
     }
 }
 

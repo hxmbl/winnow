@@ -88,24 +88,44 @@ final class GmailSyncEngine {
 
     private func syncAllMailboxes() async throws {
         lastSyncFailureCount = 0
+        defaults.removeObject(forKey: Self.historyIDKey)
+        let historyID = try await client.profile().historyId
         var seenIDs = Set<String>()
+        var fetchedIDs = Set<String>()
+        var hasTruncatedMailbox = false
 
-        for (_, query, cap) in [
-            (EmailMailbox.inbox, self.query, Int.max),
-            (EmailMailbox.archive, archiveQuery, broadMailboxCap),
-            (EmailMailbox.trash, "in:trash", broadMailboxCap),
+        for (query, cap) in [
+            (self.query, Int.max),
+            (archiveQuery, broadMailboxCap),
+            ("in:trash", broadMailboxCap),
         ] {
             var stubs: [GmailMessageStub] = []
             var pageToken: String?
             var collected = 0
+            var pageCount = 0
+            let maxPages = 200
             repeat {
-                let page = try await client.listMessages(query: query, pageToken: pageToken)
+                pageCount += 1
+                guard pageCount <= maxPages else {
+                    #if DEBUG
+                    print("[gmail-sync] pagination guard: exceeded \(maxPages) pages on query \"\(query)\"")
+                    #endif
+                    break
+                }
+                let page = try await client.listMessages(
+                    query: query,
+                    pageToken: pageToken,
+                    maxResults: min(GmailClient.maxPageSize, cap - collected)
+                )
                 if let messages = page.messages {
                     stubs.append(contentsOf: messages)
                     collected += messages.count
                 }
                 pageToken = page.nextPageToken
-                if collected >= cap { pageToken = nil }
+                if collected >= cap {
+                    if pageToken != nil { hasTruncatedMailbox = true }
+                    pageToken = nil
+                }
             } while pageToken != nil
 
             var batch: [SyncItem] = []
@@ -115,21 +135,35 @@ final class GmailSyncEngine {
                 try cache.upsertAll(batch.map { (email: $0.email, gmailId: $0.gmailId, threadId: $0.threadId, mailbox: $0.mailbox) })
                 batch.removeAll(keepingCapacity: true)
             }
-            for stub in stubs {
-                seenIDs.insert(stub.id)
-                if case .success(let item) = await fetch(id: stub.id, threadId: stub.threadId) {
+            for stub in stubs where fetchedIDs.insert(stub.id).inserted {
+                switch await fetch(id: stub.id, threadId: stub.threadId) {
+                case .success(let item):
+                    seenIDs.insert(stub.id)
                     batch.append(item)
                     if batch.count >= batchSize { try flush() }
+                case .missing:
+                    break
+                case .failed:
+                    seenIDs.insert(stub.id)
                 }
             }
             try flush()
+        }
+
+        if hasTruncatedMailbox {
+            for id in try cache.gmailIDs().subtracting(fetchedIDs) {
+                try await refetchAndStore(id: id, threadId: nil)
+                seenIDs.insert(id)
+            }
         }
 
         // Anything in the cache that no longer exists in ANY tracked view has
         // been permanently deleted (or moved to SENT/DRAFTS/etc.) — drop it.
         try cache.keepOnly(gmailIds: seenIDs)
 
-        await recordHistoryID()
+        if lastSyncFailureCount == 0 {
+            defaults.set(historyID, forKey: Self.historyIDKey)
+        }
     }
 
     // MARK: - Incremental sync
@@ -143,12 +177,25 @@ final class GmailSyncEngine {
 
         do {
             var pageToken: String?
+            var historyID = startHistoryID
+            var pageCount = 0
+            let maxPages = 200
             repeat {
+                pageCount += 1
+                guard pageCount <= maxPages else {
+                    #if DEBUG
+                    print("[gmail-sync] incremental pagination guard: exceeded \(maxPages) pages")
+                    #endif
+                    break
+                }
                 let page = try await client.historyList(startHistoryID: startHistoryID, pageToken: pageToken)
                 try await apply(page.history ?? [])
                 pageToken = page.nextPageToken
-                defaults.set(page.historyId, forKey: Self.historyIDKey)
+                historyID = page.historyId
             } while pageToken != nil
+            if lastSyncFailureCount == 0 {
+                defaults.set(historyID, forKey: Self.historyIDKey)
+            }
         } catch GmailAPIError.http(let status, _) where status == 404 {
             // History cursor older than Google retains → full rebuild.
             try await syncAllMailboxes()
@@ -195,6 +242,10 @@ final class GmailSyncEngine {
     private func fetch(id: String, threadId: String?) async -> FetchResult {
         do {
             let message = try await client.message(id: id)
+            if !message.hasLabel(GmailLabel.inbox) && !message.hasLabel(GmailLabel.trash),
+               ["SENT", "DRAFT", "SPAM"].contains(where: message.hasLabel) {
+                return .missing
+            }
             // The mapper now maps trash too; bucket is decided by labels.
             guard let email = GmailMessageMapper.winnowEmail(from: message) else { return .missing }
             return .success(SyncItem(
@@ -227,15 +278,10 @@ final class GmailSyncEngine {
                 mailbox: item.mailbox
             )
         case .missing:
-            try? cache.remove(gmailIds: [id])
+            try cache.remove(gmailIds: [id])
         case .failed:
             break
         }
     }
 
-    private func recordHistoryID() async {
-        if let profile = try? await client.profile() {
-            defaults.set(profile.historyId, forKey: Self.historyIDKey)
-        }
-    }
 }

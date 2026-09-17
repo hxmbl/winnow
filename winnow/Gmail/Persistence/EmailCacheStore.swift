@@ -116,6 +116,9 @@ final class EmailCacheStore {
     /// Creates the container, recovering from a stale or corrupt store: the
     /// failed file is removed (with its SQLite WAL/SHM sidecars) and a fresh
     /// empty store is created in its place.
+    ///
+    /// Only schema/load errors trigger a purge — transient failures like disk-full
+    /// or file locks are surfaced to the caller so the sync engine can retry.
     private static func loadContainer(_ configuration: ModelConfiguration) throws -> ModelContainer {
         do {
             return try ModelContainer(for: StoredEmail.self, configurations: configuration)
@@ -123,6 +126,21 @@ final class EmailCacheStore {
             // In-memory containers own no store file — if one ever fails there
             // is nothing to purge, so surface the error.
             guard !configuration.isStoredInMemoryOnly else { throw error }
+
+            let nsError = error as NSError
+            // Only purge on schema mismatch or corrupt-store errors — NOT on
+            // disk-full (NSPOSIXErrorDomain code 28), permissions (code 13),
+            // or file-locked (EBUSY) conditions where the files are still valid.
+            let isSchemaError = nsError.domain.contains("SwiftData")
+                || nsError.domain.contains("CoreData")
+                || nsError.code == 134100   // Core Data model incompatibility
+                || nsError.code == 134110   // persistent store store-level error
+                || nsError.code == 134130   // migration error
+            guard isSchemaError else { throw error }
+
+            #if DEBUG
+            print("[email-cache] purging stale store: \(error)")
+            #endif
             purgeStoreFiles(at: configuration.url)
             return try ModelContainer(for: StoredEmail.self, configurations: configuration)
         }
@@ -238,6 +256,10 @@ final class EmailCacheStore {
             }
         }
         try context.save()
+    }
+
+    func gmailIDs() throws -> Set<String> {
+        Set(try context.fetch(FetchDescriptor<StoredEmail>()).map(\.gmailId))
     }
 
     /// Deletes every cached message whose gmail id is absent from the set —

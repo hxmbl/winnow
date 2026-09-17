@@ -138,10 +138,13 @@ final class KeybindEngine {
     /// Keys the canvas does not own must still survive:
     /// - Sign-in screen and any live text field keep their keys.
     /// - ⌘/⌃/⌥ combos belong to system and menu shortcuts.
+    /// - Shift+letter is normal typing (uppercase) and must pass through.
     /// - F-keys arrive with `.function`, so they keep their system meaning.
     nonisolated static func shouldPassThrough(context: Context, modifiers: UInt = 0) -> Bool {
         if !context.authed || context.textEditing { return true }
-        let flags = NSEvent.ModifierFlags(rawValue: modifiers).subtracting(.shift)
+        // Shift alone is normal typing (uppercase letters, #, ?) — let it through
+        // so users can type capital letters without the event being swallowed.
+        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
         return !flags.intersection(.deviceIndependentFlagsMask).isEmpty
     }
 

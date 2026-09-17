@@ -94,6 +94,7 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { dismissEmail() }
                 EmailViewer(email: email, store: store)
+                    .id(email.id)
                     // Two frames: cap width on large windows, stay fluid below.
                     .frame(maxWidth: 1000)
                     .frame(maxWidth: .infinity)
@@ -128,12 +129,12 @@ struct ContentView: View {
             }
             ToolbarItem {
                 Button { Task { await store.refresh() } } label: {
-                    if store.loading { ProgressView().controlSize(.small) }
+                    if store.isRefreshing { ProgressView().controlSize(.small) }
                     else { Image(systemName: "arrow.clockwise") }
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 .help("Refresh inbox")
-                .disabled(store.loading)
+                .disabled(store.isRefreshing)
             }
         }
     }

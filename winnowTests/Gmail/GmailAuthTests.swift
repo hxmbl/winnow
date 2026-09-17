@@ -176,6 +176,185 @@ struct GmailAuthTests {
         }
     }
 
+    private func beginRefresh(_ manager: TokenManager) async -> Task<String, Error> {
+        let (started, continuation) = AsyncStream<Void>.makeStream()
+        let task = Task {
+            continuation.yield(())
+            return try await manager.forceRefresh()
+        }
+        for await _ in started { break }
+        return task
+    }
+
+    @Test(.timeLimit(.minutes(1))) func concurrentRefreshesShareOneRequestEvenIfAWaiterIsCancelled() async throws {
+        try await StubURLProtocol.exclusive {
+            let requests = PausedTokenRequests(expectedCount: 2)
+            let session = URLSession(configuration: PausedTokenURLProtocol.config(requests))
+            defer { session.invalidateAndCancel() }
+            let store = InMemoryTokenStore()
+            let manager = self.makeManager(store: store, session: session)
+            manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: .distantPast, scope: nil))
+
+            let first = await beginRefresh(manager)
+            let request = try await requests.next()
+            let second = await beginRefresh(manager)
+            let cancelled = await beginRefresh(manager)
+            cancelled.cancel()
+            request.complete(status: 200)
+
+            #expect(try await first.value == "refreshed")
+            #expect(try await second.value == "refreshed")
+            #expect(try await cancelled.value == "refreshed")
+            #expect(requests.count == 1)
+            #expect(store.saveCount == 2)
+            #expect(manager.lastError == nil)
+
+            let forced = await beginRefresh(manager)
+            let next = try await requests.next()
+            next.complete(status: 200)
+            #expect(try await forced.value == "refreshed")
+            #expect(requests.count == 2)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [400, 401, 500, 200, -1])
+    func adoptDuringRefreshDiscardsStaleErrors(status: Int) async throws {
+        try await StubURLProtocol.exclusive {
+            let requests = PausedTokenRequests(expectedCount: 1)
+            let session = URLSession(configuration: PausedTokenURLProtocol.config(requests))
+            defer { session.invalidateAndCancel() }
+            let store = InMemoryTokenStore()
+            let manager = self.makeManager(store: store, session: session)
+            manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: .distantPast, scope: nil))
+
+            let first = await beginRefresh(manager)
+            let request = try await requests.next()
+            let joined = await beginRefresh(manager)
+            manager.adopt(TokenSet(accessToken: "new-session", refreshToken: "r2", expiresAt: .distantFuture, scope: nil))
+            request.complete(status: status, body: Data("invalid response".utf8))
+
+            #expect(try await first.value == "new-session")
+            #expect(try await joined.value == "new-session")
+            #expect(try await manager.validAccessToken() == "new-session")
+            #expect(try store.load()?.refreshToken == "r2")
+            #expect(store.saveCount == 2)
+            #expect(store.clearCount == 0)
+            #expect(manager.lastError == nil)
+            #expect(requests.count == 1)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [400, 401, 500, 200, -1])
+    func clearDuringRefreshDiscardsStaleErrors(status: Int) async throws {
+        try await StubURLProtocol.exclusive {
+            let requests = PausedTokenRequests(expectedCount: 1)
+            let session = URLSession(configuration: PausedTokenURLProtocol.config(requests))
+            defer { session.invalidateAndCancel() }
+            let store = InMemoryTokenStore()
+            let manager = self.makeManager(store: store, session: session)
+            manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: .distantPast, scope: nil))
+
+            let first = await beginRefresh(manager)
+            let request = try await requests.next()
+            let joined = await beginRefresh(manager)
+            manager.clear()
+            request.complete(status: status, body: Data("invalid response".utf8))
+
+            await #expect(throws: GmailConfigError.reauthRequired) { try await first.value }
+            await #expect(throws: GmailConfigError.reauthRequired) { try await joined.value }
+            #expect(!manager.hasSession)
+            #expect(try store.load() == nil)
+            #expect(store.clearCount == 1)
+            #expect(manager.lastError == nil)
+            #expect(requests.count == 1)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true], [200, 400, 500, -1])
+    func staleCompletionCannotDetachANewerRefresh(clearFirst: Bool, status: Int) async throws {
+        try await StubURLProtocol.exclusive {
+            let requests = PausedTokenRequests(expectedCount: 2)
+            let session = URLSession(configuration: PausedTokenURLProtocol.config(requests))
+            defer { session.invalidateAndCancel() }
+            let store = InMemoryTokenStore()
+            let manager = self.makeManager(store: store, session: session)
+            manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: .distantPast, scope: nil))
+
+            let old = await beginRefresh(manager)
+            let oldRequest = try await requests.next()
+            if clearFirst { manager.clear() }
+            manager.adopt(TokenSet(accessToken: "new", refreshToken: "r2", expiresAt: .distantPast, scope: nil))
+            let current = await beginRefresh(manager)
+            let currentRequest = try await requests.next()
+            oldRequest.complete(status: status)
+            await #expect(throws: GmailConfigError.reauthRequired) { try await old.value }
+            #expect(manager.lastError == nil)
+
+            let joined = await beginRefresh(manager)
+            currentRequest.complete(status: 200)
+            #expect(try await current.value == "refreshed")
+            #expect(try await joined.value == "refreshed")
+            #expect(requests.count == 2)
+            #expect(store.saveCount == 3)
+            #expect(store.clearCount == (clearFirst ? 1 : 0))
+            #expect(try store.load()?.refreshToken == "r2")
+            #expect(manager.lastError == nil)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func staleFailureCannotOverwriteTheCurrentRefreshError() async throws {
+        try await StubURLProtocol.exclusive {
+            let requests = PausedTokenRequests(expectedCount: 2)
+            let session = URLSession(configuration: PausedTokenURLProtocol.config(requests))
+            defer { session.invalidateAndCancel() }
+            let manager = self.makeManager(store: InMemoryTokenStore(), session: session)
+            manager.adopt(TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: .distantPast, scope: nil))
+            let old = await beginRefresh(manager)
+            let oldRequest = try await requests.next()
+
+            manager.clear()
+            manager.adopt(TokenSet(accessToken: "new", refreshToken: "r2", expiresAt: .distantPast, scope: nil))
+            let current = await beginRefresh(manager)
+            let currentRequest = try await requests.next()
+            currentRequest.complete(status: 503, body: Data())
+            await #expect(throws: GmailAPIError.http(status: 503, bodySnippet: "")) { try await current.value }
+            oldRequest.complete(status: 500, body: Data())
+            await #expect(throws: GmailConfigError.reauthRequired) { try await old.value }
+            #expect(manager.lastError as? GmailAPIError == .http(status: 503, bodySnippet: ""))
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func successfulRefreshAndLifecycleChangesResetLastError() async throws {
+        try await StubURLProtocol.exclusive {
+            let requests = PausedTokenRequests(expectedCount: 4)
+            let session = URLSession(configuration: PausedTokenURLProtocol.config(requests))
+            defer { session.invalidateAndCancel() }
+            let manager = self.makeManager(store: InMemoryTokenStore(), session: session)
+            let tokens = TokenSet(accessToken: "old", refreshToken: "r1", expiresAt: .distantPast, scope: nil)
+            manager.adopt(tokens)
+
+            for recovery in 0..<3 {
+                let failed = await beginRefresh(manager)
+                let request = try await requests.next()
+                request.complete(status: 500, body: Data())
+                await #expect(throws: GmailAPIError.http(status: 500, bodySnippet: "")) { try await failed.value }
+                #expect(manager.lastError as? GmailAPIError == .http(status: 500, bodySnippet: ""))
+                if recovery == 0 {
+                    let succeeded = await beginRefresh(manager)
+                    let retry = try await requests.next()
+                    retry.complete(status: 200)
+                    #expect(try await succeeded.value == "refreshed")
+                } else if recovery == 1 {
+                    manager.adopt(tokens)
+                } else {
+                    manager.clear()
+                }
+                #expect(manager.lastError == nil)
+            }
+            #expect(requests.count == 4)
+        }
+    }
+
     @Test func revokedRefreshTokenClearsTheSessionAndDemandsReauth() async throws {
         try await StubURLProtocol.exclusive {
             StubURLProtocol.route { _ in (400, Data(#"{"error":"invalid_grant"}"#.utf8)) }
@@ -237,6 +416,106 @@ struct GmailAuthTests {
 
         try store.clear()
         #expect(try store.load() == nil)
+    }
+}
+
+private struct PausedTokenRequest: @unchecked Sendable {
+    let protocolInstance: PausedTokenURLProtocol
+
+    func complete(status: Int, body: Data = Data(#"{"access_token":"refreshed","expires_in":3600}"#.utf8)) {
+        protocolInstance.complete(status: status, body: body)
+    }
+}
+
+private final class PausedTokenRequests: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedCount = 0
+    private let expectedCount: Int
+    private let stream: AsyncStream<PausedTokenRequest>
+    private let continuation: AsyncStream<PausedTokenRequest>.Continuation
+
+    init(expectedCount: Int) {
+        self.expectedCount = expectedCount
+        (stream, continuation) = AsyncStream.makeStream()
+    }
+
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return recordedCount
+    }
+
+    func record(_ request: PausedTokenURLProtocol) {
+        lock.lock()
+        recordedCount += 1
+        let unexpected = recordedCount > expectedCount
+        lock.unlock()
+        if unexpected {
+            Issue.record("Unexpected extra token refresh")
+            request.complete(status: 500, body: Data())
+        } else {
+            continuation.yield(PausedTokenRequest(protocolInstance: request))
+        }
+    }
+
+    func next() async throws -> PausedTokenRequest {
+        try await withThrowingTaskGroup(of: PausedTokenRequest.self) { group in
+            group.addTask { [stream] in
+                for await request in stream { return request }
+                throw CancellationError()
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(5))
+                throw URLError(.timedOut)
+            }
+            defer { group.cancelAll() }
+            let request = try await group.next()
+            return try #require(request)
+        }
+    }
+}
+
+private final class PausedTokenURLProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var requests: PausedTokenRequests?
+    private let completionLock = NSLock()
+    private var completed = false
+
+    static func config(_ requests: PausedTokenRequests) -> URLSessionConfiguration {
+        lock.lock()
+        Self.requests = requests
+        lock.unlock()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [Self.self]
+        return configuration
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.lock.lock()
+        let requests = Self.requests
+        Self.lock.unlock()
+        requests?.record(self)
+    }
+
+    func complete(status: Int, body: Data = Data(#"{"access_token":"refreshed","expires_in":3600}"#.utf8)) {
+        completionLock.lock(); defer { completionLock.unlock() }
+        guard !completed else { return }
+        completed = true
+        if status == -1 {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {
+        completionLock.lock(); defer { completionLock.unlock() }
+        completed = true
     }
 }
 

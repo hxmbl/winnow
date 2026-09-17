@@ -67,6 +67,6 @@ nonisolated func matchesBuiltin(
 nonisolated func matchesSmartFilter(filter: FilterId, email: WinnowEmail, sig: EmailSignals, profile: UserProfile) -> Bool {
     switch filter {
     case .builtin(let builtin): return matchesBuiltin(builtin, email: email, sig: sig, profile: profile)
-    case .sender(let sender): return email.sender == sender
+    case .sender(let sender): return email.sender.lowercased() == sender.lowercased()
     }
 }

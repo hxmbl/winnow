@@ -345,6 +345,252 @@ struct GmailSyncTests {
         }
     }
 
+    @Test func incrementalPaginationFailureRetainsCursorAndReplaysEarlierPages() async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("100", forKey: GmailSyncEngine.historyIDKey)
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+
+            for fails in [true, false] {
+                StubURLProtocol.route { request in
+                    let path = request.url?.path ?? ""
+                    if path.hasSuffix("/history") {
+                        if request.url?.query?.contains("pageToken=p2") == true {
+                            return fails
+                                ? (503, Data())
+                                : (200, Data(#"{"history":[{"messagesAdded":[{"message":{"id":"m2"}}]}],"historyId":"300"}"#.utf8))
+                        }
+                        return (200, Data(#"{"history":[{"messagesAdded":[{"message":{"id":"m1"}}]}],"historyId":"200","nextPageToken":"p2"}"#.utf8))
+                    }
+                    let id = request.url!.lastPathComponent
+                    return (200, Data(self.fullMessageJSON(id: id, subject: id).utf8))
+                }
+
+                do {
+                    try await sync.incrementalSync()
+                    #expect(!fails)
+                } catch {
+                    #expect(fails)
+                    #expect(error as? GmailAPIError == .http(status: 503, bodySnippet: ""))
+                }
+                #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == (fails ? "100" : "300"))
+                let requests = StubURLProtocol.requests.filter { $0.url?.path.hasSuffix("/history") == true }
+                #expect(requests.count == 2)
+                #expect(requests.allSatisfy { $0.url?.query?.contains("startHistoryId=100") == true })
+            }
+            #expect(Set(try cache.all().map(\.subject)) == ["m1", "m2"])
+        }
+    }
+
+    @Test func incrementalFailedFetchKeepsCachedMailAndRetriesWithoutAdvancingCursor() async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("100", forKey: GmailSyncEngine.historyIDKey)
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            try cache.upsert(email: Fixtures.email(id: 1, subject: "Old"), gmailId: "m1", threadId: "t1")
+
+            for fails in [true, false] {
+                StubURLProtocol.route { request in
+                    if request.url?.path.hasSuffix("/history") == true {
+                        return (200, Data(#"{"history":[{"labelsAdded":[{"message":{"id":"m1"}}]}],"historyId":"200"}"#.utf8))
+                    }
+                    return fails
+                        ? (503, Data())
+                        : (200, Data(self.fullMessageJSON(id: "m1", subject: "New", starred: true).utf8))
+                }
+                let emails = try await sync.incrementalSync()
+                #expect(emails.map(\.subject) == [fails ? "Old" : "New"])
+                #expect(sync.lastSyncFailureCount == (fails ? 1 : 0))
+                #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == (fails ? "100" : "200"))
+            }
+        }
+    }
+
+    @Test func fullSyncCapturesCursorBeforeListingAndReplaysChangesDuringScan() async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                if path.hasSuffix("/profile") {
+                    let historyID = StubURLProtocol.requestCount(to: "/messages") == 0 ? "100" : "200"
+                    return (200, Data("{\"emailAddress\":\"a@b.c\",\"historyId\":\"\(historyID)\"}".utf8))
+                }
+                if path.hasSuffix("/messages") { return (200, Data(#"{}"#.utf8)) }
+                if path.hasSuffix("/history") {
+                    if request.url?.query?.contains("startHistoryId=100") == true {
+                        return (200, Data(#"{"history":[{"messagesAdded":[{"message":{"id":"m1"}}]}],"historyId":"200"}"#.utf8))
+                    }
+                    return (200, Data(#"{"historyId":"200"}"#.utf8))
+                }
+                return (200, Data(self.fullMessageJSON(id: "m1", subject: "Arrived during scan").utf8))
+            }
+            let (_, _, sync, _) = try makeStack(defaults: defaults)
+            #expect(try await sync.fullSync().isEmpty)
+            #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "100")
+            #expect(StubURLProtocol.requests.first?.url?.path.hasSuffix("/profile") == true)
+            #expect(try await sync.incrementalSync().map(\.subject) == ["Arrived during scan"])
+        }
+    }
+
+    @Test func incompleteFullSyncInvalidatesOldCursorAndRetriesMissingDownloads() async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("50", forKey: GmailSyncEngine.historyIDKey)
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            try cache.upsert(email: Fixtures.email(id: 1, subject: "Old"), gmailId: "m1", threadId: "t1")
+            for fails in [true, false] {
+                StubURLProtocol.route { request in
+                    let path = request.url?.path ?? ""
+                    if path.hasSuffix("/profile") {
+                        return (200, Data(#"{"emailAddress":"a@b.c","historyId":"100"}"#.utf8))
+                    }
+                    if path.hasSuffix("/messages") {
+                        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }?.value
+                        return (200, Data((query == "in:inbox" ? #"{"messages":[{"id":"m1","threadId":"t1"},{"id":"m2","threadId":"t2"}]}"# : "{}").utf8))
+                    }
+                    let id = request.url!.lastPathComponent
+                    return fails ? (503, Data()) : (200, Data(self.fullMessageJSON(id: id, subject: id).utf8))
+                }
+                if fails {
+                    #expect(try await sync.fullSync().map(\.subject) == ["Old"])
+                    #expect(sync.lastSyncFailureCount == 2)
+                    #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == nil)
+                } else {
+                    #expect(Set(try await sync.incrementalSync().map(\.subject)) == ["m1", "m2"])
+                    #expect(StubURLProtocol.requestCount(to: "/history") == 0)
+                    #expect(sync.lastSyncFailureCount == 0)
+                    #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "100")
+                }
+            }
+        }
+    }
+
+    @Test(arguments: ["profile", "messages"])
+    func fullSyncEndpointFailureDoesNotPruneCacheOrLeaveUsableCursor(endpoint: String) async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("50", forKey: GmailSyncEngine.historyIDKey)
+            StubURLProtocol.route { request in
+                if request.url?.path.hasSuffix("/\(endpoint)") == true { return (503, Data()) }
+                return (200, Data(#"{"emailAddress":"a@b.c","historyId":"100"}"#.utf8))
+            }
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            try cache.upsert(email: Fixtures.email(id: 1), gmailId: "m1", threadId: "t1")
+            do {
+                try await sync.fullSync()
+                Issue.record("Expected full sync to fail")
+            } catch {
+                #expect(error as? GmailAPIError == .http(status: 503, bodySnippet: ""))
+            }
+            #expect(cache.count == 1)
+            #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == nil)
+        }
+    }
+
+    @Test(arguments: [true, false])
+    func missingFetchedMessageIsRemovedFromCache(full: Bool) async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("50", forKey: GmailSyncEngine.historyIDKey)
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                if path.hasSuffix("/profile") {
+                    return (200, Data(#"{"emailAddress":"a@b.c","historyId":"100"}"#.utf8))
+                }
+                if path.hasSuffix("/messages") {
+                    return (200, Data(#"{"messages":[{"id":"m1","threadId":"t1"}]}"#.utf8))
+                }
+                if path.hasSuffix("/history") {
+                    return (200, Data(#"{"history":[{"labelsRemoved":[{"message":{"id":"m1"}}]}],"historyId":"100"}"#.utf8))
+                }
+                return (404, Data())
+            }
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            try cache.upsert(email: Fixtures.email(id: 1), gmailId: "m1", threadId: "t1")
+            if full { try await sync.fullSync() } else { try await sync.incrementalSync() }
+            #expect(cache.count == 0)
+            #expect(sync.lastSyncFailureCount == 0)
+            #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "100")
+        }
+    }
+
+    @Test func emptyFullSyncPrunesEveryMailboxAndEmptyHistoryAdvancesCursor() async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                if path.hasSuffix("/profile") {
+                    return (200, Data(#"{"emailAddress":"a@b.c","historyId":"100"}"#.utf8))
+                }
+                if path.hasSuffix("/history") { return (200, Data(#"{"historyId":"200"}"#.utf8)) }
+                return (200, Data(#"{}"#.utf8))
+            }
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            for (index, mailbox) in [EmailMailbox.inbox, .archive, .trash].enumerated() {
+                try cache.upsert(email: Fixtures.email(id: index), gmailId: "m\(index)", threadId: "t", mailbox: mailbox)
+            }
+            let snapshot = try await sync.fullSnapshot()
+            #expect(snapshot.inbox.isEmpty && snapshot.archive.isEmpty && snapshot.trash.isEmpty)
+            #expect(cache.count == 0)
+            try await sync.incrementalSync()
+            #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "200")
+        }
+    }
+
+    @Test(arguments: ["archive", "trash"])
+    func cappedFullSyncPreservesUnlistedCachedMailAndStopsAt500(mailbox: String) async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                if path.hasSuffix("/profile") {
+                    return (200, Data(#"{"emailAddress":"a@b.c","historyId":"100"}"#.utf8))
+                }
+                if path.hasSuffix("/messages") {
+                    let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+                    let query = items.first { $0.name == "q" }!.value!
+                    let matches = mailbox == "trash" ? query == "in:trash" : query.hasPrefix("-in:inbox")
+                    guard matches else { return (200, Data(#"{}"#.utf8)) }
+                    let start = Int(items.first { $0.name == "pageToken" }?.value ?? "0")!
+                    let count = Int(items.first { $0.name == "maxResults" }!.value!)!
+                    let messages = (start..<(start + count)).map { #"{"id":"m\#($0)","threadId":"t"}"# }.joined(separator: ",")
+                    return (200, Data("{\"messages\":[\(messages)],\"nextPageToken\":\"\(start + count)\"}".utf8))
+                }
+                if request.url?.lastPathComponent == "gone" { return (404, Data()) }
+                let labels = mailbox == "trash" ? #"["TRASH"]"# : "[]"
+                return (200, Data("{\"id\":\"\(request.url!.lastPathComponent)\",\"labelIds\":\(labels)}".utf8))
+            }
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            try cache.upsert(email: Fixtures.email(id: -1), gmailId: "older", threadId: "t", mailbox: mailbox == "trash" ? .trash : .archive)
+            try cache.upsert(email: Fixtures.email(id: -2), gmailId: "gone", threadId: "t", mailbox: .inbox)
+            try await sync.fullSnapshot()
+            #expect(cache.gmailID(for: GmailMessageMapper.stableNumericID(for: "older")) == "older")
+            #expect(cache.gmailID(for: -2) == nil)
+            #expect(cache.count == 501)
+            let fetches = StubURLProtocol.requests.filter { $0.url?.path.contains("/messages/m") == true }
+            #expect(fetches.count == 500)
+            #expect(StubURLProtocol.requestCount(to: "/messages/older") == 1)
+            #expect(StubURLProtocol.requestCount(to: "/messages/gone") == 1)
+            #expect(StubURLProtocol.requests.filter { $0.url?.path.hasSuffix("/messages") == true && $0.url?.query?.contains("pageToken") != true }.count == 3)
+        }
+    }
+
     // MARK: Cache
 
     @Test func cacheUpsertIsKeyedByGmailIDAndRoundTrips() throws {

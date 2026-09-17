@@ -1,4 +1,19 @@
 import SwiftUI
+import UserNotifications
+
+final class WinnowAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+}
 
 /// App entry point.
 ///
@@ -6,6 +21,7 @@ import SwiftUI
 /// main window and Settings always observe the same state.
 @main
 struct WinnowApp: App {
+    @NSApplicationDelegateAdaptor(WinnowAppDelegate.self) private var appDelegate
 
     // MARK: - State
 

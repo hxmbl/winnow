@@ -219,7 +219,7 @@ struct ScoreAndFilterTests {
 
     @Test func senderFiltersMatchExactAddressesOnly() {
         #expect(matchesSmartFilter(filter: .sender("bob@x.co"), email: Fixtures.email(sender: "bob@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))
-        #expect(!matchesSmartFilter(filter: .sender("BOB@X.CO"), email: Fixtures.email(sender: "bob@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))
+        #expect(matchesSmartFilter(filter: .sender("BOB@X.CO"), email: Fixtures.email(sender: "bob@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))
         #expect(!matchesSmartFilter(filter: .sender("bob@x.co"), email: Fixtures.email(sender: "alice@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))
     }
 }

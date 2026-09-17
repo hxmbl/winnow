@@ -447,6 +447,46 @@ final class WinnowStoreTests {
         #expect(store.chosenScheme == nil)
     }
 
+    @Test(arguments: [true, false])
+    func notificationOptInRequestsPermissionAndSurfacesDenial(granted: Bool) async {
+        let store = makeStore()
+        var calls = 0
+        store.requestNotificationAuthorization = {
+            calls += 1
+            return granted
+        }
+        store.notificationsEnabled = true
+        await waitFor("notification authorization") { calls == 1 }
+        #expect(defaults.bool(forKey: WinnowStore.notificationsEnabledKey))
+        #expect((store.notificationError == nil) == granted)
+        store.notificationsEnabled = false
+        #expect(store.notificationError == nil)
+        #expect(!defaults.bool(forKey: WinnowStore.notificationsEnabledKey))
+    }
+
+    @Test func notificationOptOutIgnoresPendingPermissionResult() async {
+        let store = makeStore()
+        var continuation: CheckedContinuation<Bool, Never>?
+        store.requestNotificationAuthorization = {
+            await withCheckedContinuation { continuation = $0 }
+        }
+        store.notificationsEnabled = true
+        await waitFor("permission request") { continuation != nil }
+        store.notificationsEnabled = false
+        continuation?.resume(returning: false)
+        await Task.yield()
+        #expect(!store.notificationsEnabled)
+        #expect(store.notificationError == nil)
+    }
+
+    @Test func notificationAuthorizationFailureIsVisible() async {
+        let store = makeStore()
+        store.requestNotificationAuthorization = { throw URLError(.notConnectedToInternet) }
+        store.notificationsEnabled = true
+        await waitFor("notification error") { store.notificationError != nil }
+        #expect(store.notificationError?.contains("Couldn't enable notifications") == true)
+    }
+
     @Test func refreshSettlesItsLoadingFlag() async {
         let store = makeStore()
         await store.refresh()

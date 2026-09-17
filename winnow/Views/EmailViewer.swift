@@ -224,6 +224,8 @@ struct EmailViewer: View {
                     return
                 }
                 try await Task.detached(priority: .userInitiated) { () throws in
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     try data.write(to: url, options: .atomic)
                 }.value
                 flashNotice("Saved \(attachment.filename).", seconds: 2)

@@ -152,6 +152,76 @@ struct GmailMapperTests {
         #expect(GmailMessageMapper.mailbox(of: trashed) == .trash)
     }
 
+    @Test func replyHeadersUseCaseInsensitiveNamesAndUnfoldReferences() throws {
+        let message = try Self.decode(#"{"id":"gmail-id","threadId":"gmail-thread","payload":{"headers":[{"name":"mEsSaGe-Id","value":" <parent@example.com> "},{"name":"rEfErEnCeS","value":"<root@example.com>\r\n\t<ancestor@example.com>"}]}}"#)
+        let headers = try GmailMessageMapper.replyHeaders(from: message)
+        #expect(headers.messageID == "<parent@example.com>")
+        #expect(headers.references == ["<root@example.com>", "<ancestor@example.com>"])
+    }
+
+    @Test func replyReferencesFallBackToSingleInReplyTo() throws {
+        let message = try Self.decode(#"{"id":"m1","payload":{"headers":[{"name":"Message-ID","value":"<parent@example.com>"},{"name":"In-Reply-To","value":"<root@example.com>"}]}}"#)
+        #expect(try GmailMessageMapper.replyHeaders(from: message).references == ["<root@example.com>"])
+        let multipleParents = try Self.decode(#"{"id":"m1","payload":{"headers":[{"name":"Message-ID","value":"<parent@example.com>"},{"name":"In-Reply-To","value":"<a@example.com> <b@example.com>"}]}}"#)
+        #expect(try GmailMessageMapper.replyHeaders(from: multipleParents).references.isEmpty)
+    }
+
+    @Test func replyHeadersRejectMissingAmbiguousAndInjectedIDs() throws {
+        let missing = try Self.decode(#"{"id":"gmail-id","threadId":"gmail-thread"}"#)
+        #expect(throws: MIMEBuilder.BuildError.missingReplyMessageID) { try GmailMessageMapper.replyHeaders(from: missing) }
+        let duplicate = try Self.decode(#"{"id":"m1","payload":{"headers":[{"name":"Message-ID","value":"<a@example.com>"},{"name":"Message-ID","value":"<b@example.com>"}]}}"#)
+        #expect(throws: MIMEBuilder.BuildError.missingReplyMessageID) { try GmailMessageMapper.replyHeaders(from: duplicate) }
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("References")) {
+            try MIMEBuilder.messageIDs(in: "<root@example.com>\r\nBcc: other@example.com", name: "References")
+        }
+    }
+
+    @Test func referencesRetainAncestorsAndAppendParentOnlyOnce() throws {
+        let draft = OutgoingDraft(from: "me@example.com", to: "ada@example.com", subject: "Re: Hi", body: "reply", inReplyToMessageID: "<parent@example.com>", references: ["<root@example.com>", "<root@example.com>", "<parent@example.com>"])
+        let raw = String(decoding: try MIMEBuilder.build(draft), as: UTF8.self)
+        #expect(raw.contains("In-Reply-To: <parent@example.com>\r\nReferences: <root@example.com>\r\n <parent@example.com>\r\n"))
+        var firstReply = draft
+        firstReply.references = []
+        #expect(String(decoding: try MIMEBuilder.build(firstReply), as: UTF8.self).contains("References: <parent@example.com>\r\n"))
+        var newMessage = draft
+        newMessage.references = []
+        newMessage.inReplyToMessageID = nil
+        let fresh = String(decoding: try MIMEBuilder.build(newMessage), as: UTF8.self)
+        #expect(!fresh.contains("References:") && !fresh.contains("In-Reply-To:"))
+        newMessage.threadID = "gmail-thread"
+        #expect(throws: MIMEBuilder.BuildError.missingReplyMessageID) { try MIMEBuilder.build(newMessage) }
+    }
+
+    @Test(arguments: ["\r\nBcc: other@example.com", "\nBcc: other@example.com", "\rBcc: other@example.com", "\u{0}"])
+    func outgoingHeadersRejectControlCharacters(injection: String) throws {
+        let valid = OutgoingDraft(from: "me@example.com", to: "ada@example.com", subject: "Hi", body: "reply")
+        var draft = valid
+        draft.from += injection
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("From")) { try MIMEBuilder.build(draft) }
+        draft = valid
+        draft.to += injection
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("To")) { try MIMEBuilder.build(draft) }
+        draft = valid
+        draft.subject += injection
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("Subject")) { try MIMEBuilder.build(draft) }
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("Message-ID")) { try MIMEBuilder.build(valid, messageID: "<id@example.com>" + injection) }
+        draft = valid
+        draft.inReplyToMessageID = "<parent@example.com>" + injection
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("In-Reply-To")) { try MIMEBuilder.build(draft) }
+        draft.inReplyToMessageID = "<parent@example.com>"
+        draft.references = ["<root@example.com>" + injection]
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("References")) { try MIMEBuilder.build(draft) }
+        draft = valid
+        draft.attachments = [.init(filename: "file.txt", mimeType: "text/plain" + injection, data: Data())]
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("Content-Type")) { try MIMEBuilder.build(draft) }
+    }
+
+    @Test(arguments: ["", " ", "not-an-address", "me@example.com,other@example.com"])
+    func outgoingSenderMustBeOneAddress(address: String) {
+        let draft = OutgoingDraft(from: address, to: "ada@example.com", subject: "Hi", body: "reply")
+        #expect(throws: MIMEBuilder.BuildError.invalidHeader("From")) { try MIMEBuilder.build(draft) }
+    }
+
     private static func decode(_ payload: String) throws -> GmailMessage {
         try JSONDecoder().decode(GmailMessage.self, from: Data(payload.utf8))
     }

@@ -7,6 +7,8 @@ import Foundation
 // which dominated profile/classify time (thousands of compilations per inbox).
 
 /// Case-insensitive regex from a static literal pattern, built once at startup.
+/// All patterns below are compile-time string literals — a syntax error here is
+/// a build-time bug, not a runtime surprise.
 nonisolated func regex(_ pattern: String) -> NSRegularExpression {
     try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
 }

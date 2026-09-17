@@ -147,9 +147,10 @@ struct KeybindEngineTests {
         // With no binding, the authed non-editing canvas consumes the key so it
         // never reaches NSResponder.noResponder (the macOS alert beep).
         #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: 0) == false)
+        // Shift-only is normal typing (uppercase letters) — it must pass through.
         let shift = UInt(NSEvent.ModifierFlags.shift.rawValue)
-        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: shift) == false)
-        // Contexts that block commands (overlay up, no target) still swallow.
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: shift) == true)
+        // Contexts that block commands (overlay up, no target) still swallow bare keys.
         #expect(KeybindEngine.shouldPassThrough(context: context(overlayVisible: true), modifiers: 0) == false)
         #expect(KeybindEngine.shouldPassThrough(context: context(viewerOpen: true), modifiers: 0) == false)
     }
