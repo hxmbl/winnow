@@ -30,28 +30,16 @@ extension BuiltinSmartFilter {
     }
 }
 
-/// Unique-id wrapper letting the rail repeat filters without duplicate IDs.
+/// Array-position wrapper keeping the rail's items stable as it re-ranks.
 struct FilterRailItem: Identifiable {
     let id: Int
     let filter: BuiltinFilter
 }
 
-/// Builds the rail's item list from a ranked filter set. DEBUG repeats every
-/// filter 3× to exercise horizontal scroll + wheel rerouting under real
-/// overflow; release ships one item per filter.
+/// Builds the rail's item list from a ranked filter set, one item per filter.
 enum FilterRailLayout {
     static func items(from ranked: [BuiltinFilter]) -> [FilterRailItem] {
-        #if DEBUG
-        var items: [FilterRailItem] = []
-        for pass in 0..<3 {
-            for (index, filter) in ranked.enumerated() {
-                items.append(FilterRailItem(id: pass * 100 + index, filter: filter))
-            }
-        }
-        return items
-        #else
         ranked.enumerated().map { FilterRailItem(id: $0.offset, filter: $0.element) }
-        #endif
     }
 }
 

@@ -205,11 +205,7 @@ final class WinnowStoreTests {
         let store = makeStore()
         let ids = store.railItems.map(\.filter.id)
         #expect(Set(ids) == Set(builtinFilters.map(\.id)))
-        #if DEBUG
-        #expect(store.railItems.count == builtinFilters.count * 3)
-        #else
         #expect(store.railItems.count == builtinFilters.count)
-        #endif
     }
 
     // MARK: Keyboard navigation & triage

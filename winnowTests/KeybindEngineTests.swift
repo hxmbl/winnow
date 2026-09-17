@@ -131,7 +131,7 @@ struct KeybindEngineTests {
     @Test func digitKeysToggleRailFiltersWithinRange() {
         #expect(KeybindEngine.command(forCharacter: "1", keyCode: 18, context: context()) == .toggleFilter(railIndex: 0))
         #expect(KeybindEngine.command(forCharacter: "9", keyCode: 25, context: context()) == .toggleFilter(railIndex: 8))
-        // Rail has 12 filters in DEBUG (tripled) but a short rail clamps.
+        // A short rail clamps: indices beyond the rail width are ignored.
         #expect(KeybindEngine.command(forCharacter: "9", keyCode: 25, context: context(railCount: 3)) == nil)
         #expect(KeybindEngine.command(forCharacter: "3", keyCode: 20, context: context(railCount: 3)) == .toggleFilter(railIndex: 2))
     }
