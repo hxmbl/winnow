@@ -135,7 +135,7 @@ struct PipelineTests {
             Fixtures.email(id: 2, sender: "alice@x.co", receivedAt: 100, subject: "Invoice attached", body: "Your invoice is overdue."),
             Fixtures.email(id: 3, sender: "carol@x.co", receivedAt: 900, subject: "Flash sale", body: "Everything is 20% off."),
         ]
-        #expect(run(inbox, filters: [], query: "", sort: .score, profile: Fixtures.profile(), signals: [:]) == [2, 1, 3])   // scores 68 / 50 / 42 despite arrival order
+        #expect(run(inbox, filters: [], query: "", sort: .score, profile: Fixtures.profile(), signals: [:]) == [2, 1, 3])   // 68 / 50 / 45 (newest recency bonus) despite arrival order
     }
 
     // MARK: Filter rail ranking

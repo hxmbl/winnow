@@ -40,8 +40,13 @@ final class WinnowStore {
 
     /// Active smart-filter / sender selection. Drives `filteredEmails`; the
     /// sidebar and the pill bar both toggle into this single source of truth.
+    /// Mutating it reorders the rail (active built-ins jump to the front) and
+    /// rebuilds the visible rows.
     var activeFilters: [FilterId] = [] {
-        didSet { rebuildFilteredRows() }
+        didSet {
+            updateRailItems()
+            rebuildFilteredRows()
+        }
     }
 
     var searchQuery = "" {
@@ -77,6 +82,13 @@ final class WinnowStore {
         didSet { rebuildFilteredRows() }
     }
 
+    /// Quarantined mail shown in the Spam mailbox (live mode; empty in demo).
+    /// Not classified — triage happens in the inbox; these are kept for
+    /// rescuing ("not spam" moves them back to the inbox).
+    var spam: [WinnowEmail] = [] {
+        didSet { rebuildFilteredRows() }
+    }
+
     /// The mailbox currently on screen. Owned here (not in the view) so
     /// keybinds and actions can act on whatever list the user is looking at.
     var mailbox: Mailbox = .inbox {
@@ -85,6 +97,7 @@ final class WinnowStore {
             // selection is per-list, never carried across views.
             selectedEmailID = nil
             selectedRowIndex = nil
+            navigationIndex = NavigationItem.index(for: mailbox)
             rebuildFilteredRows()
         }
     }
@@ -141,7 +154,7 @@ final class WinnowStore {
     /// even when filters would hide its row.
     var selectedEmailID: Int?
 
-    /// Keyboard cursor: index into `filteredEmails`. Independent of the open
+    /// Keyboard cursor: index into `filteredThreads`. Independent of the open
     /// card — `j/k` move it, `Enter/o` opens it, clicking a row syncs it.
     private(set) var selectedRowIndex: Int?
 
@@ -150,8 +163,21 @@ final class WinnowStore {
     var searchFocusToken = 0
     /// Bumped to ask the reader card to focus the reply composer (keybind `r`).
     var composerFocusToken = 0
+    /// The rail item most recently reached via a numeric keyboard shortcut.
+    var focusedRailIndex: Int?
+    /// Cumulative step count for arrow-key scrolling inside the open reader
+    /// (STO-137). Deltas accumulate so a series of ↑/↓ presses settles on the
+    /// exact target row, and is reset whenever a message opens or the reader
+    /// closes so the next conversation starts at the top.
+    var viewerScrollStep = 0
     /// Keyboard-shortcuts cheat sheet visibility (keybind `?`).
     var showShortcutOverlay = false
+
+    /// Compact navigation palette visibility (keybind `!`). When open, the
+    /// canvas keys steer the palette; number keys stay on filter toggles.
+    var navigationVisible = false
+    /// Cursor into `NavigationItem.allCases` while the palette is open.
+    private(set) var navigationIndex = 0
 
     /// Tunable/learned classification weights + feedback log. Weight changes
     /// re-run the whole pipeline via `onWeightsChanged`. Injectable so tests can
@@ -212,6 +238,12 @@ final class WinnowStore {
 
     /// Filtered + sorted rows with their signals attached, ready for rendering.
     private(set) var filteredEmails: [EmailRowModel] = []
+
+    /// The conversation-aware list: messages sharing a Gmail thread collapse
+    /// into one row (representative = newest). The keyboard cursor, row
+    /// selection, and scroll all index THIS list; `filteredEmails` stays flat
+    /// for per-email consumers (selection resolution, tests).
+    private(set) var filteredThreads: [EmailThreadRow] = []
 
     /// Query the current `filteredEmails` was built from (trimmed), so keystrokes
     /// that don't change the effective query skip the rebuild.
@@ -362,10 +394,46 @@ final class WinnowStore {
         rebuildFilteredRows()
     }
 
+    /// STO-139 — orders the rail so active smart filters lead.
+    ///
+    /// Display order is: permanent always-watch buckets (the fixed leading
+    /// area) → active built-in filters (activation order, kept in the rail even
+    /// while they currently match no mail so an active filter stays reachable)
+    /// → the remaining ranked buckets (volume-first "magic" buckets, with the
+    /// exclusive Unsafe safety valve pinned last).
+    ///
+    /// The canonical catalog and `rankFilters` semantics are untouched: this
+    /// only re-orders the *presented* items. Sender filters have no pill and
+    /// Unsafe stays pinned last rather than jumping ahead of the rail, so the
+    /// safety valve always stays in its predictable spot.
     private func updateRailItems() {
-        railItems = FilterRailLayout.items(
-            from: rankFilters(inbox: inbox, signals: emailSignals, profile: profile)
-        )
+        let ranked = rankFilters(inbox: inbox, signals: emailSignals, profile: profile)
+
+        // Active built-ins in activation order, excluding the exclusive Unsafe
+        // bucket (kept pinned last) and sender filters (no pill exists).
+        let activeBuiltins: [BuiltinSmartFilter] = activeFilters.compactMap { filter in
+            if case .builtin(let builtin) = filter, builtin != .unsafe { return builtin }
+            return nil
+        }
+
+        var reordered: [FilterRailItem] = []
+        var placed: Set<BuiltinSmartFilter> = []
+
+        func place(_ builtin: BuiltinSmartFilter) {
+            guard placed.insert(builtin).inserted else { return }
+            // Prefer the ranked entry; fall back to the catalog so an active
+            // bucket with zero current matches stays visible and removable.
+            let source = ranked.first { $0.id == builtin }
+                ?? builtinFilters.first { $0.id == builtin }
+            guard let source else { return }
+            reordered.append(FilterRailItem(id: reordered.count, filter: source))
+        }
+
+        for permanent in permanentFilterIds { place(permanent) }
+        for builtin in activeBuiltins { place(builtin) }
+        for item in ranked where !placed.contains(item.id) { place(item.id) }
+
+        self.railItems = reordered
     }
 
     /// Emails whose content differs from the previous inbox (including added ones).
@@ -462,69 +530,151 @@ final class WinnowStore {
         var rows: [EmailRowModel] = []
         rows.reserveCapacity(visibleIDs.count)
         for email in visibleIDs {
-            // Archived/trashed mail is never classified (triage lives in the
-            // inbox), so those rows render with a neutral signal.
+            // Archived/trashed/spam mail is never classified (triage lives in
+            // the inbox), so those rows render with a neutral signal.
             let sig = emailSignals[email.id] ?? .neutral
             rows.append(EmailRowModel(email: email, sig: sig))
         }
         filteredEmails = rows
+        filteredThreads = Self.groupThreads(rows)
         lastFilteredQuery = searchQuery.trimmingCharacters(in: .whitespaces)
 
-        // Keep the keyboard cursor inside the (possibly shrunk) list.
-        if filteredEmails.isEmpty {
+        // Keep the keyboard cursor inside the (possibly shrunk) thread list.
+        if filteredThreads.isEmpty {
             selectedRowIndex = nil
         } else if let index = selectedRowIndex {
-            selectedRowIndex = min(max(0, index), filteredEmails.count - 1)
+            selectedRowIndex = min(max(0, index), filteredThreads.count - 1)
         }
         // During a background classification pass, inbox rows without signals
         // yet are "pending", not a bug — they fill in as the pass completes.
-        // Archived/trashed rows intentionally render with neutral signals.
+        // Archived/trashed/spam rows intentionally render with neutral signals.
         if !isClassifyingInBackground, mailbox == .inbox {
             let missing = filteredEmails.contains { emailSignals[$0.email.id] == nil }
             assert(!missing, "Inbox rows without cached signals outside a background classify window")
         }
     }
 
-    // MARK: - Keyboard navigation
-
-    /// The id the keyboard currently targets: the open card if present, else
-    /// the cursor row.
-    private var focusedEmailID: Int? {
-        selectedEmailID ?? {
-            guard let i = selectedRowIndex, filteredEmails.indices.contains(i) else { return nil }
-            return filteredEmails[i].email.id
-        }()
-    }
-
-    /// Moves the cursor by `delta` rows, clamped. When the reader card is
-    /// open the cursor drag it along — `j/k` become "next/previous message".
-    func moveSelection(_ delta: Int) {
-        guard !filteredEmails.isEmpty else { return }
-        let current = selectedRowIndex ?? (delta > 0 ? -1 : filteredEmails.count)
-        let next = min(max(0, current + delta), filteredEmails.count - 1)
-        selectedRowIndex = next
-        if selectedEmailID != nil {
-            openEmail(filteredEmails[next].email.id)
+    /// Groups flat (already filtered + sorted) rows into threads. Messages with
+    /// a non-empty `threadId` collapse under that key (oldest → newest);
+    /// messages without one stay standalone rows. First-seen order is kept, so
+    /// the thread list follows the same sort the flat list did.
+    nonisolated private static func groupThreads(_ rows: [EmailRowModel]) -> [EmailThreadRow] {
+        var members: [String: [WinnowEmail]] = [:]
+        var order: [String] = []
+        for row in rows {
+            let key = row.email.threadId ?? "single-\(row.email.id)"
+            if members[key] == nil { order.append(key) }
+            members[key, default: []].append(row.email)
+        }
+        return order.map { key in
+            EmailThreadRow(messages: members[key]!.sorted { $0.receivedAt < $1.receivedAt })
         }
     }
 
-    /// Opens whichever email the keyboard is on.
-    func openSelected() {
-        guard let index = selectedRowIndex, filteredEmails.indices.contains(index) else { return }
-        openEmail(filteredEmails[index].email.id)
+    /// Index of the thread row that contains `id`, if any.
+    private func threadRowIndex(containing id: Int) -> Int? {
+        filteredThreads.firstIndex { $0.contains(id) }
     }
+
+    // MARK: - Keyboard navigation
+
+    /// The id the keyboard currently targets: the open card if present, else
+    /// the cursor thread's representative.
+    private var focusedEmailID: Int? {
+        selectedEmailID ?? {
+            guard let i = selectedRowIndex, filteredThreads.indices.contains(i) else { return nil }
+            return filteredThreads[i].representative.id
+        }()
+    }
+
+    /// Index of the row the reading cursor sits on, if any.
+
+    /// Moves the cursor by `delta` rows (conversations), clamped. When the
+    /// reader card is open the cursor drag it along — `j/k` become
+    /// "next/previous conversation".
+    func moveSelection(_ delta: Int) {
+        guard !filteredThreads.isEmpty else { return }
+        let current = selectedRowIndex ?? (delta > 0 ? -1 : filteredThreads.count)
+        let next = min(max(0, current + delta), filteredThreads.count - 1)
+        selectedRowIndex = next
+        if selectedEmailID != nil {
+            openEmail(filteredThreads[next].representative.id)
+        }
+    }
+
+    /// Opens whichever conversation the keyboard is on.
+    func openSelected() {
+        guard let index = selectedRowIndex, filteredThreads.indices.contains(index) else { return }
+        openEmail(filteredThreads[index].representative.id)
+    }
+
+    // MARK: - Compact navigation palette (`!`)
+
+    /// Opens/closes the navigation palette. Opening re-arms it to the current
+    /// mailbox's slot; closing is safe to spam.
+    func toggleNavigation() {
+        navigationVisible.toggle()
+        if navigationVisible {
+            navigationIndex = NavigationItem.index(for: mailbox)
+        }
+    }
+
+    /// Closes the palette without navigating (Esc).
+    func dismissNavigation() {
+        navigationVisible = false
+    }
+
+    /// Moves the palette cursor by `delta`, clamped to the item list.
+    func moveNavigationSelection(_ delta: Int) {
+        let items = NavigationItem.allCases
+        guard !items.isEmpty else { return }
+        let current = navigationIndex
+        navigationIndex = min(max(0, current + delta), items.count - 1)
+    }
+
+    /// Activates the palette cursor: switches mailbox, or opens Settings in its
+    /// own window. Closes the palette either way.
+    func activateNavigation(at index: Int? = nil) {
+        let items = NavigationItem.allCases
+        if let index, items.indices.contains(index) {
+            navigationIndex = index
+        }
+        guard items.indices.contains(navigationIndex) else {
+            navigationVisible = false
+            return
+        }
+        let item = items[navigationIndex]
+        navigationVisible = false
+        if let mailbox = item.mailbox {
+            self.mailbox = mailbox
+        } else {
+            settingsRequestToken += 1
+        }
+    }
+
+    /// Drop-in mailbox switch used by the palette items.
+    func selectMailbox(_ mailbox: Mailbox) {
+        self.mailbox = mailbox
+    }
+
+    /// Bumped to ask ContentView to open the Settings window (palette item).
+    var settingsRequestToken = 0
 
     /// Executes a keybind command. The single place key semantics touch state.
     func apply(_ command: KeyCommand) {
         switch command {
         case .moveSelection(let delta):
             moveSelection(delta)
+        case .scrollReader(let delta):
+            viewerScrollStep += delta
         case .openSelected:
             openSelected()
         case .closeViewer:
             dismissEmail()
         case .dismissOverlay:
             showShortcutOverlay = false
+        case .dismissNavigation:
+            dismissNavigation()
         case .toggleShortcutsOverlay:
             showShortcutOverlay.toggle()
         case .toggleStar:
@@ -532,11 +682,13 @@ final class WinnowStore {
         case .archive:
             if let id = focusedEmailID {
                 // Context-sensitive: `e` archives from the inbox, restores
-                // from the archive, and un-trashes from the trash mailbox.
+                // from the archive, un-trashes from the trash mailbox, and
+                // rescues from the spam mailbox (removes SPAM).
                 switch mailbox {
                 case .inbox: archiveEmail(id)
                 case .archive: unarchiveEmail(id)
                 case .trash: restoreEmail(id)
+                case .spam: notSpamEmail(id)
                 }
             }
         case .trash:
@@ -557,7 +709,16 @@ final class WinnowStore {
             searchFocusToken += 1
         case .toggleFilter(let railIndex):
             guard railItems.indices.contains(railIndex) else { return }
+            focusedRailIndex = railIndex
             toggleFilter(.builtin(railItems[railIndex].filter.id))
+        case .clearFilters:
+            clearAllFilters()
+        case .toggleNavigation:
+            toggleNavigation()
+        case .moveNavigation(let delta):
+            moveNavigationSelection(delta)
+        case .activateNavigation:
+            activateNavigation()
         case .blurText:
             NSApp.keyWindow?.makeFirstResponder(nil)
         }
@@ -574,6 +735,7 @@ final class WinnowStore {
         case .inbox: base = inbox
         case .archive: base = archived
         case .trash: base = trashed
+        case .spam: base = spam
         }
         return base.filter { !isSenderBlocked($0.sender) }
     }
@@ -583,6 +745,7 @@ final class WinnowStore {
         case .inbox: return inbox.first { $0.id == id }
         case .archive: return archived.first { $0.id == id }
         case .trash: return trashed.first { $0.id == id }
+        case .spam: return spam.first { $0.id == id }
         }
     }
 
@@ -597,6 +760,9 @@ final class WinnowStore {
         case .trash:
             guard let i = trashed.firstIndex(where: { $0.id == email.id }) else { return }
             trashed[i] = email
+        case .spam:
+            guard let i = spam.firstIndex(where: { $0.id == email.id }) else { return }
+            spam[i] = email
         }
     }
 
@@ -612,6 +778,9 @@ final class WinnowStore {
         case .trash:
             guard let i = trashed.firstIndex(where: { $0.id == id }) else { return nil }
             return trashed.remove(at: i)
+        case .spam:
+            guard let i = spam.firstIndex(where: { $0.id == id }) else { return nil }
+            return spam.remove(at: i)
         }
     }
 
@@ -620,6 +789,7 @@ final class WinnowStore {
         case .inbox: inbox.insert(email, at: 0)
         case .archive: archived.insert(email, at: 0)
         case .trash: trashed.insert(email, at: 0)
+        case .spam: spam.insert(email, at: 0)
         }
     }
 
@@ -628,6 +798,7 @@ final class WinnowStore {
         if inbox.contains(where: { $0.id == id }) { return .inbox }
         if archived.contains(where: { $0.id == id }) { return .archive }
         if trashed.contains(where: { $0.id == id }) { return .trash }
+        if spam.contains(where: { $0.id == id }) { return .spam }
         return nil
     }
 
@@ -662,6 +833,14 @@ final class WinnowStore {
     func restoreEmail(_ emailID: Int) {
         relocate(emailID, to: .inbox) { client, gmailID in
             try await client.modify(messageID: gmailID, addLabelIds: [GmailLabel.inbox], removeLabelIds: [GmailLabel.trash])
+        }
+    }
+
+    /// Rescues a quarantined message back to the inbox (live: drops SPAM,
+    /// adds INBOX). Reaching it via `e` inside the Spam mailbox.
+    func notSpamEmail(_ emailID: Int) {
+        relocate(emailID, to: .inbox) { client, gmailID in
+            try await client.modify(messageID: gmailID, addLabelIds: [GmailLabel.inbox], removeLabelIds: [GmailLabel.spam])
         }
     }
 
@@ -713,7 +892,7 @@ final class WinnowStore {
         }
         if wasOpen {
             openEmail(email.id)
-        } else if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
+        } else if let row = threadRowIndex(containing: email.id) {
             selectedRowIndex = row
         }
     }
@@ -799,23 +978,23 @@ final class WinnowStore {
         }
         if wasOpen {
             openEmail(email.id)
-        } else if let row = filteredEmails.firstIndex(where: { $0.email.id == email.id }) {
+        } else if let row = threadRowIndex(containing: email.id) {
             selectedRowIndex = row
         }
     }
 
     /// Cursor/card bookkeeping after a move or delete: stay at the same
-    /// position — which now points at the next email — and advance an open
-    /// card to it.
+    /// position — which now points at the next conversation — and advance an
+    /// open card to it.
     private func applyPostMoveCursor(removedID: Int, wasOpen: Bool) {
-        if filteredEmails.isEmpty {
+        if filteredThreads.isEmpty {
             selectedRowIndex = nil
             if wasOpen { dismissEmail() }
         } else {
-            let next = min(max(0, selectedRowIndex ?? 0), filteredEmails.count - 1)
+            let next = min(max(0, selectedRowIndex ?? 0), filteredThreads.count - 1)
             selectedRowIndex = next
             if wasOpen {
-                openEmail(filteredEmails[next].email.id)
+                openEmail(filteredThreads[next].representative.id)
             }
         }
     }
@@ -890,12 +1069,14 @@ final class WinnowStore {
 
     func openEmail(_ id: Int) {
         selectedEmailID = id
-        // Clicking a row moves the keyboard cursor with it.
-        if let index = filteredEmails.firstIndex(where: { $0.email.id == id }) {
+        viewerScrollStep = 0
+        // Clicking a row moves the keyboard cursor to its conversation.
+        if let index = threadRowIndex(containing: id) {
             selectedRowIndex = index
         }
         // Opening a message marks it read — triage that surfaces new mail
-        // straight into the read (and unread-dot-free) pipeline.
+        // straight into the read (and unread-dot-free) pipeline. Threads open
+        // their representative; opening the card counts the conversation read.
         if let email = emails(for: mailbox).first(where: { $0.id == id }),
            email.unread {
             markRead(id)
@@ -904,6 +1085,26 @@ final class WinnowStore {
 
     func dismissEmail() {
         selectedEmailID = nil
+        viewerScrollStep = 0
+    }
+
+    /// The full conversation behind an email: every message sharing its
+    /// `threadId`, unioned across inbox/archive/trash/spam (blocked senders
+    /// are excluded by `emails(for:)`), oldest first. Messages without a
+    /// thread — mock data, pre-thread caches — are standalone conversations.
+    func conversation(for email: WinnowEmail) -> [WinnowEmail] {
+        guard let threadId = email.threadId, !threadId.isEmpty else {
+            return [email]
+        }
+        var messages: [WinnowEmail] = []
+        messages += emails(for: .inbox).filter { $0.threadId == threadId }
+        messages += emails(for: .archive).filter { $0.threadId == threadId }
+        messages += emails(for: .trash).filter { $0.threadId == threadId }
+        messages += emails(for: .spam).filter { $0.threadId == threadId }
+        var seen: Set<Int> = []
+        return messages
+            .filter { seen.insert($0.id).inserted }
+            .sorted { $0.receivedAt < $1.receivedAt }
     }
 
     // MARK: - Appearance
@@ -953,14 +1154,25 @@ final class WinnowStore {
     // MARK: - Actions
 
     /// Toggle a filter pill. "Unsafe" is exclusive (replaces the others); every
-    /// other bucket combines, so several can be active at once.
+    /// other bucket combines, so several can be active at once. Activating a
+    /// built-in moves it to the front of the rail (see `updateRailItems`) and
+    /// re-points the keyboard focus at its new position.
     func toggleFilter(_ id: FilterId) {
         if activeFilters.contains(id) {
             activeFilters.removeAll { $0 == id }
         } else if id.isUnsafe {
             activeFilters = [id]
         } else {
-            activeFilters.append(id)
+            if !activeFilters.contains(id) {
+                activeFilters.append(id)
+            }
+        }
+        // `activeFilters.didSet` already reordered the rail; if the toggle left
+        // this filter on the rail, follow it with the keyboard focus so the
+        // rail scrolls to the pill that was just (de)activated.
+        if case .builtin(let builtin) = id,
+           let index = railItems.firstIndex(where: { $0.filter.id == builtin }) {
+            focusedRailIndex = index
         }
     }
 
@@ -1247,6 +1459,7 @@ final class WinnowStore {
         inbox = mockInbox
         archived = []
         trashed = []
+        spam = []
         // blockedSenders is a user preference — preserve across sign-out so
         // re-signing into the same account keeps the block list intact.
         mailbox = .inbox
@@ -1256,6 +1469,9 @@ final class WinnowStore {
         selectedEmailID = nil
         selectedRowIndex = nil
         showShortcutOverlay = false
+        focusedRailIndex = nil
+        navigationVisible = false
+        navigationIndex = 0
     }
 
     /// Jump to the unsafe bucket (used by Settings).
@@ -1292,11 +1508,12 @@ final class WinnowStore {
         try? await Task.sleep(nanoseconds: 500_000_000)
     }
 
-    /// Replaces the three mailbox lists with a fresh server snapshot.
-    private func adopt(_ snapshot: GmailMailboxSnapshot) {
+    /// Replaces the mailbox lists with a fresh server snapshot.
+    func adopt(_ snapshot: GmailMailboxSnapshot) {
         inbox = snapshot.inbox
         archived = snapshot.archive
         trashed = snapshot.trash
+        spam = snapshot.spam
     }
 
     /// Stable fingerprint of the unread mail the user has already seen.

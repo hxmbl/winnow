@@ -1,16 +1,25 @@
 import Foundation
 
 /// A point-in-time view of every mailbox the app tracks. The store mirrors
-/// these three arrays into its UI state.
+/// these arrays into its UI state.
 struct GmailMailboxSnapshot {
     let inbox: [WinnowEmail]
     let archive: [WinnowEmail]
     let trash: [WinnowEmail]
+    let spam: [WinnowEmail]
+
+    init(inbox: [WinnowEmail], archive: [WinnowEmail], trash: [WinnowEmail], spam: [WinnowEmail]) {
+        self.inbox = inbox
+        self.archive = archive
+        self.trash = trash
+        self.spam = spam
+    }
 
     init(cache: EmailCacheStore) throws {
         inbox = try cache.all(mailbox: .inbox)
         archive = try cache.all(mailbox: .archive)
         trash = try cache.all(mailbox: .trash)
+        spam = try cache.all(mailbox: .spam)
     }
 }
 
@@ -98,6 +107,7 @@ final class GmailSyncEngine {
             (self.query, Int.max),
             (archiveQuery, broadMailboxCap),
             ("in:trash", broadMailboxCap),
+            ("in:spam", broadMailboxCap),
         ] {
             var stubs: [GmailMessageStub] = []
             var pageToken: String?
@@ -242,11 +252,14 @@ final class GmailSyncEngine {
     private func fetch(id: String, threadId: String?) async -> FetchResult {
         do {
             let message = try await client.message(id: id)
-            if !message.hasLabel(GmailLabel.inbox) && !message.hasLabel(GmailLabel.trash),
-               ["SENT", "DRAFT", "SPAM"].contains(where: message.hasLabel) {
+            // Mail the user wrote (sent/drafts) is not a tracked view — drop it.
+            // Spam IS tracked (the Spam mailbox), so SPAM-labeled messages are
+            // homed by `mailbox(of:)` instead of being discarded.
+            if !message.hasLabel(GmailLabel.inbox) && !message.hasLabel(GmailLabel.trash) && !message.hasLabel(GmailLabel.spam),
+               ["SENT", "DRAFT"].contains(where: message.hasLabel) {
                 return .missing
             }
-            // The mapper now maps trash too; bucket is decided by labels.
+            // The mapper now maps trash and spam too; bucket is decided by labels.
             guard let email = GmailMessageMapper.winnowEmail(from: message) else { return .missing }
             return .success(SyncItem(
                 email: email,

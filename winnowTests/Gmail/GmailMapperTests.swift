@@ -152,6 +152,29 @@ struct GmailMapperTests {
         #expect(GmailMessageMapper.mailbox(of: trashed) == .trash)
     }
 
+    @Test func spamFollowsGmailLabelSemantics() throws {
+        // SPAM alone homes to .spam.
+        let spamOnly = try Self.decode(#"{"id":"4","labelIds":["SPAM"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.mailbox(of: spamOnly) == .spam)
+
+        // SPAM inside the inbox view still homes to .spam (SPAM sits above INBOX).
+        let spamInInbox = try Self.decode(#"{"id":"5","labelIds":["INBOX","SPAM"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.mailbox(of: spamInInbox) == .spam)
+
+        // TRASH still dominates over SPAM (a trashed spam message is a trash row).
+        let trashedSpam = try Self.decode(#"{"id":"6","labelIds":["SPAM","TRASH"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.mailbox(of: trashedSpam) == .trash)
+    }
+
+    @Test func threadIdFlowsIntoTheEmail() throws {
+        let message = try Self.decode(#"{"id":"7","threadId":"thread-abc","labelIds":["INBOX"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.winnowEmail(from: message)?.threadId == "thread-abc")
+
+        // Messages without a thread id map to standalone (nil), not "".
+        let bare = try Self.decode(#"{"id":"8","labelIds":["INBOX"],"payload":{"headers":[],"mimeType":"text/plain"}}"#)
+        #expect(GmailMessageMapper.winnowEmail(from: bare)?.threadId == nil)
+    }
+
     @Test func replyHeadersUseCaseInsensitiveNamesAndUnfoldReferences() throws {
         let message = try Self.decode(#"{"id":"gmail-id","threadId":"gmail-thread","payload":{"headers":[{"name":"mEsSaGe-Id","value":" <parent@example.com> "},{"name":"rEfErEnCeS","value":"<root@example.com>\r\n\t<ancestor@example.com>"}]}}"#)
         let headers = try GmailMessageMapper.replyHeaders(from: message)
@@ -220,6 +243,48 @@ struct GmailMapperTests {
     func outgoingSenderMustBeOneAddress(address: String) {
         let draft = OutgoingDraft(from: address, to: "ada@example.com", subject: "Hi", body: "reply")
         #expect(throws: MIMEBuilder.BuildError.invalidHeader("From")) { try MIMEBuilder.build(draft) }
+    }
+
+    @Test func replyBodyWithAQuotedOriginalIsSentVerbatimExactlyOnce() throws {
+        // STO-125: what the composer sends is `replyText` verbatim — a quoted
+        // original is already real text inside it. The MIME body must carry it
+        // once and only once (no re-append, no duplication).
+        let original = WinnowEmail(
+            id: 1, sender: "ada@example.com", name: "Ada", email: nil,
+            receivedAt: 1_000, subject: "Lunch", body: "Let's do 2pm.\n\nSee you!",
+            type: "work", starred: false, urgent: false, unread: false
+        )
+        let quoted = ReplyQuoting.block(original: original)
+        let body = "Sounds good.\n\n\(quoted)"
+        let draft = OutgoingDraft(
+            from: "me@example.com",
+            to: "ada@example.com",
+            subject: "Re: Lunch",
+            body: body,
+            inReplyToMessageID: "<parent@example.com>",
+            references: ["<root@example.com>"]
+        )
+        let raw = String(decoding: try MIMEBuilder.build(draft), as: UTF8.self)
+        // The MIME body part is base64 (RFC 2045) — decode it before the
+        // verbatim check: the quoted original must appear once, and only once.
+        let bodyPart = raw.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n")
+        let decodedBody = String(
+            decoding: Data(base64Encoded: bodyPart.replacingOccurrences(of: "\r\n", with: ""))!,
+            as: UTF8.self
+        )
+        let occurrences = Self.countOccurrences(of: quoted, in: decodedBody)
+        #expect(occurrences == 1, "quoted block appeared \(occurrences) times")
+        #expect(decodedBody.contains("> Let's do 2pm."))
+    }
+
+    private static func countOccurrences(of needle: String, in haystack: String) -> Int {
+        var count = 0
+        var range = haystack.startIndex
+        while let found = haystack.range(of: needle, range: range..<haystack.endIndex) {
+            count += 1
+            range = found.upperBound
+        }
+        return count
     }
 
     private static func decode(_ payload: String) throws -> GmailMessage {

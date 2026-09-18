@@ -34,13 +34,66 @@ nonisolated func senderRankBonus(sender: String, profile: UserProfile, topBoost:
     }
 }
 
+/// The age window a smart score is computed against: the newest (and oldest)
+/// `receivedAt` among the messages being scored. Threading this through lets
+/// the recency bonus scale an email against the mail it actually ranks among,
+/// so "new" always means *new relative to this inbox* — never relative to a
+/// hidden wall clock — and results are reproducible for a given inbox.
+struct ScoreRecencyContext: Equatable {
+    let oldestReceivedAt: Int
+    let newestReceivedAt: Int
+
+    /// Builds the window from a batch of arrival timestamps. `nil` when the
+    /// batch is empty (nothing to score); a single timestamp yields a
+    /// degenerate zero-span window whose bonus is 0.
+    static func window(of timestamps: [Int]) -> ScoreRecencyContext? {
+        guard let newest = timestamps.max() else { return nil }
+        return ScoreRecencyContext(oldestReceivedAt: timestamps.min() ?? newest, newestReceivedAt: newest)
+    }
+}
+
+/// STO-140 — the bounded recency bonus for the Smart Score.
+///
+/// Returns 0…`maxBonus` based on where `receivedAt` falls on the span from the
+/// oldest to the newest message in the scored set: the newest message earns the
+/// full bonus, the oldest earns 0, and everything else interpolates (rounded).
+/// Receipts outside the window clamp to its edges. A degenerate window (one
+/// timestamp) yields 0 — there is nothing to prioritize against.
+///
+/// The bonus is deliberately *relative*: it depends only on the messages being
+/// scored, never on the calendar, so identical inboxes score identically at any
+/// time and the effect stays a small "slightly newer first" nudge.
+nonisolated func relativeRecencyBonus(
+    receivedAt: Int,
+    context: ScoreRecencyContext?,
+    maxBonus: Int = 3
+) -> Int {
+    guard let context, context.newestReceivedAt > context.oldestReceivedAt else { return 0 }
+    let span = Double(context.newestReceivedAt - context.oldestReceivedAt)
+    let clamped = min(context.newestReceivedAt, max(context.oldestReceivedAt, receivedAt))
+    let position = Double(clamped - context.oldestReceivedAt)
+    return Int((Double(maxBonus) * position / span).rounded())
+}
+
 /// Score (0–100) behind the "Smart Score" sort.
 ///
 /// Deliberately independent of the learned `SignalWeights`: it ranks with the
 /// fixed `intentRegexes`, so ordering stays stable while tuned weights drift.
 /// Spam likelihood *is* honored — unsafe mail is dragged down so the Smart
 /// Score sort never floats phishing to the top of its own bucket.
-nonisolated func calculateWinnowScore(email: WinnowEmail, sig: EmailSignals, profile: UserProfile) -> Int {
+///
+/// - Parameters:
+///   - recency: Relative age window of the scored set (see
+///     `ScoreRecencyContext`). When provided, newer mail earns a small bonus
+///     (≤ 3 points) so incoming mail ranks slightly above otherwise-identical
+///     older mail; `nil` (no context) keeps the score recency-neutral, which
+///     is also what single-item callers observe.
+nonisolated func calculateWinnowScore(
+    email: WinnowEmail,
+    sig: EmailSignals,
+    profile: UserProfile,
+    recency: ScoreRecencyContext? = nil
+) -> Int {
     var score = 50
 
     score += senderRankBonus(sender: email.sender, profile: profile)
@@ -54,6 +107,8 @@ nonisolated func calculateWinnowScore(email: WinnowEmail, sig: EmailSignals, pro
     for (intentRegex, weight) in intentRegexes {
         if matches(intentRegex, in: text) { score += weight }
     }
+
+    score += relativeRecencyBonus(receivedAt: email.receivedAt, context: recency)
 
     return max(0, min(100, score))
 }

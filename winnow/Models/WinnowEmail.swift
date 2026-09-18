@@ -11,14 +11,24 @@ struct EmailAttachment: Identifiable, Equatable, Codable {
 }
 
 /// The mailbox a message currently belongs to. Gmail negotiation: `TRASH`
-/// dominates, then `INBOX`; anything else is archived (All Mail minus those).
+/// dominates, then `SPAM`, then `INBOX`; anything else is archived (All Mail
+/// minus those).
 enum EmailMailbox: String, Codable, CaseIterable {
-    case inbox, archive, trash
+    case inbox, archive, trash, spam
 }
 
-/// A single email thread in the user's mailbox.
+/// A single email in the user's mailbox. `threadId` (when known) groups a set
+/// of these into one conversation; messages without one are standalone.
+/// The mailbox `threadId` is the Gmail thread the message belongs to; the
+/// cache persists it so the reader can treat threads coherently.
 struct WinnowEmail: Identifiable, Equatable {
     let id: Int
+
+    /// The Gmail thread this message belongs to, when known. `nil` means the
+    /// message is standalone (mock data, pre-thread caches). Defaulted at the
+    /// memberwise init so existing construction sites compile unchanged.
+    var threadId: String? = nil
+
     let sender: String
     var name: String?
     var email: String?

@@ -28,11 +28,17 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay { emailPresentation }
         .overlay { shortcutOverlay }
+        .overlay { navigationPalette }
         .background { keyboardShortcuts }
         // Keybinds are scoped to *this* window: the Settings scene must never
         // route `j/k` into the inbox.
         .background { MainWindowReader { window in attachKeybinds(to: window) } }
         .onChange(of: store.searchFocusToken) { _, _ in searchFocused = true }
+        .onChange(of: store.settingsRequestToken) { _, _ in
+            // Settings is its own scene (WindowGroup). `!` → Settings uses the
+            // same selector the app menu's Preferences item does.
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
     }
 
     private func attachKeybinds(to window: NSWindow?) {
@@ -80,6 +86,51 @@ struct ContentView: View {
         if store.showShortcutOverlay {
             ShortcutSheet(store: store)
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
+        }
+    }
+
+    /// Compact navigation palette (`!`): Inbox · Spam · Bin · Settings, one
+    /// axis, keyboard-driven. Floats above the rail's leading edge.
+    @ViewBuilder
+    private var navigationPalette: some View {
+        if store.navigationVisible {
+            VStack(spacing: 2) {
+                ForEach(Array(NavigationItem.allCases.enumerated()), id: \.element.id) { index, item in
+                    HStack(spacing: 10) {
+                        Image(systemName: item.icon)
+                            .font(.callout.weight(.medium))
+                            .frame(width: 16)
+                        Text(item.label)
+                            .font(.callout.weight(index == store.navigationIndex ? .semibold : .regular))
+                        Spacer(minLength: 20)
+                        if index == store.navigationIndex {
+                            Image(systemName: "return")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .foregroundStyle(index == store.navigationIndex ? Color.accentColor : Color.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                    .background {
+                        if index == store.navigationIndex {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.10))
+                        }
+                    }
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.12)) { store.activateNavigation(at: index) }
+                    }
+                }
+            }
+            .padding(6)
+            .background(Color.winnowCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.winnowBorder, lineWidth: 1))
+            .shadow(color: .black.opacity(0.18), radius: 16, x: 0, y: 6)
+            .padding(.leading, 12)
+            .padding(.bottom, 56)
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
     }
 
@@ -150,7 +201,24 @@ struct ContentView: View {
                 Divider().opacity(0.5)
                 emailList
             }
+            if store.isRefreshing {
+                VStack {
+                    Spacer()
+                    Label("Syncing mail…", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.regularMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.winnowBorder, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                        .padding(.bottom, 58)
+                }
+                .transition(.opacity)
+                .allowsHitTesting(false)
+            }
         }
+        .animation(.easeOut(duration: 0.16), value: store.isRefreshing)
     }
 
     private var bottomOverlay: some View {
@@ -211,14 +279,14 @@ struct ContentView: View {
 
     private var emailList: some View {
         Group {
-            if store.filteredEmails.isEmpty {
+            if store.filteredThreads.isEmpty {
                 emptyState
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(store.filteredEmails) { row in
-                                emailListRow(row)
+                            ForEach(store.filteredThreads) { thread in
+                                emailListRow(thread)
                             }
                         }
                         .padding(.vertical, 4)
@@ -228,9 +296,9 @@ struct ContentView: View {
                     .background(Color.winnowBackground)
                     .onChange(of: store.selectedRowIndex) { _, newIndex in
                         guard let newIndex,
-                              store.filteredEmails.indices.contains(newIndex) else { return }
+                              store.filteredThreads.indices.contains(newIndex) else { return }
                         withAnimation(.easeOut(duration: 0.12)) {
-                            proxy.scrollTo(store.filteredEmails[newIndex].email.id, anchor: .center)
+                            proxy.scrollTo(store.filteredThreads[newIndex].representative.id, anchor: .center)
                         }
                     }
                 }
@@ -239,8 +307,8 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Per-mailbox empty message. Archive and Trash are live Gmail views now —
-    /// they only say "empty" when there really is nothing there.
+    /// Per-mailbox empty message. Archive, Trash, and Spam are live Gmail
+    /// views now — they only say "empty" when there really is nothing there.
     @ViewBuilder
     private var emptyState: some View {
         switch store.mailbox {
@@ -265,19 +333,30 @@ struct ContentView: View {
                 description: Text("Trashed messages appear here until permanently deleted.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .spam:
+            ContentUnavailableView(
+                "Spam is empty",
+                systemImage: "exclamationmark.triangle",
+                description: Text("Messages flagged as spam appear here — select one and press e to report it as not spam.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    /// One inbox row: the email plus its tappable star and smart-filter
-    /// indicators, opened by tapping anywhere else on the row.
-    private func emailListRow(_ row: EmailRowModel) -> some View {
+    /// One list row: the conversation's representative email plus its tappable
+    /// star and smart-filter indicators, opened by tapping anywhere else on the
+    /// row. Conversation density rides the row as a count chip.
+    private func emailListRow(_ thread: EmailThreadRow) -> some View {
+        let representative = thread.representative
+        let sig = store.emailSignals[representative.id] ?? .neutral
         // Plain view + tap gesture (not Button) so the row's own buttons keep
         // their hit areas un-nested.
-        EmailRow(
-            email: row.email,
-            sig: row.sig,
+        return EmailRow(
+            email: representative,
+            sig: sig,
+            conversationCount: thread.conversationCount,
             onToggleStar: {
-                withAnimation(.easeOut(duration: 0.15)) { store.toggleStar(row.email.id) }
+                withAnimation(.easeOut(duration: 0.15)) { store.toggleStar(representative.id) }
             },
             activeFilters: store.activeFilters,
             onToggleFilter: { filter in
@@ -288,18 +367,21 @@ struct ContentView: View {
         )
         .padding(.horizontal, 16)
         .contentShape(Rectangle())
-        .onTapGesture { store.openEmail(row.email.id) }
-        .background(rowBackground(for: row.email.id))
+        .onTapGesture { store.openEmail(representative.id) }
+        .background(rowBackground(for: thread))
         .overlay(alignment: .bottom) { Divider().padding(.leading, 64) }
-        .accessibilityAction(named: "Open message") { store.openEmail(row.email.id) }
+        .accessibilityAction(named: "Open message") { store.openEmail(representative.id) }
     }
 
-    private func rowBackground(for id: Int) -> Color {
-        if store.selectedEmailID == id { return Color.accentColor.opacity(0.08) }
+    private func rowBackground(for thread: EmailThreadRow) -> Color {
+        // Open card: the row behind it is emphasized.
+        if let selectedID = store.selectedEmailID, thread.contains(selectedID) {
+            return Color.accentColor.opacity(0.08)
+        }
         // Keyboard cursor: a fainter wash on the row the keys are on.
         if let cursor = store.selectedRowIndex,
-           store.filteredEmails.indices.contains(cursor),
-           store.filteredEmails[cursor].email.id == id {
+           store.filteredThreads.indices.contains(cursor),
+           store.filteredThreads[cursor].id == thread.id {
             return Color.accentColor.opacity(0.045)
         }
         return Color.clear

@@ -27,6 +27,13 @@ struct BadgeStack: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(4)
+                .background(
+                    activeFilters.contains(.builtin(filter))
+                        ? Color.accentColor.opacity(0.10)
+                        : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                )
                 .accessibilityLabel(activeFilters.contains(.builtin(filter)) ? "\(filter.label) filter, on" : "\(filter.label) filter")
                 .help("Toggle \(filter.label) filter")
             }
@@ -36,6 +43,8 @@ struct BadgeStack: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .padding(4)
+            .background(starred ? Color.yellow.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .accessibilityLabel(starred ? "Remove star" : "Add star")
             .help(starred ? "Remove star" : "Add star")
         }

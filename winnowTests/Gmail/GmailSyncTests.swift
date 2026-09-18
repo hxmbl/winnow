@@ -544,10 +544,74 @@ struct GmailSyncTests {
                 try cache.upsert(email: Fixtures.email(id: index), gmailId: "m\(index)", threadId: "t", mailbox: mailbox)
             }
             let snapshot = try await sync.fullSnapshot()
-            #expect(snapshot.inbox.isEmpty && snapshot.archive.isEmpty && snapshot.trash.isEmpty)
+            #expect(snapshot.inbox.isEmpty && snapshot.archive.isEmpty && snapshot.trash.isEmpty && snapshot.spam.isEmpty)
             #expect(cache.count == 0)
             try await sync.incrementalSync()
             #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "200")
+        }
+    }
+
+    @Test func fullSyncMapsSpamIntoTheSnapshotAndDropsSentMail() async throws {
+        try await StubURLProtocol.exclusive {
+            let suite = "winnow.tests.sync.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            let spamJSON = """
+            {
+              "id": "s1", "threadId": "ts1",
+              "labelIds": ["SPAM"],
+              "internalDate": "1778371140000",
+              "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                  {"name": "From", "value": "Neferites <no-reply@lottery.example>"},
+                  {"name": "Subject", "value": "Quarantined"}
+                ],
+                "body": {"data": "\(Base64URL.encode(Data("You have won".utf8)))"}
+              }
+            }
+            """
+            let sentJSON = """
+            {
+              "id": "s2", "threadId": "ts2",
+              "labelIds": ["SENT"],
+              "internalDate": "1778371140000",
+              "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                  {"name": "From", "value": "Me <me@example.com>"},
+                  {"name": "Subject", "value": "I sent this"}
+                ],
+                "body": {"data": "\(Base64URL.encode(Data("My own mail".utf8)))"}
+              }
+            }
+            """
+
+            StubURLProtocol.route { request in
+                let path = request.url?.path ?? ""
+                if path.hasSuffix("/profile") {
+                    return (200, Data(#"{"emailAddress":"me@example.com","historyId":"100"}"#.utf8))
+                }
+                if path.hasSuffix("/messages/s1") { return (200, Data(spamJSON.utf8)) }
+                if path.hasSuffix("/messages/s2") { return (200, Data(sentJSON.utf8)) }
+                if path.hasSuffix("/messages") && request.httpMethod == "GET" {
+                    return (200, Data(#"{"messages":[{"id":"s1","threadId":"ts1"},{"id":"s2","threadId":"ts2"}]}"#.utf8))
+                }
+                return (404, Data())
+            }
+
+            let (_, cache, sync, _) = try makeStack(defaults: defaults)
+            let snapshot = try await sync.fullSnapshot()
+
+            // SPAM-homed mail lands in the snapshot's spam bucket…
+            #expect(snapshot.spam.map(\.subject) == ["Quarantined"])
+            #expect(snapshot.spam.first?.threadId == "ts1")
+            // …and the inbox bucket does not see it.
+            #expect(snapshot.inbox.isEmpty)
+            // Sent mail is not a tracked view: it stays out of the cache entirely.
+            #expect(cache.count == 1)
+            #expect(try cache.all(mailbox: .spam).map(\.subject) == ["Quarantined"])
         }
     }
 
@@ -587,7 +651,7 @@ struct GmailSyncTests {
             #expect(fetches.count == 500)
             #expect(StubURLProtocol.requestCount(to: "/messages/older") == 1)
             #expect(StubURLProtocol.requestCount(to: "/messages/gone") == 1)
-            #expect(StubURLProtocol.requests.filter { $0.url?.path.hasSuffix("/messages") == true && $0.url?.query?.contains("pageToken") != true }.count == 3)
+            #expect(StubURLProtocol.requests.filter { $0.url?.path.hasSuffix("/messages") == true && $0.url?.query?.contains("pageToken") != true }.count == 4)
         }
     }
 

@@ -208,7 +208,9 @@ final class LearningModelTests {
 
         let start = Date()
         while defaults.data(forKey: LearningModel.storageKey) == nil {
-            if Date().timeIntervalSince(start) > 2.0 {
+            // The debounce is 200ms; under full-suite parallel load the
+            // main-actor task can be starved well past the former 2s window.
+            if Date().timeIntervalSince(start) > 10.0 {
                 Issue.record("Debounced persist never landed")
                 return
             }

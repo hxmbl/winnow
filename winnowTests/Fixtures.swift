@@ -11,6 +11,7 @@ enum Fixtures {
     /// Classifies to all-false flags, spam likelihood 0, importance 50.
     static func email(
         id: Int = 1,
+        threadId: String? = nil,
         sender: String = "maya@winnow.app",
         name: String? = nil,
         receivedAt: Int = 1_000,
@@ -24,6 +25,7 @@ enum Fixtures {
     ) -> WinnowEmail {
         WinnowEmail(
             id: id,
+            threadId: threadId,
             sender: sender,
             name: name,
             email: nil,

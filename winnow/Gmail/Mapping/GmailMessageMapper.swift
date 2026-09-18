@@ -23,8 +23,9 @@ import Foundation
 ///   Gmail's own classifier is a legitimate signal; all other labels are
 ///   ignored here and left to the rule engine.
 /// - **Mailbox**: derived from labels via `mailbox(of:)` — TRASH dominates,
-///   then INBOX, else archived. Trash is mapped (the Trash mailbox needs it);
-///   the *store* decides which buckets each mailbox view reads.
+///   then SPAM, then INBOX, else archived. Trash and spam are mapped (those
+///   mailboxes need them); the *store* decides which buckets each mailbox
+///   view reads.
 /// - **Attachments**: any MIME leaf with an `attachmentId` (or an inline
 ///   part with a filename) becomes metadata. Payload bytes are fetched
 ///   lazily by the reader via `GmailClient.attachment(...)`.
@@ -41,6 +42,7 @@ enum GmailMessageMapper {
 
         return WinnowEmail(
             id: stableNumericID(for: message.id),
+            threadId: message.threadId,
             sender: from.address,
             name: from.name,
             email: from.address,
@@ -78,6 +80,7 @@ enum GmailMessageMapper {
     /// The mailbox a message lives in, per Gmail's label semantics.
     nonisolated static func mailbox(of message: GmailMessage) -> EmailMailbox {
         if message.hasLabel(GmailLabel.trash) { return .trash }
+        if message.hasLabel(GmailLabel.spam) { return .spam }
         if message.hasLabel(GmailLabel.inbox) { return .inbox }
         return .archive
     }

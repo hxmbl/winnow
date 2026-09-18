@@ -11,6 +11,8 @@ struct KeybindEngineTests {
         textEditing: Bool = false,
         viewerOpen: Bool = false,
         overlayVisible: Bool = false,
+        navigationVisible: Bool = false,
+        filtersActive: Bool = false,
         hasActionTarget: Bool = false,
         railCount: Int = 12
     ) -> KeybindEngine.Context {
@@ -19,6 +21,8 @@ struct KeybindEngineTests {
             textEditing: textEditing,
             viewerOpen: viewerOpen,
             overlayVisible: overlayVisible,
+            navigationVisible: navigationVisible,
+            filtersActive: filtersActive,
             hasActionTarget: hasActionTarget,
             railCount: railCount
         )
@@ -87,6 +91,35 @@ struct KeybindEngineTests {
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 126, context: list) == .moveSelection(-1))
     }
 
+    // MARK: STO-137 — arrows scroll the reader
+
+    @Test func arrowsScrollTheReaderWhileItIsOpen() {
+        let reader = context(viewerOpen: true)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: reader) == .scrollReader(1))
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 126, context: reader) == .scrollReader(-1))
+        // j/k keep navigating between conversations with the reader open.
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: reader) == .moveSelection(1))
+        #expect(KeybindEngine.command(forCharacter: "k", keyCode: 40, context: reader) == .moveSelection(-1))
+    }
+
+    @Test func arrowsReturnToSelectionNavigationWhenTheReaderCloses() {
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: context()) == .moveSelection(1))
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 126, context: context()) == .moveSelection(-1))
+    }
+
+    @Test func arrowsNeverFireWhileTypingOrWithModifiers() {
+        let editing = context(textEditing: true, viewerOpen: true)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: editing) == nil)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 126, context: editing) == nil)
+
+        let command = UInt(NSEvent.ModifierFlags.command.rawValue)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: context(viewerOpen: true), modifiers: command) == nil)
+        // The compact `!` palette still steers with arrows regardless of viewer.
+        let nav = context(viewerOpen: true, navigationVisible: true)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: nav) == .moveNavigation(1))
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 126, context: nav) == .moveNavigation(-1))
+    }
+
     @Test func openRequiresClosedViewer() {
         #expect(KeybindEngine.command(forCharacter: "o", keyCode: 31, context: context()) == .openSelected)
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 36, context: context()) == .openSelected)
@@ -98,6 +131,8 @@ struct KeybindEngineTests {
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: context(overlayVisible: true)) == .dismissOverlay)
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: context(viewerOpen: true)) == .closeViewer)
         #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: context()) == nil)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: context(filtersActive: true)) == .clearFilters)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: context(viewerOpen: true, filtersActive: true)) == .closeViewer)
     }
 
     // MARK: Actions
@@ -187,6 +222,7 @@ struct KeybindEngineTests {
             switch binding.display {
             case "j": (character, keyCode, activeContext) = ("j", 38, listContext)
             case "k": (character, keyCode, activeContext) = ("k", 40, listContext)
+            case "↑ / ↓": (character, keyCode, activeContext) = (nil, 125, readerContext)
             case "o / ⏎": (character, keyCode, activeContext) = ("o", 31, listContext)
             case "Esc": (character, keyCode, activeContext) = (nil, 53, readerContext)
             case "s": (character, keyCode, activeContext) = ("s", 1, listContext)
@@ -197,6 +233,7 @@ struct KeybindEngineTests {
             case "/": (character, keyCode, activeContext) = ("/", 44, listContext)
             case "1–9": (character, keyCode, activeContext) = ("1", 18, listContext)
             case "?": (character, keyCode, activeContext) = ("?", 44, listContext)
+            case "!": (character, keyCode, activeContext) = ("!", 18, listContext)
             default:
                 Issue.record("Unmapped cheat-sheet entry: \(binding.display)")
                 continue
@@ -204,5 +241,44 @@ struct KeybindEngineTests {
             let routed = KeybindEngine.command(forCharacter: character, keyCode: keyCode, context: activeContext)
             #expect(routed != nil, "\(binding.display) failed to route")
         }
+    }
+
+    // MARK: Compact navigation palette (`!`)
+
+    @Test func bangTogglesNavigationPalette() {
+        #expect(KeybindEngine.command(forCharacter: "!", keyCode: 18, context: context()) == .toggleNavigation)
+        // While the palette is open the same key closes it.
+        #expect(KeybindEngine.command(forCharacter: "!", keyCode: 18, context: context(navigationVisible: true)) == .toggleNavigation)
+    }
+
+    @Test func navigationPaletteSteersWithArrowsJandKAndActivates() {
+        let nav = context(navigationVisible: true)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: nav) == .moveNavigation(1))
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 126, context: nav) == .moveNavigation(-1))
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: nav) == .moveNavigation(1))
+        #expect(KeybindEngine.command(forCharacter: "k", keyCode: 40, context: nav) == .moveNavigation(-1))
+        #expect(KeybindEngine.command(forCharacter: "o", keyCode: 31, context: nav) == .activateNavigation)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 36, context: nav) == .activateNavigation)
+    }
+
+    @Test func navigationPaletteEscapeDismissesBeforeViewerOrFilters() {
+        let nav = context(viewerOpen: true, navigationVisible: true, filtersActive: true)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: nav) == .dismissNavigation)
+        // No navigation state on: Esc precedence falls through to viewer/filters.
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 53, context: context(viewerOpen: true, filtersActive: true)) == .closeViewer)
+    }
+
+    @Test func navigationPaletteSwallowsActionsButLetsDigitsThrough() {
+        // Actions must not fire on the list behind the palette...
+        let nav = context(navigationVisible: true, hasActionTarget: true, railCount: 12)
+        #expect(KeybindEngine.command(forCharacter: "s", keyCode: 1, context: nav) == nil)
+        #expect(KeybindEngine.command(forCharacter: "e", keyCode: 14, context: nav) == nil)
+        #expect(KeybindEngine.command(forCharacter: "m", keyCode: 46, context: nav) == nil)
+        #expect(KeybindEngine.command(forCharacter: "#", keyCode: 18, context: nav) == nil)
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 51, context: nav) == nil)
+        #expect(KeybindEngine.command(forCharacter: "?", keyCode: 44, context: nav) == nil)
+        // ...but number keys stay canvas filter toggles.
+        #expect(KeybindEngine.command(forCharacter: "1", keyCode: 18, context: nav) == .toggleFilter(railIndex: 0))
+        #expect(KeybindEngine.command(forCharacter: "9", keyCode: 25, context: context(navigationVisible: true, railCount: 3)) == nil)
     }
 }

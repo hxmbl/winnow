@@ -222,4 +222,91 @@ struct ScoreAndFilterTests {
         #expect(matchesSmartFilter(filter: .sender("BOB@X.CO"), email: Fixtures.email(sender: "bob@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))
         #expect(!matchesSmartFilter(filter: .sender("bob@x.co"), email: Fixtures.email(sender: "alice@x.co"), sig: Fixtures.signals(), profile: Fixtures.profile()))
     }
+
+    // MARK: Recency bonus (STO-140)
+
+    /// The default (nil) context keeps the score recency-neutral so the exact
+    /// values above — and single-message callers — are unaffected by age.
+    @Test func identicalMailScoresIdenticallyWithoutARecencyContext() {
+        let old = calculateWinnowScore(
+            email: Fixtures.email(receivedAt: 1_000),
+            sig: Fixtures.signals(),
+            profile: Fixtures.profile()
+        )
+        let recent = calculateWinnowScore(
+            email: Fixtures.email(receivedAt: 10_000_000_000),
+            sig: Fixtures.signals(),
+            profile: Fixtures.profile()
+        )
+        #expect(old == recent)
+    }
+
+    @Test func relativeRecencyBonusScalesNewestToFullAndOldestToZero() {
+        let context = ScoreRecencyContext(oldestReceivedAt: 1_000, newestReceivedAt: 2_000_000)
+
+        #expect(relativeRecencyBonus(receivedAt: 1_000, context: context) == 0)    // oldest edge
+        #expect(relativeRecencyBonus(receivedAt: 2_000_000, context: context) == 3) // newest edge
+        #expect(relativeRecencyBonus(receivedAt: 500_750, context: context) == 1) // ~25% → 0.75 rounds to 1
+        #expect(relativeRecencyBonus(receivedAt: 1_000_500, context: context) == 2) // midpoint → 1.5 rounds to 2
+        // Admissions outside the window clamp to its edges.
+        #expect(relativeRecencyBonus(receivedAt: -5, context: context) == 0)
+        #expect(relativeRecencyBonus(receivedAt: 99_000_000, context: context) == 3)
+    }
+
+    @Test func relativeRecencyBonusIsZeroWithoutAWindow() {
+        #expect(relativeRecencyBonus(receivedAt: 5_000, context: nil) == 0)
+        // A degenerate window (single timestamp) has nothing to prioritize.
+        let single = ScoreRecencyContext(oldestReceivedAt: 5_000, newestReceivedAt: 5_000)
+        #expect(relativeRecencyBonus(receivedAt: 5_000, context: single) == 0)
+    }
+
+    @Test func scoreRecencyWindowBuildsFromTimestamps() {
+        // Milliseconds like mock mail, not the "current time" — the whole point
+        // is the bonus never consults a wall clock.
+        let timestamps = [5_000, 1_000_000_000, 3_000_000_000]
+        let window = ScoreRecencyContext.window(of: timestamps)
+        #expect(window?.oldestReceivedAt == 5_000)
+        #expect(window?.newestReceivedAt == 3_000_000_000)
+        #expect(ScoreRecencyContext.window(of: []) == nil)
+    }
+
+    @Test func newerMailOutranksIdenticalOlderMailInTheSameWindow() {
+        let oldEmail = Fixtures.email(receivedAt: 1_000)
+        let newEmail = Fixtures.email(receivedAt: 2_000_000)
+        let context = ScoreRecencyContext.window(of: [oldEmail.receivedAt, newEmail.receivedAt])
+
+        let oldScore = calculateWinnowScore(email: oldEmail, sig: Fixtures.signals(), profile: Fixtures.profile(), recency: context)
+        let newScore = calculateWinnowScore(email: newEmail, sig: Fixtures.signals(), profile: Fixtures.profile(), recency: context)
+        #expect(newScore == oldScore + 3)
+    }
+
+    @Test func recencyBonusIsRelativeBoundedAndNeverDrownsPriorities() {
+        let timestamps = [1_000, 2_000, 1_000_000, 2_000_000, 5_000_000]
+        let context = ScoreRecencyContext.window(of: timestamps)
+
+        // Priority mail (top sender) keeps its lead over the newest anonymous mail.
+        let priority = calculateWinnowScore(
+            email: Fixtures.email(sender: "top@x.co", receivedAt: 1_000),
+            sig: Fixtures.signals(),
+            profile: Fixtures.profile(topSenders: ["top@x.co"]),
+            recency: context
+        )
+        let newest = calculateWinnowScore(
+            email: Fixtures.email(receivedAt: 5_000_000),
+            sig: Fixtures.signals(),
+            profile: Fixtures.profile(),
+            recency: context
+        )
+        #expect(priority > newest)
+
+        // Even the newest phish stays dragged below a clean 50.
+        let phishy = calculateWinnowScore(
+            email: Fixtures.email(receivedAt: 5_000_000),
+            sig: Fixtures.signals(spamLikelihood: 0.8),
+            profile: Fixtures.profile(),
+            recency: context
+        )
+        #expect(phishy < 50)
+        #expect(newest - phishy >= 30)
+    }
 }

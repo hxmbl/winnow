@@ -165,7 +165,10 @@ final class WinnowStoreTests {
         #expect(store.emailSignals[5]?.importanceScore == 78)
 
         store.learning.setWeight(.security, 30)
-        await waitFor("sweep to apply the new security weight") {
+        // The sweep is debounced; under full-suite parallel load the main-actor
+        // task can be starved well past the default 2s window, so allow more
+        // time here — the assertion still verifies the sweep actually applies.
+        await waitFor("sweep to apply the new security weight", timeoutNanos: 10_000_000_000) {
             store.emailSignals[5]?.importanceScore == 92   // 50 + 18 + 30 − 6
         }
     }
@@ -226,6 +229,66 @@ final class WinnowStoreTests {
         for hidden in [BuiltinSmartFilter.newsletters, .codes, .travel, .events, .attachments, .unread] {
             #expect(!ids.contains(hidden))
         }
+    }
+
+    // MARK: STO-139 — active filters lead the rail
+
+    @Test func activeFiltersJumpAheadOfRankedBucketsInActivationOrder() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, starred: true)])
+        // Receipts and Events hold no mail in this inbox: activating them must
+        // still surface them — right after the permanent pins, in activation
+        // order — while the safety valve stays pinned last. Ranked buckets
+        // that do hold mail (Starred) slot in behind the active block.
+        store.toggleFilter(.builtin(.receipts))
+        store.toggleFilter(.builtin(.events))
+
+        let ids = store.railItems.map(\.filter.id)
+        #expect(ids.prefix(4) == [.important, .shipping, .receipts, .events])
+        #expect(ids.contains(.starred))
+        #expect(ids.last == .unsafe)
+    }
+
+    @Test func deactivatingAnEmptyActiveBucketRemovesItFromTheRail() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, starred: true)])
+        store.toggleFilter(.builtin(.receipts))
+        #expect(store.railItems.contains { $0.filter.id == .receipts })
+
+        store.toggleFilter(.builtin(.receipts))
+        #expect(!store.railItems.contains { $0.filter.id == .receipts })
+        #expect(store.activeFilters.isEmpty)
+    }
+
+    @Test func activeBuiltinsNeverDuplicateOnTheRail() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, starred: true)])
+        // Starred already ranks (it has mail); activating it must not add a
+        // second pill.
+        store.toggleFilter(.builtin(.starred))
+
+        let ids = store.railItems.map(\.filter.id)
+        #expect(Set(ids).count == ids.count)
+        #expect(ids.filter { $0 == .starred }.count == 1)
+        #expect(store.activeFilters == [.builtin(.starred)])
+    }
+
+    @Test func keyboardFocusFollowsTheActivatedPillToTheFront() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1)])
+        store.toggleFilter(.builtin(.receipts))   // empty bucket, activated from the catalog
+
+        guard let receiptsIndex = store.railItems.firstIndex(where: { $0.filter.id == .receipts }) else {
+            Issue.record("Active receipts bucket missing from the rail")
+            return
+        }
+        #expect(receiptsIndex == 2)   // right after the two permanent buckets
+        #expect(store.focusedRailIndex == receiptsIndex)
+    }
+
+    @Test func unsafeStaysPinnedLastEvenWhenActive() {
+        let store = makeStore()
+        store.showUnsafe()
+        #expect(store.activeFilters == [.builtin(.unsafe)])
+        let ids = store.railItems.map(\.filter.id)
+        let unsafeIndex = store.railItems.firstIndex { $0.filter.id == .unsafe }
+        #expect(unsafeIndex == ids.count - 1)
     }
 
     // MARK: Keyboard navigation & triage
@@ -335,10 +398,29 @@ final class WinnowStoreTests {
         }
         store.apply(.toggleFilter(railIndex: starredIndex))
         #expect(store.activeFilters == [.builtin(.starred)])
+        #expect(store.focusedRailIndex == starredIndex)
         store.apply(.toggleFilter(railIndex: starredIndex))
         #expect(store.activeFilters.isEmpty)
         store.apply(.toggleFilter(railIndex: 999)) // out of range: no-op
         #expect(store.activeFilters.isEmpty)
+    }
+
+    // MARK: STO-137 — reader scroll state
+
+    @Test func scrollReaderStepsAccumulateAndResetPerConversation() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1), Fixtures.email(id: 2)])
+        #expect(store.viewerScrollStep == 0)
+
+        store.apply(.scrollReader(1))
+        store.apply(.scrollReader(1))
+        store.apply(.scrollReader(-1))
+        #expect(store.viewerScrollStep == 1)
+
+        store.openEmail(1)
+        #expect(store.viewerScrollStep == 0)   // a new conversation starts at the top
+        store.apply(.scrollReader(1))
+        store.dismissEmail()
+        #expect(store.viewerScrollStep == 0)   // closing the reader resets the counter
     }
 
     // MARK: Session lifecycle
@@ -517,6 +599,184 @@ final class WinnowStoreTests {
         store.mailbox = .trash
         #expect(store.filteredEmails.map(\.email.id) == [42])
         #expect(store.listTitle == "Trash")
+    }
+
+    // MARK: Spam mailbox
+
+    @Test func spamMailboxListsItsOwnRowsAndUnspamReturnsThemToTheInbox() {
+        let store = makeStore(inbox: [Fixtures.email(id: 2, sender: "b@x.co")])
+        store.spam = [Fixtures.email(id: 7, sender: "scam@x.co")]
+
+        store.mailbox = .spam
+        #expect(store.filteredEmails.map(\.email.id) == [7])
+        #expect(store.listTitle == "Spam")
+
+        // `e` inside Spam rescues the row (removes SPAM, adds INBOX).
+        store.moveSelection(0)
+        store.apply(.archive)
+        #expect(store.spam.isEmpty)
+        #expect(store.inbox.map(\.id).sorted() == [2, 7])
+        #expect(store.emails(for: .spam).isEmpty)
+    }
+
+    @Test func spamEmailResolvesInItsMailboxAndAdoptSurfacesIt() {
+        let store = makeStore(inbox: [Fixtures.email(id: 2, sender: "b@x.co")])
+        store.spam = [Fixtures.email(id: 7, sender: "scam@x.co")]
+        store.mailbox = .spam
+        store.openEmail(7)
+        #expect(store.selectedEmail?.id == 7)
+        #expect(store.selectedEmail?.sender == "scam@x.co")
+        store.dismissEmail()
+
+        // adopt() is the incremental-sync landing pad — spam must survive it.
+        let snapshot = GmailMailboxSnapshot(
+            inbox: [Fixtures.email(id: 2, sender: "b@x.co")],
+            archive: [],
+            trash: [],
+            spam: [Fixtures.email(id: 7, sender: "scam@x.co"), Fixtures.email(id: 8, sender: "nigerian@x.co")]
+        )
+        store.adopt(snapshot)
+        #expect(store.spam.map(\.id).sorted() == [7, 8])
+        #expect(store.inbox.map(\.id) == [2])
+    }
+
+    // MARK: Compact navigation palette (STO-118)
+
+    @Test func navigationTogglesAndReArmsToTheCurrentMailbox() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1)])
+        store.mailbox = .trash
+
+        #expect(!store.navigationVisible)
+        store.toggleNavigation()
+        #expect(store.navigationVisible)
+        // Re-armed to the current mailbox's slot: Bin / Trash is index 2.
+        #expect(store.navigationIndex == 2)
+
+        // Closing re-arms next time (still to the then-current mailbox).
+        store.dismissNavigation()
+        #expect(!store.navigationVisible)
+
+        store.mailbox = .spam
+        store.toggleNavigation()
+        #expect(store.navigationIndex == 1)
+    }
+
+    @Test func navigationMovesClampedAndActivatesMailboxSwitches() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1)])
+        store.toggleNavigation()
+        #expect(store.navigationIndex == 0)
+
+        store.moveNavigationSelection(1)
+        #expect(store.navigationIndex == 1)      // Spam
+        store.moveNavigationSelection(1)
+        #expect(store.navigationIndex == 2)      // Bin / Trash
+        store.moveNavigationSelection(5)
+        #expect(store.navigationIndex == 3)      // Settings (clamped)
+        store.moveNavigationSelection(-1)
+        #expect(store.navigationIndex == 2)      // back to Bin / Trash
+
+        store.apply(.activateNavigation)
+        #expect(store.mailbox == .trash)
+        #expect(!store.navigationVisible)
+    }
+
+    @Test func navigationActivatingSettingsRequestsTheSettingsWindow() {
+        let store = makeStore()
+        store.moveNavigationSelection(3)         // Settings
+        let before = store.settingsRequestToken
+        store.activateNavigation()
+        #expect(store.settingsRequestToken == before + 1)
+        #expect(!store.navigationVisible)
+        #expect(store.mailbox == .inbox)
+    }
+
+    @Test func mailboxSwitchSyncsThePaletteCursor() {
+        let store = makeStore()
+        store.mailbox = .archive
+        #expect(store.navigationIndex == NavigationItem.index(for: .archive))
+        store.mailbox = .inbox
+        #expect(store.navigationIndex == 0)
+    }
+
+    @Test func signOutResetsNavigationState() async {
+        let store = makeStore()
+        store.toggleNavigation()
+        store.moveNavigationSelection(3)
+        await store.signIn()
+        store.signOut()
+        #expect(!store.navigationVisible)
+        #expect(store.navigationIndex == 0)
+    }
+
+    // MARK: Thread grouping & conversations (STO-124)
+
+    @Test func messagesSharingAThreadCollapseIntoOneRowNewestRepresentativeWins() {
+        let store = makeStore(inbox: [
+            Fixtures.email(id: 1, threadId: "t-1", receivedAt: 1, subject: "Oldest"),
+            Fixtures.email(id: 2, threadId: "t-1", receivedAt: 2, subject: "Newest"),
+            Fixtures.email(id: 3, threadId: "t-2", receivedAt: 3, subject: "Other"),
+            Fixtures.email(id: 4, receivedAt: 4, subject: "Standalone"),
+        ])
+
+        // The conversation-aware list collapses the pair into one row.
+        #expect(store.filteredThreads.count == 3)
+        let pairIndex = store.filteredThreads.firstIndex { $0.id == 2 }
+        #expect(pairIndex != nil)
+        let pair = store.filteredThreads[pairIndex!]
+        // Representative is the newest member; id is the representative's id.
+        #expect(pair.conversationCount == 2)
+        #expect(pair.representative.id == 2)
+        // Messages stay oldest → newest inside the row.
+        #expect(pair.messages.map(\.id) == [1, 2])
+        // nil-thread mail stays standalone (and the list is newest-first).
+        #expect(store.filteredThreads[0].id == 4)
+        #expect(store.filteredThreads[0].conversationCount == 1)
+
+        // Cursor/open bookkeeping keys off the representative.
+        store.moveSelection(pairIndex! + 1)
+        #expect(store.selectedRowIndex == pairIndex)
+        store.openSelected()
+        #expect(store.selectedEmailID == 2)
+    }
+
+    @Test func openingAMemberMovesTheCursorToItsThreadAndMarksThatMessageRead() {
+        let store = makeStore(inbox: [
+            Fixtures.email(id: 1, threadId: "t-1", receivedAt: 1, subject: "Old", unread: true),
+            Fixtures.email(id: 2, threadId: "t-1", receivedAt: 2, subject: "New", unread: true),
+            Fixtures.email(id: 3, threadId: "t-2", receivedAt: 3, subject: "Other"),
+        ])
+
+        store.openEmail(1)
+        #expect(store.selectedEmailID == 1)
+        // Wherever you click, the cursor lands on the thread's row (here row 1).
+        #expect(store.selectedRowIndex == 1)
+        // The opened member is marked read; its sibling stays unread.
+        #expect(store.inbox.first(where: { $0.id == 1 })?.unread == false)
+        #expect(store.inbox.first(where: { $0.id == 2 })?.unread == true)
+    }
+
+    @Test func conversationUnionsMailboxesAndOrdersOldestFirst() {
+        let store = makeStore(inbox: [
+            Fixtures.email(id: 1, threadId: "t-1", sender: "a@x.co", receivedAt: 5, subject: "Later"),
+            Fixtures.email(id: 2, threadId: "t-1", sender: "b@x.co", receivedAt: 1, subject: "Earlier"),
+        ])
+        store.archived = [Fixtures.email(id: 3, threadId: "t-1", receivedAt: 3, subject: "Middle")]
+        store.spam = [Fixtures.email(id: 4, threadId: "t-1", receivedAt: 4, subject: "Spam member")]
+
+        let conversation = store.conversation(for: Fixtures.email(id: 2, threadId: "t-1", receivedAt: 1))
+        #expect(conversation.map { $0.id } == [2, 3, 4, 1])
+
+        // Standalone mail (no thread) is its own single-element conversation.
+        #expect(store.conversation(for: Fixtures.email(id: 99)).map { $0.id } == [99])
+    }
+
+    @Test func conversationExcludesBlockedSenders() {
+        let store = makeStore(inbox: [
+            Fixtures.email(id: 1, threadId: "t-1", sender: "good@x.co", receivedAt: 1),
+            Fixtures.email(id: 2, threadId: "t-1", sender: "blocked@x.co", receivedAt: 2),
+        ])
+        store.blockSender("blocked@x.co")
+        #expect(store.conversation(for: Fixtures.email(id: 1, threadId: "t-1")).map { $0.id } == [1])
     }
 
     @Test func readingInsideArchiveShowsItsOwnRows() {

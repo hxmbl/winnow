@@ -1,8 +1,13 @@
 import SwiftUI
 
-/// The fixed mailbox pill at the leading edge of the filter rail, with a
-/// custom iOS-style pull-up card menu. Owns its own open/hover state; the
-/// caller only binds the selection.
+/// STO-135 — fixed mailbox switcher at the leading edge of the filter rail.
+///
+/// Presents the choices as a native macOS popover: anchored to the pill,
+/// contained inside the window, dismissed by outside click or Esc, and fully
+/// keyboard-accessible. Unlike the earlier custom pull-up overlay this never
+/// shifts the underlying layout, never positions itself across windows, and
+/// keeps keyboard focus sane (the compact `!` palette and Settings are
+/// unaffected). The caller only binds the selection.
 struct MailboxMenu: View {
     @Binding var selection: Mailbox
 
@@ -10,32 +15,6 @@ struct MailboxMenu: View {
     @State private var hoveredMailbox: Mailbox?
 
     var body: some View {
-        menuButton
-            // Scrim sits under the card and swallows every outside click
-            .overlay {
-                if isExpanded {
-                    Rectangle()
-                        .fill(Color.clear)
-                        // Oversized so it covers the whole window; SwiftUI doesn't clip,
-                        // and hit-testing still resolves gestures outside parent bounds.
-                        .frame(width: 8000, height: 8000)
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: dismiss)
-                }
-            }
-            // Card floats above the pill, its bottom edge parked just above the button;
-            // alignmentGuide keeps it out of layout so the pill never shifts.
-            .overlay(alignment: .top) {
-                if isExpanded {
-                    menuCard
-                        .alignmentGuide(.top) { $0.height + 10 }
-                        .transition(.pullUpFromButton)
-                }
-            }
-            .help("Switch mailbox")
-    }
-
-    private var menuButton: some View {
         Button(action: toggle) {
             HStack(spacing: 6) {
                 Image(systemName: selection.icon).imageScale(.small)
@@ -49,10 +28,16 @@ struct MailboxMenu: View {
             .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
+        // Arrow on the pill's bottom edge ⇒ the card reads upward, matching
+        // the layout of the old pull-up menu while staying native.
+        .popover(isPresented: $isExpanded, arrowEdge: .bottom) {
+            menuCard
+        }
+        .help("Switch mailbox")
     }
 
-    /// The pull-up card: vibrancy material, continuous corners, hairline dividers —
-    /// the same anatomy as a stock iOS pull-down/pull-up menu.
+    /// The menu card: vibrancy material, continuous corners, hairline
+    /// dividers — the same anatomy as a stock pull-down/pull-up menu.
     private var menuCard: some View {
         VStack(spacing: 0) {
             ForEach(Array(Mailbox.allCases.enumerated()), id: \.element) { index, box in
@@ -99,29 +84,11 @@ struct MailboxMenu: View {
     }
 
     private func toggle() {
-        withAnimation(.spring(duration: 0.35, bounce: 0.15)) { isExpanded.toggle() }
-    }
-
-    private func dismiss() {
-        guard isExpanded else { return }
-        withAnimation(.easeOut(duration: 0.15)) { isExpanded = false }
+        isExpanded.toggle()
     }
 
     private func select(_ box: Mailbox) {
-        withAnimation(.easeOut(duration: 0.15)) {
-            selection = box
-            isExpanded = false
-        }
-    }
-}
-
-// MARK: - Pull-up transition — springs out of the button's edge, iOS style
-
-private extension AnyTransition {
-    static var pullUpFromButton: AnyTransition {
-        .asymmetric(
-            insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
-            removal: .scale(scale: 0.94, anchor: .bottomLeading).combined(with: .opacity)
-        )
+        selection = box
+        isExpanded = false
     }
 }

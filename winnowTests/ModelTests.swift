@@ -50,6 +50,19 @@ struct ModelTests {
         #expect(SortBy.allCases.count == 3)
     }
 
+    // MARK: STO-135 — mailbox menu destinations
+
+    @Test func mailboxMenuCoversEverySelectableMailbox() {
+        // The bottom-left pill menu iterates `Mailbox.allCases`; every case must
+        // carry a real label and icon so the popover (and the `!` palette) never
+        // renders a blank destination.
+        #expect(Mailbox.allCases.map(\.label) == ["Inbox", "Archive", "Trash", "Spam"])
+        for box in Mailbox.allCases {
+            #expect(!box.label.isEmpty)
+            #expect(!box.icon.isEmpty)
+        }
+    }
+
     // MARK: Row indicators
 
     @Test func rowIndicatorsAreBadgeFiltersMinusViewerOnlyBuckets() {

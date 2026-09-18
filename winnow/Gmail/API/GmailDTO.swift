@@ -118,6 +118,7 @@ enum GmailLabel {
     nonisolated static let trash = "TRASH"
     nonisolated static let inbox = "INBOX"
     nonisolated static let unread = "UNREAD"
+    nonisolated static let spam = "SPAM"
     nonisolated static let categoryPromotions = "CATEGORY_PROMOTIONS"
 }
 

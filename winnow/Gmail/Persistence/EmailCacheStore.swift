@@ -52,6 +52,7 @@ final class StoredEmail {
     var winnowEmail: WinnowEmail {
         WinnowEmail(
             id: numericId,
+            threadId: threadId.isEmpty ? nil : threadId,
             sender: sender,
             name: name,
             email: address,

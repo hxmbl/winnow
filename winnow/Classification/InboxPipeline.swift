@@ -56,11 +56,14 @@ nonisolated func filterAndSortInbox(
         output.sort { $0.sender.localizedStandardCompare($1.sender) == .orderedAscending }
     case .score:
         // Scores are only needed for this sort — skip the regex pass otherwise.
+        // The recency window is the filtered set itself, so the new-incoming
+        // bonus compares mail against the mail it actually ranks among.
         var scores: [Int: Int] = [:]
         scores.reserveCapacity(output.count)
+        let recency = ScoreRecencyContext.window(of: output.map(\.receivedAt))
         for email in output {
             let sig = signals[email.id] ?? .neutral
-            scores[email.id] = calculateWinnowScore(email: email, sig: sig, profile: profile)
+            scores[email.id] = calculateWinnowScore(email: email, sig: sig, profile: profile, recency: recency)
         }
         output.sort { (scores[$0.id] ?? 0) > (scores[$1.id] ?? 0) }
     }

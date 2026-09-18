@@ -252,4 +252,32 @@ struct ClassificationTests {
         let long = Fixtures.classify(Fixtures.email(body: longBody))
         #expect(long.longRead)
     }
+
+    // MARK: New-mail scoring bonus — lives in the smart score, not the signals
+
+    // The recency bonus (STO-140) is applied where messages are *ranked*,
+    // never in the per-email classifier: `classifyEmail` sees a single message
+    // with no knowledge of the set it will rank among, and its
+    // `importanceScore` is cached on the signal. The relative, bounded and
+    // reproducible behavior is covered in `ScoreAndFilterTests`; the
+    // classifier itself stays recency-neutral — identical mail must score
+    // identically regardless of its age.
+
+    @Test func classifierIsRecencyNeutral() {
+        let old = Fixtures.classify(Fixtures.email(receivedAt: 1_000))
+        let new = Fixtures.classify(Fixtures.email(receivedAt: 10_000_000_000))
+        #expect(old.importanceScore == new.importanceScore)
+    }
+
+    @Test func spamLikelihoodAndPrioritiesUnchanged() {
+        let phishy = Fixtures.classify(Fixtures.email(body: "Click here to confirm your identity."))
+        let starred = Fixtures.classify(Fixtures.email(starred: true))
+        let urgent = Fixtures.classify(Fixtures.email(urgent: true))
+        let promo = Fixtures.classify(Fixtures.email(body: "Flash sale! Everything is 20% off."))
+
+        #expect(phishy.importanceScore < 50)
+        #expect(starred.importanceScore > 50)
+        #expect(urgent.importanceScore > 50)
+        #expect(promo.importanceScore < 50)
+    }
 }
