@@ -89,6 +89,7 @@ final class LearningModel {
                 action: action,
                 predictedImportance: sig.importanceScore,
                 activeSignals: touched,
+                rejectedFilter: nil,
                 at: Date()
             )
         )
@@ -97,6 +98,36 @@ final class LearningModel {
         }
         if adaptive {
             applyUpdate(touched: touched, starred: action == .starred, sig: sig)
+        }
+        persist()
+    }
+
+    /// Record a smart filter the user dismissed as noise, then nudge the weights
+    /// away from that bucket (STO-138): boosting signals step down, penalty
+    /// signals step up — the bucket was overrating / underrating this mail.
+    /// `.unsafe` is never dismissible (the store refuses it), so the spam
+    /// sensitivity weight is untouched here. `email` is nil for a global
+    /// "remove this pill" act; when dismissing on a specific message, pass both
+    /// so the event carries the prediction context.
+    func rejectFilter(_ filter: BuiltinSmartFilter, email: WinnowEmail?, sig: EmailSignals = .neutral) {
+        let keys = drivingKeys(for: filter)
+        events.append(
+            FeedbackEvent(
+                id: UUID(),
+                emailID: email?.id,
+                sender: email?.sender,
+                action: .filterRejected,
+                predictedImportance: email != nil ? sig.importanceScore : nil,
+                activeSignals: email != nil ? touchedKeys(for: sig) : [],
+                rejectedFilter: filter,
+                at: Date()
+            )
+        )
+        if events.count > maxEvents {
+            events.removeFirst(events.count - maxEvents)
+        }
+        if adaptive, !keys.isEmpty {
+            applyRejection(keys: keys)
         }
         persist()
     }
@@ -145,6 +176,37 @@ final class LearningModel {
         default:
             return false
         }
+    }
+
+    /// Which importance signals most plausibly drove this bucket's matches.
+    /// Rejecting the bucket pulls those signals the other way — boosting keys
+    /// down (this mail wasn't important) and penalty keys up (the label
+    /// under-fired). Buckets with no obvious signal (codes, shipping, social…)
+    /// learn nothing but still log the act, so the event log stays complete.
+    private func drivingKeys(for filter: BuiltinSmartFilter) -> [SignalKey] {
+        switch filter {
+        case .important, .needsAction: return [.actionNeeded]
+        case .urgent: return [.urgency]
+        case .security: return [.security]
+        case .receipts: return [.finance]
+        case .newsletters: return [.newsletterPenalty]
+        case .promotional: return [.promoPenalty]
+        default: return []
+        }
+    }
+
+    private func applyRejection(keys: [SignalKey]) {
+        var changed = false
+        for key in keys {
+            let delta = isPenalty(key) ? learningStep : -learningStep
+            let current = weight(key)
+            let next = min(max(current + delta, key.allowedRange.lowerBound), key.allowedRange.upperBound)
+            if next != current {
+                weights[keyPath: key.keyPath] = next
+                changed = true
+            }
+        }
+        if changed { onWeightsChanged?() }
     }
 
     // MARK: Persistence

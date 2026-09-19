@@ -57,6 +57,15 @@ struct SettingsView: View {
                         Label("Blocked senders", systemImage: "person.slash")
                     }
                 }
+                NavigationLink {
+                    RemovedFiltersList(store: store)
+                } label: {
+                    LabeledContent {
+                        Text("\(store.removedFilters.count)").foregroundStyle(.secondary)
+                    } label: {
+                        Label("Hidden smart filters", systemImage: "eye.slash")
+                    }
+                }
             } header: {
                 Text("Preferences")
             }
@@ -171,6 +180,50 @@ struct SettingsView: View {
         default:
             return "—"
         }
+    }
+}
+
+/// Smart buckets the user silenced from the pill rail (STO-138). Removing a
+/// filter hides that mail from the default inbox and retrains the learner
+/// away from it; restoring here brings the pill and the mail back.
+struct RemovedFiltersList: View {
+    @Bindable var store: WinnowStore
+
+    var body: some View {
+        Group {
+            if store.removedFilters.isEmpty {
+                ContentUnavailableView(
+                    "No hidden filters",
+                    systemImage: "eye.slash",
+                    description: Text("Right-click a smart filter in the rail and choose \u{201C}Hide\u{201D} to silence that bucket.")
+                )
+            } else {
+                List {
+                    ForEach(store.removedFilters.sorted { $0.rawValue < $1.rawValue }, id: \.self) { filter in
+                        HStack(spacing: 12) {
+                            Image(systemName: filter.iconName)
+                                .font(.body)
+                                .foregroundStyle(filter.palette.text)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(filter.label).font(.body.weight(.medium))
+                                Text("Hidden from the default inbox")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Restore") {
+                                withAnimation { store.restoreFilter(filter) }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .navigationTitle("Hidden Smart Filters")
     }
 }
 

@@ -35,6 +35,7 @@ final class WinnowStore {
     static let authDefaultsKey = "winnow.authed.v1"
     static let blockedSendersKey = "winnow.blockedSenders.v1"
     static let notificationsEnabledKey = "winnow.notificationsEnabled.v1"
+    static let removedFiltersKey = "winnow.removedFilters.v1"
 
     var authed = false
 
@@ -107,6 +108,23 @@ final class WinnowStore {
     /// drops it — blocking is a view concern, unblocking must bring it back).
     private(set) var blockedSenders: [String] {
         didSet { defaults.set(blockedSenders, forKey: Self.blockedSendersKey) }
+    }
+
+    /// Built-in smart buckets the user silenced from the rail (STO-138).
+    /// Mail matching a removed bucket is hidden from the unfiltered inbox; a
+    /// persistently active filter still overrides the mute. The exclusive
+    /// `.unsafe` bucket can never be removed. Removal also feeds the learner
+    /// (`rejectFilter`) so the same bucket keeps firing less often.
+    private(set) var removedFilters: Set<BuiltinSmartFilter> = [] {
+        didSet {
+            guard !isBootstrapping else { return }
+            if removedFilters != oldValue,
+               let data = try? JSONEncoder().encode([BuiltinSmartFilter](removedFilters)) {
+                defaults.set(data, forKey: Self.removedFiltersKey)
+            }
+            updateRailItems()
+            rebuildFilteredRows()
+        }
     }
 
     /// User opt-in for new-email notifications (Settings).
@@ -267,6 +285,11 @@ final class WinnowStore {
 
     @ObservationIgnored private let defaults: UserDefaults
 
+    /// True while `init` restores persisted state, before classification has
+    /// run. Silences `didSet` rebuilds (and redundant persistence) that would
+    /// otherwise fight the surrounding bootstrap sequence.
+    @ObservationIgnored private var isBootstrapping = false
+
     // MARK: - Lifecycle & rebuilds
 
     /// True when this process hosts the unit-test bundle (the host app launches
@@ -282,6 +305,12 @@ final class WinnowStore {
         self.authed = defaults.bool(forKey: Self.authDefaultsKey)
         self.blockedSenders = defaults.stringArray(forKey: Self.blockedSendersKey) ?? []
         self.notificationsEnabled = defaults.bool(forKey: Self.notificationsEnabledKey)
+        isBootstrapping = true
+        if let data = defaults.data(forKey: Self.removedFiltersKey),
+           let removed = try? JSONDecoder().decode([BuiltinSmartFilter].self, from: data) {
+            self.removedFilters = Set(removed)
+        }
+        isBootstrapping = false
         learning.onWeightsChanged = { [weak self] in self?.scheduleWeightsSweep() }
         rebuildAllDerived()
         terminateObserver = NotificationCenter.default.addObserver(
@@ -421,6 +450,8 @@ final class WinnowStore {
 
         func place(_ builtin: BuiltinSmartFilter) {
             guard placed.insert(builtin).inserted else { return }
+            // Removed buckets are silenced until restored (STO-138).
+            guard !removedFilters.contains(builtin) else { return }
             // Prefer the ranked entry; fall back to the catalog so an active
             // bucket with zero current matches stays visible and removable.
             let source = ranked.first { $0.id == builtin }
@@ -525,7 +556,8 @@ final class WinnowStore {
             sortBy: sortBy,
             profile: profile,
             signals: emailSignals,
-            searchBags: searchBags
+            searchBags: searchBags,
+            removedFilters: removedFilters
         )
         var rows: [EmailRowModel] = []
         rows.reserveCapacity(visibleIDs.count)
@@ -1058,6 +1090,29 @@ final class WinnowStore {
         rebuildFilteredRows()
     }
 
+    // MARK: - Removed smart filters (STO-138)
+
+    func isFilterRemoved(_ filter: BuiltinSmartFilter) -> Bool {
+        removedFilters.contains(filter)
+    }
+
+    /// Silences a smart bucket: its pill leaves the rail, its mail drops out of
+    /// the unfiltered inbox (an explicitly activated filter still wins), and
+    /// the learner logs a rejection so the bucket stops firing. The exclusive
+    /// `.unsafe` safety valve can never be dismissed.
+    func dismissFilter(_ filter: BuiltinSmartFilter) {
+        guard filter != .unsafe, !removedFilters.contains(filter) else { return }
+        activeFilters.removeAll { $0 == .builtin(filter) }
+        learning.rejectFilter(filter, email: nil)
+        removedFilters.insert(filter)
+    }
+
+    /// Brings a silenced bucket back to the rail and the inbox.
+    func restoreFilter(_ filter: BuiltinSmartFilter) {
+        guard removedFilters.contains(filter) else { return }
+        removedFilters.remove(filter)
+    }
+
     // MARK: - Reader-card selection
 
     /// The selected thread resolved against the **current mailbox**, or nil
@@ -1158,6 +1213,11 @@ final class WinnowStore {
     /// built-in moves it to the front of the rail (see `updateRailItems`) and
     /// re-points the keyboard focus at its new position.
     func toggleFilter(_ id: FilterId) {
+        // A silenced bucket can't be re-activated from the rail; restore it in
+        // Settings first (STO-138).
+        if case .builtin(let builtin) = id, removedFilters.contains(builtin) {
+            return
+        }
         if activeFilters.contains(id) {
             activeFilters.removeAll { $0 == id }
         } else if id.isUnsafe {

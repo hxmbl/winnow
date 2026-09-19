@@ -291,6 +291,75 @@ final class WinnowStoreTests {
         #expect(unsafeIndex == ids.count - 1)
     }
 
+    // MARK: STO-138 — removed smart filters
+
+    @Test func dismissingAFilterDeactivatesItAndRemovesItsPill() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1, starred: true)])
+        store.toggleFilter(.builtin(.receipts))
+        #expect(store.activeFilters == [.builtin(.receipts)])
+
+        store.dismissFilter(.receipts)
+
+        #expect(store.activeFilters.isEmpty)
+        #expect(store.isFilterRemoved(.receipts))
+        #expect(!store.railItems.contains { $0.filter.id == .receipts })
+    }
+
+    @Test func dismissingTheUnsafeSafetyValveIsRefused() {
+        let store = makeStore()
+        store.dismissFilter(.unsafe)
+        #expect(!store.isFilterRemoved(.unsafe))
+        #expect(store.railItems.contains { $0.filter.id == .unsafe })
+    }
+
+    @Test func silencedBucketsStayOffTheRailAndCannotBeReToggled() {
+        let store = makeStore(inbox: [Fixtures.email(id: 1)])
+        store.dismissFilter(.promotional)
+        store.toggleFilter(.builtin(.promotional))
+        #expect(store.activeFilters.isEmpty)
+        #expect(!store.railItems.contains { $0.filter.id == .promotional })
+    }
+
+    @Test func dismissingAFilterHidesItsMailFromTheDefaultInboxUntilRestored() {
+        let newsletter = Fixtures.email(id: 1, body: "You can unsubscribe from this weekly digest anytime.")
+        let work = Fixtures.email(id: 2, body: "Could you review the design doc today?")
+        let store = makeStore(inbox: [newsletter, work])
+
+        func visibleIDs() -> Set<Int> { Set(store.filteredEmails.map(\.id)) }
+        #expect(visibleIDs() == [1, 2])
+
+        store.dismissFilter(.newsletters)
+        #expect(visibleIDs() == [2])
+
+        store.restoreFilter(.newsletters)
+        #expect(visibleIDs() == [1, 2])
+    }
+
+    @Test func anActivatedFilterOverridesASilencedBucket() {
+        let newsletter = Fixtures.email(id: 1, body: "You can unsubscribe from this weekly digest anytime.", starred: true)
+        let work = Fixtures.email(id: 2, body: "Could you review the design doc today?", starred: true)
+        let store = makeStore(inbox: [newsletter, work])
+
+        store.dismissFilter(.newsletters)
+        #expect(Set(store.filteredEmails.map(\.id)) == [2])
+
+        // An explicit selection wins over the mute — the user asked to see mail.
+        store.toggleFilter(.builtin(.starred))
+        #expect(Set(store.filteredEmails.map(\.id)) == [1, 2])
+    }
+
+    @Test func removedFiltersSurviveRecreatingTheStore() {
+        let store = makeStore()
+        store.dismissFilter(.newsletters)
+        store.dismissFilter(.promotional)
+
+        let reloaded = makeStore()
+        #expect(reloaded.isFilterRemoved(.newsletters))
+        #expect(reloaded.isFilterRemoved(.promotional))
+        #expect(!reloaded.railItems.contains { $0.filter.id == .newsletters })
+        #expect(!reloaded.railItems.contains { $0.filter.id == .promotional })
+    }
+
     // MARK: Keyboard navigation & triage
 
     @Test func selectionMovesClampsAndOpensAlong() {

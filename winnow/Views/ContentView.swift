@@ -76,7 +76,19 @@ struct ContentView: View {
             return view
         }
 
-        func updateNSView(_ nsView: NSView, context: Context) {}
+        func updateNSView(_ nsView: NSView, context: Context) {
+            // STO-132: makeNSView's single tick can fire before the view has a
+            // hosting window (launch-order races), leaving the keybind monitor
+            // never installed — every key then plays the alert beep. Re-resolve
+            // the window on each update so a transiently-windowless view is
+            // caught as soon as its window exists, and a window that was
+            // re-created re-targets the engine. Deferred like makeNSView so
+            // state mutation never happens mid-update; attachKeybinds is
+            // idempotent (re-target is a no-op on a nil or repeated window).
+            DispatchQueue.main.async { [weak nsView] in
+                onWindow(nsView?.window)
+            }
+        }
     }
 
     /// `?` cheat sheet — rendered from the engine's binding table, so it can
@@ -363,7 +375,8 @@ struct ContentView: View {
                 withAnimation(.easeOut(duration: 0.18)) {
                     store.toggleFilter(.builtin(filter))
                 }
-            }
+            },
+            removedFilters: store.removedFilters
         )
         .padding(.horizontal, 16)
         .contentShape(Rectangle())

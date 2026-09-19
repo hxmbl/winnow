@@ -17,6 +17,8 @@ import Foundation
 ///   - profile: Engagement stats (top/quiet senders, trash bias).
 ///   - signals: Precomputed classification keyed by email id.
 ///   - searchBags: Optional precomputed `wordBag` values keyed by email id.
+///   - removedFilters: Buckets the user silenced (STO-138). Only applies to
+///     the unfiltered inbox — an explicitly activated filter overrides a mute.
 /// - Returns: The visible emails in display order.
 nonisolated func filterAndSortInbox(
     inbox: [WinnowEmail],
@@ -25,7 +27,8 @@ nonisolated func filterAndSortInbox(
     sortBy: SortBy,
     profile: UserProfile,
     signals: [Int: EmailSignals],
-    searchBags: [Int: String] = [:]
+    searchBags: [Int: String] = [:],
+    removedFilters: Set<BuiltinSmartFilter> = []
 ) -> [WinnowEmail] {
     let query = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
     let tokens = query.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -45,8 +48,16 @@ nonisolated func filterAndSortInbox(
             return filters.allSatisfy { matchesSmartFilter(filter: $0, email: email, sig: sig, profile: profile) }
         }
     } else {
-        // No filter selected: hide the spam bucket so the inbox stays clean by default.
-        output = output.filter { (signals[$0.id]?.spamLikelihood ?? 0) < EmailSignals.unsafeThreshold }
+        // No filter selected: hide the spam bucket and whatever buckets the
+        // user has explicitly removed, so the default inbox stays clean.
+        output = output.filter { email in
+            let sig = signals[email.id] ?? .neutral
+            guard sig.spamLikelihood < EmailSignals.unsafeThreshold else { return false }
+            guard !removedFilters.isEmpty else { return true }
+            return !removedFilters.contains(where: {
+                matchesBuiltin($0, email: email, sig: sig, profile: profile)
+            })
+        }
     }
 
     switch sortBy {

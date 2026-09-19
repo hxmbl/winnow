@@ -81,6 +81,15 @@ final class KeybindEngine {
 
     // MARK: - Pure routing
 
+    /// Modifier noise that must not block canvas keys: Shift (uppercase
+    /// typing, `#`/`?`/`!`), Caps Lock (sticky state, not a chord), and the
+    /// keypad flag (main-keyboard arrows and keypad digits often carry it).
+    /// Every other device-independent flag is a real chord (⌘/⌃/⌥/fn) and
+    /// still belongs to system/menu shortcuts.
+    nonisolated private static func routingFlags(_ modifiers: UInt) -> NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: modifiers).subtracting([.shift, .capsLock, .numericPad])
+    }
+
     /// Routes one key. `modifiers` carries the event's modifier flags so the
     /// ⌘/⌃/⌥ guard lives here — in the testable router, not the monitor shell.
     nonisolated static func command(
@@ -90,9 +99,9 @@ final class KeybindEngine {
         modifiers: UInt = 0
     ) -> KeyCommand? {
         // ⌘/⌃/⌥ combos (with or without shift) belong to system and menu
-        // shortcuts and are never intercepted.
-        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
-        guard flags.subtracting(.shift).intersection(.deviceIndependentFlagsMask).isEmpty else { return nil }
+        // shortcuts and are never intercepted. Caps Lock and the keypad flag
+        // are state noise, not chords: bare keys must keep routing (STO-132).
+        guard routingFlags(modifiers).intersection(.deviceIndependentFlagsMask).isEmpty else { return nil }
         guard context.authed else { return nil }
 
         let esc = keyCode == 53
@@ -179,11 +188,14 @@ final class KeybindEngine {
     /// - ⌘/⌃/⌥ combos belong to system and menu shortcuts.
     /// - Shift+letter is normal typing (uppercase) and must pass through.
     /// - F-keys arrive with `.function`, so they keep their system meaning.
+    /// Caps Lock and the keypad flag are sticky state, not chords — a bare
+    /// key wearing them alone must be swallowed, not leak into the responder
+    /// chain and beep (STO-132).
     nonisolated static func shouldPassThrough(context: Context, modifiers: UInt = 0) -> Bool {
         if !context.authed || context.textEditing { return true }
         // Shift alone is normal typing (uppercase letters, #, ?) — let it through
         // so users can type capital letters without the event being swallowed.
-        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
+        let flags = NSEvent.ModifierFlags(rawValue: modifiers).subtracting([.capsLock, .numericPad])
         return !flags.intersection(.deviceIndependentFlagsMask).isEmpty
     }
 

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Semantic buckets the app can filter by, without naming individual vendors.
-enum BuiltinSmartFilter: String, CaseIterable {
+enum BuiltinSmartFilter: String, CaseIterable, Codable {
     case starred
     case important
     case urgent

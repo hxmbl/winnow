@@ -10,10 +10,12 @@ struct BadgeStack: View {
     /// Buckets whose filter pills are currently active (drives the checkmark).
     var activeFilters: [FilterId] = []
     var onToggleFilter: (BuiltinSmartFilter) -> Void = { _ in }
+    /// Buckets the user silenced (STO-138) — their badges are hidden too.
+    var removedFilters: Set<BuiltinSmartFilter> = []
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(sig.rowIndicators, id: \.self) { filter in
+            ForEach(sig.rowIndicators.filter { !removedFilters.contains($0) }, id: \.self) { filter in
                 Button { onToggleFilter(filter) } label: {
                     HStack(spacing: 2) {
                         Image(systemName: filter.iconName)

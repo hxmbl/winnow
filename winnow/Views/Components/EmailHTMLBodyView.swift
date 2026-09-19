@@ -81,12 +81,16 @@ private struct WebKitEmailBodyView: NSViewRepresentable {
 
         /// Loads the HTML once per document — SwiftUI re-runs `updateNSView`
         /// whenever the height binding changes, and re-loading on every update
-        /// would reset the page in a loop.
+        /// would reset the page in a loop. `loadedHTML` holds the *raw* source
+        /// so re-highlighting never happens just because the binding ticked.
         func attach(_ webView: WKWebView, html: String) {
             self.webView = webView
             guard html != loadedHTML else { return }
             loadedHTML = html
-            webView.loadHTMLString(html, baseURL: nil)
+            // STO-136: page scripting is disabled (security model), so syntax
+            // highlighting is done here in Swift before the document loads.
+            let rendered = CodeHighlighting.highlightCodeBlocks(in: html)
+            webView.loadHTMLString(rendered, baseURL: nil)
         }
 
         // MARK: - Navigation sandbox

@@ -33,6 +33,28 @@ struct FilterRail: View {
                                 }
                             }
                             .id(item.id)
+                            // STO-138: right-clicking a pill silences that
+                            // bucket for good — its mail leaves the default
+                            // inbox and the pill leaves the rail, reversible in
+                            // Settings. The Unsafe safety valve stays pinned.
+                            .contextMenu {
+                                if filter.id != .unsafe {
+                                    Button {
+                                        withAnimation(.easeOut(duration: 0.18)) {
+                                            store.dismissFilter(filter.id)
+                                        }
+                                    } label: {
+                                        Label("Hide \(filter.label) mail", systemImage: "eye.slash")
+                                    }
+                                    if on {
+                                        Button {
+                                            store.clearAllFilters()
+                                        } label: {
+                                            Label("Turn off \(filter.label) filter", systemImage: "xmark.circle")
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 16)

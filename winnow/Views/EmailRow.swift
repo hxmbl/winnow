@@ -14,6 +14,8 @@ import SwiftUI
         var activeFilters: [FilterId] = []
         /// Tapped by any smart-filter indicator badge; toggles that bucket's filter.
         var onToggleFilter: (BuiltinSmartFilter) -> Void = { _ in }
+        /// Buckets the user silenced (STO-138) — passed to the badge stack.
+        var removedFilters: Set<BuiltinSmartFilter> = []
         @State private var isHovered = false
 
     var body: some View {
@@ -48,7 +50,8 @@ import SwiftUI
                             starred: email.starred,
                             onToggleStar: onToggleStar,
                             activeFilters: activeFilters,
-                            onToggleFilter: onToggleFilter
+                            onToggleFilter: onToggleFilter,
+                            removedFilters: removedFilters
                         )
                     }
                 }

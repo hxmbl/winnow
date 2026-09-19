@@ -40,7 +40,10 @@ struct EmailViewer: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+                // STO-134: lazy so each message's WKWebView (a fresh sandboxed
+                // WebContent process) is created only as it scrolls into view —
+                // building all of them eagerly made opening a conversation slow.
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ReaderScrollDriver(step: store.viewerScrollStep)
                     threadHeader
                     ForEach(Array(conversation.enumerated()), id: \.element.id) { index, message in
@@ -307,7 +310,8 @@ struct EmailViewer: View {
             .help(message.starred ? "Remove star" : "Add star")
             // Every smart-filter indicator acts like the star: tapping toggles
             // its bucket in the main list; the checkmark mirrors the pill rail.
-            ForEach(sig.badgeFilters, id: \.self) { filter in
+            // Silenced buckets (STO-138) hide their badge too.
+            ForEach(sig.badgeFilters.filter { !store.removedFilters.contains($0) }, id: \.self) { filter in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {
                         store.toggleFilter(.builtin(filter))

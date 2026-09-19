@@ -134,6 +134,89 @@ final class LearningModelTests {
         #expect(model.weight(.spamSensitivity) == SignalKey.spamSensitivity.defaultValue)
     }
 
+    // MARK: STO-138 — filter rejection feedback
+
+    @Test func rejectingANewsletterBucketHardensItsPenalty() {
+        let model = makeModel()
+        model.rejectFilter(.newsletters, email: nil)
+        #expect(model.weight(.newsletterPenalty) == SignalKey.newsletterPenalty.defaultValue + 1)
+        // Only the driving key moves.
+        #expect(model.weight(.promoPenalty) == SignalKey.promoPenalty.defaultValue)
+    }
+
+    @Test func rejectingAUrgentBucketSoftensItsBoostingSignal() {
+        let model = makeModel()
+        model.rejectFilter(.urgent, email: nil)
+        #expect(model.weight(.urgency) == SignalKey.urgency.defaultValue - 1)
+    }
+
+    @Test func rejectingAReceiptsBucketPullsFinanceDown() {
+        let model = makeModel()
+        model.rejectFilter(.receipts, email: nil)
+        #expect(model.weight(.finance) == SignalKey.finance.defaultValue - 1)
+    }
+
+    @Test func rejectingAFilterLogsTheActWithoutAConcreteEmail() {
+        let model = makeModel()
+        model.rejectFilter(.security, email: nil)
+        let event = model.events.first
+        #expect(event?.action == .filterRejected)
+        #expect(event?.rejectedFilter == .security)
+        #expect(event?.emailID == nil)
+        #expect(event?.predictedImportance == nil)
+    }
+
+    @Test func filterRejectionNeverTouchesSpamSensitivity() {
+        let model = makeModel()
+        model.rejectFilter(.promotional, email: nil)
+        #expect(model.weight(.spamSensitivity) == SignalKey.spamSensitivity.defaultValue)
+    }
+
+    @Test func bucketsWithoutDrivingSignalsLogButDoNotMoveWeights() {
+        let model = makeModel()
+        model.rejectFilter(.codes, email: nil)
+        #expect(model.events.count == 1)
+        for key in SignalKey.allCases {
+            #expect(model.weight(key) == key.defaultValue)
+        }
+    }
+
+    @Test func manualModeSkipsRejectionNudgesButStillLogs() {
+        let model = makeModel()
+        model.setAdaptive(false)
+        model.rejectFilter(.urgent, email: nil)
+        #expect(model.events.count == 1)
+        #expect(model.weight(.urgency) == SignalKey.urgency.defaultValue)
+    }
+
+    @Test func rejectionOnASpecificMessageCarriesThePredictionContext() {
+        let model = makeModel()
+        let email = Fixtures.email(id: 42, sender: "news@digest.io")
+        let sig = Fixtures.signals(newsletter: true, importanceScore: 61)
+
+        model.rejectFilter(.newsletters, email: email, sig: sig)
+
+        let event = model.events.first
+        #expect(event?.emailID == 42)
+        #expect(event?.sender == "news@digest.io")
+        #expect(event?.predictedImportance == 61)
+        #expect(event?.rejectedFilter == .newsletters)
+        #expect(event?.activeSignals.contains(.newsletterPenalty) == true)
+    }
+
+    @Test func starFeedbackAndFilterRejectionRecoverTheSameDrift() {
+        let model = makeModel()
+        let sig = Fixtures.signals(newsletter: true)
+
+        // Starring wants newsletters to matter less; rejecting one wants the
+        // same outcome from the opposite direction.
+        model.record(action: .starred, email: Fixtures.email(), sig: sig)
+        #expect(model.weight(.newsletterPenalty) == SignalKey.newsletterPenalty.defaultValue - 1)
+
+        model.rejectFilter(.newsletters, email: nil)
+        #expect(model.weight(.newsletterPenalty) == SignalKey.newsletterPenalty.defaultValue)
+    }
+
     @Test func everyFeedbackEventLogsThePreFlipPrediction() {
         let model = makeModel()
         let sig = Fixtures.signals(promotional: true, importanceScore: 77)

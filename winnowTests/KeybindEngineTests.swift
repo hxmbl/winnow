@@ -209,6 +209,40 @@ struct KeybindEngineTests {
         #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: function) == true)
     }
 
+    // MARK: STO-132 — Caps Lock / keypad noise must not beep or block routing
+
+    @Test func capsLockAndNumericPadAreNoiseNotChords() {
+        let capsLock = UInt(NSEvent.ModifierFlags.capsLock.rawValue)
+        let numericPad = UInt(NSEvent.ModifierFlags.numericPad.rawValue)
+
+        // Bare keys keep routing while Caps Lock is engaged or a keypad flag
+        // rides along.
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: context(), modifiers: capsLock) == .moveSelection(1))
+        #expect(KeybindEngine.command(forCharacter: "s", keyCode: 1, context: context(hasActionTarget: true), modifiers: capsLock) == .toggleStar)
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: context(), modifiers: numericPad) == .moveSelection(1))
+        // Keypad arrows carry .numericPad and must still scroll/select.
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: context(viewerOpen: true), modifiers: numericPad) == .scrollReader(1))
+        #expect(KeybindEngine.command(forCharacter: nil, keyCode: 125, context: context(), modifiers: numericPad) == .moveSelection(1))
+
+        // Unmatched keys wearing only this noise are swallowed, never passed
+        // through to NSResponder.noResponder (the alert beep).
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: capsLock) == false)
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: numericPad) == false)
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: capsLock | numericPad) == false)
+    }
+
+    @Test func capsLockNeverDemotesARealChord() {
+        let capsLock = UInt(NSEvent.ModifierFlags.capsLock.rawValue)
+        let command = UInt(NSEvent.ModifierFlags.command.rawValue)
+        let control = UInt(NSEvent.ModifierFlags.control.rawValue)
+
+        // A genuine ⌘/⌃/⌥ combo stays system-owned even with Caps Lock on.
+        #expect(KeybindEngine.command(forCharacter: "j", keyCode: 38, context: context(), modifiers: command | capsLock) == nil)
+        #expect(KeybindEngine.command(forCharacter: "s", keyCode: 1, context: context(hasActionTarget: true), modifiers: control | capsLock) == nil)
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: command | capsLock) == true)
+        #expect(KeybindEngine.shouldPassThrough(context: context(), modifiers: control | capsLock) == true)
+    }
+
     @Test func cheatSheetListsEveryRoutedKey() {
         // Documentation cannot drift: every binding entry must produce its
         // command in the context where it is valid.
