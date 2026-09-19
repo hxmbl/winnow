@@ -45,7 +45,7 @@ struct ReplyQuotingTests {
         var message = email(body: "")
         message.bodyHTML = "<p>html fallback</p>"
         let block = ReplyQuoting.block(original: message)
-        #expect(block.hasSuffix("\n> <p>html fallback</p>"))
+        #expect(block.hasSuffix("\n> html fallback"))
     }
 
     @Test func suffixMatchingIsVerbatim() {

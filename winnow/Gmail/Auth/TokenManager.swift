@@ -40,7 +40,11 @@ final class TokenManager {
     private var cached: TokenSet?
     private var inflightRefresh: Task<String, Error>?
 
-    init(store: TokenStore, credentialsProvider: @escaping () throws -> GmailCredentials, session: URLSession = .shared) {
+    init(
+        store: TokenStore,
+        credentialsProvider: @escaping () throws -> GmailCredentials,
+        session: URLSession = GmailClient.productionSession()
+    ) {
         self.store = store
         self.credentialsProvider = credentialsProvider
         self.session = session
@@ -167,7 +171,7 @@ final class TokenManager {
         var form = [
             "client_id": credentials.clientID,
             "refresh_token": refreshToken,
-            "grant_type": "refresh_token",
+            "grant_type": "refresh_token"
         ]
         if let secret = credentials.clientSecret {
             form["client_secret"] = secret

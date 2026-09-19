@@ -36,6 +36,9 @@ final class WinnowStore {
     static let blockedSendersKey = "winnow.blockedSenders.v1"
     static let notificationsEnabledKey = "winnow.notificationsEnabled.v1"
     static let removedFiltersKey = "winnow.removedFilters.v1"
+    /// Off by default: email HTML is hostile input, so remote images, remote
+    /// CSS/fonts and tracking pixels stay blocked until the user opts in.
+    nonisolated static let loadRemoteContentKey = "winnow.loadRemoteContent.v1"
 
     var authed = false
 
@@ -139,6 +142,15 @@ final class WinnowStore {
         try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
     }
     @ObservationIgnored private var notificationAuthorizationTask: Task<Void, Never>?
+
+    /// User opt-in for loading remote content (images, CSS, fonts) in message
+    /// bodies. Blocking it by default denies senders a tracking-pixel read
+    /// receipt and keeps the reader from reaching the network.
+    var loadRemoteContent = false {
+        didSet {
+            defaults.set(loadRemoteContent, forKey: Self.loadRemoteContentKey)
+        }
+    }
 
     private func updateNotificationAuthorization() {
         notificationAuthorizationTask?.cancel()
@@ -305,6 +317,7 @@ final class WinnowStore {
         self.authed = defaults.bool(forKey: Self.authDefaultsKey)
         self.blockedSenders = defaults.stringArray(forKey: Self.blockedSendersKey) ?? []
         self.notificationsEnabled = defaults.bool(forKey: Self.notificationsEnabledKey)
+        self.loadRemoteContent = defaults.bool(forKey: Self.loadRemoteContentKey)
         isBootstrapping = true
         if let data = defaults.data(forKey: Self.removedFiltersKey),
            let removed = try? JSONDecoder().decode([BuiltinSmartFilter].self, from: data) {

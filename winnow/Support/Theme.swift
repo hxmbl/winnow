@@ -41,7 +41,7 @@ let builtinFilterPalettes: [BuiltinSmartFilter: FilterPalette] = [
     .unread: FilterPalette(bg: rgba(148, 163, 184, 0.45), border: rgba(100, 116, 139, 0.5), text: rgba(30, 41, 59, 1)),
     .attachments: FilterPalette(bg: rgba(214, 158, 46, 0.45), border: rgba(180, 125, 25, 0.52), text: rgba(84, 50, 6, 1)),
     .newSenders: FilterPalette(bg: rgba(248, 113, 113, 0.45), border: rgba(239, 68, 68, 0.5), text: rgba(127, 29, 29, 1)),
-    .unsafe: FilterPalette(bg: rgba(253, 186, 116, 0.53), border: rgba(251, 146, 60, 0.58), text: rgba(124, 45, 18, 1)),
+    .unsafe: FilterPalette(bg: rgba(253, 186, 116, 0.53), border: rgba(251, 146, 60, 0.58), text: rgba(124, 45, 18, 1))
 ]
 
 extension BuiltinSmartFilter {

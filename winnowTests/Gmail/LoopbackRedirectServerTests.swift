@@ -43,16 +43,24 @@ struct LoopbackRedirectServerTests {
     }
 
     @Test func liveRoundTripRejectsWrongState() async throws {
-        let server = try await LoopbackRedirectServer.start()
+        let server = try await LoopbackRedirectServer.start(expectedState: "expected")
 
         let waiter = Task { try await server.awaitCode(expectedState: "expected", timeout: 10) }
 
-        let request = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/?code=c&state=evil")!)
-        _ = try await URLSession.shared.data(for: request)
+        // A redirect carrying the wrong nonce is answered 403 and must NOT
+        // settle the wait or tear the listener down.
+        let forged = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/?code=c&state=evil")!)
+        let (_, forgedResponse) = try await URLSession.shared.data(for: forged)
+        #expect((forgedResponse as? HTTPURLResponse)?.statusCode == 403)
+        #expect(!waiter.isCancelled)
 
-        await #expect(throws: GmailAPIError.self) {
-            _ = try await waiter.value
-        }
+        // The genuine redirect still lands afterwards.
+        let real = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/?code=real&state=expected")!)
+        let (_, realResponse) = try await URLSession.shared.data(for: real)
+        #expect((realResponse as? HTTPURLResponse)?.statusCode == 200)
+
+        let code = try await waiter.value
+        #expect(code == "real")
     }
 
     @Test func faviconRequestsDoNotFulfillTheWait() async throws {

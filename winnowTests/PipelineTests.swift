@@ -10,7 +10,7 @@ struct PipelineTests {
             Fixtures.email(id: 2, sender: "alice@x.co", receivedAt: 300, subject: "Invoice overdue", body: "See attachment."),
             Fixtures.email(id: 3, sender: "carol@x.co", receivedAt: 200, type: "promotional"),
             Fixtures.email(id: 4, sender: "dan@x.co", receivedAt: 400, body: "Could you review this?"),
-            Fixtures.email(id: 5, sender: "erin@x.co", receivedAt: 50, starred: true),
+            Fixtures.email(id: 5, sender: "erin@x.co", receivedAt: 50, starred: true)
         ]
     }
 
@@ -124,7 +124,7 @@ struct PipelineTests {
         let inbox = [
             Fixtures.email(id: 1, sender: "zoe@x.co", receivedAt: 999),
             Fixtures.email(id: 2, sender: "alice@x.co", receivedAt: 888),
-            Fixtures.email(id: 3, sender: "mike@x.co", receivedAt: 777),
+            Fixtures.email(id: 3, sender: "mike@x.co", receivedAt: 777)
         ]
         #expect(run(inbox, filters: [], query: "", sort: .sender, profile: Fixtures.profile(), signals: [:]) == [2, 3, 1])
     }
@@ -133,7 +133,7 @@ struct PipelineTests {
         let inbox = [
             Fixtures.email(id: 1, sender: "bob@x.co", receivedAt: 200),
             Fixtures.email(id: 2, sender: "alice@x.co", receivedAt: 100, subject: "Invoice attached", body: "Your invoice is overdue."),
-            Fixtures.email(id: 3, sender: "carol@x.co", receivedAt: 900, subject: "Flash sale", body: "Everything is 20% off."),
+            Fixtures.email(id: 3, sender: "carol@x.co", receivedAt: 900, subject: "Flash sale", body: "Everything is 20% off.")
         ]
         #expect(run(inbox, filters: [], query: "", sort: .score, profile: Fixtures.profile(), signals: [:]) == [2, 1, 3])   // 68 / 50 / 45 (newest recency bonus) despite arrival order
     }
@@ -159,7 +159,7 @@ struct PipelineTests {
 
     @Test func rankFiltersHidesEmptyBucketsEvenWithMailFlow() {
         let inbox = [
-            Fixtures.email(id: 1, subject: "Security alert", body: "Reset your password now."),
+            Fixtures.email(id: 1, subject: "Security alert", body: "Reset your password now.")
         ]
         let ranked = rankFilters(inbox: inbox, signals: [:], profile: Fixtures.profile())
         let ids = ranked.map(\.id)

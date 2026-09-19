@@ -14,21 +14,27 @@ import WebKit
 /// - JavaScript is disabled for the page (`allowsContentJavaScript = false`).
 ///   The height measurement below uses app-driven `evaluateJavaScript`, which
 ///   is separate from page scripting and still runs.
+/// - Remote content is blocked by default via a `Content-Security-Policy` meta
+///   (`loadRemoteContent` in Settings → Mail), so tracking pixels and remote
+///   images/CSS/fonts never reach the network. When the user opts in, they do.
 /// - The web view never navigates away from the message. Link clicks and
 ///   `target="_blank"` requests are forwarded to the user's default browser
-///   for `http(s)` only; everything else (meta-refresh, form submits, other
-///   schemes) is dropped.
+///   for `http(s)` only; everything else (meta-refresh, redirects, form
+///   submits, other schemes) is dropped without leaving the app.
 /// - WKWebView renders in the OS's own sandboxed WebContent process, so a
 ///   malicious message cannot reach the app's files or Keychain.
 struct EmailHTMLBodyView: View {
     let html: String
+
+    /// Mirrors the persisted setting so toggling it re-renders the loaded page.
+    @AppStorage(WinnowStore.loadRemoteContentKey) private var loadRemoteContent = false
 
     /// Measured content height; starts at a floor so a message that measures
     /// slowly still has a readable canvas.
     @State private var height: CGFloat = 180
 
     var body: some View {
-        WebKitEmailBodyView(html: html, height: $height)
+        WebKitEmailBodyView(html: html, height: $height, loadRemoteContent: loadRemoteContent)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .frame(height: max(height, 180))
             .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -45,6 +51,7 @@ struct EmailHTMLBodyView: View {
 private struct WebKitEmailBodyView: NSViewRepresentable {
     var html: String
     @Binding var height: CGFloat
+    var loadRemoteContent: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -73,6 +80,7 @@ private struct WebKitEmailBodyView: NSViewRepresentable {
         private var parent: WebKitEmailBodyView
         private weak var webView: WKWebView?
         private var loadedHTML: String?
+        private var loadedAllowsRemoteContent: Bool?
         private var heightTask: Task<Void, Never>?
 
         init(_ parent: WebKitEmailBodyView) {
@@ -85,12 +93,42 @@ private struct WebKitEmailBodyView: NSViewRepresentable {
         /// so re-highlighting never happens just because the binding ticked.
         func attach(_ webView: WKWebView, html: String) {
             self.webView = webView
-            guard html != loadedHTML else { return }
+            let allowsRemoteContent = parent.loadRemoteContent
+            guard html != loadedHTML || allowsRemoteContent != loadedAllowsRemoteContent else { return }
             loadedHTML = html
+            loadedAllowsRemoteContent = allowsRemoteContent
             // STO-136: page scripting is disabled (security model), so syntax
             // highlighting is done here in Swift before the document loads.
-            let rendered = CodeHighlighting.highlightCodeBlocks(in: html)
+            let highlighted = CodeHighlighting.highlightCodeBlocks(in: html)
+            let rendered = allowsRemoteContent
+                ? highlighted
+                : Self.blockingRemoteContent(in: highlighted)
             webView.loadHTMLString(rendered, baseURL: nil)
+        }
+
+        /// Prepends a restrictive `Content-Security-Policy` meta so the page
+        /// cannot open a network connection — no tracking pixels, remote
+        /// images, CSS, fonts or `meta`-refresh — even though the web view
+        /// would otherwise fetch `http(s)` subresources. Inline styles are
+        /// allowed so the message keeps its own formatting.
+        nonisolated static func blockingRemoteContent(in html: String) -> String {
+            let meta = """
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; \
+            img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; \
+            script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; \
+            form-action 'none'; base-uri 'none'">
+            """
+            if let open = html.range(of: "<head", options: .caseInsensitive),
+               let end = html[open.lowerBound...].firstIndex(of: ">") {
+                let after = html.index(after: end)
+                return html.replacingCharacters(in: after..<after, with: meta)
+            }
+            if let open = html.range(of: "<html", options: .caseInsensitive),
+               let end = html[open.lowerBound...].firstIndex(of: ">") {
+                let after = html.index(after: end)
+                return html.replacingCharacters(in: after..<after, with: "<head>\(meta)</head>")
+            }
+            return meta + html
         }
 
         // MARK: - Navigation sandbox
@@ -108,17 +146,15 @@ private struct WebKitEmailBodyView: NSViewRepresentable {
             case .other:
                 // The initial loadHTMLString document (the email itself) is an
                 // `about:blank` request — let it through. Anything else under
-                // `.other` is meta-refresh / redirects leaving the message.
-                guard let url = navigationAction.request.url else {
+                // `.other` is meta-refresh / a redirect leaving the message:
+                // cancel it rather than handing it to the browser, so a
+                // message cannot silently open a URL or leak a read receipt.
+                guard let url = navigationAction.request.url,
+                      url.absoluteString == "about:blank" else {
                     decisionHandler(.cancel)
                     return
                 }
-                if url.absoluteString == "about:blank" {
-                    decisionHandler(.allow)
-                } else {
-                    Self.openExternally(url)
-                    decisionHandler(.cancel)
-                }
+                decisionHandler(.allow)
 
             case .backForward, .reload, .formSubmitted, .formResubmitted:
                 decisionHandler(.cancel)

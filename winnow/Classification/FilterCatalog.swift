@@ -29,7 +29,7 @@ nonisolated let builtinFilters: [BuiltinFilter] = [
     BuiltinFilter(id: .lowPriority, label: "Read later"),
     BuiltinFilter(id: .longReads, label: "Long reads"),
     BuiltinFilter(id: .social, label: "Social"),
-    BuiltinFilter(id: .unsafe, label: "Unsafe"),
+    BuiltinFilter(id: .unsafe, label: "Unsafe")
 ]
 
 extension BuiltinSmartFilter {

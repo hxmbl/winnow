@@ -101,7 +101,7 @@ extension EmailSignals {
     /// rather than re-encoded, so thresholds can never drift between the two.
     var rowIndicators: [BuiltinSmartFilter] {
         let rowHidden: Set<BuiltinSmartFilter> = [
-            .needsAction, .receipts, .codes, .shipping, .travel, .events,
+            .needsAction, .receipts, .codes, .shipping, .travel, .events
         ]
         return badgeFilters.filter { !rowHidden.contains($0) }
     }

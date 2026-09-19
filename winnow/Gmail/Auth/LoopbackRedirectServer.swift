@@ -7,9 +7,10 @@ import Network
 /// SECURITY MODEL
 /// - Bound to **127.0.0.1 only** on an OS-assigned ephemeral port — never any
 ///   LAN interface — and torn down after a single successful redirect.
-/// - The `state` nonce is validated by the caller against the one embedded in
-///   the authorize URL, so a malicious local app or page cannot inject its own
-///   code (it would need the nonce).
+/// - The `state` nonce is validated before the wait is settled, against the one
+///   embedded in the authorize URL, so a malicious local app or page cannot
+///   inject its own code (it would need the nonce). A redirect with the wrong
+///   `state` is answered `403` and the listener keeps waiting.
 /// - Only `GET /` with a `code`/`error` query fulfills the wait; anything else
 ///   (favicon requests, scanners) gets a 404 and the listener keeps waiting.
 /// - The browser is shown a plain "you can close this tab" page; nothing from
@@ -21,6 +22,7 @@ final class LoopbackRedirectServer: @unchecked Sendable {
     private var continuation: CheckedContinuation<URL, Error>?
     private var capturedTarget: URL?
     private var settled = false
+    private var expectedState: String?
     private(set) var port: UInt16 = 0
 
     /// Parses the request target out of an HTTP request head's first line.
@@ -34,13 +36,16 @@ final class LoopbackRedirectServer: @unchecked Sendable {
         return URL(string: "http://127.0.0.1" + parts[1])
     }
 
-    /// Binds a loopback listener on a random free port.
-    static func start() async throws -> LoopbackRedirectServer {
+    /// Binds a loopback listener on a random free port. When `expectedState` is
+    /// supplied, a redirect carrying any other `state` is rejected (403) and
+    /// the wait continues, so a local attacker cannot pre-empt sign-in.
+    static func start(expectedState: String? = nil) async throws -> LoopbackRedirectServer {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
         let listener = try NWListener(using: parameters)
 
         let server = LoopbackRedirectServer()
+        server.expectedState = expectedState
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LoopbackRedirectServer, Error>) in
             listener.stateUpdateHandler = { state in
                 switch state {
@@ -142,7 +147,23 @@ final class LoopbackRedirectServer: @unchecked Sendable {
             return
         }
 
+        // Reject a redirect that doesn't carry the nonce we generated *before*
+        // settling, so a spoofed `code` can neither satisfy the wait nor tear
+        // the listener down. `awaitCode` validates again as defense in depth.
+        if let expectedState, Self.state(in: target) != expectedState {
+            send(connection, status: "403 Forbidden", body: "Forbidden", thenSettle: nil)
+            return
+        }
+
         send(connection, status: "200 OK", body: Self.successPageHTML, thenSettle: .success(target))
+    }
+
+    /// The `state` query value, if the target carries one.
+    nonisolated static func state(in target: URL) -> String? {
+        URLComponents(url: target, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "state" })?
+            .value
     }
 
     /// True only for redirects shaped like Google's (`code=…`/`error=…`, with

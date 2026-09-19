@@ -21,11 +21,11 @@ struct ProfileTests {
             ("alice@example.com", 4, 2),   // score 4 + 4 = 8
             ("bob@example.com", 1, 0),     // score 1
             ("carol@example.com", 2, 0),   // score 2 - 0.35 (one trash)
-            ("erin@example.com", 10, 1),   // score 10 + 2 = 12
+            ("erin@example.com", 10, 1)   // score 10 + 2 = 12
         ])
         let trash = [
             TrashRow(sender: "carol@example.com"),
-            TrashRow(sender: "dave@example.com"),
+            TrashRow(sender: "dave@example.com")
         ]
         let profile = buildUserProfile(inbox: inbox, trash: trash)
 
@@ -33,7 +33,7 @@ struct ProfileTests {
             "erin@example.com",
             "alice@example.com",
             "carol@example.com",
-            "bob@example.com",
+            "bob@example.com"
         ])
     }
 
@@ -42,7 +42,7 @@ struct ProfileTests {
         let trash = [
             TrashRow(sender: "dave@example.com"),
             TrashRow(sender: "dave@example.com"),
-            TrashRow(sender: "carol@example.com"),
+            TrashRow(sender: "carol@example.com")
         ]
         let profile = buildUserProfile(inbox: inbox, trash: trash)
 
@@ -56,7 +56,7 @@ struct ProfileTests {
             ("busy@example.com", 9, 0),
             ("middle@example.com", 4, 0),
             ("rare1@example.com", 1, 0),
-            ("rare2@example.com", 2, 0),
+            ("rare2@example.com", 2, 0)
         ])
         let profile = buildUserProfile(inbox: inbox, trash: [])
 
@@ -68,7 +68,7 @@ struct ProfileTests {
         // nobody qualifies.
         let inbox = inbox([
             ("quietest@example.com", 4, 0),
-            ("busiest@example.com", 8, 0),
+            ("busiest@example.com", 8, 0)
         ])
         let profile = buildUserProfile(inbox: inbox, trash: [])
 
@@ -111,7 +111,7 @@ struct ProfileTests {
             ("cold@example.com", 1, 0),          // one email, never trashed → first-timer
             ("recurring@example.com", 2, 0),     // two emails → not first-time
             ("discarded@example.com", 1, 0),     // one email but trashed → excluded
-            ("busy@example.com", 5, 0),          // established sender
+            ("busy@example.com", 5, 0)          // established sender
         ])
         let trash = [TrashRow(sender: "discarded@example.com")]
         let profile = buildUserProfile(inbox: inbox, trash: trash)

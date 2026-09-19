@@ -106,7 +106,7 @@ final class WinnowStoreTests {
         let inbox = [
             Fixtures.email(id: 1, body: "I'm making your favorite lasagna."),
             Fixtures.email(id: 2, subject: "Invoice attached"),
-            Fixtures.email(id: 3, sender: "dan@x.co", body: "Could you review this?"),
+            Fixtures.email(id: 3, sender: "dan@x.co", body: "Could you review this?")
         ]
         let store = makeStore(inbox: inbox)
 
@@ -178,7 +178,7 @@ final class WinnowStoreTests {
     @Test func selectionResolvesAgainstTheFullInboxEvenWhenFilteredOut() {
         let inbox = [
             Fixtures.email(id: 1, starred: true),
-            Fixtures.email(id: 2),
+            Fixtures.email(id: 2)
         ]
         let store = makeStore(inbox: inbox)
 
@@ -366,7 +366,7 @@ final class WinnowStoreTests {
         let store = makeStore(inbox: [
             Fixtures.email(id: 1),
             Fixtures.email(id: 2),
-            Fixtures.email(id: 3),
+            Fixtures.email(id: 3)
         ])
 
         store.moveSelection(1)
@@ -392,7 +392,7 @@ final class WinnowStoreTests {
     @Test func clickingARowMovesTheCursorWithIt() {
         let store = makeStore(inbox: [
             Fixtures.email(id: 1),
-            Fixtures.email(id: 2),
+            Fixtures.email(id: 2)
         ])
         store.openEmail(2)
         #expect(store.selectedRowIndex == 1)
@@ -784,7 +784,7 @@ final class WinnowStoreTests {
             Fixtures.email(id: 1, threadId: "t-1", receivedAt: 1, subject: "Oldest"),
             Fixtures.email(id: 2, threadId: "t-1", receivedAt: 2, subject: "Newest"),
             Fixtures.email(id: 3, threadId: "t-2", receivedAt: 3, subject: "Other"),
-            Fixtures.email(id: 4, receivedAt: 4, subject: "Standalone"),
+            Fixtures.email(id: 4, receivedAt: 4, subject: "Standalone")
         ])
 
         // The conversation-aware list collapses the pair into one row.
@@ -812,7 +812,7 @@ final class WinnowStoreTests {
         let store = makeStore(inbox: [
             Fixtures.email(id: 1, threadId: "t-1", receivedAt: 1, subject: "Old", unread: true),
             Fixtures.email(id: 2, threadId: "t-1", receivedAt: 2, subject: "New", unread: true),
-            Fixtures.email(id: 3, threadId: "t-2", receivedAt: 3, subject: "Other"),
+            Fixtures.email(id: 3, threadId: "t-2", receivedAt: 3, subject: "Other")
         ])
 
         store.openEmail(1)
@@ -827,7 +827,7 @@ final class WinnowStoreTests {
     @Test func conversationUnionsMailboxesAndOrdersOldestFirst() {
         let store = makeStore(inbox: [
             Fixtures.email(id: 1, threadId: "t-1", sender: "a@x.co", receivedAt: 5, subject: "Later"),
-            Fixtures.email(id: 2, threadId: "t-1", sender: "b@x.co", receivedAt: 1, subject: "Earlier"),
+            Fixtures.email(id: 2, threadId: "t-1", sender: "b@x.co", receivedAt: 1, subject: "Earlier")
         ])
         store.archived = [Fixtures.email(id: 3, threadId: "t-1", receivedAt: 3, subject: "Middle")]
         store.spam = [Fixtures.email(id: 4, threadId: "t-1", receivedAt: 4, subject: "Spam member")]
@@ -842,7 +842,7 @@ final class WinnowStoreTests {
     @Test func conversationExcludesBlockedSenders() {
         let store = makeStore(inbox: [
             Fixtures.email(id: 1, threadId: "t-1", sender: "good@x.co", receivedAt: 1),
-            Fixtures.email(id: 2, threadId: "t-1", sender: "blocked@x.co", receivedAt: 2),
+            Fixtures.email(id: 2, threadId: "t-1", sender: "blocked@x.co", receivedAt: 2)
         ])
         store.blockSender("blocked@x.co")
         #expect(store.conversation(for: Fixtures.email(id: 1, threadId: "t-1")).map { $0.id } == [1])

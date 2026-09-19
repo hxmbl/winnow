@@ -51,12 +51,20 @@ final class GmailClient {
     /// Production transport: ephemeral session (no shared cookie jar, no
     /// URL cache) — the API is bearer-token only, and cookies would be pure
     /// attack surface.
-    static func productionSession() -> URLSession {
+    nonisolated static func productionSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
         configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
+    }
+
+    /// Percent-encodes a value for use as a single path segment, so a crafted
+    /// message/attachment id cannot inject extra path or query structure.
+    nonisolated static func encodedPathComponent(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     // MARK: - Endpoints
@@ -68,7 +76,7 @@ final class GmailClient {
     func listMessages(query: String, pageToken: String? = nil, maxResults: Int = GmailClient.maxPageSize) async throws -> GmailMessageList {
         var queryItems = [
             URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "maxResults", value: String(maxResults)),
+            URLQueryItem(name: "maxResults", value: String(maxResults))
         ]
         if let pageToken {
             queryItems.append(URLQueryItem(name: "pageToken", value: pageToken))
@@ -78,7 +86,7 @@ final class GmailClient {
 
     func message(id: String) async throws -> GmailMessage {
         try await get(
-            path: "messages/\(id)",
+            path: "messages/\(Self.encodedPathComponent(id))",
             query: [URLQueryItem(name: "format", value: "full")]
         )
     }
@@ -88,12 +96,12 @@ final class GmailClient {
     @discardableResult
     func modify(messageID: String, addLabelIds: [String]?, removeLabelIds: [String]?) async throws -> GmailMessage {
         let body = GmailModifyRequest(addLabelIds: addLabelIds, removeLabelIds: removeLabelIds)
-        return try await post(path: "messages/\(messageID)/modify", body: body)
+        return try await post(path: "messages/\(Self.encodedPathComponent(messageID))/modify", body: body)
     }
 
     @discardableResult
     func trash(messageID: String) async throws -> GmailMessage {
-        try await post(path: "messages/\(messageID)/trash", bodyData: nil)
+        try await post(path: "messages/\(Self.encodedPathComponent(messageID))/trash", bodyData: nil)
     }
 
     @discardableResult
@@ -104,7 +112,7 @@ final class GmailClient {
     /// Fetches one attachment's bytes (base64url in the response `data`).
     func attachment(messageID: String, attachmentID: String) async throws -> GmailAttachment {
         try await get(
-            path: "messages/\(messageID)/attachments/\(attachmentID)",
+            path: "messages/\(Self.encodedPathComponent(messageID))/attachments/\(Self.encodedPathComponent(attachmentID))",
             query: []
         )
     }
@@ -113,7 +121,8 @@ final class GmailClient {
     /// from the Trash mailbox.
     @discardableResult
     func deletePermanent(messageID: String) async throws -> GmailMessage {
-        var request = URLRequest(url: URL(string: "\(Self.apiBase)/messages/\(messageID)")!)
+        let path = "\(Self.apiBase)/messages/\(Self.encodedPathComponent(messageID))"
+        var request = URLRequest(url: URL(string: path)!)
         request.httpMethod = "DELETE"
         return try await execute(request, expect: GmailMessage.self)
     }

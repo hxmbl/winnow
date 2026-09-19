@@ -48,6 +48,12 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
+                Toggle(isOn: $store.loadRemoteContent) {
+                    Label("Load remote content in messages", systemImage: "photo")
+                }
+                Text("Off by default. Turning this on lets messages load remote images, styles and fonts, which tells senders when you opened their mail and can leak your IP address.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 NavigationLink {
                     BlockedSendersList(store: store)
                 } label: {

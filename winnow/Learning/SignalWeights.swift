@@ -56,7 +56,7 @@ enum SignalKey: String, CaseIterable, Identifiable, Codable {
         case .urgency: return 18
         case .actionNeeded: return 12
         case .finance: return 7
-        case .newsletterPenalty: return 9
+        case .newsletterPenalty: return 5
         case .promoPenalty: return 11
         case .spamSensitivity: return 44
         case .quietContactPenalty: return 6

@@ -57,7 +57,7 @@ struct GmailAuthTests {
     @Test func formEncodeProducesFormURLEncodedPairs() {
         let body = String(data: TokenManager.formEncode([
             "grant_type": "refresh_token",
-            "client_id": "abc-def.apps.googleusercontent.com",
+            "client_id": "abc-def.apps.googleusercontent.com"
         ]), encoding: .utf8) ?? ""
         #expect(body.contains("grant_type=refresh_token"))
         #expect(body.contains("client_id=abc-def.apps.googleusercontent.com"))

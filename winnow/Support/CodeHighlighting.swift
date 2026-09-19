@@ -334,7 +334,7 @@ struct CodeHighlighting {
         "where", "defer", "async", "await", "actor", "some", "any", "public", "private", "internal", "fileprivate",
         "open", "static", "final", "lazy", "override", "mutating", "nonisolated", "is", "as", "rethrows",
         "associatedtype", "typealias", "indirect", "infix", "prefix", "postfix", "operator", "precedencegroup",
-        "convenience", "required", "dynamic", "noescape", "escaping", "optional", "weak", "unowned", "frozen",
+        "convenience", "required", "dynamic", "noescape", "escaping", "optional", "weak", "unowned", "frozen"
     ]
 
     nonisolated private static let swiftTypes: Set<String> = [
@@ -342,7 +342,7 @@ struct CodeHighlighting {
         "Double", "Float", "Bool", "Character", "Array", "Dictionary", "Set", "Optional", "Result", "Error",
         "UUID", "URL", "Date", "Data", "CGFloat", "CGPoint", "CGSize", "CGRect", "NSView", "NSWindow", "NSEvent",
         "WKWebView", "Color", "Font", "Task", "Any", "Hashable", "Equatable", "Codable", "Identifiable", "Sendable",
-        "NSObject", "StringProtocol", "Substring", "Sequence", "Collection",
+        "NSObject", "StringProtocol", "Substring", "Sequence", "Collection"
     ]
 
     nonisolated private static let javascriptKeywords: Set<String> = [
@@ -350,25 +350,25 @@ struct CodeHighlighting {
         "super", "import", "export", "default", "async", "await", "try", "catch", "finally", "throw", "switch",
         "case", "break", "continue", "typeof", "instanceof", "in", "of", "this", "null", "undefined", "true",
         "false", "delete", "void", "yield", "static", "get", "set", "from", "as", "interface", "type", "enum",
-        "implements", "private", "public", "protected", "readonly",
+        "implements", "private", "public", "protected", "readonly"
     ]
 
     nonisolated private static let pythonKeywords: Set<String> = [
         "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from", "as", "with", "try",
         "except", "finally", "raise", "lambda", "global", "nonlocal", "pass", "break", "continue", "del", "yield",
         "async", "await", "True", "False", "None", "in", "not", "and", "or", "is", "assert", "match", "case",
-        "self", "type", "async",
+        "self", "type", "async"
     ]
 
     nonisolated private static let pythonTypes: Set<String> = [
         "int", "str", "float", "bool", "list", "dict", "set", "tuple", "bytes", "NoneType", "object", "range",
-        "type", "Exception", "ValueError", "TypeError", "RuntimeError",
+        "type", "Exception", "ValueError", "TypeError", "RuntimeError"
     ]
 
     nonisolated private static let shellKeywords: Set<String> = [
         "if", "then", "elif", "else", "fi", "for", "in", "do", "while", "until", "case", "esac", "function",
         "return", "exit", "echo", "cd", "export", "local", "readonly", "shift", "source", "true", "false", "set",
-        "unset", "select", "break", "continue",
+        "unset", "select", "break", "continue"
     ]
 
     nonisolated private static let sqlKeywords: Set<String> = [
@@ -376,7 +376,7 @@ struct CodeHighlighting {
         "alter", "drop", "join", "left", "right", "inner", "outer", "full", "cross", "on", "group", "by", "order",
         "having", "limit", "offset", "union", "all", "distinct", "as", "and", "or", "not", "null", "is", "like",
         "in", "exists", "primary", "key", "foreign", "references", "index", "view", "count", "sum", "avg", "min",
-        "max", "begin", "commit", "rollback", "case", "when", "then", "else", "end", "explain", "show", "with",
+        "max", "begin", "commit", "rollback", "case", "when", "then", "else", "end", "explain", "show", "with"
     ]
 
     nonisolated private static let typescriptKeyords: Set<String> = [
@@ -385,19 +385,19 @@ struct CodeHighlighting {
         "static", "async", "await", "export", "import", "from", "default", "new", "this", "null", "undefined",
         "true", "false", "if", "else", "for", "while", "switch", "case", "break", "continue", "try", "catch",
         "finally", "throw", "typeof", "instanceof", "in", "of", "yield", "readonly", "abstract", "any", "never",
-        "unknown", "void", "as",
+        "unknown", "void", "as"
     ]
 
     nonisolated private static let goKeywords: Set<String> = [
         "func", "package", "import", "var", "const", "type", "struct", "interface", "map", "chan", "defer",
         "go", "range", "if", "else", "for", "switch", "case", "default", "return", "break", "continue", "fallthrough",
-        "select", "go", "goto", "nil", "true", "false", "iota",
+        "select", "go", "goto", "nil", "true", "false", "iota"
     ]
 
     nonisolated private static let rustKeywords: Set<String> = [
         "fn", "let", "mut", "const", "static", "struct", "enum", "impl", "trait", "mod", "use", "crate", "pub",
         "fn", "if", "else", "match", "loop", "while", "for", "return", "break", "continue", "move", "ref", "async",
-        "await", "dyn", "where", "type", "self", "super", "true", "false", "unsafe",
+        "await", "dyn", "where", "type", "self", "super", "true", "false", "unsafe"
     ]
 
     nonisolated private static let genericKeywords: Set<String> = {

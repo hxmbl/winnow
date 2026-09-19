@@ -28,7 +28,11 @@ final class AuthController {
     /// Generous window for the user to finish the browser round-trip.
     private let redirectTimeout: TimeInterval
 
-    init(tokenManager: TokenManager, session: URLSession = .shared, redirectTimeout: TimeInterval = 300) {
+    init(
+        tokenManager: TokenManager,
+        session: URLSession = GmailClient.productionSession(),
+        redirectTimeout: TimeInterval = 300
+    ) {
         self.tokenManager = tokenManager
         self.session = session
         self.redirectTimeout = redirectTimeout
@@ -48,7 +52,7 @@ final class AuthController {
             return Data(bytes)
         }())
 
-        let server = try await LoopbackRedirectServer.start()
+        let server = try await LoopbackRedirectServer.start(expectedState: state)
         let redirectURI = "http://127.0.0.1:\(server.port)"
 
         var components = URLComponents(url: Self.authorizeURL, resolvingAgainstBaseURL: false)!
@@ -61,7 +65,7 @@ final class AuthController {
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "access_type", value: "offline"),
-            URLQueryItem(name: "prompt", value: "consent"),
+            URLQueryItem(name: "prompt", value: "consent")
         ]
         guard let authorizeURL = components.url else {
             throw GmailAPIError.transport("could not build authorize URL")
@@ -88,7 +92,7 @@ final class AuthController {
             "client_id": credentials.clientID,
             "redirect_uri": redirectURI,
             "code_verifier": pkce.verifier,
-            "grant_type": "authorization_code",
+            "grant_type": "authorization_code"
         ]
         if let secret = credentials.clientSecret {
             form["client_secret"] = secret
