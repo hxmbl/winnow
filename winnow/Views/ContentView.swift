@@ -192,8 +192,7 @@ struct ContentView: View {
             }
             ToolbarItem {
                 Button { Task { await store.refresh() } } label: {
-                    if store.isRefreshing { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "arrow.clockwise") }
+                    if store.isRefreshing { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 .help("Refresh inbox")

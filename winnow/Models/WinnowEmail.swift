@@ -27,7 +27,7 @@ struct WinnowEmail: Identifiable, Equatable {
     /// The Gmail thread this message belongs to, when known. `nil` means the
     /// message is standalone (mock data, pre-thread caches). Defaulted at the
     /// memberwise init so existing construction sites compile unchanged.
-    var threadId: String? = nil
+    var threadId: String?
 
     let sender: String
     var name: String?

@@ -106,7 +106,8 @@ enum GmailMessageMapper {
             if name.hasPrefix("\""), name.hasSuffix("\""), name.count >= 2 {
                 name = String(name.dropFirst().dropLast())
             }
-            return (name.isEmpty ? nil : name, sanitizeAddress(trimmed[trimmed.index(after: open)..<close]))
+            let sanitized = sanitizeDisplayName(name)
+            return (sanitized.isEmpty ? nil : sanitized, sanitizeAddress(trimmed[trimmed.index(after: open)..<close]))
         }
         // Unclosed `<`: whatever follows it is the best address candidate.
         if let open = trimmed.lastIndex(of: "<") {
@@ -122,6 +123,24 @@ enum GmailMessageMapper {
             .replacingOccurrences(of: "<", with: "")
             .replacingOccurrences(of: ">", with: "")
         return stripped.trimmingCharacters(in: CharacterSet(charactersIn: " \t\""))
+    }
+
+    /// Strips invisible control/format scalars — bidi overrides and zero-width
+    /// characters above all — from a sender display name. Without this a
+    /// header could render as a different name/address than it carries
+    /// (spoofing) or smuggle control characters into the UI.
+    nonisolated static func sanitizeDisplayName(_ raw: String) -> String {
+        let stripped = raw.unicodeScalars.filter { scalar in
+            switch scalar.properties.generalCategory {
+            case .control, .format, .privateUse, .surrogate, .unassigned:
+                return false
+            default:
+                return true
+            }
+        }
+        var result = ""
+        result.unicodeScalars.append(contentsOf: stripped)
+        return result.trimmingCharacters(in: .whitespaces)
     }
 
     nonisolated static func receivedAtMs(internalDate: String?, dateHeader: String?) -> Int {
@@ -223,7 +242,7 @@ enum GmailMessageMapper {
         text = text.replacingOccurrences(of: "<[/!?a-zA-Z][^>]*>", with: " ", options: .regularExpression)
         let entities = [
             "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
-            "&#39;": "'", "&apos;": "'", "&nbsp;": " ",
+            "&#39;": "'", "&apos;": "'", "&nbsp;": " "
         ]
         for (entity, replacement) in entities {
             text = text.replacingOccurrences(of: entity, with: replacement)

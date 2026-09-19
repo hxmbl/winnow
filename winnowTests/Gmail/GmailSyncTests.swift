@@ -38,7 +38,7 @@ struct GmailSyncTests {
         try Data("stale wal".utf8).write(to: URL(fileURLWithPath: storeURL.path + "-wal"))
 
         let cache = try EmailCacheStore(url: storeURL)
-        #expect(cache.count == 0)                       // recreated empty, not wedged
+        #expect(cache.isEmpty)                       // recreated empty, not wedged
         try cache.upsert(email: Fixtures.email(id: 1), gmailId: "g1", threadId: "t", mailbox: .inbox)
         #expect(cache.count == 1)                       // and fully usable again
     }
@@ -520,7 +520,7 @@ struct GmailSyncTests {
             let (_, cache, sync, _) = try makeStack(defaults: defaults)
             try cache.upsert(email: Fixtures.email(id: 1), gmailId: "m1", threadId: "t1")
             if full { try await sync.fullSync() } else { try await sync.incrementalSync() }
-            #expect(cache.count == 0)
+            #expect(cache.isEmpty)
             #expect(sync.lastSyncFailureCount == 0)
             #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "100")
         }
@@ -545,7 +545,7 @@ struct GmailSyncTests {
             }
             let snapshot = try await sync.fullSnapshot()
             #expect(snapshot.inbox.isEmpty && snapshot.archive.isEmpty && snapshot.trash.isEmpty && snapshot.spam.isEmpty)
-            #expect(cache.count == 0)
+            #expect(cache.isEmpty)
             try await sync.incrementalSync()
             #expect(defaults.string(forKey: GmailSyncEngine.historyIDKey) == "200")
         }
@@ -675,14 +675,14 @@ struct GmailSyncTests {
         #expect(try cache.all().first?.starred == true)
 
         try cache.remove(gmailIds: ["gm1"])
-        #expect(cache.count == 0)
+        #expect(cache.isEmpty)
     }
 
     @Test func cacheWipeClearsEverythingForSignOut() throws {
         let cache = try EmailCacheStore(inMemory: true)
         try cache.upsert(email: Fixtures.email(id: 1), gmailId: "g1", threadId: "t")
         try cache.wipe()
-        #expect(cache.count == 0)
+        #expect(cache.isEmpty)
     }
 
     @Test func cacheStoresMailboxUnreadAndAttachments() throws {

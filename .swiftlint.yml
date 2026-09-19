@@ -1,0 +1,24 @@
+# SwiftLint configuration — recommended defaults for this project
+excluded:
+  - Carthage
+  - Pods
+  - .git
+  - .build
+
+# Allow slightly longer lines for readability
+line_length: 120
+
+# Opt-in rules that are useful but off by default
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - sorted_imports
+
+# Project-specific disabled rules (avoid noisy or harmful ones)
+disabled_rules:
+  - legacy_hashing
+  - force_unwrapping
+  - trailing_whitespace
+
+# Use Xcode-friendly reporting when running locally in Xcode
+reporter: "xcode"

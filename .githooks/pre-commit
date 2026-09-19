@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Optional git hook template: run SwiftLint and warn on violations (recommended mode)
+# To enable locally: chmod +x .githooks/pre-commit && ln -s ../../.githooks/pre-commit .git/hooks/pre-commit
+
+set -euo pipefail
+
+# Resolve the repository root instead of this file's directory: git invokes the
+# hook through the `.git/hooks/pre-commit` symlink, so `dirname "$0"` would point
+# into `.git` rather than at the real script.
+ROOT="$(git rev-parse --show-toplevel)"
+"$ROOT/tools/run-swiftlint.sh" || true
+
+# Always allow commits for recommended mode; change the script or this hook to exit non-zero to block commits on violations.
+exit 0

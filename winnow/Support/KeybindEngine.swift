@@ -76,7 +76,7 @@ final class KeybindEngine {
         Binding(display: "/", help: "Search", command: .focusSearch),
         Binding(display: "1–9", help: "Toggle filter pill", command: .toggleFilter(railIndex: 0)),
         Binding(display: "?", help: "Toggle this cheat sheet", command: .toggleShortcutsOverlay),
-        Binding(display: "!", help: "Compact navigation (Inbox · Spam · Bin · Settings)", command: .toggleNavigation),
+        Binding(display: "!", help: "Compact navigation (Inbox · Spam · Bin · Settings)", command: .toggleNavigation)
     ]
 
     // MARK: - Pure routing

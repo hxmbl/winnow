@@ -107,7 +107,7 @@ final class GmailSyncEngine {
             (self.query, Int.max),
             (archiveQuery, broadMailboxCap),
             ("in:trash", broadMailboxCap),
-            ("in:spam", broadMailboxCap),
+            ("in:spam", broadMailboxCap)
         ] {
             var stubs: [GmailMessageStub] = []
             var pageToken: String?

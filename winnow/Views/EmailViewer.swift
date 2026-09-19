@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 /// Floating card content for a selected conversation — renders every message

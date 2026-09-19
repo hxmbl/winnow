@@ -59,17 +59,17 @@ nonisolated let securityKeywords = KeywordTable([
     "verify your account", "security alert", "unauthorized", "suspicious activity",
     "breach", "breached", "reset your password", "reset password", "one-time passcode", "otp",
     "two-factor", "2fa", "oauth", "authentication", "login attempt",
-    "unusual sign-in", "unusual sign in", "unrecognized device",
+    "unusual sign-in", "unusual sign in", "unrecognized device"
 ])
 /// Bulk-mail tells → the `.newsletter` signal (fires at ≥ 2 hits, or via `type`).
 nonisolated let newsletterKeywords = KeywordTable([
     "unsubscribe", "newsletter", "mailing list", "weekly digest", "view in browser",
-    "email preferences", "manage preferences",
+    "email preferences", "manage preferences"
 ])
 /// Time-pressure language → the `.urgentText` signal.
 nonisolated let urgentKeywords = KeywordTable([
     "urgent", "asap", "immediately", "expires tonight", "last chance", "critical",
-    "time sensitive", "action required", "deadline", "needs your approval",
+    "time sensitive", "action required", "deadline", "needs your approval"
 ])
 /// Classic scam phrasing → raises `spamLikelihood` (stacks per distinct hit).
 /// Everyday words like "congratulations" / "unlimited" / "no cost" stay out so
@@ -77,14 +77,14 @@ nonisolated let urgentKeywords = KeywordTable([
 nonisolated let spamKeywords = KeywordTable([
     "claim your prize", "you have won", "free money", "act now",
     "exclusive deal", "buy now", "call now", "free gift", "earn money", "work from home",
-    "cash bonus", "increase your",
+    "cash bonus", "increase your"
 ])
 /// Transactional mail → the `.finance` signal (gated against security/promo).
 nonisolated let financeKeywords = KeywordTable([
     "invoice", "receipt", "payment received", "payment confirmation", "order confirmation",
     "billing", "statement", "subscription renewed", "auto-renew", "your order",
     "refund", "wire transfer", "direct deposit", "payout", "your bill", "bill is ready",
-    "amount due", "credit score",
+    "amount due", "credit score"
 ])
 /// One-time login / verification codes → the `.codes` signal. Deliberately
 /// narrower than security — a code is copyable, not an alarm.
@@ -92,39 +92,39 @@ nonisolated let codesKeywords = KeywordTable([
     "one-time code", "one time code", "verification code", "security code",
     "sign-in code", "sign in code", "login code", "auth code", "authentication code",
     "confirmation code", "verification pin", "one-time passcode", "otp", "passcode",
-    "single-use code",
+    "single-use code"
 ])
 /// Package / delivery notifications → the `.shipping` signal.
 nonisolated let shippingKeywords = KeywordTable([
     "tracking number", "tracking update", "your package", "out for delivery",
     "has shipped", "has been shipped", "shipping confirmation", "delivery date",
     "delivery scheduled", "delivery attempt", "delivery was", "status of your order",
-    "courier", "parcel", "dispatch confirmation", "is on its way", "arriving tomorrow",
+    "courier", "parcel", "dispatch confirmation", "is on its way", "arriving tomorrow"
 ])
 /// Flight/hotel/itinerary correspondence → the `.travel` signal.
 nonisolated let travelKeywords = KeywordTable([
     "boarding pass", "flight", "itinerary", "hotel", "reservation",
     "booking confirmation", "car rental", "airport", "departure gate",
-    "layover", "check-in", "check in", "arrival time", "trip details",
+    "layover", "check-in", "check in", "arrival time", "trip details"
 ])
 /// Invitations and calendar events → the `.events` signal. Precise phrases only —
 /// bare "event" is too common to be a useful tell.
 nonisolated let eventsKeywords = KeywordTable([
     "calendar invite", "you're invited", "you are invited", "invitation",
     "save the date", "webinar", "meetup", "rsvp", "workshop", "conference",
-    "register for", "reserve your spot", "roundtable",
+    "register for", "reserve your spot", "roundtable"
 ])
 /// Social-platform notifications → the `.social` signal (keyword phrasing).
 nonisolated let socialKeywords = KeywordTable([
     "mentioned you", "commented on", "sent you a message", "new follower",
     "friend request", "connection request", "replied to your", "liked your",
-    "tagged you", "invited you to join", "you have a new", "added to your",
+    "tagged you", "invited you to join", "you have a new", "added to your"
 ])
 /// Social platforms matched by sender domain (e.g. `no-reply@linkedin.com`).
 nonisolated let socialDomains: [String] = [
     "linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
     "threads.net", "reddit.com", "pinterest.com", "tiktok.com", "snapchat.com",
-    "discord.com", "youtube.com", "whatsapp.com", "telegram.org",
+    "discord.com", "youtube.com", "whatsapp.com", "telegram.org"
 ]
 
 // MARK: - Regex heuristics
@@ -148,7 +148,7 @@ nonisolated let needsActionRegexes: [NSRegularExpression] = [
     regex(#"\b(?:appointment|renew|check-?in|register|approval)\b"#),
     regex(#"\b(?:bill|payment|invoice)\s+is\s+due\b"#),
     // Bare "sign" / "verify" match "sign in" and "verify your email" CTAs.
-    regex(#"\b(?:please\s+sign|sign\s+(?:the|this|here)|signature)\b"#),
+    regex(#"\b(?:please\s+sign|sign\s+(?:the|this|here)|signature)\b"#)
 ]
 /// Asks directed at the reader that imply a reply or task — stricter than the
 /// broad `needsAction` keyword net, so "Action needed" stays high-signal.

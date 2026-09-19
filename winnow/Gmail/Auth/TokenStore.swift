@@ -45,7 +45,7 @@ struct KeychainTokenStore: TokenStore {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account
         ]
     }
 
@@ -69,7 +69,7 @@ struct KeychainTokenStore: TokenStore {
             kSecValueData as String: data,
             // This-device-only: tokens must not silently replicate via iCloud
             // Keychain to other machines.
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
         let updateStatus = SecItemUpdate(baseQuery() as CFDictionary, attributes as CFDictionary)

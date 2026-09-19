@@ -3,11 +3,17 @@ import SwiftUI
 /// Circular avatar. When the sender resolves to a Gravatar it is loaded
 /// asynchronously (STO-133); otherwise — or while loading, or on 404 — the
 /// initials fallback renders over the stable per-sender tint.
+///
+/// Remote avatars are only fetched when the user has opted into remote content
+/// (`loadRemoteContent`), since the Gravatar URL leaks the sender's address and
+/// the reader's IP/timestamp to a third party.
 struct AvatarView: View {
     let sender: String
     let size: CGFloat
     let font: Font
     var provider: AvatarProviding = GravatarAvatarProvider.shared
+
+    @AppStorage(WinnowStore.loadRemoteContentKey) private var loadRemoteContent = false
 
     private var initials: some View {
         Text(String((sender.first ?? Character("?")).uppercased()))
@@ -19,7 +25,7 @@ struct AvatarView: View {
         ZStack {
             Circle()
                 .fill(avatarColor(sender))
-            if let url = provider.avatarURL(for: sender, size: Int(size)) {
+            if loadRemoteContent, let url = provider.avatarURL(for: sender, size: Int(size)) {
                 AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
                     if case .success(let image) = phase {
                         image.resizable().scaledToFill()

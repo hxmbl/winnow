@@ -8,9 +8,9 @@ struct LoginScreen: View {
     /// open a second browser tab.
     let onSignIn: () -> Void
     /// Cancels an in-flight sign-in; present only while one can be cancelled.
-    var onCancelSignIn: (() -> Void)? = nil
+    var onCancelSignIn: (() -> Void)?
     /// Sign-in failure from the store, shown under the button.
-    var errorMessage: String? = nil
+    var errorMessage: String?
     /// True for the entire interactive sign-in (browser round-trip included).
     var isSigningIn = false
 
