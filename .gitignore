@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+._*
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.xcarchive
+
+# Swift Package Manager
+.build/
+Packages/
+Package.pins
+Package.resolved
+
+# CocoaPods (defensive)
+Pods/
+
+# Misc
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Gmail OAuth credentials — never commit real values
+**/GmailCredentials.plist
