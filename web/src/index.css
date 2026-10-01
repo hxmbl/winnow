@@ -2,30 +2,46 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * The app owns the whole viewport — there is no page to scroll, only panes.
+ * `overscroll-behavior` stops a trackpad gesture that reaches the end of a pane
+ * from then scrolling the window behind it, which in a Tauri window means the
+ * whole app shifting under the user's fingers.
+ */
 html,
 body,
 #root {
   height: 100%;
+  overflow: hidden;
 }
 
 body {
   margin: 0;
   background: var(--wn-canvas, #eff3f3);
+  color: var(--wn-ink, #15181d);
+  font-family: theme("fontFamily.sans");
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* A mail client is open for hours. Selecting text is for the *message*, not
+     for the chrome, so it is off globally and re-enabled where it matters. */
+  user-select: none;
+}
+
+/* Selection is for content the user might want to copy. */
+.selectable {
+  user-select: text;
 }
 
 @layer components {
   /*
-   * Staged, not used yet.
+   * The frosted chrome.
    *
-   * The layout already leaves a real gap around every pane (`App.tsx`) and
-   * every container already draws `border-hairline`. That gap is what makes a
-   * lift read: an element only looks like it is above another if you can see
-   * the other one past its edge, and only blurs if there is something behind
-   * it to blur.
+   * The layout leaves a real gap around every pane and every container draws
+   * `border-hairline`, and *that* is what makes a lift read: an element only
+   * looks like it is above another if you can see the other one past its edge,
+   * and only blurs if there is something behind it to blur. The class is applied
+   * in pairs:
    *
-   * When lifting something, use the two together:
    *   class="glass border-b border-hairline shadow-lift"
    */
   .glass {
@@ -33,22 +49,62 @@ body {
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
   }
+
+  /*
+   * The scrollbar.
+   *
+   * Six pixels, and only for the reader and the list. A wide scrollbar eats the
+   * gutter that carries the layout's whole sense of depth, and an always-visible
+   * one competes with the content. `scrollbar-width` is the standard property;
+   * the WebKit block is the fallback, and the two are written together because
+   * neither browser implements both.
+   */
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--wn-scrollbar, rgba(0, 0, 0, 0.2)) transparent;
+  }
+
+  .thin-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .thin-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .thin-scroll::-webkit-scrollbar-thumb {
+    background: var(--wn-scrollbar, rgba(0, 0, 0, 0.2));
+    border-radius: 999px;
+  }
+
+  /* The pill strip hides its scrollbar entirely: a partially-visible row of
+     pills with a scrollbar under it reads as a broken carousel. */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
-.reader-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.reader-scroll::-webkit-scrollbar-thumb {
-  background: var(--wn-scrollbar, rgba(0, 0, 0, 0.18));
-  border-radius: 999px;
+/*
+ * Respect the OS setting.
+ *
+ * Not a nicety: this is a keyboard-first app, and a user who has asked the
+ * system to reduce motion is telling us that animation is costing them
+ * something. The transitions here are the "this content is new" cue, and they
+ * are not worth failing that preference over.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,0 +1,92 @@
+/**
+ * Sign-in failures, in the words the user should read.
+ *
+ * Every error path in the OAuth flow lands here. The reason this is its own
+ * file rather than a switch inside the sign-in screen: the same failures are
+ * reachable from three places (the sign-in button, a silent session restore, a
+ * failed refresh), and when they were worded separately the restore path said
+ * "unknown error" for a revoked grant the user could fix in ten seconds.
+ */
+
+/** A redirect whose `state` did not match the one we issued. */
+export class GoogleAuthStateMissing extends Error {
+  constructor() {
+    super("Sign-in could not be verified. Please try again.");
+    this.name = "GoogleAuthStateMissing";
+  }
+}
+
+export type AuthFailure = {
+  /** One line, for the message under the button. */
+  message: string;
+  /** What the user can do about it, when there is something. */
+  hint?: string;
+  /** Whether retrying as-is could plausibly work. */
+  retryable: boolean;
+};
+
+/**
+ * Turn any thrown value into something renderable.
+ *
+ * `unknown` rather than `Error`, because the throws come from three places —
+ * `GmailError`, a bare `TypeError` from a failed `fetch`, and a string from
+ * an `invoke` rejection — and each says something different about what to do.
+ */
+export function describeFailure(error: unknown): AuthFailure {
+  if (error instanceof GoogleAuthStateMissing) {
+    return {
+      message: error.message,
+      hint: "This usually means the sign-in was started in a different window.",
+      retryable: true,
+    };
+  }
+
+  const kind = (error as { kind?: string; message?: string })?.kind;
+  const message = error instanceof Error ? error.message : String(error);
+
+  switch (kind) {
+    case "declined":
+      return {
+        message: "Sign-in was declined.",
+        hint: "Winnow needs access to your mail to sort it. Nothing was changed.",
+        retryable: true,
+      };
+    case "state_mismatch":
+      return {
+        message: "Sign-in could not be verified.",
+        hint: "Start again from this window.",
+        retryable: true,
+      };
+    case "reauth_required":
+      return {
+        message: "Your Google session is no longer valid.",
+        hint: "Sign in again to continue.",
+        retryable: true,
+      };
+    case "config":
+      return {
+        message: "This build is not configured to sign in.",
+        hint: "Set VITE_GMAIL_CLIENT_ID and rebuild.",
+        retryable: false,
+      };
+    case "network":
+      return {
+        message: "Could not reach Google.",
+        hint: "Check your connection and try again.",
+        retryable: true,
+      };
+    case "timeout":
+      return {
+        message: "Sign-in timed out.",
+        hint: "Try again — the browser tab may still be open.",
+        retryable: true,
+      };
+    default:
+      return { message, retryable: true };
+  }
+}
+
+/** A shorter form, for a toast rather than a sign-in screen. */
+export function shortFailure(error: unknown): string {
+  return describeFailure(error).message;
+}

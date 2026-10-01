@@ -23,6 +23,14 @@ node_modules/
 web/dist/
 *.tsbuildinfo
 
+# Rust / Tauri
+# The crate lives in `native/src-tauri`, so its target directory does too.
+# `native/target` is from before the move and is ignored so a stale one cannot be
+# committed by accident; it is safe to delete.
+target/
+native/target/
+web/src-tauri/
+
 # Misc
 *.ipa
 *.dSYM.zip

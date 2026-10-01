@@ -1,0 +1,279 @@
+/**
+ * Classification vocabulary: the signals a message carries, and the buckets
+ * those signals put it in.
+ *
+ * This file is the single source of truth for *thresholds and ordering*. The
+ * classifier produces signals, the filter matcher and the badge renderer both
+ * read them, and the learning loop tunes the weights that feed them. Anything
+ * numeric that more than one of those cares about lives here, so a threshold
+ * can be changed in one place instead of hunted across the app.
+ *
+ * Ported from `legacy/swift-native/Sources/winnow/Models/EmailSignals.swift`,
+ * `Models/SmartFilter.swift` and `Classification/FilterCatalog.swift`.
+ */
+
+import type { Mailbox } from "./email";
+
+// ── Signals ─────────────────────────────────────────────────────────────────
+
+/**
+ * What the rule engine found in one message.
+ *
+ * Every field here is either a direct observation ("the body is long") or a
+ * keyed judgement ("this looks like a receipt"). The distinction matters:
+ * observations are re-derived from the message on every classification, while
+ * judgements depend on the *tuned weights* and therefore change when the user
+ * adjusts the learning model.
+ */
+export type EmailSignals = {
+  /** Something is wrong with the account: an alert, a breach, a failed sign-in. */
+  security: boolean;
+  /** Bulk mail sent on a list. Fires at two distinct unsubscribe-style hits. */
+  newsletter: boolean;
+  /** Marketing: discounts, launches, "last chance". */
+  promotional: boolean;
+  /** Time-pressure language, or a sender-set urgent flag. */
+  urgentText: boolean;
+  /** A reply or a task is being asked of the reader. */
+  needsAction: boolean;
+  /** Transactional: invoices, receipts, billing, payouts. */
+  finance: boolean;
+  /** A one-time code the user is meant to copy. Distinct from `security`. */
+  codes: boolean;
+  /** Package tracking and delivery notices. */
+  shipping: boolean;
+  /** Flights, hotels, itineraries. */
+  travel: boolean;
+  /** Calendar invites, RSVPs, webinars. */
+  events: boolean;
+  /** Social-platform notifications. */
+  social: boolean;
+  /** Substantive long-form mail, by body word count. */
+  longRead: boolean;
+
+  /** 0–1 confidence the message is junk. */
+  spamLikelihood: number;
+  /** Weighted importance from a base of 50. Unclamped on purpose. */
+  importanceScore: number;
+};
+
+/**
+ * At or above this, a message is "unsafe": hidden from the default inbox and
+ * excluded from the positive buckets.
+ */
+export const UNSAFE_THRESHOLD = 0.4;
+
+/** At or above this, a message counts as Important. */
+export const IMPORTANT_THRESHOLD = 56;
+
+/** The one predicate for "this is spam", used everywhere. */
+export function isUnsafe(signals: EmailSignals): boolean {
+  return signals.spamLikelihood >= UNSAFE_THRESHOLD;
+}
+
+/**
+ * The all-clear classification.
+ *
+ * Used wherever a signal is genuinely unknown — an archived message that was
+ * never classified, or a cache miss. Same result a quiet, clean email would
+ * get, so a missing classification degrades to "shows up normally" rather than
+ * "gets hidden".
+ */
+export const NEUTRAL_SIGNALS: EmailSignals = {
+  security: false,
+  newsletter: false,
+  promotional: false,
+  urgentText: false,
+  needsAction: false,
+  finance: false,
+  codes: false,
+  shipping: false,
+  travel: false,
+  events: false,
+  social: false,
+  longRead: false,
+  spamLikelihood: 0,
+  importanceScore: 50,
+};
+
+// ── Filters ─────────────────────────────────────────────────────────────────
+
+/**
+ * The built-in buckets.
+ *
+ * No vendor names anywhere: a bucket is a *kind of mail*, so it keeps working
+ * when the sender changes and stays meaningful across accounts.
+ */
+export const BUILTIN_FILTERS = [
+  "important",
+  "urgent",
+  "needs_action",
+  "security",
+  "codes",
+  "shipping",
+  "travel",
+  "events",
+  "receipts",
+  "starred",
+  "unread",
+  "attachments",
+  "new_senders",
+  "top_contacts",
+  "quiet_contacts",
+  "newsletters",
+  "promotional",
+  "low_priority",
+  "long_reads",
+  "social",
+  "unsafe",
+] as const;
+
+export type BuiltinSmartFilter = (typeof BUILTIN_FILTERS)[number];
+
+/** Human label per bucket. The pill, the badge and the rail all read this. */
+export const FILTER_LABELS: Record<BuiltinSmartFilter, string> = {
+  important: "Important",
+  urgent: "Urgent",
+  needs_action: "Action needed",
+  security: "Security",
+  codes: "Codes",
+  shipping: "Deliveries",
+  travel: "Travel",
+  events: "Events",
+  receipts: "Receipts",
+  starred: "Starred",
+  unread: "Unread",
+  attachments: "Files",
+  new_senders: "New contacts",
+  top_contacts: "Top contacts",
+  quiet_contacts: "Quiet contacts",
+  newsletters: "Newsletters",
+  promotional: "Promos",
+  low_priority: "Read later",
+  long_reads: "Long reads",
+  social: "Social",
+  unsafe: "Unsafe",
+};
+
+/**
+ * A filter in the rail. Either a built-in bucket or a single sender.
+ *
+ * Modelled as a tagged union rather than a prefixed string because the prefix
+ * scheme collides: a sender whose address literally starts with `sender:`
+ * would produce an id that means something else entirely.
+ */
+export type FilterId =
+  | { kind: "builtin"; id: BuiltinSmartFilter }
+  | { kind: "sender"; sender: string };
+
+/** A filter the user can toggle. Never "no filter" — see `FilterId | null`. */
+export const builtinFilter = (id: BuiltinSmartFilter): FilterId => ({ kind: "builtin", id });
+
+export const senderFilter = (sender: string): FilterId => ({ kind: "sender", sender });
+
+/** Stable key for React and for persisting the active set. */
+export function filterKey(filter: FilterId): string {
+  return filter.kind === "builtin" ? filter.id : `sender:${filter.sender.toLowerCase()}`;
+}
+
+/** Inverse of `filterKey`, for restoring persisted filters. */
+export function parseFilterKey(key: string): FilterId | null {
+  if (key.startsWith("sender:")) return senderFilter(key.slice("sender:".length));
+  return (BUILTIN_FILTERS as readonly string[]).includes(key)
+    ? builtinFilter(key as BuiltinSmartFilter)
+    : null;
+}
+
+/** The label a pill or badge shows. */
+export function filterLabel(filter: FilterId): string {
+  return filter.kind === "builtin" ? FILTER_LABELS[filter.id] : filter.sender;
+}
+
+/**
+ * Buckets pinned to the front of the rail regardless of how much mail they
+ * currently match — the "always watch" pair. Everything else ranks by volume
+ * and hides when empty.
+ */
+export const PERMANENT_FILTERS: readonly BuiltinSmartFilter[] = ["important", "shipping"];
+
+/** The catalog order, which is the tie-break inside a volume rank. */
+export const FILTER_CATALOG: readonly BuiltinSmartFilter[] = BUILTIN_FILTERS;
+
+/** Where a bucket sits in the catalog; used to break volume ties. */
+export function catalogIndex(id: BuiltinSmartFilter): number {
+  return FILTER_CATALOG.indexOf(id);
+}
+
+// ── Badges ──────────────────────────────────────────────────────────────────
+
+/**
+ * Every bucket a message belongs to, in badge order.
+ *
+ * Derived from the signals rather than re-encoding the thresholds, so the row
+ * indicator and the pill can never disagree about which messages are
+ * important. Excludes `starred`/`unread`/`attachments`, which are drawn from
+ * the message's own state rather than from classification.
+ */
+export function badgeFilters(signals: EmailSignals): BuiltinSmartFilter[] {
+  const out: BuiltinSmartFilter[] = [];
+  const safe = !isUnsafe(signals);
+
+  if (signals.importanceScore >= IMPORTANT_THRESHOLD) out.push("important");
+  if (signals.urgentText) out.push("urgent");
+  if (signals.needsAction && !signals.newsletter) out.push("needs_action");
+  if (signals.security) out.push("security");
+  if (signals.finance && safe) out.push("receipts");
+  if (signals.codes && safe) out.push("codes");
+  if (signals.shipping && safe) out.push("shipping");
+  if (signals.travel && safe) out.push("travel");
+  if (signals.events && safe) out.push("events");
+  if (signals.newsletter) out.push("newsletters");
+  if (signals.promotional) out.push("promotional");
+  if (isUnsafe(signals)) out.push("unsafe");
+
+  return out;
+}
+
+/**
+ * The compact subset shown on a list row.
+ *
+ * The list is scanned, not read, so it gets the buckets that change how a row
+ * is *judged* (important, urgent, unsafe) and drops the ones that are really
+ * just categories. The reader shows the full set.
+ */
+const ROW_HIDDEN: ReadonlySet<BuiltinSmartFilter> = new Set([
+  "needs_action",
+  "receipts",
+  "codes",
+  "shipping",
+  "travel",
+  "events",
+]);
+
+export function rowIndicators(signals: EmailSignals): BuiltinSmartFilter[] {
+  return badgeFilters(signals).filter((id) => !ROW_HIDDEN.has(id));
+}
+
+// ── Mailbox navigation ──────────────────────────────────────────────────────
+
+/**
+ * The compact navigation palette. Archive is deliberately absent: it is a
+ * destination you visit deliberately, not one you flip to while triaging.
+ */
+export type NavigationItem = "inbox" | "spam" | "trash" | "settings";
+
+export const NAVIGATION_ITEMS: readonly { id: NavigationItem; label: string; mailbox?: Mailbox }[] = [
+  { id: "inbox", label: "Inbox", mailbox: "inbox" },
+  { id: "spam", label: "Spam", mailbox: "spam" },
+  { id: "trash", label: "Bin / Trash", mailbox: "trash" },
+  { id: "settings", label: "Settings" },
+] as const;
+
+/** Where the palette's selection should land for a given mailbox. */
+export function navigationIndexFor(mailbox: Mailbox): number {
+  // Archive is not in the palette, so it maps to the top — the inbox — the
+  // same way the Swift implementation did: arriving in Archive, the most
+  // useful jump is back to where the work is.
+  void mailbox;
+  return 0;
+}

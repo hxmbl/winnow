@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Winnow",
+  "version": "0.1.0",
+  "identifier": "app.winnow.desktop",
+  "build": {
+    "frontendDist": "../../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix ../../web install && npm --prefix ../../web run dev",
+    "beforeBuildCommand": "npm --prefix ../../web install && npm --prefix ../../web run build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Winnow",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 560,
+        "center": true,
+        "decorations": true,
+        "resizable": true,
+        "visible": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: https:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost https://www.googleapis.com https://gmail.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://*.googleapis.com",
+        "frame-src": "'self'",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'"
+      },
+      "assetProtocol": {
+        "enable": false
+      }
+    }
+  },
+  "bundle": {
+    "category": "Productivity",
+    "shortDescription": "Email that sorts itself",
+    "longDescription": "Winnow is an email client that classifies, ranks and filters your mail so the important messages rise to the top and the noise falls away.",
+    "copyright": "© Winnow",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "targets": ["app", "dmg", "deb", "appimage", "msi", "nsis"],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}
