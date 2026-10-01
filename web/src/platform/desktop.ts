@@ -59,9 +59,27 @@ const keychainTokenStore = (name = "gmail.tokens"): TokenStore => ({
   },
 });
 
+/**
+ * `app_info`, resolved once.
+ *
+ * What the build can do is a fixed property of the build — it does not change
+ * while the app runs, and there is nothing to re-read. Both the entry point and
+ * the app shell ask for it at startup, so without this each would pay a
+ * round-trip to Rust for an answer that cannot have changed, and the two copies
+ * would be free to drift if the struct ever did change.
+ *
+ * A rejected promise is not cached: a transient IPC failure should not pin the
+ * app to "this build can do nothing" for the life of the process.
+ */
+let infoPromise: Promise<PlatformInfo> | null = null;
+
 export const desktopPlatform: Platform = {
-  async info(): Promise<PlatformInfo> {
-    return invoke<PlatformInfo>("app_info");
+  info(): Promise<PlatformInfo> {
+    infoPromise ??= invoke<PlatformInfo>("app_info").catch((error) => {
+      infoPromise = null;
+      throw error;
+    });
+    return infoPromise;
   },
 
   tokenStore(): TokenStore {

@@ -142,15 +142,18 @@ export function App({ store }: Props) {
     }
   }, [store]);
 
-
   /**
    * Start a sign-in.
    *
-   * `main.tsx` owns the platform and the Gmail session, so the whole of
-   * sign-in — PKCE, the loopback listener, the token exchange — happens there
-   * and this component only asks. The store's `connect` is what turns a
-   * signed-in account into a populated inbox, so the two steps are sequenced
-   * here rather than in a layer that does not know about the UI.
+   * The bridge owns the whole flow — PKCE, the loopback listener or the page
+   * redirect, the token exchange — and this only asks. The store's `connect` is
+   * what turns a signed-in account into a populated inbox, so the two steps are
+   * sequenced here rather than in a layer that does not know about the UI.
+   *
+   * On the web build this promise does not resolve: `beginSignIn` navigates away
+   * and the page is torn down. The sign-in completes in `completeWebRedirect` on
+   * the way back. The only way this resolves is if the navigation was blocked,
+   * which surfaces as a cancellation — the honest reading.
    */
   const sessionRef = useRef<SessionBridge | null>(null);
   const [restoringSession, setRestoringSession] = useState(false);
