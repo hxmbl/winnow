@@ -790,6 +790,44 @@ describe("sign out", () => {
     expect(state.learning.weights.security).toBe(30);
     expect(state.preferences.blockedSenders).toContain("someone@example.com");
   });
+
+  it("parks the background ticker", async () => {
+    // Otherwise the desktop's Rust thread keeps firing every minute against a
+    // backend that no longer exists, and the user watches a signed-out app
+    // making requests it cannot authenticate.
+    const { backend } = fakeBackend();
+    const { platform, calls } = fakePlatform();
+    const store = demoStore();
+    store.attach({ backend, platform });
+    await store.refresh();
+
+    await store.signOut();
+    const parked = calls.filter((c) => c.method === "syncInterval").at(-1);
+    expect(parked).toBeDefined();
+    expect(parked!.args[0]).toBeNull();
+  });
+
+  it("clears the unread badge", async () => {
+    // A signed-out app showing "12 unread" on the dock badge is a lie the user
+    // has to look at, and there is no inbox behind it to explain.
+    const { backend } = fakeBackend();
+    const { platform, calls } = fakePlatform();
+    const store = demoStore();
+    store.attach({ backend, platform });
+    await store.refresh();
+
+    await store.signOut();
+    const badge = calls.filter((c) => c.method === "badge").at(-1);
+    expect(badge).toBeDefined();
+    expect(badge!.args[0]).toBe(0);
+  });
+
+  it("works with no platform attached at all", async () => {
+    // The demo never attaches one, and signing out of the demo must not throw.
+    const store = demoStore();
+    await expect(store.signOut()).resolves.toBeUndefined();
+    expect(store.getSnapshot().status).toBe("signed_out");
+  });
 });
 
 describe("sync failure reporting", () => {

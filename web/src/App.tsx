@@ -167,6 +167,37 @@ export function App({ store }: Props) {
   }
 
   /**
+   * Sign out for real.
+   *
+   * Through the bridge, not straight to `store.signOut`. The store half clears
+   * the screen; the bridge half is what revokes the tokens in the OS keychain
+   * and wipes the cached mail. Calling only the store left a working refresh
+   * token in the keychain and the user's inbox in `localStorage` — on a shared
+   * machine, that is the difference between "signed out" and "signed out, but
+   * the next person can read your mail".
+   *
+   * The store is still cleared if the bridge half fails, because leaving a
+   * populated inbox on screen after someone pressed "sign out" is worse than
+   * leaving a token behind.
+   */
+  const signOut = useCallback(async () => {
+    const bridge = sessionRef.current;
+    try {
+      if (bridge) {
+        await bridge.signOut();
+        return;
+      }
+    } catch (error) {
+      store.setError(
+        error instanceof Error
+          ? `Signed out, but the saved session could not be erased: ${error.message}`
+          : "Signed out, but the saved session could not be erased.",
+      );
+    }
+    await store.signOut();
+  }, [store]);
+
+  /**
    * Build the session bridge and look for an existing session.
    *
    * Mounted unconditionally, in demo mode too, because the demo *is* what the
@@ -580,7 +611,7 @@ export function App({ store }: Props) {
         hasSelection={selected !== null}
         accountEmail={snapshot.account?.email ?? null}
         onSignOut={() => {
-          void store.signOut();
+          void signOut();
         }}
       />
 

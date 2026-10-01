@@ -419,6 +419,122 @@ No further action is required. A copy is attached for your records.`,
     demonstrates: "long_reads",
   },
 
+  // ── Starred, unread, important, low priority ───────────────────────────────
+  //
+  // These four are the buckets a user reaches for first, and every one of them
+  // was unreachable in the demo until these fixtures existed. That is the worst
+  // kind of gap: the bucket looks fine in the rail until you click it and get
+  // an empty list, which reads as the classifier being broken rather than as the
+  // seed being incomplete.
+
+  {
+    // Starred is pure state, not a heuristic, so it needs a message whose only
+    // job is to carry the flag. Chosen to also be genuinely worth starring —
+    // a fixture that is starred and obviously junk would teach the wrong thing.
+    id: "demo-starred-1",
+    sender: "marcus@northwind.example",
+    name: "Marcus Feld",
+    at: 9 * HOUR,
+    subject: "the contract — I think this version is the one",
+    body: `I have read it twice against the version from Tuesday and I think this one
+works. The clause that was bothering me is gone, and the indemnity wording is now
+the version our lawyer actually sent back, which I did not expect to survive this
+round.
+
+Two small things, neither of which I think should hold anything up:
+
+The payment schedule still says 45 days in section 3, and the summary at the top
+says 30. One of them is out of date.
+
+The address for the notices clause is the old one — the Rickmans building, which
+we vacated in March.
+
+If you can get the payment schedule corrected I will sign this afternoon. If the
+notices address is going to take a few days, that is fine too, I would rather it
+were right than quick.`,
+    category: "primary",
+    starred: true,
+    demonstrates: "starred",
+  },
+  {
+    // Unread: anything flagged unread and not spam. Separate from `important`
+    // on purpose — a user clicking "Unread" expects to see mail they have not
+    // looked at, not mail the classifier thinks matters, and conflating the two
+    // is how a filter becomes a suggestion.
+    id: "demo-unread-1",
+    sender: "priya@northwind.example",
+    name: "Priya Raman",
+    at: 40 * MINUTE,
+    subject: "quick one — can we push standup by an hour tomorrow",
+    body: `Room booking fell through for tomorrow morning, so could we move standup to
+10:00 instead of 09:30? It is only me and Tom for the first half anyway, and the
+09:30 slot is double-booked in the small room.
+
+If that does not work I will do 09:30 remotely. No need to reply if 10:00 is
+fine, I will just move it.`,
+    category: "primary",
+    unread: true,
+    threadId: "demo-thread-standup",
+    demonstrates: "unread",
+  },
+  {
+    // Important: the composite bucket — high score, not bulk, not junk. A
+    // message from someone the profile ranks as a close correspondent, carrying
+    // a real ask, is what earns the badge honestly rather than by keyword.
+    id: "demo-important-1",
+    sender: "dana@northwind.example",
+    name: "Dana Whitfield",
+    at: 4 * HOUR,
+    subject: "Are we still signing the Northwind agreement this week?",
+    body: `I need to know today, because the counterparty's board meets Friday morning
+and they have asked twice whether we will have signed by then.
+
+If we are not signing this week, please tell them directly rather than letting it
+drift. A clear no this week costs us one quarter. A vague maybe costs us the
+relationship, because they will plan around a signature that was never coming.
+
+If it comes down to the indemnity language, tell me and I will take it to our
+lawyer today — I would rather have the conversation than let the date slip
+quietly.
+
+Either way I would like to send something tonight rather than nothing.`,
+    category: "primary",
+    unread: true,
+    demonstrates: "important",
+  },
+  {
+    // Low priority: the bucket that is easy to get wrong, so it gets an honest
+    // fixture. A quiet note from a contact the profile has barely heard from —
+    // not a newsletter, not promotional, no keyword. This is the mail the bucket
+    // exists for, and the demo showing only bulk here would misrepresent it.
+    id: "demo-low-1",
+    sender: "helena@quarrylane.example",
+    name: "Helena Ruiz",
+    at: 3 * DAY,
+    subject: "Fwd: photos from the weekend",
+    body: `Forwarding these because the printer wants originals and these are better than
+the ones I took.
+
+The one of the harbour at dusk is the good one.`,
+    category: "primary",
+    demonstrates: "low_priority",
+  },
+  {
+    // A second one, from a sender the profile has seen before but rarely — so
+    // "Read later" is not just one mailbox's worth of a single thread.
+    id: "demo-low-2",
+    sender: "tomas@fieldnotes.example",
+    name: "Tomás Lindqvist",
+    at: 5 * DAY,
+    subject: "that book you mentioned",
+    body: `Found it in a second-hand shop in Malmö, which is either a coincidence or a
+sign. Reading it this week.
+
+No rush to reply, I know you have a thing on at the moment.`,
+    category: "primary",
+    demonstrates: "low_priority",
+  },
+
   // ── Newsletters ───────────────────────────────────────────────────────────
   {
     id: "demo-newsletter-1",
@@ -859,13 +975,33 @@ export const DEMO_TRASH: readonly TrashRecord[] = [
 ];
 
 /**
- * Every bucket the seed is designed to demonstrate, and one message for each.
+ * Every bucket the seed is designed to demonstrate, and the messages for each.
  *
- * This is the seed's contract with the tests: `demo.test.ts` classifies the
- * whole mailbox and asserts that each of these buckets is non-empty. A seed
- * edit that accidentally stops producing a security alert fails a test rather
- * than quietly shipping a demo with a broken feature.
+ * This is the seed's contract with the tests: `demo.test.ts` classifies the whole
+ * mailbox and asserts that each bucket listed here is both reachable *and*
+ * actually claimed by the message that says it is. A seed edit that accidentally
+ * stops producing a security alert fails a test rather than quietly shipping a
+ * demo with a broken feature.
+ *
+ * A list per bucket rather than one id, because most buckets have several
+ * fixtures — two security alerts, two shipping notices. An earlier version keyed
+ * this to a single id with `Object.fromEntries`, which silently kept only the
+ * *last* fixture for each bucket and made the contract a statement about whichever
+ * seed happened to be written last. It also meant a genuine regression in an
+ * earlier fixture went unnoticed, since the contract had quietly stopped covering
+ * it.
+ *
+ * The test asserts that at least one claimed message lands in each bucket, and
+ * separately that every message claiming a bucket does land there — the first is
+ * "the demo can show this", the second is "the demo is not lying about it".
  */
-export const DEMO_EXPECTATIONS: Readonly<Record<string, string>> = Object.fromEntries(
-  seeds.filter((seed) => seed.demonstrates).map((seed) => [seed.demonstrates!, seed.id]),
-);
+export const DEMO_EXPECTATIONS: Readonly<Record<string, readonly string[]>> =
+  Object.fromEntries(
+    Object.entries(
+      seeds.reduce<Record<string, string[]>>((byBucket, seed) => {
+        if (!seed.demonstrates) return byBucket;
+        (byBucket[seed.demonstrates] ??= []).push(seed.id);
+        return byBucket;
+      }, {}),
+    ),
+  );

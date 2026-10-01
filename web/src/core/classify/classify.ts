@@ -29,6 +29,7 @@ import {
   isShoutySubject,
   needsActionRegexes,
   newsletterKeywords,
+  coercionRegex,
   phishingRegex,
   promoRegex,
   replyRequestRegex,
@@ -173,6 +174,19 @@ export function classifyEmail(
   // Phishing phrasing dominates; a bare "click here" is only a nudge.
   if (phishingRegex.test(actionText)) spamLikelihood += 0.3;
   else if (clickHereRegex.test(actionText)) spamLikelihood += 0.08;
+
+  // Coercion is scored on top of the phishing test, not inside it. That test is
+  // binary, so a message that already matched "verify your password" gained
+  // nothing from also threatening to delete the account — which is exactly the
+  // message that should score highest. Coercion is the ingredient that separates
+  // a clumsy real notice from a campaign, so it carries its own weight and is
+  // additive.
+  //
+  // Capped at 0.45 rather than summed freely: two coercive phrasings in one
+  // message should not be worth more than the threshold on their own plus a
+  // little, or a long, earnest, urgent-but-real letter about an expiring
+  // document would tip over into unsafe on volume of worry alone.
+  if (coercionRegex.test(actionText)) spamLikelihood += 0.45;
 
   const spamHits = spamKeywords.count(text);
   if (spamHits > 0) spamLikelihood += Math.min(0.35, 0.15 + (spamHits - 1) * 0.08);

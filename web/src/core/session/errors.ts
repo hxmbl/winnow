@@ -8,6 +8,8 @@
  * "unknown error" for a revoked grant the user could fix in ten seconds.
  */
 
+import { isTauri } from "../../platform";
+
 /** A redirect whose `state` did not match the one we issued. */
 export class GoogleAuthStateMissing extends Error {
   constructor() {
@@ -67,6 +69,18 @@ export function describeFailure(error: unknown): AuthFailure {
       return {
         message: "This build is not configured to sign in.",
         hint: "Set VITE_GMAIL_CLIENT_ID and rebuild.",
+        retryable: false,
+      };
+    case "invalid_client":
+      return {
+        message: "Google rejected this build's credentials.",
+        // The overwhelmingly common cause is a client id registered for the
+        // wrong kind of client: a "Web application" id on the desktop build, or a
+        // "Desktop app" id on a website. Google's own error is `invalid_client`
+        // and says nothing more, so the hint has to supply the diagnosis.
+        hint: isTauri()
+          ? "This looks like a web app client id. A desktop build needs one registered as 'Desktop app'."
+          : "This looks like a desktop app client id. A website needs one registered as 'Web application', along with VITE_GMAIL_CLIENT_SECRET.",
         retryable: false,
       };
     case "network":

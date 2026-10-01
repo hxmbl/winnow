@@ -210,6 +210,56 @@ describe("TokenManager — failure handling", () => {
     expect(store.peek()).not.toBeNull();
   });
 
+  it("blames the build, not the session, on invalid_client", async () => {
+    // A wrong client secret is a build misconfiguration. Clearing the session
+    // would force a re-authorisation that fails in exactly the same way — and
+    // would take a working session down with it.
+    const { fetchImpl } = tokenFetch({
+      status: 401,
+      body: { error: "invalid_client", error_description: "Unauthorized" },
+    });
+    const store = memoryStore(tokenSet({ expiresAt: Date.now() - 1 }));
+    const manager = new TokenManager({
+      store: store.store,
+      clientId: "id",
+      clientSecret: "wrong",
+      fetchImpl,
+    });
+
+    await expect(manager.validAccessToken()).rejects.toMatchObject({
+      kind: "invalid_client",
+    });
+    expect(store.peek()).not.toBeNull();
+  });
+
+  it("names invalid_client at the exchange too, not just the refresh", async () => {
+    // Google answers the same way for both, and the wording must not drift: the
+    // code exchange is where a web build with no secret actually fails.
+    const { fetchImpl } = tokenFetch({
+      status: 401,
+      body: { error: "invalid_client" },
+    });
+    const manager = new TokenManager({ store: memoryStore(null).store, clientId: "id", fetchImpl });
+
+    await expect(
+      manager.exchangeCode({ code: "c", verifier: "v", redirectUri: "https://x/cb" }),
+    ).rejects.toMatchObject({ kind: "invalid_client" });
+  });
+
+  it("does not leak Google's wording for a rejected code", async () => {
+    // `invalid_grant` covers a replayed code as well as a misused one. Echoing
+    // Google's description back would tell an attacker which half to fix.
+    const { fetchImpl } = tokenFetch({
+      status: 400,
+      body: { error: "invalid_grant", error_description: "code already used" },
+    });
+    const manager = new TokenManager({ store: memoryStore(null).store, clientId: "id", fetchImpl });
+
+    await expect(
+      manager.exchangeCode({ code: "c", verifier: "v", redirectUri: "https://x/cb" }),
+    ).rejects.toThrow(/^Sign-in could not be verified/);
+  });
+
   it("reports a network failure distinctly", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError("Failed to fetch");

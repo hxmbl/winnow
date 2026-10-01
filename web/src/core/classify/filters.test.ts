@@ -198,9 +198,18 @@ describe("rankFilters", () => {
   it("hides empty buckets that are not permanent", () => {
     // "Files" matches one demo message; "Quiet contacts" matches two. A bucket
     // advertising a count of zero costs a rail slot and offers nothing.
+    //
+    // `social` is the control: the demo has two social messages, so it is
+    // present, and its absence from the ranked list would mean non-empty buckets
+    // are being dropped.
     const ranked = rankFilters(inbox, signals, profile);
     expect(ranked).toContain("attachments");
-    expect(ranked).not.toContain("starred");
+    expect(ranked).toContain("social");
+
+    // A slice with nothing in it: the demo has no starred message in
+    // `slice`, so the bucket has nothing to offer and must not appear.
+    const quiet = rankFilters([], new Map(), profile);
+    expect(quiet).not.toContain("starred");
   });
 
   it("gives every permanent bucket a position regardless of count", () => {

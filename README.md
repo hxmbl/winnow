@@ -113,10 +113,11 @@ whether to trust it with an account.
 
 ## Tests
 
-297 unit tests over `web/src/core` and `web/src/ui` — the classifier, the
-filters, the store's derivation and undo, the Gmail sync engine, token refresh,
-reply quoting, keybinds, and the OAuth redirect parsing. No DOM required, which
-is the payoff of the `core`/`ui` split.
+337 unit tests over `web/src/core` and `web/src/ui` — the classifier, the
+profile, the filters, the store's derivation and undo, the demo seed's own
+contract, the Gmail sync engine, token refresh, reply quoting, keybinds, and the
+OAuth redirect parsing. No DOM required, which is the payoff of the `core`/`ui`
+split.
 
 The Rust side has its own tests for the parts worth testing: the loopback
 listener, the path sanitiser, the background scheduler, deep-link parsing.
@@ -144,6 +145,20 @@ clock on connect.
 **The keyword tables are narrow on purpose.** Ported faithfully from the Swift
 reference, including the parts that look like bugs. Widening them would make the
 classifier louder and less trustworthy. See `legacy/swift-native/README.md`.
+
+**Engagement is weighted by correspondence, not volume.** A sender's score
+discounts bulk mail per message using Gmail's own category, so a retailer
+sending four promotions does not outrank a colleague writing three replies. The
+discount is per *message* rather than per sender, because someone who forwards
+one newsletter among six replies is overwhelmingly a contact. Ties break on the
+sender name: a ranking that decides what is hidden cannot be a shuffle.
+
+**Coercion is scored separately from phishing.** The phishing test is binary, so
+folding "your account will be suspended… all data will be removed" into it
+changed nothing for exactly the worst message. Every coercion pattern requires a
+*demand* alongside the threat, so a real bank notice about a delinquent account
+does not get filed as phishing — an Unsafe bucket that cries wolf is the only way
+to make it useless.
 
 **No gravatar.** Avatars are a colour hashed from the address. A third-party
 request per message is a latency cost and a privacy leak for decoration.

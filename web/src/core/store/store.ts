@@ -1170,6 +1170,15 @@ export class WinnowStore {
       learning: this.state.learning,
     };
     this.backend = undefined;
+
+    // Park the background ticker *before* dropping the backend. On the desktop
+    // this is a Rust thread that would otherwise keep firing every minute,
+    // calling `refresh` with no backend — so the user who signed out would sit
+    // watching a logged-out app make network requests it cannot authenticate.
+    await this.platform?.setBackgroundSync(null).catch(() => undefined);
+    // And clear the badge, for the same reason: a signed-out app with "12
+    // unread" still on the dock badge is a lie the user has to look at.
+    await this.platform?.setUnreadBadge(0).catch(() => undefined);
     this.state = {
       ...this.state,
       status: "signed_out",

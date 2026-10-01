@@ -52,6 +52,23 @@ export const securityKeywords = new KeywordTable([
   "unusual sign-in",
   "unusual sign in",
   "unrecognized device",
+  // The new-device notice, which is how Dropbox, Google, Apple and most banks
+  // word the *commonest* account-security event there is. The table had
+  // "unrecognized device" — which almost nobody writes, because a service
+  // calling your own phone unrecognised reads as a bug to the recipient — and
+  // missed this entirely, so a routine Dropbox new-device alert was not filed as
+  // security at all.
+  //
+  // Narrower than it looks, and the narrowness is the point. An earlier attempt
+  // added "signed in to your account" alongside this, which fired on "You signed
+  // in to your account from a new device" — the *welcome-back* mail sent after a
+  // legitimate sign-in. That phrase alone cannot tell a new device from a known
+  // one, which is the entire content of these notices. So the entries below
+  // require the *newness*, and "sign-in history" is the action a real alert
+  // offers.
+  "new device signed in",
+  "new device has signed in",
+  "sign-in history",
 ]);
 
 // ── Bulk mail ───────────────────────────────────────────────────────────────
@@ -289,6 +306,52 @@ export const promoRegex = compile(
  */
 export const phishingRegex = compile(
   "\\b(?:account has been compromised|verify your password|suspended account|click here.{0,80}(?:password|account|verify|identity|login|credential))\\b",
+);
+
+/**
+ * Coercion: a deadline or a threat, wrapped around a demand.
+ *
+ * Separate from `phishingRegex` rather than folded into it, because that test is
+ * *binary* — one hit is 0.3 whether it matched one phrase or five. Folding
+ * coercion in changed nothing for the message that motivated this: the fixture
+ * threatening permanent data removal still scored 0.30, below the unsafe
+ * threshold, because it already matched "verify your password".
+ *
+ * What makes a campaign worse than a bare credential demand is the threat
+ * attached to it. "Verify your password" could be a clumsy real notice. "Your
+ * account will be suspended unless you verify immediately, and all associated
+ * data will be removed" is not something a genuine institution sends about a
+ * password — it is the coercion that makes phishing work, and it deserves to
+ * score above the threshold on its own.
+ *
+ * Every alternative requires a *demand* alongside the threat, which is what
+ * keeps genuine enforcement notices out. A bank saying "your account will be
+ * closed if the balance remains unpaid" matches neither: no credential demand,
+ * and no deletion threat. Those are real and common, and misfiling them as
+ * unsafe is how the Unsafe bucket learns to cry wolf.
+ */
+export const coercionRegex = compile(
+  [
+    // A credential demand carrying a deadline or a condition. This is the core
+    // shape, and the demand is required in every alternative — a bare
+    // "your account will be suspended" is a real bank notice, and treating it as
+    // coercion would put genuine enforcement mail in the Unsafe bucket.
+    "(?:verif|confirm|update|renew)\\w* your (?:password|account|credentials|identity|access).{0,80}(?:hour|minute|day|immediately|unless|expire)",
+    "unless you verif",
+    // Data destruction as the stated consequence. No institution phrases it this
+    // way about an account the user is already in.
+    "(?:all|your) (?:associated )?(?:data|records|files) will be (?:removed|deleted|deactivated)",
+    // Credential stuffing: several failures in a row. Real alerts say "unusual";
+    // campaigns say "multiple".
+    "(?:unauthori[sz]ed|multiple|failed|unrecogni[sz]ed) (?:sign-?in|log-?in|access) attempts?",
+    // A countdown stated on its own, as a subject line does.
+    "(?:hour|minute)s? to (?:verif|confirm|respond)",
+    // "Failure to comply" only counts when the stated consequence is the account
+    // itself. "Failure to comply will result in your registration being
+    // cancelled" is a real registrar email and does not match — which is the
+    // whole reason the consequence is spelled out rather than left as `.{0,50}`.
+    "failure to (?:comply|verify|confirm).{0,60}(?:result in your account|account (?:will be )?(?:suspend|clos|delet|terminat))",
+  ].join("|"),
 );
 
 /** Generic CTA. A weak tell on its own; ignored when `phishingRegex` fired. */

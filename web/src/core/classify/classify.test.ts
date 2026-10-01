@@ -258,6 +258,87 @@ describe("classifyEmail — spam likelihood", () => {
     expect(isUnsafe(signals)).toBe(true);
   });
 
+  it("is raised by a coercive threat even when the phishing phrases already matched", () => {
+    // The regression this exists for. `phishingRegex` is a *binary* test worth a
+    // flat 0.3, so adding the coercion phrases to it changed nothing for a
+    // message that already said "verify your password" — which is to say, for
+    // precisely the worst kind of message. This one scored 0.30, below the
+    // threshold, while a subtler campaign scored exactly 0.40.
+    //
+    // The threat is the part that separates a campaign from a clumsy real notice,
+    // so it is scored additively rather than folded into the binary test.
+    const signals = classifyEmail(
+      email({
+        sender: "service@account-verify.example",
+        subject: "Your account will be suspended",
+        body: "Your account will be suspended unless you verify your password immediately.\n\nFailure to comply within 24 hours will result in permanent closure of your account and all associated data will be removed.",
+      }),
+      EMPTY_PROFILE,
+    );
+    expect(isUnsafe(signals)).toBe(true);
+  });
+
+  it("is not raised by a genuine notice about a delinquent account", () => {
+    // The other half of that fix, and the reason the coercion patterns require a
+    // *demand* alongside the threat. A bank warning that an unpaid account will
+    // be closed is real, common, and must not be filed as phishing — otherwise
+    // the Unsafe bucket cries wolf, which is the only way to make it useless.
+    const signals = classifyEmail(
+      email({
+        sender: "billing@bank.example",
+        subject: "Your account will be closed if the balance remains unpaid",
+        body: "Your account may be suspended if the minimum balance is not maintained. Please pay the outstanding amount within 7 days to avoid closure.",
+      }),
+      EMPTY_PROFILE,
+    );
+    expect(signals.spamLikelihood).toBeLessThan(UNSAFE_THRESHOLD);
+  });
+
+  it("is not raised by an earnest urgent letter about an expiring document", () => {
+    // Counted as a case because the coercion weight is additive: two worrying
+    // phrasings in one real letter must not add up to unsafe on volume of worry.
+    const signals = classifyEmail(
+      email({
+        sender: "registry@company.example",
+        subject: "Action required: your visa document expires soon",
+        body: "Please confirm your details within 14 days. Failure to comply will result in your registration being cancelled. We would rather help you avoid this.",
+      }),
+      EMPTY_PROFILE,
+    );
+    expect(signals.spamLikelihood).toBeLessThan(UNSAFE_THRESHOLD);
+  });
+
+  it("recognises the commonest account-security notice of all", () => {
+    // The table had "unrecognized device" — which almost nobody writes, because
+    // a service calling your own phone unrecognised reads as a bug to the person
+    // receiving it — and missed the form every major service actually uses.
+    const signals = classifyEmail(
+      email({
+        sender: "noreply@dropbox.com",
+        subject: "We noticed a new device signed in to your account",
+        body: "A new device signed in to your account. If this was you, you can dismiss this notice. If not, please review your sign-in history.",
+      }),
+      EMPTY_PROFILE,
+    );
+    expect(signals.security).toBe(true);
+  });
+
+  it("still calls a welcome-back mail a welcome-back mail", () => {
+    // The guard on that addition. It takes the sign-in *and* the account, so a
+    // routine "you signed in successfully" notice — or a newsletter about
+    // sign-in features — must not become a security alert.
+    const welcome = classifyEmail(
+      email({
+        sender: "hello@service.example",
+        subject: "You signed in successfully",
+        body: "You signed in to your account from a new device. Everything looks normal.",
+      }),
+      EMPTY_PROFILE,
+    );
+    expect(welcome.security).toBe(false);
+    expect(welcome.spamLikelihood).toBeLessThan(UNSAFE_THRESHOLD);
+  });
+
   it("is not raised by a click-here link with no credential language", () => {
     // Every newsletter has one of these. Treating it as phishing taught users
     // to ignore the Unsafe bucket, which is the one that must never cry wolf.

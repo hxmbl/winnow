@@ -131,7 +131,18 @@ export type AuthErrorKind =
   | "reauth_required"
   | "network"
   | "timeout"
+  /** The build is missing something it needs — a client id, or a secret. */
   | "config"
+  /**
+   * Google accepted the request but refused the identity: a wrong secret, or a
+   * client whose type forbids the flow it was asked to perform.
+   *
+   * Distinct from `config` because the fix is not the same. `config` means
+   * "this was never built correctly"; this means "this was built for a different
+   * client type", which for Winnow is usually a Desktop-app client configured
+   * with a web redirect URI, or the reverse.
+   */
+  | "invalid_client"
   | "unknown";
 
 export class GmailError extends Error {

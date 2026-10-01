@@ -25,7 +25,12 @@
  * Ported from `legacy/swift-native/Sources/winnow/Gmail/Auth/TokenManager.swift`.
  */
 
-import { GOOGLE_TOKEN_URL, GmailError, type TokenSet } from "./dto";
+import {
+  GOOGLE_TOKEN_URL,
+  GmailError,
+  type AuthErrorKind,
+  type TokenSet,
+} from "./dto";
 
 /** Refresh this far before the real expiry, so an in-flight request cannot expire. */
 export const EXPIRY_SLACK_MS = 60_000;
@@ -239,9 +244,22 @@ export class TokenManager {
 
     if (!response.ok) {
       const text = await response.text();
+
+      // A wrong client secret is not a dead grant, so it must not clear the
+      // session — checked before the 400/401 branch below, which does. Wiping a
+      // working session because the *build* is misconfigured would force a
+      // re-authorisation that would fail the same way.
+      if (text.includes("invalid_client")) {
+        throw new GmailError(
+          "Google rejected this build's client credentials.",
+          response.status,
+          "invalid_client",
+        );
+      }
+
       // 400 and 401 are the two that mean "this grant is gone": `invalid_grant`
-        // covers a revoked token, an expired one, and a changed password. All
-        // three need the user, not a retry.
+      // covers a revoked token, an expired one, and a changed password. All
+      // three need the user, not a retry.
       if (response.status === 400 || response.status === 401) {
         await this.clear();
         throw new GmailError(
@@ -311,16 +329,8 @@ export class TokenManager {
 
     if (!response.ok) {
       const text = await response.text();
-      // A rejected verifier is a bug in the client, not a revoked session, so
-      // it must not clear an existing session.
-      const isVerifierProblem = text.includes("invalid_grant") || text.includes("invalid_request");
-      throw new GmailError(
-        isVerifierProblem
-          ? "Sign-in could not be verified. Please try again."
-          : `Google returned ${response.status}: ${text.slice(0, 200)}`,
-        response.status,
-        isVerifierProblem ? "state_mismatch" : "unknown",
-      );
+      const [message, kind] = describeTokenRejection(response.status, text);
+      throw new GmailError(message, response.status, kind);
     }
 
     const payload = (await response.json()) as {
@@ -342,6 +352,35 @@ export class TokenManager {
     await this.adopt(tokens);
     return tokens;
   }
+}
+
+/**
+ * Turn a rejected token request into something a user can be told.
+ *
+ * Shared by the code exchange and the refresh, because Google answers the same
+ * way for both and the wording should not drift between them.
+ *
+ * The three cases are separated because the remedy differs in each, and getting
+ * that wrong sends people to the wrong place:
+ *
+ *   - `invalid_client` is the *build* being wrong — a missing secret, or the
+ *     wrong client type. Retrying cannot help.
+ *   - `invalid_grant` is this *attempt* being wrong — a spent code, a replayed
+ *     verifier, a code issued for a different redirect URI. Start over.
+ *   - anything else is passed through, truncated, because inventing a friendly
+ *     message for an error we do not recognise is how a real bug gets reported
+ *     as "something went wrong".
+ */
+function describeTokenRejection(status: number, text: string): [string, AuthErrorKind] {
+  if (text.includes("invalid_client") || text.includes("unauthorized_client")) {
+    return ["Google rejected this build's client credentials.", "invalid_client"];
+  }
+  if (text.includes("invalid_grant") || text.includes("invalid_request")) {
+    // Deliberately vague: "invalid_grant" covers a replayed code as well as a
+    // misused one, and saying which would tell an attacker what to fix.
+    return ["Sign-in could not be verified. Please try again.", "state_mismatch"];
+  }
+  return [`Google returned ${status}: ${text.slice(0, 200)}`, "unknown"];
 }
 
 /** A `TokenStore` backed by `localStorage`, for the web build. */
