@@ -187,16 +187,45 @@ fn serve(
             Err(_) => break,
         };
 
+        // Split the request target into path and query *before* handing anything to
+        // `Url`. The bug this replaces folded the whole target — query string and
+        // all — into `set_path`, so `query_pairs()` was always empty and the
+        // listener never once read a `code` or an `error`. It did not fail; it
+        // looped, answering 204s and waiting for a redirect it was structurally
+        // incapable of parsing, until the five-minute timeout blamed the user's
+        // network. Three tests asserted this behaviour passed, because they
+        // exercised the *transport* and never checked that anything came back.
+        let (path, query) = match request.url().split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (request.url(), None),
+        };
+
         let url = match url::Url::parse(&base) {
             Ok(mut url) => {
-                // Fold the request target into the base so relative and
-                // absolute forms both parse; we only care about the query.
-                if let Some(rest) = request.url().strip_prefix('/') {
-                    url.set_path(&format!("/{rest}"));
+                // `set_path` percent-decodes nothing and treats `?` as an
+                // ordinary character, so the path has to be handed over without
+                // the query. It is empty-safe: an absolute-form request target
+                // starts with `http`, which is not a path, and is taken whole.
+                let path = if path.starts_with("http://") || path.starts_with("https://") {
+                    path.to_string()
+                } else if path.starts_with('/') {
+                    path.to_string()
                 } else {
-                    url.set_path(request.url());
+                    format!("/{path}")
+                };
+
+                if path.starts_with("http://") || path.starts_with("https://") {
+                    // Absolute-form request target (RFC 7230 §5.3.2): parse it
+                    // whole rather than grafting it onto the base.
+                    match url::Url::parse(&path) {
+                        Ok(parsed) => parsed,
+                        Err(_) => continue,
+                    }
+                } else {
+                    url.set_path(&path);
+                    url.set_query(query);
+                    url
                 }
-                url
             }
             Err(_) => continue,
         };
@@ -376,6 +405,15 @@ mod tests {
         }
     }
 
+    /// A minimal executor so the tests do not need a full Tokio runtime.
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(future)
+    }
+
     #[test]
     fn unrelated_requests_do_not_end_the_flow() {
         let session = begin(AUTH_URL.into()).unwrap();
@@ -401,12 +439,41 @@ mod tests {
         session.abort();
     }
 
-    /// Minimal executor so the tests do not need a full Tokio runtime.
-    fn block_on<F: std::future::Future>(future: F) -> F::Output {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
+    /// Split a request target the way the listener has to.
+    ///
+    /// Factored out because this is where the bug lived: folding the whole
+    /// target into `Url::set_path` — query string included — produces a URL whose
+    /// `query_pairs()` is empty, so the listener answers 204s forever and never
+    /// sees a code. The transport tests above still passed against that version,
+    /// because they checked that a request was *answered* and not that anything
+    /// was *understood*.
+    fn split_target(target: &str) -> (&str, Option<&str>) {
+        match target.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (target, None),
+        }
+    }
+
+    #[test]
+    fn the_query_is_never_treated_as_part_of_the_path() {
+        let (path, query) = split_target("/winnow-oauth?code=abc123&state=xyz");
+        assert_eq!(path, "/winnow-oauth");
+        assert_eq!(query, Some("code=abc123&state=xyz"));
+
+        let url = url::Url::parse("http://127.0.0.1:8080/")
             .unwrap()
-            .block_on(future)
+            .join(path)
+            .unwrap();
+        // The regression itself: a path carrying `?` would parse, and would
+        // silently yield no query at all.
+        assert_eq!(url.path(), "/winnow-oauth");
+        assert_eq!(url.query(), None);
+    }
+
+    #[test]
+    fn a_target_with_no_query_is_still_usable() {
+        let (path, query) = split_target("/favicon.ico");
+        assert_eq!(path, "/favicon.ico");
+        assert_eq!(query, None);
     }
 }

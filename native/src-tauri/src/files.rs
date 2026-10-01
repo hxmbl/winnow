@@ -73,10 +73,14 @@ mod tests {
 
     #[test]
     fn traversal_segments_lose_their_separators() {
+        // Five dots, not four: `../` and `../` leave two each, and the segment
+        // `.ssh` starts with a fifth. The point being asserted is that no
+        // separator survives, not the dot count.
         assert_eq!(
             sanitise_name("../../.ssh/authorized_keys"),
-            "....sshauthorized_keys"
+            ".....sshauthorized_keys"
         );
+        assert!(!sanitise_name("../../.ssh/authorized_keys").contains('/'));
     }
 
     #[test]

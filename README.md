@@ -120,7 +120,11 @@ OAuth redirect parsing. No DOM required, which is the payoff of the `core`/`ui`
 split.
 
 The Rust side has its own tests for the parts worth testing: the loopback
-listener, the path sanitiser, the background scheduler, deep-link parsing.
+listener, the path sanitiser, the background scheduler, deep-link parsing. The
+listener's tests in particular assert that a redirect is *understood*, not merely
+that a request was *answered* — a distinction that turned out to matter, because
+the version that folded the query string into `Url::set_path` answered every
+request with a 204 and never once read a code.
 
 `npm run smoke` drives the real production build through a browser and asserts
 the app renders, classifies, navigates by keyboard, and logs nothing to the

@@ -62,6 +62,20 @@ back the finished URL. A URL without the placeholder is refused rather than
 silently accepted — see the comment on `PORT_PLACEHOLDER` for why that failure
 would be so expensive.
 
+## Parsing the request target
+
+`serve` splits the request target on `?` and hands the path to `Url::set_path`
+and the query to `set_query`, separately.
+
+This is not a detail. The version that folded the whole target into `set_path`
+produced a URL whose `query_pairs()` was always empty, so the listener answered
+every request with a 204 and never once read a `code` or an `error`. It did not
+crash or report anything wrong: it waited, and the sign-in timed out five
+minutes later with a message blaming the user's network.
+
+The tests around it had passed the whole time, because they checked that the
+listener *answered* a request and not that it *understood* one.
+
 ## Closing the window hides the app
 
 The inbox client is meant to keep syncing, so `CloseRequested` hides rather than
