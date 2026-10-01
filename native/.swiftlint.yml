@@ -1,0 +1,47 @@
+# SwiftLint configuration — recommended defaults for this project
+excluded:
+  - Carthage
+  - Pods
+  - .git
+  - .build
+
+# Allow slightly longer lines for readability
+line_length: 120
+
+# Opt-in rules that are useful but off by default
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - sorted_imports
+
+# Project-specific disabled rules (avoid noisy or harmful ones)
+disabled_rules:
+  - legacy_hashing
+  - force_unwrapping
+  - trailing_whitespace
+  # Every regex in `Heuristics.swift` is a compile-time string literal wrapped in
+  # `regex(_:)` / `PhraseMatcher.init(_:)`. A malformed pattern is a build-time
+  # bug that cannot reach a release binary, so `try` would only add a code path
+  # that can never be taken.
+  - force_try
+
+# Structural rules. These fire on flat dispatch tables — one `switch` per filter
+# bucket, one `if` per keybind chord — where every branch is a single expression
+# and splitting them up would scatter one lookup across four functions. The
+# thresholds below are set above the current worst case so the rule still catches
+# genuine growth.
+cyclomatic_complexity:
+  warning: 45
+  error: 60
+type_body_length:
+  warning: 1300
+  error: 1600
+file_length:
+  warning: 1800
+  error: 2400
+# `upsertAll` takes one 4-member labelled tuple per incoming row: it is the
+# batch unit, and a struct would only add a name for a value used in one place.
+large_tuple: 4
+
+# Use Xcode-friendly reporting when running locally in Xcode
+reporter: "xcode"

@@ -18,6 +18,11 @@ Package.resolved
 # CocoaPods (defensive)
 Pods/
 
+# Node
+node_modules/
+web/dist/
+*.tsbuildinfo
+
 # Misc
 *.ipa
 *.dSYM.zip
