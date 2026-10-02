@@ -65,6 +65,22 @@ pub fn run() {
             commands::set_background_sync,
             commands::request_notification_permission,
         ])
+        .on_page_load(|window, payload| {
+            // The window is configured `visible: false` so the user never sees a
+            // blank white rectangle while the webview boots, but nothing else
+            // showed it — so a normal launch produced no window at all, only a
+            // tray icon. Revealing it here, once the page has actually finished
+            // loading, is the only point at which there is something to look at.
+            //
+            // Skipped when launched with `--minimized`, which is how the autostart
+            // entry point starts it: a login item that opens a window over
+            // whatever the user is doing is exactly the behaviour people disable.
+            if payload.event() == tauri::webview::PageLoadEvent::Finished
+                && !std::env::args().any(|arg| arg == "--minimized")
+            {
+                tray::reveal(window.app_handle());
+            }
+        })
         .setup(|app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(

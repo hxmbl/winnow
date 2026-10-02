@@ -23,6 +23,9 @@ node_modules/
 web/dist/
 *.tsbuildinfo
 
+# The smoke test's screenshot — an artifact of running the app, not source.
+web/smoke.png
+
 # Rust / Tauri
 # The crate lives in `native/src-tauri`, so its target directory does too.
 # `native/target` is from before the move and is ignored so a stale one cannot be

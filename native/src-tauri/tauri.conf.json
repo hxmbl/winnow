@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm --prefix ../../web install && npm --prefix ../../web run dev",
-    "beforeBuildCommand": "npm --prefix ../../web install && npm --prefix ../../web run build"
+    "beforeDevCommand": "npm --prefix ../web install && npm --prefix ../web run dev",
+    "beforeBuildCommand": "npm --prefix ../web install && npm --prefix ../web run build"
   },
   "app": {
     "withGlobalTauri": false,
@@ -56,7 +56,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "targets": ["app", "dmg", "deb", "appimage", "msi", "nsis"],
     "macOS": {
       "minimumSystemVersion": "10.15"
     }

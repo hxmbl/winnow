@@ -24,15 +24,56 @@ From `web/`:
 
 ```sh
 npm run tauri:dev
-npm run tauri:build
+npm run tauri:build                 # .app + .dmg on macOS
+npm run tauri:build -- app          # just the .app, no create-dmg needed
 ```
 
-Both run `cargo tauri` from this directory, which is where `src-tauri/` lives.
 Tauri 2 requires the `tauri-cli` v2 binary:
 
 ```sh
 cargo install tauri-cli --version "^2"
 ```
+
+### Why the build is a script and not `cargo tauri build`
+
+`cargo tauri build` produces **no bundle at all** with tauri-cli 2.11: it
+compiles the binary, prints `Built application at …`, exits 0, and writes
+nothing under `target/release/bundle/`.
+
+Naming targets in `tauri.conf.json` does not change this. Verified against a
+full cross-platform list, a macOS-only list, `"all"`, and omitting the key
+entirely — all four produce no bundle. Only `--bundles` on the command line does.
+
+So `web/scripts/bundle.mjs` names the targets per host and passes them
+explicitly, and then **checks the output directory exists**, because the whole
+failure mode is an exit code of 0 next to a plausible-looking log. A release
+script that reports success without shipping anything is worse than one that
+fails.
+
+### macOS packaging prerequisites
+
+Bundling a `.dmg` needs Homebrew's `create-dmg` — Tauri's `bundle_dmg.sh` is a
+thin wrapper around it:
+
+```sh
+brew install create-dmg
+```
+
+The `.app` needs nothing beyond a Rust toolchain. The script checks for
+`create-dmg` up front and says so, because without it the `.app` builds fine and
+the `.dmg` then dies inside a vendored bash script with no mention of what to
+install.
+
+### Apple Silicon
+
+The bundle built here is x86_64 only. For a universal binary:
+
+```sh
+npm run tauri:build -- --target universal-apple-darwin
+```
+
+which needs both targets installed: `rustup target add aarch64-apple-darwin
+x86_64-apple-darwin`.
 
 ## The command surface
 
@@ -81,3 +122,13 @@ listener *answered* a request and not that it *understood* one.
 The inbox client is meant to keep syncing, so `CloseRequested` hides rather than
 quits. That makes the tray load-bearing rather than decorative: it is the only
 way back in, and the only way to quit. If you remove the tray, remove the hide.
+
+The corollary is that showing the window has to be deliberate. It is configured
+`visible: false` so nobody sees a white rectangle while the webview boots, and
+`on_page_load` reveals it once the page has actually finished — the only moment
+there is something to look at. Before that hook existed, a normal launch produced
+a tray icon and no window at all.
+
+`--minimized` skips the reveal: that is how the autostart entry point launches,
+and a login item that opens a window over whatever the user is doing is exactly
+the behaviour people switch off.

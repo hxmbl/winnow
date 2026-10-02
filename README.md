@@ -63,11 +63,15 @@ Desktop:
 
 ```sh
 npm run tauri:dev      # runs `cargo tauri dev` in native/
-npm run tauri:build    # a signed bundle in native/src-tauri/target/release/bundle
+npm run tauri:build    # a bundle in native/src-tauri/target/release/bundle
+npm run tauri:build -- app   # just the .app — no create-dmg needed
 ```
 
-The desktop build needs a Rust toolchain and, per platform, the usual Tauri
-system dependencies (WebKitGTK on Linux).
+The desktop build needs a Rust toolchain, `cargo install tauri-cli --version "^2"`,
+and per platform the usual Tauri system dependencies (WebKitGTK on Linux). On
+macOS a `.dmg` additionally needs `brew install create-dmg`; the `.app` does not.
+See `native/README.md` for why the build is a script rather than a bare
+`cargo tauri build`.
 
 ## Gmail setup
 

@@ -14,7 +14,7 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "smoke": "node scripts/smoke.mjs",
     "tauri:dev": "cd ../native && cargo tauri dev",
-    "tauri:build": "cd ../native && cargo tauri build"
+    "tauri:build": "node scripts/bundle.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
