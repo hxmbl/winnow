@@ -61,6 +61,20 @@ export const LOOPBACK_PORT_PLACEHOLDER = "__WINNOW_LOOPBACK_PORT__";
 export const LOOPBACK_REDIRECT_URI =
   `http://127.0.0.1:${LOOPBACK_PORT_PLACEHOLDER}/winnow-oauth`;
 
+/**
+ * How long to wait for the user to finish at Google.
+ *
+ * Long, because the flow is: click, switch to a browser, possibly create an
+ * account, read a consent screen, pick four scopes, come back. Five minutes is
+ * about the floor for someone doing that for the first time, and a timeout that
+ * fires while they are still choosing produces a sign-in screen that looks broken
+ * at the exact moment they were about to succeed.
+ *
+ * Bounded anyway, because "unbounded" is not a timeout — a listener waiting
+ * forever is a listener that outlives the app's willingness to explain itself.
+ */
+export const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
+
 /** A cache backed by `localStorage` (web) or `storage` (desktop). */
 export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorStore {
   const readAll = (): Email[] => {
@@ -217,12 +231,30 @@ export class GmailSession {
 
     const outcome = await this.platform.beginSignIn({
       authorizeUrl,
-      timeoutMs: 300_000,
+      timeoutMs: SIGN_IN_TIMEOUT_MS,
     });
 
     if (outcome.kind === "cancelled") {
       forgetPendingAuth(pkce.state);
       throw new GmailError("Sign-in was cancelled.", 0, "declined");
+    }
+
+    if (outcome.kind === "timeout") {
+      forgetPendingAuth(pkce.state);
+      throw new GmailError(
+        "Sign-in timed out. If you finished at Google, try again — the code is single-use.",
+        0,
+        "declined",
+      );
+    }
+
+    if (outcome.kind === "unavailable") {
+      // Not the user's doing, and not a decline: the listener never started, so
+      // saying "cancelled" would tell them their click was ignored when in fact
+      // nothing was listening. The half-finished verifier is dropped either way,
+      // because it cannot be completed without a code that will never arrive.
+      forgetPendingAuth(pkce.state);
+      throw new GmailError(`Could not listen for the sign-in redirect: ${outcome.detail}`, 0, "network");
     }
 
     if (outcome.kind === "error") {
@@ -382,9 +414,17 @@ export class GmailSession {
     };
 
     return {
-      async sync() {
-        const result = await engine.sync();
-        return { emails: result.emails, failed: result.failed };
+      async sync(options) {
+        // Progress is threaded from the store rather than invented here, so the
+        // number on the status line is the engine's own count of messages it has
+        // actually downloaded — not an estimate, and not a guess at what a
+        // percentage would have been.
+        const result = await engine.sync({ onProgress: options?.onProgress });
+        return {
+          emails: result.emails,
+          failed: result.failed,
+          truncated: result.truncated,
+        };
       },
       async toggleStar(id, starred) {
         await client.setStarred(await gmailIdFor(id), starred);

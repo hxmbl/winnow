@@ -27,6 +27,7 @@ import {
   Archive,
   Ban,
   CornerUpLeft,
+  Forward,
   Mail,
   MailOpen,
   Paperclip,
@@ -34,6 +35,7 @@ import {
   Star,
   Trash2,
   TriangleAlert,
+  Undo2,
   X,
 } from "lucide-react";
 import { formatFullTime, formatRelative } from "../../core/mail/datetime";
@@ -41,19 +43,25 @@ import { countRemoteReferences } from "../../core/mail/html";
 import { displayAddress, displayName, monogram, type Email } from "../../core/model/email";
 import { badgeFilters, filterLabel, type EmailSignals } from "../../core/model/signals";
 import { avatarColor, avatarTextColor } from "../avatarColor";
-import { hexA } from "../filterColors";
 import { formatBytes } from "../../core/gmail/mime";
 import type { Mailbox } from "../../core/model/email";
 
 /** A bucket chip in the reader header. */
 function Badge({ id }: { id: string }) {
-  // The accent is read from a CSS custom property rather than imported, so the
-  // dark palette's lifted hues apply without a second code path here.
-  const accent = `var(--wn-badge-${id})`;
+  // Three custom properties, all written by `applyTheme` from the live palette:
+  // the accent, a wash of it at 14%, and an edge at 34%. Reading the accent's
+  // *name* and feeding it to a hex parser cannot work — JavaScript has no way to
+  // ask the CSS engine what a custom property currently resolves to, and
+  // `parseInt("ar(--wn-badge-urgent)", 16)` quietly answers `0x0A`. That is how
+  // every chip in the reader ended up wearing the same near-black fill.
   return (
     <span
       className="inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-      style={{ background: hexA(accent, 0.12), color: accent }}
+      style={{
+        background: `var(--wn-badge-${id}-wash)`,
+        border: `1px solid var(--wn-badge-${id}-edge)`,
+        color: `var(--wn-badge-${id})`,
+      }}
     >
       {filterLabel({ kind: "builtin", id: id as never })}
     </span>
@@ -67,8 +75,15 @@ type Actions = {
   onArchive: () => void;
   onTrash: () => void;
   onReply: () => void;
+  onForward: () => void;
+  /** Mark the current message not-spam. Only offered in the spam folder. */
+  onNotSpam: () => void;
   onShowOriginal: () => void;
   onBlockSender: () => void;
+  /** Turn image loading on for the whole mailbox, from the blocked-content note. */
+  onLoadRemoteContent: () => void;
+  /** Open another message in the conversation. */
+  onOpenMessage: (id: number) => void;
   onSaveAttachment: (attachment: { filename: string; mimeType: string; size: number; index: number }) => void;
 };
 
@@ -86,6 +101,16 @@ function Toolbar({ starred, unread, mailbox, actions }: {
   const archiveLabel =
     mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : "Restore";
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
+
+  /*
+    No "not spam" outside the spam folder.
+
+    It is here, and only here, because the spam folder had no way out: `GmailClient`
+    implemented `markNotSpam` and nothing in the app called it, so a message Gmail
+    misfiled was recoverable only by going to Gmail on the web. One button, in the one
+    folder where the question arises.
+  */
+  const inSpam = mailbox === "spam";
 
   return (
     <div className="flex items-center gap-0.5">
@@ -112,11 +137,20 @@ function Toolbar({ starred, unread, mailbox, actions }: {
       <button
         type="button"
         onClick={actions.onReply}
-        aria-label="Reply"
-        title="Reply (r)"
+        aria-label="Reply to all"
+        title="Reply to all (r)"
         className={ICON_BUTTON}
       >
         <CornerUpLeft size={15} strokeWidth={1.9} />
+      </button>
+      <button
+        type="button"
+        onClick={actions.onForward}
+        aria-label="Forward"
+        title="Forward (f)"
+        className={ICON_BUTTON}
+      >
+        <Forward size={15} strokeWidth={1.9} />
       </button>
       <button
         type="button"
@@ -140,6 +174,20 @@ function Toolbar({ starred, unread, mailbox, actions }: {
       >
         <Trash2 size={15} strokeWidth={1.9} />
       </button>
+      {inSpam && (
+        <>
+          <span className="mx-1 h-4 w-px bg-divider" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={actions.onNotSpam}
+            aria-label="Not spam — move to inbox"
+            title="Not spam — move to inbox"
+            className={ICON_BUTTON}
+          >
+            <Undo2 size={15} strokeWidth={1.9} />
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -151,6 +199,14 @@ type Props = {
   mailbox: Mailbox;
   loadRemoteContent: boolean;
   accountAddress: string | null;
+  /**
+   * The reference instant for relative timestamps in this pane.
+   *
+   * Passed in rather than read from the clock so the demo's fixed instant governs the
+   * demo's timestamps, and so the reader cannot disagree with the list beside it —
+   * two "2h ago"s a minute apart is the kind of detail that makes an app feel broken.
+   */
+  now: number;
   onClose: () => void;
   actions: Actions;
   /** Scroll the reader by whole steps, for the arrow keys. */
@@ -164,6 +220,7 @@ export function Reader({
   mailbox,
   loadRemoteContent,
   accountAddress,
+  now,
   onClose,
   actions,
   scrollStep,
@@ -283,6 +340,65 @@ export function Reader({
             {email.body}
           </div>
 
+          {/*
+            Rich rendering, behind the setting.
+
+            This is the *only* place in the app where a sender's markup is rendered,
+            and it is behind both an explicit opt-in and a sandbox that grants nothing:
+            no scripts, no forms, no popups, no same-origin. So a message can show its
+            own images and layout, and cannot execute anything, read anything, or
+            navigate the window.
+
+            The cost is real and is stated on screen — the sender learns the message was
+            opened and roughly where — which is why it is off by default and why the
+            text rendering above is what most messages get. A toggle that only removed
+            this panel, as it used to, was a control that changed nothing and took away
+            the app's own explanation of itself.
+
+            `key` on the iframe: the document changes when the message does, and a reused
+            frame would keep the previous message's scroll position and its already-loaded
+            images. The reader is already remounted per selection by its parent, so this
+            is belt to that braces.
+          */}
+          {email.bodyHtml && loadRemoteContent && (
+            <div className="mt-5 max-w-[68ch]">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="flex items-center gap-2 text-[12px] font-semibold text-ink-muted">
+                  <TriangleAlert size={13} strokeWidth={1.9} aria-hidden="true" />
+                  {blocked} remote {blocked === 1 ? "reference is" : "references are"} loading
+                </p>
+                <button
+                  type="button"
+                  onClick={actions.onShowOriginal}
+                  className="text-[12px] font-semibold text-ink-muted underline decoration-dotted underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  Open the original
+                </button>
+              </div>
+              <iframe
+                key={email.id}
+                title={`Message from ${displayName(email)}`}
+                srcDoc={email.bodyHtml}
+                // An empty `sandbox`, deliberately. Empty is the *most* restrictive
+                // value there is: every capability is off. Naming `allow-same-origin`
+                // here would give the frame access to this app's own origin, which is
+                // the one thing that would make rendering a sender's markup dangerous.
+                sandbox=""
+                referrerPolicy="no-referrer"
+                className="h-[32rem] w-full rounded-pane border border-hairline bg-surface"
+              />
+            </div>
+          )}
+
+          {/*
+            The blocked-content note.
+
+            Only when there is remote content and it is *not* being loaded, which is the
+            default and the only state in which the note is about blocking. It carries
+            the escape hatch — the original, in the user's own browser — plus the one
+            click that turns images on, so neither route out of the text-only reader is
+            hidden behind a settings panel.
+          */}
           {email.bodyHtml && blocked > 0 && !loadRemoteContent && (
             <div className="mt-5 max-w-[68ch] rounded-pane border border-hairline bg-surface-sunken px-4 py-3">
               <p className="flex items-center gap-2 text-[13px] font-semibold text-ink-body">
@@ -290,16 +406,24 @@ export function Reader({
                 {blocked} remote {blocked === 1 ? "reference was" : "references were"} blocked
               </p>
               <p className="mt-1 text-preview text-ink-muted">
-                Images and stylesheets in this message are not loaded. They can confirm you
-                opened it and where you are.
+                Winnow shows the plain text of every message, so images and stylesheets
+                from the sender are not loaded — they can confirm you opened a message and
+                roughly where you are.
               </p>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={actions.onShowOriginal}
                   className="rounded-full border border-control-border px-3 py-1 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   Open the original in your browser
+                </button>
+                <button
+                  type="button"
+                  onClick={actions.onLoadRemoteContent}
+                  className="rounded-full border border-control-border px-3 py-1 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  Load images
                 </button>
               </div>
             </div>
@@ -333,22 +457,52 @@ export function Reader({
             </div>
           )}
 
+          {/*
+            The rest of the conversation.
+
+            Clickable, because a thread you cannot read past the newest message is half
+            a thread. The list was previously a set of `<span>`s with no handler, so the
+            only way to see an earlier message was to find it in the inbox list and open
+            it there — and a message that has been archived is not in the inbox list at
+            all, so for those it was not reachable at all.
+
+            `focusMessage` is the right entry point rather than a local selection swap:
+            it handles the case where the message is not in the current view at all,
+            clearing the search and filters that were hiding it.
+          */}
           {others.length > 0 && (
             <div className="mt-8 max-w-[68ch] border-t border-hairline pt-4">
               <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
                 {others.length} earlier {others.length === 1 ? "message" : "messages"} in this
                 conversation
               </h3>
-              <ul className="mt-2 flex flex-col gap-1">
+              <ul className="mt-2 flex flex-col gap-0.5">
                 {others.map((message) => (
-                  <li key={message.gmailId} className="flex items-baseline gap-2 text-[12.5px]">
-                    <span className="shrink-0 font-semibold text-ink-muted">
-                      {displayName(message)}
-                    </span>
-                    <span className="truncate text-ink-body">{message.subject}</span>
-                    <span className="ml-auto shrink-0 tabular-nums text-ink-subtle">
-                      {formatRelative(message.receivedAt, email.receivedAt)}
-                    </span>
+                  <li key={message.gmailId}>
+                    <button
+                      type="button"
+                      onClick={() => actions.onOpenMessage(message.id)}
+                      className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    >
+                      <span className="shrink-0 font-semibold text-ink-muted">
+                        {displayName(message)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-ink-body">
+                        {message.subject || "(no subject)"}
+                      </span>
+                      {/*
+                        Against the *store's* reference instant, not the open message's.
+
+                        Formatted relative to another message's timestamp it reads "in 3
+                        days" for something that arrived three days ago — which is how
+                        the conversation list said the opposite of what it meant. And
+                        `now` rather than `Date.now()`, so the demo's fixed instant still
+                        governs the demo's timestamps.
+                      */}
+                      <span className="shrink-0 tabular-nums text-ink-subtle">
+                        {formatRelative(message.receivedAt, now)}
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ul>

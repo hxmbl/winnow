@@ -1,9 +1,9 @@
 /**
  * The platform boundary.
  *
- * This is the only place Winnow asks "am I in a browser or on the desktop?",
- * and it is deliberately a small interface with a boring implementation for
- * each side. The rule for what belongs here:
+ * This is the only place Winnow asks "am I in a browser or on the desktop?", and
+ * it is deliberately a small interface with a boring implementation for each side.
+ * The rule for what belongs here:
  *
  * > If a browser can do it, it does not belong in this interface.
  *
@@ -14,7 +14,7 @@
  * | --- | --- | --- |
  * | Secrets at rest | `localStorage` | OS keychain (Rust command) |
  * | OAuth redirect | a page load back to the site | loopback listener (Rust) |
- * | Background sync while hidden | a timer, throttled hard | a Rust thread |
+ * | Sync while hidden | a throttled timer, or nothing | a Rust thread |
  * | Notification | `Notification` | native, with message ids |
  * | Unread badge | `document.title` | dock badge / tray tooltip |
  * | Save an attachment | a download | a real save dialog, returns a path |
@@ -22,7 +22,8 @@
  *
  * `PLATFORM_KEYS` is the test that keeps this honest: every feature flag in
  * `core/` is checked against it, so a capability cannot be claimed in the app
- * that the desktop shell does not actually provide.
+ * that the desktop shell does not actually provide. `platform.test.ts` is what
+ * gives that sentence teeth — it was previously an exported array with no reader.
  */
 
 import type { TokenSet } from "../core/gmail/dto";
@@ -65,6 +66,28 @@ export type SignInRequest = {
   timeoutMs: number;
 };
 
+/**
+ * Why a sign-in attempt ended without a token.
+ *
+ * A union rather than a string, because the three cases need different words and
+ * the caller cannot tell them apart from a message: "Sign-in was cancelled" is
+ * true for someone who clicked Cancel, someone who closed the browser tab, and
+ * someone whose network died five minutes in. The first is a choice, the second
+ * is a change of mind, and the third is a fault — and only the third should ever
+ * be reported as a fault.
+ *
+ * The desktop build reported all three as `cancelled`, so a port that never
+ * bound and a five-minute timeout both arrived at the sign-in screen as
+ * "Sign-in was cancelled", which is the one thing it could not have been.
+ */
+export type SignInFailure =
+  | { kind: "cancelled" }
+  | { kind: "timeout" }
+  | { kind: "unavailable"; detail: string };
+
+/** What `beginSignIn` can hand back when there is no authorization code. */
+export type SignInResult = OAuthRedirect | SignInFailure;
+
 export interface Platform {
   info(): Promise<PlatformInfo>;
 
@@ -104,7 +127,7 @@ export interface Platform {
    * the web build navigates and reads the result from the URL. Both return the
    * same shape, so the store's sign-in path has no branch.
    */
-  beginSignIn(request: SignInRequest): Promise<OAuthRedirect>;
+  beginSignIn(request: SignInRequest): Promise<SignInResult>;
 
   /** Abandon an in-flight sign-in. */
   cancelSignIn(): Promise<void>;
@@ -125,6 +148,11 @@ export interface Platform {
    * `null` parks it. The browser implementation resolves immediately and does
    * nothing: a hidden tab is throttled to the point where polling it is worse
    * than not polling, and a page that is not open cannot run at all.
+   *
+   * What the browser *can* do — poll while the page is visible — is done by
+   * `web.ts`'s own timer rather than by asking the store to schedule one, because
+   * a store that owned a timer would need to be told when the tab was hidden, and
+   * that is a platform question.
    */
   setBackgroundSync(intervalSeconds: number | null): Promise<void>;
 
@@ -150,9 +178,9 @@ export interface Platform {
 /**
  * The capabilities a build is expected to have.
  *
- * Used by the app's own tests: if a feature needs a capability, it declares it
- * here, and a build that cannot provide it has to fail a test rather than
- * silently degrade at runtime.
+ * Used by `platform.test.ts`: if a feature needs a capability, it declares it
+ * here, and a build that cannot provide it fails a test rather than silently
+ * degrading at runtime.
  */
 export const PLATFORM_KEYS = [
   "nativeOAuth",

@@ -36,19 +36,30 @@ cargo install tauri-cli --version "^2"
 
 ### Why the build is a script and not `cargo tauri build`
 
-`cargo tauri build` produces **no bundle at all** with tauri-cli 2.11: it
-compiles the binary, prints `Built application at …`, exits 0, and writes
-nothing under `target/release/bundle/`.
+> The previous version of this section claimed that `cargo tauri build` produces
+> **no bundle at all** with tauri-cli 2.11 — exits 0, prints `Built application
+> at …`, writes nothing under `target/release/bundle/` — and cited a matrix of
+> experiments across `tauri.conf.json` bundle settings. **That was wrong.**
+> `bundle.active` defaults to `true`, so a bare `cargo tauri build` does bundle;
+> verified against tauri-cli 2.11 after the fact. The experiments were almost
+> certainly reading a stale `target/release/bundle/` from an earlier run.
 
-Naming targets in `tauri.conf.json` does not change this. Verified against a
-full cross-platform list, a macOS-only list, `"all"`, and omitting the key
-entirely — all four produce no bundle. Only `--bundles` on the command line does.
+The script survives the correction, for the two reasons that were always true:
 
-So `web/scripts/bundle.mjs` names the targets per host and passes them
-explicitly, and then **checks the output directory exists**, because the whole
-failure mode is an exit code of 0 next to a plausible-looking log. A release
-script that reports success without shipping anything is worse than one that
-fails.
+1. **Bundle kinds are named per host.** Asking macOS for `deb` is not an error
+   Tauri reports — it declines to bundle, quietly. So the targets are decided
+   here, where a missing one is a sentence.
+2. **Success is asserted by looking for the output,** and per kind rather than per
+   directory. "The tool said it succeeded" and "a bundle exists where a release
+   should be" are different facts, and a bundle directory containing only empty
+   subdirectories passes the weaker check while shipping nothing. A release script
+   that reports success without shipping anything is worse than one that fails.
+
+It is also where the argument parsing lives, and that was broken: the original
+sliced `passthrough.slice(bundles.length)`, which is always an empty slice because
+`bundles.length` *is* `passthrough.length` on that branch. Every flag except a
+bundle name was silently swallowed, and `npm run tauri:build -- --bundles app`
+produced the literal string `--bundles,app` as a bundle name.
 
 ### macOS packaging prerequisites
 
@@ -66,7 +77,8 @@ install.
 
 ### Apple Silicon
 
-The bundle built here is x86_64 only. For a universal binary:
+The bundle built here is whatever the host toolchain targets — x86_64 on an Intel
+Mac, `aarch64` on Apple Silicon. For a universal binary:
 
 ```sh
 npm run tauri:build -- --target universal-apple-darwin
@@ -115,7 +127,49 @@ crash or report anything wrong: it waited, and the sign-in timed out five
 minutes later with a message blaming the user's network.
 
 The tests around it had passed the whole time, because they checked that the
-listener *answered* a request and not that it *understood* one.
+listener *answered* a request and not that it *understood* one. A malformed target
+is now answered with an error page rather than dropped, for the same reason: a
+connection that hangs open is indistinguishable from a listener that is not there.
+
+## Field names across the IPC boundary
+
+Tauri rewrites **argument** keys from camelCase to snake_case, and never rewrites
+**return values** — those go through plain serde using the struct's own field
+names. So a struct declared `authorize_url` in Rust and read as `authorizeUrl` in
+TypeScript yields `undefined`, and nothing anywhere reports an error.
+
+Three bugs shipped that way before the tests that now catch them existed:
+
+- `AppInfo`'s capability flags all arrived `undefined`, so `backgroundSync` read
+  as absent and the settings panel's entire Background section was gated on it. A
+  feature that was implemented, permissioned and unreachable.
+- `oauth_begin`'s reply was read as `authorizeUrl`, so `open_external` was called
+  with `url: undefined`, IPC rejected it with "missing required key url", and
+  desktop sign-in was impossible.
+- `notify_new_mail`'s `message_ids` was sent as `messageIds`, which *deserialised
+  successfully* into a struct with `#[serde(default)]` — as an empty vec. No error
+  at all, and a notification click could never know which conversation to open.
+
+`serde(rename_all = "camelCase")` is not the fix for the first of these: it
+produces `nativeOauth`, not `nativeOAuth`. Every field carries an explicit
+`#[serde(rename = …)]`, and `web/src/platform/platform.test.ts` asserts the
+wire shapes the UI actually reads.
+
+## Three fixes worth knowing about
+
+Each of these was a hang, a deadlock, or a silent no-op, and none of them
+produced an error at the call site.
+
+- **`oauth_await` no longer unregisters its port on entry.** It did, so `oauth_cancel`
+  had nothing to cancel and Cancel did nothing — the sign-in could not be stopped.
+- **`save_attachment` is `async`.** The save dialog blocks; called synchronously from
+  the command thread it deadlocked the main thread, so the dialog could not be
+  dismissed.
+- **`Reopen` reveals the window,** and `focusWindow` calls `unminimize` before
+  `show` and `setFocus`. `setFocus` on a minimised window focuses nothing visible,
+  and `unminimize` needed a capability that had not been granted — so it was
+  rejected, and being first in the sequence, it stopped the other two running.
+  Every deep link and every tray click on a running app therefore did nothing.
 
 ## Closing the window hides the app
 

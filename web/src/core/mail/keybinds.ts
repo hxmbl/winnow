@@ -4,36 +4,48 @@
  * A mail client is a keyboard application. Everything you do while triaging —
  * next message, star, archive, filter, search — has a key, and the point of
  * this module is that the mapping is *data*, not a `switch` buried in a
- * component. Three things follow from that:
+ * component.
  *
- *   - The `?` cheat sheet renders the same array the router uses, so the
- *     documentation cannot drift from the behaviour. This was the actual bug
- *     it fixed: the sheet had been maintained by hand and had already fallen
- *     behind.
- *   - The routing rules are testable without a DOM, a synthetic event, or a
- *     window.
- *   - The browser and the desktop share it exactly. The Tauri build does not
- *     need its own accelerator handling.
+ * That claim used to be half true, which is worse than not making it. `BINDINGS`
+ * existed, the cheat sheet rendered it, and a test asserted every advertised key
+ * resolved — but the router was an `if`-chain that never read the table. The
+ * sheet was documentation with a test attached, and the two drifted at once: `,`
+ * opened Settings and appeared nowhere in the sheet, and the toolbar advertised
+ * a `⇧U` that was not a binding at all.
+ *
+ * So the router is built from the table now. `BINDINGS` is walked in order and
+ * the first row whose `matches` and `when` both hold wins. What is left
+ * imperative is only what genuinely is not a flat lookup:
+ *
+ *   1. **Not ready** — nothing is routed before sign-in.
+ *   2. **System modifiers** — ⌘/⌃/⌥ belong to the system and the browser.
+ *   3. **Text editing** — a hard stop, except Escape, which either leaves the
+ *      field or closes the composer.
+ *   4. **Modal grammars** — the shortcut sheet and the mailbox palette each get
+ *      their own small table, because both must swallow the canvas.
+ *
+ * `TopBar` prints its toolbar hints from this same table, so a button's `title`
+ * cannot advertise a shortcut the router will not take.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Support/KeybindEngine.swift`.
  */
 
-import type { NavigationItem } from "../model/signals";
-
-/** Every action the keyboard can trigger. */
+/** Everything the keyboard can trigger. */
 export type Command =
   | { type: "moveSelection"; delta: number }
   | { type: "scrollReader"; delta: number }
   | { type: "openSelected" }
   | { type: "closeViewer" }
+  | { type: "closeComposer" }
   | { type: "dismissOverlay" }
   | { type: "dismissNavigation" }
   | { type: "toggleStar" }
   | { type: "archive" }
   | { type: "trash" }
-  | { type: "restore" }
   | { type: "toggleRead" }
+  | { type: "markAllRead" }
   | { type: "focusReply" }
+  | { type: "forward" }
   | { type: "focusSearch" }
   | { type: "toggleFilter"; railIndex: number }
   | { type: "clearFilters" }
@@ -44,30 +56,29 @@ export type Command =
   | { type: "toggleShortcutsOverlay" }
   | { type: "openSettings" };
 
-/** One row of the cheat sheet. Also the binding it installs. */
-export type Binding = {
-  /** How the key is written on the key cap: `j`, `↑ / ↓`, `1–9`. */
-  keys: string;
-  help: string;
-  matches: KeySpec;
-  command: Command;
+/** The modifiers as the router sees them. */
+export type KeyModifiers = {
+  shiftKey?: boolean;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
 };
 
 /**
  * A key as the router sees it.
  *
- * `key` is `KeyboardEvent.key`, which is layout-dependent — `event.key` for
- * the `?` on a US layout is `?`, but on a French layout it is the character
- * produced *before* `Shift` is applied. Both forms are accepted for the three
- * shift-produced characters, because the alternative is a cheat sheet that
- * works on the developer's machine only.
+ * `keys` holds the values `KeyboardEvent.key` is expected to take on a US layout.
+ * `chars` holds the alternates that produce the same binding on layouts where
+ * the character is not the US one — `?` is `,` on a French keyboard and `Shift+/`
+ * on a German one, and a cheat sheet that works on the author's machine only is
+ * not a cheat sheet.
  */
 export type KeySpec = {
   /** Any of these matches. */
   keys: readonly string[];
-  /** `KeyboardEvent.key` values, checked for shift-produced punctuation. */
+  /** Additional `key` values for the same binding on other layouts. */
   chars?: readonly string[];
-  /** Require or ignore a modifier. */
+  /** Require (`true`) or forbid (`false`) a modifier. Unset means "don't care". */
   shift?: boolean;
   alt?: boolean;
   ctrl?: boolean;
@@ -76,12 +87,14 @@ export type KeySpec = {
 
 /** The one context object the router reads. */
 export type KeyContext = {
-  /** No routing at all before sign-in. */
+  /** No routing at all before the app is ready. */
   ready: boolean;
-  /** A text field or the composer has focus: hands off everything but Esc. */
+  /** A text field owns the keyboard: hands off everything but Esc. */
   textEditing: boolean;
+  /** The composer is up. A modal world that happens to contain a text field. */
+  composerOpen: boolean;
   viewerOpen: boolean;
-  /** A modal sheet — the shortcut sheet — is up. */
+  /** A modal sheet — settings, the shortcut list — is up. */
   overlayVisible: boolean;
   navigationVisible: boolean;
   filtersActive: boolean;
@@ -94,6 +107,7 @@ export type KeyContext = {
 export const DEFAULT_CONTEXT: KeyContext = {
   ready: true,
   textEditing: false,
+  composerOpen: false,
   viewerOpen: false,
   overlayVisible: false,
   navigationVisible: false,
@@ -102,104 +116,255 @@ export const DEFAULT_CONTEXT: KeyContext = {
   railCount: 0,
 };
 
-// ── The cheat sheet ─────────────────────────────────────────────────────────
+/** A binding, and the row of the cheat sheet that documents it. */
+export type Binding = {
+  /** How the key is written on the key cap: `j`, `↑ / ↓`, `1–9`. */
+  keys: string;
+  help: string;
+  matches: KeySpec;
+  /**
+   * Anything beyond "the key matches".
+   *
+   * A predicate rather than more boolean fields because the interesting
+   * conditions are relational — "only while the reader is open", "only when
+   * something is selected" — and encoding those as flags means either a
+   * combinatorial explosion of fields or a convention for smuggling a function
+   * through a string.
+   */
+  when?: (pressed: Pressed) => boolean;
+  /**
+   * The command, or one computed from what was pressed.
+   *
+   * The computed form is what lets a single table row cover a key whose meaning
+   * depends on context — the arrows scroll or move, Escape closes four different
+   * things, and a digit addresses whichever pill it names. Returning `null` means
+   * "not applicable after all", which is how the lookup falls through to the next
+   * row rather than committing.
+   */
+  command: Command | ((pressed: Pressed) => Command | null);
+};
+
+/** What the router matched, handed to a computed command. */
+export type Pressed = {
+  key: string;
+  event: KeyModifiers;
+  context: KeyContext;
+};
+
+/** True when `key` (with its modifiers) satisfies `spec`. */
+export function specMatches(
+  key: string,
+  spec: KeySpec,
+  event: KeyModifiers = {},
+): boolean {
+  if (![...spec.keys, ...(spec.chars ?? [])].includes(key)) return false;
+  if (spec.shift !== undefined && (event.shiftKey ?? false) !== spec.shift) return false;
+  if (spec.alt !== undefined && (event.altKey ?? false) !== spec.alt) return false;
+  if (spec.ctrl !== undefined && (event.ctrlKey ?? false) !== spec.ctrl) return false;
+  if (spec.meta !== undefined && (event.metaKey ?? false) !== spec.meta) return false;
+  return true;
+}
+
+/** First match wins, in table order. */
+function lookup(
+  bindings: readonly Binding[],
+  key: string,
+  context: KeyContext,
+  event: KeyModifiers,
+): Command | null {
+  const pressed: Pressed = { key, event, context };
+  for (const binding of bindings) {
+    if (!specMatches(key, binding.matches, event)) continue;
+    if (binding.when && !binding.when(pressed)) continue;
+    const command =
+      typeof binding.command === "function" ? binding.command(pressed) : binding.command;
+    if (command) return command;
+  }
+  return null;
+}
 
 /**
- * The bindings, in the order the sheet shows them.
+ * The zero-based rail position for a digit, or `null`.
  *
- * Navigation first (how do I move), then the actions (what do I do), then the
- * views. That is the order someone triaging an inbox needs them in.
+ * `shift` is rejected rather than merely deprioritised: on a US layout `!`
+ * arrives as `event.key === "1"` with shift held, and treating that as filter `1`
+ * would make the mailbox palette and filter `1` fight over one keypress.
+ */
+function digitIndex(key: string, shift: boolean): number | null {
+  if (shift) return null;
+  if (key.length !== 1 || key < "1" || key > "9") return null;
+  return Number(key) - 1;
+}
+
+// ── The canvas ──────────────────────────────────────────────────────────────
+
+/**
+ * The canvas bindings, in the order the sheet shows them and the order the router
+ * tries them.
+ *
+ * Order is load-bearing and deliberately not alphabetical. It is grouped as "how
+ * do I move", "what do I do", "how do I change what I am looking at", and within
+ * a group the more specific row comes first — which is why Escape's four outcomes
+ * are one row that reads the context rather than four near-identical rows.
  */
 export const BINDINGS: readonly Binding[] = [
   {
-    keys: "j / ↓",
-    help: "Next message, or scroll the open one",
+    keys: "j",
+    help: "Next message",
     matches: { keys: ["j"] },
     command: { type: "moveSelection", delta: 1 },
   },
   {
-    keys: "k / ↑",
-    help: "Previous message, or scroll back",
+    keys: "k",
+    help: "Previous message",
     matches: { keys: ["k"] },
     command: { type: "moveSelection", delta: -1 },
+  },
+  {
+    // The one genuinely dual-purpose key pair. With a message open the reader is
+    // what the user is looking at, so the arrows scroll it; with nothing open
+    // they walk the list. `block: "nearest"` scrolling on the list keeps that
+    // from turning into a jump.
+    keys: "↓ / ↑",
+    help: "Move through the list, or scroll the open message",
+    matches: { keys: ["ArrowDown", "ArrowUp"] },
+    command: ({ key, context }) => {
+      const delta = key === "ArrowUp" ? -1 : 1;
+      return context.viewerOpen
+        ? { type: "scrollReader", delta }
+        : { type: "moveSelection", delta };
+    },
   },
   {
     keys: "o / ⏎",
     help: "Open the highlighted message",
     matches: { keys: ["o", "Enter"] },
+    // With a message open, Enter belongs to the reader, where it would activate
+    // a link. Declining rather than returning something else is what makes the
+    // following row reachable.
+    when: ({ context }) => !context.viewerOpen,
     command: { type: "openSelected" },
   },
   {
-    // ↓ and ↑ are listed here as well as with `j`/`k` because with the reader
-    // open they scroll the message rather than moving the cursor, and the sheet
-    // should say so. See `commandForKey`, which branches on `viewerOpen`.
-    keys: "↓ / ↑",
-    help: "Scroll the open message",
-    matches: { keys: ["ArrowDown"] },
-    command: { type: "scrollReader", delta: 1 },
-  },
-  {
     keys: "Esc",
-    help: "Close the message, clear filters, or leave a field",
+    help: "Close the message, a sheet, or the filters",
     matches: { keys: ["Escape"] },
-    command: { type: "closeViewer" },
+    when: ({ context }) =>
+      context.overlayVisible ||
+      context.navigationVisible ||
+      context.viewerOpen ||
+      context.filtersActive,
+    command: ({ context }) => {
+      if (context.overlayVisible) return { type: "dismissOverlay" };
+      if (context.navigationVisible) return { type: "dismissNavigation" };
+      if (context.viewerOpen) return { type: "closeViewer" };
+      return { type: "clearFilters" };
+    },
   },
   {
     keys: "s",
     help: "Star or unstar",
     matches: { keys: ["s"] },
+    when: ({ context }) => context.hasActionTarget,
     command: { type: "toggleStar" },
   },
   {
+    // `e` is context-sensitive rather than having a second binding: archive from
+    // the inbox, move back from the archive, restore from the bin. One key, one
+    // meaning, and the meaning follows where you are — which is also what
+    // `store.archive` implements.
     keys: "e",
-    help: "Archive, unarchive, or restore — whichever the current mailbox implies",
+    help: "Archive, unarchive, or restore — whichever this mailbox implies",
     matches: { keys: ["e"] },
+    when: ({ context }) => context.hasActionTarget,
     command: { type: "archive" },
   },
   {
     keys: "# / ⌫",
     help: "Move to trash, or delete permanently from Trash",
     matches: { keys: ["#", "Backspace", "Delete"] },
+    when: ({ context }) => context.hasActionTarget,
     command: { type: "trash" },
   },
   {
     keys: "u / m",
     help: "Mark read or unread",
     matches: { keys: ["u", "m"] },
+    when: ({ context }) => context.hasActionTarget,
     command: { type: "toggleRead" },
   },
   {
-    // `restore` deliberately has no row: it is what `e` does when the current
-    // mailbox is the bin, so a separate key would be a second way to do one
-    // thing. The `e` help text says so.
+    keys: "f",
+    help: "Forward the open message",
+    matches: { keys: ["f"] },
+    when: ({ context }) => context.viewerOpen,
+    command: { type: "forward" },
+  },
+  {
     keys: "r",
     help: "Reply to the open message",
     matches: { keys: ["r"] },
+    when: ({ context }) => context.viewerOpen,
     command: { type: "focusReply" },
   },
   {
+    // Bare `/` searches, and `/` with shift is `?` on a German or Nordic layout —
+    // which is why the guard is on shift rather than on the character. Both rows
+    // therefore have to be here, and both have to agree about shift.
     keys: "/",
     help: "Search",
     matches: { keys: ["/"] },
+    when: ({ event }) => event.shiftKey !== true,
     command: { type: "focusSearch" },
   },
   {
     keys: "1–9",
     help: "Toggle the filter pill in that position",
     matches: { keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9"] },
-    command: { type: "toggleFilter", railIndex: 0 },
+    command: ({ key, event, context }) => {
+      // The rail's length is only known at runtime, so the bounds check lives
+      // here rather than in the table: `7` with six pills must fall through to
+      // nothing, not to pill zero.
+      const index = digitIndex(key, event.shiftKey ?? false);
+      return index !== null && index < context.railCount
+        ? { type: "toggleFilter", railIndex: index }
+        : null;
+    },
   },
   {
+    // `!` is `Shift+1` on a US layout and a bare character on a French one, so
+    // the bare `1` is accepted only with shift held — otherwise filter `1` and the
+    // palette would fight over one keypress.
     keys: "!",
     help: "Switch mailbox, or open Settings",
-    matches: { keys: ["!", "1"], shift: true },
+    matches: { keys: ["!", "&", "1"] },
+    when: ({ key, event }) => key !== "1" || event.shiftKey === true,
     command: { type: "toggleNavigation" },
   },
   {
     keys: "?",
     help: "Show or hide this list",
-    matches: { keys: ["?"] },
+    matches: { keys: ["?", "/"] },
+    // Only when shift really was held. On a US layout `?` arrives as `?`, on a
+    // German one as `/`; in both cases `event.shiftKey` is true, and without this
+    // guard the German `?` would be indistinguishable from the US search key.
+    when: ({ key, event }) => key === "?" || event.shiftKey === true,
     command: { type: "toggleShortcutsOverlay" },
+  },
+  {
+    keys: ",",
+    help: "Settings",
+    matches: { keys: [","] },
+    command: { type: "openSettings" },
+  },
+  {
+    // Shift, because it is the most destructive thing on the canvas: there is no
+    // undo for "everything in this mailbox is now read". `U` rather than `u`,
+    // which is already the read/unread toggle.
+    keys: "⇧U",
+    help: "Mark everything in this mailbox read",
+    matches: { keys: ["U"], shift: true },
+    command: { type: "markAllRead" },
   },
 ] as const;
 
@@ -209,163 +374,161 @@ export const BINDINGS: readonly Binding[] = [
 const SYSTEM_MODIFIERS = ["altKey", "ctrlKey", "metaKey"] as const;
 
 /**
+ * The shortcut sheet is modal and answers only its own toggle and Escape.
+ *
+ * Anything else is swallowed rather than acted on: a keystroke that changes the
+ * list behind a sheet the user is reading is a keystroke they did not mean.
+ */
+const SHEET_BINDINGS: readonly Binding[] = [
+  {
+    keys: "?",
+    help: "",
+    // The German `?` arrives as `/` with shift, so the alternate spelling comes
+    // along — but the same shift guard as the canvas row, or a bare `/` typed at
+    // the sheet would close it instead of being swallowed.
+    matches: { keys: ["?", "/"] },
+    when: ({ key, event }) => key === "?" || event.shiftKey === true,
+    command: { type: "toggleShortcutsOverlay" },
+  },
+  { keys: "Esc", help: "", matches: { keys: ["Escape"] }, command: { type: "dismissOverlay" } },
+];
+
+/**
+ * The palette's own grammar.
+ *
+ * Separate from `BINDINGS` because it is modal: `j`/`k` walk the palette here and
+ * move the list everywhere else, and one flat table cannot hold both.
+ */
+const PALETTE_BINDINGS: readonly Binding[] = [
+  { keys: "↓ / j", help: "", matches: { keys: ["ArrowDown", "j"] }, command: { type: "moveNavigation", delta: 1 } },
+  { keys: "↑ / k", help: "", matches: { keys: ["ArrowUp", "k"] }, command: { type: "moveNavigation", delta: -1 } },
+  { keys: "⏎ / o", help: "", matches: { keys: ["Enter", "o"] }, command: { type: "activateNavigation" } },
+  { keys: "Esc", help: "", matches: { keys: ["Escape"] }, command: { type: "dismissNavigation" } },
+  {
+    // Digits reach the rail from inside the palette.
+    //
+    // This is why the palette matched a bare `1` at all, and why that was a bug:
+    // the row that opened the palette was also the row that filtered, so `1` did
+    // both. Splitting them means the palette's `!` demands shift for its digit
+    // spelling and its own row takes the bare one — two keys, two answers, instead
+    // of one key with two.
+    //
+    // It sits *above* the `!` row so a shifted digit reaches it and is declined
+    // (`digitIndex` rejects shift), falling through to `!` — which is what makes
+    // Shift+1 still open the palette.
+    keys: "1–9",
+    help: "",
+    matches: { keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9"] },
+    command: ({ key, event, context }) => {
+      const index = digitIndex(key, event.shiftKey ?? false);
+      return index !== null && index < context.railCount
+        ? { type: "toggleFilter", railIndex: index }
+        : null;
+    },
+  },
+  {
+    keys: "!",
+    help: "",
+    matches: { keys: ["!", "&"], chars: ["1"] },
+    command: { type: "toggleNavigation" },
+  },
+];
+
+/**
  * Resolve a key event to a command, or `null` to let it through.
  *
- * The order of the rules is the design, and it is not arbitrary:
- *
- *   1. **Not ready** — nothing is routed before sign-in.
- *   2. **Modifiers** — ⌘/⌃/⌥ belong to the system and the browser. Shift,
- *      CapsLock and the numeric keypad are treated as noise, so `Shift+j`
- *      still selects.
- *   3. **Text editing** — a hard stop. Only Esc gets through, because a mail
- *      client that eats `s` while you are typing a subject is unusable.
- *   4. **Escape precedence** — close the topmost thing, most specific first.
- *   5. **Overlay** — the shortcut sheet swallows everything but its own toggle.
- *      The list behind it must not mutate while you read the key list.
- *   6. **Palette** — the mailbox palette gets its own small grammar, and
- *      swallows the rest, for the same reason.
- *   7. **Canvas** — the normal case.
+ * Everything below the four rules is a table lookup, and every table lives in
+ * this file, so the cheat sheet, the toolbar hints and the router cannot drift.
  */
 export function commandForKey(
   key: string,
   context: KeyContext,
-  event?: { shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean },
+  event: KeyModifiers = {},
 ): Command | null {
+  // 1. Nothing is routed before the app is ready.
   if (!context.ready) return null;
 
-  const shift = event?.shiftKey ?? false;
-  const ctrl = event?.ctrlKey ?? false;
-  const alt = event?.altKey ?? false;
-  const meta = event?.metaKey ?? false;
-
   // 2. Never intercept a system shortcut.
-  if (ctrl || alt || meta) return null;
+  if (event.ctrlKey || event.altKey || event.metaKey) return null;
 
-  // 3. A text field owns the keyboard.
+  // 3. A text field owns the keyboard — except Escape, which leaves it. The
+  //    composer is a text field *and* a modal world, so Escape closes it outright
+  //    rather than blurring a textarea the user can no longer see.
+  if (context.composerOpen) {
+    // The composer is checked before `textEditing` even though it is also a text
+    // field, because its Escape means "close the sheet" while a plain field's
+    // means "give the keyboard back to the list". The order here is the whole
+    // distinction; reversing it leaves the composer unclosable by keyboard.
+    if (key === "Escape") return { type: "closeComposer" };
+    return null;
+  }
+
   if (context.textEditing) {
-    return key === "Escape" ? { type: "blurText" } : null;
+    if (key !== "Escape") return null;
+    return { type: "blurText" };
   }
 
-  // 4. Escape closes the topmost layer, whatever that is.
-  if (key === "Escape") {
-    if (context.overlayVisible) return { type: "dismissOverlay" };
-    if (context.navigationVisible) return { type: "dismissNavigation" };
-    if (context.viewerOpen) return { type: "closeViewer" };
-    if (context.filtersActive) return { type: "clearFilters" };
-    return null;
-  }
+  // 4. Modals.
+  if (context.overlayVisible) return lookup(SHEET_BINDINGS, key, context, event);
+  if (context.navigationVisible) return lookup(PALETTE_BINDINGS, key, context, event);
 
-  // 5. The shortcut sheet is modal.
-  if (context.overlayVisible) {
-    return key === "?" ? { type: "toggleShortcutsOverlay" } : null;
-  }
-
-  // 6. The mailbox palette is modal.
-  if (context.navigationVisible) {
-    if (key === "ArrowDown") return { type: "moveNavigation", delta: 1 };
-    if (key === "ArrowUp") return { type: "moveNavigation", delta: -1 };
-    if (key === "Enter") return { type: "activateNavigation" };
-    if (key === "j") return { type: "moveNavigation", delta: 1 };
-    if (key === "k") return { type: "moveNavigation", delta: -1 };
-    if (key === "o") return { type: "activateNavigation" };
-    if (key === "!" || (shift && key === "1")) return { type: "toggleNavigation" };
-    const digit = digitIndex(key, shift);
-    if (digit !== null && digit < context.railCount) {
-      return { type: "toggleFilter", railIndex: digit };
-    }
-    return null;
-  }
-
-  // 7. The canvas.
-  if (key === "ArrowDown") {
-    return context.viewerOpen
-      ? { type: "scrollReader", delta: 1 }
-      : { type: "moveSelection", delta: 1 };
-  }
-  if (key === "ArrowUp") {
-    return context.viewerOpen
-      ? { type: "scrollReader", delta: -1 }
-      : { type: "moveSelection", delta: -1 };
-  }
-  if (key === "Enter") {
-    // Enter on the canvas opens the cursor; with a message open it belongs to
-    // the reader, where it activates a link.
-    return context.viewerOpen ? null : { type: "openSelected" };
-  }
-  if (key === "Backspace" || key === "Delete") {
-    return context.hasActionTarget ? { type: "trash" } : null;
-  }
-
-  if (key === "j") return { type: "moveSelection", delta: 1 };
-  if (key === "k") return { type: "moveSelection", delta: -1 };
-  if (key === "o") {
-    return context.viewerOpen ? null : { type: "openSelected" };
-  }
-  if (key === "?") return { type: "toggleShortcutsOverlay" };
-  if (key === "!" || (shift && key === "1")) return { type: "toggleNavigation" };
-  if (key === "/") return { type: "focusSearch" };
-
-  if (key === "s" && context.hasActionTarget) return { type: "toggleStar" };
-  if (key === "e" && context.hasActionTarget) return { type: "archive" };
-  if (key === "#" && context.hasActionTarget) return { type: "trash" };
-  if ((key === "u" || key === "m") && context.hasActionTarget) return { type: "toggleRead" };
-  if (key === "r" && context.viewerOpen) return { type: "focusReply" };
-  if (key === ",") return { type: "openSettings" };
-
-  // `1`–`9` address the rail positionally. `!` is `Shift+1`, handled above,
-  // so a shifted digit is never mistaken for a filter.
-  const digit = digitIndex(key, shift);
-  if (digit !== null && digit < context.railCount) {
-    return { type: "toggleFilter", railIndex: digit };
-  }
-
-  return null;
-}
-
-/**
- * The zero-based rail position for a digit key, or `null`.
- *
- * `shift` matters: on a US layout `!` arrives as `event.key === "1"` with
- * shift held, and treating that as filter `1` would make the mailbox palette
- * and filter `1` fight over the same keypress.
- */
-function digitIndex(key: string, shift: boolean): number | null {
-  if (shift) return null;
-  if (key.length !== 1 || key < "1" || key > "9") return null;
-  return Number(key) - 1;
+  // 5. The canvas.
+  return lookup(BINDINGS, key, context, event);
 }
 
 /**
  * Whether an unhandled key should be swallowed.
  *
- * In a keyboard-first app, an unbound key that reaches the OS produces the
- * macOS alert beep, which reads as a bug. So outside a text field, unmatched
- * keys are consumed — except when a system modifier is held, because those
- * genuinely belong elsewhere.
+ * In a keyboard-first app an unbound key that reaches the OS produces the macOS
+ * alert beep, which reads as a bug. So outside a text field and outside a modal,
+ * unmatched keys are consumed — except when a system modifier is held, because
+ * those genuinely belong elsewhere.
  */
-export function shouldSwallow(
-  context: KeyContext,
-  event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean },
-): boolean {
-  if (!context.ready || context.textEditing) return false;
-  return !SYSTEM_MODIFIERS.some((modifier) => event[modifier]);
+export function shouldSwallow(context: KeyContext, event: KeyModifiers = {}): boolean {
+  if (!context.ready) return false;
+  if (context.textEditing || context.composerOpen) return false;
+  if (SYSTEM_MODIFIERS.some((modifier) => event[modifier])) return false;
+  return true;
 }
-
-/** The `1`–`9` binding whose index is `railIndex`, for the sheet and the pills. */
-export function digitForRailIndex(railIndex: number): string {
-  return String(railIndex + 1);
-}
-
-/** The navigation item a palette index refers to. */
-export const NAVIGATION_ORDER: readonly NavigationItem[] = ["inbox", "spam", "trash", "settings"];
 
 /**
- * What a palette row does when activated.
+ * The keys a command is bound to, as the toolbar prints them.
  *
- * Settings is a view rather than a mailbox, which is why this returns a
- * command rather than a mailbox: the palette cannot switch to a mailbox that
- * does not exist.
+ * `TopBar` reads this for its button tooltips so a control's advertised shortcut
+ * is the one the router actually takes. Returns the first binding that produces
+ * the command, or `null`.
  */
-export function navigationCommandFor(item: NavigationItem): Command {
-  return item === "settings" ? { type: "openSettings" } : { type: "activateNavigation" };
+export function shortcutFor(command: Command["type"]): string | null {
+  const binding = BINDINGS.find((candidate) => {
+    if (typeof candidate.command === "function") {
+      // A computed command can produce this type for *some* context; assume yes
+      // rather than evaluating a context we do not have.
+      return PROBE.some((context) => resolveType(candidate.command, context) === command);
+    }
+    return candidate.command.type === command;
+  });
+  return binding?.keys ?? null;
+}
+
+/** A few contexts, chosen to cover the branches a computed command can take. */
+const PROBE: readonly KeyContext[] = [
+  DEFAULT_CONTEXT,
+  { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true, railCount: 9 },
+  { ...DEFAULT_CONTEXT, overlayVisible: true, filtersActive: true },
+];
+
+function resolveType(
+  command: Binding["command"],
+  context: KeyContext,
+): Command["type"] | null {
+  const resolved =
+    typeof command === "function"
+      ? command({ key: "?", event: {}, context })
+      : command;
+  return resolved?.type ?? null;
+}
+
+/** The digit a rail position is addressed by, or `null` past the ninth pill. */
+export function digitForRailIndex(railIndex: number): string | null {
+  return railIndex < 9 ? String(railIndex + 1) : null;
 }

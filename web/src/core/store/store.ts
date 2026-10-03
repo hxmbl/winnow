@@ -24,8 +24,15 @@
 import { MAILBOX_LABEL, type Email, type Mailbox } from "../model/email";
 import {
   BUILTIN_FILTERS,
+  catalogIndex,
   FILTER_LABELS,
   filterKey,
+  parseFilterKey,
+  PERMANENT_FILTERS,
+  NAVIGATION_ITEMS,
+  NEUTRAL_SIGNALS,
+  navigationIndexFor,
+  clampIndex,
   type BuiltinSmartFilter,
   type EmailSignals,
   type FilterId,
@@ -33,7 +40,7 @@ import {
 } from "../model/signals";
 import { buildUserProfile, type TrashRecord, type UserProfile } from "../model/profile";
 import { classifyAll, type SignalMap } from "../classify/classify";
-import { matchesFilter, rankFilters } from "../classify/filters";
+import { countAllFilters, rankFilters } from "../classify/filters";
 import {
   buildSearchBags,
   conversationFor,
@@ -47,12 +54,33 @@ import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
 import { defaultWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
+import type { SyncProgress } from "../gmail/sync";
 
 /** The four mailboxes, in the order the sidebar shows them. */
 export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "trash", "spam"];
 
+/**
+ * Which half of a sync is running, for the status line.
+ *
+ * Named here rather than reusing `SyncProgress["phase"]` because the engine's
+ * union also contains `idle` and `sending`, and this field is specifically "a sync
+ * is in flight, and here is which kind". The engine's `idle` never reaches the UI:
+ * a completed phase is `null` on this field, which is what makes "not syncing"
+ * answerable without a second boolean.
+ */
+export type SyncPhase = "full" | "incremental";
+
 /** `cursorIndex` meaning "the user has not touched the list yet". */
 export const NO_CURSOR = -1;
+
+/**
+ * How often the list's reference clock is refreshed.
+ *
+ * A minute, because the coarsest thing it drives is a relative timestamp, which
+ * has a resolution of minutes anyway — and a store that ticks faster than its own
+ * display resolution is paying for nothing.
+ */
+const CLOCK_INTERVAL_MS = 60_000;
 
 /** What the user can change about how Winnow behaves. */
 export type Preferences = {
@@ -118,11 +146,41 @@ export type StoreState = {
   learning: LearningModel;
 
   /** Which modal is up, if any. */
-  overlay: "none" | "shortcuts" | "navigation" | "settings" | "composer";
+  overlay: "none" | "shortcuts" | "navigation" | "settings";
   navigationIndex: number;
 
+  /**
+   * The buckets the user has silenced, in catalog order.
+   *
+   * Mirrors `persistedRemoved` onto the public state because the UI needs it to *draw*
+   * a muted pill: the muted buckets stay in the rail so they can be un-muted from the
+   * rail, and a pill that is in the rail but has no marker is indistinguishable from an
+   * active one — its dismiss button calls `dismissFilter`, which is now a no-op, so
+   * the control looks broken.
+   */
+  mutedFilters: readonly BuiltinSmartFilter[];
+
   syncing: boolean;
+  /**
+   * What the sync is doing, for the status line. `null` when not syncing.
+   *
+   * Nullable rather than an enum with an `idle` member, because "is a sync running"
+   * and "which kind is it" are two questions and only the first is asked most of the
+   * time. `syncing` already answers the first for callers that need the *count*, and
+   * this answers it for callers that need the *kind*.
+   */
+  syncPhase: SyncPhase | null;
+  /** 0–1 while the total is known, else `null`. */
+  syncFraction: number | null;
+  /** Messages that arrived in the run in progress, or the last completed one. */
+  syncFetched: number;
   lastSyncedAt: number | null;
+  /**
+   * True when a sync walked a mailbox to its cap, so the cache is a triage set
+   * rather than an export. Silently showing 500 archived messages as though they
+   * were all of it would be a lie about the user's own mail.
+   */
+  truncated: boolean;
   /** Ids that arrived in the last sync, for the "new" marker. */
   recentIds: ReadonlySet<number>;
   /**
@@ -147,10 +205,30 @@ export type MailboxView = {
   threads: ThreadRow[];
   /** The rail, with activated buckets hoisted above the volume ranking. */
   rail: BuiltinSmartFilter[];
+  /**
+   * How many inbox messages land in each bucket.
+   *
+   * Computed over the *inbox*, not over `emails`, and that distinction is the
+   * whole reason this is a field rather than something the UI works out for
+   * itself. The rail is ranked against the inbox so that opening the bin does not
+   * reshuffle it, and its counts have to agree with that ranking — otherwise
+   * every pill reads `0` the moment you look at Archive or Trash, and reads
+   * whatever the active filter admits the moment you turn one on. The number on a
+   * pill is a claim about your mail, not about the current result set.
+   *
+   * `unsafe` is counted here even though it is excluded from the visible list:
+   * its members *are* the hidden rows, so counting only what is on screen would
+   * report the one bucket you need to be able to reach as permanently empty.
+   */
+  inboxCounts: ReadonlyMap<BuiltinSmartFilter, number>;
+  /** Messages per sender, over the inbox, for the sender pills. */
+  inboxSenderCounts: ReadonlyMap<string, number>;
   selected: Email | null;
   conversation: Email[];
   unreadCount: number;
   totalCount: number;
+  /** Everything the app knows that is not in the current mailbox. */
+  otherMailboxCount: number;
 };
 
 /** Everything the store owns. Read this in React; never mutate it. */
@@ -161,7 +239,16 @@ export type Snapshot = StoreState & {
 
 /** The server side. Absent in demo mode, which is why every call is optional. */
 export interface MailBackend {
-  sync(): Promise<{ emails: Email[]; failed: number }>;
+  /**
+   * Fetch everything changed since the last run.
+   *
+   * `onProgress` is a *request*, not a notification: the engine calls it as often
+   * as it likes and the store decides whether that is worth a re-render. That
+   * asymmetry is deliberate — a first sync downloads thousands of messages, and a
+   * callback that re-rendered per message would make the app unusable during the
+   * one operation it is least able to hide.
+   */
+  sync(options?: { onProgress?: (progress: SyncProgress) => void }): Promise<SyncOutcome>;
   toggleStar(id: number, starred: boolean): Promise<void>;
   moveToMailbox(id: number, mailbox: Mailbox): Promise<void>;
   setRead(id: number, read: boolean): Promise<void>;
@@ -180,24 +267,32 @@ export interface MailBackend {
   ): Promise<{ bytes: Uint8Array; filename: string; mimeType: string }>;
 }
 
-/** Notifications and OS integration. Also absent in demo mode. */
+/** What one sync produced. */
+export type SyncOutcome = {
+  emails: Email[];
+  failed: number;
+  /** A mailbox hit its cap, so the cache is a triage set rather than an export. */
+  truncated: boolean;
+};
+
+/**
+ * The OS surface the store drives.
+ *
+ * Exactly three things, and the restraint is the point: every one is a *reflection of
+ * state the store already holds* — the unread count for the badge, the cadence for the
+ * scheduler, the new arrivals for the notification.
+ *
+ * `openExternal` and `saveAttachment` used to be declared here too, and nothing in the
+ * store ever called either. Both are one-shot operations a component performs directly,
+ * and routing them through the store would mean reaching past it for a non-mutation —
+ * so they are gone from this interface, and the reader calls the platform itself.
+ *
+ * Absent in demo mode, which is why every call on it is optional.
+ */
 export interface PlatformBridge {
   notifyNewMail(emails: readonly Email[]): Promise<void>;
   setUnreadBadge(count: number): Promise<void>;
   setBackgroundSync(intervalSeconds: number | null): Promise<void>;
-  openExternal(url: string): Promise<void>;
-  /**
-   * Save an attachment's bytes somewhere the user chose.
-   *
-   * Returns the path on the desktop, or `null` where the save dialog was
-   * dismissed. In a browser there is no dialog, so the platform layer turns this
-   * into a download and resolves `null`.
-   */
-  saveAttachment(
-    filename: string,
-    bytes: Uint8Array,
-    mimeType: string,
-  ): Promise<string | null>;
 }
 
 type Listener = () => void;
@@ -229,10 +324,18 @@ export type StoreOptions = {
 export type PersistPatch = {
   preferences?: Partial<Preferences>;
   learning?: ReturnType<LearningModel["toSnapshot"]>;
-  /** Sender addresses of binned messages, for the trash-bias profile. */
-  trashedSenders?: string[];
   activeFilters?: string[];
   mailbox?: Mailbox;
+  /**
+   * Buckets the user has silenced.
+   *
+   * Persisted with the rest of the "what you have told Winnow" state, because a
+   * mute is a statement about the mail rather than about this session — the same
+   * argument the blocked-sender list makes. It was not persisted at all before,
+   * which combined with there being no unmute anywhere in the UI to mean muting a
+   * bucket was a permanent, silent, unrecoverable decision.
+   */
+  removedFilters?: string[];
 };
 
 /**
@@ -292,11 +395,40 @@ export class WinnowStore {
       learning: LearningModel.initial(),
       overlay: "none",
       navigationIndex: 0,
+      mutedFilters: [],
       syncing: false,
+      syncPhase: null,
+      syncFraction: null,
+      syncFetched: 0,
       lastSyncedAt: null,
+      truncated: false,
       recentIds: new Set(),
       now: options.now ?? Date.now(),
     };
+  }
+
+  /**
+   * Advance the list's reference clock.
+   *
+   * `state.now` is latched — at `connect` for live mail, at the seed's instant
+   * for the demo — and every day section and relative timestamp in the list is
+   * computed against it. Latching is the right call for the demo and the wrong
+   * one for live mail: a desktop app left open overnight would greet the user
+   * with a list whose newest message is still "2 minutes ago" and a set of day
+   * headings that stopped being true hours ago.
+   *
+   * So it is refreshed on a slow tick. The store owns the timer because the store
+   * owns `now`; nothing above it needs to know that the clock is not a constant.
+   */
+  startClock(): () => void {
+    const tick = (): void => {
+      // Demo mode keeps its fixed instant: that is what makes the seed's day
+      // sections and relative timestamps deterministic, and a demo whose
+      // headings shift under the reader would fail its own fixture contract.
+      if (this.backend) this.set({ now: Date.now() });
+    };
+    const handle = setInterval(tick, CLOCK_INTERVAL_MS);
+    return () => clearInterval(handle);
   }
 
   // ── Reading ───────────────────────────────────────────────────────────────
@@ -338,8 +470,27 @@ export class WinnowStore {
     // "who you read" from an archive or a bin would teach it the wrong thing.
     const inboxForProfile = visible.filter((email) => email.mailbox === "inbox");
     const profile = buildUserProfile(inboxForProfile, this.trashRecords());
+    const inboxSignals = classifyAll(inboxForProfile, profile, state.learning.weights);
 
-    const signals = classifyAll(mailboxEmails, profile, state.learning.weights);
+    // The inbox is classified once and reused when the inbox is open — the common
+    // case, and the only one where the two sets coincide.
+    //
+    // Every *other* mailbox is deliberately left unclassified and rendered as
+    // `NEUTRAL_SIGNALS`, because classifying it and then applying the inbox's own
+    // filter rules to the result is how the bin and the spam folder ended up
+    // showing zero messages. The rule that hides spam is a rule about what belongs
+    // in your inbox; applying it to a folder whose entire purpose is to hold the
+    // messages you rejected means every one of them is hidden, and the folder reads
+    // as empty. The user opens Spam to check what Gmail decided was spam, and the
+    // app was silently disagreeing with Gmail about all of it.
+    //
+    // `NEUTRAL_SIGNALS` is also the honest answer: a trashed message is not
+    // "quiet personal mail", it is mail that has already been dealt with, and the
+    // profile that would judge it was built from the inbox it is not in.
+    const signals =
+      state.mailbox === "inbox"
+        ? inboxSignals
+        : neutralSignalsFor(mailboxEmails);
     const searchBags = buildSearchBags(mailboxEmails);
 
     const result = runInboxQuery({
@@ -360,15 +511,31 @@ export class WinnowStore {
     // is state, not a derive-time decision, so it is read from the instance.
     const rail = rankFilters(
       inboxForProfile,
-      classifyAll(inboxForProfile, profile, state.learning.weights),
+      inboxSignals,
       profile,
       this.persistedRemoved,
     );
     const railWithActive = this.orderedRail(rail, this.persistedRemoved);
 
+    // The same inbox the rail was ranked against, for the same reason. See the
+    // field's doc comment: a pill count has to be a claim about the user's mail,
+    // not about whatever the current result set happens to be.
+    const inboxCounts = countAllFilters(inboxForProfile, inboxSignals, profile);
+
+    const inboxSenderCounts = new Map<string, number>();
+    for (const email of inboxForProfile) {
+      inboxSenderCounts.set(email.sender, (inboxSenderCounts.get(email.sender) ?? 0) + 1);
+    }
+
     const selectedRow = threads.find((row) => row.representative.id === state.selectedId) ?? null;
     const selected = selectedRow?.representative ?? null;
-    const conversation = selected ? conversationFor(state.all, selected.threadId, selected.gmailId) : [];
+    // From `visible`, not `state.all`: a blocked sender's reply must not stay
+    // readable inside the conversation of a message you *can* see. Blocking a
+    // sender and then finding their mail quoted in the open thread is not blocking
+    // them.
+    const conversation = selected
+      ? conversationFor(visible, selected.threadId, selected.gmailId)
+      : [];
 
     return {
       emails: result.emails,
@@ -378,10 +545,13 @@ export class WinnowStore {
       result,
       threads,
       rail: railWithActive,
+      inboxCounts,
+      inboxSenderCounts,
       selected,
       conversation,
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
       totalCount: mailboxEmails.length,
+      otherMailboxCount: visible.length - mailboxEmails.length,
     };
   }
 
@@ -397,10 +567,31 @@ export class WinnowStore {
   /**
    * The rail's final order.
    *
-   * `rankFilters` sorts by volume; the user also expects an activated filter to
-   * *stay* activated and visible even when it momentarily matches nothing, and
-   * to be reachable by its digit. So active filters are hoisted above the
-   * ranked set, in the order they were turned on.
+   * Four things happen here, and each exists because of a specific way the rail
+   * used to lose a control the pointer needed:
+   *
+   *   - **The permanent pair leads.** Important and Deliveries stay at positions 1
+   *     and 2 regardless of what is active. They are the two buckets a user
+   *     reaches for on a bad day, and a pill that moves out from under a thumb
+   *     because they happened to toggle something else is worse than no pill.
+   *   - **An activated bucket is hoisted next**, in the order it was turned on,
+   *     *whether or not it currently matches anything*. This is the bug that
+   *     mattered: a magic bucket with no mail is not in `ranked` at all, so
+   *     filtering to one, archiving everything in it, and letting a sync bring
+   *     nothing back dropped the pill — leaving a live filter applied with no
+   *     control anywhere on screen to turn it off. Falling back to the catalog
+   *     means an empty active bucket still has a pill.
+   *   - **A muted bucket is appended**, struck through, so muting is reversible
+   *     from the same place it was made. It used to vanish, which made muting a
+   *     one-way door.
+   *   - **Mutes take no digit**, because they are not filterable and a pill that
+   *     prints a shortcut it ignores is the same lie as a badge in the wrong
+   *     colour.
+   *
+   * Ported from `legacy/swift-native/Sources/winnow/Store/WinnowStore.swift`,
+   * which pins the permanent pair *before* hoisting active filters — the order
+   * matters, because hoisting actives first pushed the always-watch buckets down
+   * by however many filters were on.
    */
   private orderedRail(
     ranked: BuiltinSmartFilter[],
@@ -411,9 +602,38 @@ export class WinnowStore {
       .map((filter) => filter.id)
       .filter((id) => !removed.has(id));
 
-    const hoisted = activeBuiltins.filter((id) => ranked.includes(id));
-    const rest = ranked.filter((id) => !hoisted.includes(id));
-    return [...hoisted, ...rest];
+    const pinned = PERMANENT_FILTERS.filter((id) => !removed.has(id));
+
+    // Catalog order is the fallback for an active bucket that has dropped out of
+    // the ranking, so the pill appears in a predictable place rather than
+    // appended at random.
+    const hoisted = activeBuiltins.filter((id) => !pinned.includes(id));
+    const hoistedOrdered = [
+      ...hoisted.filter((id) => ranked.includes(id)),
+      ...hoisted.filter((id) => !ranked.includes(id)).sort((a, b) => catalogIndex(a) - catalogIndex(b)),
+    ];
+
+    const hoistedSet = new Set([...pinned, ...hoistedOrdered]);
+    const rest = ranked.filter((id) => !hoistedSet.has(id));
+    const muted = BUILTIN_FILTERS.filter((id) => removed.has(id));
+
+    return [...pinned, ...hoistedOrdered, ...rest, ...muted];
+  }
+
+  /**
+   * The muted buckets, in catalog order.
+   *
+   * Separate from the rail because the rail is not the only place they need to
+   * appear: the settings panel renders an "unhide" row per bucket, so a mute is
+   * reversible from a place the user will actually think to look.
+   */
+  mutedBuckets(): BuiltinSmartFilter[] {
+    return this.mutedList();
+  }
+
+  /** The muted buckets, in catalog order. */
+  private mutedList(): BuiltinSmartFilter[] {
+    return BUILTIN_FILTERS.filter((id) => this.persistedRemoved.has(id));
   }
 
   // ── Changing ──────────────────────────────────────────────────────────────
@@ -428,9 +648,20 @@ export class WinnowStore {
    */
   private set(patch: Partial<StoreState>, persist?: PersistPatch): void {
     this.state = { ...this.state, ...patch };
+    this.notify();
+    if (persist) this.onPersist?.(persist);
+  }
+
+  /**
+   * Tell every subscriber the world moved.
+   *
+   * Split out of `set` because one caller — the sync engine's progress callback —
+   * needs to advance state without paying for a notification on every message it
+   * downloads.
+   */
+  private notify(): void {
     this.version += 1;
     for (const listener of this.listeners) listener();
-    if (persist) this.onPersist?.(persist);
   }
 
   /** Wired by `attach`; see `StoreOptions`. */
@@ -456,12 +687,86 @@ export class WinnowStore {
     if (options.onWeightsChanged) this.onWeightsChanged = options.onWeightsChanged;
   }
 
-  /** Trash rows for the profile: the seed, plus anything binned this session. */
+  /**
+   * Trash rows for the profile: senders the user has binned from.
+   *
+   * Two sources describe the same habit and are combined with `max` rather than
+   * summed: the messages currently sitting in the bin, and the discards this
+   * store has witnessed (or was seeded with). Summing them counted a sender twice
+   * for every message still in the bin, so the bias tracked the *size* of the bin
+   * rather than how often the user actually discards — which is the number the
+   * profile is supposed to be reading, and the one that decides whether a sender
+   * is demoted.
+   *
+   * `max` is also what makes the purge case work: deleting a message for good
+   * removes it from `state.all`, and without the witnessed log that discard would
+   * simply stop existing.
+   */
   private trashRecords(): TrashRecord[] {
-    const binned = this.state.all
-      .filter((email) => email.mailbox === "trash")
-      .map((email) => ({ sender: email.sender }));
-    return [...binned, ...this.trashSenders.map((sender) => ({ sender }))];
+    const witnessed = new Map<string, number>();
+    for (const sender of this.trashSenders) {
+      witnessed.set(sender, (witnessed.get(sender) ?? 0) + 1);
+    }
+
+    const inBin = new Map<string, number>();
+    for (const email of this.state.all) {
+      if (email.mailbox === "trash") {
+        inBin.set(email.sender, (inBin.get(email.sender) ?? 0) + 1);
+      }
+    }
+
+    const senders = new Set([...witnessed.keys(), ...inBin.keys()]);
+    return [...senders].map((sender) => ({
+      sender,
+      count: Math.max(witnessed.get(sender) ?? 0, inBin.get(sender) ?? 0),
+    }));
+  }
+
+  /**
+   * Adopt everything the last session persisted.
+   *
+   * One call, and one notification, on purpose. The three things a returning user
+   * expects to find are the mailbox they left, the buckets they had narrowed to,
+   * and what Winnow learned — and restoring them in three separate `set` calls
+   * meant three renders, each of which classified the whole mailbox against a
+   * half-restored world.
+   *
+   * Called from `main.tsx` before the first paint, which is why it is separate
+   * from the constructor: the constructor cannot notify, and a store that
+   * computed its derived view three times on boot was visible as a flash.
+   */
+  restoreState(saved: {
+    mailbox?: Mailbox | null;
+    activeFilters?: readonly string[];
+    removedFilters?: readonly string[];
+    preferences?: Partial<Preferences>;
+    learning?: ReturnType<LearningModel["toSnapshot"]> | null;
+  }): void {
+    const filters = (saved.activeFilters ?? [])
+      .map(parseFilterKey)
+      .filter((filter): filter is FilterId => filter !== null);
+
+    for (const key of saved.removedFilters ?? []) {
+      if ((BUILTIN_FILTERS as readonly string[]).includes(key)) {
+        this.persistedRemoved.add(key as BuiltinSmartFilter);
+      }
+    }
+
+    this.state = {
+      ...this.state,
+      mailbox: MAILBOX_ORDER.includes(saved.mailbox as Mailbox)
+        ? (saved.mailbox as Mailbox)
+        : this.state.mailbox,
+      activeFilters: filters,
+      // Mutes are applied inside the loop above, so the list is read *after* it and
+      // is already correct.
+      mutedFilters: this.mutedList(),
+      preferences: { ...this.state.preferences, ...(saved.preferences ?? {}) },
+      learning: saved.learning
+        ? LearningModel.fromSnapshot(saved.learning)
+        : this.state.learning,
+    };
+    this.notify();
   }
 
   /**
@@ -474,63 +779,146 @@ export class WinnowStore {
 
   // ── Session ───────────────────────────────────────────────────────────────
 
-  /** Point the store at a backend and start the first sync. */
+  /** The connection `connect` is establishing, so a failed one can be retried. */
+  private pendingConnect: { backend: MailBackend; account: { email: string } } | null = null;
+
+  /**
+   * Point the store at a backend and start the first sync.
+   *
+   * `signing_in` is a real status, and the top bar renders it: the OAuth round
+   * trip is the one step where the app is deliberately doing nothing and waiting
+   * for a human, and saying so is the difference between "hanging" and "waiting
+   * for you".
+   */
   async connect(backend: MailBackend, account: { email: string }): Promise<void> {
     this.backend = backend;
-    // Live mail is real, so the wall clock is the right reference instant for its
-    // day sections. The demo's fixed instant is for the demo's fixed instants.
-    this.set({ status: "loading", account, error: null, now: Date.now() });
-    try {
-      const result = await backend.sync();
-      this.set({
-        status: "ready",
-        all: result.emails,
-        syncing: false,
-        lastSyncedAt: Date.now(),
-        recentIds: new Set(),
-        error: result.failed > 0 ? syncFailureSummary(result.failed) : null,
-      });
-      await this.applyPlatform();
-    } catch (error) {
-      this.set({
-        status: "error",
-        syncing: false,
-        error: error instanceof Error ? error.message : "Could not reach Gmail.",
-      });
-    }
+    this.pendingConnect = { backend, account };
+    this.set({
+      status: "signing_in",
+      account,
+      error: null,
+      // Live mail is real, so the wall clock is the right reference instant for
+      // its day sections. The demo's fixed instant is for the demo's instants.
+      now: Date.now(),
+    });
+    await this.runSync({ initial: true });
+    // Connected. The retained connection only exists so a *failed* connect can be
+    // retried; keeping it would let "Try again" resurrect a revoked session.
+    this.pendingConnect = null;
   }
 
   /**
    * Refresh.
    *
-   * New messages are diffed against what was already known *before* the sync,
-   * so the "new" marker only appears for genuinely new mail and the list does
-   * not flash on every refresh.
+   * New messages are diffed against what was already known *before* the sync, so
+   * the "new" marker only appears for genuinely new mail and the list does not
+   * flash on every refresh.
    */
   async refresh(): Promise<void> {
     if (!this.backend || this.state.syncing) return;
-    this.set({ syncing: true, error: null });
+    await this.runSync({ initial: false });
+  }
+
+  /**
+   * One sync, shared by `connect` and `refresh`.
+   *
+   * The only difference between them is what surrounds the call. `connect` also
+   * moves the session through `loading` and announces nothing, because a first
+   * sync has no "new" mail: everything in it is new, and telling someone about
+   * forty messages they have never seen is noise, not news.
+   *
+   * A failure is put on screen *and* re-thrown, so `connect`'s caller can decide
+   * what a failure means for the session as a whole.
+   */
+  private async runSync({ initial }: { initial: boolean }): Promise<void> {
+    const backend = this.backend;
+    if (!backend) return;
+
+    this.set({
+      ...(initial ? { status: "loading" as const } : {}),
+      syncing: true,
+      error: null,
+      syncPhase: null,
+      syncFraction: null,
+      syncFetched: 0,
+    });
+
+    const known = new Set(this.state.all.map((email) => email.gmailId));
+
     try {
-      const known = new Set(this.state.all.map((email) => email.gmailId));
-      const result = await this.backend.sync();
+      const result = await backend.sync({
+        onProgress: (progress) => {
+          // Progress arrives on the engine's own schedule, not on a store tick,
+          // so it is written to state *without* notifying: a first sync of two
+          // thousand messages would otherwise re-render the app two thousand times
+          // to move a percentage. A phase change is notified, because that is a
+          // visible transition rather than a per-message increment.
+          const phase = progress.phase === "idle" || progress.phase === "sending"
+            ? this.state.syncPhase
+            : progress.phase;
+          const changed = this.state.syncPhase !== phase;
+          this.state = {
+            ...this.state,
+            syncing: true,
+            syncPhase: phase,
+            syncFraction: progress.fraction,
+            syncFetched: progress.fetched,
+          };
+          if (changed) this.notify();
+        },
+      });
+
       const recent = new Set<number>();
-      for (const email of result.emails) {
-        if (!known.has(email.gmailId)) recent.add(email.id);
+      if (!initial) {
+        for (const email of result.emails) {
+          if (!known.has(email.gmailId)) recent.add(email.id);
+        }
       }
+
       this.set({
+        status: "ready",
         all: result.emails,
         syncing: false,
+        syncPhase: null,
+        syncFraction: null,
         lastSyncedAt: Date.now(),
         recentIds: recent,
+        truncated: result.truncated,
+        notice: syncNotice(result),
         error: result.failed > 0 ? syncFailureSummary(result.failed) : null,
       });
-      await this.notifyIfNew(recent);
+
+      if (!initial) await this.notifyIfNew(recent);
       await this.applyPlatform();
     } catch (error) {
       this.set({
+        status: "error",
         syncing: false,
-        error: error instanceof Error ? error.message : "Sync failed.",
+        syncPhase: null,
+        error: error instanceof Error ? error.message : "Could not reach Gmail.",
       });
+      throw error;
+    }
+  }
+
+  /**
+   * Retry the connection that failed.
+   *
+   * The error screen's only button used to be a no-op, and there was nowhere to
+   * go from it because `connect` threw away what it was connecting *to*. Both are
+   * retained now, so retrying is one call — and it is the call the user wants,
+   * since "try again" is the only answer to a network that was down thirty
+   * seconds ago.
+   */
+  async retryConnection(): Promise<void> {
+    const pending = this.pendingConnect;
+    if (!pending) return;
+    this.set({ status: "signing_in", error: null });
+    try {
+      await this.runSync({ initial: true });
+      this.pendingConnect = null;
+    } catch {
+      // Already on screen: `runSync` set `error` before re-throwing.
     }
   }
 
@@ -565,8 +953,13 @@ export class WinnowStore {
     if (this.state.mailbox === mailbox) return;
     // Switching mailbox drops the reader and the cursor: a selection from the
     // inbox means nothing in the bin, and leaving it would show a message the
-    // list does not contain.
-    this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [] }, { mailbox });
+    // list does not contain. Filters go too — a bucket pinned in the inbox means
+    // nothing in the archive — and both are persisted together, since "which
+    // mailbox am I in" and "what is narrowed inside it" are one decision.
+    this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [] }, {
+      mailbox,
+      activeFilters: [],
+    });
   }
 
   select(id: number | null): void {
@@ -607,7 +1000,7 @@ export class WinnowStore {
     if (this.state.cursorIndex === NO_CURSOR) {
       next = delta > 0 ? 0 : threads.length - 1;
     } else {
-      next = Math.min(Math.max(this.state.cursorIndex + delta, 0), threads.length - 1);
+      next = clampIndex(this.state.cursorIndex + delta, threads.length);
     }
 
     this.set({
@@ -672,27 +1065,38 @@ export class WinnowStore {
   setOverlay(overlay: StoreState["overlay"]): void {
     this.set({
       overlay,
-      navigationIndex: overlay === "navigation" ? 0 : this.state.navigationIndex,
+      // The palette opens on whichever row corresponds to the mailbox already on
+      // screen, so opening it from Spam highlights Spam. Without this it always
+      // opened on Inbox, which made `!` feel broken when used from anywhere else.
+      navigationIndex:
+        overlay === "navigation" ? navigationIndexFor(this.state.mailbox) : this.state.navigationIndex,
     });
   }
 
   moveNavigation(delta: number): void {
-    const count = 4;
+    // The count comes from the palette's own list rather than a literal `4`. It
+    // had drifted from `NAVIGATION_ITEMS` in exactly the way a duplicated constant
+    // does: the palette gained no row, but a future one would have been
+    // un-reachable by keyboard with nothing to say so.
     this.set({
-      navigationIndex: Math.min(Math.max(this.state.navigationIndex + delta, 0), count - 1),
+      navigationIndex: clampIndex(this.state.navigationIndex + delta, NAVIGATION_ITEMS.length),
     });
   }
 
-  /** Act on the highlighted palette row. */
+  /**
+   * Act on the highlighted palette row.
+   *
+   * The mailbox is read off `NAVIGATION_ITEMS` rather than matched per-id, so a
+   * row added to the palette is reachable without touching this function — and a
+   * row whose mailbox is missing (settings) is a view rather than a destination,
+   * which is why `mailbox` is optional on the item.
+   */
   activateNavigation(item: NavigationItem): void {
+    const entry = NAVIGATION_ITEMS.find((candidate) => candidate.id === item);
     this.set({ overlay: "none" });
-    if (item === "settings") {
-      this.setOverlay("settings");
-      return;
-    }
-    if (item === "inbox") this.setMailbox("inbox");
-    if (item === "spam") this.setMailbox("spam");
-    if (item === "trash") this.setMailbox("trash");
+    if (!entry) return;
+    if (entry.mailbox) this.setMailbox(entry.mailbox);
+    else this.setOverlay("settings");
   }
 
   // ── Filters ───────────────────────────────────────────────────────────────
@@ -709,64 +1113,103 @@ export class WinnowStore {
     const isActive = active.some((existing) => filterKey(existing) === key);
 
     if (isActive) {
-      this.set({ activeFilters: active.filter((f) => filterKey(f) !== key) }, this.filterPatch());
+      this.setFilters(active.filter((f) => filterKey(f) !== key));
       return;
     }
 
     if (filter.kind === "builtin" && filter.id === "unsafe") {
-      this.set({ activeFilters: [filter] }, this.filterPatch());
+      this.setFilters([filter]);
       return;
     }
 
-    this.set({ activeFilters: [...active, filter] }, this.filterPatch());
+    // A muted bucket cannot be re-activated. Muting is a statement that the bucket
+    // is over-firing, and letting a filter turn it back on would apply a mute and
+    // an activation to the same mail at once — the list would show exactly the
+    // messages the user asked to stop seeing, and the pill would read as if the
+    // mute had not worked.
+    if (filter.kind === "builtin" && this.persistedRemoved.has(filter.id)) return;
+
+    this.setFilters([...active, filter]);
+  }
+
+  /**
+   * Replace the active set and persist it.
+   *
+   * One method, because persisting the active set has to be computed from the set
+   * being installed. Passing a patch alongside the new value meant the two were
+   * built at different moments: `set` evaluates its arguments before it runs, so
+   * `filterPatch()` read the *previous* state and wrote that. The effect was that
+   * turning a bucket on persisted "off" — and the persisted set was one click
+   * behind for the rest of the session, so the filters you saw after a reload
+   * were the ones you had before the click.
+   */
+  private setFilters(activeFilters: FilterId[]): void {
+    this.set(
+      { activeFilters, mutedFilters: this.mutedList() },
+      {
+        activeFilters: activeFilters.map(filterKey),
+        removedFilters: [...this.persistedRemoved],
+      },
+    );
   }
 
   clearFilters(): void {
     if (this.state.activeFilters.length === 0) return;
-    this.set({ activeFilters: [] }, this.filterPatch());
-  }
-
-  private filterPatch(): PersistPatch {
-    return { activeFilters: this.state.activeFilters.map(filterKey) };
+    this.setFilters([]);
   }
 
   /**
    * Mute a bucket: hide its mail *and* tell the learning model.
    *
-   * Mutes survive sign-out, unlike filters — muting is a statement about the
-   * mail, not about this session.
+   * Mutes survive sign-out and survive a reload, unlike filters — muting is a
+   * statement about the mail, not about this session, and a preference that reset
+   * on every launch is not a preference. The bucket stays in the rail, struck
+   * through, so the mute can be undone from the same place it was made; see
+   * `orderedRail`.
    */
   dismissFilter(filter: BuiltinSmartFilter): void {
-    if (filter === "unsafe") return;
+    if (filter === "unsafe" || this.persistedRemoved.has(filter)) return;
     this.persistedRemoved.add(filter);
-    this.set(
-      {
-        activeFilters: this.state.activeFilters.filter(
-          (f) => !(f.kind === "builtin" && f.id === filter),
-        ),
-      },
-      this.filterPatch(),
+    this.setFilters(
+      this.state.activeFilters.filter(
+        (f) => !(f.kind === "builtin" && f.id === filter),
+      ),
     );
 
     // The rejection is about a *bucket*, not a message, so it is recorded
     // without one. Attaching the open message would teach the model that this
     // particular message was a bad example, which is a much stronger claim than
     // the user made.
-    this.setLearning(this.state.learning.rejectFilter(filter, null, null, Date.now()));
+    this.setLearning(this.state.learning.rejectFilter(filter, null, null, this.now()));
   }
 
   /** Unmute a bucket. */
   restoreFilter(filter: BuiltinSmartFilter): void {
-    this.persistedRemoved.delete(filter);
-    this.set({});
+    if (!this.persistedRemoved.delete(filter)) return;
+    this.set(
+      { mutedFilters: this.mutedList() },
+      { removedFilters: [...this.persistedRemoved] },
+    );
+  }
+
+  /**
+   * Adopt a persisted set of mutes.
+   *
+   * Separate from the constructor because the restored set has to arrive *with*
+   * the persisted filters and mailbox — the three are one decision, split across
+   * three keys — and calling `restoreFilter` per bucket would re-notify and
+   * re-persist on the way in.
+   */
+  adoptRemovedFilters(filters: readonly BuiltinSmartFilter[]): void {
+    for (const id of BUILTIN_FILTERS) {
+      if (filters.includes(id)) this.persistedRemoved.add(id);
+    }
+    this.state = { ...this.state, mutedFilters: this.mutedList() };
+    this.notify();
   }
 
   isFilterRemoved(filter: BuiltinSmartFilter): boolean {
     return this.persistedRemoved.has(filter);
-  }
-
-  get removedFilters(): ReadonlySet<BuiltinSmartFilter> {
-    return this.persistedRemoved;
   }
 
   /** Hide every message from a sender, everywhere. */
@@ -845,6 +1288,18 @@ export class WinnowStore {
     this.move(id, destination);
   }
 
+  /**
+   * Move a message to another mailbox.
+   *
+   * The discard is recorded here rather than by the caller, because it is the
+   * move itself that is the signal: the profile's trash bias is a statement about
+   * how often the user bins each sender, and the only place that number can be
+   * observed is the instant they do it. Recording it in the UI would miss every
+   * keyboard-driven filing, which is most of them.
+   *
+   * Moving marks read. A message you have filed away is a message you have dealt
+   * with, and leaving it bold in the next mailbox is noise.
+   */
   move(id: number, mailbox: Mailbox): void {
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!email || email.mailbox === mailbox) return;
@@ -852,8 +1307,10 @@ export class WinnowStore {
     const previousMailbox = email.mailbox;
     const previousUnread = email.unread;
 
-    // Moving marks read. A message you have filed away is a message you have
-    // dealt with, and leaving it bold in the next mailbox is noise.
+    if (mailbox === "trash" && !this.trashSenders.includes(email.sender)) {
+      this.trashSenders = [...this.trashSenders, email.sender];
+    }
+
     this.mutate(id, () => ({ ...email, mailbox, unread: false }), async () => {
       await this.backend?.moveToMailbox(id, mailbox);
     }, { previousMailbox, previousUnread });
@@ -889,16 +1346,33 @@ export class WinnowStore {
     });
   }
 
-  /** Mark every message in the current mailbox read. */
+  /**
+   * Mark every message in the current mailbox read.
+   *
+   * The mailbox on screen, and only that one. Clearing read state everywhere is
+   * both a surprise — you were looking at the inbox, and your archive quietly went
+   * quiet — and a divergence, because only the current mailbox's messages are
+   * pushed to the server, so the rest would snap back on the next sync.
+   *
+   * The undo is the list of ids it touched, not a captured array: a rollback that
+   * restored a stale snapshot would undo whatever else happened in between.
+   */
   markAllRead(): void {
-    const unread = this.state.all.filter(
-      (email) => email.mailbox === this.state.mailbox && email.unread,
+    const mailbox = this.state.mailbox;
+    const ids = new Set(
+      this.state.all
+        .filter((email) => email.mailbox === mailbox && email.unread)
+        .map((email) => email.id),
     );
-    if (unread.length === 0) return;
-    const snapshot = this.state.all;
-    this.set({ all: snapshot.map((email) => (email.unread ? { ...email, unread: false } : email)) });
-    for (const email of unread) {
-      this.backend?.setRead(email.id, true).catch(() => undefined);
+    if (ids.size === 0) return;
+
+    this.set({
+      all: this.state.all.map((email) =>
+        ids.has(email.id) ? { ...email, unread: false } : email,
+      ),
+    });
+    for (const email of this.state.all) {
+      if (ids.has(email.id)) this.backend?.setRead(email.id, true).catch(() => undefined);
     }
     void this.applyPlatform();
   }
@@ -1112,16 +1586,21 @@ export class WinnowStore {
     if (this.classifyTimer) clearTimeout(this.classifyTimer);
     this.classifyTimer = setTimeout(() => {
       this.classifyTimer = null;
-      // Bumped once: the whole derived tree is recomputed from the new weights,
+      // Notified once: the whole derived tree is recomputed from the new weights,
       // and every consumer sees the same new world.
-      this.version += 1;
-      for (const listener of this.listeners) listener();
+      this.notify();
       this.onWeightsChanged?.(this.state.learning);
     }, 80);
   }
 
   dismissError(): void {
     this.set({ error: null });
+  }
+
+  /** Dismiss the non-blocking sync notice, e.g. after the user has read it. */
+  dismissNotice(): void {
+    if (this.state.notice === null) return;
+    this.set({ notice: null });
   }
 
   setError(message: string | null): void {
@@ -1143,6 +1622,7 @@ export class WinnowStore {
    */
   markDemoMode(): void {
     this.backend = undefined;
+    this.pendingConnect = null;
     this.set({
       status: "ready",
       account: null,
@@ -1152,7 +1632,11 @@ export class WinnowStore {
       searchQuery: "",
       overlay: "none",
       syncing: false,
+      syncPhase: null,
+      syncFraction: null,
+      truncated: false,
       error: null,
+      notice: null,
       lastSyncedAt: null,
       // The seed is built around this instant. Leaving the wall clock in place
       // would drop the entire demo into one "Earlier" section and hide the one
@@ -1161,15 +1645,25 @@ export class WinnowStore {
     });
   }
 
-  /** Sign out: clear the session but keep the things that describe the user. */
+  /**
+   * Sign out: clear the session but keep the things that describe the user.
+   *
+   * The line drawn here is "what is about this account" versus "what is about this
+   * person". Mail, the account, the unread state and the active filters are the
+   * account's; preferences, blocked senders, mutes and what Winnow learned are
+   * the person's. Keeping the second group is the whole reason a user can sign
+   * back in and find the app already tuned.
+   */
   async signOut(): Promise<void> {
-    // Mutes and blocked senders survive: they are statements about the mail,
-    // not about this session.
+    // Kept across the boundary rather than spread back afterwards, because
+    // `this.state` is replaced wholesale below and anything not in `keep` is gone.
     const keep = {
       preferences: this.state.preferences,
       learning: this.state.learning,
     };
+    const mutes = [...this.persistedRemoved];
     this.backend = undefined;
+    this.pendingConnect = null;
 
     // Park the background ticker *before* dropping the backend. On the desktop
     // this is a Rust thread that would otherwise keep firing every minute,
@@ -1179,6 +1673,8 @@ export class WinnowStore {
     // And clear the badge, for the same reason: a signed-out app with "12
     // unread" still on the dock badge is a lie the user has to look at.
     await this.platform?.setUnreadBadge(0).catch(() => undefined);
+
+    this.persistedRemoved = new Set(mutes);
     this.state = {
       ...this.state,
       status: "signed_out",
@@ -1188,14 +1684,33 @@ export class WinnowStore {
       cursorIndex: NO_CURSOR,
       activeFilters: [],
       searchQuery: "",
+      mailbox: "inbox",
       overlay: "none",
       syncing: false,
+      syncPhase: null,
+      syncFraction: null,
+      truncated: false,
       error: null,
+      notice: null,
+      recentIds: new Set(),
+      lastSyncedAt: null,
       ...keep,
     };
-    this.version += 1;
-    for (const listener of this.listeners) listener();
+    this.notify();
   }
+}
+
+/**
+ * A signal map for mail that is deliberately not classified.
+ *
+ * `NEUTRAL_SIGNALS` is a frozen-by-convention shared object, so it is handed out
+ * as-is rather than copied per message: it has no mutable fields, and a map of a
+ * few thousand identical references costs nothing next to a few thousand copies.
+ */
+function neutralSignalsFor(emails: readonly Email[]): SignalMap {
+  const map = new Map<number, EmailSignals>();
+  for (const email of emails) map.set(email.id, NEUTRAL_SIGNALS);
+  return map;
 }
 
 /** The message shown when a sync could not download everything. */
@@ -1203,5 +1718,20 @@ export function syncFailureSummary(count: number): string {
   return `${count} message${count === 1 ? "" : "s"} failed to download this sync — refresh to retry.`;
 }
 
+/**
+ * The non-blocking half of a sync's outcome.
+ *
+ * A truncated view is not an error: the sync worked, the user just has more mail
+ * than Winnow will walk. It went into `error` before, which is the wrong channel
+ * twice over — an error banner is dismissible and alarming, and the thing it
+ * would have said ("only some of your archive is here") is a permanent property of
+ * the account rather than something that resolves on retry.
+ */
+export function syncNotice(result: { truncated: boolean }): string | null {
+  return result.truncated
+    ? "Some mailboxes hold more than Winnow will walk, so older messages are not listed."
+    : null;
+}
+
 /** Every bucket, for the settings panel's mute list. */
-export { BUILTIN_FILTERS, matchesFilter };
+export { BUILTIN_FILTERS };

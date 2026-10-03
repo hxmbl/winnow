@@ -21,26 +21,74 @@ export type PillItem = {
   id: FilterId;
   label: string;
   colors: PillColors;
-  /** How many messages this bucket currently holds. */
+  /**
+   * How many messages this bucket holds in the *inbox*.
+   *
+   * Inbox-wide, not "in the current view", and that distinction is the reason this
+   * function takes its counts from the store rather than deriving them: the rail is
+   * ranked against the inbox so it stays put when you change mailbox, and a count
+   * that meant something else would put a number on a pill that contradicts the rank
+   * beside it.
+   */
   count: number;
-  /** Muted by the user: shown separately, in a struck-through state. */
+  /**
+   * Muted by the user: drawn struck through, with a restore control.
+   *
+   * Optional because a pill's mutability is a property of the *bucket*, not of the
+   * sender pills — and sender pills have no such state, because there is no learning
+   * to do from silencing one person. `buildPills` sets it for every builtin pill
+   * (true or false), so the component can branch on `id.kind === "builtin"` and this
+   * field together.
+   */
   muted?: boolean;
 };
 
-/** Build the rail's items from the store's ranked buckets and the counts. */
+/**
+ * Build the rail's items from the store's ranked buckets and the counts.
+ *
+ * `muted` is passed in rather than derived, because the store is what knows: a muted
+ * bucket is instance state on the store (it survives a reload from persistence, and
+ * a bucket the user muted must stay muted), and it is *not* inferable from the counts
+ * — a muted bucket with mail in it and a live bucket with mail in it have identical
+ * counts.
+ *
+ * A muted pill is drawn struck through, with its dismiss button replaced by a restore
+ * one. That is the whole reason muting is reversible from the rail: without the
+ * marker, a muted pill is indistinguishable from an active one, its ✕ calls a
+ * no-op, and the user is left with a setting they cannot undo.
+ */
 export function buildPills(
   rail: readonly BuiltinSmartFilter[],
   counts: ReadonlyMap<BuiltinSmartFilter, number>,
   topSenders: readonly string[],
   senderCounts: ReadonlyMap<string, number>,
   activeFilters: readonly FilterId[],
+  mutedFilters: readonly BuiltinSmartFilter[] = [],
 ): PillItem[] {
-  const buckets: PillItem[] = rail.map((id) => ({
-    id: { kind: "builtin", id },
-    label: FILTER_LABELS[id],
-    colors: FILTER_PILLS[id],
-    count: counts.get(id) ?? 0,
-  }));
+  const muted = new Set(mutedFilters);
+  // A muted bucket is at the end of the rail and is not filterable, so it must not
+  // take a digit — and the digits are assigned by position, which means muting a
+  // bucket would otherwise silently repoint every shortcut after it. So the muted
+  // pills are counted separately and take no index.
+  const buckets: PillItem[] = rail
+    .filter((id) => !muted.has(id))
+    .map((id) => ({
+      id: { kind: "builtin", id },
+      label: FILTER_LABELS[id],
+      colors: FILTER_PILLS[id],
+      count: counts.get(id) ?? 0,
+      muted: false,
+    }));
+
+  const mutedBuckets: PillItem[] = rail
+    .filter((id) => muted.has(id))
+    .map((id) => ({
+      id: { kind: "builtin", id },
+      label: FILTER_LABELS[id],
+      colors: FILTER_PILLS[id],
+      count: counts.get(id) ?? 0,
+      muted: true,
+    }));
 
   /**
    * Sender pills, from the same engagement ranking the classifier uses, so
@@ -73,10 +121,13 @@ export function buildPills(
       label: `From ${filter.sender}`,
       colors: senderPillColors(filter.sender),
       count: senderCounts.get(filter.sender) ?? 0,
+      muted: false,
     });
   }
 
-  return [...buckets, ...senders];
+  // Muted buckets last, so the digit-to-pill mapping is only ever shifted by buckets
+  // that can actually be filtered by.
+  return [...buckets, ...senders, ...mutedBuckets];
 }
 
 /**

@@ -269,11 +269,23 @@ export const NAVIGATION_ITEMS: readonly { id: NavigationItem; label: string; mai
   { id: "settings", label: "Settings" },
 ] as const;
 
-/** Where the palette's selection should land for a given mailbox. */
+/**
+ * Where the palette's selection should land for a given mailbox.
+ *
+ * Derived from `NAVIGATION_ITEMS` rather than hardcoded, because the previous
+ * implementation returned `0` for every mailbox and threw its argument away — so
+ * opening the palette from Spam or the bin always highlighted Inbox, and the
+ * keyboard path through the palette (`!`, then Enter) jumped somewhere the user
+ * was not. The `inbox` fallback is deliberate for Archive, which is not in the
+ * palette: arriving there, the most useful jump is back to where the work is.
+ */
 export function navigationIndexFor(mailbox: Mailbox): number {
-  // Archive is not in the palette, so it maps to the top — the inbox — the
-  // same way the Swift implementation did: arriving in Archive, the most
-  // useful jump is back to where the work is.
-  void mailbox;
-  return 0;
+  const index = NAVIGATION_ITEMS.findIndex((item) => item.mailbox === mailbox);
+  return index >= 0 ? index : 0;
+}
+
+/** Clamp an index into a list, or `0` for an empty one. */
+export function clampIndex(index: number, length: number): number {
+  if (length <= 0) return 0;
+  return Math.min(Math.max(index, 0), length - 1);
 }

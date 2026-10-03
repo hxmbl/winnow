@@ -156,14 +156,6 @@ export const FILTER_PILLS: Record<BuiltinSmartFilter, PillColors> = {
   long_reads: grey("#C8D2D3"),
 };
 
-/** The flat grey a sender pill falls back to. */
-export const NEUTRAL_PILL: PillColors = {
-  accent: "#C5D0D1",
-  edge: "#C5D0D1",
-  alpha: PILL_ALPHA,
-  solid: "#A3B3B6",
-};
-
 /**
  * A stable colour per sender, derived from the address.
  *
@@ -236,27 +228,12 @@ export function pillBackground(colors: PillColors, on: boolean): string {
   ].join(" ");
 }
 
-/** The badge accent for a bucket, for the reader's chips. */
-export const BADGE_COLORS: Record<BuiltinSmartFilter, string> = {
-  urgent: "#C2410C",
-  security: "#0369A1",
-  unsafe: "#C2410C",
-  needs_action: "#B45309",
-  important: "#A16207",
-  starred: "#B8860B",
-  receipts: "#0E7490",
-  shipping: "#4D7C0F",
-  travel: "#4338CA",
-  events: "#7E22CE",
-  codes: "#A21CAF",
-  social: "#4F46E5",
-  unread: "#3F6212",
-  attachments: "#3F6212",
-  new_senders: "#0E7490",
-  top_contacts: "#15803D",
-  quiet_contacts: "#4D7C0F",
-  newsletters: "#575757",
-  promotional: "#15803D",
-  low_priority: "#334155",
-  long_reads: "#334155",
-};
+/**
+ * The badge accents live in `theme.ts`, not here.
+ *
+ * They used to be duplicated as `BADGE_COLORS`, which is how they came to
+ * disagree with the palette the app actually renders — two sources of truth for
+ * one colour, one of which nothing displayed. The reader's chips read
+ * `--wn-badge-<id>` (and the wash/edge derived from it), which is the same source
+ * as everything else.
+ */

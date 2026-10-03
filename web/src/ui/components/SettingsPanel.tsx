@@ -14,7 +14,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Check, RotateCcw, X } from "lucide-react";
+import { Check, RotateCcw } from "lucide-react";
+import { Sheet, SheetHeader } from "./Overlay";
 import {
   SIGNAL_KEYS,
   adjustment,
@@ -22,50 +23,9 @@ import {
   type SignalWeights,
 } from "../../core/classify/weights";
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
+import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
-
-/** The sheet chrome both panels share. */
-function Sheet({
-  title,
-  onClose,
-  children,
-  width = "max-w-[520px]",
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  width?: string;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-        className={`thin-scroll animate-sheet max-h-[85vh] w-full ${width} overflow-y-auto rounded-pane border border-hairline bg-chrome shadow-lift`}
-      >
-        <div className="sticky top-0 flex items-center justify-between gap-3 border-b border-hairline bg-chrome px-5 py-3.5">
-          <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -106,6 +66,15 @@ export type SettingsProps = {
   onSortBy: (sort: SortBy) => void;
   appearance: "system" | "light" | "dark";
   onAppearance: (value: "system" | "light" | "dark") => void;
+  /**
+   * Whether the reader can render a message's own markup at all.
+   *
+   * True on both hosts — the reader puts the sender's HTML in a `sandbox=""` iframe,
+   * which loads its images without running a line of it. The flag is here so a future
+   * build that genuinely cannot (a webview without iframe isolation, say) hides the
+   * row rather than offering a switch that would do nothing.
+   */
+  canLoadRemoteContent: boolean;
   loadRemoteContent: boolean;
   onLoadRemoteContent: (value: boolean) => void;
   notificationsEnabled: boolean;
@@ -123,6 +92,9 @@ export type SettingsProps = {
   events: readonly FeedbackEvent[];
   blockedSenders: readonly string[];
   onUnblock: (sender: string) => void;
+  /** Buckets the user has silenced, so a mute can be undone from here too. */
+  mutedFilters: readonly BuiltinSmartFilter[];
+  onRestoreFilter: (id: BuiltinSmartFilter) => void;
   /** True when the build is a desktop shell, so the OS-only rows make sense. */
   isDesktop: boolean;
   onClose: () => void;
@@ -185,8 +157,16 @@ export function Settings(props: SettingsProps) {
   const [showHistory, setShowHistory] = useState(false);
 
   return (
-    <Sheet title="Settings" onClose={props.onClose}>
-      <Section title="Reading">
+    <Sheet
+      label="Settings"
+      onClose={props.onClose}
+      // The sheet scrolled its own body, not the panel, so the panel is not itself the
+      // scroller — which keeps the focus trap's `offsetParent` check meaningful.
+      className="flex max-h-[85vh] w-full max-w-[520px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+    >
+      <SheetHeader title="Settings" onClose={props.onClose} />
+      <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
+        <Section title="Reading">
         <Row label="Sort messages by">
           <div className="flex gap-1 rounded-full border border-hairline p-0.5">
             {SORT_OPTIONS.map((option) => (
@@ -209,10 +189,10 @@ export function Settings(props: SettingsProps) {
 
         <Row
           label="Load remote images"
-          hint="Tracking pixels confirm you opened a message. Turn this on for messages you trust."
+          hint="Off by default: an image confirms the message was opened and roughly where. On, messages are rendered in a sandbox that runs none of the sender's code."
         >
           <Toggle
-            checked={props.loadRemoteContent}
+            checked={props.canLoadRemoteContent && props.loadRemoteContent}
             onChange={props.onLoadRemoteContent}
             label="Load remote images"
           />
@@ -374,6 +354,38 @@ export function Settings(props: SettingsProps) {
           ))}
         </Section>
       )}
+
+      {/*
+        The muted buckets.
+
+        The rail also carries them, struck through, with a restore control on each — so
+        this section is a second route rather than the only one. It exists because the
+        rail is a strip that scrolls, and a bucket muted weeks ago is not something
+        anyone scrolls to look for. A setting you cannot find is a setting you have to
+        remember, and what would have to be remembered here is "which bucket did I
+        kill".
+      */}
+      {props.mutedFilters.length > 0 && (
+        <Section title={`Hidden buckets (${props.mutedFilters.length})`}>
+          <p className="-mt-1 text-[12px] text-ink-subtle">
+            Not counted or shown in your inbox, and Winnow has learned they were
+            over-firing.
+          </p>
+          {props.mutedFilters.map((id) => (
+            <Row key={id} label={FILTER_LABELS[id]}>
+              <button
+                type="button"
+                onClick={() => props.onRestoreFilter(id)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-control-border px-3 py-1 text-[12px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <Check size={12} strokeWidth={2.4} aria-hidden="true" />
+                Show again
+              </button>
+            </Row>
+          ))}
+        </Section>
+      )}
+      </div>
     </Sheet>
   );
 }
@@ -412,6 +424,8 @@ function Toggle({
 // ── Composer ────────────────────────────────────────────────────────────────
 
 export type ComposerProps = {
+  /** Reply or forward: the title, and whether a recipient is expected. */
+  mode: "reply" | "forward";
   to: readonly string[];
   subject: string;
   body: string;
@@ -420,11 +434,14 @@ export type ComposerProps = {
   error: string | null;
   onChange: (patch: { to?: string[]; subject?: string; body?: string }) => void;
   onSend: () => void;
+  /** Close, having said the word. No confirmation. */
   onDiscard: () => void;
+  /** Close from Escape, the X, or the backdrop. May confirm. */
   onClose: () => void;
 };
 
 export function Composer({
+  mode,
   to,
   subject,
   body,
@@ -436,29 +453,67 @@ export function Composer({
   onClose,
 }: ComposerProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const toRef = useRef<HTMLInputElement>(null);
+  /** `true` until the mount effect has placed the caret. */
+  const placed = useRef(false);
 
-  // The composer takes focus on open, and Escape returns it to the reader
-  // without sending. A reply that requires you to click into a box before you
-  // can read the quote is a reply nobody reads.
-  //
-  // `body.length` is in the dependency list even though it is only read as a
-  // boolean: without it the effect is honest about what it depends on, and if
-  // the composer is ever mounted against a body that arrives *later* — a draft
-  // restored from a draft store, say — the caret still lands above the quote
-  // instead of after it. An exhaustive-deps warning here is a real behaviour
-  // change waiting to happen, not noise.
+  /*
+    Focus and caret placement, once per *mount*.
+
+    This effect used to depend on `body.length`, which changes on every keystroke —
+    so every character re-ran it and called `setSelectionRange(0, 0)`. Typing put the
+    caret back at the start each time, which means `hello` came out as `olleh`: reply,
+    the one thing a mail client cannot get wrong, was unusable. The comment above the
+    old version argued the dependency was there on purpose, and it was the argument
+    that kept it there.
+
+    The intent it was defending is real and is now served explicitly: put the caret at
+    the *top* of the body, above the quote, so what the user types goes above what is
+    being replied to. A forward has no quote, so its caret goes to the top too, which
+    is where a forward's own text belongs. `placed` makes it once-only without an empty
+    dependency array, which would be a lie about what this depends on.
+
+    **A forward does not touch the body at all.** `Sheet` is told to focus the To field
+    for a forward (`initialFocus`), and this effect ran *after* that — React fires a
+    child's effects before its parent's, so `Sheet` focused the To input, and then this
+    immediately stole it for the textarea. The stated intent above ("a forward's caret
+    goes to the top") is about the body once you have chosen to write in it; deciding
+    *which* field you start in belongs to `Sheet`, and the two must not both answer it.
+    Getting this wrong meant a forward opened with the caret in an empty body while Send
+    stayed disabled for want of a recipient — the sheet looked broken and nothing said why.
+  */
   useEffect(() => {
+    if (placed.current || mode === "forward") return;
+    placed.current = true;
     bodyRef.current?.focus();
-    if (bodyRef.current && body.length > 0) bodyRef.current.setSelectionRange(0, 0);
-  }, [body.length]);
+    bodyRef.current?.setSelectionRange(0, 0);
+  }, [mode]);
+
+  const title = mode === "reply" ? "Reply" : "Forward";
 
   return (
-    <Sheet title="Reply" onClose={onClose} width="max-w-[640px]">
+    <Sheet
+      label={title}
+      onClose={onClose}
+      // The composer is not dismissable by clicking away from it. A click just
+      // outside a 640px dialog is not "I have decided to abandon this", and it used to
+      // destroy a typed reply with no confirmation and no draft kept. Escape and the
+      // close button still work, and both go through `onClose`, which *may* confirm —
+      // so the destructive paths still exist and they still ask.
+      dismissOnBackdrop={false}
+      initialFocus={mode === "forward" ? toRef : bodyRef}
+      className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+    >
+      <SheetHeader title={title} onClose={onClose} />
+      <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
       <div className="flex flex-col gap-3 px-5 py-4">
         <div className="flex items-center gap-2 text-[12.5px]">
           <span className="w-12 shrink-0 text-ink-subtle">To</span>
           <input
+            ref={toRef}
             type="text"
+            aria-label="To"
+            placeholder="name@example.com, another@example.com"
             value={to.join(", ")}
             onChange={(event) =>
               onChange({
@@ -468,7 +523,7 @@ export function Composer({
                   .filter(Boolean),
               })
             }
-            className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus-visible:border-[var(--wn-inkBody)]"
+            className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-[var(--wn-inkBody)]"
           />
         </div>
 
@@ -476,6 +531,7 @@ export function Composer({
           <span className="w-12 shrink-0 text-ink-subtle">Subject</span>
           <input
             type="text"
+            aria-label="Subject"
             value={subject}
             onChange={(event) => onChange({ subject: event.target.value })}
             className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus-visible:border-[var(--wn-inkBody)]"
@@ -484,11 +540,12 @@ export function Composer({
 
         <textarea
           ref={bodyRef}
+          aria-label="Message"
           value={body}
           onChange={(event) => onChange({ body: event.target.value })}
           rows={16}
           spellCheck
-          className="selectable thin-scroll w-full resize-y rounded-md border border-hairline bg-surface p-3 font-mono text-[13px] leading-[1.7] text-ink-body outline-none focus-visible:border-[var(--wn-inkBody)]"
+          className="selectable thin-scroll w-full resize-y rounded-md border border-hairline bg-surface p-3 text-[13.5px] leading-[1.7] text-ink-body outline-none focus-visible:border-[var(--wn-inkBody)]"
         />
 
         {error && (
@@ -501,7 +558,11 @@ export function Composer({
           <button
             type="button"
             onClick={onSend}
+            // A forward with no recipient is unsendable, and a disabled Send is a
+            // truthful statement about that. `title` says why, because a greyed-out
+            // button with no explanation is its own small puzzle.
             disabled={sending || to.length === 0}
+            title={to.length === 0 ? "Add at least one recipient" : undefined}
             className="rounded-full bg-[var(--wn-inkBody)] px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {sending ? "Sending…" : "Send"}
@@ -513,10 +574,13 @@ export function Composer({
           >
             Discard
           </button>
-          <span className="ml-auto text-[11.5px] text-ink-subtle">
-            The quoted message below is kept only if you leave it exactly as it is.
+          <span className="ml-auto text-right text-[11.5px] text-ink-subtle">
+            {mode === "reply"
+              ? "The quoted message is kept only if you leave it exactly as it is."
+              : "The whole conversation is quoted below, without the reply markers."}
           </span>
         </div>
+      </div>
       </div>
     </Sheet>
   );

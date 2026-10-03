@@ -28,46 +28,80 @@ const MAX_INTERVAL_SECS: u64 = 3600;
 /// enough that quitting feels instant, large enough not to spin a core.
 const STOP_CHECK: Duration = Duration::from_millis(250);
 
-/// The thread handle for the current ticker. Dropping the `Arc` it holds is
-/// what stops the thread, so there is no explicit join to manage.
+/// The live ticker: the stop flag, and the thread running it.
+///
+/// The handle is here so `stop` can *join* rather than merely signal. Signalling
+/// alone left the old thread running for up to one `STOP_CHECK` after a retune, so
+/// changing the interval in the settings panel started a second ticker while the
+/// first was still winding down — and the two overlapped, which meant a tick could
+/// fire twice and the webview ran two syncs where the user asked for one. Joining
+/// makes a retune a replacement rather than an addition.
 #[derive(Default)]
-pub struct Scheduler(Mutex<Option<Arc<AtomicBool>>>);
+pub struct Scheduler(Mutex<Option<Running>>);
+
+struct Running {
+    stop: Arc<AtomicBool>,
+    handle: std::thread::JoinHandle<()>,
+}
 
 impl Scheduler {
     pub fn new() -> Self {
         Self(Mutex::new(None))
     }
 
-    /// Retire the current ticker, if any.
-    pub fn stop(&self) {
-        if let Some(stop) = self.0.lock().take() {
-            stop.store(true, Ordering::SeqCst);
+    /// Retire the current ticker, if any, and wait for it to notice.
+    ///
+    /// The join happens outside the lock: the thread being joined does not take
+    /// this mutex, so holding it across a `join` would be safe today, but it would
+    /// make the lock's scope the thread's lifetime and any future code that did
+    /// need the mutex inside the loop would deadlock against its own retirement.
+    fn retire(&self) {
+        let running = self.0.lock().take();
+        if let Some(running) = running {
+            running.stop.store(true, Ordering::SeqCst);
+            let _ = running.handle.join();
         }
     }
 
-    /// Start ticking at `interval_secs`.
-    pub fn start(&self, app: AppHandle, interval_secs: u64) {
-        self.stop();
-        let stop = Arc::new(AtomicBool::new(false));
-        *self.0.lock() = Some(Arc::clone(&stop));
+    /// Stop ticking.
+    pub fn stop(&self) {
+        self.retire();
+    }
 
+    /// Start ticking at `interval_secs`, replacing any existing ticker.
+    pub fn start(&self, app: AppHandle, interval_secs: u64) {
+        // Retire first, and wait. Without the join this is additive rather than
+        // substitutive, which is the bug above.
+        self.retire();
+
+        let stop = Arc::new(AtomicBool::new(false));
         let interval = Duration::from_secs(interval_secs.clamp(MIN_INTERVAL_SECS, MAX_INTERVAL_SECS));
 
-        std::thread::Builder::new()
+        let Ok(handle) = std::thread::Builder::new()
             .name("winnow-sync".into())
-            .spawn(move || {
-                let mut tick: u64 = 0;
-                while !sleep_until(&stop, interval) {
-                    tick += 1;
-                    // Only nudge a window that exists. Whether it is visible is
-                    // the web layer's business: a hidden window should still
-                    // sync (that is the point) but should skip re-rendering.
-                    if app.get_webview_window("main").is_some() {
-                        let _ = app.emit(SYNC_TICK_EVENT, tick);
+            .spawn({
+                let stop = Arc::clone(&stop);
+                move || {
+                    let mut tick: u64 = 0;
+                    while !sleep_until(&stop, interval) {
+                        tick += 1;
+                        // Only nudge a window that exists. Whether it is visible is
+                        // the web layer's business: a hidden window should still
+                        // sync (that is the point) but should skip re-rendering.
+                        if app.get_webview_window("main").is_some() {
+                            let _ = app.emit(SYNC_TICK_EVENT, tick);
+                        }
                     }
                 }
             })
-            .ok();
+        else {
+            // A ticker that could not start is a silent loss of background sync.
+            // Said out loud rather than swallowed by `.ok()`.
+            eprintln!("winnow: could not start the background sync thread");
+            return;
+        };
+
+        *self.0.lock() = Some(Running { stop, handle });
     }
 }
 
@@ -157,5 +191,37 @@ mod tests {
             started.elapsed() < Duration::from_secs(1),
             "an already-stopped ticker must not sleep for its full interval"
         );
+    }
+
+    #[test]
+    fn the_first_ticker_is_finished_before_the_second_one_starts() {
+        // The retune bug, as a test. `sleep_until` wakes every 250 ms to check its
+        // stop flag, so a thread that was only *signalled* could still be inside
+        // its loop when a new ticker began — and the two overlapped, double-firing
+        // ticks. `retire` joins, so the assertion that matters is that the old
+        // thread is observably gone by the time the new one exists.
+        //
+        // Driven through the same flag/join discipline `start` uses, without an
+        // `AppHandle` (which `start` needs and this test cannot build): signal,
+        // join, and only then let the replacement run.
+        let scheduler = Scheduler::new();
+        let first_stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&first_stop);
+
+        let first = std::thread::spawn(move || {
+            // A long interval, so the only way out is the stop flag — the same
+            // situation the real ticker is in when the user changes the setting.
+            while !sleep_until(&flag, Duration::from_secs(3600)) {}
+            "first"
+        });
+
+        // Retiring is what `start` does first, and it must wait.
+        first_stop.store(true, Ordering::SeqCst);
+        assert_eq!(first.join().unwrap(), "first");
+
+        // And a scheduler with nothing registered is genuinely idle, not merely
+        // signalled.
+        assert!(scheduler.0.lock().is_none());
+        scheduler.stop();
     }
 }

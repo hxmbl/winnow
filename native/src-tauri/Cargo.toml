@@ -14,14 +14,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# `image-ico` alongside `image-png`: `default_window_icon()` reads the platform's
+# own format, so on Windows a PNG-only bundle builds fine and then has no icon to
+# put in the tray.
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
+
 tauri-plugin-autostart = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-os = "2"
-tauri-plugin-store = "2"
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
@@ -30,11 +33,17 @@ tiny_http = "0.12"
 tokio = { version = "1", features = ["sync", "rt", "time"] }
 url = "2"
 parking_lot = "0.12"
-log = "0.4"
 
-[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+# `tauri-plugin-os` and `tauri-plugin-store` were both listed here and neither was
+# called: the frontend reports its own platform facts through `app_info`, and
+# persistence is `localStorage` in the web layer (the *secrets* go to the keychain,
+# which is `keyring` directly). Removing them takes two plugins out of the binary
+# and two sets of ACL permissions out of the window's reach — `capabilities/default.json`
+# no longer grants either, so leaving the dependencies would mean granting nothing
+# for something that exists.
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
-tauri-plugin-autostart = "2"
 tauri-plugin-window-state = "2"
 
 [dev-dependencies]

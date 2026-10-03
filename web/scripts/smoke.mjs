@@ -1,190 +1,873 @@
 /**
- * A smoke test that actually runs the app.
+ * The end-to-end net.
  *
- * The unit tests cover `core/` in isolation, which is the right level for a
- * pure layer — but it means nothing has yet checked that the bundle boots, that
- * React mounts, or that the store's derived view reaches the screen. This does
- * that, against the real production build, and fails loudly on any console
- * error.
+ * The unit tests cover `core/` in isolation, which is the right level for a pure
+ * layer — but it means nothing has checked that the bundle boots, that React
+ * mounts, that the store's derived view reaches the screen, or that a keystroke
+ * does what the keybind table says it does. This does all of that against the
+ * real production build, and fails loudly on any console error.
  *
- * It is a *smoke* test, not a UI test: it asserts that the app rendered, that the
- * mailbox is populated, and that a few interactions do not throw. Anything more
- * precise about layout or pixels belongs in a component test, and there are
- * none on purpose.
+ * It owns its own server. `vite preview` is started in-process through Vite's JS
+ * API rather than as a child process, so there is no port to leave bound, no
+ * `SIGTERM` to get wrong, and no "the command in the README assumes something
+ * else is already running" — which is exactly how the previous version of this
+ * script was unusable: it pointed at `localhost:4173` and nothing in the repo
+ * ever served that port.
+ *
+ * `WINNOW_URL` points it at an existing server instead, for when you want to
+ * smoke the dev server (which does not need a build) or a deployed bundle.
+ *
+ * It is a *smoke* test, not a UI test suite: it asserts that things work and
+ * that the ones with a history of being broken stay fixed. Anything more precise
+ * about pixels belongs in a component test, and there are none on purpose.
  */
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { build, preview } from "vite";
 
-const URL = process.env.WINNOW_URL ?? "http://localhost:4173/";
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PORT = Number(process.env.WINNOW_PORT ?? 4173);
+const EXTERNAL = process.env.WINNOW_URL ?? null;
+const URL = EXTERNAL ?? `http://localhost:${PORT}/`;
 
-const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// ── Reporting ───────────────────────────────────────────────────────────────
+//
+// A check that throws takes the rest of the run with it, so every assertion is
+// written to *record and continue*. The cost of that is that a broken step can
+// cascade into failures further down; the benefit is that one regression does not
+// hide the other nine behind it. Steps that everything after them depends on use
+// `require`, which throws on purpose.
 
-/** Console errors are failures: a React warning in production is a bug. */
-const errors = [];
-page.on("console", (message) => {
-  if (message.type() === "error") errors.push(message.text());
-});
-page.on("pageerror", (error) => errors.push(String(error)));
+let passed = 0;
+const failures = [];
 
-function check(label, condition, detail = "") {
-  const status = condition ? "  ok  " : " FAIL ";
-  console.log(`[${status}] ${label}${detail ? ` — ${detail}` : ""}`);
-  if (!condition) process.exitCode = 1;
+function check(label, ok, detail = "") {
+  const line = `${label}${detail ? ` — ${detail}` : ""}`;
+  if (ok) {
+    passed += 1;
+    console.log(`  ok   ${line}`);
+  } else {
+    failures.push(line);
+    console.log(` FAIL  ${line}`);
+  }
+  return ok;
 }
 
-await page.goto(URL, { waitUntil: "networkidle" });
+/** A precondition. Throwing is the right behaviour: the steps after it are void. */
+function require(label, ok, detail = "") {
+  if (!check(label, ok, detail)) {
+    throw new Error(`smoke test cannot continue: ${label}`);
+  }
+  return true;
+}
 
-// ── It renders ─────────────────────────────────────────────────────────────
+function section(title) {
+  console.log(`\n── ${title} ${"─".repeat(Math.max(0, 66 - title.length))}`);
+}
 
-await page.waitForSelector("text=Nothing selected", { timeout: 10_000 });
-check("the app boots and the reader's empty state renders", true);
+// ── The server ──────────────────────────────────────────────────────────────
 
-// ── The demo mailbox is populated ──────────────────────────────────────────
+/**
+ * Build if there is nothing to serve.
+ *
+ * A stale `dist/` is *not* rebuilt: the honest contract is that `npm run smoke`
+ * runs `npm run build` first (see `package.json`), and a timestamp comparison
+ * would quietly paper over a build that was skipped. This is only the fallback
+ * for running the file directly.
+ */
+async function ensureBuilt() {
+  if (existsSync(path.join(ROOT, "dist", "index.html"))) return;
+  console.log("· no dist/ — building it (npm run check still owns the typecheck)");
+  await build({ root: ROOT, logLevel: "warn" });
+}
 
-const rows = page.locator("[data-message-id]");
-const rowCount = await rows.count();
-check("the demo mailbox has rows", rowCount > 20, `${rowCount} rows`);
+async function openServer() {
+  if (EXTERNAL) {
+    console.log(`· using ${URL} (WINNOW_URL) — not starting a server`);
+    return async () => {};
+  }
+  await ensureBuilt();
+  const server = await preview({
+    root: ROOT,
+    logLevel: "warn",
+    preview: { port: PORT, strictPort: true, open: false },
+  });
+  console.log(`· vite preview on ${URL}`);
+  return () => server.close();
+}
 
-// ── Day sections ───────────────────────────────────────────────────────────
+// ── The run ─────────────────────────────────────────────────────────────────
 
-const sections = await page.locator("section").count();
-check("rows are grouped into dated sections", sections >= 3, `${sections} sections`);
+const stopServer = await openServer();
+const browser = await chromium.launch();
+let failed = false;
 
-// ── The rail is ranked ─────────────────────────────────────────────────────
-// Scoped past the `aria-hidden` copy: the strip renders twice (inline on a wide
-// screen, on its own row on a narrow one) and the narrow copy is hidden from
-// assistive tech precisely so it is not a second live control list.
-const pills = page.locator('header button[aria-pressed]:not([aria-hidden="true"] * *)');
-const pillCount = await pills.count();
-check("the filter rail is populated", pillCount > 5, `${pillCount} pills`);
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
-// ── The list says what it is showing ───────────────────────────────────────
-// "3 of 40" is not answerable without knowing what the 40 are.
-const listTitle = await page
-  .locator('header [title]')
-  .filter({ hasText: /Inbox|Archive|Trash|Spam|Important|Filtered|From / })
-  .first()
-  .textContent();
-check("the list reports its own title", Boolean(listTitle?.trim()), listTitle ?? "");
+  const errors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(String(error)));
 
-// ── A filter can be turned on and back off with the pointer ────────────────
-// This is the rail bug that motivated `ui/rail.ts`: hiding an active pill makes
-// the control that turned it on disappear, leaving no way to undo it. Only a
-// browser can prove the pill is actually reachable after the state change.
-const firstPill = pills.first();
-const pillLabel = (await firstPill.getAttribute("aria-label")) ?? "";
-await firstPill.click();
-await page.waitForTimeout(200);
-const stillThere = await pills
-  .first()
-  .getAttribute("aria-label");
-check(
-  "an active filter keeps its pill so it can be switched off",
-  stillThere === pillLabel,
-  `${pillLabel} → ${stillThere}`,
-);
+  /**
+   * The composer's discard prompt, answered on the next `Escape`.
+   *
+   * Registered as a permanent handler rather than per-press: Playwright *dismisses*
+   * dialogs it has no handler for, so a `once("dialog")` registered after the
+   * keystroke is a race, and a handler that is only sometimes attached makes every
+   * assertion about the composer depend on which branch ran first. One handler, one
+   * switch.
+   */
+  let discardAnswer = false;
+  page.on("dialog", (dialog) => (discardAnswer ? dialog.accept() : dialog.dismiss()));
 
-await pills.first().click();
-await page.waitForTimeout(200);
-check(
-  "clicking it again clears the filter",
-  (await pills.first().getAttribute("aria-pressed")) === "false",
-);
+  // Re-read after every state change, so nothing here holds a stale handle.
+  const rows = () => page.locator("[data-message-id]");
+  // Scoped to the *live* copy of the rail: it is rendered twice (inline at `lg`, on
+  // its own row below it), and counting both would double every number here.
+  const pills = () => page.locator("header button[aria-pressed]:visible");
+  const mailbox = (name) =>
+    page.locator('header nav[aria-label="Mailboxes"] button', { hasText: name }).first();
+  const storage = () =>
+    page.evaluate(() => Object.fromEntries(Object.entries(globalThis.localStorage)));
 
-// ── Clicking a row opens the reader ───────────────────────────────────────
+  const openMessage = async () => {
+    await rows().first().click();
+    await page.waitForSelector("article h1", { timeout: 5_000 });
+  };
+  const closeReader = async () => {
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("text=Nothing selected", { timeout: 5_000 });
+  };
+  const goTo = async (name) => {
+    await mailbox(name).click();
+    await page.waitForTimeout(250);
+  };
+  /** The unread badge on a mailbox tab, or `0` when it has no badge at all. */
+  const unreadBadge = async (name) => {
+    const badge = mailbox(name).locator("span");
+    return (await badge.count()) === 0 ? "0" : (await badge.first().textContent())?.trim();
+  };
+  const listTitle = () => page.locator("header span[title]").first().textContent();
 
-await rows.first().click();
-await page.waitForSelector("article h1", { timeout: 5_000 });
-const subject = await page.locator("article h1").first().textContent();
-check("clicking a row opens the reader", Boolean(subject?.trim()), subject ?? "");
+  await page.goto(URL, { waitUntil: "networkidle" });
 
-await page.keyboard.press("Escape");
-await page.waitForSelector("text=Nothing selected", { timeout: 5_000 });
-check("Escape closes the reader", true);
+  // ── It boots ───────────────────────────────────────────────────────────────
 
-await page.keyboard.press("j");
-await page.waitForSelector("article h1", { timeout: 5_000 });
-check("j opens the first message", true);
+  section("boot");
 
-await page.keyboard.press("Escape");
+  await page.waitForSelector("text=Nothing selected", { timeout: 10_000 });
+  check("the app boots into the demo, with the reader's empty state", true);
 
-// ── The cheat sheet renders and is generated from the bindings ─────────────
+  const rowCount = await rows().count();
+  require("the demo mailbox has rows", rowCount > 20, `${rowCount} rows`);
+  check("the demo mailbox is populated", true, `${rowCount} rows`);
 
-await page.keyboard.press("?");
-await page.waitForSelector("text=Keyboard shortcuts", { timeout: 5_000 });
-const sheetRows = await page.locator("dl > div").count();
-check("the shortcut sheet opens", sheetRows > 8, `${sheetRows} rows`);
-await page.keyboard.press("Escape");
+  const sections = await page.locator("section").count();
+  check("rows are grouped into dated sections", sections >= 3, `${sections} sections`);
 
-// ── The mailbox palette ────────────────────────────────────────────────────
+  const pillCount = await pills().count();
+  require("the filter rail is populated", pillCount > 5, `${pillCount} pills`);
+  check("the filter rail is ranked", true, `${pillCount} pills`);
 
-await page.keyboard.press("!");
-// Selected by role, not by text: the palette's accessible name is an
-// `aria-label`, and `text=` matches visible text only.
-await page.waitForSelector('[role="menu"]', { timeout: 5_000 });
-const paletteRows = await page.locator('[role="menu"] [role="menuitem"]').count();
-check("the navigation palette opens", paletteRows === 4, `${paletteRows} rows`);
+  const title = await listTitle();
+  check("the list says what it is showing", Boolean(title?.trim()), title ?? "");
 
-await page.keyboard.press("ArrowDown");
-await page.keyboard.press("Enter");
-await page.waitForTimeout(250);
-check(
-  "Enter in the palette switches mailbox",
-  (await page.locator('[role="menu"]').count()) === 0,
-);
+  // ── Sign-in is reachable from the demo ─────────────────────────────────────
 
-// ── Settings ──────────────────────────────────────────────────────────────
+  // The app boots with no backend, so it never shows the sign-in screen on first
+  // run. If this button is missing, the entire Gmail half of the product is
+  // unreachable until you have already used it.
+  const connect = page.locator('button:has-text("Connect Gmail")');
+  check("the demo offers a route to sign-in", (await connect.count()) > 0);
+  check(
+    "and says the demo is a sample, not a synced account",
+    (await page.locator("text=Demo mailbox").count()) > 0,
+  );
 
-await page.keyboard.press(",");
-await page.waitForSelector("text=How Winnow sorts", { timeout: 5_000 });
-const sliders = await page.locator('input[type="range"]').count();
-check("settings shows the weight sliders", sliders >= 8, `${sliders} sliders`);
-await page.keyboard.press("Escape");
+  // ── Filtering ──────────────────────────────────────────────────────────────
 
-// ── Search ────────────────────────────────────────────────────────────────
-// Back to the inbox first: the palette step above moved to Spam, where an
-// "invoice" search legitimately finds nothing.
-await page.keyboard.press("!");
-await page.keyboard.press("Enter");
-await page.waitForTimeout(200);
+  section("filters");
 
-await page.keyboard.press("/");
-await page.keyboard.type("invoice");
-await page.waitForTimeout(300);
-const searchRows = await page.locator("[data-message-id]").count();
-check("search narrows the list", searchRows > 0 && searchRows < rowCount, `${searchRows} of ${rowCount}`);
+  // This is the rail bug that motivated `ui/rail.ts`: hiding an active pill makes
+  // the control that turned it on disappear, leaving no way to undo it. Only a
+  // browser can prove the pill is still reachable after the state change.
+  const firstPill = pills().first();
+  const pillLabel = (await firstPill.getAttribute("aria-label")) ?? "";
+  await firstPill.click();
+  await page.waitForTimeout(200);
+  const pressedLabel = await pills().first().getAttribute("aria-label");
+  check(
+    "an active filter keeps its pill so it can be switched off",
+    pressedLabel === pillLabel,
+    `${pillLabel} → ${pressedLabel}`,
+  );
+  check(
+    "and the pill reports itself pressed",
+    (await pills().first().getAttribute("aria-pressed")) === "true",
+  );
 
-// ── Empty state explains itself ────────────────────────────────────────────
+  await pills().first().click();
+  await page.waitForTimeout(200);
+  check(
+    "clicking it again clears the filter",
+    (await pills().first().getAttribute("aria-pressed")) === "false",
+  );
 
-// Captured before the search is narrowed, while the list still has rows.
-const linkedId = await rows.first().getAttribute("data-message-id");
+  // ── Search ─────────────────────────────────────────────────────────────────
 
-await page.keyboard.press("Escape");
-await page.locator("#topbar-search").fill("zzzznothingmatchesthis");
-await page.waitForTimeout(250);
-const emptyText = await page.locator("text=Nothing matches that search").count();
-check("an empty search says why", emptyText > 0);
+  section("search");
 
-// ── A shared link boots cleanly ────────────────────────────────────────────
-// Last, because it reloads the page and everything above is order-dependent.
-//
-// The point being checked is that a URL carrying a message id is not mistaken
-// for an OAuth redirect. `parseRedirect` returns `null` for it, so the app boots
-// normally — the failure this guards against is a sign-in loop or an error
-// banner for a link someone was sent in good faith.
-await page.goto(`${URL}?view=spam&message=${linkedId}`, { waitUntil: "networkidle" });
-await page.waitForTimeout(400);
-check(
-  "a shared link is not mistaken for a sign-in redirect",
-  (await page.locator("text=Keyboard shortcuts").count()) === 0 &&
-    (await page.locator("[data-message-id]").count()) > 0,
-);
+  await page.keyboard.press("/");
+  check(
+    "`/` focuses the search box",
+    (await page.evaluate(() => document.activeElement?.id)) === "topbar-search",
+  );
+  await page.keyboard.type("migration");
+  await page.waitForTimeout(300);
+  const searchRows = await rows().count();
+  check(
+    "search narrows the list",
+    searchRows > 0 && searchRows < rowCount,
+    `${searchRows} of ${rowCount}`,
+  );
 
-// ── No console errors ─────────────────────────────────────────────────────
+  // Multi-token search is AND across the tokens, not a substring match on the query
+  // as one run of characters. The failure this replaced: searching "invoice march"
+  // found nothing at all, because no message contains that exact byte sequence, and
+  // the list said "nothing matches that search" as though the mailbox were empty.
+  //
+  // Two tokens that genuinely co-occur in the demo's migration thread, so a working
+  // AND finds them and a phrase match would too — which is what makes the negative
+  // case below the load-bearing one.
+  await page.locator("#topbar-search").fill("migration plan");
+  await page.waitForTimeout(300);
+  const bothTokens = await rows().count();
+  check("two tokens that co-occur both match", bothTokens > 0, `${bothTokens} rows`);
 
-check("no console errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+  // A second token that cannot co-occur must narrow to nothing rather than being
+  // ignored, which is what "AND" has to mean to be worth anything.
+  await page.locator("#topbar-search").fill("migration zzzznotaword");
+  await page.waitForTimeout(300);
+  const impossiblePair = await rows().count();
+  check(
+    "and an impossible pair narrows to nothing rather than ignoring a token",
+    impossiblePair === 0,
+    `migration + nonsense → ${impossiblePair}`,
+  );
 
-await page.screenshot({ path: "smoke.png", fullPage: false });
-await browser.close();
+  // Order must not matter, since the tokens are a set rather than a phrase.
+  await page.locator("#topbar-search").fill("migration plan");
+  await page.waitForTimeout(250);
+  const ordered = await rows().count();
+  await page.locator("#topbar-search").fill("plan migration");
+  await page.waitForTimeout(250);
+  const reversed = await rows().count();
+  check("token order does not matter", ordered === reversed, `${ordered} vs ${reversed}`);
+  await page.locator("#topbar-search").fill("");
+  await page.waitForTimeout(300);
 
-console.log(process.exitCode ? "\nSMOKE TEST FAILED" : "\nSMOKE TEST PASSED");
+  await page.locator("#topbar-search").fill("zzzznothingmatchesthis");
+  await page.waitForTimeout(300);
+  check(
+    "an empty search says why",
+    (await page.locator("text=Nothing matches that search").count()) > 0,
+  );
+
+  // Cleared through the field rather than by pressing Escape, because Escape from a
+  // focused text field only blurs it — the query stays, so the list stays empty, and
+  // the next step would time out waiting for rows. That distinction is the point of
+  // the `textEditing` branch in the keybind router, so it is worth stating here.
+  await page.locator("#topbar-search").fill("");
+  await page.waitForTimeout(300);
+  check("clearing the search brings the list back", (await rows().count()) === rowCount);
+
+  // ── The reader ─────────────────────────────────────────────────────────────
+
+  section("reader");
+
+  await openMessage();
+  const subject = await page.locator("article h1").first().textContent();
+  check("clicking a row opens the reader", Boolean(subject?.trim()), subject ?? "");
+
+  await closeReader();
+  check("Escape closes the reader", true);
+
+  await page.keyboard.press("j");
+  await page.waitForSelector("article h1", { timeout: 5_000 });
+  check("`j` opens the first message", true);
+  await closeReader();
+
+  // ── Badges ─────────────────────────────────────────────────────────────────
+
+  // Every badge used to resolve to the same near-black, because the CSS variables
+  // were named `--wn-badge-<id>` but never defined — so `var()` resolved to nothing
+  // and the classifier's opinion was invisible on the message itself. The check is on
+  // *computed* colours, so it fails if a variable goes missing again.
+  await page.locator("#topbar-search").fill("migration plan");
+  await page.waitForTimeout(300);
+  await rows().first().click();
+  await page.waitForSelector("article h1", { timeout: 5_000 });
+
+  // Matched on the *rendered chip*: an inline background that is literally a badge
+  // wash variable. `applyTheme` writes every token onto `<html>`'s inline style, so a
+  // document-wide `[style*="--wn-badge"]` matches the root element and reports the
+  // token definitions rather than any badge — which reads as one transparent wash and
+  // looks like the very bug this is checking for.
+  //
+  // The `_` in the id pattern is load-bearing too: bucket keys are snake_case, and
+  // `needs_action` read without it looks like an unrecognised badge.
+  const badges = await page.evaluate(() =>
+    [...document.querySelectorAll("span[style*='--wn-badge']")]
+      .filter((node) => /^var\(--wn-badge-[a-z_]+-wash\)$/.test(node.style.background ?? ""))
+      .map((node) => ({
+        id: (node.getAttribute("style") ?? "").match(/--wn-badge-([a-z_]+)-wash/)?.[1] ?? "?",
+        wash: getComputedStyle(node).backgroundColor,
+        edge: getComputedStyle(node).borderTopColor,
+      })),
+  );
+  check("the reader shows the classifier's badges", badges.length > 0, `${badges.length} badges`);
+  check(
+    "every badge resolves to its own colour rather than one shared wash",
+    badges.length > 0 &&
+      badges.every((badge) => badge.wash !== "rgba(0, 0, 0, 0)") &&
+      new Set(badges.map((badge) => badge.wash)).size === badges.length,
+    JSON.stringify(badges),
+  );
+
+  // ── Conversations ──────────────────────────────────────────────────────────
+
+  // The list collapses a thread to one row, so without this the rest of the exchange
+  // is unreachable from the reader — and a message that was archived is not in the
+  // list at all, so it was unreachable anywhere.
+  const convoHeading = page.locator('article h3:has-text("in this conversation")');
+  check("a thread shows the rest of the exchange", (await convoHeading.count()) > 0);
+
+  // The three "Re: the migration plan" messages share a subject, so the subject
+  // cannot tell them apart — the check has to look at something that does. The list
+  // row's text is the right thing: it names the sender and relative time, so a
+  // different sender or a different timestamp proves the reader moved.
+  const convoButtons = page.locator(
+    'article h3:has-text("in this conversation") + ul > li > button',
+  );
+  const convoCount = await convoButtons.count();
+  check("and each earlier message is a real button", convoCount >= 2, `${convoCount} entries`);
+
+  if (convoCount >= 2) {
+    const before = await page.evaluate(() => {
+      const article = document.querySelector("article");
+      const h1 = article?.querySelector("h1")?.textContent ?? "";
+      const stamp = article?.querySelector("time")?.getAttribute("datetime") ?? "";
+      return `${h1}|${stamp}`;
+    });
+    await convoButtons.last().click();
+    // `focusMessage` re-derives the view, so the reader swaps rather than merely
+    // restyling. Waiting for the stamp to actually differ is the honest signal; a
+    // fixed sleep would race the render and could read the old value.
+    await page
+      .waitForFunction(
+        (previous) => {
+          const article = document.querySelector("article");
+          const stamp = article?.querySelector("time")?.getAttribute("datetime") ?? "";
+          return stamp !== "" && `|${stamp}` !== previous.slice(previous.indexOf("|"));
+        },
+        before,
+        { timeout: 5_000 },
+      )
+      .catch(() => undefined);
+    const after = await page.evaluate(() => {
+      const article = document.querySelector("article");
+      const h1 = article?.querySelector("h1")?.textContent ?? "";
+      const stamp = article?.querySelector("time")?.getAttribute("datetime") ?? "";
+      return `${h1}|${stamp}`;
+    });
+    check("clicking one opens that message", after !== before, `${before} → ${after}`);
+  }
+
+  // The search is cleared through the field, and Escape is pressed *afterwards* —
+  // the order matters, because Escape from a focused field only blurs it, and a
+  // still-active query would leave `focusMessage` clearing it on the next click.
+  await page.locator("#topbar-search").fill("");
+  await page.waitForTimeout(300);
+  await closeReader();
+
+  // ── Overlays ───────────────────────────────────────────────────────────────
+
+  section("overlays");
+
+  await page.keyboard.press("?");
+  await page.waitForSelector("text=Keyboard shortcuts", { timeout: 5_000 });
+  const sheetRows = await page.locator("dl > div").count();
+  check("the shortcut sheet opens", sheetRows > 8, `${sheetRows} rows`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  check("Escape closes it", (await page.locator('[role="dialog"]').count()) === 0);
+
+  await page.keyboard.press(",");
+  await page.waitForSelector("text=How Winnow sorts", { timeout: 5_000 });
+  const sliders = await page.locator('input[type="range"]').count();
+  check("settings opens and shows the weight sliders", sliders >= 8, `${sliders} sliders`);
+
+  // A modal that does not trap focus lets Tab walk out of it into the page behind,
+  // which is both unusable and invisible. Real key presses, not synthetic events, so
+  // this exercises the browser's own focus order rather than a reimplementation of it.
+  for (let i = 0; i < 25; i += 1) await page.keyboard.press("Tab");
+  const trapped = await page.evaluate(() =>
+    Boolean(document.querySelector('[role="dialog"]')?.contains(document.activeElement)),
+  );
+  check("Tab cycles inside settings rather than escaping to the page behind", trapped);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  check("Escape closes settings from inside it", (await page.locator('[role="dialog"]').count()) === 0);
+
+  // ── The composer ───────────────────────────────────────────────────────────
+
+  section("composer");
+
+  await openMessage();
+  await page.locator('button[aria-label^="Reply"]').first().click();
+  await page.waitForSelector('textarea[aria-label="Message"]', { timeout: 5_000 });
+
+  // Deliberately *not* clicked first. The composer focuses its own body and puts the
+  // caret at position 0, above the quote; clicking the textarea moves the caret to
+  // wherever the pointer landed — usually the end of the quoted text — which would test
+  // the click rather than the caret placement.
+  const textarea = page.locator('textarea[aria-label="Message"]');
+  check(
+    "the composer opens with its keyboard already in the body",
+    (await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Message",
+  );
+  await page.keyboard.type("Sounds good", { delay: 20 });
+  await page.waitForTimeout(250);
+  const typed = await textarea.inputValue();
+  // The caret used to reset to the start of the field on every keystroke, so a
+  // typed word came out reversed. This is the assertion that catches that class
+  // of bug, which no unit test can see.
+  check("typed text lands at the caret, in order", typed.startsWith("Sounds good"), JSON.stringify(typed.slice(0, 30)));
+  check("the quoted original is stripped once you start writing", !typed.includes(">"));
+
+  discardAnswer = false;
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check(
+    "declining the discard keeps the composer open",
+    (await page.locator('textarea[aria-label="Message"]').count()) > 0,
+  );
+  discardAnswer = true;
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check(
+    "accepting the discard closes it",
+    (await page.locator('textarea[aria-label="Message"]').count()) === 0,
+  );
+
+  // Forward. `GmailClient` has had a forward path in it from the start and nothing
+  // in the UI called it, so a message could be replied to but not forwarded.
+  await openMessage();
+  await page.locator('button[aria-label="Forward"]').first().click();
+  await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
+  check(
+    "Forward opens a sheet titled Forward",
+    (await page.locator('[role="dialog"][aria-label="Forward"]').count()) > 0,
+  );
+  check(
+    "it focuses the To field first, not the body",
+    (await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "To",
+  );
+  check(
+    "Send is disabled with no recipient",
+    await page.locator('[role="dialog"] button:has-text("Send")').first().isDisabled(),
+  );
+  discardAnswer = true;
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
+  await closeReader();
+  await openMessage();
+  await page.keyboard.press("f");
+  await page.waitForTimeout(400);
+  check(
+    "`f` opens the forward composer",
+    (await page.locator('[role="dialog"][aria-label="Forward"]').count()) > 0,
+  );
+  discardAnswer = true;
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await closeReader();
+
+  // ── Mailboxes ──────────────────────────────────────────────────────────────
+
+  section("mailboxes");
+
+  await page.keyboard.press("!");
+  // Selected by role, not by text: the palette's accessible name is an
+  // `aria-label`, and `text=` matches visible text only.
+  await page.waitForSelector('[role="menu"]', { timeout: 5_000 });
+  const paletteRows = await page.locator('[role="menu"] [role="menuitem"]').count();
+  check("the navigation palette opens", paletteRows === 4, `${paletteRows} rows`);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(250);
+  check("Enter in the palette switches mailbox", (await page.locator('[role="menu"]').count()) === 0);
+
+  // ── Mark all read is scoped to the mailbox on screen ───────────────────────
+
+  // Only the demo's *inbox* has unread mail, so "leaves other mailboxes alone" has to
+  // be set up rather than assumed: this marks a spam message unread first, so a
+  // mark-all-read that ignored its scope would visibly clear it. Asserting against a
+  // mailbox that was already at zero would pass for any implementation at all.
+  await goTo("Spam");
+  await rows().first().click();
+  await page.waitForSelector("article h1", { timeout: 5_000 });
+  await page.locator('button[aria-label="Mark unread"]').first().click();
+  await page.waitForTimeout(300);
+  const spamBefore = await unreadBadge("Spam");
+  require("a spam message can be made unread to test against", Number(spamBefore) > 0, `spam ${spamBefore}`);
+
+  await goTo("Inbox");
+  await page.locator('button[aria-label="Mark all read"]').click();
+  await page.waitForTimeout(300);
+  check(
+    "mark all read clears the mailbox it was pressed in",
+    (await unreadBadge("Inbox")) === "0",
+    `inbox ${await unreadBadge("Inbox")}`,
+  );
+  check(
+    "and leaves every other mailbox alone",
+    (await unreadBadge("Spam")) === spamBefore,
+    `spam ${spamBefore} → ${await unreadBadge("Spam")}`,
+  );
+
+  // ── Rail counts are inbox-wide ─────────────────────────────────────────────
+
+  // The rail used to be ranked over the *visible* list, so every count read 0 the
+  // moment you left the inbox — including on the pill you were about to click.
+  await goTo("Spam");
+  await page.waitForTimeout(300);
+  const spamPillLabels = await pills().evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("aria-label")),
+  );
+  check(
+    "every rail pill reports a count while looking at another mailbox",
+    spamPillLabels.length > 0 && spamPillLabels.every((label) => label && /, \d+ messages?$/.test(label)),
+    JSON.stringify(spamPillLabels.slice(0, 4)),
+  );
+  check(
+    "and the counts are inbox-wide rather than all reading 0",
+    spamPillLabels.some((label) => label && /, [1-9]\d* messages?$/.test(label)),
+  );
+
+  // ── Not spam ───────────────────────────────────────────────────────────────
+
+  const spamRows = await rows().count();
+  require("the spam folder has messages", spamRows > 0, `${spamRows} rows`);
+  await rows().first().click();
+  await page.waitForSelector("article h1", { timeout: 5_000 });
+  const notSpam = page.locator('button[aria-label="Not spam — move to inbox"]');
+  check("the spam folder offers a way out of it", (await notSpam.count()) > 0);
+  await notSpam.first().click();
+  await page.waitForTimeout(400);
+  check(
+    "and it moves the message back to the inbox",
+    (await rows().count()) === spamRows - 1,
+    `${spamRows} → ${await rows().count()} in spam`,
+  );
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  // ── Muting is reversible ───────────────────────────────────────────────────
+
+  section("mutes");
+
+  await goTo("Inbox");
+  await page.waitForTimeout(300);
+  const newsletters = page.locator('header button[aria-label^="Newsletters,"]:visible').first();
+  require("the demo has a Newsletters bucket to mute", (await newsletters.count()) > 0);
+
+  await newsletters.hover();
+  await page.waitForTimeout(200);
+  await page.locator('header button[aria-label^="Hide Newsletters"]:visible').first().click();
+  await page.waitForTimeout(400);
+
+  const muted = page.locator('header button[aria-label^="Newsletters, hidden"]:visible').first();
+  check("a muted bucket stays on the rail, struck through", (await muted.count()) > 0);
+  check("and cannot be switched on as a filter", await muted.isDisabled());
+
+  // The restore control is revealed on hover of the pill's group, so it is counted
+  // *after* hovering — before that it is `display: none` and a count of zero would say
+  // nothing about whether the control exists.
+  await muted.locator("xpath=..").hover();
+  await page.waitForTimeout(250);
+  const restore = page.locator('header button[aria-label^="Show Newsletters"]:visible').first();
+  check("the muted pill offers a restore control", (await restore.count()) > 0);
+  await restore.click({ force: true });
+  await page.waitForTimeout(500);
+  check(
+    "restoring brings the bucket back",
+    (await page.locator('header button[aria-label^="Show Newsletters"]:visible').count()) === 0,
+  );
+  check(
+    "and its pill is live again",
+    (await page.locator('header button[aria-label^="Newsletters,"]:visible:not([disabled])').count()) > 0,
+  );
+
+  // Mute a *second* bucket and leave it muted, so Settings has something to list. The
+  // section is conditional on `mutedFilters.length > 0` — which is right, since an
+  // empty section is noise — but it means this check has to be made with a mute in
+  // place rather than after restoring everything.
+  const receipts = page.locator('header button[aria-label^="Receipts,"]:visible').first();
+  if (await receipts.count()) {
+    await receipts.hover();
+    await page.waitForTimeout(200);
+    await page.locator('header button[aria-label^="Hide Receipts"]:visible').first().click();
+    await page.waitForTimeout(400);
+    check(
+      "a second bucket can be muted too",
+      (await page.locator('header button[aria-label^="Receipts, hidden"]:visible').count()) > 0,
+    );
+
+    await page.keyboard.press(",");
+    await page.waitForTimeout(400);
+    // Matched on the heading, not on `innerText`. The section headings are uppercased
+    // and letterspaced by CSS, so their rendered text is "HIDDEN BUCKETS (1)" — a
+    // regex against the visible text silently misses it, which is exactly what this
+    // check did at first. `textContent` is the DOM's own text, uncased and unspaced.
+    const headings = await page.locator('[role="dialog"] h2, [role="dialog"] h3').allTextContents();
+    check(
+      "settings lists hidden buckets",
+      headings.some((heading) => /^Hidden buckets \(\d+\)$/.test(heading)),
+      headings.join(" | "),
+    );
+    check(
+      "and offers to show one again",
+      (await page.locator('[role="dialog"] button:has-text("Show again")').count()) > 0,
+    );
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+
+    // Undone from the rail, so the persistence checks below are not perturbed by a
+    // second active filter.
+    const restoreReceipts = page
+      .locator('header button[aria-label^="Receipts, hidden"]:visible')
+      .first();
+    await restoreReceipts.locator("xpath=..").hover();
+    await page.waitForTimeout(250);
+    await page
+      .locator('header button[aria-label^="Show Receipts"]:visible')
+      .first()
+      .click({ force: true });
+    await page.waitForTimeout(400);
+  } else {
+    // No second bucket to mute: assert the section is *absent* when nothing is muted,
+    // which is the behaviour the condition encodes.
+    await page.keyboard.press(",");
+    await page.waitForTimeout(400);
+    const headings = await page.locator('[role="dialog"] h2, [role="dialog"] h3').allTextContents();
+    check(
+      "with nothing muted, settings shows no empty hidden-buckets section",
+      !headings.some((heading) => heading.startsWith("Hidden buckets")),
+      headings.join(" | "),
+    );
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+  }
+
+  // ── Persistence ────────────────────────────────────────────────────────────
+
+  section("persistence");
+
+  // Star the first row with the pointer, then activate a rail filter with the
+  // keyboard, and check that both wrote the key that is supposed to hold them.
+  const firstRow = rows().first();
+  await firstRow.hover();
+  await firstRow.locator("xpath=..").locator('button[aria-label="Star"]').first().click();
+  await page.waitForTimeout(300);
+  await page.keyboard.press("1");
+  await page.waitForTimeout(300);
+
+  const beforeReload = await storage();
+  check("a star writes the learning snapshot", Boolean(beforeReload["winnow.learning.v1"]));
+  check(
+    "a filter toggle writes the active set",
+    beforeReload["winnow.activeFilters.v1"] !== undefined,
+    beforeReload["winnow.activeFilters.v1"],
+  );
+  check("the mailbox is written too", beforeReload["winnow.mailbox.v1"] !== undefined);
+
+  // The demo's *messages* are re-seeded on every load, so a star is not expected to
+  // still be set — the seed owns that state, and there is no server to have told us
+  // otherwise. What must survive is the *learning* the star produced, which is the
+  // part that is actually Winnow's. Asserting the star glyph would be asserting the
+  // seed, not the product.
+  const learningBefore = beforeReload["winnow.learning.v1"];
+  const titleBefore = await listTitle();
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(700);
+  check("the active filter survives a reload", titleBefore === (await listTitle()), `${titleBefore}`);
+  check(
+    "and so does the learning the star produced",
+    (await storage())["winnow.learning.v1"] === learningBefore,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  // A partial preferences patch must merge, not replace. Blocking one spammer used
+  // to reset appearance, sort order and everything else, on the next launch.
+  await page.keyboard.press(",");
+  await page.waitForTimeout(400);
+  await page.locator('button[role="switch"][aria-label="Load remote images"]').click();
+  await page.waitForTimeout(250);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check("Escape closes the settings sheet from inside it", (await page.locator('[role="dialog"]').count()) === 0);
+
+  await openMessage();
+  const block = page.locator('button:has-text("Hide everything from")').first();
+  require("the reader offers to hide a sender", (await block.count()) > 0);
+  const blockedName = ((await block.textContent()) ?? "").replace("Hide everything from ", "").trim();
+  await block.click();
+  await page.waitForTimeout(400);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(700);
+
+  const prefs = JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}");
+  check(
+    "blocking a sender does not reset other preferences",
+    prefs.loadRemoteContent === true,
+    JSON.stringify(prefs),
+  );
+  check("the blocked sender is recorded", Array.isArray(prefs.blockedSenders) && prefs.blockedSenders.length > 0, JSON.stringify(prefs.blockedSenders));
+  check(
+    "and none of their messages are left in the list",
+    (await rows().filter({ hasText: blockedName }).count()) === 0,
+    blockedName,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  // ── The phone layout ───────────────────────────────────────────────────────
+
+  section("mobile");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(400);
+  await openMessage();
+  await page.waitForTimeout(400);
+
+  const headerBox = await page.locator("header").first().boundingBox();
+  check(
+    "the top bar survives an open reader on a phone",
+    Boolean(headerBox) && headerBox.y >= 0 && headerBox.height > 20,
+    JSON.stringify(headerBox),
+  );
+
+  const searchBox = await page.locator("#topbar-search").boundingBox();
+  check(
+    "search is still on screen, not collapsed to nothing",
+    Boolean(searchBox) && searchBox.width > 40,
+    JSON.stringify(searchBox),
+  );
+
+  const overflow = await page.evaluate(() => {
+    const row = document.querySelector("header > div");
+    if (!row) return null;
+    // How far the toolbar's content extends past its own box, in CSS pixels.
+    return Math.round(row.scrollWidth - row.clientWidth);
+  });
+  check(
+    "the toolbar does not need a sideways scroll to reach the search",
+    overflow !== null && overflow <= 1,
+    `${overflow}px past`,
+  );
+
+  const back = page.locator('button[aria-label="Back to the list"]');
+  check("there is a way back to the list", (await back.count()) > 0);
+  await back.first().click();
+  await page.waitForTimeout(300);
+  check("and it works", (await page.locator("text=Nothing selected").count()) > 0);
+
+  // ── A shared link ──────────────────────────────────────────────────────────
+
+  section("deep links");
+
+  // A shared link has to be *followed*, not merely survived. `parseRedirect` treats
+  // `view` and `message` as the app's own parameters and leaves them in the URL, and
+  // `applySharedLink` was called only on the signed-in path — so on a fresh install,
+  // which is the demo, `?message=…` booted the inbox and quietly dropped the link.
+  //
+  // The id and subject are captured *here*, from a spam row that is still visible. The
+  // id captured at boot is no good: the block-sender step above removed that sender's
+  // mail from the list, and `focusMessage` correctly refuses to open what the user has
+  // said they do not want to read — so a link to it legitimately shows nothing, and the
+  // test would be measuring its own earlier action.
+
+  await goTo("Spam");
+  await page.waitForTimeout(300);
+  const deepRow = rows().first();
+  const deepId = await deepRow.getAttribute("data-message-id");
+  const deepSubject = (await deepRow.textContent())?.trim() ?? "";
+  require("the spam folder still has a row to link to", Boolean(deepId), `${deepId}`);
+
+  await page.goto(`${URL}?message=${deepId}`, { waitUntil: "networkidle" });
+  await page.waitForSelector("article h1", { timeout: 5_000 });
+  const openedSubject = (await page.locator("article h1").first().textContent())?.trim() ?? "";
+  check(
+    "a link naming a message opens that message",
+    openedSubject.length > 0 && deepSubject.includes(openedSubject),
+    `${openedSubject} in ${deepSubject}`,
+  );
+  check(
+    "and the reader follows it into the mailbox it lives in",
+    (await mailbox("Spam").getAttribute("aria-current")) === "page",
+  );
+
+  await page.goto(`${URL}?view=archive`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  check(
+    "a link naming a mailbox switches to it",
+    (await mailbox("Archive").getAttribute("aria-current")) === "page",
+    await listTitle(),
+  );
+
+  // A URL carrying the app's own parameters must not be mistaken for an OAuth
+  // redirect: `parseRedirect` returns null for it, so the app boots normally. The
+  // failure this guards against is an error banner or an exchange attempt for a link
+  // somebody was sent in good faith.
+  await page.goto(`${URL}?view=spam&message=${deepId}&tracking=1`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  check(
+    "a shared link is not mistaken for an OAuth redirect",
+    (await page.locator('[role="alert"]').count()) === 0 && (await rows().count()) > 0,
+    `${await rows().count()} rows`,
+  );
+
+  // ── Console ────────────────────────────────────────────────────────────────
+
+  section("console");
+
+  check("no console errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+
+  await page.screenshot({ path: "smoke.png", fullPage: false });
+} catch (error) {
+  failed = true;
+  console.error(`\nSmoke run aborted: ${error?.stack ?? error}`);
+} finally {
+  await browser.close();
+  await stopServer();
+}
+
+const bad = failures.length + (failed ? 1 : 0);
+console.log(`\n${passed} passed, ${bad} failed`);
+if (bad > 0) {
+  console.log("\nFAILURES");
+  for (const line of failures) console.log(`  · ${line}`);
+  process.exitCode = 1;
+} else {
+  console.log("\nSMOKE TEST PASSED");
+}

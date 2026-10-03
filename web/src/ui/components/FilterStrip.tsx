@@ -32,17 +32,18 @@ type Props = {
   activeFilters: FilterId[];
   onToggle: (id: FilterId) => void;
   onMute: (id: BuiltinSmartFilter) => void;
+  /** Undo a mute. Present because a mute has to be reversible from the rail. */
+  onRestore: (id: BuiltinSmartFilter) => void;
   onClear: () => void;
   className?: string;
 };
-
-
 
 export const FilterStrip = memo(function FilterStrip({
   pills,
   activeFilters,
   onToggle,
   onMute,
+  onRestore,
   onClear,
   className = "",
 }: Props) {
@@ -102,24 +103,36 @@ export const FilterStrip = memo(function FilterStrip({
       {pills.map(({ id, label, colors, count, muted }, index) => {
         const key = filterKey(id);
         const on = activeKeys.has(key);
-        const digit = digitFor(index);
+        // No digit for a muted pill. The rail's digits are what `1`–`9` address, and a
+        // muted bucket is not filterable — printing a shortcut on it would be a
+        // shortcut that does nothing.
+        const digit = muted ? null : digitFor(index);
+        const isMuted = muted === true;
 
         return (
           <div key={key} className="group/pill relative shrink-0">
             <button
               type="button"
               aria-pressed={on}
+              // A muted pill is not a toggle. It is not pressed, it cannot be pressed,
+              // and saying otherwise to a screen reader describes a state the app
+              // will not enter.
+              disabled={isMuted}
               onClick={() => onToggle(id)}
-              // The count is in the accessible name, not just the visible badge,
-              // so a screen reader user gets the same information a sighted one
-              // reads off the pill.
-              aria-label={`${label}, ${count} ${count === 1 ? "message" : "messages"}`}
-              className={`flex h-7 items-center gap-1.5 rounded-full pl-3 pr-2.5 text-ui font-semibold whitespace-nowrap text-ink-body transition-[filter] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                muted ? "opacity-45 line-through" : ""
+              // The count is in the accessible name, not just the visible badge, so a
+              // screen reader user gets the same information a sighted one reads off
+              // the pill.
+              aria-label={
+                isMuted
+                  ? `${label}, hidden — ${count} ${count === 1 ? "message" : "messages"}`
+                  : `${label}, ${count} ${count === 1 ? "message" : "messages"}`
+              }
+              className={`flex h-7 items-center gap-1.5 rounded-full pl-3 pr-2.5 text-ui font-semibold whitespace-nowrap text-ink-body transition-[filter] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
+                isMuted ? "opacity-45 line-through" : ""
               }`}
               style={{
-                background: pillBackground(colors, on),
-                boxShadow: on ? `inset 0 0 0 1px ${colors.solid}` : "none",
+                background: pillBackground(colors, on && !isMuted),
+                boxShadow: on && !isMuted ? `inset 0 0 0 1px ${colors.solid}` : "none",
               }}
             >
               {label}
@@ -138,18 +151,35 @@ export const FilterStrip = memo(function FilterStrip({
               )}
             </button>
 
-            {/* Mute, on hover or focus. Hidden for sender pills: there is no
-                learning to do from muting one person, and the store has no model
-                for it. */}
-            {id.kind === "builtin" && id.id !== "unsafe" && !muted && (
+            {/*
+              One control per builtin pill, in whichever direction it points.
+
+              On a live pill it hides the bucket; on a muted one it brings the bucket
+              back. That is the reason a mute is not a one-way door: the pill that hid
+              the mail is the pill that un-hides it, so undoing it is where the user
+              already is rather than a hunt through Settings.
+
+              `unsafe` has neither — it is not hidden by default, so there is nothing to
+              unhide, and muting it is meaningless (it is the one bucket the user goes to
+              on purpose).
+            */}
+            {id.kind === "builtin" && id.id !== "unsafe" && (
               <button
                 type="button"
-                onClick={() => onMute(id.id)}
-                title={`Hide ${label} from the inbox`}
-                aria-label={`Hide ${label} from the inbox and tell Winnow it is over-firing`}
-                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-hairline bg-surface text-[10px] leading-none text-ink-muted shadow-pane transition-colors hover:text-danger focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:inline-flex"
+                onClick={() => (isMuted ? onRestore(id.id) : onMute(id.id))}
+                title={
+                  isMuted
+                    ? `Show ${label} in the inbox again`
+                    : `Hide ${label} from the inbox`
+                }
+                aria-label={
+                  isMuted
+                    ? `Show ${label} in the inbox again`
+                    : `Hide ${label} from the inbox and tell Winnow it is over-firing`
+                }
+                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-hairline bg-surface text-[10px] leading-none text-ink-muted shadow-pane transition-colors hover:text-ink focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:inline-flex"
               >
-                ×
+                {isMuted ? "↺" : "×"}
               </button>
             )}
           </div>

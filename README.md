@@ -113,15 +113,27 @@ Two details that are easy to trip over:
 
 The app runs with no Google configuration at all: the demo mailbox is seeded on
 boot, so you can see whether the classification is any good before deciding
-whether to trust it with an account.
+whether to trust it with an account. The demo is the *default*, not a fallback —
+there is no sign-in wall — so the top bar's status line carries a **Connect Gmail**
+button, which is the only route to sign-in on a fresh install.
 
 ## Tests
 
-337 unit tests over `web/src/core` and `web/src/ui` — the classifier, the
-profile, the filters, the store's derivation and undo, the demo seed's own
-contract, the Gmail sync engine, token refresh, reply quoting, keybinds, and the
-OAuth redirect parsing. No DOM required, which is the payoff of the `core`/`ui`
-split.
+431 unit tests over `web/src` — the classifier, the profile, the filters, the list
+pipeline and Smart Score, the learning model and its tolerant snapshot reader, the
+store's derivation and undo, the demo seed's own contract, the Gmail sync engine,
+token refresh, reply quoting, keybinds, the OAuth redirect parsing, the desktop IPC
+wire shapes, and the rail's ordering. No DOM required, which is the payoff of the
+`core`/`ui` split.
+
+`platform.test.ts` pins the names that cross the Rust/TypeScript boundary, which is
+the one place in the codebase where a silent field-name mismatch produces no error
+at all. Tauri rewrites *argument* keys from camelCase to snake_case but never
+rewrites *return values*, so a struct declared `authorize_url` in Rust and read as
+`authorizeUrl` in TypeScript produced `undefined` — and desktop sign-in was
+impossible with the sign-in screen showing the raw IPC error as though it had come
+from Google. `serde(rename_all = "camelCase")` is not the fix, either: it yields
+`nativeOauth`, not `nativeOAuth`. Both directions are asserted in tests now.
 
 The Rust side has its own tests for the parts worth testing: the loopback
 listener, the path sanitiser, the background scheduler, deep-link parsing. The
@@ -131,9 +143,12 @@ the version that folded the query string into `Url::set_path` answered every
 request with a 204 and never once read a code.
 
 `npm run smoke` drives the real production build through a browser and asserts
-the app renders, classifies, navigates by keyboard, and logs nothing to the
-console. It is the check that the three layers are actually wired to each other,
-which unit tests structurally cannot tell you.
+that the app boots, classifies, navigates by keyboard, composes, persists, and logs
+nothing to the console. It starts its own `vite preview` in-process, so the command
+in this file is the whole command. It is the check that the three layers are
+actually wired to each other, which unit tests structurally cannot tell you — and
+the reason several of its assertions exist at all is that the corresponding defect
+was invisible from inside any single layer.
 
 ## Design notes worth knowing
 
@@ -170,3 +185,31 @@ to make it useless.
 
 **No gravatar.** Avatars are a colour hashed from the address. A third-party
 request per message is a latency cost and a privacy leak for decoration.
+
+**Forwarding is a first-class verb.** `GmailClient` has had `markNotSpam` and a
+forward path since early on and nothing in the UI called either, so a message could
+be replied to but not forwarded, and a message Gmail misfiled could only be
+recovered by going to gmail.com. Both are wired now: `f` opens a forward sheet that
+starts in the To field with Send disabled until there is a recipient, and the spam
+folder is the only place the "not spam" button appears.
+
+**Muting a bucket is reversible from where you did it.** Hiding a bucket is a
+statement about your mail, so it is persisted with the rest of what you have told
+Winnow — but a mute that cannot be undone from the rail is a trap. The muted pill
+stays in place, struck through and not filterable, carrying a ↺ that brings the
+bucket back; Settings also lists them under "Hidden buckets".
+
+**Smart Score is deliberately not importance.** The list sort is a fixed formula and
+the learnable importance score is not, so dragging a weight slider cannot silently
+reorder the inbox underneath you. They share the sender ladder, so they agree about
+*who* matters while disagreeing about how much each signal is worth. Its recency
+nudge is relative to the span of the messages being ranked, never the wall clock: an
+inbox that re-sorted itself overnight would be impossible to reason about while
+triaging.
+
+**The empty state has five reasons, not one.** "Nothing here" can mean the mailbox
+is empty, the search is too narrow, the filters are too narrow, the buckets you
+muted are hiding everything, or the default inbox's own spam rule is hiding
+everything. Those have three different remedies, and the old single message either
+blamed the user for a filter they did not set or left them with an empty screen and
+no button.

@@ -80,8 +80,15 @@ export function standingFor(profile: UserProfile, sender: string): Standing {
  * Only the sender matters. Winnow does not keep the body of something the user
  * binned — the discard *is* the signal, and retaining the mail to learn from
  * it would be both a privacy problem and a distraction.
+ *
+ * `count` carries multiplicity for callers that have already aggregated. A bare
+ * `{ sender }` means one discard, which is the shape a fixture or a seed uses;
+ * the store aggregates its two sources (the messages currently in the bin, and
+ * the discards it has witnessed) into counted rows, because summing one row per
+ * source would make the bias track the size of the bin rather than how often the
+ * user actually discards.
  */
-export type TrashRecord = { sender: string };
+export type TrashRecord = { sender: string; count?: number };
 
 /**
  * Build the profile from the current inbox and trash.
@@ -144,7 +151,7 @@ export function buildUserProfile(inbox: readonly Email[], trash: readonly TrashR
 
   const trashStats = new Map<string, number>();
   for (const row of trash) {
-    trashStats.set(row.sender, (trashStats.get(row.sender) ?? 0) + 1);
+    trashStats.set(row.sender, (trashStats.get(row.sender) ?? 0) + (row.count ?? 1));
   }
 
   const trashBiasBySender: Record<string, number> = {};

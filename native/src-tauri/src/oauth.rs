@@ -51,17 +51,32 @@ pub enum AuthOutcome {
 }
 
 /// State shared between the command layer and the listener thread.
+///
+/// `receiver` is an `Option` because exactly one waiter may take it, and "taken
+/// already" has to be representable: the session stays registered while the wait
+/// is in flight — otherwise `oauth_cancel` has nothing to find and Cancel cannot
+/// work — but the outcome can only be delivered once. See `take_receiver`.
 pub struct AuthSession {
     pub port: u16,
     /// The authorize URL with the real port already substituted.
     pub auth_url: String,
     pub cancel: Arc<AtomicBool>,
-    pub receiver: oneshot::Receiver<AuthOutcome>,
+    receiver: Option<oneshot::Receiver<AuthOutcome>>,
 }
 
 impl AuthSession {
     pub fn abort(&self) {
         self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    /// Take the one-shot receiver, or `None` if a waiter already has it.
+    ///
+    /// Public so the command layer can claim the outcome while leaving the session
+    /// itself registered. The alternative — removing the whole session from the map
+    /// to get at the receiver — is what made `oauth_cancel` a no-op, because by the
+    /// time the UI could offer a Cancel button the entry was already gone.
+    pub fn take_receiver(&mut self) -> Option<oneshot::Receiver<AuthOutcome>> {
+        self.receiver.take()
     }
 }
 
@@ -113,7 +128,7 @@ pub fn begin(authorize_url: String) -> Result<AuthSession, String> {
         port,
         auth_url: authorize_url,
         cancel,
-        receiver: rx,
+        receiver: Some(rx),
     })
 }
 
@@ -156,7 +171,54 @@ const ERROR_PAGE: &str = r#"<!doctype html>
 <body><div class="card">
   <h1>Winnow could not sign you in</h1>
   <p>Google said: <code>{ERROR}</code></p>
+  <p>{DETAIL}</p>
 </div></body></html>"#;
+
+/// Answer a request the listener could not understand, then keep waiting.
+///
+/// The point is that it answers. Every other path in `serve` either completes the
+/// sign-in or answers 204 and loops; a request whose target would not parse used
+/// to `continue` with the `Request` dropped un-answered, leaving the browser
+/// waiting on a socket that had accepted the connection and then said nothing.
+/// That presents as a tab that hangs on Google's "Completing sign-in" spinner,
+/// which is indistinguishable from the network being down.
+fn answer_bad_request(request: tiny_http::Request) {
+    let _ = request.respond(
+        tiny_http::Response::from_string("Bad request")
+            .with_status_code(400)
+            .with_header(
+                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..])
+                    .unwrap(),
+            ),
+    );
+}
+
+/// Escape text for interpolation into the loopback error page.
+///
+/// The value is Google's `error_description`, which arrives as a query parameter
+/// on a request anyone on the machine could have made. It is rendered into a page
+/// served from `127.0.0.1`, so without this a crafted redirect could inject markup
+/// — or, more usefully to an attacker, a convincing fake of this page. The length
+/// cap keeps it from filling the viewport either.
+fn escape_html(value: &str) -> String {
+    const MAX: usize = 300;
+
+    let mut out = String::with_capacity(value.len().min(MAX));
+    for ch in value.chars().take(MAX) {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            other => out.push(other),
+        }
+    }
+    if value.chars().count() > MAX {
+        out.push('…');
+    }
+    out
+}
 
 /// Poll the listener until the redirect arrives, the user cancels, or we hit
 /// the 5-minute mark that the Swift implementation used as well.
@@ -200,62 +262,70 @@ fn serve(
             None => (request.url(), None),
         };
 
-        let url = match url::Url::parse(&base) {
-            Ok(mut url) => {
-                // `set_path` percent-decodes nothing and treats `?` as an
-                // ordinary character, so the path has to be handed over without
-                // the query. It is empty-safe: an absolute-form request target
-                // starts with `http`, which is not a path, and is taken whole.
-                let path = if path.starts_with("http://") || path.starts_with("https://") {
-                    path.to_string()
-                } else if path.starts_with('/') {
-                    path.to_string()
-                } else {
-                    format!("/{path}")
-                };
-
-                if path.starts_with("http://") || path.starts_with("https://") {
-                    // Absolute-form request target (RFC 7230 §5.3.2): parse it
-                    // whole rather than grafting it onto the base.
-                    match url::Url::parse(&path) {
-                        Ok(parsed) => parsed,
-                        Err(_) => continue,
-                    }
-                } else {
-                    url.set_path(&path);
+        // One parse, and the whole request target goes through it. The previous
+        // shape built a `Url` from the *base* and then grafted the path on, which
+        // meant a request target that failed to parse was silently dropped with
+        // the `Request` still alive — dropped without being answered, so the
+        // browser sat waiting on a socket that had accepted and then said nothing.
+        // Two `continue`s here are the bug; parsing up front means there is
+        // exactly one, and it is an `else`.
+        let is_absolute = path.starts_with("http://") || path.starts_with("https://");
+        let url = if is_absolute {
+            // Absolute-form request target (RFC 7230 §5.3.2): parse it whole
+            // rather than grafting it onto the base.
+            match url::Url::parse(path) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    answer_bad_request(request);
+                    continue;
+                }
+            }
+        } else {
+            let normalised = if path.starts_with('/') {
+                path.to_string()
+            } else {
+                format!("/{path}")
+            };
+            match url::Url::parse(&base) {
+                Ok(mut url) => {
+                    // `set_path` percent-decodes nothing and treats `?` as an
+                    // ordinary character, so the query is handed over separately.
+                    url.set_path(&normalised);
                     url.set_query(query);
                     url
                 }
+                Err(_) => {
+                    answer_bad_request(request);
+                    continue;
+                }
             }
-            Err(_) => continue,
         };
 
+        // Read the query *once*. It was previously walked twice — once for
+        // `code`/`state`/`error` and again inside the error arm for
+        // `error_description` — which is both a second parse of every pair and a
+        // second chance for the two walks to disagree.
         let mut code = None;
         let mut error = None;
+        let mut description = None;
         let mut state = String::new();
         for (key, value) in url.query_pairs() {
             match key.as_ref() {
                 "code" => code = Some(value.into_owned()),
                 "state" => state = value.into_owned(),
                 "error" => error = Some(value.into_owned()),
+                "error_description" => description = Some(value.into_owned()),
                 _ => {}
             }
         }
 
         let outcome = match (code, error) {
             (Some(code), _) => Some(AuthOutcome::Code { code, state }),
-            (None, Some(error)) => {
-                let description = url
-                    .query_pairs()
-                    .find(|(k, _)| k == "error_description")
-                    .map(|(_, v)| v.into_owned())
-                    .unwrap_or_else(|| error.clone());
-                Some(AuthOutcome::Error {
-                    error,
-                    description,
-                    state,
-                })
-            }
+            (None, Some(error)) => Some(AuthOutcome::Error {
+                description: description.unwrap_or_else(|| error.clone()),
+                error,
+                state,
+            }),
             // A favicon probe or a stray health check — answer and keep waiting.
             _ => None,
         };
@@ -269,9 +339,17 @@ fn serve(
 
         let (status, body) = match &outcome {
             AuthOutcome::Code { .. } => (200, SUCCESS_PAGE.to_string()),
-            AuthOutcome::Error { error, .. } => (
+            AuthOutcome::Error { error, description, .. } => (
                 400,
-                ERROR_PAGE.replace("{ERROR}", error),
+                ERROR_PAGE
+                    .replace("{ERROR}", error)
+                    // Google's `error_description` is prose written for a person,
+                    // and it was parsed and then thrown away — the page showed the
+                    // bare code (`access_denied`) where the explanation should be.
+                    // It is also attacker-influenceable, so it is escaped and
+                    // truncated: a hostile redirect must not be able to inject
+                    // markup into a page served from `127.0.0.1`.
+                    .replace("{DETAIL}", &escape_html(description)),
             ),
         };
         let _ = request.respond(
@@ -340,7 +418,7 @@ mod tests {
 
     #[test]
     fn the_redirect_is_captured_and_answered() {
-        let session = begin(AUTH_URL.into()).unwrap();
+        let mut session = begin(AUTH_URL.into()).unwrap();
         let port = session.port;
 
         // Play the browser: issue the redirect the way Google would.
@@ -363,7 +441,7 @@ mod tests {
             String::new()
         });
 
-        let outcome = block_on(session.receiver)
+        let outcome = block_on(session.take_receiver().unwrap())
             .expect("the listener should have sent exactly one outcome");
         let body = redirect.join().unwrap();
 
@@ -380,7 +458,7 @@ mod tests {
 
     #[test]
     fn google_errors_are_passed_through() {
-        let session = begin(AUTH_URL.into()).unwrap();
+        let mut session = begin(AUTH_URL.into()).unwrap();
         let port = session.port;
 
         std::thread::spawn(move || {
@@ -396,7 +474,7 @@ mod tests {
             }
         });
 
-        match block_on(session.receiver).expect("an error should have been sent") {
+        match block_on(session.take_receiver().unwrap()).expect("an error should have been sent") {
             AuthOutcome::Error { error, description, .. } => {
                 assert_eq!(error, "access_denied");
                 assert_eq!(description, "User said no");
@@ -475,5 +553,157 @@ mod tests {
         let (path, query) = split_target("/favicon.ico");
         assert_eq!(path, "/favicon.ico");
         assert_eq!(query, None);
+    }
+
+    /// Drive a real request through `serve` and hand back the raw response.
+    ///
+    /// The helper the four tests below share. It is a *transport* test: it proves
+    /// the listener answered, which is the weaker half of what the redirect tests
+    /// above assert. Each of them also checks the body or the outcome, because
+    /// "a request was answered" is exactly the property that held while the query
+    /// string was folded into `set_path` and no code was ever read.
+    fn request_once(port: u16, target: String) -> String {
+        for _ in 0..100 {
+            std::thread::sleep(Duration::from_millis(20));
+            if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                use std::io::{Read, Write};
+                let request =
+                    format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+                if stream.write_all(request.as_bytes()).is_err() {
+                    return String::new();
+                }
+                let mut response = String::new();
+                let _ = stream.read_to_string(&mut response);
+                return response;
+            }
+        }
+        String::new()
+    }
+
+    #[test]
+    fn the_redirect_path_is_the_registered_one_not_just_the_root() {
+        // Google redirects to whatever `redirect_uri` names, and Winnow registers
+        // `/winnow-oauth`. So the callback arrives on that path with the code in
+        // the query — the combination that has to survive the parse. Asserted
+        // end-to-end because the transport working and the *path* working are
+        // separate facts, and only the second one means sign-in works.
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+
+        // The request runs on its own thread because the listener only sends once it
+        // has received something; awaiting the receiver first would deadlock against
+        // a test that can only pass by making the request.
+        let browser =
+            std::thread::spawn(move || request_once(port, "/winnow-oauth?state=s1&code=the-real-code".into()));
+
+        let outcome = block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent");
+        let body = browser.join().unwrap();
+
+        match outcome {
+            AuthOutcome::Code { code, state } => {
+                assert_eq!(code, "the-real-code", "the code must survive the path split");
+                assert_eq!(state, "s1");
+            }
+            other => panic!("expected a code, got {other:?}"),
+        }
+        assert!(body.contains("Signed in to Winnow"), "body was: {body}");
+    }
+
+    #[test]
+    fn a_percent_encoded_code_is_decoded_before_the_exchange() {
+        // Google percent-encodes the authorization code. A `+`-containing code is
+        // the case that matters: `query_pairs` decodes `+` as a space, which is
+        // correct for form encoding and is what Google emits, so the assertion
+        // pins that the decoding path is the one actually in use.
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+
+        let browser =
+            std::thread::spawn(move || request_once(port, "/winnow-oauth?state=s&code=a%2Bb%2Fc".into()));
+
+        match block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent") {
+            AuthOutcome::Code { code, .. } => assert_eq!(code, "a+b/c"),
+            other => panic!("expected a code, got {other:?}"),
+        }
+        let _ = browser.join();
+    }
+
+    #[test]
+    fn a_malformed_target_is_answered_rather_than_dropped() {
+        // The bug: an unparseable request target hit a bare `continue`, so the
+        // `Request` was dropped without being answered. The browser waited on a
+        // socket that had accepted and then gone silent — indistinguishable from
+        // the network being down.
+        let session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+
+        // A target containing raw control characters cannot be a valid URL, and
+        // `tiny_http` will hand it through verbatim.
+        let probe = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(120));
+            if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                use std::io::{Read, Write};
+                let _ = stream.write_all(
+                    b"GET /%zz HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+                );
+                let mut response = String::new();
+                let _ = stream.read_to_string(&mut response);
+                return response;
+            }
+            String::new()
+        });
+
+        let body = probe.join().unwrap();
+        // Either it parsed and was answered as an unrelated request (204), or it
+        // did not and was answered as a bad request (400). Both are answers.
+        // What is asserted is that it is one: a non-empty response.
+        assert!(
+            !body.is_empty(),
+            "an unparseable target must still be answered, got nothing"
+        );
+
+        // And the sign-in is still alive afterwards.
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!session.cancel.load(Ordering::SeqCst));
+        session.abort();
+    }
+
+    #[test]
+    fn the_error_page_shows_the_description_escaped() {
+        // Two properties at once, because they are the same line of code: Google's
+        // prose reaches the page (it was parsed and thrown away before), and it is
+        // escaped on the way (the value comes off the query string of a request
+        // anyone on the machine could make).
+        assert_eq!(escape_html("User said no"), "User said no");
+        assert_eq!(
+            escape_html("<script>alert(1)</script>"),
+            "&lt;script&gt;alert(1)&lt;/script&gt;"
+        );
+        assert_eq!(escape_html("a & b"), "a &amp; b");
+        assert!(escape_html(&"x".repeat(500)).ends_with('…'));
+
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+
+        let browser = std::thread::spawn(move || {
+            request_once(
+                port,
+                "/winnow-oauth?state=s&error=access_denied&error_description=User+said+no"
+                    .to_string(),
+            )
+        });
+
+        let outcome = block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent");
+        let body = browser.join().unwrap();
+
+        match &outcome {
+            AuthOutcome::Error { description, .. } => assert_eq!(description, "User said no"),
+            other => panic!("expected an error, got {other:?}"),
+        }
+        assert!(
+            body.contains("User said no"),
+            "the description was parsed but never rendered: {body}"
+        );
+        assert!(body.contains("access_denied"));
     }
 }

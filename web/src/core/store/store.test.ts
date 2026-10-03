@@ -19,10 +19,11 @@ function fakeBackend() {
   const record = (method: string, ...args: unknown[]) => calls.push({ method, args });
 
   const backend: MailBackend = {
-    async sync() {
+    async sync(options) {
       record("sync");
       if (shouldFail) throw new Error("network down");
-      return { emails: [...DEMO_EMAILS], failed: 0 };
+      options?.onProgress?.({ phase: "full", fraction: 0.5, fetched: 1, failed: 0 });
+      return { emails: [...DEMO_EMAILS], failed: 0, truncated: false };
     },
     async toggleStar(id, starred) {
       record("toggleStar", id, starred);
@@ -77,10 +78,6 @@ function fakePlatform() {
     },
     async setBackgroundSync(interval) {
       calls.push({ method: "syncInterval", args: [interval] });
-    },
-    async openExternal() {},
-    async saveAttachment() {
-      return null;
     },
   };
   return { platform, calls };
@@ -715,10 +712,58 @@ describe("persistence", () => {
   it("restores weights from a snapshot written by an older build", () => {
     // A snapshot that predates a weight must still load rather than producing
     // `undefined` arithmetic downstream.
-    const partial = { weights: { security: 30 } as never, adaptive: true, events: [] };
-    const model = LearningModel.from(partial);
+    const partial = { weights: { security: 30 }, adaptive: true, events: [] };
+    const model = LearningModel.fromSnapshot(partial);
     expect(model.weights.security).toBe(30);
     expect(model.weights.spamSensitivity).toBe(44);
+  });
+
+  it("survives a corrupt snapshot rather than losing the app", () => {
+    // `localStorage` is user-writable and a half-finished write is possible, so this
+    // input is reachable in practice — not just in a test. Anything unusable falls back
+    // to the default; nothing throws, because a thrown error here would cost the user
+    // the app rather than just their tuning.
+    const junk: unknown[] = [
+      null,
+      undefined,
+      "not an object",
+      42,
+      { weights: "nope" },
+      { weights: { security: "overrated" } },
+      { events: "not an array" },
+      { events: [{ id: "no-timestamp" }, { id: "x", at: 1, action: "invented", activeSignals: [] }] },
+    ];
+
+    for (const input of junk) {
+      const model = LearningModel.fromSnapshot(input);
+      expect(model.adaptive).toBe(true);
+      expect(model.weights.security).toBe(16);
+      // Only the well-formed events survive, and none carries an action the UI has no
+      // wording for.
+      for (const event of model.events) {
+        expect(["starred", "unstarred", "filter_rejected"]).toContain(event.action);
+      }
+    }
+  });
+
+  it("clamps a restored weight that is outside its own range", () => {
+    // The settings panel renders `value` straight onto a slider, so an
+    // out-of-range stored number would put the thumb somewhere the slider cannot
+    // represent — and then the next edit would snap it to an unrelated number.
+    const model = LearningModel.fromSnapshot({ weights: { security: 9999 } });
+    expect(model.weights.security).toBeLessThanOrEqual(100);
+
+    const clamped = LearningModel.fromSnapshot({ weights: { security: -50 } });
+    expect(clamped.weights.security).toBeGreaterThanOrEqual(0);
+  });
+
+  it("drops a weight it does not recognise", () => {
+    // A weight added by a *newer* build, or a typo, must not survive into the
+    // model as a key nothing reads.
+    const model = LearningModel.fromSnapshot({
+      weights: { security: 20, someFutureWeight: 99 },
+    });
+    expect("someFutureWeight" in model.weights).toBe(false);
   });
 });
 
@@ -836,28 +881,53 @@ describe("sync failure reporting", () => {
     expect(syncFailureSummary(3)).toBe("3 messages failed to download this sync — refresh to retry.");
   });
 
-  it("surfaces a partial failure rather than claiming everything loaded", () => {
+  it("surfaces a partial failure rather than claiming everything loaded", async () => {
     // "All caught up" over a cache that is missing messages is worse than an
     // error message.
     const store = demoStore();
-    const { backend } = {
-      backend: {
-        async sync() {
-          return { emails: [...DEMO_EMAILS], failed: 2 };
-        },
-        async toggleStar() {},
-        async moveToMailbox() {},
-        async setRead() {},
-        async deletePermanently() {},
-        async sendReply() {},
-        async fetchAttachment() {
-          return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
-        },
-      } satisfies MailBackend,
-    };
-    return store.connect(backend, { email: "user@example.com" }).then(() => {
-      expect(store.getSnapshot().error).toContain("2 messages failed");
-    });
+    const backend = {
+      async sync() {
+        return { emails: [...DEMO_EMAILS], failed: 2, truncated: false };
+      },
+      async toggleStar() {},
+      async moveToMailbox() {},
+      async setRead() {},
+      async deletePermanently() {},
+      async sendReply() {},
+      async fetchAttachment() {
+        return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
+      },
+    } satisfies MailBackend;
+
+    await store.connect(backend, { email: "user@example.com" });
+
+    expect(store.getSnapshot().error).toContain("2 messages failed");
+  });
+
+  it("reports a truncated view as a notice, not an error", async () => {
+    // A capped mailbox is not a failure and does not resolve on retry, so it must
+    // not be wearing the error banner's clothes.
+    const store = demoStore();
+    const backend = {
+      async sync() {
+        return { emails: [...DEMO_EMAILS], failed: 0, truncated: true };
+      },
+      async toggleStar() {},
+      async moveToMailbox() {},
+      async setRead() {},
+      async deletePermanently() {},
+      async sendReply() {},
+      async fetchAttachment() {
+        return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
+      },
+    } satisfies MailBackend;
+
+    await store.connect(backend, { email: "user@example.com" });
+    const snapshot = store.getSnapshot();
+
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.notice).toMatch(/more than Winnow will walk/i);
+    expect(snapshot.error).toBeNull();
   });
 });
 

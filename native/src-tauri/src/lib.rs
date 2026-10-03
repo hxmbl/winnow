@@ -25,29 +25,43 @@ pub mod scheduler;
 pub mod secrets;
 pub mod tray;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Build and run the Winnow desktop application.
 pub fn run() {
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_os::init())
-        .plugin(tauri_plugin_store::Builder::new().build())
+    // `single_instance` has to be registered *first*, before any other plugin.
+    // Tauri requires it: it must be able to detect and forward a second launch
+    // before any other plugin has a chance to initialise against a second app, so
+    // putting it later means a `winnow://` click can briefly create a rival
+    // process that fights over the same keychain item and the same tray id.
+    let builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // A second launch — or a `winnow://` click while already running — should
+        // surface the existing window rather than open a rival one.
+        tray::reveal(app);
+
+        // …and it should carry the link that caused it. The callback receives the
+        // second process's argv, and the deep link is in there; it used to be
+        // discarded into `_argv`, so clicking a message link in a browser while
+        // Winnow was already running did the only visible thing (show the window)
+        // and then stopped. The webview's listener picks this up from the same
+        // event the cold-launch path uses, so both routes end in one place.
+        for arg in argv.iter().skip(1) {
+            if arg.starts_with(deep_link::SCHEME) {
+                let _ = app.emit(deep_link::OPEN_URL_EVENT, arg.as_str());
+            }
+        }
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init());
 
     #[cfg(desktop)]
-    let builder = builder
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            // A second launch (or a `winnow://` click while already running)
-            // should surface the existing window rather than open a rival one.
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }))
-        .plugin(tauri_plugin_window_state::Builder::default().build());
+    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
     builder
         .invoke_handler(tauri::generate_handler![
@@ -82,6 +96,12 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Autostart is *registered* here and *enabled* by the user from the
+            // settings panel. The plugin's `init` only stores configuration; it does
+            // not create a login item. Registering it and then never enabling it
+            // used to leave three `autostart:allow-*` permissions granted for calls
+            // that could never happen, and a `--minimized` code path that nothing
+            // could ever reach.
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -92,6 +112,7 @@ pub fn run() {
             deep_link::register(app.handle())?;
             tray::build(app.handle())?;
             scheduler::install(app.handle());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -107,6 +128,25 @@ pub fn run() {
                 let _ = api;
             }
         })
-        .run(tauri::generate_context!())
-        .expect("failed to start the Winnow desktop application");
+        .build(tauri::generate_context!())
+        .expect("failed to start the Winnow desktop application")
+        .run(|app, event| {
+            // Clicking a macOS notification activates the app without any payload,
+            // and `tauri-plugin-notification` offers no desktop click callback to
+            // recover the ids from — so the useful response is the same one as a
+            // dock click: bring the window back.
+            //
+            // `Reopen` is macOS's "the app was already running and got activated"
+            // event. It fires for a dock click, a notification click, and a
+            // `Reopen` Apple Event, and it does not fire for a cold launch, which is
+            // handled by `on_page_load` instead. Revealing on it means the two do not
+            // fight: the page-load path reveals a window that is about to be shown,
+            // and this one reveals one that already exists.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                tray::reveal(app);
+            }
+
+            let _ = (app, &event);
+        });
 }

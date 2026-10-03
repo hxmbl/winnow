@@ -1,26 +1,33 @@
 /**
  * Build the desktop bundle.
  *
- * Wrapped in a script rather than left as a bare `cargo tauri build` because
- * that command produces *no distributable at all* with tauri-cli 2.11: it
- * compiles the binary, prints "Built application at …", exits 0, and writes
- * nothing under `target/release/bundle/`. Naming bundle kinds in
- * `tauri.conf.json` does not change this — verified against an explicit
- * cross-platform list, a macOS-only list, `"all"`, and omitting the key
- * entirely. Only `--bundles` on the command line bundles anything.
+ * Wrapped in a script rather than left as a bare `cargo tauri build` for two
+ * reasons, one of which turned out to be a false premise and is kept because the
+ * *check* is worth having regardless.
  *
- * The failure mode is the reason this is worth a script rather than a note in
- * the README: an exit code of 0 and a plausible-looking log make it look like a
- * release succeeded. Nothing shipped.
+ * 1. **Bundle kinds are named per host.** Asking macOS for `deb` is not an error
+ *    Tauri reports — it declines to bundle, quietly. So the targets are decided
+ *    here, where a missing one is a sentence.
  *
- * So the targets are named here, per host, and passed explicitly. Bundles are
- * named per platform because asking macOS for `deb` is not an error Tauri
- * reports — it just declines to bundle, which is the same silent nothing this
- * script exists to prevent.
+ * 2. **Success is asserted by looking for the output.** The original version of this
+ *    file claimed `cargo tauri build` exits 0 without writing anything, and cited
+ *    tauri-cli 2.11 as the reason. That claim was wrong — `bundle.active` defaults
+ *    to `true`, so a bare `cargo tauri build` *does* bundle. The check stayed
+ *    because it is still the right thing to assert: "the tool said it succeeded" and
+ *    "a file exists where a release should be" are different facts, and the second
+ *    one is the one a release depends on. It costs nothing and it catches the case
+ *    where a future tauri-cli reintroduces the silent case.
+ *
+ * The argument handling was also wrong and is the other reason this is a script:
+ * `--bundles app,dmg … passthrough.slice(bundles.length)` is always an empty slice,
+ * because `bundles.length` *is* `passthrough.length` on that branch. Any flag other
+ * than a bundle name — `--target`, `--ci`, `--debug` — was silently swallowed, and
+ * `npm run tauri:build -- --bundles app` produced the literal string
+ * `--bundles,app` as a bundle name. Flags are now parsed rather than sliced.
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,10 +47,70 @@ function bundlesFor(platform) {
   }
 }
 
-/** Anything after `--` goes straight through, so CI can narrow the targets. */
-const passthrough = process.argv.slice(2);
+/**
+ * Split the arguments into bundle names and flags to forward.
+ *
+ * A bundle name is a bare word; anything beginning with `-` is a flag, and a flag
+ * that takes a value is given the word after it. `--bundles` takes the remainder as
+ * a comma-separated list, which is the one case where a following word is *not* a
+ * flag and *not* a bundle — it is consumed as the flag's own value.
+ *
+ * Returns `{ bundles, flags }`, both in the order they were written, because the
+ * order of forwarded flags can matter (`--debug --ci` is not `--ci --debug`).
+ */
+function parseArgs(argv, platform) {
+  const bundles = [];
+  const flags = [];
+  const rest = [...argv];
+
+  while (rest.length > 0) {
+    const arg = rest.shift();
+
+    if (arg === "--bundles" || arg === "-b") {
+      // Whatever follows *is* the value, commas and all. A missing value is a usage
+      // error rather than an empty bundle list, because the latter builds nothing
+      // and says nothing.
+      const value = rest.shift();
+      if (!value) {
+        throw new Error(`${arg} needs a comma-separated list of bundle kinds`);
+      }
+      for (const kind of value.split(",").map((s) => s.trim()).filter(Boolean)) {
+        if (!bundles.includes(kind)) bundles.push(kind);
+      }
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      flags.push(arg);
+      // The flags that take a value. Everything else is a bare switch, and a bare
+      // switch followed by a bare word is a word, not its value.
+      if (["--target", "--config", "--features", "--profile", "-p"].includes(arg)) {
+        const value = rest.shift();
+        if (!value) throw new Error(`${arg} needs a value`);
+        flags.push(value);
+      }
+      continue;
+    }
+
+    // A bare word is a bundle kind. This is the case the old slicing got wrong.
+    if (!bundles.includes(arg)) bundles.push(arg);
+  }
+
+  return { bundles: bundles.length > 0 ? bundles : bundlesFor(platform), flags };
+}
+
+let bundles;
+let flags;
 const platform = process.platform;
-const bundles = passthrough.length > 0 ? passthrough : bundlesFor(platform);
+
+try {
+  ({ bundles, flags } = parseArgs(process.argv.slice(2), platform));
+} catch (error) {
+  console.error(`${error.message}\n`);
+  console.error("Usage: npm run tauri:build -- [bundle-kind…] [--flag …]");
+  console.error(`  Bundle kinds for this host: ${bundlesFor(platform).join(", ")}`);
+  process.exit(1);
+}
 
 if (!existsSync(resolve(native, "src-tauri", "tauri.conf.json"))) {
   console.error(`Cannot find the Tauri config under ${native}. Is the repo intact?`);
@@ -51,13 +118,13 @@ if (!existsSync(resolve(native, "src-tauri", "tauri.conf.json"))) {
 }
 
 /**
- * Preflight the tools Tauri shells out to, so a missing one is a sentence
- * rather than a stack trace from inside a vendored bash script.
+ * Preflight the tools Tauri shells out to, so a missing one is a sentence rather
+ * than a stack trace from inside a vendored bash script.
  *
- * Tauri's `bundle_dmg.sh` is a thin wrapper around Homebrew's `create-dmg`.
- * Without it the `.app` builds fine and the `.dmg` dies deep inside a script
- * with no mention of what to install — which reads as a bug in this repo rather
- * than a missing prerequisite. `hdiutil` ships with macOS; `create-dmg` does not.
+ * Tauri's `bundle_dmg.sh` is a thin wrapper around Homebrew's `create-dmg`. Without
+ * it the `.app` builds fine and the `.dmg` dies deep inside a script with no mention
+ * of what to install — which reads as a bug in this repo rather than a missing
+ * prerequisite. `hdiutil` ships with macOS; `create-dmg` does not.
  */
 if (platform === "darwin" && bundles.includes("dmg")) {
   const missing = [];
@@ -80,7 +147,7 @@ function has(command) {
   return probe.status === 0;
 }
 
-const args = ["tauri", "build", "--bundles", bundles.join(","), ...passthrough.slice(bundles.length)];
+const args = ["tauri", "build", "--bundles", bundles.join(","), ...flags];
 console.log(`> cargo ${args.join(" ")}   (running in native/)`);
 
 const child = spawn("cargo", args, {
@@ -108,16 +175,42 @@ child.on("exit", (code, signal) => {
   }
   if (code !== 0) process.exit(code ?? 1);
 
-  // The check this script exists for. `cargo tauri build` can exit 0 having
-  // written no bundle at all, so success is asserted by looking for the output
-  // rather than by trusting the exit code.
+  // The check this script exists for. Asserting success by looking for the output
+  // rather than by trusting the exit code: "the tool said it succeeded" and "a
+  // release exists where it should" are different facts.
   const out = resolve(native, "src-tauri", "target", "release", "bundle");
   if (!existsSync(out)) {
     console.error(
       `\nBuild reported success but produced no bundle at ${out}.\n` +
-        "That is the silent-no-bundle failure this script guards against.\n",
+        "Treating that as a failure: shipping a binary with no bundle is the exact\n" +
+        "outcome this check exists to prevent.\n",
     );
     process.exit(1);
   }
+
+  // …and check each bundle kind that was asked for is actually there, rather than
+  // that *a* directory exists. A bundle directory with an empty subdirectory passes
+  // the weaker check and ships nothing.
+  const missing = bundles.filter((kind) => {
+    const dir = resolve(out, kind);
+    if (!existsSync(dir)) return true;
+    try {
+      return readdirSync(dir).every(
+        (entry) => statSync(resolve(dir, entry)).isDirectory(),
+      );
+    } catch {
+      return true;
+    }
+  });
+
+  if (missing.length > 0) {
+    console.error(
+      `\nBuild reported success but produced nothing for: ${missing.join(", ")}.\n` +
+        `Looked under ${out}\n`,
+    );
+    process.exit(1);
+  }
+
   console.log(`\nBundles written to ${out}`);
+  for (const kind of bundles) console.log(`  ${resolve(out, kind)}`);
 });

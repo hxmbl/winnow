@@ -118,6 +118,20 @@ function applyDeltas(
   return { weights: next, changed };
 }
 
+/** Whether a persisted event is complete enough for the panel to render it. */
+function isWellFormedEvent(event: unknown): event is FeedbackEvent {
+  if (!event || typeof event !== "object") return false;
+  const row = event as Partial<FeedbackEvent>;
+  if (typeof row.id !== "string" || typeof row.at !== "number") return false;
+  if (!Number.isFinite(row.at)) return false;
+  if (row.action !== "starred" && row.action !== "unstarred" && row.action !== "filter_rejected") {
+    return false;
+  }
+  if (row.sender !== undefined && typeof row.sender !== "string") return false;
+  if (row.emailId !== undefined && typeof row.emailId !== "number") return false;
+  return Array.isArray(row.activeSignals);
+}
+
 /**
  * The learning model.
  *
@@ -140,13 +154,51 @@ export class LearningModel {
     return new LearningModel({ weights: STANDARD_WEIGHTS, adaptive: true, events: [] });
   }
 
-  static from(snapshot: LearningSnapshot): LearningModel {
-    // Merge over the defaults so a snapshot written by an older build — which
-    // lacks weights added since — still loads.
+  /**
+   * Rebuild from what was persisted.
+   *
+   * A *tolerant* constructor, because the input is `localStorage`: anything can be
+   * in there, including a snapshot from a build that knew fewer weights, a value
+   * a user edited by hand, or half a write from a tab that was closed mid-save.
+   *
+   *   - **Weights** merge over the defaults, so a weight added since the snapshot
+   *     was written is present at its default rather than `undefined`. A weight
+   *     that is not a finite number is dropped for the same reason; one that is
+   *     finite is clamped into its own range, because the panel's sliders will
+   *     happily render an out-of-range value as a thumb at the far end.
+   *   - **`adaptive`** falls back to on, because the alternative — reading
+   *     `undefined` as off — would silently stop the learning loop the user never
+   *     turned off.
+   *   - **Events** are filtered to well-formed entries. A malformed one is
+   *     dropped rather than allowed to reach the panel, which renders
+   *     `event.sender` and `event.at` directly.
+   *
+   * Nothing here throws. A corrupt snapshot costs the user their tuning; a thrown
+   * error costs them the app.
+   */
+  static fromSnapshot(raw: unknown): LearningModel {
+    const snapshot = (raw ?? {}) as Partial<LearningSnapshot>;
+    const defaults = defaultWeights();
+    const weights = { ...defaults };
+
+    const stored = snapshot.weights;
+    if (stored && typeof stored === "object") {
+      for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
+        if (!Object.hasOwn(weights, key)) continue;
+        if (typeof value !== "number" || !Number.isFinite(value)) continue;
+        const meta = signalMeta(key as SignalKey);
+        weights[key as SignalKey] = Math.min(Math.max(Math.round(value), meta.min), meta.max);
+      }
+    }
+
+    const events = Array.isArray(snapshot.events)
+      ? snapshot.events.filter(isWellFormedEvent).slice(-MAX_EVENTS)
+      : [];
+
     return new LearningModel({
-      weights: { ...defaultWeights(), ...snapshot.weights },
-      adaptive: snapshot.adaptive ?? true,
-      events: snapshot.events ?? [],
+      weights,
+      adaptive: typeof snapshot.adaptive === "boolean" ? snapshot.adaptive : true,
+      events,
     });
   }
 

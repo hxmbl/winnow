@@ -109,15 +109,25 @@ export class GmailSyncEngine {
   }
 
   /** Refresh, choosing the strategy from whether a cursor exists. */
-  async sync(): Promise<SyncResult> {
+  /**
+   * Refresh, choosing the strategy from whether a cursor exists.
+   *
+   * `onProgress` is accepted per-call rather than only in the constructor because
+   * the reporter is the *caller's*: the store attaches one, the tests attach
+   * another, and neither should have to be built before the engine exists. Both
+   * strategies are also given the caller's reporter, so a full sync does not lose
+   * its progress the moment the store hands over a fresh callback.
+   */
+  async sync(options: { onProgress?: (progress: SyncProgress) => void } = {}): Promise<SyncResult> {
     const cursor = await this.options.cursor.read();
-    return cursor ? this.incremental() : this.full();
+    const reporter = options.onProgress ?? this.options.onProgress;
+    return cursor ? this.incremental(reporter) : this.full(reporter);
   }
 
   /** Discard the cursor and rebuild every view. */
-  async rebuild(): Promise<SyncResult> {
+  async rebuild(options: { onProgress?: (progress: SyncProgress) => void } = {}): Promise<SyncResult> {
     await this.options.cursor.clear();
-    return this.full();
+    return this.full(options.onProgress ?? this.options.onProgress);
   }
 
   /**
@@ -127,10 +137,13 @@ export class GmailSyncEngine {
    * truth about what exists, so anything else in the cache was deleted
    * server-side and must go. Merging would leave ghosts behind forever.
    */
-  async full(): Promise<SyncResult> {
+  async full(onProgress?: (progress: SyncProgress) => void): Promise<SyncResult> {
     const started = this.now();
     await this.options.cursor.clear();
-    this.report({ phase: "full", fraction: 0, fetched: 0, failed: 0 });
+    const report = (progress: SyncProgress): void => {
+      (onProgress ?? this.options.onProgress)?.(progress);
+    };
+    report({ phase: "full", fraction: 0, fetched: 0, failed: 0 });
 
     // Taken *before* the pages, so anything that arrives while we are paging
     // is picked up by the next incremental sync rather than being missed.
@@ -192,7 +205,7 @@ export class GmailSyncEngine {
             await this.options.cache.upsert(batch);
             batch = [];
           }
-          this.report({
+          report({
             phase: "full",
             fraction: null,
             fetched: seen.size,
@@ -234,18 +247,21 @@ export class GmailSyncEngine {
     if (failed === 0) await this.options.cursor.write(profile.historyId);
 
     const emails = await this.options.cache.all();
-    this.report({ phase: "idle", fraction: 1, fetched: seen.size, failed });
+    report({ phase: "idle", fraction: 1, fetched: seen.size, failed });
 
     return { emails, failed, truncated, durationMs: this.now() - started };
   }
 
   /** Apply everything that changed since the stored cursor. */
-  async incremental(): Promise<SyncResult> {
+  async incremental(onProgress?: (progress: SyncProgress) => void): Promise<SyncResult> {
     const started = this.now();
     const startHistoryId = await this.options.cursor.read();
-    if (!startHistoryId) return this.full();
+    if (!startHistoryId) return this.full(onProgress);
 
-    this.report({ phase: "incremental", fraction: 0, fetched: 0, failed: 0 });
+    const report = (progress: SyncProgress): void => {
+      (onProgress ?? this.options.onProgress)?.(progress);
+    };
+    report({ phase: "incremental", fraction: 0, fetched: 0, failed: 0 });
 
     let failed = 0;
     let fetched = 0;
@@ -265,13 +281,13 @@ export class GmailSyncEngine {
         }
         pageToken = response.nextPageToken;
         if (response.historyId) latestHistoryId = response.historyId;
-        this.report({ phase: "incremental", fraction: null, fetched, failed });
+        report({ phase: "incremental", fraction: null, fetched, failed });
       } while (pageToken);
     } catch (error) {
       // The cursor is older than Google retains. The only correct response is
       // a full rebuild; carrying on would silently skip everything since.
       if (error instanceof GmailHttpError && error.status === 404) {
-        return this.full();
+        return this.full(onProgress);
       }
       throw error;
     }
@@ -279,7 +295,7 @@ export class GmailSyncEngine {
     if (failed === 0) await this.options.cursor.write(latestHistoryId);
 
     const emails = await this.options.cache.all();
-    this.report({ phase: "idle", fraction: 1, fetched, failed });
+    report({ phase: "idle", fraction: 1, fetched, failed });
 
     return { emails, failed, truncated: false, durationMs: this.now() - started };
   }
@@ -355,9 +371,6 @@ export class GmailSyncEngine {
     return { kind: "success", email: { ...email, mailbox: mailboxFor(labels) } };
   }
 
-  private report(progress: SyncProgress): void {
-    this.options.onProgress?.(progress);
-  }
 }
 
 /** Sort newest-first, which is the order every view and the cache expect. */

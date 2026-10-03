@@ -21,10 +21,10 @@ import type { TokenSet } from "../core/gmail/dto";
 import type { TokenStore } from "../core/gmail/tokens";
 import type {
   NewMailNotification,
-  OAuthRedirect,
   Platform,
   PlatformInfo,
   SignInRequest,
+  SignInResult,
 } from "./types";
 
 /** The event Rust emits on each background tick. Mirrors `scheduler.rs`. */
@@ -44,12 +44,44 @@ type AuthOutcome =
 /** The loopback port of an in-flight sign-in, so it can be cancelled. */
 let activePort: number | null = null;
 
-/** Secrets in the OS keychain, not in `localStorage`. */
+/**
+ * Tear a listener down.
+ *
+ * Freeing the port is the point. A listener is a bound socket and a thread that runs
+ * until it is told to stop, so a sign-in that failed after `oauth_begin` — the browser
+ * would not open, say — leaves both running for the life of the process unless
+ * something frees them. `oauth_cancel` is idempotent, so calling it for a port that is
+ * already gone is fine.
+ *
+ * Also clears `activePort`, but only if it is *this* port. Two overlapping attempts are
+ * not possible through `beginSignIn` (the UI disables the button), and clearing another
+ * attempt's port would leave it uncancellable.
+ */
+async function abandonSignIn(port: number): Promise<void> {
+  if (activePort === port) activePort = null;
+  await invoke("oauth_cancel", { port }).catch(() => undefined);
+}
+
+/**
+ * Secrets in the OS keychain, not in `localStorage`.
+ *
+ * `read` treats a parse failure as "no session" rather than propagating it. A
+ * token blob written by a build whose `TokenSet` had different fields, or edited
+ * by hand in the keychain, is not recoverable — but it is also not a reason to
+ * fail sign-in. `TokenManager` distinguishes a store that failed from a store that
+ * was empty precisely so the sign-in screen can say "your keychain is locked"
+ * rather than looping forever on a value that will never parse.
+ */
 const keychainTokenStore = (name = "gmail.tokens"): TokenStore => ({
   async read(): Promise<TokenSet | null> {
     const raw = await invoke<string | null>("secrets_get", { name });
     if (!raw) return null;
-    return JSON.parse(raw) as TokenSet;
+    try {
+      const parsed = JSON.parse(raw) as TokenSet;
+      return parsed?.accessToken ? parsed : null;
+    } catch {
+      return null;
+    }
   },
   async write(tokens: TokenSet): Promise<void> {
     await invoke("secrets_set", { name, value: JSON.stringify(tokens) });
@@ -70,15 +102,28 @@ const keychainTokenStore = (name = "gmail.tokens"): TokenStore => ({
  *
  * A rejected promise is not cached: a transient IPC failure should not pin the
  * app to "this build can do nothing" for the life of the process.
+ *
+ * **The wire shape is snake_case.** As with `oauth_begin`, Tauri rewrites
+ * arguments but not returns. `AppInfo` was declared in Rust with
+ * `native_oauth`/`background_sync`/… and read here as `nativeOAuth`/`backgroundSync`,
+ * so every capability arrived `undefined`. The consequence was quiet and total:
+ * `backgroundSync` read as `undefined`, the settings panel's whole Background
+ * section was gated on it, and the desktop user could never turn background sync
+ * on — a feature that was implemented, permissioned, and unreachable.
+ * `normaliseAppInfo` is the belt to that braces: it accepts either casing, so a
+ * future field cannot fail this way silently, and `platform.test.ts` pins the
+ * camelCase contract the UI reads.
  */
 let infoPromise: Promise<PlatformInfo> | null = null;
 
 export const desktopPlatform: Platform = {
   info(): Promise<PlatformInfo> {
-    infoPromise ??= invoke<PlatformInfo>("app_info").catch((error) => {
-      infoPromise = null;
-      throw error;
-    });
+    infoPromise ??= invoke<Record<string, unknown>>("app_info")
+      .then(normaliseAppInfo)
+      .catch((error) => {
+        infoPromise = null;
+        throw error;
+      });
     return infoPromise;
   },
 
@@ -117,31 +162,57 @@ export const desktopPlatform: Platform = {
    * that wrong is a sign-in that hangs for five minutes and then blames the
    * user's network.
    *
-   * The URL that comes back from Rust is the one opened, not the one sent in,
-   * so there is no way to open an un-substituted URL by mistake.
+   * The URL that comes back from Rust is the one opened, not the one sent in, so
+   * there is no way to open an un-substituted URL by mistake.
+   *
+   * **The reply is snake_case on purpose.** Tauri rewrites *argument* keys from
+   * camelCase to snake_case, but it never rewrites *return values* — those go
+   * through plain serde using the struct's own field names. Reading
+   * `begun.authorizeUrl` from a struct Rust declared `authorize_url` produced
+   * `undefined`, which was then passed to `open_external` as `url: undefined`; the
+   * IPC rejected the call with "missing required key url", and since that `await`
+   * sat outside the try below, `beginSignIn` rejected outright. Google sign-in on
+   * the desktop was impossible, and the sign-in screen rendered the raw IPC error
+   * as though it had come from Google. Hence the snake_case types at this boundary,
+   * and `platform.test.ts` pinning the shape.
    */
-  async beginSignIn(request: SignInRequest): Promise<OAuthRedirect> {
+  async beginSignIn(request: SignInRequest): Promise<SignInResult> {
     // Tauri v2 converts an `invoke` argument from camelCase to snake_case
     // automatically, so this reaches `oauth_begin(authorize_url: String)`.
-    const begun = await invoke<{ port: number; authorizeUrl: string }>("oauth_begin", {
+    const begun = await invoke<{ port: number; authorize_url: string }>("oauth_begin", {
       authorizeUrl: request.authorizeUrl,
     });
     activePort = begun.port;
 
-    // Opened from the app rather than navigated to, so the app stays alive and
-    // the user can see it waiting.
-    await invoke("open_external", { url: begun.authorizeUrl });
+    try {
+      // Opened from the app rather than navigated to, so the app stays alive and
+      // the user can see it waiting. Inside the try, because failing here is the
+      // same class of problem as failing to listen: nothing is waiting for a
+      // redirect that is never going to arrive, and leaving the listener bound
+      // would leak a thread and a socket for the life of the process.
+      await invoke("open_external", { url: begun.authorize_url });
+    } catch (error) {
+      await abandonSignIn(begun.port);
+      return {
+        kind: "unavailable",
+        detail: describeIpcError(error, "the browser could not be opened"),
+      };
+    }
 
     try {
       return await invoke<AuthOutcome>("oauth_await", {
         port: begun.port,
         timeoutMs: request.timeoutMs,
       });
-    } catch {
-      // A timeout, a dropped listener, or a port the user walked away from.
-      // All three are a cancellation from the user's side of the story rather
-      // than a crash, and the session layer renders them as one.
-      return { kind: "cancelled" };
+    } catch (error) {
+      // Three genuinely different endings, and collapsing them into one
+      // "cancelled" is what made a listener that never bound indistinguishable from
+      // a user who closed the tab — so the sign-in screen told someone their click
+      // had been ignored when nothing had been listening at all.
+      const message = describeIpcError(error, "the sign-in listener stopped");
+      if (/\btimed?[\s-]?out\b/i.test(message)) return { kind: "timeout" };
+      if (/\b(cancel|abort|closed|disconnect|dropped)\b/i.test(message)) return { kind: "cancelled" };
+      return { kind: "unavailable", detail: message };
     } finally {
       activePort = null;
     }
@@ -149,14 +220,22 @@ export const desktopPlatform: Platform = {
 
   async cancelSignIn(): Promise<void> {
     if (activePort === null) return;
-    const port = activePort;
-    activePort = null;
-    await invoke("oauth_cancel", { port }).catch(() => undefined);
+    await abandonSignIn(activePort);
   },
 
   async notifyNewMail(mail: NewMailNotification): Promise<void> {
+    // `message_ids` on the wire, for the same reason as every other reply here:
+    // the camelCase rewrite applies to the *top-level* argument key (`mail`), not
+    // to the fields inside the value it deserialises. Sending `messageIds` into a
+    // struct with `#[serde(default)]` on `message_ids` deserialised *successfully*
+    // with an empty vec — so the ids were dropped with no error at all, and a
+    // notification click could never know which conversation to open.
     await invoke("notify_new_mail", {
-      mail: { title: mail.title, body: mail.body, messageIds: mail.messageIds },
+      mail: {
+        title: mail.title,
+        body: mail.body,
+        message_ids: mail.messageIds,
+      },
     });
   },
 
@@ -169,6 +248,9 @@ export const desktopPlatform: Platform = {
   },
 
   async setBackgroundSync(intervalSeconds: number | null): Promise<void> {
+    // `intervalSecs` → `interval_secs`: this one *is* rewritten, because it is a
+    // top-level argument key. `null` is accepted by Tauri as `None` for an
+    // `Option<u64>`, which is how the ticker is parked.
     await invoke("set_background_sync", { intervalSecs: intervalSeconds });
   },
 
@@ -214,12 +296,29 @@ export const desktopPlatform: Platform = {
     return invoke<string | null>("save_attachment", { filename, bytesBase64: base64 });
   },
 
+  /**
+   * Raise the window.
+   *
+   * `unminimize` is not a no-op on a path where the app was launched from a tray
+   * click or a `winnow://` link: that is exactly the situation this exists for,
+   * and `setFocus` on a minimised window focuses nothing the user can see. The
+   * call needs `core:window:allow-unminimize`, which `capabilities/default.json`
+   * did not grant — so it was rejected, and because it was the *first* call in the
+   * sequence, `show` and `setFocus` never ran. Every deep link and every tray
+   * click on the running app therefore did nothing visible.
+   *
+   * The three calls are attempted independently rather than as a chain: they are
+   * three permissions with three failure modes, and one missing permission should
+   * not cost the other two. `focusWindow` is a best-effort convenience, so it
+   * swallows its own errors — the alternative is an unhandled rejection in a path
+   * that has nothing to report to.
+   */
   async focusWindow(): Promise<void> {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     const window = getCurrentWindow();
-    await window.unminimize();
-    await window.show();
-    await window.setFocus();
+    await window.unminimize().catch(() => undefined);
+    await window.show().catch(() => undefined);
+    await window.setFocus().catch(() => undefined);
   },
 };
 
@@ -266,4 +365,73 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
   return btoa(binary);
+}
+
+/**
+ * Rust's `AppInfo` in the shape the UI reads.
+ *
+ * Declared snake_case because that is what serde produces, and mapped up by
+ * `normaliseAppInfo` rather than being `rename_all = "camelCase"` in Rust. The
+ * asymmetry is deliberate and the reason is worth recording: this is the one
+ * struct whose field names are read by two different languages, so the mismatch
+ * was invisible in both. Serde's `rename_all` would have made the TypeScript side
+ * correct and the Rust side lie, which is the same bug with the fix on the other
+ * file. Normalising in one place means the wire format is whatever Rust says and
+ * the contract is asserted once, here.
+ */
+type AppInfoWire = {
+  name: string;
+  version: string;
+  os: string;
+  arch: string;
+  kind: "web" | "desktop";
+  native_oauth: boolean;
+  native_secrets: boolean;
+  background_sync: boolean;
+  save_files: boolean;
+};
+
+/**
+ * Accept either casing for the capability flags.
+ *
+ * Returns the desktop's own answer when Rust gives it, and `false` when it does
+ * not — never `undefined`. `undefined` was the actual bug: `SettingsPanel` gates
+ * its Background section on `backgroundSync !== null`, so an absent flag meant the
+ * section was not merely wrong, it was *absent*, with no error anywhere.
+ */
+function normaliseAppInfo(wire: Record<string, unknown>): PlatformInfo {
+  const source = wire as Partial<AppInfoWire> & Record<string, unknown>;
+  const flag = (snake: string, camel: string): boolean =>
+    source[snake] === true || source[camel] === true;
+
+  return {
+    name: typeof source.name === "string" ? source.name : "Winnow",
+    version: typeof source.version === "string" ? source.version : "0.0.0",
+    os: typeof source.os === "string" ? source.os : "unknown",
+    arch: typeof source.arch === "string" ? source.arch : "unknown",
+    kind: source.kind === "desktop" ? "desktop" : "web",
+    nativeOAuth: flag("native_oauth", "nativeOAuth"),
+    nativeSecrets: flag("native_secrets", "nativeSecrets"),
+    backgroundSync: flag("background_sync", "backgroundSync"),
+    saveFiles: flag("save_files", "saveFiles"),
+  };
+}
+
+/**
+ * Turn an IPC rejection into something worth showing a person.
+ *
+ * A rejected `invoke` arrives as a plain `Error` whose message is either the
+ * Rust `Err` string or a Tauri's own "missing required key" phrasing — neither of
+ * which means anything to someone whose sign-in just failed. The `fallback` says
+ * what was being attempted, so the message has a subject even when the cause is
+ * unrecognised.
+ *
+ * Truncated, because an IPC error can carry a whole serialised payload and the
+ * sign-in screen has no room for it.
+ */
+function describeIpcError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const cleaned = message.trim().replace(/\s+/g, " ");
+  if (!cleaned) return fallback;
+  return cleaned.length > 200 ? `${cleaned.slice(0, 200)}…` : cleaned;
 }

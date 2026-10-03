@@ -29,6 +29,12 @@
 const PANEL = "#FAFFFF";
 const PANEL_ALPHA = 0.81;
 
+/** How much of a badge accent goes into its chip fill. */
+const BADGE_WASH_ALPHA = 0.14;
+
+/** …and into its hairline edge, which is what makes the chip legible on a wash. */
+const BADGE_EDGE_ALPHA = 0.34;
+
 /**
  * The semantic names, and their light-mode values.
  *
@@ -255,6 +261,15 @@ export function applyTheme(root: HTMLElement, scheme: ThemeName = "light"): void
   }
   for (const [key, value] of Object.entries(palette.badge)) {
     root.style.setProperty(`--wn-badge-${key}`, value);
+    // The chip's fill and edge are derived from the same accent, here rather
+    // than in the component. A component cannot derive them: it holds the *name*
+    // `--wn-badge-urgent`, not the resolved hex, and JavaScript has no way to ask
+    // the CSS engine what a custom property currently computes to. Passing that
+    // name to a hex parser silently produced `rgba(0, 0, 10, α)` for every chip —
+    // one identical near-black wash — which is what the reader's badges used to
+    // render.
+    root.style.setProperty(`--wn-badge-${key}-wash`, rgba(value, BADGE_WASH_ALPHA));
+    root.style.setProperty(`--wn-badge-${key}-edge`, rgba(value, BADGE_EDGE_ALPHA));
   }
   for (const [key, value] of Object.entries(palette.elevation)) {
     root.style.setProperty(`--wn-elev-${key}`, value);

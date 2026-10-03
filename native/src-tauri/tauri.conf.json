@@ -9,6 +9,13 @@
     "beforeDevCommand": "npm --prefix ../web install && npm --prefix ../web run dev",
     "beforeBuildCommand": "npm --prefix ../web install && npm --prefix ../web run build"
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["winnow"]
+      }
+    }
+  },
   "app": {
     "withGlobalTauri": false,
     "windows": [

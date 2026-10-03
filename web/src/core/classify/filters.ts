@@ -123,16 +123,31 @@ export function matchesBuiltin(
       // `promotional || newsletter` here, which made Read later a synonym for
       // two buckets that already existed and hid quiet personal mail.
       //
-      // The score test is `<= SKIPPABLE_SCORE`, where the base score is 50. That
-      // boundary is load-bearing: with a strict `< 50`, a message carrying no
-      // signal at all scored exactly 50 and was excluded, so the only mail that
-      // could reach Read later was mail from a penalised sender. The bucket
-      // meant "skippable" and selected for "quiet or demoted" instead.
+      // The score test is `<= SKIPPABLE_SCORE`, where the base score is 50, and the
+      // boundary is load-bearing in both directions. With a strict `< 50` a message
+      // carrying no signal at all scored exactly 50 and was excluded, so the only
+      // mail that could reach Read later was mail from a *penalised* sender — the
+      // bucket meant "skippable" and selected for "quiet or demoted" instead. But
+      // the symmetric mistake is just as bad: a 2FA code and a social mention both
+      // score exactly 50 too, and filing those under Read later is precisely the
+      // "hides mail you needed" failure the bucket exists to avoid.
+      //
+      // So the boundary holds the score and the *other* signals decide: anything
+      // the user was explicitly asked to deal with is excluded by name, and
+      // everything else that earned no positive signal falls in. That is what makes
+      // "Read later" mean the same thing the classifier's own base score does —
+      // mail with no reason to open it now.
       return (
         !email.starred &&
         !signals.urgentText &&
         !signals.security &&
         !signals.needsAction &&
+        !signals.codes &&
+        !signals.travel &&
+        !signals.events &&
+        !signals.shipping &&
+        !signals.finance &&
+        !signals.social &&
         signals.importanceScore <= SKIPPABLE_SCORE &&
         safe
       );
@@ -164,7 +179,28 @@ export function matchesFilter(
   return matchesBuiltin(filter.id, email, signals, profile);
 }
 
-/** How many messages in the inbox land in each bucket. */
+/**
+ * How many messages in the inbox land in each bucket.
+ *
+ * `unsafe` is the exception, and it has to be. Every other bucket is defined with
+ * a `safe && …` guard — a message the classifier thinks is junk must not appear
+ * in a bucket that means "worth your attention", or the user reads a phishing
+ * lure by explicitly asking for Security. The `unsafe` bucket *is* the junk, so
+ * counting it the same way would report the safety valve as permanently empty and
+ * pin it nowhere.
+ *
+ * So the guard is applied once, here, to every bucket except `unsafe`, rather than
+ * being left to each predicate. Applying it per-predicate is what let spam into
+ * the Security count anyway: `security` is the one positive bucket whose predicate
+ * has no `safe` guard — `signals.security` is a fact about the message, not a
+ * judgement about whether to show it — so a phished "your account is suspended"
+ * notice was counted under Security *and* under Unsafe at the same time. That
+ * inflated the count, and since the rail ranks by count, it also moved Security
+ * above buckets that genuinely had more mail in them.
+ *
+ * Ported from `legacy/swift-native/Sources/winnow/Classification/FilterCatalog.swift`,
+ * which guards the loop rather than the predicates for the same reason.
+ */
 export function countAllFilters(
   inbox: readonly Email[],
   signals: ReadonlyMap<number, EmailSignals>,
@@ -174,7 +210,9 @@ export function countAllFilters(
   for (const email of inbox) {
     const signal = signals.get(email.id);
     if (!signal) continue;
+    const safe = !isUnsafe(signal);
     for (const id of ALL_FILTER_IDS) {
+      if (!safe && id !== "unsafe") continue;
       if (matchesBuiltin(id, email, signal, profile)) {
         counts.set(id, (counts.get(id) ?? 0) + 1);
       }

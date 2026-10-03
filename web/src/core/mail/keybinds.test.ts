@@ -4,13 +4,99 @@ import {
   DEFAULT_CONTEXT,
   commandForKey,
   shouldSwallow,
+  specMatches,
+  type Binding,
+  type Command,
   type KeyContext,
 } from "./keybinds";
+
+/**
+ * Every command type `commandForKey` can produce, across every reachable context.
+ *
+ * Derived from the *router* rather than from the table, so this stays correct as
+ * either side changes — and so a command that only exists in the `Command` union,
+ * with no key that reaches it, fails here rather than in someone's hands.
+ */
+function reachableCommandTypes(): Set<string> {
+  const types = new Set<string>();
+  const keys = [
+    ..."jkoseurfmuh#/,?!123456789".split(""),
+    "Enter",
+    "Escape",
+    "ArrowUp",
+    "ArrowDown",
+    "Backspace",
+    "Delete",
+    "U",
+    "&",
+  ];
+  const modifiers = [
+    {},
+    { shiftKey: true },
+    { shiftKey: false },
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+  ];
+  for (const ctx of REACHABLE_CONTEXTS) {
+    for (const key of keys) {
+      for (const event of modifiers) {
+        const command = commandForKey(key, ctx, event);
+        if (command) types.add(command.type);
+      }
+    }
+  }
+  return types;
+}
+
+/**
+ * Every command type a single binding can produce, across reachable contexts.
+ *
+ * Probed through `commandForKey` rather than by calling `binding.command`
+ * directly, because a binding that the router never reaches produces nothing in
+ * the app — and calling it by hand would happily report one.
+ */
+function commandTypesOf(binding: Binding): string[] {
+  const types = new Set<string>();
+  const keys = [...binding.matches.keys, ...(binding.matches.chars ?? [])];
+  for (const ctx of REACHABLE_CONTEXTS) {
+    for (const key of keys) {
+      for (const event of [{}, { shiftKey: true }, { shiftKey: false }]) {
+        if (!specMatches(key, binding.matches, event)) continue;
+        if (binding.when && !binding.when({ key, event, context: ctx })) continue;
+        const command = commandForKey(key, ctx, event);
+        if (command) types.add(command.type);
+      }
+    }
+  }
+  return [...types];
+}
 
 /** A context with everything switched off, so each test states only what it needs. */
 function context(over: Partial<KeyContext> = {}): KeyContext {
   return { ...DEFAULT_CONTEXT, ...over };
 }
+
+/**
+ * Every context a command can fire in.
+ *
+ * The cheat-sheet contract is checked against *all* of them rather than one
+ * generous one, because a binding that only works in a state no user is ever in is
+ * still a binding that does not work. This is the enumeration: the contexts the
+ * table's guards actually branch on.
+ */
+const REACHABLE_CONTEXTS: readonly KeyContext[] = [
+  DEFAULT_CONTEXT,
+  context({ hasActionTarget: true }),
+  context({ viewerOpen: true, hasActionTarget: true }),
+  context({ railCount: 9, hasActionTarget: true }),
+  context({ filtersActive: true, hasActionTarget: true, railCount: 9 }),
+  context({ overlayVisible: true, hasActionTarget: true, railCount: 9 }),
+  context({ navigationVisible: true, hasActionTarget: true, railCount: 9 }),
+  context({ composerOpen: true, hasActionTarget: true, railCount: 9, viewerOpen: true }),
+  context({ textEditing: true }),
+  context({ textEditing: true, composerOpen: true }),
+];
 
 describe("commandForKey — not ready", () => {
   it("routes nothing before sign-in", () => {
@@ -91,7 +177,15 @@ describe("commandForKey — the shortcut sheet is modal", () => {
   });
 
   it("closes on ?", () => {
-    expect(commandForKey("?", sheet)).toEqual({ type: "toggleShortcutsOverlay" });
+    expect(commandForKey("?", sheet, { shiftKey: true })).toEqual({
+      type: "toggleShortcutsOverlay",
+    });
+  });
+
+  it("closes on Escape", () => {
+    // The generic Escape rule already does this; the sheet's own table has to as
+    // well, or `SHEET_BINDINGS` would be a second, driftable answer.
+    expect(commandForKey("Escape", sheet)).toEqual({ type: "dismissOverlay" });
   });
 });
 
@@ -124,6 +218,18 @@ describe("commandForKey — the mailbox palette is modal", () => {
     // `4` is past the end: a rail with three pills has no fourth position, and
     // acting on it would toggle an arbitrary filter.
     expect(commandForKey("4", palette)).toBeNull();
+  });
+
+  it("keeps Shift+1 for itself, so a digit never opens the palette", () => {
+    // The bug this pins: the palette's `!` row accepted a bare `1`, so pressing `1`
+    // with the palette open both toggled a filter *and* would have closed the
+    // palette — one keystroke with two answers, neither of them the obvious one.
+    const shifted = commandForKey("1", palette, { shiftKey: true });
+    expect(shifted).toEqual({ type: "toggleNavigation" });
+    expect(commandForKey("1", palette, { shiftKey: false })).toEqual({
+      type: "toggleFilter",
+      railIndex: 0,
+    });
   });
 });
 
@@ -169,12 +275,86 @@ describe("commandForKey — the canvas", () => {
     expect(commandForKey("r", context({ viewerOpen: true }))).toEqual({ type: "focusReply" });
   });
 
-  it("always allows search and the two overlays", () => {
-    // These are safe with or without a target: search is not destructive, and
-    // the sheets are views.
+  it("forwards only when a message is open", () => {
+    // Forwarding needs a message to forward. Gating it on `viewerOpen` rather than
+    // on `hasActionTarget` is what keeps `f` from firing on a bare cursor: the
+    // cursor can exist with nothing highlighted.
+    expect(commandForKey("f", DEFAULT_CONTEXT)).toBeNull();
+    expect(commandForKey("f", context({ hasActionTarget: true }))).toBeNull();
+    expect(commandForKey("f", context({ viewerOpen: true }))).toEqual({ type: "forward" });
+  });
+
+  it("marks the whole mailbox read only with shift", () => {
+    // The most destructive thing on the canvas, and the one with no undo. It gets
+    // a modifier precisely because `u` is already the read/unread toggle and a
+    // bare letter for "mark everything read" would be one mis-aimed keystroke.
+    expect(commandForKey("u", context({ hasActionTarget: true }))).toEqual({
+      type: "toggleRead",
+    });
+    expect(commandForKey("U", context({ hasActionTarget: true }))).toBeNull();
+    expect(
+      commandForKey("U", context({ hasActionTarget: true }), { shiftKey: true }),
+    ).toEqual({ type: "markAllRead" });
+  });
+
+  it("always allows search, settings and the two overlays", () => {
+    // These are safe with or without a target: search and settings are not
+    // destructive, and the sheets are views.
     expect(commandForKey("/", DEFAULT_CONTEXT)).toEqual({ type: "focusSearch" });
-    expect(commandForKey("?", DEFAULT_CONTEXT)).toEqual({ type: "toggleShortcutsOverlay" });
-    expect(commandForKey("!", DEFAULT_CONTEXT)).toEqual({ type: "toggleNavigation" });
+    expect(commandForKey(",", DEFAULT_CONTEXT)).toEqual({ type: "openSettings" });
+    expect(commandForKey("?", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({
+      type: "toggleShortcutsOverlay",
+    });
+    expect(commandForKey("!", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({
+      type: "toggleNavigation",
+    });
+  });
+
+  it("distinguishes `/` from `?` on a layout where both arrive as slash", () => {
+    // On a German or Nordic keyboard `?` *is* `/` with shift. If the two bindings
+    // could not tell shift apart, one of them would be unreachable on exactly the
+    // layouts that need it.
+    expect(commandForKey("/", DEFAULT_CONTEXT, { shiftKey: false })).toEqual({
+      type: "focusSearch",
+    });
+    expect(commandForKey("/", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({
+      type: "toggleShortcutsOverlay",
+    });
+  });
+
+  it("reaches the palette on a layout where `!` is not Shift+1", () => {
+    // A French keyboard produces a bare `&` with no shift at all. Requiring shift
+    // would make the palette unreachable there, so the character is accepted on
+    // its own and only the *digit* 1 demands shift.
+    expect(commandForKey("&", DEFAULT_CONTEXT)).toEqual({ type: "toggleNavigation" });
+    expect(commandForKey("1", context({ railCount: 9 }), { shiftKey: true })).toEqual({
+      type: "toggleNavigation",
+    });
+    expect(commandForKey("1", context({ railCount: 9 }), { shiftKey: false })).toEqual({
+      type: "toggleFilter",
+      railIndex: 0,
+    });
+  });
+});
+
+describe("commandForKey — the composer", () => {
+  it("closes on Escape rather than blurring a field nobody can see", () => {
+    // The composer's textarea is a text field, so the generic rule would blur it —
+    // which closes nothing, because the sheet is still up over it.
+    const typing = context({ textEditing: true, composerOpen: true });
+    expect(commandForKey("Escape", typing)).toEqual({ type: "closeComposer" });
+    // …and still refuses to eat the letters being typed.
+    for (const key of ["j", "s", "r", "e", "?"]) {
+      expect(commandForKey(key, typing), key).toBeNull();
+    }
+  });
+
+  it("routes nothing else while it is open", () => {
+    // Otherwise `s` behind the sheet would star a message the user cannot see.
+    const open = context({ composerOpen: true, hasActionTarget: true, viewerOpen: true });
+    for (const key of ["j", "k", "s", "e", "u", "!", "?", ","]) {
+      expect(commandForKey(key, open), key).toBeNull();
+    }
   });
 });
 
@@ -217,6 +397,12 @@ describe("shouldSwallow", () => {
     expect(shouldSwallow(context({ textEditing: true }), {})).toBe(false);
   });
 
+  it("never consumes inside the composer", () => {
+    // The composer's own Escape is handled by `commandForKey`, so consuming here
+    // would double-prevent it and the sheet would never close.
+    expect(shouldSwallow(context({ composerOpen: true }), {})).toBe(false);
+  });
+
   it("never consumes when a system modifier is held", () => {
     expect(shouldSwallow(DEFAULT_CONTEXT, { metaKey: true })).toBe(false);
     expect(shouldSwallow(DEFAULT_CONTEXT, { ctrlKey: true })).toBe(false);
@@ -245,9 +431,9 @@ describe("the cheat sheet", () => {
     //
     // The context is chosen per key rather than maximally generous, because a
     // maximally generous context is not a real one: `o` is suppressed while the
-    // reader is open, and `r` only works with a message open. A test that
-    // forced everything on at once would be asserting a state no user is ever
-    // in, and would pass a binding that can never fire.
+    // reader is open, and `r` only works with a message open. A test that forced
+    // everything on at once would be asserting a state no user is ever in, and
+    // would pass a binding that can never fire.
     const contexts: Record<string, KeyContext> = {
       // Opening needs a row highlighted, and the reader closed.
       o: context({ hasActionTarget: true, viewerOpen: false }),
@@ -255,8 +441,9 @@ describe("the cheat sheet", () => {
       // Scrolling the reader needs it open.
       ArrowDown: context({ viewerOpen: true, hasActionTarget: true }),
       ArrowUp: context({ viewerOpen: true, hasActionTarget: true }),
-      // Replying needs the reader open.
+      // Replying and forwarding need the reader open.
       r: context({ viewerOpen: true, hasActionTarget: true }),
+      f: context({ viewerOpen: true, hasActionTarget: true }),
       // Escape closes the topmost layer; with only the reader open, that is it.
       Escape: context({ viewerOpen: true, hasActionTarget: true }),
       // Digits need a rail to address.
@@ -264,63 +451,123 @@ describe("the cheat sheet", () => {
     };
 
     for (const binding of BINDINGS) {
-      const key = binding.matches.keys[0];
-      const ctx = contexts[key] ?? context({ hasActionTarget: true, railCount: 9 });
-      const command = commandForKey(key, ctx);
-      expect(command, `sheet advertises ${binding.keys} (${key})`).not.toBeNull();
+      for (const key of binding.matches.keys) {
+        // A row whose modifier is required has to be pressed with it, or the
+        // assertion would be testing a keystroke the binding rejects.
+        const event =
+          binding.matches.shift === true ? { shiftKey: true } : { shiftKey: false };
+        const ctx = contexts[key] ?? context({ hasActionTarget: true, railCount: 9 });
+        const command = commandForKey(key, ctx, event);
+        expect(command, `sheet advertises ${binding.keys} (${key})`).not.toBeNull();
+      }
     }
   });
 
-  it("documents every action the store can take from the keyboard", () => {
-    const documented = new Set(BINDINGS.map((b) => b.command.type));
-    // Actions with no sheet row of their own, and why:
-    //
-    //   - `restore` is what `e` does from the bin; a separate key would be a
-    //     second way to do one thing.
-    //   - `clearFilters` is Escape with no viewer open.
-    //   - `dismissOverlay` / `dismissNavigation` / `blurText` are the other
-    //     Escape targets.
-    //   - `activateNavigation` / `moveNavigation` are Enter and arrows inside
-    //     the palette, and the palette has its own row for `!`.
-    //   - `openSettings` is the palette's settings row, reachable by mouse.
-    const implicit = new Set([
-      "restore",
-      "clearFilters",
-      "dismissOverlay",
-      "dismissNavigation",
-      "blurText",
-      "activateNavigation",
-      "moveNavigation",
-      "openSettings",
-    ]);
-
-    const expected: string[] = [
+  it("routes every command in the union to some key in some context", () => {
+    // The floor. A command nobody can produce is dead code wearing a type
+    // annotation, and it used to be invisible: `restore` sat in the union and in
+    // `App.tsx`'s switch for the whole life of the project with no binding
+    // anywhere that produced it.
+    const reachable = reachableCommandTypes();
+    const expected: Command["type"][] = [
       "moveSelection",
       "scrollReader",
       "openSelected",
       "closeViewer",
+      "closeComposer",
+      "dismissOverlay",
+      "dismissNavigation",
       "toggleStar",
       "archive",
       "trash",
       "toggleRead",
+      "markAllRead",
       "focusReply",
+      "forward",
       "focusSearch",
       "toggleFilter",
+      "clearFilters",
       "toggleNavigation",
+      "moveNavigation",
+      "activateNavigation",
+      "blurText",
       "toggleShortcutsOverlay",
+      "openSettings",
     ];
 
     for (const type of expected) {
-      expect(documented.has(type as never), `no sheet entry for ${type}`).toBe(true);
+      expect(reachable.has(type), `no key produces "${type}"`).toBe(true);
     }
 
-    // And nothing in the sheet is undocumented, which catches a row added for
-    // an action nobody wired up.
-    for (const binding of BINDINGS) {
-      expect(
-        expected.includes(binding.command.type) || implicit.has(binding.command.type),
-        `sheet row "${binding.keys}" produces an unhandled command: ${binding.command.type}`,
-      ).toBe(true);
+    // And nothing produces a command outside that list, which catches a binding
+    // added for an action nobody wired up.
+    for (const type of reachable) {
+      expect(expected.includes(type as Command["type"]), `unhandled command: ${type}`).toBe(true);
     }
+  });
+
+  it("documents every action it can take, and nothing it cannot", () => {
+    // `BINDINGS` is the cheat sheet. A row may produce several commands — Escape
+    // alone covers four, and the arrows cover two — so this is a containment check
+    // rather than a bijection.
+    const reachable = reachableCommandTypes();
+
+    for (const binding of BINDINGS) {
+      const types = commandTypesOf(binding);
+      expect(types.length, `sheet row "${binding.keys}" produces nothing at all`).toBeGreaterThan(0);
+      for (const type of types) {
+        expect(reachable.has(type), `sheet row "${binding.keys}" documents unreachable ${type}`).toBe(
+          true,
+        );
+      }
+    }
+
+    // Every command with a sheet row of its own must name a printable key, since
+    // the sheet renders `keys` and the user reads it.
+    for (const binding of BINDINGS) {
+      expect(binding.keys.trim(), "a sheet row with a blank key column").not.toBe("");
+      expect(binding.help.trim(), `sheet row "${binding.keys}" has no description`).not.toBe("");
+    }
+  });
+
+  it("lets no keystroke satisfy two rows that would both act on it", () => {
+    // The drift the sheet exists to prevent, checked as behaviour rather than as
+    // prose.
+    //
+    // Sharing a key *list* is fine and necessary — `?` and `/` are the same
+    // physical key on a German layout, and `1` is both a rail position and
+    // `Shift+1`. What must not happen is two rows that would each produce a
+    // command for one keystroke: the first silently wins, so the second is
+    // documentation of nothing, and reordering the table would silently change
+    // what a key does.
+    const ambiguous: string[] = [];
+
+    for (const ctx of REACHABLE_CONTEXTS) {
+      for (const key of "jkoseurfmuh#/,?!123456789U&".split("")) {
+        for (const event of [{}, { shiftKey: true }, { shiftKey: false }]) {
+          const firing = BINDINGS.filter((binding) => {
+            if (![...binding.matches.keys, ...(binding.matches.chars ?? [])].includes(key)) {
+              return false;
+            }
+            if (binding.when && !binding.when({ key, event, context: ctx })) return false;
+            const command =
+              typeof binding.command === "function"
+                ? binding.command({ key, event, context: ctx })
+                : binding.command;
+            return command !== null;
+          });
+
+          if (firing.length > 1) {
+            ambiguous.push(
+              `${key}${event.shiftKey ? "⇧" : ""} → ${firing
+                .map((binding) => `"${binding.keys}"`)
+                .join(" and ")}`,
+            );
+          }
+        }
+      }
+    }
+
+    expect(ambiguous).toEqual([]);
   });
 });
