@@ -38,7 +38,7 @@ import { GmailClient } from "../gmail/client";
 import { GmailSyncEngine, type MailboxCache, type CursorStore } from "../gmail/sync";
 import { buildMime } from "../gmail/mime";
 import { base64UrlDecode } from "../gmail/dto";
-import type { Email, Mailbox } from "../model/email";
+import type { Email, GmailId, Mailbox } from "../model/email";
 import { mailboxFor } from "../gmail/mapper";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
@@ -76,6 +76,9 @@ export const LOOPBACK_REDIRECT_URI =
  */
 export const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
 
+/** How long a pending cache write waits for more writes to join it. */
+const FLUSH_DEBOUNCE_MS = 250;
+
 /**
  * A cache backed by `localStorage` (web) or `storage` (desktop).
  *
@@ -86,55 +89,157 @@ export const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
  * exception out of `write()` the first time a sync saved a cursor, which surfaced
  * mid-sync as a failed refresh on an account that had just worked. Storage being
  * unavailable is not a reason to fail; it is a reason to do less.
+ *
+ * ## Why this holds the mailbox in memory
+ *
+ * The obvious implementation — read the blob, merge, write the blob, per call — is
+ * quadratic, and quadratically *in the one place that cannot afford it*. Sync
+ * upserts every 25 messages (`BATCH_SIZE`), so a 2,500-message full sync ran 100
+ * upserts, and each one parsed and re-serialised the entire mailbox: measured at
+ * 1.36s and 6.15MB of allocation for a mailbox that is 6.15MB on disk. The cost is
+ * not the writing, it is that every intermediate write is a full copy.
+ *
+ * So the mailbox is mirrored in memory and `localStorage` is treated as a *sink*,
+ * not a store. Reads come from the mirror; mutations touch the mirror and coalesce
+ * into a single flush. A full sync now serialises the mailbox once.
+ *
+ * ## Why the quota is no longer swallowed
+ *
+ * A full quota throws on `setItem`, and the old `catch` discarded it — so past
+ * roughly 2,000 messages (measured: 6.15MB against a ~5MB origin quota) the cache
+ * silently stopped persisting, on every launch, forever, while the comment claimed
+ * "the next sync rebuilds it". It cannot: the next sync hits the same wall. Losing
+ * the offline cache is survivable; being told you have it and not having it is not,
+ * so `flush()` reports the failure and the sync engine surfaces it.
  */
-export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorStore {
-  const readAll = (): Email[] => {
+export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorStore & { flush(): Promise<void> } {
+  /**
+   * The mirror, keyed by Gmail id.
+   *
+   * A `Map` and not an array because sync's inner loop is `upsert`, and an array
+   * mirror still had to rebuild the whole index on every call to find what it was
+   * replacing — quadratic in a much cheaper currency, but quadratic. Keyed, an
+   * upsert is a put per message.
+   *
+   * Insertion order is the array's order, and `set` on an existing key keeps a
+   * key's original position, so the persisted blob is ordered the same way it
+   * was when this was a plain array.
+   *
+   * `null` until something reads it, so an account that never syncs never pays for
+   * the initial parse.
+   */
+  let mirror: Map<GmailId, Email> | null = null;
+  let flushHandle: ReturnType<typeof setTimeout> | null = null;
+  /** The last persistence failure, or `null`. Reported by `flush()`. */
+  let flushError: unknown = null;
+
+  const readAll = (): Map<GmailId, Email> => {
+    if (mirror) return mirror;
     try {
       const raw = globalThis.localStorage?.getItem(`${key}.messages`);
-      return raw ? (JSON.parse(raw) as Email[]) : [];
+      const rows = raw ? (JSON.parse(raw) as Email[]) : [];
+      mirror = new Map(rows.map((email) => [email.gmailId, email]));
     } catch {
-      return [];
+      mirror = new Map();
+    }
+    return mirror;
+  };
+
+  /**
+   * Push the mirror to storage now.
+   *
+   * Records the failure instead of discarding it. `flush()` is where it surfaces.
+   */
+  const writeNow = (): void => {
+    if (!mirror) return;
+    try {
+      globalThis.localStorage?.setItem(`${key}.messages`, JSON.stringify([...mirror.values()]));
+      flushError = null;
+    } catch (error) {
+      flushError = error ?? new Error("cache write failed");
     }
   };
 
-  const writeAll = (emails: readonly Email[]): void => {
-    try {
-      globalThis.localStorage?.setItem(`${key}.messages`, JSON.stringify(emails));
-    } catch {
-      // A full quota throws. The session keeps working from memory; only the
-      // offline cache is lost, and the next sync rebuilds it.
-    }
+  /**
+   * Ask for a write, joining any already pending.
+   *
+   * The `flushHandle` check is the coalescing: the first mutation in a burst
+   * schedules, and everything after it for the next 250ms rides along on that one
+   * timer rather than each writing its own full copy.
+   */
+  const scheduleFlush = (): void => {
+    if (flushHandle !== null) return;
+    flushHandle = setTimeout(() => {
+      flushHandle = null;
+      writeNow();
+    }, FLUSH_DEBOUNCE_MS);
+  };
+
+  /** Replace the mirror and schedule one write. */
+  const setAll = (emails: readonly Email[]): void => {
+    mirror = new Map(emails.map((email) => [email.gmailId, email]));
+    scheduleFlush();
   };
 
   return {
     async all() {
-      return readAll().sort((a, b) => b.receivedAt - a.receivedAt);
+      return [...readAll().values()].sort((a, b) => b.receivedAt - a.receivedAt);
     },
     async upsert(emails) {
-      const byId = new Map(readAll().map((email) => [email.gmailId, email]));
-      for (const email of emails) byId.set(email.gmailId, email);
-      writeAll([...byId.values()]);
+      const rows = readAll();
+      for (const email of emails) rows.set(email.gmailId, email);
+      scheduleFlush();
     },
     async remove(gmailIds) {
-      const drop = new Set(gmailIds);
-      writeAll(readAll().filter((email) => !drop.has(email.gmailId)));
+      const rows = readAll();
+      for (const gmailId of gmailIds) rows.delete(gmailId);
+      scheduleFlush();
     },
     async gmailIds() {
-      return readAll().map((email) => email.gmailId);
+      return [...readAll().keys()];
     },
     async keepOnly(gmailIds) {
+      // Deleted rather than rebuilt: `keepOnly` runs over the whole cache at the
+      // end of a full sync, and this is the one operation where the survivors are
+      // usually *most* of the mailbox.
       const keep = new Set(gmailIds);
-      writeAll(readAll().filter((email) => keep.has(email.gmailId)));
+      const rows = readAll();
+      for (const gmailId of [...rows.keys()]) {
+        if (!keep.has(gmailId)) rows.delete(gmailId);
+      }
+      scheduleFlush();
     },
     async replace(emails) {
-      writeAll(emails);
+      setAll(emails);
     },
     async clear() {
+      if (flushHandle !== null) {
+        clearTimeout(flushHandle);
+        flushHandle = null;
+      }
+      mirror = new Map();
+      flushError = null;
       try {
         globalThis.localStorage?.removeItem(`${key}.messages`);
       } catch {
         // Nothing to do; the cache is already unreachable.
       }
+    },
+
+    /**
+     * Write any pending change and report whether it stuck.
+     *
+     * Called by the sync engine immediately before it records a cursor. The
+     * ordering is the point: a cursor says "the cache is a faithful copy as of
+     * this history id", and that claim is only true if the cache actually landed.
+     */
+    async flush() {
+      if (flushHandle !== null) {
+        clearTimeout(flushHandle);
+        flushHandle = null;
+      }
+      writeNow();
+      if (flushError !== null) throw flushError;
     },
 
     async read() {
@@ -160,7 +265,7 @@ export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorSto
         // Already unreachable.
       }
     },
-  } as MailboxCache & CursorStore & { cursorClear(): Promise<void> };
+  } as MailboxCache & CursorStore & { cursorClear(): Promise<void>; flush(): Promise<void> };
 }
 
 /** The session: a token manager, a client, a sync engine, and a backend. */
@@ -449,6 +554,10 @@ export class GmailSession {
           emails: result.emails,
           failed: result.failed,
           truncated: result.truncated,
+          // Forwarded rather than dropped: the store's notice is the only place the
+          // user is told their offline cache did not save, and a flag that stops here
+          // is a flag that is never seen.
+          cacheUnpersisted: result.cacheUnpersisted,
         };
       },
       async toggleStar(id, starred) {
@@ -523,6 +632,13 @@ export class GmailSession {
           filename: attachment?.filename ?? "attachment",
           mimeType: attachment?.mimeType ?? "application/octet-stream",
         };
+      },
+
+      async fetchBody(gmailId) {
+        // One request, for one message, when someone opens it. The store keeps the
+        // HTML body for a recent window precisely so this is rare — see
+        // `BODY_RETENTION`.
+        return client.messageBodyHtml(gmailId);
       },
     };
   }

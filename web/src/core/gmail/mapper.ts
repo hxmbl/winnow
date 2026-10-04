@@ -75,8 +75,13 @@ function plainTextPart(part: GmailPart | undefined): GmailPart | undefined {
   return best;
 }
 
-/** The first `text/html` leaf, or `undefined`. */
-function htmlPart(part: GmailPart | undefined): GmailPart | undefined {
+/**
+ * The first `text/html` leaf, or `undefined`.
+ *
+ * Exported for `client.messageBodyHtml`, which needs the same leaf without building a
+ * whole `Email` from the message around it.
+ */
+export function htmlPart(part: GmailPart | undefined): GmailPart | undefined {
   let found: GmailPart | undefined;
   forEachLeaf(part, (leaf) => {
     if (!found && leaf.mimeType === "text/html" && leaf.body?.data !== undefined) found = leaf;

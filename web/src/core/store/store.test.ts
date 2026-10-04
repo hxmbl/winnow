@@ -3,12 +3,13 @@ import {
   NO_CURSOR,
   WinnowStore,
   syncFailureSummary,
+  syncNotice,
   type MailBackend,
   type PlatformBridge,
 } from "./store";
 import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 import { builtinFilter, senderFilter } from "../model/signals";
-import type { Mailbox } from "../model/email";
+import type { Email, Mailbox } from "../model/email";
 import { LearningModel } from "../learn/learning";
 
 /** A backend that records calls and can be made to fail on demand. */
@@ -44,6 +45,10 @@ function fakeBackend() {
     },
     async sendReply() {
       record("sendReply");
+    },
+    async fetchBody(gmailId) {
+      record("fetchBody", gmailId);
+      return `<p>fetched body for ${gmailId}</p>`;
     },
     async fetchAttachment(gmailId, attachmentId) {
       record("fetchAttachment", gmailId, attachmentId);
@@ -1277,6 +1282,9 @@ describe("sync failure reporting", () => {
       async setRead() {},
       async deletePermanently() {},
       async sendReply() {},
+      async fetchBody() {
+        return undefined;
+      },
       async fetchAttachment() {
         return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
       },
@@ -1300,6 +1308,9 @@ describe("sync failure reporting", () => {
       async setRead() {},
       async deletePermanently() {},
       async sendReply() {},
+      async fetchBody() {
+        return undefined;
+      },
       async fetchAttachment() {
         return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
       },
@@ -1340,5 +1351,220 @@ describe("subscriptions", () => {
 
     store.setSearchQuery("x");
     expect(store.getSnapshot().key).not.toBe(first.key);
+  });
+});
+
+describe("syncNotice", () => {
+  it("says nothing when the sync was complete", () => {
+    expect(syncNotice({ truncated: false })).toBeNull();
+  });
+
+  it("explains a truncated view without calling it an error", () => {
+    expect(syncNotice({ truncated: true })).toMatch(/more than Winnow will walk/);
+  });
+
+  it("reports a cache that could not be written", () => {
+    // The flag is worthless if it never reaches the user, and it reaches the user
+    // through this string. Before, the `QuotaExceededError` was discarded inside the
+    // cache and the app reported a healthy sync while the offline copy of a large
+    // mailbox had never once been written.
+    expect(syncNotice({ truncated: false, cacheUnpersisted: true })).toMatch(
+      /too large to save offline/,
+    );
+  });
+
+  it("carries both when both happened", () => {
+    const notice = syncNotice({ truncated: true, cacheUnpersisted: true });
+    expect(notice).toMatch(/more than Winnow will walk/);
+    expect(notice).toMatch(/too large to save offline/);
+  });
+
+  it("stays quiet when a cache that was never flushed reports nothing", () => {
+    expect(syncNotice({ truncated: false, cacheUnpersisted: false })).toBeNull();
+  });
+});
+
+describe("body retention", () => {
+  /**
+   * A backend serving `n` messages, each with a distinct HTML body.
+   *
+   * Needed because the fetch path only runs *outside* the retention window, and the
+   * 38-message demo seed sits entirely inside it — which is the point: for any mailbox
+   * under 500, opening a message never touches the network.
+   */
+  function bigBackend(n: number) {
+    const calls: { method: string; args: unknown[] }[] = [];
+    const emails: Email[] = Array.from({ length: n }, (_, i) => ({
+      ...DEMO_EMAILS[i % DEMO_EMAILS.length]!,
+      id: i + 1,
+      gmailId: `b-${i}`,
+      // Descending recency, so "the newest 500" is unambiguous.
+      receivedAt: 1_000_000 - i,
+      bodyHtml: `<p>body ${i}</p>`,
+    }));
+
+    const backend: MailBackend = {
+      async sync(options) {
+        calls.push({ method: "sync", args: [] });
+        options?.onProgress?.({ phase: "full", fraction: 1, fetched: n, failed: 0 });
+        return { emails, failed: 0, truncated: false };
+      },
+      async toggleStar() {},
+      async moveToMailbox() {},
+      async setRead() {},
+      async deletePermanently() {},
+      async sendReply() {},
+      async fetchBody(gmailId) {
+        calls.push({ method: "fetchBody", args: [gmailId] });
+        return `<p>fetched body for ${gmailId}</p>`;
+      },
+      async fetchAttachment() {
+        return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "application/octet-stream" };
+      },
+    };
+    return { backend, calls };
+  }
+
+  /** A connected store over a mailbox of `n`, with every message carrying HTML. */
+  async function storeOver(n: number) {
+    const { backend, calls } = bigBackend(n);
+    const store = new WinnowStore();
+    store.attach({ backend });
+    await store.connect(backend, { email: "a@b.example" });
+    return { store, calls };
+  }
+
+  /** The oldest message — outside the retention window. */
+  function oldestOf(store: WinnowStore): Email {
+    return store.getSnapshot().all.slice().sort((a, b) => a.receivedAt - b.receivedAt)[0]!;
+  }
+
+  it("keeps no HTML on state.all, however recent", async () => {
+    // `state.all` is uniformly body-free. That is the whole bound — the resident bodies
+    // live in a side-map, so nothing has to ask whether a given message happens to be
+    // inside the window.
+    const { store } = await storeOver(600);
+    expect(store.getSnapshot().all.some((e) => e.bodyHtml !== undefined)).toBe(false);
+  });
+
+  it("keeps the plain-text body, so classification is untouched", async () => {
+    // The load-bearing half. `contentBag` is `subject + body`, so bounding the HTML must
+    // cost the classifier nothing — and the list's preview line reads `body` too.
+    const { store } = await storeOver(600);
+    expect(store.getSnapshot().all.filter((e) => e.body.trim() === "")).toHaveLength(0);
+    expect(store.view.signals.size).toBeGreaterThan(0);
+  });
+
+  it("needs no fetch for a message inside the window", async () => {
+    // The other half of the retention policy: the common case costs nothing. The newest
+    // 500 have their HTML already, so opening one never reaches the network.
+    const { store, calls } = await storeOver(600);
+    const newest = store.getSnapshot().all.slice().sort((a, b) => b.receivedAt - a.receivedAt)[0]!;
+    store.select(newest.id);
+
+    expect(store.hasLoadedBody(newest.id)).toBe(true);
+    expect(store.view.selected?.bodyHtml).toBe("<p>body 0</p>");
+    expect(calls.filter((c) => c.method === "fetchBody")).toHaveLength(0);
+  });
+
+  it("fetches a body for a message outside the window and attaches it to the view", async () => {
+    const { store, calls } = await storeOver(600);
+    const target = oldestOf(store);
+
+    expect(target.bodyHtml).toBeUndefined();
+    expect(store.hasLoadedBody(target.id)).toBe(false);
+
+    await store.loadBody(target.id);
+
+    expect(calls.filter((c) => c.method === "fetchBody").length).toBe(1);
+    expect(store.hasLoadedBody(target.id)).toBe(true);
+    // `state.all` is untouched — that is the side-map's whole point.
+    expect(store.getSnapshot().all.find((e) => e.id === target.id)?.bodyHtml).toBeUndefined();
+  });
+
+  it("hands the reader a copy carrying the body", async () => {
+    const { store } = await storeOver(600);
+    const target = oldestOf(store);
+    store.select(target.id);
+    expect(store.getSnapshot().view.selected?.bodyHtml).toBeUndefined();
+
+    await store.loadBody(target.id);
+
+    expect(store.getSnapshot().view.selected?.bodyHtml).toContain("fetched body");
+  });
+
+  it("asks once for the same message, however many times", async () => {
+    const { store, calls } = await storeOver(600);
+    const target = oldestOf(store);
+
+    await Promise.all([store.loadBody(target.id), store.loadBody(target.id)]);
+    await store.loadBody(target.id);
+
+    expect(calls.filter((c) => c.method === "fetchBody").length).toBe(1);
+  });
+
+  it("treats a plain-text message as answered, so it is never refetched", async () => {
+    // `undefined` from `fetchBody` means "this message has no HTML part", which is the
+    // answer for all plain-text mail. Treating it as "not loaded yet" would refetch it
+    // on every render, forever.
+    const { backend, calls } = bigBackend(600);
+    const plain: MailBackend = {
+      ...backend,
+      async fetchBody(gmailId) {
+        calls.push({ method: "fetchBody", args: [gmailId] });
+        return undefined;
+      },
+    };
+    const store = new WinnowStore();
+    store.attach({ backend: plain });
+    await store.connect(plain, { email: "a@b.example" });
+    const target = oldestOf(store);
+
+    await store.loadBody(target.id);
+    expect(store.hasLoadedBody(target.id)).toBe(true);
+    await store.loadBody(target.id);
+    await store.loadBody(target.id);
+
+    expect(store.hasLoadedBody(target.id)).toBe(true);
+    expect(calls.filter((c) => c.method === "fetchBody").length).toBe(1);
+  });
+
+  it("attaching a body does not reclassify the inbox", async () => {
+    // The reason bodies live beside `state.all` rather than on it. Rebuilding the array
+    // changes its identity, which invalidates `inboxAnalysis`, which reclassifies
+    // everything — a 271ms stall at 5,000 messages, every time an old message is opened.
+    const classify = await import("../classify/classify");
+    const spy = vi.spyOn(classify, "classifyAll");
+
+    const { store } = await storeOver(600);
+    const target = oldestOf(store);
+    const before = spy.mock.calls.length;
+
+    await store.loadBody(target.id);
+    store.getSnapshot(); // what a render would do
+
+    expect(spy.mock.calls.length).toBe(before);
+    spy.mockRestore();
+  });
+
+  it("a message inside the window needs no fetch even when it has no HTML", async () => {
+    // The sync already walked it, so its body question is settled. Without this,
+    // opening plain-text mail inside the window would cost a request every time.
+    const { backend, calls } = bigBackend(3);
+    const textOnly: MailBackend = {
+      ...backend,
+      async sync(options) {
+        const result = await backend.sync(options);
+        return { ...result, emails: result.emails.map((e) => ({ ...e, bodyHtml: undefined })) };
+      },
+    };
+    const store = new WinnowStore();
+    store.attach({ backend: textOnly });
+    await store.connect(textOnly, { email: "a@b.example" });
+
+    const target = store.getSnapshot().all[0]!;
+    expect(store.hasLoadedBody(target.id)).toBe(true);
+    await store.loadBody(target.id);
+    expect(calls.filter((c) => c.method === "fetchBody")).toHaveLength(0);
   });
 });

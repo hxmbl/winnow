@@ -52,7 +52,7 @@ import {
 } from "../classify/pipeline";
 import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
-import { defaultWeights } from "../classify/weights";
+import { defaultWeights, type SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
 import type { SyncProgress } from "../gmail/sync";
 
@@ -81,6 +81,76 @@ export const NO_CURSOR = -1;
  * display resolution is paying for nothing.
  */
 const CLOCK_INTERVAL_MS = 60_000;
+
+/**
+ * How many messages keep their HTML body resident.
+ *
+ * The bound on `state.all`, and it is deliberately a bound on *this field* rather than
+ * on the number of messages. Measured on a representative HTML email:
+ *
+ *     bodyHtml    1,704 bytes    67.3%
+ *     body          301 bytes    11.9%
+ *     metadata      527 bytes    20.8%
+ *
+ * So the HTML body is two thirds of what a mailbox costs to hold — and it is read in
+ * exactly two places, `Reader` and `reply`, both for the single message being opened.
+ * Retaining it for every message while using it for one is the whole of the waste, and
+ * it is the reason 5,000 messages cost 12.1MB rather than 3.9MB.
+ *
+ * The plain-text `body` is kept unconditionally, and that is the load-bearing part of
+ * this decision: `contentBag` is `subject + body`, so every keyword the classifier
+ * matches on is still there. Bounding `bodyHtml` costs one request when someone opens
+ * an old message and costs the classifier nothing.
+ *
+ * 500 is generous enough that ordinary reading never triggers a fetch, and lands the
+ * resident bodies at ~1.2MB.
+ */
+const BODY_RETENTION = 500;
+
+/**
+ * Split a synced mailbox into its messages and its resident HTML bodies.
+ *
+ * The bodies are held *beside* `state.all` rather than inside it, and that is the
+ * load-bearing part. Keeping them on the message objects looked simpler and was wrong:
+ * attaching one to an entry means rebuilding the array, which changes `state.all`'s
+ * identity, which invalidates the memo in `inboxAnalysis`, which reclassifies the
+ * entire inbox — a 271ms stall at 5,000 messages, every time someone opened an old
+ * message. A side-map leaves `state.all` alone, so the body arrives for the price of
+ * a re-render.
+ *
+ * It also gives one source of truth. `state.all` is uniformly body-free, so nothing has
+ * to ask whether a given message happens to be inside the window.
+ */
+function partitionBodies(emails: readonly Email[]): {
+  emails: Email[];
+  bodies: Map<number, string>;
+  /** Messages whose body question is settled — resident, or known to have no HTML. */
+  checked: Set<number>;
+} {
+  const byRecency = [...emails].sort((a, b) => b.receivedAt - a.receivedAt);
+  const bodies = new Map<number, string>();
+  const checked = new Set<number>();
+  let changed = false;
+
+  for (const email of byRecency.slice(0, BODY_RETENTION)) {
+    // Every message inside the window counts as settled, not just the ones that came
+    // back with HTML. The sync already walked all of them, so a plain-text message in
+    // the window has been *asked* — and recording that is what stops the reader from
+    // asking again for every plain-text message it opens.
+    checked.add(email.id);
+    if (email.bodyHtml !== undefined) bodies.set(email.id, email.bodyHtml);
+  }
+
+  const stripped = emails.map((email) => {
+    if (email.bodyHtml === undefined) return email;
+    changed = true;
+    return { ...email, bodyHtml: undefined };
+  });
+
+  // The same array when nothing had a body to begin with, so the demo seed and a
+  // small mailbox keep the identity `inboxAnalysis` is keyed on.
+  return { emails: changed ? stripped : (emails as Email[]), bodies, checked };
+}
 
 /** What the user can change about how Winnow behaves. */
 export type Preferences = {
@@ -296,6 +366,17 @@ export interface MailBackend {
     gmailId: string,
     attachmentId: string,
   ): Promise<{ bytes: Uint8Array; filename: string; mimeType: string }>;
+  /**
+   * The HTML body of one message, fetched on demand.
+   *
+   * The counterpart to `BODY_RETENTION`: the HTML body is two thirds of what a message
+   * costs to hold and is only ever read for the message on screen, so the store keeps
+   * it for a recent window and asks for it when someone opens something older.
+   *
+   * `undefined` for a message with no HTML part is not an error — plain-text mail has
+   * none, and the reader falls back to the plain-text body it already has.
+   */
+  fetchBody(gmailId: string): Promise<string | undefined>;
 }
 
 /** What one sync produced. */
@@ -304,6 +385,13 @@ export type SyncOutcome = {
   failed: number;
   /** A mailbox hit its cap, so the cache is a triage set rather than an export. */
   truncated: boolean;
+  /**
+   * The mailbox could not be written to persistent storage.
+   *
+   * Distinct from `failed`, which counts messages that could not be fetched. The sync
+   * worked and the user has their mail; what is missing is the offline copy of it.
+   */
+  cacheUnpersisted?: boolean;
 };
 
 /**
@@ -414,6 +502,27 @@ export class WinnowStore {
 
   private backend: MailBackend | undefined;
   private platform: PlatformBridge | undefined;
+
+  /**
+   * Resident HTML bodies, by message id. Bounded by `BODY_RETENTION`.
+   *
+   * Held apart from `state.all` so that attaching a body cannot change `all`'s
+   * identity — see `partitionBodies` for why that matters.
+   */
+  private bodies = new Map<number, string>();
+
+  /**
+   * Messages whose body has been resolved one way or the other.
+   *
+   * Separate from `bodies` because "fetched, and this message has no HTML part" and
+   * "not fetched yet" both mean `bodies.has(id) === false`, and only the second should
+   * send the reader back to the network. Plain-text mail would otherwise be refetched
+   * on every render, forever.
+   */
+  private bodyChecked = new Set<number>();
+
+  /** In-flight body fetches, so opening the same message twice asks once. */
+  private bodyInFlight = new Map<number, Promise<void>>();
 
   /**
    * The binned senders, kept separately from the message list.
@@ -536,6 +645,61 @@ export class WinnowStore {
    * implementation memoised these independently in the React component, which
    * meant a filter toggle briefly rendered pills computed against the old list.
    */
+  /**
+   * The user profile and the inbox's signals, memoised on the only inputs that
+   * can change them.
+   *
+   * `derive()` is memoised on `version`, which is the right granularity for
+   * "recompute the world" — but the wrong granularity for the single most
+   * expensive step in the app. `state.now` is part of that state, so the 60-second
+   * clock tick bumped `version` and reclassified every message in the inbox, on an
+   * idle app, forever. Measured at 271ms for 5,000 messages; roughly 2.2s at the
+   * 40,000 the sync engine will happily walk.
+   *
+   * None of these four inputs move when the clock does. The mailbox changes
+   * identity when a message is synced or mutated, the weights when the user tunes
+   * them or the model learns, the trash list when someone is binned, and the
+   * blocked list when the user blocks a sender. A clock tick now costs one number.
+   */
+  private inboxCache: {
+    all: readonly Email[];
+    weights: SignalWeights;
+    trash: readonly string[];
+    blocked: readonly string[];
+    profile: UserProfile;
+    signals: SignalMap;
+  } | null = null;
+
+  private inboxAnalysis(): { profile: UserProfile; signals: SignalMap } {
+    const state = this.state;
+    const { all, learning, preferences } = state;
+    const weights = learning.weights;
+    const trash = this.trashSenders;
+    const blocked = preferences.blockedSenders;
+
+    const hit = this.inboxCache;
+    if (
+      hit &&
+      hit.all === all &&
+      hit.weights === weights &&
+      hit.trash === trash &&
+      hit.blocked === blocked
+    ) {
+      return { profile: hit.profile, signals: hit.signals };
+    }
+
+    // Blocked senders are excluded here for the same reason they are excluded from
+    // `visible`: a blocked sender's volume must not reach the engagement ranking.
+    const blockedLower = new Set(blocked.map((s) => s.toLowerCase()));
+    const inboxForProfile = all.filter(
+      (email) => email.mailbox === "inbox" && !blockedLower.has(email.sender.toLowerCase()),
+    );
+    const profile = buildUserProfile(inboxForProfile, this.trashRecords());
+    const signals = classifyAll(inboxForProfile, profile, weights);
+    this.inboxCache = { all, weights, trash, blocked, profile, signals };
+    return { profile, signals };
+  }
+
   private derive(): MailboxView {
     const state = this.state;
     const blocked = new Set(state.preferences.blockedSenders.map((s) => s.toLowerCase()));
@@ -548,9 +712,9 @@ export class WinnowStore {
 
     // The profile is built from the *inbox*, not the current mailbox: learning
     // "who you read" from an archive or a bin would teach it the wrong thing.
+    // Both it and the classification are memoised — see `inboxAnalysis`.
+    const { profile, signals: inboxSignals } = this.inboxAnalysis();
     const inboxForProfile = visible.filter((email) => email.mailbox === "inbox");
-    const profile = buildUserProfile(inboxForProfile, this.trashRecords());
-    const inboxSignals = classifyAll(inboxForProfile, profile, state.learning.weights);
 
     // The inbox is classified once and reused when the inbox is open — the common
     // case, and the only one where the two sets coincide.
@@ -613,13 +777,17 @@ export class WinnowStore {
     }
 
     const selectedRow = threads.find((row) => row.representative.id === state.selectedId) ?? null;
-    const selected = selectedRow?.representative ?? null;
+    const selected = selectedRow ? this.withBody(selectedRow.representative) : null;
     // From `visible`, not `state.all`: a blocked sender's reply must not stay
     // readable inside the conversation of a message you *can* see. Blocking a
     // sender and then finding their mail quoted in the open thread is not blocking
     // them.
+    //
+    // Body-bearing copies, because these are the two places a message is actually
+    // *read*. Everything above this line works on the body-free messages `state.all`
+    // holds, which is the point of `partitionBodies`.
     const conversation = selected
-      ? conversationFor(visible, selected.threadId, selected.gmailId)
+      ? conversationFor(visible, selected.threadId, selected.gmailId).map((m) => this.withBody(m))
       : [];
 
     return {
@@ -955,9 +1123,16 @@ export class WinnowStore {
         }
       }
 
+      const { emails, bodies, checked } = partitionBodies(result.emails);
+      // Replaced wholesale rather than merged: a sync is a fresh reading of the
+      // account, and a body that was resident for a message which has since left is
+      // memory nobody is using.
+      this.bodies = bodies;
+      this.bodyChecked = checked;
+
       this.set({
         status: "ready",
-        all: result.emails,
+        all: emails,
         syncing: false,
         syncPhase: null,
         syncFraction: null,
@@ -1748,6 +1923,59 @@ export class WinnowStore {
     }, 80);
   }
 
+  /**
+   * Fetch the HTML body of one message the reader has opened.
+   *
+   * Three details are load-bearing:
+   *
+   * - **In-flight is keyed by id.** A reader effect that re-runs on every render, or a
+   *   cursor held down the list, would otherwise fire the same request repeatedly. The
+   *   map holds the promise, so a second caller awaits the first.
+   * - **"No HTML part" is remembered as an answer.** Plain-text mail has none, and
+   *   treating `undefined` as "not loaded yet" would refetch it on every render, forever.
+   * - **`state.all` is not touched.** The body goes into `bodies` and the view is
+   *   re-derived, which leaves the classification memo intact — see `partitionBodies`.
+   */
+  loadBody(id: number): Promise<void> {
+    const existing = this.bodyInFlight.get(id);
+    if (existing) return existing;
+    if (this.bodyChecked.has(id)) return Promise.resolve();
+
+    const backend = this.backend;
+    const email = this.state.all.find((candidate) => candidate.id === id);
+    if (!backend || !email) return Promise.resolve();
+
+    const request = (async () => {
+      try {
+        const bodyHtml = await backend.fetchBody(email.gmailId);
+        this.bodyChecked.add(id);
+        if (bodyHtml !== undefined) this.bodies.set(id, bodyHtml);
+      } catch {
+        // A body that will not load is not a sync failure and not an error banner: the
+        // message still opens, showing the plain text it already has. Left out of
+        // `bodyChecked` so opening it again can try once more.
+        return;
+      } finally {
+        this.bodyInFlight.delete(id);
+      }
+      this.notify();
+    })();
+
+    this.bodyInFlight.set(id, request);
+    return request;
+  }
+
+  /** True once a body has been fetched, or found not to exist. Drives the reader's wait. */
+  hasLoadedBody(id: number): boolean {
+    return this.bodyChecked.has(id);
+  }
+
+  /** The body-bearing copy of a message, for the parts of the view that render one. */
+  private withBody(email: Email): Email {
+    const bodyHtml = this.bodies.get(email.id);
+    return bodyHtml === undefined ? email : { ...email, bodyHtml };
+  }
+
   dismissError(): void {
     this.set({ error: null });
   }
@@ -1885,11 +2113,21 @@ export function syncFailureSummary(count: number): string {
  * twice over — an error banner is dismissible and alarming, and the thing it
  * would have said ("only some of your archive is here") is a permanent property of
  * the account rather than something that resolves on retry.
+ *
+ * The cache notice is here for the same reason, and because silence was the
+ * alternative that had been tried: a mailbox too large for the origin's storage
+ * quota used to discard the `QuotaExceededError` and carry on, so the app
+ * reported a healthy sync while the offline cache had not been written once.
  */
-export function syncNotice(result: { truncated: boolean }): string | null {
-  return result.truncated
-    ? "Some mailboxes hold more than Winnow will walk, so older messages are not listed."
-    : null;
+export function syncNotice(result: { truncated: boolean; cacheUnpersisted?: boolean }): string | null {
+  const notes: string[] = [];
+  if (result.truncated) {
+    notes.push("Some mailboxes hold more than Winnow will walk, so older messages are not listed.");
+  }
+  if (result.cacheUnpersisted) {
+    notes.push("This mailbox is too large to save offline, so it will re-download next launch.");
+  }
+  return notes.length > 0 ? notes.join(" ") : null;
 }
 
 /** Every bucket, for the settings panel's mute list. */

@@ -44,6 +44,15 @@ export interface MailboxCache {
   /** Replace the whole cache. */
   replace(emails: readonly Email[]): Promise<void>;
   clear(): Promise<void>;
+  /**
+   * Force any coalesced write to land, throwing if it could not be persisted.
+   *
+   * Optional, because a store that writes through on every call has nothing to
+   * flush. A store that batches has one, and the sync engine must call it before
+   * recording a cursor: the cursor asserts "the cache is a faithful copy as of
+   * this history id", and that is only true if the cache actually reached disk.
+   */
+  flush?(): Promise<void>;
 }
 
 /** Where the sync cursor lives. Opaque, and not a secret. */
@@ -87,6 +96,16 @@ export type SyncResult = {
   failed: number;
   /** True when a view hit its cap, so the cache is a triage set, not an export. */
   truncated: boolean;
+  /**
+   * True when the mailbox could not be written to persistent storage.
+   *
+   * Distinct from `failed`, which counts messages that could not be *fetched*.
+   * This says the sync itself succeeded and the offline cache was still lost —
+   * which used to be reported by silently discarding a `QuotaExceededError`, so
+   * that a user past roughly 2,000 messages had a "working" offline cache that
+   * was never written, on every launch, with no indication of it.
+   */
+  cacheUnpersisted: boolean;
   durationMs: number;
 };
 
@@ -242,13 +261,19 @@ export class GmailSyncEngine {
 
     await this.options.cache.keepOnly([...seen]);
 
+    // Land any coalesced write before making a claim that depends on it. A cursor
+    // means "the cache is a faithful copy as of this history id", so writing one
+    // over a cache that failed to persist would leave the next launch believing a
+    // mailbox it does not have — and skipping the sync that would rebuild it.
+    const cacheUnpersisted = !(await this.flushCache());
+
     // The cursor is only trustworthy when the cache is a faithful copy.
-    if (failed === 0) await this.options.cursor.write(profile.historyId);
+    if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(profile.historyId);
 
     const emails = await this.options.cache.all();
     report({ phase: "idle", fraction: 1, fetched: seen.size, failed });
 
-    return { emails, failed, truncated, durationMs: this.now() - started };
+    return { emails, failed, truncated, cacheUnpersisted, durationMs: this.now() - started };
   }
 
   /** Apply everything that changed since the stored cursor. */
@@ -291,12 +316,30 @@ export class GmailSyncEngine {
       throw error;
     }
 
-    if (failed === 0) await this.options.cursor.write(latestHistoryId);
+    const cacheUnpersisted = !(await this.flushCache());
+
+    if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(latestHistoryId);
 
     const emails = await this.options.cache.all();
     report({ phase: "idle", fraction: 1, fetched, failed });
 
-    return { emails, failed, truncated: false, durationMs: this.now() - started };
+    return { emails, failed, truncated: false, cacheUnpersisted, durationMs: this.now() - started };
+  }
+
+  /**
+   * Land any coalesced cache write. Returns `false` if it could not be persisted.
+   *
+   * Reported rather than thrown: the messages themselves arrived fine, and the
+   * session is fully usable in memory. Failing the whole sync would be a worse
+   * answer than telling the user their offline cache did not save.
+   */
+  private async flushCache(): Promise<boolean> {
+    try {
+      await this.options.cache.flush?.();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

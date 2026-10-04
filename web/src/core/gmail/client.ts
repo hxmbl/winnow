@@ -27,6 +27,7 @@ import {
   type GmailProfile,
   type GmailSendResponse,
 } from "./dto";
+import { decodeBody, htmlPart } from "./mapper";
 
 /** Gmail's maximum page size. Asking for more is silently clamped. */
 export const MAX_PAGE_SIZE = 200;
@@ -153,6 +154,21 @@ export class GmailClient {
    */
   async message(id: string): Promise<GmailMessage> {
     return this.request<GmailMessage>(`/users/me/messages/${encodeURIComponent(id)}?format=full`);
+  }
+
+  /**
+   * Just the HTML body of one message, for a message the reader is opening.
+   *
+   * The same request as `message` — Gmail has no body-only endpoint — but named for
+   * what it is *for*, and that is the whole difference: one call per message on every
+   * sync versus one call when a person opens something. See `BODY_RETENTION` in the
+   * store. The HTML body is 67% of what a message costs to hold and is only ever read
+   * for the one message on screen, so it is the one field worth not keeping.
+   */
+  async messageBodyHtml(id: string): Promise<string | undefined> {
+    const message = await this.message(id);
+    const html = htmlPart(message.payload);
+    return html ? decodeBody(html.body!.data!) : undefined;
   }
 
   /**

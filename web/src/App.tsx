@@ -631,6 +631,19 @@ export function App({ store }: Props) {
    * token and surfaced whatever the HTTP layer said, which is not a sentence anyone can
    * act on.
    */
+  /**
+   * Fetch the HTML body of the open message, if it is not already resident.
+   *
+   * A `useCallback` because it goes into the reader's effect dependency list: an
+   * identity that changed every render would re-fire the fetch on every render, which
+   * is the bug the store's in-flight map exists to prevent but only on the store's side
+   * of the call.
+   */
+  const loadSelectedBody = useCallback(() => {
+    const id = storeRef.current.getSnapshot().view.selected?.id;
+    if (id !== undefined) void storeRef.current.loadBody(id);
+  }, []);
+
   const saveAttachment = useCallback(async (attachment: { index: number }) => {
     const s = storeRef.current;
     const email = snapshotRef.current.view.selected;
@@ -1177,6 +1190,11 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             now={snapshot.now}
             onClose={store.closeReader.bind(store)}
             scrollStep={scrollStep}
+            // The HTML body is resident for a recent window and fetched for anything
+            // older, so "not here yet" is the normal state for a message far enough
+            // back. See `BODY_RETENTION` in the store.
+            bodyPending={selected !== null && !store.hasLoadedBody(selected.id)}
+            onLoadBody={loadSelectedBody}
             actions={{
               onStar: act((s, snap) => {
                 if (snap.view.selected) s.toggleStar(snap.view.selected.id);

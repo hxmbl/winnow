@@ -262,6 +262,18 @@ type Props = {
   actions: Actions;
   /** Scroll the reader by whole steps, for the arrow keys. */
   scrollStep: number;
+  /**
+   * True when this message's HTML body has not arrived yet.
+   *
+   * A separate prop rather than something the reader infers from `email.bodyHtml`
+   * being absent, because absent means two different things: not fetched yet, or a
+   * plain-text message that will never have one. The store knows which, and a reader
+   * that guessed would either spin forever on plain-text mail or show an empty body
+   * with no explanation.
+   */
+  bodyPending: boolean;
+  /** Ask for the HTML body of the open message. */
+  onLoadBody: () => void;
 };
 
 export function Reader({
@@ -275,8 +287,25 @@ export function Reader({
   onClose,
   actions,
   scrollStep,
+  bodyPending,
+  onLoadBody,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Ask for the HTML body when this message does not have one.
+   *
+   * The store keeps HTML for a recent window and drops it from the rest, so opening
+   * something older is the normal case rather than an edge one. Keyed on the message
+   * id so holding `j` down the list walks through the fetches rather than re-asking
+   * for the first one.
+   */
+  const emailId = email?.id ?? null;
+  const hasHtml = email?.bodyHtml !== undefined;
+
+  useEffect(() => {
+    if (emailId !== null && !hasHtml) onLoadBody();
+  }, [emailId, hasHtml, onLoadBody]);
 
   // The arrow keys scroll the reader rather than moving the list. A discrete
   // step per keypress, applied as an effect, so holding the key down scrolls
@@ -403,6 +432,25 @@ export function Reader({
           <div className="selectable mt-4 max-w-[68ch] whitespace-pre-wrap text-body text-ink-body">
             {email.body}
           </div>
+
+          {/*
+            The rich version is on its way.
+
+            Worth saying out loud rather than rendering nothing: the plain text above is
+            already complete, so a reader who opens an older message would otherwise
+            conclude the message simply had no formatting — when in fact the markup is
+            arriving, and the reason it was not resident is that Winnow does not keep
+            two thirds of every message in memory for the sake of one open pane.
+          */}
+          {bodyPending && (
+            <p
+              className="mt-3 text-[12px] text-ink-subtle"
+              role="status"
+              aria-live="polite"
+            >
+              Loading the formatted version…
+            </p>
+          )}
 
           {/*
             Rich rendering, behind the setting.

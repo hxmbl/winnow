@@ -75,6 +75,15 @@ export type SessionBridge = {
  * the desktop, and the message cache is not a secret so much as a copy of mail
  * the user has already chosen to download. Putting it in IndexedDB instead would
  * buy nothing and cost a second serialisation path.
+ *
+ * That reasoning holds for *where* the cache lives and not for how big it is.
+ * `localStorage` is capped around 5MB per origin, and a mailbox with HTML bodies
+ * measures ~2.4KB a message — so a real account crosses the ceiling somewhere
+ * around 2,000 messages, which a Gmail inbox passes in a month or two. Past that
+ * the write fails, and the honest response is to say so: `localCache.flush`
+ * reports the failure, the sync engine turns it into `cacheUnpersisted`, and the
+ * store puts it in the sync notice. An IndexedDB cache is the fix for the ceiling
+ * itself, and is the next thing to do here rather than a done one.
  */
 export function createSessionBridge(platform: Platform, store: WinnowStore): SessionBridge {
   const session = new GmailSession(platform, localCache());
