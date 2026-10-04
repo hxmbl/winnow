@@ -64,7 +64,7 @@ const Row = memo(function Row({
   onToggleStar,
 }: RowProps) {
   const email = row.representative;
-  const indicators = rowIndicators(signals);
+  const indicators = rowIndicators(email, signals);
 
   return (
     <div

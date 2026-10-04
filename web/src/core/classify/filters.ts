@@ -14,7 +14,7 @@
 import type { Email } from "../model/email";
 import {
   BUILTIN_FILTERS,
-  IMPORTANT_THRESHOLD,
+  isImportant,
   isUnsafe,
   PERMANENT_FILTERS,
   type BuiltinSmartFilter,
@@ -37,9 +37,25 @@ export const SKIPPABLE_SCORE = 50;
 /**
  * The bucket test.
  *
- * The recurring shape is `safe && …`: a message the classifier thinks is spam
- * must not appear in any bucket that means "worth your attention", or the
- * user reads a phishing lure by explicitly asking for Security.
+ * **`safe` is applied once, in `countAllFilters`, not here.** Five of the predicates
+ * have no spam guard of their own: `starred`, `security`, `newsletters`,
+ * `promotional`, `top_contacts` and `quiet_contacts`. Each of those is a statement
+ * about the message rather than a judgement about whether to show it — you starred
+ * it, it *is* a security notice, it *is* from someone you correspond with — and
+ * gating them here would make "Security" empty for the one message the user most
+ * wants to see filed there.
+ *
+ * So an earlier version of this docstring claimed every bucket except `unsafe` was
+ * `safe && …`, which was false for those six, and the comment did not match the
+ * code. The behaviour was right; the claim was the defect, and it mattered because
+ * the claim is what a future change reads before adding a seventh guard. The guard
+ * lives in the one place that counts every bucket — see `countAllFilters`.
+ *
+ * **The consequence, stated rather than hidden:** clicking a bucket whose predicate
+ * lacks a guard *can* surface unsafe mail. `starred` and `security` do so
+ * deliberately, and `demo-security-2` — a lure deliberately filed as starred in the
+ * seed — really does match `quiet_contacts`. The count a pill shows is guarded; the
+ * list behind it is not, for those buckets by design.
  */
 export function matchesBuiltin(
   filter: BuiltinSmartFilter,
@@ -54,15 +70,10 @@ export function matchesBuiltin(
       return email.starred;
 
     case "important":
-      // Important means it scores well or clearly needs action — but never
-      // spam, and never bulk mail, which has its own buckets.
-      return (
-        safe &&
-        ((signals.importanceScore >= IMPORTANT_THRESHOLD &&
-          !signals.newsletter &&
-          !signals.promotional) ||
-          (signals.needsAction && !signals.promotional))
-      );
+      // Delegated to `isImportant` rather than written out here, because the badge
+      // on the message is the same question asked by a different caller — and the two
+      // copies drifted. See `isImportant` for what they disagreed about.
+      return isImportant(email, signals);
 
     case "urgent":
       // Marketing "last chance!" is promo pressure, not urgency — unless the

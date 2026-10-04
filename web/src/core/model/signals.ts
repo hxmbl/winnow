@@ -12,7 +12,7 @@
  * `Models/SmartFilter.swift` and `Classification/FilterCatalog.swift`.
  */
 
-import type { Mailbox } from "./email";
+import type { Email, Mailbox } from "./email";
 
 // ── Signals ─────────────────────────────────────────────────────────────────
 
@@ -69,6 +69,61 @@ export const IMPORTANT_THRESHOLD = 56;
 /** The one predicate for "this is spam", used everywhere. */
 export function isUnsafe(signals: EmailSignals): boolean {
   return signals.spamLikelihood >= UNSAFE_THRESHOLD;
+}
+
+/**
+ * The one predicate for "this is bulk mail", used everywhere.
+ *
+ * Bulk has its own buckets — `newsletters` and `promotional` — so a message that
+ * is bulk must not also be badged Important, however well it scores. It can score
+ * well: a promotion from a sender the profile ranks highly clears the Important
+ * threshold on the sender boost alone, because nothing subtracts for bulk. Which is
+ * exactly why the exclusion has to live inside the Important test in both places it
+ * appears, rather than being left implicit in one and spelled out in the other.
+ */
+export function isBulk(signals: EmailSignals): boolean {
+  return signals.newsletter || signals.promotional;
+}
+
+/**
+ * Is this message Important?
+ *
+ * **One rule, two callers, and it used to be two rules.** `matchesBuiltin` asks this
+ * of a message the user is filtering by; `badgeFilters` asks it of the message on
+ * screen. They were written separately and they disagreed: the filter required
+ * `safe &&` the threshold `&& !bulk`, while the badge required only the threshold.
+ *
+ * The disagreement was reachable, and on ordinary mail. Nothing subtracts for bulk
+ * mail, so a promotion from a sender the profile ranks highly clears the bar on the
+ * sender boost alone — 50 + 18 − 5 = 63, against a threshold of 56 — and it wore an
+ * Important badge while the Important filter declined to list it. The row says one
+ * thing about a message and the pill says another, and the reaction to an Important
+ * badge on a retail promotion is to stop trusting the badges, which is the one thing
+ * this product is asking to be trusted about.
+ *
+ * Lives here rather than in `filters.ts` because this is where the threshold and the
+ * signal shape already are, and because `badgeFilters` must not have to import the
+ * classifier to ask: `filters.ts` depends on this file, and the arrow only points
+ * one way.
+ *
+ * Takes the message because a promotion that the *sender* flagged urgent is a
+ * different proposition from one that merely says "act now", and that distinction
+ * belongs to the message rather than to the signals.
+ */
+export function isImportant(email: Email, signals: EmailSignals): boolean {
+  if (isUnsafe(signals)) return false;
+
+  // Bulk mail is excluded up front, so both clauses below inherit it. Excluding it
+  // per-clause is how the two copies came to disagree in the first place.
+  if (signals.newsletter) return false;
+  if (signals.promotional && !email.urgent) return false;
+
+  return (
+    signals.importanceScore >= IMPORTANT_THRESHOLD ||
+    // `needsAction` gets in on its own strength: a message can be worth reading
+    // without scoring well, which is most of what "needs a reply" means.
+    signals.needsAction
+  );
 }
 
 /**
@@ -214,11 +269,14 @@ export function catalogIndex(id: BuiltinSmartFilter): number {
  * important. Excludes `starred`/`unread`/`attachments`, which are drawn from
  * the message's own state rather than from classification.
  */
-export function badgeFilters(signals: EmailSignals): BuiltinSmartFilter[] {
+export function badgeFilters(email: Email, signals: EmailSignals): BuiltinSmartFilter[] {
   const out: BuiltinSmartFilter[] = [];
   const safe = !isUnsafe(signals);
 
-  if (signals.importanceScore >= IMPORTANT_THRESHOLD) out.push("important");
+  // Delegated to the one `isImportant`, rather than re-testing the threshold here.
+  // See `isImportant`: this clause and `matchesBuiltin`'s used to be two copies of one
+  // rule, and they disagreed about bulk mail.
+  if (isImportant(email, signals)) out.push("important");
   if (signals.urgentText) out.push("urgent");
   if (signals.needsAction && !signals.newsletter) out.push("needs_action");
   if (signals.security) out.push("security");
@@ -250,8 +308,8 @@ const ROW_HIDDEN: ReadonlySet<BuiltinSmartFilter> = new Set([
   "events",
 ]);
 
-export function rowIndicators(signals: EmailSignals): BuiltinSmartFilter[] {
-  return badgeFilters(signals).filter((id) => !ROW_HIDDEN.has(id));
+export function rowIndicators(email: Email, signals: EmailSignals): BuiltinSmartFilter[] {
+  return badgeFilters(email, signals).filter((id) => !ROW_HIDDEN.has(id));
 }
 
 // ── Mailbox navigation ──────────────────────────────────────────────────────

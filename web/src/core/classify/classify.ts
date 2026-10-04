@@ -67,10 +67,47 @@ export function inboxSearchBag(email: Email): string {
   return `${email.sender} ${email.subject} ${email.body}`.toLowerCase();
 }
 
-/** True when the message arrived from a social platform's address. */
+/**
+ * True when the message arrived from a social platform's address.
+ *
+ * **Host-suffix matching, not substring.** `line.includes(domain)` read
+ * `notlinkedin.com.evil.example` and `linkedin.com.attacker.test` as LinkedIn,
+ * because both contain `linkedin.com`. The signal is a claim about who sent the
+ * mail, and a phisher controls the entire domain right of the registrable name —
+ * so a substring test here lets anyone claim any platform by writing its name into
+ * their own hostname, which is precisely the confusion the `social` bucket exists
+ * to prevent.
+ *
+ * A host matches when it *is* the domain or ends with `.<domain>`, which admits
+ * `www.linkedin.com`, `mail.linkedin.com` and any other subdomain a platform
+ * legitimately sends from, and rejects `notlinkedin.com` and
+ * `linkedin.com.evil.example`. The address is compared with the `local@host` part
+ * taken explicitly rather than by looking for an `@`, because a display address
+ * with no `@` in it — `LinkedIn <notifications>`, which is what several of these
+ * send — should still be judged on its host and not silently treated as a miss.
+ *
+ * Punycode is not decoded here: `xn--` hosts arrive already in ASCII from the
+ * envelope, and an internationalised hostname cannot match an ASCII table anyway.
+ */
 export function matchesSocialDomain(email: Email): boolean {
-  const lines = [email.sender.toLowerCase(), (email.address ?? "").toLowerCase()];
-  return lines.some((line) => SOCIAL_DOMAINS.some((domain) => line.includes(domain)));
+  const lines = [email.sender, email.address ?? ""];
+  return lines.some((line) => {
+    const at = line.lastIndexOf("@");
+    // A display name in angle brackets — `LinkedIn <notifications@linkedin.com>` —
+    // leaves the host followed by `>`, and a bare domain can carry a trailing dot.
+    // Stripped before comparing, or the legitimate form misses and only the bare
+    // one works, which is backwards.
+    const tail = (at >= 0 ? line.slice(at + 1) : line.split(/\s+/).pop() ?? "")
+      .trim()
+      // Everything a display name or an RFC 5322 comment can leave behind.
+      .replace(/[>)\]]+$/, "")
+      .replace(/[.,;]+$/, "");
+    const host = tail.toLowerCase();
+    if (!host) return false;
+    return SOCIAL_DOMAINS.some(
+      (domain) => host === domain || host.endsWith(`.${domain}`),
+    );
+  });
 }
 
 /**

@@ -455,7 +455,7 @@ export function App({ store }: Props) {
         selected.subject || "(no subject)",
         selected.unread ? "unread" : null,
         view.signals.get(selected.id)
-          ? badgeFilters(view.signals.get(selected.id)!)
+          ? badgeFilters(selected, view.signals.get(selected.id)!)
               .map((id) => FILTER_LABELS[id])
               .join(", ")
           : null,

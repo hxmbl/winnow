@@ -299,7 +299,7 @@ export function Reader({
     );
   }
 
-  const badges = signals ? badgeFilters(signals) : [];
+  const badges = signals ? badgeFilters(email, signals) : [];
   const blocked = email.bodyHtml ? countRemoteReferences(email.bodyHtml) : 0;
   const isOwnMessage = accountAddress !== null && email.sender === accountAddress;
   const others = conversation.filter((m) => m.gmailId !== email.gmailId);
