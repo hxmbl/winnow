@@ -16,7 +16,7 @@
  * cheap enough — was measurably not, once the inbox passed a few hundred rows.
  */
 
-import { memo, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
 import { displayName, monogram } from "../../core/model/email";
 import { rowIndicators, type EmailSignals } from "../../core/model/signals";
@@ -24,6 +24,79 @@ import { avatarColor, avatarTextColor } from "../avatarColor";
 import { hexA, FILTER_PILLS } from "../filterColors";
 import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
+import {
+  ESTIMATED_HEADER_HEIGHT,
+  ESTIMATED_ROW_HEIGHT,
+  computeOffsets,
+  indexAt,
+  scrollTopForIndex,
+  visibleRange,
+} from "../windowing";
+
+/**
+ * One entry in the windowed list: a day header, or a message row.
+ *
+ * A flat union rather than a nested section/row tree, because windowing needs a
+ * single index space to slice — and because a viewport edge can land in the middle
+ * of a day, which a `<section>` wrapper cannot survive.
+ */
+type ListItem =
+  | { kind: "header"; key: string; section: DaySection; label: string; count: number }
+  | {
+      kind: "row";
+      key: string;
+      section: DaySection;
+      row: ThreadRow;
+      bucket: DayBucket;
+      signals: EmailSignals;
+    };
+
+/** What a row needs to rebuild its day boundary: the key to group on, and the text. */
+type DaySection = {
+  key: string;
+  /** Null for a sort that is not chronological, and then there is no boundary. */
+  label: string | null;
+  /** The day's full row count, not the number currently mounted. */
+  count: number;
+};
+
+/**
+ * Which item the keyboard cursor is on.
+ *
+ * `cursorIndex` counts *rows*, not items, so it has to be walked past the headers.
+ * Returns `null` when the cursor is out of range — which is a real state, not an
+ * error: `NO_CURSOR` is `-1` and means nothing is selected yet.
+ */
+function rowIndexForCursor(items: readonly ListItem[], cursorIndex: number): number | null {
+  if (cursorIndex < 0) return null;
+  let seen = 0;
+  for (let i = 0; i < items.length; i += 1) {
+    if (items[i]!.kind !== "row") continue;
+    if (seen === cursorIndex) return i;
+    seen += 1;
+  }
+  return null;
+}
+
+/** One day boundary's worth of mounted items. */
+type ItemRun = { section: DaySection; firstKey: string; items: ListItem[] };
+
+/**
+ * The mounted window, cut into runs of consecutive items that share a day.
+ *
+ * The key includes the first item so a day split by the window edge becomes two
+ * sections rather than two sibling runs colliding on one React key.
+ */
+function runsInWindow(items: readonly ListItem[], start: number, end: number): ItemRun[] {
+  const runs: ItemRun[] = [];
+  for (let i = start; i < end; i += 1) {
+    const item = items[i]!;
+    const current = runs[runs.length - 1];
+    if (current && current.section.key === item.section.key) current.items.push(item);
+    else runs.push({ section: item.section, firstKey: item.key, items: [item] });
+  }
+  return runs;
+}
 
 type RowProps = {
   row: ThreadRow;
@@ -203,14 +276,23 @@ const Row = memo(function Row({
 });
 
 /**
- * Sticky, so it stays legible while its section scrolls under it.
+ * The day heading.
+ *
+ * Not sticky itself. It used to be — `sticky top-0` inside its `<section>` — and
+ * that no longer works once the list is windowed, because the containing block is
+ * now the translated window rather than the whole day. The pinned copy is drawn
+ * over the scroller by `MessageList`; this is the in-flow original, which scrolls
+ * away normally and is what that pinned copy is painted over.
+ *
+ * The background is opaque for the same reason: the pinned copy sits on top of rows
+ * scrolling underneath it.
  *
  * The label is aligned to the avatar edge below it, because the label describes
  * the rows and should sit where the rows start.
  */
 function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
-    <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-surface px-4 pb-1.5 pt-4">
+    <div className="flex items-baseline gap-2 bg-surface px-4 pb-1.5 pt-4">
       <span className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
         {label}
       </span>
@@ -363,7 +445,6 @@ function MessageList({
   now,
   className = "",
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // Day sections, on the *representative* message's date, since that is the date the
   // row displays. One flat section unless the sort is chronological.
@@ -373,6 +454,165 @@ function MessageList({
     (row) => row.representative.receivedAt,
     sortBy === "date",
   );
+
+  /**
+   * The sections flattened into one index space, so headers and rows can be
+   * windowed together.
+   *
+   * Rows whose signals are missing are dropped here rather than at render time. The
+   * classifier runs over the whole mailbox before anything is shown, so a miss means
+   * the message left the list between the two passes. Filtering here is what keeps
+   * the flattened index and `cursorIndex` in agreement — filtering during render
+   * would leave holes that `querySelectorAll`-by-index silently miscounts, which is
+   * what the cursor-follow effect used to do.
+   */
+  const items = useMemo<ListItem[]>(() => {
+    const out: ListItem[] = [];
+    for (const section of sections) {
+      const day: DaySection = { key: section.key, label: section.label, count: section.rows.length };
+      if (section.label) {
+        out.push({ kind: "header", key: section.key, section: day, label: section.label, count: section.rows.length });
+      }
+      for (const { row, bucket } of section.rows) {
+        const signalsForRow = signals.get(row.representative.id);
+        if (!signalsForRow) continue;
+        out.push({ kind: "row", key: row.key, section: day, row, bucket, signals: signalsForRow });
+      }
+    }
+    return out;
+  }, [sections, signals]);
+
+  /**
+   * Measured heights, by item key.
+   *
+   * A `Map` keyed by identity rather than an array by index because the list is
+   * rebuilt on every derive — an index-keyed cache would be invalidated wholesale
+   * by an unrelated change and every row would have to be measured again.
+   */
+  const heightsRef = useRef(new Map<string, number>());
+  /** Bumped when a measurement changes an offset, to force the prefix sums. */
+  const [measureVersion, setMeasureVersion] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+
+  const offsets = useMemo(
+    () =>
+      computeOffsets(items.length, items.map((item) => heightsRef.current.get(item.key) ?? null), (i) =>
+        items[i]!.kind === "header" ? ESTIMATED_HEADER_HEIGHT : ESTIMATED_ROW_HEIGHT,
+      ),
+    // `measureVersion` is the dependency that matters: `heightsRef` is a ref, so
+    // mutating it does not invalidate this memo on its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, measureVersion],
+  );
+
+  const { start, end } = useMemo(
+    () => visibleRange(offsets, scrollTop, viewportHeight),
+    [offsets, scrollTop, viewportHeight],
+  );
+
+  /** Measure one rendered item, and record it only if it actually moved. */
+  const measure = useCallback((key: string, height: number) => {
+    const known = heightsRef.current.get(key);
+    // Sub-pixel differences are not worth a re-render and a new set of offsets.
+    if (known != null && Math.abs(known - height) < 1) return;
+    heightsRef.current.set(key, height);
+    setMeasureVersion((n) => n + 1);
+  }, []);
+
+  /**
+   * Height bookkeeping for every mounted item.
+   *
+   * A `ResizeObserver` rather than `offsetHeight` on mount, because a row's height
+   * is not known when it mounts — the fonts may not have loaded and the preview line
+   * may not have wrapped yet — and it changes again if the pane is resized.
+   */
+  const itemObserver = useRef<ResizeObserver | null>(null);
+  if (!itemObserver.current && typeof ResizeObserver !== "undefined") {
+    itemObserver.current = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const key = (entry.target as HTMLElement).dataset.itemKey;
+        if (key) measure(key, entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+      }
+    });
+  }
+
+  /**
+   * The scroller itself, as state rather than a ref.
+   *
+   * A callback ref instead of `useRef` + an effect keyed on `[]`, and the reason is
+   * specific: the empty state replaces the list wholesale, so the scroller *unmounts*
+   * whenever a search matches nothing and **mounts a different element** when the
+   * search is cleared. An effect with `[]` dependencies does not re-run for that — the
+   * component instance is the same — so the new element got no scroll listener and no
+   * viewport height. The list then looked correct while scrolling did nothing, which is
+   * exactly the failure the integration test caught and a fresh-page check cannot.
+   *
+   * Keying the effect on the element makes the attach follow the DOM rather than the
+   * component.
+   */
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+
+  // Viewport height, and the scroll position, in one observer on the scroller.
+  useEffect(() => {
+    if (!scroller) return;
+
+    const readViewport = (): void => setViewportHeight(scroller.clientHeight);
+    readViewport();
+
+    const onScroll = (): void => setScrollTop(scroller.scrollTop);
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(readViewport) : null;
+    observer?.observe(scroller);
+
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      observer?.disconnect();
+    };
+  }, [scroller]);
+
+  // Heights are per-item and only meaningful for the keys it has seen, so a key that
+  // leaves the list drops out rather than growing the map forever.
+  useEffect(() => {
+    const live = new Set(items.map((item) => item.key));
+    for (const key of heightsRef.current.keys()) {
+      if (!live.has(key)) heightsRef.current.delete(key);
+    }
+  }, [items]);
+
+  /** Attach the shared observer to one mounted item. */
+  const observeItem = useCallback((element: HTMLDivElement | null) => {
+    const observer = itemObserver.current;
+    if (!element || !observer) return;
+    observer.observe(element);
+  }, []);
+
+  /** How many rows the list holds, headers excluded. */
+  const rowCount = useMemo(() => items.reduce((n, item) => n + (item.kind === "row" ? 1 : 0), 0), [items]);
+
+  const ariaLabel = useMemo(() => {
+    const days = sections.filter((section) => section.label).map((section) => section.label!);
+    if (days.length === 0) return `${rowCount} ${rowCount === 1 ? "message" : "messages"}`;
+    return `${rowCount} ${rowCount === 1 ? "message" : "messages"}, grouped by day`;
+  }, [sections, rowCount]);
+
+  /**
+   * The day header to pin over the top of the viewport.
+   *
+   * The last header at or above the current scroll position. Null once the list is
+   * scrolled into a section that has no header — the non-chronological sorts — which
+   * is correct: there is no day to name.
+   */
+  const stickyHeader = useMemo(() => {
+    const at = indexAt(offsets, Math.max(0, scrollTop + 1));
+    for (let i = at; i >= 0; i -= 1) {
+      const item = items[i];
+      if (item?.kind === "header") return item;
+    }
+    return null;
+  }, [items, offsets, scrollTop]);
 
   /**
    * Keep the cursor's row in view.
@@ -396,9 +636,30 @@ function MessageList({
    */
   useEffect(() => {
     if (cursorIndex < 0) return;
-    const rows = containerRef.current?.querySelectorAll<HTMLElement>("[data-message-id]");
-    rows?.[cursorIndex]?.scrollIntoView({ block: "nearest" });
-  }, [cursorIndex, threads.length]);
+    const element = scroller;
+    if (!element) return;
+
+    // Scroll by *offset*, not by `querySelectorAll` index. Two reasons, and the
+    // second is the one that made this wrong before: only a window of the list is
+    // mounted, so an index into the DOM is an index into whatever happened to be
+    // visible; and rows whose signals were missing were skipped at render time,
+    // which shifted every index after them.
+    //
+    // `block: "nearest"` semantics — only move when the target is actually off
+    // screen, because `"center"` would yank the list on every `j` press.
+    const rowIndex = rowIndexForCursor(items, cursorIndex);
+    if (rowIndex === null) return;
+
+    const target = scrollTopForIndex(offsets, rowIndex, element.clientHeight);
+    const rowTop = offsets[rowIndex] ?? 0;
+    const rowBottom = offsets[rowIndex + 1] ?? 0;
+    const viewTop = element.scrollTop;
+    const viewBottom = viewTop + element.clientHeight;
+    if (rowTop >= viewTop && rowBottom <= viewBottom) return;
+
+    element.scrollTop = target;
+    setScrollTop(target);
+  }, [cursorIndex, threads.length, items, offsets, scroller]);
 
   if (threads.length === 0) {
     return (
@@ -413,58 +674,118 @@ function MessageList({
   }
 
   return (
-    <div
-      ref={containerRef}
-      className={`thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4 ${className}`}
-    >
-      {sections.map(({ key, label, rows }) => (
-        /*
-          Each day is its own `section` with an accessible name.
+    // A positioning wrapper, so the pinned day header can sit over the scroller
+    // rather than inside it. See the note on the overlay below for why it cannot
+    // simply be `sticky` inside the scroll content.
+    <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${className}`}>
+      <div
+        ref={setScroller}
+        // The true row count, for anything that needs the size of the list rather than
+        // the size of the window. The smoke test asserts against this: `[data-message-id]`
+        // is now a window, so counting those elements measures the viewport.
+        data-row-count={rowCount}
+        className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4"
+      >
+      {/*
+        The scroll extent, and the window positioned inside it.
 
-          The heading was purely visual before, so a screen reader heard one
-          undifferentiated list of messages with no indication of where today ended and
-          yesterday began — which is the single most useful thing the grouping
-          communicates. `aria-label` on the section is what turns the visual header into
-          a real boundary, and `role="list"`/`listitem` below it is what makes the
-          count and the position in the list available to assistive tech.
-
-          `label` is null for a sort that is not chronological, and then there is one
-          section with no header: the boundary would be false, so the whole wrapper
-          collapses to the list itself.
-        */
-        <section
-          key={key}
-          aria-label={label ? `${label}, ${rows.length} ${rows.length === 1 ? "message" : "messages"}` : undefined}
+        The outer div is the full height of the list so the scrollbar is honest; the
+        inner one is translated to the first mounted item's offset. Only the mounted
+        rows exist as DOM, which is the entire point — a 5,000-message inbox used to
+        build 5,000 row subtrees.
+      */}
+      <div style={{ height: offsets[items.length] ?? 0, position: "relative" }}>
+        <div
+          role="list"
+          aria-label={ariaLabel}
+          className="absolute inset-x-0 top-0 px-1.5"
+          style={{ transform: `translateY(${offsets[start] ?? 0}px)` }}
         >
-          {label && <SectionHeader label={label} count={rows.length} />}
-          <div role="list" className="flex flex-col gap-0.5 px-1.5">
-            {rows.map(({ row, bucket }) => {
-              const email = row.representative;
-              const signalsForRow = signals.get(email.id);
-              // A row whose signals are missing is not rendered at all: the classifier
-              // runs over the whole mailbox before anything is shown, so a miss here
-              // means the message left the list between the two passes, and an empty row
-              // would be worse than none.
-              if (!signalsForRow) return null;
-              return (
-                <div role="listitem" key={row.key}>
-                <Row
-                  key={row.key}
-                  row={row}
-                  signals={signalsForRow}
-                  bucket={bucket}
-                  selected={email.id === selectedId}
-                  unread={unreadIds.has(email.id)}
-                  fresh={freshIds.has(email.id)}
-                  onSelect={onSelect}
-                  onToggleStar={onToggleStar}
-                />
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+          {/*
+            Each day is its own boundary, with an accessible name.
+
+            The heading was purely visual before, so a screen reader heard one
+            undifferentiated list of messages with no indication of where today ended and
+            yesterday began — which is the single most useful thing the grouping
+            communicates.
+
+            The section wrapper is gone because a window cannot contain part of a
+            `<section>`: a day boundary would be cut in half by the viewport edge. The
+            boundary is preserved as a header item in the flat list plus
+            `aria-label` on the list, which is the same information in a shape that
+            survives windowing.
+
+            `label` is null for a sort that is not chronological, and then there are no
+            header items at all: the boundary would be false, so there is nothing to
+            announce.
+          */}
+          {/*
+            Rendered items, re-wrapped into the day sections they belong to.
+
+            A window cannot hold a whole `<section>`, but it can hold the *run* of
+            mounted items that share one — so a day split across the window edge
+            renders as two sections with the same accessible name rather than one
+            section with a hole in it. The name carries the day's full count, so a
+            screen reader still hears "Today, 12 messages" rather than a partial day.
+          */}
+          {runsInWindow(items, start, end).map((run) => (
+            <section
+              key={`${run.section.key}:${run.firstKey}`}
+              aria-label={
+                run.section.label
+                  ? `${run.section.label}, ${run.section.count} ${run.section.count === 1 ? "message" : "messages"}`
+                  : undefined
+              }
+            >
+              {run.items.map((item) => {
+                if (item.kind === "header") {
+                  return (
+                    <div key={item.key} data-item-key={item.key} ref={observeItem}>
+                      <SectionHeader label={item.label} count={item.count} />
+                    </div>
+                  );
+                }
+                const email = item.row.representative;
+                return (
+                  <div role="listitem" key={item.key} data-item-key={item.key} ref={observeItem}>
+                    <Row
+                      row={item.row}
+                      signals={item.signals}
+                      bucket={item.bucket}
+                      selected={email.id === selectedId}
+                      unread={unreadIds.has(email.id)}
+                      fresh={freshIds.has(email.id)}
+                      onSelect={onSelect}
+                      onToggleStar={onToggleStar}
+                    />
+                  </div>
+                );
+              })}
+            </section>
+          ))}
+        </div>
+      </div>
+      </div>
+
+      {/*
+        The day header, pinned while its day scrolls under it.
+
+        `position: sticky` cannot be used for this any more, which is why this sits
+        outside the scroller instead of inside it. Sticky resolves against the nearest
+        scrolling ancestor *within its own containing block*; the containing block here
+        is the translated window, so a sticky header would stop sticking the moment it
+        scrolled out of the window — which is exactly when it is needed. Tracking the
+        scroll position and painting the current header over the top is the same
+        behaviour without the dependency.
+
+        `pointer-events-none` because this is a copy of a header that is also in the
+        flow below; it must not swallow a click meant for the row underneath.
+      */}
+      {stickyHeader && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10">
+          <SectionHeader label={stickyHeader.label} count={stickyHeader.count} />
+        </div>
+      )}
     </div>
   );
 }

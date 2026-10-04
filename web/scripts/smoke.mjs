@@ -150,7 +150,23 @@ try {
   };
 
   // Re-read after every state change, so nothing here holds a stale handle.
+  //
+  // Two different questions, and conflating them is the trap: `rows` counts what is
+  // *mounted*, which since the list was windowed is a viewport-sized window rather
+  // than the whole mailbox. `rowTotal` counts what the mailbox *holds*, read from the
+  // attribute the list publishes for exactly this. Anything asserting "how many
+  // messages match" wants `rowTotal`; anything that needs to click or await a
+  // specific row wants `rows`.
   const rows = () => page.locator("[data-message-id]");
+  // Zero when the list is empty: the empty state replaces the list wholesale, so there
+  // is no `[data-row-count]` element to read. `count()` returns without waiting, which
+  // is what keeps this from hanging for the 30s a `getAttribute` would.
+  const rowTotal = async () => {
+    const locator = page.locator("[data-row-count]").first();
+    if ((await locator.count()) === 0) return 0;
+    const raw = await locator.getAttribute("data-row-count");
+    return raw === null ? 0 : Number(raw);
+  };
   // Scoped to the live rail. It was rendered twice — inline at `lg` and again on its
   // own row below it — and counting both would have doubled every number here; there is
   // one copy now, and the `:visible` guard documents that it is a layout assumption
@@ -189,9 +205,24 @@ try {
   await page.waitForSelector("text=Nothing selected", { timeout: 10_000 });
   check("the app boots into the demo, with the reader's empty state", true);
 
-  const rowCount = await rows().count();
+  const rowCount = await rowTotal();
   require("the demo mailbox has rows", rowCount > 20, `${rowCount} rows`);
   check("the demo mailbox is populated", true, `${rowCount} rows`);
+
+  // The windowing itself. The list publishes its true size and mounts only what the
+  // viewport needs; a large mailbox must not become one DOM subtree per message, which
+  // is what it used to do — 5,000 rows meant 5,000 row components in the tree.
+  const mounted = await rows().count();
+  check(
+    "and mounts only a window of them",
+    mounted > 0 && mounted <= rowCount,
+    `${mounted} mounted of ${rowCount}`,
+  );
+  check(
+    "the mounted window is smaller than the mailbox",
+    mounted < rowCount,
+    `${mounted} mounted of ${rowCount}`,
+  );
 
   const pillCount = await pills().count();
   require("the filter rail is populated", pillCount > 5, `${pillCount} pills`);
@@ -297,7 +328,7 @@ try {
   );
   await page.keyboard.type("migration");
   await page.waitForTimeout(300);
-  const searchRows = await rows().count();
+  const searchRows = await rowTotal();
   check(
     "search narrows the list",
     searchRows > 0 && searchRows < rowCount,
@@ -314,14 +345,14 @@ try {
   // case below the load-bearing one.
   await page.locator("#topbar-search").fill("migration plan");
   await page.waitForTimeout(300);
-  const bothTokens = await rows().count();
+  const bothTokens = await rowTotal();
   check("two tokens that co-occur both match", bothTokens > 0, `${bothTokens} rows`);
 
   // A second token that cannot co-occur must narrow to nothing rather than being
   // ignored, which is what "AND" has to mean to be worth anything.
   await page.locator("#topbar-search").fill("migration zzzznotaword");
   await page.waitForTimeout(300);
-  const impossiblePair = await rows().count();
+  const impossiblePair = await rowTotal();
   check(
     "and an impossible pair narrows to nothing rather than ignoring a token",
     impossiblePair === 0,
@@ -331,10 +362,10 @@ try {
   // Order must not matter, since the tokens are a set rather than a phrase.
   await page.locator("#topbar-search").fill("migration plan");
   await page.waitForTimeout(250);
-  const ordered = await rows().count();
+  const ordered = await rowTotal();
   await page.locator("#topbar-search").fill("plan migration");
   await page.waitForTimeout(250);
-  const reversed = await rows().count();
+  const reversed = await rowTotal();
   check("token order does not matter", ordered === reversed, `${ordered} vs ${reversed}`);
   await page.locator("#topbar-search").fill("");
   await page.waitForTimeout(300);
@@ -352,7 +383,42 @@ try {
   // the `textEditing` branch in the keybind router, so it is worth stating here.
   await page.locator("#topbar-search").fill("");
   await page.waitForTimeout(300);
-  check("clearing the search brings the list back", (await rows().count()) === rowCount);
+  check("clearing the search brings the list back", (await rowTotal()) === rowCount);
+
+  /**
+   * The list is still scrollable after coming back from empty.
+   *
+   * Not a redundant restatement of the row count above: an empty result *unmounts* the
+   * scroller and renders the empty state in its place, so clearing the search mounts a
+   * **different** element. Anything the list attached to the old one — the scroll
+   * listener, the viewport measurement — is attached to an element that no longer
+   * exists, and the list then looks entirely correct while scrolling does nothing. It
+   * showed up here as a list that reported 38 rows and a window stuck at the first
+   * message, and it is invisible to any check that only counts.
+   */
+  const scroller = page.locator("[data-row-count]").first();
+  const firstMounted = () =>
+    scroller.evaluate((el) => el.querySelector("[data-message-id]")?.getAttribute("data-message-id") ?? null);
+
+  const rowBeforeScroll = await firstMounted();
+  const scrollAfter = await scroller.evaluate((el) => {
+    el.scrollTop = Math.min(el.scrollTop + el.clientHeight, el.scrollHeight);
+    return el.scrollTop;
+  });
+  await page.waitForTimeout(250);
+  const rowAfterScroll = await firstMounted();
+
+  check("and the list still scrolls after coming back from empty", scrollAfter > 0, `scrollTop ${scrollAfter}`);
+  check(
+    "and the mounted window followed it, rather than staying pinned to the top",
+    rowAfterScroll !== null && rowAfterScroll !== rowBeforeScroll,
+    `${rowBeforeScroll} → ${rowAfterScroll}`,
+  );
+
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await page.waitForTimeout(200);
 
   // ── Sorting ────────────────────────────────────────────────────────────────
 
@@ -361,13 +427,12 @@ try {
   /**
    * The dated sections, and what they say.
    *
-   * `section > [role=list]` is the list's own markup: the settings sheet is also a
-   * `<section>`, so a bare `section` selector counted whichever panel happened to be
-   * open. The label is read off the accessible name rather than the rendered header,
-   * because that name is the thing a screen reader gets — and if it stops carrying the
-   * count, the header and the boundary disagree.
+   * `section[aria-label]` rather than a bare `section`, because the settings sheet is
+   * also a `<section>` and a bare selector counted whichever panel happened to be open.
+   * The label is read off the accessible name rather than the rendered header, because
+   * that name is the thing a screen reader gets — and if it stops carrying the count,
+   * the header and the boundary disagree.
    */
-  const daySections = () => page.locator("section > [role='list']");
   const sectionNames = async () =>
     (
       await page.locator("section[aria-label]").evaluateAll((els) =>
@@ -398,10 +463,57 @@ try {
       els.map((el) => el.getAttribute("aria-label") ?? ""),
     );
 
+  /**
+   * Every day boundary in the list, collected by scrolling from the top to the bottom.
+   *
+   * The list is windowed, so the days that happen to intersect the viewport are the
+   * only ones mounted at any moment — asking "how many days does this list have" from
+   * the DOM once measures the window, not the list, and it silently became a weaker
+   * assertion the moment windowing landed. Walking the scroll position is how the
+   * question gets asked of the whole list, and it exercises the scrolling path while
+   * doing it.
+   *
+   * Deduplicated by name, because a day whose rows straddle a window edge renders as
+   * two sections with the same accessible name — correct, and invisible to a user.
+   */
+  const allDaySections = async () => {
+    const scroller = page.locator("[data-row-count]").first();
+    if ((await scroller.count()) === 0) return [];
+    const seen = new Set();
+    const collect = async () => {
+      for (const name of await datedSections()) seen.add(name);
+    };
+
+    await scroller.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await page.waitForTimeout(200);
+    await collect();
+
+    // Step by roughly a viewport each way, so no day is skipped between two
+    // positions even when the list is much taller than the window.
+    for (let guard = 0; guard < 40; guard += 1) {
+      const moved = await scroller.evaluate((el) => {
+        const before = el.scrollTop;
+        el.scrollTop = Math.min(el.scrollTop + el.clientHeight, el.scrollHeight);
+        return el.scrollTop !== before;
+      });
+      await page.waitForTimeout(120);
+      await collect();
+      if (!moved) break;
+    }
+
+    await scroller.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await page.waitForTimeout(200);
+    return [...seen];
+  };
+
   check(
     "the default sort groups the list into dated sections",
-    (await daySections().count()) >= 3,
-    `${await sectionNames()}`,
+    (await allDaySections()).length >= 3,
+    `${await allDaySections()}`,
   );
   check(
     "each section names its day and counts its rows",
@@ -410,11 +522,11 @@ try {
   );
   check(
     "and the days run oldest-last, because that is the order they arrived in",
-    (await datedSections()).every((name, i, all) => {
+    (await allDaySections()).every((name, i, all) => {
       const rank = ["Today", "Yesterday", "This week", "Earlier"];
       return i === 0 || rank.indexOf(name.split(",")[0]) > rank.indexOf(all[i - 1].split(",")[0]);
     }),
-    `${await sectionNames()}`,
+    `${await allDaySections()}`,
   );
 
   /**
@@ -432,8 +544,12 @@ try {
     await sortBy(label);
     check(
       `${label} renders one flat list, not interleaved day sections`,
-      (await daySections().count()) === 1,
-      `${await daySections().count()} section(s): ${await sectionNames()}`,
+      // Zero *labelled* sections, which is the claim: day headers are an assertion
+      // about adjacency, and a score- or sender-sorted list interleaves the days, so
+      // there must be none. Counted across the whole list by scrolling, because a
+      // single position only shows the part of it that is mounted.
+      (await allDaySections()).length === 0,
+      `${(await allDaySections()).length} dated section(s)`,
     );
     check(
       `${label} logs no duplicate-key error`,
@@ -442,14 +558,14 @@ try {
     );
     check(
       `${label} still shows every row`,
-      (await rows().count()) === rowCount,
-      `${await rows().count()} of ${rowCount}`,
+      (await rowTotal()) === rowCount,
+      `${await rowTotal()} of ${rowCount}`,
     );
   }
 
   await sortBy("Date");
-  check("switching back to Date restores the sections", (await daySections().count()) >= 3);
-  check("and the row count is unchanged", (await rows().count()) === rowCount);
+  check("switching back to Date restores the sections", (await allDaySections()).length >= 3);
+  check("and the row count is unchanged", (await rowTotal()) === rowCount);
 
   // ── The reader ─────────────────────────────────────────────────────────────
 
@@ -876,7 +992,7 @@ try {
 
   // ── Not spam ───────────────────────────────────────────────────────────────
 
-  const spamRows = await rows().count();
+  const spamRows = await rowTotal();
   require("the spam folder has messages", spamRows > 0, `${spamRows} rows`);
   await rows().first().click();
   await page.waitForSelector("article h1", { timeout: 5_000 });
@@ -904,8 +1020,8 @@ try {
   await page.waitForTimeout(400);
   check(
     "and it moves the message back to the inbox",
-    (await rows().count()) === spamRows - 1,
-    `${spamRows} → ${await rows().count()} in spam`,
+    (await rowTotal()) === spamRows - 1,
+    `${spamRows} → ${await rowTotal()} in spam`,
   );
 
   await page.keyboard.press("Escape");
@@ -1326,8 +1442,8 @@ try {
   await page.waitForTimeout(500);
   check(
     "a shared link is not mistaken for an OAuth redirect",
-    (await page.locator('[role="alert"]').count()) === 0 && (await rows().count()) > 0,
-    `${await rows().count()} rows`,
+    (await page.locator('[role="alert"]').count()) === 0 && (await rowTotal()) > 0,
+    `${await rowTotal()} rows`,
   );
 
   // ── Console ────────────────────────────────────────────────────────────────
