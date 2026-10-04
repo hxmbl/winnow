@@ -175,10 +175,10 @@ try {
   /**
    * The mailbox menu, which the logo opens.
    *
-   * It used to be four pills in the top bar, so every assertion about mailboxes went
-   * straight at `header nav`. It is now a drawer behind the mark, which means the
-   * navigation has to be *opened* before it can be asserted on — and that opening it
-   * is itself a thing worth asserting.
+   * Mailboxes used to be four always-visible pills, so every assertion about them
+   * went straight at `header nav`. They are now a drawer behind the mark, which means
+   * the navigation has to be *opened* before it can be asserted on — and that opening
+   * it is itself a thing worth asserting.
    */
   const drawer = () => page.locator('[role="dialog"][aria-label="Navigation"]');
   /**
@@ -227,7 +227,7 @@ try {
    * The unread count on a mailbox row, or `0` when it has none.
    *
    * The counts live in the drawer now, so this opens it, reads, and closes. The old
-   * version read a `span` out of a tab in the top bar and returned `"0"` for a mailbox
+   * version read a `span` out of an always-visible tab and returned `"0"` for a mailbox
    * that was simply not on screen — which is indistinguishable from a real zero, and
    * made the mark-all-read scoping checks assert against a number that was never read.
    */
@@ -903,12 +903,6 @@ try {
     `${beforeFiling} → ${afterFiling ?? "(closed)"}`,
   );
   /*
-   * The mailbox is a thread list, so filing *one* message of a four-message thread
-   * does not remove the row — every message in it shares the subject and the thread
-   * still has three left. Asserting the subject had left the list would be asserting
-   * that threads do not exist. The count is the honest measure.
-   */
-  /*
    * Where it went, rather than a count.
    *
    * The mailbox is a thread list, so filing one message of a four-message thread does
@@ -1275,9 +1269,9 @@ try {
   const notSpam = page.locator('button[aria-label="Not spam — move to inbox"]');
   check("the spam folder offers a way out of it", (await notSpam.count()) > 0);
   /*
-   * There used to be a second "not spam" button in the top bar, next to a copy of
-   * every other email action. The reader is now the only place an email action lives
-   * — that was the point of taking them out of the bar — so this asserts there is
+   * There used to be a second "not spam" button in the app chrome, next to a
+   * copy of every other email action. The reader is now the only place an email action
+   * lives — that was the point of taking them out of the bar — so this asserts there is
    * exactly one way out of Spam in the whole window rather than that two surfaces
    * agree on a label.
    */
@@ -1554,7 +1548,7 @@ try {
 
   const headerBox = await page.locator("header").first().boundingBox();
   check(
-    "the top bar survives an open reader on a phone",
+    "the masthead survives an open reader on a phone",
     Boolean(headerBox) && headerBox.y >= 0 && headerBox.height > 20,
     JSON.stringify(headerBox),
   );
@@ -1635,10 +1629,10 @@ try {
   });
   /*
     `>= 8`, not `> 10`. The scan is a sanity check that it found something worth
-    scanning, and the count fell because the top bar is gone: its five action buttons,
-    two icon buttons and four mailbox tabs no longer sit outside a scroll container.
-    What is being claimed is the second half — that nothing reachable is off-screen —
-    and that is unchanged.
+    scanning, and the count fell because the old chrome is gone: its five action
+    buttons, two icon buttons and four mailbox tabs no longer sit outside a scroll
+    container. What is being claimed is the second half — that nothing reachable is
+    off-screen — and that is unchanged.
   */
   check(
     "and no control anywhere in the app is off-screen",

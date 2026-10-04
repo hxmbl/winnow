@@ -113,8 +113,8 @@ Two details that are easy to trip over:
 The app runs with no Google configuration at all: the demo mailbox is seeded on
 boot, so you can see whether the classification is any good before deciding
 whether to trust it with an account. The demo is the *default*, not a fallback —
-there is no sign-in wall — so the top bar's status line carries a **Connect Gmail**
-button, which is the only route to sign-in on a fresh install.
+there is no sign-in wall — so the status line at the top of the mailbox carries a
+**Connect Gmail** button, which is the only route to sign-in on a fresh install.
 
 ## Tests
 

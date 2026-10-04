@@ -1,11 +1,10 @@
 /**
  * The navigation drawer.
  *
- * What the logo opens. It replaces the permanent mailbox menu that used to be four
- * pills in the top bar, and it is a drawer rather than a sidebar for the reason
- * `NavigationPalette` is an overlay: a folder rail permanently spends ~200px of a
- * full-window reading surface on four destinations the user visits deliberately
- * rather than continuously.
+ * What the logo opens. It replaces the permanent mailbox menu of four pills, and it
+ * is a drawer rather than a sidebar for the reason `NavigationPalette` is an overlay:
+ * a folder rail permanently spends ~200px of a full-window reading surface on four
+ * destinations the user visits deliberately rather than continuously.
  *
  * **It is a surface of the window, not a component in it.** The panel is flush to
  * the left edge and full height — no inset, no rounding, no margin — because a
@@ -144,9 +143,9 @@ export function NavDrawer({
         another bordered container and this drawer has spent its whole budget on
         avoiding those.
 
-        Sync lives here too. It was an icon in the top bar; it is not an email
-        action and it is not navigation either, and the drawer is the one surface
-        that is about the app rather than about a message.
+        Sync lives here too. It is not an email action and it is not navigation
+        either, and the drawer is the one surface that is about the app rather than
+        about a message.
       */}
       <div className="mt-auto px-4 pb-4 pt-6">
         <div className="h-px w-full bg-hairline" />

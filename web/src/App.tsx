@@ -127,9 +127,9 @@ export function App({ store }: Props) {
   /**
    * The search input.
    *
-   * Held here rather than inside the top bar because `/` is routed by the
-   * keyboard handler below, which lives in this component. One ref, shared by
-   * both — see the note on `Masthead`'s `searchRef` prop.
+   * Held here rather than inside `Masthead` because `/` is routed by the keyboard
+   * handler below, which lives in this component. One ref, shared by both — see
+   * the note on `Masthead`'s `searchRef` prop.
    */
   const searchRef = useRef<HTMLInputElement>(null);
   const [scrollStep, setScrollStep] = useState(0);
@@ -1152,26 +1152,14 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           } min-h-0 min-w-0 flex-1 flex-col bg-surface`}
         >
           {/*
-            The demo note, inside the mailbox.
-
-            It was a full-width strip in the app's chrome, above the mailbox, with a
-            `border-b` — so the single most important thing to say about a first run
-            ("this is a sample; nothing you do here leaves this device") was rendered
-            as *chrome about the app*, in the same place as the sync status, competing
-            with it for attention and pushing the messages down.
-
-            Here it is part of what it is describing. It is a quiet line, in the
-            list's own surface, above the first row; and the route to a real account
-            is a button in it rather than in a settings panel, because the app boots
-            into the demo and so never shows the sign-in screen on first run.
-          */}
-          {/*
             The mailbox's own status line, and the demo note.
 
             Both used to be one full-width strip in the app's chrome, above the
             mailbox, with a `border-b` — so the two most important things to say
             about a session were rendered as chrome *about the app*, in the same place
-            as each other, competing for attention and pushing the messages down.
+            as each other, competing for attention and pushing the messages down. The
+            demo note is the one that mattered most: "this is a sample; nothing you do
+            here leaves this device" is the first thing a new user needs to be told.
 
             They are inside the mailbox now, which is what they are about: the demo
             note describes the mail you are looking at, and the sync line describes

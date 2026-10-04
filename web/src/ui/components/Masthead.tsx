@@ -1,11 +1,10 @@
 /**
  * The masthead.
  *
- * Replaces the top bar, which was three stacked rows: identity and actions, then
- * the filter rail, then a status line — about 127px of chrome above a reading
- * surface, with a `border-b` under each. It was the clearest statement in the app
- * that the chrome and the mail were two different things sitting next to each
- * other.
+ * Identity and actions, the filter rail and a status line used to be three stacked
+ * strips — about 127px of chrome above a reading surface, with a `border-b` under
+ * each. That was the clearest statement in the app that the chrome and the mail
+ * were two different things sitting next to each other.
  *
  * This is **one row**, and nothing in it is a separate object:
  *
@@ -43,10 +42,9 @@ export type MastheadProps = {
   /**
    * The search input's element.
    *
-   * A ref for the same reason the old `TopBar` used one: `/` has to focus this exact
-   * element, and the keybind handler in `App.tsx` holds the same ref. If the two
-   * diverge, `/` silently does nothing and every later keystroke is swallowed by
-   * the keyboard layer.
+   * A ref, and it has to be the same ref the keybind handler in `App.tsx` holds:
+   * `/` has to focus this exact element. If the two diverge, `/` silently does
+   * nothing and every later keystroke is swallowed by the keyboard layer.
    */
   searchRef: React.RefObject<HTMLInputElement | null>;
   pills: PillItem[];
@@ -68,10 +66,10 @@ export type MastheadProps = {
   /**
    * Mark the whole mailbox read.
    *
-   * It used to live in the top bar among the email actions, and it is not an email
-   * action — it is about every message on screen, which is what the list is. It
-   * belongs here, beside the readout that tells you how many there are, and it is the
-   * only button in this row that is not about navigation, search or position.
+   * It is not an email action — it is about every message on screen, which is what
+   * the list is — so it belongs here, beside the readout that tells you how many
+   * there are. It is the only button in this row that is not about navigation,
+   * search or position.
    *
    * `⇧U` is the same verb and the button says so, which is the only place a user can
    * discover it: it is the most destructive keystroke in the product — there is no
@@ -236,17 +234,9 @@ export function Masthead({
               <ChevronRight size={17} />
             </button>
             {/*
-              Mark the whole mailbox read.
-
-              It used to sit in the top bar among the email actions, which it is not:
-              it is about every message on screen, which is what the list is. The reader
-              is now the only home of the actions that belong to the open message, and
-              this is the one that belongs to neither, so it stays here.
-
-              `⇧U` is the same verb and the button says so, which is the only place
-              anyone can discover it — it is the most destructive keystroke in the
-              product, there is no inverse anywhere except the undo strip, and the strip
-              only appears *after* it has been pressed.
+              The rationale for this living in the masthead at all is on the
+              `onMarkAllRead` prop, which is where the reasoning does not change
+              depending on how the button happens to be rendered.
             */}
             <button
               type="button"

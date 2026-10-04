@@ -1079,12 +1079,12 @@ export class WinnowStore {
   /**
    * Point the store at a backend and start the first sync.
    *
-   * `signing_in` is a real status, and it used to be rendered by the top bar: the
-   * OAuth round trip is the one step where the app is deliberately doing nothing
-   * and waiting for a human, and saying so is the difference between "hanging" and
-   * "waiting for you". It is set here but not read for rendering — the sign-in
-   * buttons carry their own local flag — so it is currently a status without a
-   * renderer, which is worth knowing before someone reads it as one.
+   * `signing_in` is a real status because the OAuth round trip is the one step
+   * where the app is deliberately doing nothing and waiting for a human, and saying
+   * so is the difference between "hanging" and "waiting for you". It is set here but
+   * not read for rendering — the sign-in buttons carry their own local flag — so it
+   * is currently a status without a renderer, which is worth knowing before someone
+   * reads it as one.
    */
   async connect(backend: MailBackend, account: { email: string }): Promise<void> {
     this.backend = backend;
