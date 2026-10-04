@@ -27,14 +27,15 @@ import {
   Archive,
   Ban,
   CornerUpLeft,
+  EyeOff,
   Forward,
+  ImageOff,
   Mail,
   MailOpen,
   Paperclip,
   RotateCcw,
   Star,
   Trash2,
-  TriangleAlert,
   Undo2,
   X,
 } from "lucide-react";
@@ -42,7 +43,12 @@ import { formatFullTime, formatRelative } from "../../core/mail/datetime";
 import { shortcutHint } from "../../core/mail/keybinds";
 import { countRemoteReferences } from "../../core/mail/html";
 import { displayAddress, displayName, monogram, type Email } from "../../core/model/email";
-import { badgeFilters, filterLabel, type EmailSignals } from "../../core/model/signals";
+import {
+  badgeFilters,
+  type BuiltinSmartFilter,
+  type EmailSignals,
+} from "../../core/model/signals";
+import { filterIcon } from "../filterIcons";
 
 /**
  * The first thing someone said, on one line.
@@ -63,29 +69,40 @@ import { avatarColor, avatarTextColor } from "../avatarColor";
 import { formatBytes } from "../../core/gmail/mime";
 import type { Mailbox } from "../../core/model/email";
 
-/** A bucket chip in the reader header. */
-function Badge({ id }: { id: string }) {
-  // Three custom properties, all written by `applyTheme` from the live palette:
-  // the accent, a wash of it at 14%, and an edge at 34%. Reading the accent's
-  // *name* and feeding it to a hex parser cannot work — JavaScript has no way to
-  // ask the CSS engine what a custom property currently resolves to, and
-  // `parseInt("ar(--wn-badge-urgent)", 16)` quietly answers `0x0A`. That is how
-  // every chip in the reader ended up wearing the same near-black fill.
+/**
+ * A smart filter that applies to the open message.
+ *
+ * **Icon and word, never colour alone.** This was a chip whose whole identity was
+ * a wash of the bucket's accent — an eleven-hue pill carrying no information a
+ * screen could read without knowing the palette, and nothing at all to a reader
+ * with a colour vision deficiency, in dark mode, or in a screenshot. `theme.ts`
+ * spends a hundred lines deriving chip label colours that clear WCAG AA on their
+ * own wash, which is a measure of how much machinery was committed to keeping a
+ * colour legible rather than saying what it meant.
+ *
+ * So the shape and the word do the work. The accent survives as a *tint* on the
+ * icon, which reinforces a meaning already carried by the glyph and the label
+ * rather than being the only carrier of it. Nothing here is a border or an opaque
+ * fill: the tags sit on the reader's own surface, and the group is separated from
+ * the header above it by spacing.
+ *
+ * The `title` is the explanation from `ui/filterIcons`, so hovering says *why*
+ * Winnow thinks this, which is the part a chip never communicated.
+ */
+function FilterTag({ id }: { id: BuiltinSmartFilter }) {
+  const { Icon, label, title } = filterIcon(id);
   return (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-      style={{
-        background: `var(--wn-badge-${id}-wash)`,
-        border: `1px solid var(--wn-badge-${id}-edge)`,
-        // The label uses the *derived* ink, not the accent. The accent is also the
-        // fill at 14%, so the two cancel out: nine of the light palette's twenty-one
-        // accents render as text on their own wash at under 4.5:1 — starred at 2.66,
-        // urgent at 3.54. See `deriveBadgeInk`, which computes this from the palette
-        // rather than from a hand-written table.
-        color: `var(--wn-badge-${id}-ink)`,
-      }}
+      // `data-filter-tag` so the smoke test can find these by what they *are* rather
+      // than by a `title` attribute, which the list rows also carry and which a
+      // future explanatory tooltip elsewhere would collide with.
+      data-filter-tag={id}
+      className="inline-flex items-center gap-1.5 rounded-full bg-sheen py-1 pl-1.5 pr-2.5 text-[11.5px] font-medium text-ink-body"
+      title={title}
     >
-      {filterLabel({ kind: "builtin", id: id as never })}
+      <Icon size={12} strokeWidth={2} className="shrink-0 text-ink-muted" aria-hidden="true" />
+      {label}
+      <span className="sr-only"> — {title}</span>
     </span>
   );
 }
@@ -103,21 +120,47 @@ type Actions = {
   onShowOriginal: () => void;
   onBlockSender: () => void;
   /**
-   * Turn image loading on for this message.
+   * Turn image loading on for this message only.
    *
-   * Per-message, and labelled accordingly — the button used to say "Load images" while
-   * setting a global preference that persisted, which meant a decision about one
-   * message silently became a decision about all of them. The global switch still
-   * exists in Settings, where its scope is visible.
+   * Per-message, and labelled accordingly — the button used to say "Load images"
+   * while setting a global preference that persisted, which meant a decision about
+   * one message silently became a decision about all of them.
    */
   onLoadRemoteContent: () => void;
+  /**
+   * Load images from now on, for every message.
+   *
+   * The second of the three answers, and the one that needed a real destination: the
+   * offer previously had "load this one" and nothing else, so a user who had decided
+   * they trusted their mail had to say it again on every single message.
+   */
+  onAlwaysLoadRemoteContent: () => void;
+  /**
+   * Stop being asked — load images for nobody, silently, from now on.
+   *
+   * Not the same as declining *this* message. Someone who has been asked three times
+   * wants their mail to render, and a boolean-only model had nowhere to record that,
+   * so the choice simply did not exist and the offer would have repeated forever.
+   */
+  onNeverLoadRemoteContent: () => void;
   /** Open another message in the conversation. */
   onOpenMessage: (id: number) => void;
   onSaveAttachment: (attachment: { filename: string; mimeType: string; size: number; index: number }) => void;
 };
 
 const ICON_BUTTON =
-  "flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+
+/**
+ * A quiet text button, for the places in this pane that are not the toolbar.
+ *
+ * `bg-sheen` rather than a bordered pill. There are four of these in the reader and
+ * every one is secondary — an escape hatch beside the thing it escapes from — and
+ * four outlined pills in a column is a column of boxes. At rest they are almost
+ * invisible; the fill is the hover, and the text is always legible.
+ */
+const QUIET_BUTTON =
+  "rounded-full bg-sheen px-3 py-1.5 text-[12.5px] font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 function Toolbar({ starred, unread, mailbox, actions }: {
   starred: boolean;
@@ -248,7 +291,22 @@ type Props = {
   conversation: readonly Email[];
   signals: EmailSignals | null;
   mailbox: Mailbox;
-  loadRemoteContent: boolean;
+  /**
+   * Whether *this* message's images are showing.
+   *
+   * Resolved by `App.tsx` from the global policy and the per-message override, so
+   * the reader never has to know which of the two is in force — and so "should the
+   * offer appear" is one boolean rather than the reader re-deriving a three-way
+   * policy it was handed pieces of.
+   */
+  imagesAllowed: boolean;
+  /**
+   * Whether to offer the choice at all.
+   *
+   * `false` once the user has answered for good. A preference to "never be asked"
+   * that still showed the question would not be a preference.
+   */
+  askAboutImages: boolean;
   accountAddress: string | null;
   /**
    * The reference instant for relative timestamps in this pane.
@@ -281,7 +339,8 @@ export function Reader({
   conversation,
   signals,
   mailbox,
-  loadRemoteContent,
+  imagesAllowed,
+  askAboutImages,
   accountAddress,
   now,
   onClose,
@@ -317,7 +376,7 @@ export function Reader({
 
   if (!email) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-panel px-6 text-center">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
         <MailOpen size={28} strokeWidth={1.4} className="text-ink-subtle" aria-hidden="true" />
         <p className="text-[13.5px] font-medium text-ink-muted">Nothing selected</p>
         <p className="max-w-[24rem] text-preview text-ink-subtle">
@@ -328,16 +387,30 @@ export function Reader({
     );
   }
 
-  const badges = signals ? badgeFilters(email, signals) : [];
+  const filters = signals ? badgeFilters(email, signals) : [];
   const blocked = email.bodyHtml ? countRemoteReferences(email.bodyHtml) : 0;
   const isOwnMessage = accountAddress !== null && email.sender === accountAddress;
   const others = conversation.filter((m) => m.gmailId !== email.gmailId);
+  /**
+   * The offer, and only when there is something to decide.
+   *
+   * `blocked > 0` because a message with no remote references has no trade-off to
+   * put to anybody, and an offer with nothing behind it is noise. `askAboutImages`
+   * because "never ask again" has to actually mean never — re-asking somebody who
+   * already answered is how a preference stops being one.
+   */
+  const offerImages = email.bodyHtml !== undefined && blocked > 0 && !imagesAllowed && askAboutImages;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-panel">
+    // `data-reader` so a test can reach the pane as a whole. The header's `<time>`
+    // lives outside `<article>`, so "which message is open" cannot be answered from
+    // the article alone — and answering it from the article is what made the
+    // conversation check compare a subject it knew was identical across all three
+    // messages against a timestamp that was never there.
+    <div data-reader="" className="flex min-h-0 flex-1 flex-col">
       {/* Mobile-only back bar. On a wide screen the reader is a pane beside the
           list, so closing it would be redundant. */}
-      <div className="flex items-center gap-1 border-b border-hairline px-3 py-2 lg:hidden">
+      <div className="flex items-center gap-1 px-3 py-2 lg:hidden">
         <button
           type="button"
           onClick={onClose}
@@ -349,7 +422,15 @@ export function Reader({
         <span className="text-ui font-semibold text-ink-muted">Message</span>
       </div>
 
-      <div className="flex items-start gap-3 border-b border-hairline px-5 py-4">
+      {/*
+        The header.
+
+        No rule under it. The reader's surface is the same one the message body sits
+        on, and a `border-b` here drew a hard line across the pane that the flat
+        layout does not otherwise have — the separation is the 20px of padding below
+        it and the change in type size, which is enough.
+      */}
+      <div className="flex items-start gap-3 px-5 pb-4 pt-4">
         <span
           aria-hidden="true"
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold"
@@ -399,10 +480,10 @@ export function Reader({
             {isOwnMessage && " · sent by you"}
           </p>
 
-          {badges.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {badges.map((id) => (
-                <Badge key={id} id={id} />
+          {filters.length > 0 && (
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {filters.map((id) => (
+                <FilterTag key={id} id={id} />
               ))}
             </div>
           )}
@@ -410,7 +491,76 @@ export function Reader({
       </div>
 
       <div ref={bodyRef} className="thin-scroll selectable min-h-0 flex-1 overflow-y-auto">
-        <article className="px-6 py-6">
+        <article className="px-6 pb-8 pt-5">
+          {/*
+            The image decision, at the very top of the email.
+
+            It goes *here* rather than at the bottom of the message, and rather than
+            in Settings, because it is a decision about this message that has to be
+            made before reading it — and because the thing it governs is not an
+            optional extra at the end, it is whether the mail looks like the mail
+            the sender sent. The previous version put a bordered card under the
+            body, where it read as an attachment notice: something to scroll to
+            after you had already decided the message did not need it.
+
+            Three answers, because there are three distinct intentions and a
+            two-button offer cannot express the third:
+
+              · **this message** — you opened this one, you want to see it, and you
+                have made no claim about the next one;
+              · **from now on** — you have decided you trust your mail;
+              · **don't ask** — you have decided you would rather read it as text
+                and stop being interrupted about it.
+
+            The third is the one the old boolean could not hold, and without it the
+            first two were the only available answers, so somebody who wanted plain
+            text forever had to decline on every message, forever.
+          */}
+          {offerImages && (
+            <div className="mb-5 max-w-[68ch] rounded-pane bg-sheen px-4 py-3.5">
+              <p className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+                <ImageOff size={14} strokeWidth={1.9} className="text-ink-muted" aria-hidden="true" />
+                Images are off
+              </p>
+              <p className="mt-1 text-preview leading-relaxed text-ink-muted">
+                This message points at {blocked} thing{blocked === 1 ? "" : "s"} on the
+                internet, and Winnow has not fetched {blocked === 1 ? "it" : "them"}. Loading
+                {blocked === 1 ? " it" : " them"} tells the sender you opened the message, and
+                roughly where you are.
+              </p>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={actions.onLoadRemoteContent}
+                  className={QUIET_BUTTON}
+                >
+                  Show {blocked === 1 ? "it" : "them"} for this message
+                </button>
+                <button
+                  type="button"
+                  onClick={actions.onAlwaysLoadRemoteContent}
+                  className={QUIET_BUTTON}
+                >
+                  Always show images
+                </button>
+                <button
+                  type="button"
+                  onClick={actions.onNeverLoadRemoteContent}
+                  className={QUIET_BUTTON}
+                >
+                  Don&rsquo;t ask again
+                </button>
+                <button
+                  type="button"
+                  onClick={actions.onShowOriginal}
+                  className="rounded-full px-3 py-1.5 text-[12.5px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  Open the original
+                </button>
+              </div>
+            </div>
+          )}
+
           <h1 className="max-w-[42ch] text-subject font-semibold leading-tight text-ink">
             {email.subject || "(no subject)"}
           </h1>
@@ -453,36 +603,54 @@ export function Reader({
           )}
 
           {/*
-            Rich rendering, behind the setting.
+            The message as its sender wrote it.
 
-            This is the *only* place in the app where a sender's markup is rendered,
-            and it is behind both an explicit opt-in and a sandbox that grants nothing:
-            no scripts, no forms, no popups, no same-origin. So a message can show its
-            own images and layout, and cannot execute anything, read anything, or
-            navigate the window.
+            **This is the only place in the app where a sender's markup is rendered**,
+            and the sandbox is the whole security argument. `sandbox=""` — the empty
+            string, with *no token named* — is the most restrictive value the attribute
+            can take: no scripts, no forms, no popups, no top-level navigation, no
+            plugins, and an opaque origin rather than this app's. Every one of those is
+            load-bearing. Adding `allow-same-origin` would hand a message the ability
+            to reach `localStorage`, the store and the keybind listener; adding
+            `allow-scripts` would let it run code at all. Neither is negotiable for
+            "faithful rendering", and neither is needed for it — tables, styles, and
+            images all work fine with nothing granted.
 
-            The cost is real and is stated on screen — the sender learns the message was
-            opened and roughly where — which is why it is off by default and why the
-            text rendering above is what most messages get. A toggle that only removed
-            this panel, as it used to, was a control that changed nothing and took away
-            the app's own explanation of itself.
+            The frame is only ever mounted once `imagesAllowed` is true, and that is
+            the second half of the boundary rather than a detail: a sandbox does *not*
+            block remote images, so rendering the frame at all would fetch them. The
+            offer above is therefore the thing standing between a tracking pixel and
+            the sender, and it is a real choice rather than a disclosure that happens
+            after the fact. The rule behind `imagesAllowed` is in
+            `core/mail/imageConsent`, which is where it is tested.
 
-            `key` on the iframe: the document changes when the message does, and a reused
-            frame would keep the previous message's scroll position and its already-loaded
-            images. The reader is already remounted per selection by its parent, so this
-            is belt to that braces.
+            All of it sits behind an explicit opt-in because the cost is real and is
+            stated on screen — the sender learns the message was opened and roughly
+            where — which is why it is off by default and why the text rendering above
+            is what most messages get. A toggle that only removed this panel, as it
+            used to, was a control that changed nothing and took away the app's own
+            explanation of itself.
+
+            `referrerPolicy="no-referrer"` so that even once images are allowed, the
+            request does not carry the URL of the message being read.
+
+            `key` on the frame: the document changes when the message does, and a
+            reused frame would keep the previous message's scroll position and its
+            already-loaded images. The reader is already remounted per selection by
+            its parent, so this is belt to those braces.
           */}
-          {email.bodyHtml && loadRemoteContent && (
-            <div className="mt-5 max-w-[68ch]">
+          {email.bodyHtml && imagesAllowed && (
+            <div className="mt-6 max-w-[68ch]">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="flex items-center gap-2 text-[12px] font-semibold text-ink-muted">
-                  <TriangleAlert size={13} strokeWidth={1.9} aria-hidden="true" />
-                  {blocked} remote {blocked === 1 ? "reference is" : "references are"} loading
+                <p className="flex items-center gap-2 text-[12px] font-medium text-ink-muted">
+                  <EyeOff size={13} strokeWidth={1.9} aria-hidden="true" />
+                  {blocked} remote {blocked === 1 ? "thing is" : "things are"} loading · scripts
+                  and links are blocked
                 </p>
                 <button
                   type="button"
                   onClick={actions.onShowOriginal}
-                  className="text-[12px] font-semibold text-ink-muted underline decoration-dotted underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="text-[12px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   Open the original
                 </button>
@@ -497,65 +665,27 @@ export function Reader({
                 // the one thing that would make rendering a sender's markup dangerous.
                 sandbox=""
                 referrerPolicy="no-referrer"
-                className="h-[32rem] w-full rounded-pane border border-hairline bg-surface"
+                className="h-[32rem] w-full rounded-pane bg-surface-sunken"
               />
             </div>
           )}
 
           {/*
-            The remote-content note.
+            When images are off *and* the user has said never to ask, there is nothing
+            left to say about it — the offer above is suppressed and this one line is
+            the whole of it.
 
-            Only when there is remote content and it is *not* being loaded, which is the
-            default and the only state in which the note is about a choice. It carries
-            the escape hatch — the original, in the user's own browser, plus the one click
-            that loads this message — so neither route out of the text-only reader is
-            hidden behind a settings panel.
-
-            The count comes from `countRemoteReferences`, which is exact about what it
-            counts: an inline `data:` logo and a `background="#fff"` are not remote
-            references, and reporting them as blocked made this note a false reassurance
-            about the reader's privacy.
+            It is here, at the end, rather than at the top with the offer, because it
+            is a *status* and not a question: there is no button, so it cannot be the
+            first thing in the message, and a card-shaped notice with no action in it
+            is the exact shape the redesign is removing. One muted sentence at the
+            bottom of a text-only message is enough to explain why it looks like this.
           */}
-          {email.bodyHtml && blocked > 0 && !loadRemoteContent && (
-            <div className="mt-5 max-w-[68ch] rounded-pane border border-hairline bg-surface-sunken px-4 py-3">
-              <p className="flex items-center gap-2 text-[13px] font-semibold text-ink-body">
-                <TriangleAlert size={14} strokeWidth={1.9} className="text-ink-muted" aria-hidden="true" />
-                {blocked} remote {blocked === 1 ? "reference is" : "references are"} not
-                loaded
-              </p>
-              {/*
-                The trade-off, stated at the moment it is decided rather than in a
-                settings panel three clicks away.
-
-                Two things were wrong with this before. It said "blocked", which
-                described the *renderer* rather than the choice — Winnow is not loading
-                them, it is declining to, and the difference matters to somebody deciding
-                whether to say yes. And it did not say what "Load images" was scoped to,
-                because it was not scoped to anything: the button sat under one message
-                and turned on remote content for every message, permanently. It is one
-                message now, so the sentence can simply be true.
-              */}
-              <p className="mt-1 text-preview text-ink-muted">
-                Winnow shows every message as plain text. Loading this one&rsquo;s images
-                tells the sender you opened it, and roughly where you are.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={actions.onShowOriginal}
-                  className="rounded-full border border-control-border px-3 py-1 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                >
-                  Open the original
-                </button>
-                <button
-                  type="button"
-                  onClick={actions.onLoadRemoteContent}
-                  className="rounded-full border border-control-border px-3 py-1 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                >
-                  Load this message&rsquo;s images
-                </button>
-              </div>
-            </div>
+          {email.bodyHtml && blocked > 0 && !imagesAllowed && !askAboutImages && (
+            <p className="mt-6 max-w-[68ch] text-[12px] text-ink-subtle">
+              This message&rsquo;s {blocked === 1 ? "image was" : "images were"} not loaded.
+              Winnow will not ask again.
+            </p>
           )}
 
           {email.attachments.length > 0 && (
@@ -570,7 +700,7 @@ export function Reader({
                     <button
                       type="button"
                       onClick={() => actions.onSaveAttachment({ ...attachment, index })}
-                      className="flex w-full items-center gap-2.5 rounded-lg border border-hairline bg-surface px-3 py-2 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                     >
                       <Paperclip size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
                       <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
@@ -607,8 +737,17 @@ export function Reader({
             "I think I know what is happening", was nowhere on screen. The subject is
             still shown when it genuinely changed, because that *is* information.
           */}
+          {/*
+            Spacing, not a rule.
+
+            Both of these used to carry a `border-t`, which in a scrolling document
+            draws a line across the full measure every time the reader moves to a
+            different message with a different number of replies. They are separated
+            now by 32–40px and an uppercase micro label, which is enough structure
+            without a mark that appears and disappears as the message changes.
+          */}
           {others.length > 0 && (
-            <div className="mt-8 max-w-[68ch] border-t border-hairline pt-4">
+            <div className="mt-10 max-w-[68ch]">
               <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
                 {others.length} earlier {others.length === 1 ? "message" : "messages"} in this
                 conversation
@@ -670,7 +809,7 @@ export function Reader({
             actions that apply to the message as a whole rather than to its content, and
             it makes the scope legible before the click rather than after.
           */}
-          <footer className="mt-8 max-w-[68ch] border-t border-hairline pt-4">
+          <footer className="mt-10 max-w-[68ch]">
             <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
               This sender
             </h3>
@@ -681,7 +820,7 @@ export function Reader({
             <button
               type="button"
               onClick={actions.onBlockSender}
-              className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-control-border px-3 py-1.5 text-[12.5px] font-semibold text-ink-body transition-colors hover:border-danger hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-sheen px-3 py-1.5 text-[12.5px] font-medium text-ink-body transition-colors hover:bg-danger-wash hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <Ban size={13} strokeWidth={1.9} aria-hidden="true" />
               Hide everything from {displayName(email)}

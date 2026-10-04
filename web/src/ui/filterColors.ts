@@ -202,38 +202,40 @@ export function senderPillColors(sender: string): PillColors {
   };
 }
 
-/** The derived edge tint, unless the pill sets one explicitly. */
-function edgeTint(colors: PillColors): string {
-  if (colors.edge) return colors.edge;
-  const [h] = hexToHsl(colors.accent);
-  return hslToHex(h, 11, 79);
-}
-
 /**
- * Resting state is a horizontal edge → accent → edge wash, so the colour reads
- * as a glow in the middle of the pill. Selected state thickens the same wash and
- * leans on a ring — the pills sit on a white bar, so an opaque fill would read
- * heavier than the rest of the strip.
+ * A pill's fill.
+ *
+ * Was a three-stop horizontal gradient — edge, accent, edge — so the colour read
+ * as a glow down the middle of the pill, with a *second* opaque gradient plus an
+ * inset ring for the selected state. Two gradients and an edge per pill, twenty-odd
+ * pills in a row: the rail came out looking like a shelf of sweets, and it was the
+ * single loudest thing in a window that is mostly a reading surface.
+ *
+ * Now the accent is a flat tint and nothing else. It identifies the bucket
+ * alongside the label; it does not have to carry the meaning alone; and at these
+ * alphas a row of them reads as one quiet line rather than as twenty separate
+ * objects.
+ *
+ * Selected state adds `--wn-sheen` — a low-alpha wash of the palette's own ink, so
+ * it darkens on a light scheme and lightens on a dark one — *over* the tint. That
+ * is the whole selection affordance: the pill lifts toward the light rather than
+ * being replaced by a differently-filled object, which is what the inset ring was
+ * doing badly.
+ *
+ * Background layers paint front to back, so the sheen is written first.
  */
 export function pillBackground(colors: PillColors, on: boolean): string {
   if (on) {
-    return `linear-gradient(180deg, ${hexA(colors.solid, 0.66)} 0%, ${hexA(colors.solid, 0.34)} 100%)`;
+    return `linear-gradient(var(--wn-sheen), var(--wn-sheen)), ${hexA(colors.accent, 0.13)}`;
   }
-  const edge = edgeTint(colors);
-  return [
-    `linear-gradient(90deg,`,
-    `${hexA(edge, colors.alpha)} 0%,`,
-    `${hexA(colors.accent, colors.alpha)} 50%,`,
-    `${hexA(edge, colors.alpha)} 100%)`,
-  ].join(" ");
+  return hexA(colors.accent, 0.07);
 }
 
 /**
  * The badge accents live in `theme.ts`, not here.
  *
  * They used to be duplicated as `BADGE_COLORS`, which is how they came to
- * disagree with the palette the app actually renders — two sources of truth for
- * one colour, one of which nothing displayed. The reader's chips read
- * `--wn-badge-<id>` (and the wash/edge derived from it), which is the same source
- * as everything else.
+ * disagree with the palette the app actually renders — two sources of truth for one
+ * colour, one of which nothing displayed. `--wn-badge-<id>` is now the same source
+ * for everything that reads one, which is the star on a row and in the reader.
  */

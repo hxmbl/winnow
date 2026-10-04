@@ -13,7 +13,7 @@
  * therefore follow `applyTheme`, which already handles `systemDark`.
  *
  * The path data is the original 512×512 artwork, unchanged — only the two fills are
- * variables now. `references/relay-logo.svg` is the untouched original.
+ * variables now.
  */
 
 export function AppMark({ size = 36 }: { size?: number }) {

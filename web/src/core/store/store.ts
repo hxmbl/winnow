@@ -152,11 +152,30 @@ function partitionBodies(emails: readonly Email[]): {
   return { emails: changed ? stripped : (emails as Email[]), bodies, checked };
 }
 
+/**
+ * What Winnow does about remote images in a message.
+ *
+ * Three states, and the third is the one that was missing. A boolean can say
+ * "never" or "always", but the decision the reader actually offers is three-way:
+ * load them for this message, load them from now on, or stop asking. "Stop asking"
+ * is not "never" — a user who has said it three times wants their mail to look
+ * like mail, and a boolean has nowhere to put that.
+ *
+ * `ask` is the default, and the only state in which the offer appears.
+ */
+export type ImagePolicy = "ask" | "always" | "never";
+
 /** What the user can change about how Winnow behaves. */
 export type Preferences = {
   sortBy: SortBy;
-  /** Remote images and tracking pixels. Off by default; see `html.ts`. */
-  loadRemoteContent: boolean;
+  /**
+   * Remote images and tracking pixels. See `ImagePolicy`.
+   *
+   * `never` is the honest default: loading a remote image tells the sender the
+   * message was opened and roughly where, and a tracking pixel does it without
+   * showing anything at all.
+   */
+  imagePolicy: ImagePolicy;
   notificationsEnabled: boolean;
   appearance: "system" | "light" | "dark";
   /** Keep syncing while the window is closed. Desktop only. */
@@ -168,7 +187,7 @@ export type Preferences = {
 
 export const DEFAULT_PREFERENCES: Preferences = {
   sortBy: DEFAULT_SORT,
-  loadRemoteContent: false,
+  imagePolicy: "ask",
   notificationsEnabled: false,
   appearance: "system",
   backgroundSync: true,
@@ -776,8 +795,35 @@ export class WinnowStore {
       inboxSenderCounts.set(email.sender, (inboxSenderCounts.get(email.sender) ?? 0) + 1);
     }
 
+    /*
+     * The open message, resolved from the *result* first and from the mailbox
+     * second.
+     *
+     * The fallback is the whole point of this component's behaviour. The reader
+     * represents the message the user selected, and a smart filter is a statement
+     * about which rows to *show* — so turning one on must not take away the message
+     * somebody is in the middle of reading. It used to: `selected` was found by
+     * searching the filtered rows, and `reconcileCursor` then closed the reader or
+     * swapped it for whatever row had taken the cursor's place. So the single act of
+     * trying a different bucket mid-triage silently threw the email away and put a
+     * different one on screen, which is not narrowing a list, it is losing the user's
+     * place.
+     *
+     * `mailboxEmails` is the right place to look, and it is what keeps this from
+     * being a way to read mail that is gone. It is the same mailbox's messages
+     * *before* filters and search, so a message that a filter is hiding is still
+     * found; and a message that was archived, trashed, moved, blocked, or removed by
+     * a sync is not in it at all, so the reader still closes for every reason it
+     * should. Switching mailbox continues to drop the selection outright, in
+     * `setMailbox`, rather than relying on this.
+     */
     const selectedRow = threads.find((row) => row.representative.id === state.selectedId) ?? null;
-    const selected = selectedRow ? this.withBody(selectedRow.representative) : null;
+    const selectedFallback =
+      selectedRow === null && state.selectedId !== null
+        ? (mailboxEmails.find((email) => email.id === state.selectedId) ?? null)
+        : null;
+    const selectedEmail = selectedRow?.representative ?? selectedFallback;
+    const selected = selectedEmail ? this.withBody(selectedEmail) : null;
     // From `visible`, not `state.all`: a blocked sender's reply must not stay
     // readable inside the conversation of a message you *can* see. Blocking a
     // sender and then finding their mail quoted in the open thread is not blocking
@@ -1033,10 +1079,12 @@ export class WinnowStore {
   /**
    * Point the store at a backend and start the first sync.
    *
-   * `signing_in` is a real status, and the top bar renders it: the OAuth round
-   * trip is the one step where the app is deliberately doing nothing and waiting
-   * for a human, and saying so is the difference between "hanging" and "waiting
-   * for you".
+   * `signing_in` is a real status, and it used to be rendered by the top bar: the
+   * OAuth round trip is the one step where the app is deliberately doing nothing
+   * and waiting for a human, and saying so is the difference between "hanging" and
+   * "waiting for you". It is set here but not read for rendering — the sign-in
+   * buttons carry their own local flag — so it is currently a status without a
+   * renderer, which is worth knowing before someone reads it as one.
    */
   async connect(backend: MailBackend, account: { email: string }): Promise<void> {
     this.backend = backend;
@@ -1774,18 +1822,43 @@ export class WinnowStore {
   private reconcileCursor(): void {
     const threads = this.view.threads;
 
+    /*
+     * Is the open message still somewhere in this mailbox?
+     *
+     * The distinction this draws is between a message that has *left* and a message
+     * that is merely *not being shown*. Filters, search and the active sort decide
+     * the second; only a move between folders, a block, or a sync decides the first.
+     * Everything below is written in terms of this one question, because getting it
+     * wrong in either direction is a bug: answer it with "is it in the filtered
+     * rows" and the reader closes every time a filter is toggled; answer it with
+     * "is it in `all`" and it never closes at all.
+     */
+    const id = this.state.selectedId;
+    const openMessageSurvives = (): boolean => {
+      if (id === null) return false;
+      return this.state.all.some(
+        (email) => email.id === id && email.mailbox === this.state.mailbox,
+      );
+    };
+
     // No cursor, so there is nothing to reconcile. A message can still have been
-    // selected by a click, and if that message left the list the reader has to
-    // close rather than keep showing something the list no longer contains.
+    // selected by a click, and the reader closes only if that message has actually
+    // gone — a filter hiding it is not that.
     if (this.state.cursorIndex === NO_CURSOR) {
-      if (this.state.selectedId === null) return;
-      const stillThere = threads.some((row) => row.representative.id === this.state.selectedId);
-      if (!stillThere) this.set({ selectedId: null });
+      if (id === null) return;
+      if (!openMessageSurvives()) this.set({ selectedId: null });
       return;
     }
 
     if (threads.length === 0) {
-      if (this.state.selectedId !== null) this.set({ selectedId: null, cursorIndex: NO_CURSOR });
+      // An empty list is not an empty mailbox. It is usually a filter that matched
+      // nothing, with the reader still open on the message that filter excluded — so
+      // the cursor is dropped and the reader is left alone.
+      if (id !== null && !openMessageSurvives()) {
+        this.set({ selectedId: null, cursorIndex: NO_CURSOR });
+      } else {
+        this.set({ cursorIndex: NO_CURSOR });
+      }
       return;
     }
 
@@ -1794,14 +1867,19 @@ export class WinnowStore {
       return;
     }
 
-    // The message under the cursor is gone. Follow the row that took its
-    // place, if the reader was showing something that still exists.
+    /*
+     * The message under the cursor is gone. Follow the row that took its place — but
+     * only if the reader was not showing something that still exists.
+     *
+     * This is the branch that used to steal the reader. A filter change re-derives
+     * the rows, the row at the cursor is now a different message, and the reader —
+     * which was showing something perfectly valid — was reassigned to it. The user
+     * asked to change what the list showed, and got a different email instead.
+     */
     const at = threads[this.state.cursorIndex];
-    if (this.state.selectedId !== null && at && at.representative.id !== this.state.selectedId) {
-      const stillVisible = threads.some(
-        (row) => row.representative.id === this.state.selectedId,
-      );
-      if (!stillVisible) this.set({ selectedId: at.representative.id });
+    if (id !== null && at && at.representative.id !== id) {
+      const stillVisible = threads.some((row) => row.representative.id === id);
+      if (!stillVisible && !openMessageSurvives()) this.set({ selectedId: at.representative.id });
     }
   }
 

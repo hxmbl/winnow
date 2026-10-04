@@ -25,7 +25,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { LogIn, RefreshCw, X } from "lucide-react";
 import { NO_CURSOR, WinnowStore, type Snapshot } from "./core/store/store";
 import { commandForKey, shouldSwallow, type KeyContext } from "./core/mail/keybinds";
 import {
@@ -35,6 +35,8 @@ import {
 } from "./core/model/signals";
 import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
 import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
+import { formatRelative } from "./core/mail/datetime";
+import { resolveImageConsent } from "./core/mail/imageConsent";
 import type { Draft } from "./core/model/email";
 import { DEMO_EMAILS } from "./core/data/demo";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
@@ -42,7 +44,8 @@ import { readOwnParams } from "./core/session/redirect";
 import { platform, type PlatformInfo } from "./platform";
 import { useStore } from "./ui/useStore";
 import { applyTheme, resolveScheme } from "./ui/theme";
-import { TopBar, type MailboxTab } from "./ui/components/TopBar";
+import { Masthead } from "./ui/components/Masthead";
+import { NavDrawer } from "./ui/components/NavDrawer";
 import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
 import { Reader } from "./ui/components/Reader";
@@ -126,7 +129,7 @@ export function App({ store }: Props) {
    *
    * Held here rather than inside the top bar because `/` is routed by the
    * keyboard handler below, which lives in this component. One ref, shared by
-   * both — see the note on `TopBar`'s `searchRef` prop.
+   * both — see the note on `Masthead`'s `searchRef` prop.
    */
   const searchRef = useRef<HTMLInputElement>(null);
   const [scrollStep, setScrollStep] = useState(0);
@@ -303,7 +306,7 @@ export function App({ store }: Props) {
    * Mounted unconditionally, in demo mode too, because the demo *is* what the user
    * sees until this resolves — and a returning user should land on their mail rather
    * than on the sample. If there is no session, nothing happens and the demo stays:
-   * the top bar's "Connect Gmail" is the route into sign-in from there.
+   * the nav drawer's "Connect Gmail" is the route into sign-in from there.
    *
    * **StrictMode runs this effect twice.** That is not a detail to shrug at: the
    * second run would call `completeWebRedirect` again, and that function *consumes*
@@ -407,7 +410,7 @@ export function App({ store }: Props) {
     [view.emails],
   );
 
-  const mailboxes: MailboxTab[] = useMemo(
+  const mailboxes = useMemo(
     () =>
       (["inbox", "archive", "trash", "spam"] as Mailbox[]).map((id) => ({
         id,
@@ -416,6 +419,16 @@ export function App({ store }: Props) {
       })),
     [snapshot.all],
   );
+
+  /**
+   * Whether the navigation drawer is open.
+   *
+   * Local state rather than a store `overlay`, because the drawer is not one of the
+   * three things the keyboard router knows how to dismiss and it must not inherit
+   * their `Escape` handling — the `Sheet` inside it handles its own, and two Escape
+   * handlers on one keypress is how a sheet closes the reader *and* itself.
+   */
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const paletteUnread = useMemo(
     () =>
@@ -611,6 +624,34 @@ export function App({ store }: Props) {
     setRemoteFor(null);
   }, [selected?.id]);
 
+  // Cleared when the standing answer changes too. `resolveImageConsent` already
+  // makes "never" absolute, so this is not what fixes the stale-grant hole; it is
+  // what stops the grant outliving the answer that replaced it, so a user who set
+  // "never" and then went back to "ask each time" is asked again rather than
+  // quietly inheriting the permission they had withdrawn.
+  useEffect(() => {
+    setRemoteFor(null);
+  }, [preferences.imagePolicy]);
+
+  /**
+   * Whether the open message shows its images, and whether to offer the choice.
+   *
+   * Resolved here rather than in the reader so the reader is handed two booleans
+   * instead of a three-way policy plus an override, and so "should the offer appear"
+   * is answered in one place.
+   *
+   * The rule itself is in `core/mail/imageConsent`, because it is the decision that
+   * decides whether a sender finds out a message was opened. It used to live here as
+   * an expression, and as an expression it had a hole: the one-off grant was `||`-ed
+   * against the standing policy, so nothing could veto it and "never" did not mean
+   * never. See that module for the regression it caused.
+   */
+  const { imagesAllowed, askAboutImages } = resolveImageConsent({
+    policy: preferences.imagePolicy,
+    grantedFor: remoteFor,
+    selectedId: selected?.id ?? null,
+  });
+
   /**
    * Download one attachment.
    *
@@ -752,7 +793,9 @@ export function App({ store }: Props) {
 
       if (!command) {
         // An unbound key is swallowed outside a text field, so the OS does not
-        // beep. This app is keyboard-first and a beep reads as broken.
+        // beep. This app is keyboard-first and a beep reads as broken. `Tab` is
+        // exempt inside `shouldSwallow` and must stay exempt here: it is how focus
+        // reaches every control that draws a `focus-visible` ring.
         if (shouldSwallow(keyContext, event)) event.preventDefault();
         return;
       }
@@ -947,7 +990,7 @@ export function App({ store }: Props) {
   /*
   Where you are in the list.
 
-  `null` before the first move, and `TopBar` renders that as an em dash. The cursor is
+  `null` before the first move, and `Masthead` renders that as an em dash. The cursor is
   `NO_CURSOR` until the user touches the keyboard, and rendering that as `0` produced
   "Inbox 0 of 38" — which reads as an empty mailbox, and "0 of 0" on a narrowed list,
   and is wrong on every count. An em dash says the honest thing: there is a list, and
@@ -957,7 +1000,13 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
-      <TopBar
+      {/*
+        The masthead: the logo, the smart filters, search and where-you-are, on one
+        surface. The mailbox menu it used to also carry is what the logo opens, and
+        the email actions it used to carry now live in the reader — they were always
+        about the open message, and the reader is where the open message is.
+      */}
+      <Masthead
         searchQuery={snapshot.searchQuery}
         onSearchChange={store.setSearchQuery.bind(store)}
         searchRef={searchRef}
@@ -967,44 +1016,15 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
         onMute={store.dismissFilter.bind(store)}
         onRestoreFilter={store.restoreFilter.bind(store)}
         onClearFilters={store.clearFilters.bind(store)}
-        mailboxes={mailboxes}
-        activeMailbox={snapshot.mailbox}
-        onSelectMailbox={store.setMailbox.bind(store)}
+        onOpenNavigation={() => setDrawerOpen(true)}
+        navigationOpen={drawerOpen}
         position={position}
         total={view.threads.length}
         listTitle={store.listTitle()}
         cursorIndex={snapshot.cursorIndex}
         onPrev={() => store.moveCursor(-1)}
         onNext={() => store.moveCursor(1)}
-        onStar={act((s, snap) => {
-          if (snap.view.selected) s.toggleStar(snap.view.selected.id);
-        })}
-        onArchive={act((s, snap) => {
-          if (snap.view.selected) s.archive(snap.view.selected.id);
-        })}
-        onTrash={act((s, snap) => {
-          if (snap.view.selected) s.trash(snap.view.selected.id);
-        })}
-        onRead={act((s, snap) => {
-          if (snap.view.selected) s.toggleRead(snap.view.selected.id);
-        })}
         onMarkAllRead={store.markAllRead.bind(store)}
-        onRefresh={() => {
-          void store.refresh();
-        }}
-        onSettings={() => store.setOverlay("settings")}
-        syncing={snapshot.syncing}
-        lastSyncedAt={snapshot.lastSyncedAt}
-        hasSelection={selected !== null}
-        accountEmail={snapshot.account?.email ?? null}
-        onSignOut={() => {
-          void signOut();
-        }}
-        onSignIn={() => {
-          void connectFromDemo();
-        }}
-        signingIn={signingIn}
-        connectError={connectError}
       />
 
       {announcement && (
@@ -1039,7 +1059,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
         property of the account wore an alarming dismissible banner.
       */}
       {snapshot.notice && (
-        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-[var(--wn-notice)] px-4 py-1.5 text-[12.5px] font-medium text-ink-body">
+        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-[12.5px] font-medium text-ink-body">
           <span className="min-w-0 truncate">{snapshot.notice}</span>
           <button
             type="button"
@@ -1069,13 +1089,13 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
       {snapshot.undo && (
         <div
           role="status"
-          className="flex items-center justify-center gap-3 border-b border-hairline bg-chrome px-4 py-2 text-[12.5px]"
+          className="flex items-center justify-center gap-3 px-4 py-1.5 text-[12.5px]"
         >
           <span className="min-w-0 truncate text-ink-muted">{snapshot.undo.label}</span>
           <button
             type="button"
             onClick={store.undoLast.bind(store)}
-            className="shrink-0 rounded-full border border-control-border px-2.5 py-0.5 font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 rounded-full bg-sheen px-2.5 py-0.5 font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Undo
           </button>
@@ -1083,7 +1103,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             type="button"
             onClick={store.dismissUndo.bind(store)}
             aria-label="Dismiss"
-            className="shrink-0 rounded-full p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 rounded-full p-1 text-ink-subtle transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <X size={12} strokeWidth={2.2} aria-hidden="true" />
           </button>
@@ -1091,15 +1111,24 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
       )}
 
       {/*
-        The gutter is the point of this layout. Panes sit apart on a tinted
-        canvas rather than sharing one seamless sheet, so each reads as its own
-        object — and so that anything later lifted off a neighbour has a visible
-        edge and something behind it to blur.
+        One surface, two regions.
 
-        Small screens keep the original full-bleed behaviour: the reader covers
-        the list outright there, so there is nothing underneath to be above.
+        This was a tinted canvas with a 12px gutter, a 14px radius and a shadow on
+        each pane — two white cards floating apart, which is the most literal
+        expression of the thing this redesign is against: mail and chrome as separate
+        objects, told apart by edges.
+
+        Now the two panes are adjacent with nothing between them. The list is the
+        surface and the reader is a *half-step* off it — `surfaceSunken`, one tonal
+        value, not a card — so the boundary is a change in value rather than a line,
+        a gap, or an object with an edge. There is no radius and no shadow anywhere
+        in this layout.
+
+        Small screens still replace one with the other: the reader covers the list
+        outright, since there is no width for two regions and nothing underneath to
+        be above.
       */}
-      <main className="flex min-h-0 flex-1 lg:gap-3 lg:p-3">
+      <main className="flex min-h-0 flex-1">
         {/*
           The list.
 
@@ -1108,9 +1137,8 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           overlay was the mechanism being used, and an overlay brings its own
           problems: it has to guess the header's height (it guessed 56px against a
           127px header, so the reader covered the bottom of the chrome), it has to
-          out-rank the header, and its panel is `bg-panel` — an 81%-opaque glass fill
-          chosen to sit on the tinted canvas, which shows the list straight through when
-          it is used as an overlay.
+          out-rank the header, and its fill has to be translucent to sit on the tinted
+          canvas without the list showing straight through it.
 
           Hiding one and showing the other is the same behaviour with none of that: both
           are flex children of `main`, so both fill the space below the header, and the
@@ -1118,7 +1146,86 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           shown, because there the reader is a pane beside the list rather than a
           replacement for it.
         */}
-        <div className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 min-w-0 flex-1 flex-col`}>
+        <div
+          className={`${
+            selected ? "hidden lg:flex" : "flex"
+          } min-h-0 min-w-0 flex-1 flex-col bg-surface`}
+        >
+          {/*
+            The demo note, inside the mailbox.
+
+            It was a full-width strip in the app's chrome, above the mailbox, with a
+            `border-b` — so the single most important thing to say about a first run
+            ("this is a sample; nothing you do here leaves this device") was rendered
+            as *chrome about the app*, in the same place as the sync status, competing
+            with it for attention and pushing the messages down.
+
+            Here it is part of what it is describing. It is a quiet line, in the
+            list's own surface, above the first row; and the route to a real account
+            is a button in it rather than in a settings panel, because the app boots
+            into the demo and so never shows the sign-in screen on first run.
+          */}
+          {/*
+            The mailbox's own status line, and the demo note.
+
+            Both used to be one full-width strip in the app's chrome, above the
+            mailbox, with a `border-b` — so the two most important things to say
+            about a session were rendered as chrome *about the app*, in the same place
+            as each other, competing for attention and pushing the messages down.
+
+            They are inside the mailbox now, which is what they are about: the demo
+            note describes the mail you are looking at, and the sync line describes
+            when it last arrived. The demo's route to a real account is a button in
+            the note rather than in a settings panel, because the app boots into the
+            demo and so never shows the sign-in screen on first run.
+          */}
+          {snapshot.account === null ? (
+            <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-1">
+              <p className="min-w-0 truncate text-[11.5px] text-ink-subtle">
+                Demo mailbox — nothing leaves this device
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void connectFromDemo();
+                }}
+                disabled={signingIn}
+                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <LogIn size={11} strokeWidth={2.2} aria-hidden="true" />
+                {signingIn ? "Waiting for Google…" : "Connect Gmail"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-1">
+              <p className="min-w-0 truncate text-[11.5px] text-ink-subtle">
+                {snapshot.lastSyncedAt
+                  ? `Synced ${formatRelative(snapshot.lastSyncedAt, Date.now())}`
+                  : "Not synced yet"}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void store.refresh();
+                }}
+                disabled={snapshot.syncing}
+                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <RefreshCw
+                  size={11}
+                  strokeWidth={2.2}
+                  className={snapshot.syncing ? "animate-spin" : ""}
+                  aria-hidden="true"
+                />
+                {snapshot.syncing ? "Syncing…" : "Sync now"}
+              </button>
+            </div>
+          )}
+          {connectError && (
+            <p role="alert" className="px-4 pb-2 text-[11.5px] font-medium text-danger">
+              {connectError}
+            </p>
+          )}
           <MessageList
             threads={view.threads}
             signals={view.signals}
@@ -1140,7 +1247,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             // exact failure the empty state's own copy was written to avoid.
             canSync={snapshot.account !== null}
             now={snapshot.now}
-            className="lg:rounded-pane lg:shadow-pane lg:min-w-0"
+            className="min-w-0"
           />
         </div>
 
@@ -1174,7 +1281,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           // which is what made the asymmetry hard to see.
           className={`${
             selected ? "flex" : "hidden lg:flex"
-          } min-h-0 w-full min-w-0 flex-col lg:w-[37.9%] lg:shrink-0 lg:rounded-pane lg:shadow-pane ${
+          } min-h-0 w-full min-w-0 flex-col bg-surface-sunken lg:w-[38%] lg:shrink-0 ${
             selected ? "animate-appear" : ""
           }`}
         >
@@ -1185,7 +1292,8 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             mailbox={snapshot.mailbox}
             // Either the global preference, or this one message the reader's own
             // escape hatch has been used on. See `remoteFor`.
-            loadRemoteContent={preferences.loadRemoteContent || remoteFor === selected?.id}
+            imagesAllowed={imagesAllowed}
+            askAboutImages={askAboutImages}
             accountAddress={snapshot.account?.email ?? null}
             now={snapshot.now}
             onClose={store.closeReader.bind(store)}
@@ -1237,6 +1345,17 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
               // Not a preference change: this message only. See `remoteFor`.
               if (snap.view.selected) setRemoteFor(snap.view.selected.id);
             }),
+              onAlwaysLoadRemoteContent: () => {
+                store.setPreferences({ imagePolicy: "always" });
+                // The hatch is redundant once the answer is standing, and leaving it
+                // set would keep this one message's grant alive behind a policy that
+                // no longer needs it.
+                setRemoteFor(null);
+              },
+              onNeverLoadRemoteContent: () => {
+                store.setPreferences({ imagePolicy: "never" });
+                setRemoteFor(null);
+              },
               onOpenMessage: (id) => {
                 // `focusMessage` rather than `select`, because the earlier message may
                 // not be in the current list — it may be in another mailbox, or behind
@@ -1251,6 +1370,31 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
 
       {snapshot.overlay === "shortcuts" && (
         <ShortcutSheet onClose={() => store.setOverlay("none")} />
+      )}
+
+      {drawerOpen && (
+        <NavDrawer
+          mailboxes={mailboxes}
+          activeMailbox={snapshot.mailbox}
+          onSelectMailbox={store.setMailbox.bind(store)}
+          accountEmail={snapshot.account?.email ?? null}
+          onSignOut={() => {
+            void signOut();
+          }}
+          onSignIn={() => {
+            void connectFromDemo();
+          }}
+          signingIn={signingIn}
+          syncing={snapshot.syncing}
+          onRefresh={() => {
+            void store.refresh();
+          }}
+          onSettings={() => {
+            setDrawerOpen(false);
+            store.setOverlay("settings");
+          }}
+          onClose={() => setDrawerOpen(false)}
+        />
       )}
 
       {snapshot.overlay === "navigation" && (
@@ -1274,8 +1418,8 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           // panel so that a build which genuinely could not would say so rather than
           // offering a switch that does nothing.
           canLoadRemoteContent
-          loadRemoteContent={preferences.loadRemoteContent}
-          onLoadRemoteContent={(loadRemoteContent) => store.setPreferences({ loadRemoteContent })}
+          imagePolicy={preferences.imagePolicy}
+          onImagePolicy={(imagePolicy) => store.setPreferences({ imagePolicy })}
           notificationsEnabled={preferences.notificationsEnabled}
           onNotifications={(notificationsEnabled) => {
             store.setPreferences({ notificationsEnabled });

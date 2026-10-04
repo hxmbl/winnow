@@ -69,6 +69,15 @@ type Props = {
    * because the element ids belong to whoever rendered the rows.
    */
   activeDescendant?: string;
+  /**
+   * Where the panel sits in the backdrop.
+   *
+   * `center` for a sheet that is about content, and `left` for the navigation
+   * drawer, which is about *place* and belongs against the edge it emerges from —
+   * a panel floating in the middle of the window says "dialog", and this one is a
+   * place you go.
+   */
+  placement?: "center" | "left";
   className?: string;
   children: React.ReactNode;
 };
@@ -76,6 +85,24 @@ type Props = {
 /** Elements that can hold focus, for the Tab trap. */
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * How a surface arrives.
+ *
+ * Two motions, because the two surfaces are different objects. A sheet *appears*:
+ * it is content that was not there, so it can scale a hair as it settles. The drawer
+ * *emerges* — it is a place, sliding out of the edge it belongs to, and scaling it
+ * would make it read as a card rather than as a surface of the window.
+ *
+ * Kept as whole keyframe names rather than as inline `style` so they stay in
+ * `tailwind.config.js` with every other animation, and so `prefers-reduced-motion`
+ * in `index.css` reaches them by the same `animation-duration` override it already
+ * applies to everything else.
+ */
+const SURFACE_ENTER = {
+  center: "animate-sheet",
+  left: "animate-drawer",
+} as const;
 
 export function Sheet({
   initialFocus,
@@ -85,6 +112,7 @@ export function Sheet({
   role = "dialog",
   label,
   activeDescendant,
+  placement = "center",
   className = "max-w-[520px]",
   children,
 }: Props) {
@@ -141,10 +169,19 @@ export function Sheet({
     const panel = panelRef.current;
     if (!panel) return;
     const focusable = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-      // `offsetParent` is null for a `display: none` element, and a hidden control
-      // that is in the tab order is a trap of the other kind: focus lands on something
-      // the user cannot see.
-      (element) => element.offsetParent !== null || element === document.activeElement,
+      // `getClientRects()` rather than `offsetParent !== null`, which was wrong in both
+      // directions. `offsetParent` is null for a `position: fixed` element — so any
+      // fixed content inside a sheet (a tooltip, a dropdown, a sticky footer) was being
+      // dropped from the tab order while very much on screen. And it is the wrong
+      // instrument for the case it was written for: a hidden control that is still in
+      // the tab order is a trap of the other kind, focus landing on something the user
+      // cannot see. A rect list answers the actual question — does this box exist on
+      // screen — for both fixed and static positioning alike.
+      //
+      // `getBoundingClientRect()` would do the same thing for a zero-size box, but a
+      // control with no area is not one anybody can click either.
+      (element) =>
+        element.getClientRects().length > 0 || element === document.activeElement,
     );
     if (focusable.length === 0) {
       event.preventDefault();
@@ -167,7 +204,15 @@ export function Sheet({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
+      className={`fixed inset-0 z-50 flex ${
+        placement === "left"
+          ? // Flush to the edge and full height: the drawer *is* the left side of the
+            // window, and a rounded panel inset by 16px would read as a dialog
+            // pretending to be a sidebar. No vertical padding either, so its top and
+            // bottom edges are the window's own.
+            "items-stretch justify-start"
+          : "items-center justify-center p-4"
+      } bg-scrim`}
       // A click handler on a div, which is only acceptable because this div is
       // genuinely a backdrop and genuinely dismissable — and it is *optional*, which is
       // the part that was missing. `onMouseDown` rather than `onClick` so a drag that
@@ -189,7 +234,7 @@ export function Sheet({
         aria-activedescendant={activeDescendant}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`animate-sheet outline-none ${className}`}
+        className={`outline-none ${SURFACE_ENTER[placement]} ${className}`}
       >
         {children}
       </div>

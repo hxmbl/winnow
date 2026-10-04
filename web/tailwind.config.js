@@ -14,7 +14,6 @@ export default {
         "surface-sunken": "var(--wn-surfaceSunken)",
         "surface-hover": "var(--wn-surfaceHover)",
         "surface-active": "var(--wn-surfaceActive)",
-        panel: "var(--wn-panel)",
         chrome: "var(--wn-chrome)",
 
         ink: "var(--wn-ink)",
@@ -34,6 +33,22 @@ export default {
         success: "var(--wn-success)",
         notice: "var(--wn-notice)",
         "danger-wash": "var(--wn-dangerWash)",
+
+        /**
+         * Depth without borders. `veil` is the translucent fill for anything that
+         * floats over content and is paired with a `backdrop-filter`; `sheen` is
+         * selection expressed as a low-alpha wash of the palette's own ink, so it
+         * darkens on a light scheme and lightens on a dark one; `scrim` is what the
+         * drawer dims.
+         *
+         * All three are CSS variables, so — as the note in `theme.ts` puts it — none
+         * of them may be combined with Tailwind's `/opacity` modifier, which emits
+         * `rgb(var(--wn-veil) / 0.5)`, is not a colour, and silently renders nothing.
+         * `theme.test.ts` asserts that over every token in this map.
+         */
+        veil: "var(--wn-veil)",
+        sheen: "var(--wn-sheen)",
+        scrim: "var(--wn-scrim)",
       },
 
       boxShadow: {
@@ -116,6 +131,17 @@ export default {
         // The sheet rising. Slightly slower, because a sheet is a bigger object
         // and a bigger object needs a little more time to arrive.
         sheet: "sheet 0.16s cubic-bezier(0.2, 0, 0, 1)",
+        /**
+         * The navigation drawer coming out of the left edge.
+         *
+         * Translation only, and no scale: it is a *place* arriving rather than a
+         * card appearing, and a scale would make a full-height surface visibly
+         * shrink as it opened, which reads as a bug rather than as motion. 180ms
+         * with a decelerating curve, so it leaves quickly and settles softly —
+         * the opposite of the ease-out used for content, because nothing here is
+         * being *replaced*.
+         */
+        drawer: "drawer 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
       },
 
       keyframes: {
@@ -126,6 +152,10 @@ export default {
         sheet: {
           "0%": { opacity: "0", transform: "translateY(6px) scale(0.99)" },
           "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
+        drawer: {
+          "0%": { opacity: "0", transform: "translateX(-100%)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
         },
       },
     },

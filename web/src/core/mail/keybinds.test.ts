@@ -412,6 +412,37 @@ describe("shouldSwallow", () => {
   it("never consumes before sign-in", () => {
     expect(shouldSwallow(context({ ready: false }), {})).toBe(false);
   });
+
+  /**
+   * The exemption that cost the app its entire keyboard tab order.
+   *
+   * `Tab` is unbound, so it reached the swallow and was consumed. Consuming Tab
+   * does not merely fail to beep — it cancels the browser's focus advance, so
+   * nothing in the app could be reached by Tab at all: every `focus-visible` ring
+   * in the codebase was a ring no user could see. Asserted here because the
+   * swallow is otherwise "consume everything unmatched", which is exactly the
+   * shape of rule that quietly swallows the one key it must not.
+   */
+  it("never consumes Tab, in either direction", () => {
+    expect(shouldSwallow(DEFAULT_CONTEXT, { key: "Tab" })).toBe(false);
+    // Shift is not a system modifier — it types `⇧U` and `⇧1` — but it does not
+    // need to be, because `Shift+Tab` still arrives with `key === "Tab"`.
+    expect(shouldSwallow(DEFAULT_CONTEXT, { key: "Tab", shiftKey: true })).toBe(false);
+  });
+
+  it("still consumes the keys either side of Tab", () => {
+    // The exemption is Tab and not "navigation keys", so that adding a binding
+    // later does not quietly widen the hole.
+    for (const key of ["ArrowDown", "ArrowUp", "Enter", "Space", "Escape"]) {
+      expect(shouldSwallow(DEFAULT_CONTEXT, { key }), key).toBe(true);
+    }
+  });
+
+  it("leaves Shift alone, because Shift types bindings", () => {
+    // The tempting fix — adding `shiftKey` to the system modifiers — would have
+    // cost `⇧U` and `⇧1`, so this pins the reason the exemption is keyed on `key`.
+    expect(shouldSwallow(DEFAULT_CONTEXT, { key: "U", shiftKey: true })).toBe(true);
+  });
 });
 
 describe("the cheat sheet", () => {

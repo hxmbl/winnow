@@ -21,7 +21,6 @@ native/
   src-tauri/    Tauri v2 shell. Rust. Native capabilities only.
 legacy/
   swift-native/ The original. A behaviour reference, not a dependency.
-references/     Design assets.
 ```
 
 The dependency arrows only ever point inward: `ui` → `platform` → `core`, and

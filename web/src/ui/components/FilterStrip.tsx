@@ -1,9 +1,10 @@
 /**
  * The filter rail.
  *
- * The one colourful thing in the app, and the component that carries the most
- * product meaning: these pills *are* Winnow's opinion about your mail, made
- * visible and reorderable.
+ * The component that carries the most product meaning: these controls *are*
+ * Winnow's opinion about your mail, made visible and reorderable. They sit in the
+ * masthead rather than in a bar of their own, because they are not a separate
+ * concern from the mailbox — they are the mailbox, narrowed.
  *
  * Three things about the design are load-bearing:
  *
@@ -12,12 +13,19 @@
  *     pinned first. This component renders what it is given; it has no opinion
  *     about order, because a component that re-sorted its own children would
  *     fight the store's ranking on every render.
- *   - **Selected state is a ring, not a fill.** The wash is already the loudest
- *     thing in the strip; a second opaque fill would drown it, and the ring
- *     reads as a toggle at a glance.
+ *   - **Selected state is illumination, not a second fill.** Each pill already
+ *     carries a wash of its own accent; an opaque fill on top of that drowned it,
+ *     and an inset ring around it drew a hard edge on a surface that is meant to
+ *     have none. What is left is a `sheen` — a low-alpha wash of the palette's own
+ *     ink — so "on" reads as the row lifting toward the light rather than as a
+ *     different object being placed on top of it.
  *   - **Each pill shows its count and its digit.** The digit is because the
  *     keyboard shortcut has to be discoverable *somewhere*, and a row of pills
  *     with an unexplained number under each one is the only honest place for it.
+ *
+ * The accent colours survive, but they are no longer what says *which bucket this
+ * is* — the label does that. They are a tint, and the rail reads as one quiet row
+ * rather than as a row of sweets.
  */
 
 import { memo, useEffect, useRef, useState } from "react";
@@ -35,6 +43,22 @@ type Props = {
   /** Undo a mute. Present because a mute has to be reversible from the rail. */
   onRestore: (id: BuiltinSmartFilter) => void;
   onClear: () => void;
+  /**
+   * Pinned to the left edge of the scroller, with the pills passing underneath it.
+   *
+   * A slot rather than a sibling because the alternative was hard-coding how much room
+   * the mark takes: the rail was absolutely positioned across the whole row and inset
+   * on the left by the logo's width and on the right by the search cluster's, which is
+   * a magic number that has to be re-measured every time either of those changes. It
+   * was wrong twice — once because `pr-24` is Tailwind's 6rem and not 24rem, and once
+   * because adding a button to the cluster made the right inset 33px short, which put
+   * the last pill's mute control underneath the search field where it could be seen and
+   * not clicked.
+   *
+   * `position: sticky; left: 0` cannot be mis-sized. The mark stays where it is, the
+   * pills travel leftward behind it, and the scroller's own clip does the rest.
+   */
+  leading?: React.ReactNode;
   className?: string;
 };
 
@@ -45,6 +69,7 @@ export const FilterStrip = memo(function FilterStrip({
   onMute,
   onRestore,
   onClear,
+  leading,
   className = "",
 }: Props) {
   const hasActive = activeFilters.length > 0;
@@ -90,11 +115,27 @@ export const FilterStrip = memo(function FilterStrip({
         ref={scrollerRef}
         className="no-scrollbar flex items-center gap-1.5 overflow-x-auto"
       >
+        {/*
+          The mark, pinned. `z-10` so it paints above the pills travelling behind it,
+          and the veil so they fade out underneath rather than being chopped off by a
+          hard edge. The veil is `pointer-events-none` and `-left-3` so it covers the
+          page padding as well as the mark, with no seam at the window edge.
+        */}
+        {leading !== undefined && (
+          <div className="sticky left-0 z-10 flex shrink-0 items-center pr-2">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 -left-3 right-0 bg-gradient-to-r from-canvas via-canvas to-transparent"
+            />
+            <div className="relative">{leading}</div>
+          </div>
+        )}
+
         {hasActive && (
           <button
             type="button"
             onClick={onClear}
-            className="h-7 shrink-0 rounded-full border border-control-border px-3 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="h-7 shrink-0 rounded-full bg-sheen px-3 text-ui font-semibold text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             All
           </button>
@@ -127,12 +168,18 @@ export const FilterStrip = memo(function FilterStrip({
                   ? `${label}, hidden — ${count} ${count === 1 ? "message" : "messages"}`
                   : `${label}, ${count} ${count === 1 ? "message" : "messages"}`
               }
-              className={`flex h-7 items-center gap-1.5 rounded-full pl-3 pr-2.5 text-ui font-semibold whitespace-nowrap text-ink-body transition-[filter] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
-                isMuted ? "opacity-45 line-through" : ""
+              className={`flex h-7 items-center gap-1.5 rounded-full pl-3 pr-2.5 text-ui font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
+                isMuted
+                  ? "text-ink-subtle line-through opacity-60"
+                  : on
+                    ? "font-semibold text-ink"
+                    : "text-ink-muted hover:text-ink-body"
               }`}
               style={{
-                background: pillBackground(colors, on && !isMuted),
-                boxShadow: on && !isMuted ? `inset 0 0 0 1px ${colors.solid}` : "none",
+                // A muted pill has nothing to filter, so it gets no fill at all rather
+                // than a dimmed one — a tinted empty pill still reads as an enabled
+                // control that is merely quiet.
+                background: isMuted ? "transparent" : pillBackground(colors, on),
               }}
             >
               {label}
@@ -169,7 +216,7 @@ export const FilterStrip = memo(function FilterStrip({
               {digit && (
                 <kbd
                   aria-hidden="true"
-                  className="ml-0.5 hidden min-w-[1.05rem] rounded border border-hairline bg-surface px-1 py-px text-center font-mono text-[10.5px] font-semibold leading-[1.35] text-ink-muted group-hover/pill:inline lg:inline"
+                  className="ml-0.5 hidden min-w-[1.05rem] rounded bg-sheen px-1 py-px text-center font-mono text-[10.5px] font-semibold leading-[1.35] text-ink-muted group-hover/pill:inline lg:inline"
                 >
                   {digit}
                 </kbd>
@@ -196,6 +243,17 @@ export const FilterStrip = memo(function FilterStrip({
               of things to change. `@media (hover: hover)` scopes the hiding to the
               devices that actually have a pointer to hover with, exactly as it does for
               the row star.
+
+              `opacity-0` rather than `hidden`, and that is the fix rather than a
+              restatement of the rule above. `display: none` takes a control out of the
+              tab order, so a desktop keyboard user could never reach the one button
+              that silences a bucket Winnow keeps mis-filing — and the
+              `focus-visible:opacity-100` in this class list could not rescue them,
+              because an element that cannot be focused cannot match a focus rule.
+              `visibility: hidden` is the same trap. Transparency is the only hiding
+              that leaves a control focusable, and `[@media(hover: none)]` still shows
+              it outright on touch, so no device is left with a transparent tappable
+              target where there used to be none.
             */}
             {id.kind === "builtin" && id.id !== "unsafe" && (
               <button
@@ -211,7 +269,7 @@ export const FilterStrip = memo(function FilterStrip({
                     ? `Show ${label} in the inbox again`
                     : `Hide ${label} from the inbox and tell Winnow it is over-firing`
                 }
-                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-hairline bg-surface text-[10px] leading-none text-ink-muted shadow-pane transition-colors hover:text-ink focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:inline-flex [@media(hover:none)]:inline-flex"
+                className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-veil text-[10px] leading-none text-ink-muted opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 {isMuted ? "↺" : "×"}
               </button>
@@ -227,13 +285,13 @@ export const FilterStrip = memo(function FilterStrip({
       {overflow.start && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-chrome to-transparent"
+          className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-canvas to-transparent"
         />
       )}
       {overflow.end && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-chrome to-transparent"
+          className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-canvas to-transparent"
         />
       )}
     </div>

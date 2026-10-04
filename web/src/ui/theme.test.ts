@@ -6,15 +6,24 @@
  * 3.14:1 on white; it looks like a perfectly good tertiary grey right up until
  * somebody reads the app in a bright room.
  *
- * So the two properties that are objectively checkable are asserted here:
+ * So the properties that are objectively checkable are asserted here:
  *
  *   1. **Text clears WCAG AA against every surface it appears on.** Not against
  *      white — against `surfaceActive`, which is the darkest plane in the light
  *      palette and therefore the binding case, and against `surfaceSunken` in dark.
- *   2. **A badge chip's label clears AA on its own wash**, over every surface. This
- *      is the one that was quietly broken: the chip renders the accent as *both* the
- *      fill (14%) and the label, and nine of the light palette's twenty-one accents
- *      were between 2.7:1 and 4.2:1 as a result.
+ *   2. **The ink ramp runs in order, in visible steps.** Both of the greys a row is
+ *      built from passing AA is not the same as being distinguishable from each
+ *      other; two adjacent steps 1% apart pass a contrast check and read as one
+ *      colour, which is the failure the ordering assertion exists to prevent.
+ *   3. **No token colour is combined with Tailwind's `/opacity`.** Every token is a
+ *      CSS custom property, so the modifier emits `rgb(var(--wn-surface) / 0.6)`,
+ *      which is not a colour, and the class renders nothing.
+ *
+ * There used to be a fourth: that a badge chip's label clears AA on its own wash,
+ * over every surface. That went with the chips — a classification is carried by a
+ * glyph and a word now, and a colour that has to be decoded before it can be read
+ * was never the right carrier for one. Its forty-five assertions were removed with
+ * it rather than left behind guarding colours that are no longer on screen.
  *
  * No DOM required, which is the payoff of the `core`/`ui` split: this is the same
  * arithmetic the browser would do, run as a unit test.
@@ -23,10 +32,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  BADGE_TEXT_CONTRAST,
-  badgeBackdrops,
   contrastRatio,
-  deriveBadgeInk,
   paletteFor,
   relativeLuminance,
   resolveScheme,
@@ -35,21 +41,6 @@ import { avatarColor, avatarRamp, avatarTextColor } from "./avatarColor";
 
 /** WCAG AA for text this size. Every piece of muted text in the app is 11–13px. */
 const AA_TEXT = 4.5;
-
-/** The alpha `applyTheme` writes into `--wn-badge-*-wash`. */
-const BADGE_WASH_ALPHA = 0.14;
-
-/** `#RRGGBB` composited under `rgba(top, alpha)`, matching what a browser paints. */
-function flatten(top: string, backdrop: string, alpha: number): string {
-  const a = Number.parseInt(top.slice(1), 16);
-  const b = Number.parseInt(backdrop.slice(1), 16);
-  const channel = (shift: number): number => {
-    const high = (a >> shift) & 255;
-    const low = (b >> shift) & 255;
-    return Math.round(high * alpha + low * (1 - alpha));
-  };
-  return `#${[16, 8, 0].map((s) => channel(s).toString(16).padStart(2, "0")).join("")}`;
-}
 
 /**
  * The planes a piece of text can land on.
@@ -148,83 +139,6 @@ describe("text contrast", () => {
       }
     });
   }
-});
-
-describe("badge chips", () => {
-  for (const name of SCHEMES) {
-    const palette = paletteFor(name);
-    const allSurfaces = badgeBackdrops(palette.color, name);
-
-    for (const [key, accent] of Object.entries(palette.badge)) {
-      it(`${name}: the ${key} chip label is readable on its own wash`, () => {
-        const ink = deriveBadgeInk(accent, palette.color, name);
-        for (const backdrop of allSurfaces) {
-          const wash = flatten(ink, backdrop, BADGE_WASH_ALPHA);
-          expect(
-            contrastRatio(ink, wash),
-            `${key}: ${ink} on its wash over ${backdrop}`,
-          ).toBeGreaterThanOrEqual(BADGE_TEXT_CONTRAST);
-        }
-      });
-    }
-
-    /**
-     * The derivation must not move an accent that is already fine.
-     *
-     * It is tempting to "tidy" the dark palette by letting the derivation run there
-     * too, and the result is a set of chips noticeably deeper than they need to be
-     * for no gain. A derivation that changes something which already passed is a
-     * derivation that cannot be trusted to leave the right things alone.
-     */
-    it(`${name}: an accent that clears everywhere is returned untouched`, () => {
-      for (const [key, accent] of Object.entries(palette.badge)) {
-        const clearsEverywhere = allSurfaces.every(
-          (backdrop) =>
-            contrastRatio(accent, flatten(accent, backdrop, BADGE_WASH_ALPHA)) >=
-            BADGE_TEXT_CONTRAST,
-        );
-        if (!clearsEverywhere) continue;
-        // Compared case-insensitively: the derivation rebuilds the hex through a
-        // channel mixer, which lowercases, and `#FB923C` is not a different colour
-        // from `#fb923c`.
-        expect(deriveBadgeInk(accent, palette.color, name).toLowerCase(), key).toBe(
-          accent.toLowerCase(),
-        );
-      }
-    });
-  }
-
-  /**
-   * The derivation must move in the right direction.
-   *
-   * A bug that pushed a light chip *lighter* would still produce a palette that
-   * passes the contrast checks above — because a sufficiently light label on a
-   * 14% wash of itself does clear the bar. So the direction is asserted directly:
-   * in the light palette every chip label must be at least as dark as its accent,
-   * and in the dark palette at least as light. Both are monotonic moves toward the
-   * palette's own ink, which is what "darker is more contrast against a wash of
-   * the same hue on a light surface" means.
-   */
-  it("light chip labels only darken, and dark chip labels only lighten", () => {
-    for (const [name, direction] of [
-      ["light", "darker"],
-      ["dark", "lighter"],
-    ] as const) {
-      const palette = paletteFor(name);
-      for (const [key, accent] of Object.entries(palette.badge)) {
-        const ink = deriveBadgeInk(accent, palette.color, name);
-        if (direction === "darker") {
-          expect(relativeLuminance(ink), `${name}/${key}`).toBeLessThanOrEqual(
-            relativeLuminance(accent),
-          );
-        } else {
-          expect(relativeLuminance(ink), `${name}/${key}`).toBeGreaterThanOrEqual(
-            relativeLuminance(accent),
-          );
-        }
-      }
-    }
-  });
 });
 
 describe("avatars", () => {

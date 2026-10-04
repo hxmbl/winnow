@@ -25,8 +25,25 @@ import {
 } from "../../core/classify/weights";
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
+import type { ImagePolicy } from "../../core/store/store";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
+
+/**
+ * The three standing answers about remote images.
+ *
+ * Order is the order of the question's escalating commitment, which is also the order
+ * of consequence: the least permanent answer is on the left.
+ *
+ * `never` is disabled rather than hidden when the host cannot render HTML at all,
+ * because hiding one option would leave a group of three showing two, which reads as
+ * a layout bug rather than as a capability limit.
+ */
+const IMAGE_POLICY_CHOICES: readonly { value: ImagePolicy; label: string }[] = [
+  { value: "ask", label: "Ask each time" },
+  { value: "always", label: "Always" },
+  { value: "never", label: "Never" },
+];
 
 /**
  * How many feedback events the panel lists.
@@ -105,8 +122,9 @@ export type SettingsProps = {
    * row rather than offering a switch that would do nothing.
    */
   canLoadRemoteContent: boolean;
-  loadRemoteContent: boolean;
-  onLoadRemoteContent: (value: boolean) => void;
+  /** The standing answer about remote images. See `IMAGE_POLICY_CHOICES`. */
+  imagePolicy: ImagePolicy;
+  onImagePolicy: (value: ImagePolicy) => void;
   notificationsEnabled: boolean;
   onNotifications: (value: boolean) => void;
   /** Null on the web, where there is no background thread to hand. */
@@ -255,15 +273,49 @@ export function Settings(props: SettingsProps) {
           </div>
         </Row>
 
+        {/*
+          Remote images: three states, because there are three intentions.
+
+          This was a toggle, and a toggle has two positions. "Load" and "don't load"
+          cannot say the third thing a user actually wants, which is *stop asking* —
+          and that is not the same as "never": somebody who has been asked three times
+          wants their mail to look like mail. With only two positions the only way to
+          express it was to decline on every message, forever.
+
+          The reader offers the same three answers per message; this is where the
+          standing one lives, so its scope is visible rather than implied. A segmented
+          control rather than three buttons because it is one setting with three
+          values, and the group is the point: three separate controls would read as
+          three independent switches and could be left in a combination that means
+          nothing.
+        */}
         <Row
-          label="Load remote images"
-          hint="Off by default: an image confirms the message was opened and roughly where. On, messages are rendered in a sandbox that runs none of the sender's code."
+          label="Remote images"
+          hint="Images confirm a message was opened and roughly where. Winnow asks per message by default; a message that has images allowed is rendered in a sandbox that runs none of the sender's code."
         >
-          <Toggle
-            checked={props.canLoadRemoteContent && props.loadRemoteContent}
-            onChange={props.onLoadRemoteContent}
-            label="Load remote images"
-          />
+          <div
+            role="radiogroup"
+            aria-label="Remote images"
+            className="flex items-center gap-0.5 rounded-full bg-sheen p-0.5"
+          >
+            {IMAGE_POLICY_CHOICES.map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                role="radio"
+                aria-checked={props.imagePolicy === choice.value}
+                disabled={!props.canLoadRemoteContent && choice.value !== "never"}
+                onClick={() => props.onImagePolicy(choice.value)}
+                className={`rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 ${
+                  props.imagePolicy === choice.value
+                    ? "bg-surface text-ink shadow-pane"
+                    : "text-ink-muted hover:text-ink-body"
+                }`}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </div>
         </Row>
 
         <Row

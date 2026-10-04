@@ -19,9 +19,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
 import { displayName, monogram } from "../../core/model/email";
-import { rowIndicators, type EmailSignals } from "../../core/model/signals";
+import {
+  rowIndicators,
+  FILTER_LABELS,
+  type BuiltinSmartFilter,
+  type EmailSignals,
+} from "../../core/model/signals";
 import { avatarColor, avatarTextColor } from "../avatarColor";
-import { hexA, FILTER_PILLS } from "../filterColors";
+import { filterIcon } from "../filterIcons";
 import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
 import {
@@ -111,19 +116,83 @@ type RowProps = {
 };
 
 /**
- * The row indicators: the buckets that change how a row is *judged*, with the
- * category buckets dropped. The list is scanned, not read — six chips on a row
- * turns a scannable list into a wall.
+ * What Winnow thinks of a row, as icons.
+ *
+ * **This is the change from coloured dots, and it is the whole point of it.** Six
+ * 6px dots in eleven categorical hues is a colour key: it cannot be read at a
+ * glance, it cannot be read at all without learning the ramp, it disappears in dark
+ * mode where several of the hues land within a few percent of each other, and it is
+ * nothing whatsoever to a reader with a colour vision deficiency.
+ *
+ * A glyph is a word somebody already owns. A star means important, a bolt means
+ * urgent, a shield means security — in any app, in any language, without a legend.
+ * The bucket's accent survives as a tint on the icon, which reinforces a meaning the
+ * shape and the row already carry rather than being the only thing carrying it.
+ *
+ * The `title` is the reason, from `ui/filterIcons`, and it is what makes hovering
+ * explanatory rather than merely decorative: "Important — from someone you read or
+ * reply to" tells the reader what to do with the information, where a dot told them
+ * nothing and a chip told them only the verdict.
+ *
+ * The same icons and the same explanations are used by the reader's filter row, so a
+ * bucket cannot mean one thing in a list and another in the message.
  */
-function Indicator({ id }: { id: string }) {
-  const pill = FILTER_PILLS[id as keyof typeof FILTER_PILLS];
+function RowIndicators({ ids }: { ids: readonly BuiltinSmartFilter[] }) {
   return (
-    <span
-      aria-hidden="true"
-      className="h-1.5 w-1.5 shrink-0 rounded-full"
-      style={{ background: hexA(pill.solid, 0.7) }}
-    />
+    <>
+      {ids.map((id) => {
+        const { Icon, title } = filterIcon(id);
+        return (
+          <span key={id} title={title} className="inline-flex shrink-0 text-ink-muted">
+            <Icon size={12.5} strokeWidth={2} aria-hidden="true" />
+            <span className="sr-only">{title}</span>
+          </span>
+        );
+      })}
+    </>
   );
+}
+
+/**
+ * The row's accessible name.
+ *
+ * `aria-label` wins over descendant content when a name is computed, so this
+ * replaces the row's text wholesale rather than adding to it. That is the point:
+ * left to content, the name is sender + subject + preview + timestamp run
+ * together into one long string, and the indicator dots are `aria-hidden` — so
+ * the one thing that says *why Winnow judged this row* is exactly what a screen
+ * reader never hears.
+ *
+ * Ordered the way the row reads: who, which conversation, what it says, then the
+ * state, then the judgement, then when. The visible row is untouched.
+ */
+function rowAccessibleName({
+  email,
+  time,
+  indicators,
+  unread,
+  fresh,
+  messageCount,
+}: {
+  email: ThreadRow["representative"];
+  time: string;
+  indicators: readonly BuiltinSmartFilter[];
+  unread: boolean;
+  fresh: boolean;
+  messageCount: number;
+}): string {
+  const parts = [displayName(email)];
+  if (messageCount > 1) parts.push(`${messageCount} messages`);
+  parts.push(email.subject || "no subject");
+  if (unread) parts.push("unread");
+  if (fresh) parts.push("new");
+  // Lowercased because these run as a comma list inside a sentence, not as a set
+  // of pill captions: "security, urgent" rather than "Security, Urgent".
+  if (indicators.length > 0) {
+    parts.push(indicators.map((id) => FILTER_LABELS[id].toLowerCase()).join(", "));
+  }
+  parts.push(time);
+  return parts.join(", ");
 }
 
 const Row = memo(function Row({
@@ -138,11 +207,21 @@ const Row = memo(function Row({
 }: RowProps) {
   const email = row.representative;
   const indicators = rowIndicators(email, signals);
+  const time = formatRowTime(email.receivedAt, bucket);
 
   return (
     <div
-      className={`group/row relative flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
-        selected ? "bg-surface-active" : "hover:bg-surface-hover"
+      className={`group/row relative flex w-full items-start gap-3 rounded-md px-2.5 py-2 text-left transition-colors ${
+        /*
+         * Selection as `sheen` rather than `surfaceActive`.
+         *
+         * An opaque step lighter than the list is a third plane, and the surface
+         * already has two. `sheen` is a wash of the palette's own ink, so the row is
+         * marked without introducing another value to keep track of — and it
+         * darkens on a light scheme and lightens on a dark one, which an opaque hex
+         * cannot do.
+         */
+        selected ? "bg-sheen" : "hover:bg-surface-hover"
       }`}
     >
       {/*
@@ -163,6 +242,14 @@ const Row = memo(function Row({
         type="button"
         data-message-id={email.id}
         aria-current={selected ? "true" : undefined}
+        aria-label={rowAccessibleName({
+          email,
+          time,
+          indicators,
+          unread,
+          fresh,
+          messageCount: row.messageCount,
+        })}
         onClick={() => onSelect(email.id)}
         className="flex min-w-0 flex-1 items-start gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
@@ -196,14 +283,35 @@ const Row = memo(function Row({
                 </span>
               )}
               {fresh && (
+                // `aria-hidden` because the row's own name now carries "new" — and
+                // `aria-label` on a role-less `<span>` is not reliably exposed anyway,
+                // so this was a label that mostly did nothing.
                 <span
-                  aria-label="New"
+                  aria-hidden="true"
                   className="h-1.5 w-1.5 shrink-0 rounded-full bg-success"
                 />
               )}
             </span>
-            <span className="shrink-0 text-tiny tabular-nums leading-snug text-ink-subtle">
-              {formatRowTime(email.receivedAt, bucket)}
+            {/*
+             * The judgements ride on the line that was already there.
+             *
+             * They were a fourth line under the preview, which is the one place the
+             * redesign was stacking rather than integrating: rows came out 72px or
+             * 56px depending on whether a row had indicators, so the list lost its
+             * rhythm and the icons read as a separate band of content rather than as
+             * something about this message. Beside the timestamp they cost no height,
+             * every row is the same three lines, and the icons are still in the corner
+             * the eye already goes to for "what is this, and when".
+             */}
+            <span className="flex shrink-0 items-baseline gap-2">
+              {indicators.length > 0 && (
+                <span className="flex items-baseline gap-1.5">
+                  <RowIndicators ids={indicators} />
+                </span>
+              )}
+              <span className="text-tiny tabular-nums leading-snug text-ink-subtle">
+                {time}
+              </span>
             </span>
           </span>
 
@@ -221,14 +329,7 @@ const Row = memo(function Row({
             </span>
           )}
 
-          {indicators.length > 0 && (
-            <span className="mt-1 flex items-center gap-1">
-              {indicators.map((id) => (
-                <Indicator key={id} id={id} />
-              ))}
-            </span>
-          )}
-        </span>
+          </span>
       </button>
 
       {/*
@@ -247,7 +348,7 @@ const Row = memo(function Row({
         onClick={() => onToggleStar(email.id)}
         aria-label={email.starred ? "Unstar" : "Star"}
         aria-pressed={email.starred}
-        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-opacity hover:bg-surface-active hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/row:opacity-100 aria-pressed:opacity-100 not-[[hover:hover]]:opacity-0"
+        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-opacity hover:bg-sheen hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/row:opacity-100 aria-pressed:opacity-100 not-[[hover:hover]]:opacity-0"
       >
         {/*
           The star is a sprite rather than a lucide icon so that the filled and outline

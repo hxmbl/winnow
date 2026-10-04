@@ -939,8 +939,85 @@ describe("following a message by id", () => {
   });
 });
 
-describe("mailbox switching", () => {
-  it("drops the selection and the filters", () => {
+/**
+ * The reader represents the message the user selected.
+ *
+ * A smart filter is a statement about which rows to *show*. It used to be a statement
+ * about what the reader showed too, because the open message was resolved out of the
+ * filtered rows: toggling a bucket mid-triage silently replaced the email being read
+ * with whatever had taken the cursor's place, or closed the reader outright.
+ *
+ * The distinction the store now draws is between a message that has *left* and one that
+ * is merely *not being shown*, and it is worth pinning from both sides — the first
+ * half of this block is the regression, the second is the guarantee that fixing it did
+ * not turn the reader into something that can never close.
+ */
+describe("the reader and the filters", () => {
+  it("keeps the open message when a filter is turned on", () => {
+    // The last row, and a filter chosen because it is narrow, so the message is
+    // genuinely excluded rather than incidentally still matching.
+    const store = demoStore();
+    const last = store.view.threads.length - 1;
+    store.openRow(last);
+    const before = store.view.selected;
+    expect(before).not.toBeNull();
+
+    store.toggleFilter(builtinFilter("travel"));
+    expect(store.getSnapshot().selectedId).toBe(before?.id);
+    expect(store.view.selected?.id).toBe(before?.id);
+  });
+
+  it("keeps it when the filter is turned off again", () => {
+    const store = demoStore();
+    store.openRow(store.view.threads.length - 1);
+    const id = store.view.selected?.id;
+
+    store.toggleFilter(builtinFilter("travel"));
+    store.toggleFilter(builtinFilter("travel"));
+    expect(store.view.selected?.id).toBe(id);
+  });
+
+  it("keeps it when a search stops matching", () => {
+    const store = demoStore();
+    store.openRow(0);
+    const id = store.view.selected?.id;
+
+    store.setSearchQuery("zzzznothingmatchesthis");
+    // The result is empty and the reader is still open, which is the whole point: an
+    // empty *result* is not an empty mailbox.
+    expect(store.view.result.emptyReason).toBe("search");
+    expect(store.view.selected?.id).toBe(id);
+  });
+
+  it("still lets go when the message is filed", () => {
+    const store = demoStore();
+    store.openRow(0);
+    const filed = store.view.selected?.id;
+    expect(filed).toBeDefined();
+
+    store.move(filed!, "archive");
+    expect(store.view.selected?.id).not.toBe(filed);
+  });
+
+  it("still lets go when the sender is blocked", () => {
+    const store = demoStore();
+    store.openRow(0);
+    const sender = store.view.selected?.sender;
+    expect(sender).toBeDefined();
+
+    store.blockSender(sender!);
+    expect(store.view.selected).toBeNull();
+  });
+
+  it("and when the mailbox changes, which is a navigation action", () => {
+    const store = demoStore();
+    store.openRow(0);
+    store.setMailbox("archive");
+    expect(store.view.selected).toBeNull();
+  });
+});
+
+describe("mailbox switching", () => {  it("drops the selection and the filters", () => {
     // A selection from the inbox means nothing in the bin, and leaving it would
     // show a message the list does not contain.
     const store = demoStore();

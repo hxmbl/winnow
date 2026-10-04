@@ -24,7 +24,7 @@
  *   4. **Modal grammars** — the shortcut sheet and the mailbox palette each get
  *      their own small table, because both must swallow the canvas.
  *
- * `TopBar` prints its toolbar hints from this same table, so a button's `title`
+ * `Masthead` prints its toolbar hints from this same table, so a button's `title`
  * cannot advertise a shortcut the router will not take.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Support/KeybindEngine.swift`.
@@ -56,8 +56,10 @@ export type Command =
   | { type: "toggleShortcutsOverlay" }
   | { type: "openSettings" };
 
-/** The modifiers as the router sees them. */
+/** The modifiers as the router sees them, plus the key itself. */
 export type KeyModifiers = {
+  /** `KeyboardEvent.key`, when the caller has the real event rather than a fixture. */
+  key?: string;
   shiftKey?: boolean;
   altKey?: boolean;
   ctrlKey?: boolean;
@@ -374,6 +376,30 @@ export const BINDINGS: readonly Binding[] = [
 const SYSTEM_MODIFIERS = ["altKey", "ctrlKey", "metaKey"] as const;
 
 /**
+ * Keys the platform owns outright, which this app therefore never consumes.
+ *
+ * `Tab` is here because it was the one omission with a real cost, and the cost was
+ * invisible from the source: every control in the app carries a `focus-visible`
+ * ring, which is a promise that the control can be *reached*. Tab is unbound, so it
+ * fell through to the swallow below and was `preventDefault`ed on the canvas —
+ * which does not stop focus moving silently, it stops it dead. Every one of those
+ * rings was a ring that could not be seen, the row star and the filter-pill mute
+ * control were mouse-only, and the three `role="switch"` toggles in Settings could
+ * not be operated from the keyboard at all. That is WCAG SC 2.1.1, and it was
+ * caused by the one rule in this file written for a different reason.
+ *
+ * Shift is not a system modifier and must not become one: it is how `⇧U` and the
+ * `⇧1` mailbox row are typed, so exempting it would cost real bindings. It does
+ * not need exempting anyway, because `Shift+Tab` arrives here with `key === "Tab"`
+ * and is excluded by the same test.
+ *
+ * `Tab` is exempt rather than bound on purpose. Binding it to a command would move
+ * focus and also fire that command, which is worse than either. `Overlay` still
+ * traps it at the edges of a dialog, which is the one place wrapping is correct.
+ */
+const PLATFORM_KEYS = ["Tab"] as const;
+
+/**
  * The shortcut sheet is modal and answers only its own toggle and Escape.
  *
  * Anything else is swallowed rather than acted on: a keystroke that changes the
@@ -482,11 +508,20 @@ export function commandForKey(
  * In a keyboard-first app an unbound key that reaches the OS produces the macOS
  * alert beep, which reads as a bug. So outside a text field and outside a modal,
  * unmatched keys are consumed — except when a system modifier is held, because
- * those genuinely belong elsewhere.
+ * those genuinely belong elsewhere, and except for `PLATFORM_KEYS`, which the
+ * swallow must never reach.
+ *
+ * That last exemption is load-bearing rather than tidiness. "Consume everything
+ * unmatched" is only safe while the unmatched set contains nothing anyone needs,
+ * and `Tab` broke that: it does not beep, so nothing about the swallow was
+ * protecting it, and cancelling it cost every focusable control in the app.
  */
 export function shouldSwallow(context: KeyContext, event: KeyModifiers = {}): boolean {
   if (!context.ready) return false;
   if (context.textEditing || context.composerOpen) return false;
+  if (event.key && PLATFORM_KEYS.includes(event.key as (typeof PLATFORM_KEYS)[number])) {
+    return false;
+  }
   if (SYSTEM_MODIFIERS.some((modifier) => event[modifier])) return false;
   return true;
 }
@@ -494,7 +529,7 @@ export function shouldSwallow(context: KeyContext, event: KeyModifiers = {}): bo
 /**
  * The keys a command is bound to, as the toolbar prints them.
  *
- * `TopBar` and `Reader` read this for their button tooltips, so a control's advertised
+ * `Masthead` and `Reader` read this for their button tooltips, so a control's advertised
  * shortcut is by construction the one the router takes. It used to be the other way
  * round: every `title` was a hand-typed literal, and the cheat sheet's own comment
  * already described the resulting drift — `,` and `⇧U` were working in the app and

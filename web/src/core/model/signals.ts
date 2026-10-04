@@ -72,20 +72,6 @@ export function isUnsafe(signals: EmailSignals): boolean {
 }
 
 /**
- * The one predicate for "this is bulk mail", used everywhere.
- *
- * Bulk has its own buckets — `newsletters` and `promotional` — so a message that
- * is bulk must not also be badged Important, however well it scores. It can score
- * well: a promotion from a sender the profile ranks highly clears the Important
- * threshold on the sender boost alone, because nothing subtracts for bulk. Which is
- * exactly why the exclusion has to live inside the Important test in both places it
- * appears, rather than being left implicit in one and spelled out in the other.
- */
-export function isBulk(signals: EmailSignals): boolean {
-  return signals.newsletter || signals.promotional;
-}
-
-/**
  * Is this message Important?
  *
  * **One rule, two callers, and it used to be two rules.** `matchesBuiltin` asks this
@@ -115,6 +101,19 @@ export function isImportant(email: Email, signals: EmailSignals): boolean {
 
   // Bulk mail is excluded up front, so both clauses below inherit it. Excluding it
   // per-clause is how the two copies came to disagree in the first place.
+  //
+  // Bulk has its own buckets — `newsletters` and `promotional` — and nothing in the
+  // scoring subtracts for either, so a promotion from a sender the profile ranks
+  // highly clears the threshold on the sender boost alone.
+  //
+  // The `urgent` exception on the second clause is deliberate and has no shared
+  // predicate behind it. A promotion the *sender* marked urgent is a different
+  // proposition from one that merely says "act now": somebody can miss a deadline
+  // they were told about in a subject line, and burying that under "read later" is
+  // how a mail client teaches people not to believe it. There used to be an exported
+  // shared predicate here, described as the one answer to the question — which it was not,
+  // because it collapsed this exception and would have excluded exactly the messages
+  // the clause exists to keep.
   if (signals.newsletter) return false;
   if (signals.promotional && !email.urgent) return false;
 

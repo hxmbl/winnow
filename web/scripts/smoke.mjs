@@ -172,8 +172,40 @@ try {
   // one copy now, and the `:visible` guard documents that it is a layout assumption
   // rather than a structural one.
   const pills = () => page.locator("header button[aria-pressed]:visible");
+  /**
+   * The mailbox menu, which the logo opens.
+   *
+   * It used to be four pills in the top bar, so every assertion about mailboxes went
+   * straight at `header nav`. It is now a drawer behind the mark, which means the
+   * navigation has to be *opened* before it can be asserted on — and that opening it
+   * is itself a thing worth asserting.
+   */
+  const drawer = () => page.locator('[role="dialog"][aria-label="Navigation"]');
+  /**
+   * Open the drawer, and be idempotent about it.
+   *
+   * Two things it has to survive. It may already be open — several callers read a
+   * mailbox count and then switch, and clicking the mark behind its own panel does
+   * nothing. And a sheet that closed on the previous line can still have its
+   * `role="presentation"` backdrop mounted for a frame, which swallows the click and
+   * reports the mark as unclickable.
+   */
+  const openDrawer = async () => {
+    if ((await drawer().count()) > 0) return;
+    await page
+      .waitForFunction(() => !document.querySelector('[role="presentation"]'), null, { timeout: 5_000 })
+      .catch(() => undefined);
+    await page.locator('button[aria-label="Open navigation"]').click();
+    await drawer().waitFor({ state: "visible", timeout: 5_000 });
+  };
+  const closeDrawer = async () => {
+    await page.keyboard.press("Escape");
+    await drawer().waitFor({ state: "detached", timeout: 5_000 });
+  };
   const mailbox = (name) =>
-    page.locator('header nav[aria-label="Mailboxes"] button', { hasText: name }).first();
+    page.locator('[role="dialog"][aria-label="Navigation"] nav[aria-label="Mailboxes"] button', {
+      hasText: name,
+    }).first();
   const storage = () =>
     page.evaluate(() => Object.fromEntries(Object.entries(globalThis.localStorage)));
 
@@ -186,17 +218,34 @@ try {
     await page.waitForSelector("text=Nothing selected", { timeout: 5_000 });
   };
   const goTo = async (name) => {
+    await openDrawer();
     await mailbox(name).click();
+    await drawer().waitFor({ state: "detached", timeout: 5_000 });
     await page.waitForTimeout(250);
   };
-  /** The unread badge on a mailbox tab, or `0` when it has no badge at all. */
+  /**
+   * The unread count on a mailbox row, or `0` when it has none.
+   *
+   * The counts live in the drawer now, so this opens it, reads, and closes. The old
+   * version read a `span` out of a tab in the top bar and returned `"0"` for a mailbox
+   * that was simply not on screen — which is indistinguishable from a real zero, and
+   * made the mark-all-read scoping checks assert against a number that was never read.
+   */
   const unreadBadge = async (name) => {
-    const badge = mailbox(name).locator("span");
-    return (await badge.count()) === 0 ? "0" : (await badge.first().textContent())?.trim();
+    await openDrawer();
+    const row = mailbox(name);
+    await row.waitFor({ state: "visible", timeout: 5_000 });
+    const text = await row.getAttribute("data-unread");
+    await closeDrawer();
+    // Absent means zero: a mailbox with nothing unread shows no count at all, which
+    // is the same thing to a reader as "0".
+    return text ?? "0";
   };
   const listTitle = () => page.locator("header span[title]").first().textContent();
+  const search = () => page.locator("#winnow-search");
 
   await page.goto(URL, { waitUntil: "networkidle" });
+
 
   // ── It boots ───────────────────────────────────────────────────────────────
 
@@ -231,16 +280,20 @@ try {
   const title = await listTitle();
   check("the list says what it is showing", Boolean(title?.trim()), title ?? "");
 
-  // The rail is the product, and it used to share a row with the mailbox nav, the
-  // search box, five action buttons, two icon buttons and the position cluster. Every
-  // one of those is `shrink-0` because it must not reflow, so the rail — the only
-  // elastic child — absorbed the whole shortfall and showed three pills at 1440px.
-  // Asserted as a ratio rather than a pixel count, because the number of pills depends
-  // on the mailbox; what matters is that most of them are reachable without scrolling.
+  // The rail is the product. It used to share a row with the mailbox nav, the search
+  // box, five action buttons, two icon buttons and the position cluster, and every one
+  // of those was `shrink-0`, so the rail — the only elastic child — absorbed the whole
+  // shortfall and showed three pills at 1440px.
+  //
+  // It is now in the masthead, absolutely positioned across the whole row and inset by
+  // the logo on the left and the search cluster on the right, so the filters pass
+  // *underneath* the mark. Asserted as a ratio rather than a pixel count, because the
+  // number of pills depends on the mailbox; what matters is that most of them are
+  // reachable without scrolling, and that the rail has not been squeezed out of
+  // existence by the two things it now shares a row with.
   const rail = await page.evaluate(() => {
-    // Not `header .no-scrollbar.overflow-x-auto` — the mailbox nav is one of those too,
-    // and it is 265px wide for exactly the right reason. The rail is the one holding
-    // pressed-state pills.
+    // Not `header .no-scrollbar.overflow-x-auto` — there is no other one now, but the
+    // rail is defined by holding pressed-state pills rather than by its class list.
     const scrollers = [...document.querySelectorAll("header div.no-scrollbar")].filter((element) =>
       element.querySelector("button[aria-pressed]"),
     );
@@ -260,12 +313,81 @@ try {
     };
   });
   check("the rail is rendered exactly once", rail?.copies === 1, `${rail?.copies} copies`);
-  check("on its own full-width row", (rail?.width ?? 0) > 1000, `${rail?.width}px`);
+  check("it has real width to work with", (rail?.width ?? 0) > 900, `${rail?.width}px`);
+  /**
+   * Six, not eight.
+   *
+   * The rail used to have a row to itself and showed a dozen pills. It now shares the
+   * masthead row with the search field and the position cluster — which is the whole
+   * point of the redesign — and those two take ~360px of a 1440px window, so the rail
+   * sees ~1015px and shows seven of its twenty-seven pills without scrolling.
+   *
+   * The trade is deliberate and it is recorded here rather than engineered away: one row
+   * with seven visible filters beats three stacked rows with twelve, because the thing
+   * being removed was the stack. The digit shortcut is on every pill and the rail
+   * scrolls, so nothing is unreachable — it just takes a scroll rather than a glance.
+   */
   check(
-    "so most of it is reachable without scrolling",
-    (rail?.visible ?? 0) >= Math.min(8, rail?.total ?? 0),
+    "so a useful run of it is reachable without scrolling",
+    (rail?.visible ?? 0) >= Math.min(6, rail?.total ?? 0),
     `${rail?.visible} of ${rail?.total} pills in ${rail?.width}px`,
   );
+
+  /**
+   * The filters pass *under* the logo rather than the logo moving out of their way.
+   *
+   * This is the masthead's one novel behaviour and it is invisible in a screenshot of
+   * the resting state, because at rest the first pill clears the mark anyway. Scrolling
+   * the rail is what makes it observable: a pill has to end up underneath the mark, and
+   * the mark has to still be there, and still be the logo.
+   */
+  const underTheLogo = await page.evaluate(async () => {
+    const scroller = [...document.querySelectorAll("header div.no-scrollbar")].find((element) =>
+      element.querySelector("button[aria-pressed]"),
+    );
+    const logo = document.querySelector('button[aria-label="Open navigation"]');
+    if (!scroller || !logo) return null;
+    const logoBox = logo.getBoundingClientRect();
+    scroller.scrollLeft = 260;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const pills = [...scroller.querySelectorAll("button[aria-pressed]")];
+    // A pill whose box reaches under the mark while the mark is still in place.
+    const crossing = pills.filter((pill) => {
+      const r = pill.getBoundingClientRect();
+      return r.left < logoBox.right && r.right > logoBox.left;
+    });
+    return {
+      scrolled: scroller.scrollLeft,
+      crossing: crossing.length,
+      logoStillThere: Boolean(document.querySelector('button[aria-label="Open navigation"] svg')),
+      pillUnderneath: crossing.some((pill) => {
+        const r = pill.getBoundingClientRect();
+        return r.left < logoBox.left + logoBox.width / 2;
+      }),
+    };
+  });
+  check(
+    "scrolling the filters carries them under the logo",
+    underTheLogo !== null && underTheLogo.scrolled > 0 && underTheLogo.crossing > 0,
+    JSON.stringify(underTheLogo),
+  );
+  check(
+    "and the logo does not move to get out of the way",
+    underTheLogo?.logoStillThere === true,
+    JSON.stringify(underTheLogo),
+  );
+  check(
+    "and a pill really does end up beneath it",
+    underTheLogo?.pillUnderneath === true,
+    JSON.stringify(underTheLogo),
+  );
+  await page.evaluate(() => {
+    const scroller = [...document.querySelectorAll("header div.no-scrollbar")].find((element) =>
+      element.querySelector("button[aria-pressed]"),
+    );
+    if (scroller) scroller.scrollLeft = 0;
+  });
+  await page.waitForTimeout(150);
 
   // The position cluster said "0 of 38" before the keyboard had ever been touched,
   // which reads as an empty mailbox — and "0 of 0" on a narrowed list.
@@ -324,7 +446,7 @@ try {
   await page.keyboard.press("/");
   check(
     "`/` focuses the search box",
-    (await page.evaluate(() => document.activeElement?.id)) === "topbar-search",
+    (await page.evaluate(() => document.activeElement?.id)) === "winnow-search",
   );
   await page.keyboard.type("migration");
   await page.waitForTimeout(300);
@@ -343,14 +465,14 @@ try {
   // Two tokens that genuinely co-occur in the demo's migration thread, so a working
   // AND finds them and a phrase match would too — which is what makes the negative
   // case below the load-bearing one.
-  await page.locator("#topbar-search").fill("migration plan");
+  await page.locator("#winnow-search").fill("migration plan");
   await page.waitForTimeout(300);
   const bothTokens = await rowTotal();
   check("two tokens that co-occur both match", bothTokens > 0, `${bothTokens} rows`);
 
   // A second token that cannot co-occur must narrow to nothing rather than being
   // ignored, which is what "AND" has to mean to be worth anything.
-  await page.locator("#topbar-search").fill("migration zzzznotaword");
+  await page.locator("#winnow-search").fill("migration zzzznotaword");
   await page.waitForTimeout(300);
   const impossiblePair = await rowTotal();
   check(
@@ -360,17 +482,17 @@ try {
   );
 
   // Order must not matter, since the tokens are a set rather than a phrase.
-  await page.locator("#topbar-search").fill("migration plan");
+  await page.locator("#winnow-search").fill("migration plan");
   await page.waitForTimeout(250);
   const ordered = await rowTotal();
-  await page.locator("#topbar-search").fill("plan migration");
+  await page.locator("#winnow-search").fill("plan migration");
   await page.waitForTimeout(250);
   const reversed = await rowTotal();
   check("token order does not matter", ordered === reversed, `${ordered} vs ${reversed}`);
-  await page.locator("#topbar-search").fill("");
+  await page.locator("#winnow-search").fill("");
   await page.waitForTimeout(300);
 
-  await page.locator("#topbar-search").fill("zzzznothingmatchesthis");
+  await page.locator("#winnow-search").fill("zzzznothingmatchesthis");
   await page.waitForTimeout(300);
   check(
     "an empty search says why",
@@ -381,7 +503,7 @@ try {
   // focused text field only blurs it — the query stays, so the list stays empty, and
   // the next step would time out waiting for rows. That distinction is the point of
   // the `textEditing` branch in the keybind router, so it is worth stating here.
-  await page.locator("#topbar-search").fill("");
+  await page.locator("#winnow-search").fill("");
   await page.waitForTimeout(300);
   check("clearing the search brings the list back", (await rowTotal()) === rowCount);
 
@@ -450,7 +572,7 @@ try {
     // at this point, and a `,` typed into a text field is a comma. The keybind
     // router's `textEditing` branch is right to ignore it — the test has to not be
     // inside a field.
-    await page.locator("#topbar-search").blur();
+    await page.locator("#winnow-search").blur();
     await page.keyboard.press(",");
     await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
     await page.getByRole("button", { name: label, exact: true }).click();
@@ -583,42 +705,115 @@ try {
   check("`j` opens the first message", true);
   await closeReader();
 
-  // ── Badges ─────────────────────────────────────────────────────────────────
+  // ── Smart filters in the reader ───────────────────────────────────────────
 
-  // Every badge used to resolve to the same near-black, because the CSS variables
-  // were named `--wn-badge-<id>` but never defined — so `var()` resolved to nothing
-  // and the classifier's opinion was invisible on the message itself. The check is on
-  // *computed* colours, so it fails if a variable goes missing again.
-  await page.locator("#topbar-search").fill("migration plan");
+  // These were colour chips: an eleven-hue wash whose whole identity was the fill,
+  // with a label in a derived ink on top. Nothing about that was readable without
+  // knowing the ramp, it vanished for a colour-blind reader, in dark mode, and in a
+  // screenshot — and `theme.ts` spent a hundred lines deriving label colours that
+  // clear AA *on their own wash*, which is a measure of how much of the design was
+  // committed to keeping a colour legible rather than saying what it meant.
+  //
+  // So the reader states them as an icon and a word. Asserted on the word and on the
+  // explanation, because that is the claim being made: not "this message has a colour"
+  // but "Winnow thinks this message is important, and here is why".
+  await page.locator("#winnow-search").fill("migration plan");
   await page.waitForTimeout(300);
   await rows().first().click();
   await page.waitForSelector("article h1", { timeout: 5_000 });
 
-  // Matched on the *rendered chip*: an inline background that is literally a badge
-  // wash variable. `applyTheme` writes every token onto `<html>`'s inline style, so a
-  // document-wide `[style*="--wn-badge"]` matches the root element and reports the
-  // token definitions rather than any badge — which reads as one transparent wash and
-  // looks like the very bug this is checking for.
-  //
-  // The `_` in the id pattern is load-bearing too: bucket keys are snake_case, and
-  // `needs_action` read without it looks like an unrecognised badge.
-  const badges = await page.evaluate(() =>
-    [...document.querySelectorAll("span[style*='--wn-badge']")]
-      .filter((node) => /^var\(--wn-badge-[a-z_]+-wash\)$/.test(node.style.background ?? ""))
-      .map((node) => ({
-        id: (node.getAttribute("style") ?? "").match(/--wn-badge-([a-z_]+)-wash/)?.[1] ?? "?",
-        wash: getComputedStyle(node).backgroundColor,
-        edge: getComputedStyle(node).borderTopColor,
-      })),
+  const filters = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-filter-tag]")].map((tag) => ({
+      id: tag.getAttribute("data-filter-tag"),
+      label: (tag.childNodes[1]?.textContent ?? "").trim(),
+      title: tag.getAttribute("title"),
+      hasGlyph: Boolean(tag.querySelector("svg")),
+      // The word must be real text, not a colour.
+      srText: (tag.querySelector(".sr-only")?.textContent ?? "").trim(),
+    })),
   );
-  check("the reader shows the classifier's badges", badges.length > 0, `${badges.length} badges`);
+  check("the reader names the smart filters", filters.length > 0, `${filters.length} filters`);
   check(
-    "every badge resolves to its own colour rather than one shared wash",
-    badges.length > 0 &&
-      badges.every((badge) => badge.wash !== "rgba(0, 0, 0, 0)") &&
-      new Set(badges.map((badge) => badge.wash)).size === badges.length,
-    JSON.stringify(badges),
+    "each one is an icon and a word, not a colour",
+    filters.every((f) => f.hasGlyph && f.label.length > 0),
+    JSON.stringify(filters),
   );
+  check(
+    "and hovering one explains the classification",
+    filters.every((f) => (f.title ?? "").length > f.label.length + 8),
+    JSON.stringify(filters.map((f) => f.title)),
+  );
+  check(
+    "and the explanation reaches assistive technology too",
+    filters.every((f) => f.srText.includes(f.title)),
+    JSON.stringify(filters.map((f) => f.srText)),
+  );
+
+  /**
+   * The same vocabulary in the list.
+   *
+   * The row drew a coloured dot and the reader drew a chip, from two different
+   * predicates — so a message could be "Urgent" in one and unremarkable in the other,
+   * in the same window. Both now read `ui/filterIcons`, so the assertion is that the
+   * row carries the *explanation* rather than a colour.
+   */
+  const rowFilters = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("[data-message-id]")].slice(0, 8);
+    return rows.map((row) => ({
+      glyphs: row.querySelectorAll("span[title] > svg").length,
+      titles: [...row.querySelectorAll("span[title]")].map((s) => s.getAttribute("title")),
+    }));
+  });
+  check(
+    "list rows carry the same semantic icons",
+    rowFilters.some((row) => row.glyphs > 0),
+    JSON.stringify(rowFilters.filter((r) => r.glyphs > 0).slice(0, 3)),
+  );
+  check(
+    "and every row glyph explains itself on hover",
+    rowFilters.every((row) => row.titles.every((t) => (t ?? "").length > 8)),
+    JSON.stringify(rowFilters.flatMap((r) => r.titles).slice(0, 4)),
+  );
+
+  // ── The reader holds its message when the filters change ──────────────────
+
+  /**
+   * The regression this redesign had to not introduce, and which the app used to have.
+   *
+   * Changing a smart filter is a statement about which rows to *show*. It used to also
+   * replace or close whatever was open in the reader, because the open message was
+   * resolved out of the filtered rows: toggling a bucket mid-triage silently threw away
+   * the email being read and put a different one on screen.
+   *
+   * So: open a message, turn on a filter that excludes it, and the reader must not
+   * move. The list is allowed to change — that is what was asked for.
+   */
+  const openBefore = await page.locator("article h1").textContent();
+  const excludingPill = pills().filter({ hasText: "Deliveries" }).first();
+  if ((await excludingPill.count()) > 0) {
+    await excludingPill.click();
+    await page.waitForTimeout(350);
+    const openAfter = await page.locator("article h1").textContent();
+    check(
+      "changing a smart filter does not replace the open email",
+      openAfter === openBefore,
+      `${openBefore} → ${openAfter}`,
+    );
+    check(
+      "and does not close it either",
+      (await page.locator("article h1").count()) > 0,
+    );
+    // Cleared through the rail's own "All" rather than by clicking the pill again:
+    // an active pill is hoisted to the front of the rail, so the second `Deliveries`
+    // lookup can land on a different element than the first.
+    const all = page.locator('header button:has-text("All")').first();
+    if ((await all.count()) > 0) await all.click();
+    await page.waitForTimeout(300);
+  }
+
+  // And it *does* let go when the message genuinely goes away — asserted below, after
+  // the conversation checks, because trashing it moves the reader on and that would
+  // change what those are looking at.
 
   // ── Conversations ──────────────────────────────────────────────────────────
 
@@ -639,12 +834,21 @@ try {
   check("and each earlier message is a real button", convoCount >= 2, `${convoCount} entries`);
 
   if (convoCount >= 2) {
-    const before = await page.evaluate(() => {
-      const article = document.querySelector("article");
-      const h1 = article?.querySelector("h1")?.textContent ?? "";
-      const stamp = article?.querySelector("time")?.getAttribute("datetime") ?? "";
-      return `${h1}|${stamp}`;
-    });
+    // Read the pane, not the article. The sender's `<time>` is in the reader's header,
+    // so `article.querySelector("time")` was always null — which meant the only part
+    // of this comparison that could have differed was the subject, and a thread's
+    // three messages share one. The check was passing or failing on nothing.
+    const readOpen = () =>
+      page.evaluate(() => {
+        const reader = document.querySelector("[data-reader]");
+        const article = reader?.querySelector("article");
+        return {
+          h1: article?.querySelector("h1")?.textContent ?? "",
+          stamp: reader?.querySelector("time")?.getAttribute("datetime") ?? "",
+        };
+      });
+    const before = await readOpen();
+    check("the open message has a timestamp to compare against", before.stamp !== "", JSON.stringify(before));
     await convoButtons.last().click();
     // `focusMessage` re-derives the view, so the reader swaps rather than merely
     // restyling. Waiting for the stamp to actually differ is the honest signal; a
@@ -652,29 +856,87 @@ try {
     await page
       .waitForFunction(
         (previous) => {
-          const article = document.querySelector("article");
-          const stamp = article?.querySelector("time")?.getAttribute("datetime") ?? "";
-          return stamp !== "" && `|${stamp}` !== previous.slice(previous.indexOf("|"));
+          const reader = document.querySelector("[data-reader]");
+          const stamp = reader?.querySelector("time")?.getAttribute("datetime") ?? "";
+          return stamp !== "" && stamp !== previous;
         },
-        before,
+        before.stamp,
         { timeout: 5_000 },
       )
       .catch(() => undefined);
-    const after = await page.evaluate(() => {
-      const article = document.querySelector("article");
-      const h1 = article?.querySelector("h1")?.textContent ?? "";
-      const stamp = article?.querySelector("time")?.getAttribute("datetime") ?? "";
-      return `${h1}|${stamp}`;
-    });
-    check("clicking one opens that message", after !== before, `${before} → ${after}`);
+    const after = await readOpen();
+    check("clicking one opens that message", after.stamp !== before.stamp, `${before.stamp} → ${after.stamp}`);
   }
 
   // The search is cleared through the field, and Escape is pressed *afterwards* —
   // the order matters, because Escape from a focused field only blurs it, and a
   // still-active query would leave `focusMessage` clearing it on the next click.
-  await page.locator("#topbar-search").fill("");
+  await page.locator("#winnow-search").fill("");
   await page.waitForTimeout(300);
+
+  /**
+   * The other half of "the reader survives a filter change": it must still let go.
+   *
+   * The distinction the store now draws is between a message that has *left* and one
+   * that is merely *not being shown*. Only a move between folders counts as leaving —
+   * so filtering keeps the reader, and filing does not.
+   *
+   * Note what "does not keep" means here, because it is not "closes": with a cursor on
+   * a row, a filed message hands the reader to whatever took its place, which is what
+   * a triage loop wants. The assertion is therefore that the reader is no longer on the
+   * filed message — not that it went blank.
+   */
+  await openMessage();
+  const beforeFiling = await page.locator("article h1").textContent();
+  const binButton = page.locator(
+    'button[aria-label="Move to trash"], button[aria-label="Delete permanently"]',
+  );
+  check("the open message can be filed from the reader", (await binButton.count()) > 0);
+  await binButton.first().click();
+  await page.waitForTimeout(500);
+  const afterFiling = (await page.locator("article h1").count())
+    ? await page.locator("article h1").textContent()
+    : null;
+  check(
+    "filing the open message releases the reader from it",
+    afterFiling !== beforeFiling,
+    `${beforeFiling} → ${afterFiling ?? "(closed)"}`,
+  );
+  /*
+   * The mailbox is a thread list, so filing *one* message of a four-message thread
+   * does not remove the row — every message in it shares the subject and the thread
+   * still has three left. Asserting the subject had left the list would be asserting
+   * that threads do not exist. The count is the honest measure.
+   */
+  /*
+   * Where it went, rather than a count.
+   *
+   * The mailbox is a thread list, so filing one message of a four-message thread does
+   * not remove the row — the subject is shared and the thread still has three. Which
+   * means both "the subject left the list" and "the row count went down" are wrong
+   * here, and the only honest check is that the message is where it was put.
+   */
+  await goTo("Trash");
+  await page.fill("#winnow-search", beforeFiling ?? "");
+  await page.waitForTimeout(400);
+  check(
+    "and it is in the bin",
+    (await rowTotal()) > 0,
+    `${await rowTotal()} rows in the bin matching ${JSON.stringify(beforeFiling)}`,
+  );
+
+  /*
+   * Back to the inbox, and the search cleared.
+   *
+   * Not tidiness. The navigation palette opens on whichever row matches the mailbox
+   * already on screen, so leaving the run in the bin made the two ArrowDowns that
+   * follow land on *Settings* rather than a mailbox, and the next assertion opened
+   * with a settings sheet on screen. The palette being context-sensitive is correct
+   * behaviour; the test is what has to put the world back how it found it.
+   */
+  await page.fill("#winnow-search", "");
   await closeReader();
+  await goTo("Inbox");
 
   // ── Overlays ───────────────────────────────────────────────────────────────
 
@@ -1012,9 +1274,17 @@ try {
 
   const notSpam = page.locator('button[aria-label="Not spam — move to inbox"]');
   check("the spam folder offers a way out of it", (await notSpam.count()) > 0);
+  /*
+   * There used to be a second "not spam" button in the top bar, next to a copy of
+   * every other email action. The reader is now the only place an email action lives
+   * — that was the point of taking them out of the bar — so this asserts there is
+   * exactly one way out of Spam in the whole window rather than that two surfaces
+   * agree on a label.
+   */
   check(
-    "the toolbar says the same thing as the reader",
-    (await page.locator('button[aria-label="Not spam"]').count()) > 0,
+    "and exactly one, in the reader, rather than one per surface",
+    (await page.locator('button[aria-label^="Not spam"]').count()) === 1,
+    `${await page.locator('button[aria-label^="Not spam"]').count()} not-spam buttons`,
   );
   await notSpam.first().click();
   await page.waitForTimeout(400);
@@ -1038,7 +1308,10 @@ try {
 
   await newsletters.hover();
   await page.waitForTimeout(200);
-  await page.locator('header button[aria-label^="Hide Newsletters"]:visible').first().click();
+  const hideAgain = page.locator('header button[aria-label^="Hide Newsletters"]:visible').first();
+  await hideAgain.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(200);
+  await hideAgain.click({ force: true });
   await page.waitForTimeout(400);
 
   /*
@@ -1066,6 +1339,18 @@ try {
   await page.waitForTimeout(250);
   const restore = page.locator('header button[aria-label^="Show Newsletters"]:visible').first();
   check("the muted pill offers a restore control", (await restore.count()) > 0);
+  /*
+   * Scrolled into view first, and this is not incidental tidiness.
+   *
+   * A muted bucket is moved to the *end* of the rail, so its restore control sits at
+   * the far right of a horizontally scrolling strip — measured at x=3025 on a 1440px
+   * window. `force: true` skips Playwright's actionability checks, which includes
+   * scrolling the target into view, so the click was dispatched at a coordinate
+   * outside the viewport and hit nothing. The count assertions after it then reported
+   * a still-muted bucket as though the restore had failed.
+   */
+  await restore.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(200);
   await restore.click({ force: true });
   await page.waitForTimeout(500);
   check(
@@ -1200,11 +1485,36 @@ try {
   // to reset appearance, sort order and everything else, on the next launch.
   await page.keyboard.press(",");
   await page.waitForTimeout(400);
-  await page.locator('button[role="switch"][aria-label="Load remote images"]').click();
+  /*
+   * The image setting is a radio group of three, not a switch.
+   *
+   * A boolean has two positions and the decision has three: ask each time, always,
+   * never. "Stop asking" is not "never" — somebody who has been asked three times wants
+   * their mail to look like mail — and with two positions the only way to say that was
+   * to decline on every message, forever. So this is one setting with three values,
+   * and the assertion is that picking one of them writes a value rather than a boolean.
+   */
+  const imageChoices = page.locator('[role="radiogroup"][aria-label="Remote images"] [role="radio"]');
+  check(
+    "the image policy is a three-way choice, not a toggle",
+    (await imageChoices.count()) === 3,
+    `${await imageChoices.count()} choices`,
+  );
+  await imageChoices.filter({ hasText: "Always" }).click();
   await page.waitForTimeout(250);
+  check(
+    "and it reports which one is in force",
+    (await imageChoices.filter({ hasText: "Always" }).getAttribute("aria-checked")) === "true",
+  );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
   check("Escape closes the settings sheet from inside it", (await page.locator('[role="dialog"]').count()) === 0);
+  const imagePrefs = JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}");
+  check(
+    "and the choice is persisted as a policy, not a flag",
+    imagePrefs.imagePolicy === "always",
+    JSON.stringify(imagePrefs.imagePolicy),
+  );
 
   await openMessage();
   const block = page.locator('button:has-text("Hide everything from")').first();
@@ -1218,7 +1528,10 @@ try {
   const prefs = JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}");
   check(
     "blocking a sender does not reset other preferences",
-    prefs.loadRemoteContent === true,
+    // The image policy specifically: it was set a moment ago through Settings, so it is
+    // the one preference whose survival this proves. Asserting the whole object instead
+    // would only pass while nothing else had changed in between.
+    prefs.imagePolicy === "always",
     JSON.stringify(prefs),
   );
   check("the blocked sender is recorded", Array.isArray(prefs.blockedSenders) && prefs.blockedSenders.length > 0, JSON.stringify(prefs.blockedSenders));
@@ -1246,7 +1559,7 @@ try {
     JSON.stringify(headerBox),
   );
 
-  const searchBox = await page.locator("#topbar-search").boundingBox();
+  const searchBox = await page.locator("#winnow-search").boundingBox();
   check(
     "search is still on screen, not collapsed to nothing",
     Boolean(searchBox) && searchBox.width > 40,
@@ -1320,9 +1633,16 @@ try {
       .map((b) => b.getAttribute("aria-label"));
     return { total: buttons.length, offscreen };
   });
+  /*
+    `>= 8`, not `> 10`. The scan is a sanity check that it found something worth
+    scanning, and the count fell because the top bar is gone: its five action buttons,
+    two icon buttons and four mailbox tabs no longer sit outside a scroll container.
+    What is being claimed is the second half — that nothing reachable is off-screen —
+    and that is unchanged.
+  */
   check(
     "and no control anywhere in the app is off-screen",
-    reachable.total > 10 && reachable.offscreen.length === 0,
+    reachable.total >= 8 && reachable.offscreen.length === 0,
     `${reachable.total} buttons, off-screen: ${reachable.offscreen.join(", ") || "none"}`,
   );
 
@@ -1337,8 +1657,10 @@ try {
   */
   const senderName = await page.evaluate(() => {
     // The reader's own root, so the pane's `h2` is found rather than some other
-    // heading on the page.
-    const reader = document.querySelector("article")?.closest(".bg-panel");
+    // heading on the page. `data-reader`, not a class: the pane is a tonal step
+    // off the list rather than a card on the canvas, so there is no background
+    // class on it to hook.
+    const reader = document.querySelector("[data-reader]");
     const heading = reader?.querySelector("h2");
     if (!heading) return null;
     return {
@@ -1421,16 +1743,25 @@ try {
     openedSubject.length > 0 && deepSubject.includes(openedSubject),
     `${openedSubject} in ${deepSubject}`,
   );
+  // The drawer, because that is where a mailbox is named now — the deep link still
+  // has to land in the right folder and the drawer is how a user would check.
+  await openDrawer();
   check(
     "and the reader follows it into the mailbox it lives in",
     (await mailbox("Spam").getAttribute("aria-current")) === "page",
   );
+  await closeDrawer();
 
   await page.goto(`${URL}?view=archive`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
   check(
     "a link naming a mailbox switches to it",
-    (await mailbox("Archive").getAttribute("aria-current")) === "page",
+    await (async () => {
+      await openDrawer();
+      const current = (await mailbox("Archive").getAttribute("aria-current")) === "page";
+      await closeDrawer();
+      return current;
+    })(),
     await listTitle(),
   );
 

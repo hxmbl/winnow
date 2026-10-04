@@ -13,7 +13,7 @@
  * Gmail session exists it is adopted in the background and the mailbox replaces the
  * demo.
  *
- * And the demo is not a dead end: the top bar offers "Connect Gmail" from it, which
+ * And the demo is not a dead end: the mailbox offers "Connect Gmail" from it, which
  * is the only route to sign-in on a fresh install. The app boots with
  * `status: "ready"` and no backend, so it never shows the sign-in screen first — and
  * without that button, sign-in was unreachable until you had already signed in.
@@ -110,7 +110,20 @@ function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (source.appearance === "system" || source.appearance === "light" || source.appearance === "dark") {
     out.appearance = source.appearance;
   }
-  if (typeof source.loadRemoteContent === "boolean") out.loadRemoteContent = source.loadRemoteContent;
+  /*
+   * The image policy, with the old boolean read as a migration rather than dropped.
+   *
+   * A previous version stored `loadRemoteContent: boolean`. Someone who had turned
+   * it on means it, and silently resetting them to "never" would be a small privacy
+   * regression in the wrong direction — while resetting them to "ask" would quietly
+   * re-prompt somebody who had already answered. `true` maps to `always` and
+   * `false` to `never`, which is exactly what each setting meant.
+   */
+  if (source.imagePolicy === "ask" || source.imagePolicy === "always" || source.imagePolicy === "never") {
+    out.imagePolicy = source.imagePolicy;
+  } else if (typeof source.loadRemoteContent === "boolean") {
+    out.imagePolicy = source.loadRemoteContent ? "always" : "never";
+  }
   if (typeof source.notificationsEnabled === "boolean") {
     out.notificationsEnabled = source.notificationsEnabled;
   }

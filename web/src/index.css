@@ -34,23 +34,6 @@ body {
 
 @layer components {
   /*
-   * The frosted chrome.
-   *
-   * The layout leaves a real gap around every pane and every container draws
-   * `border-hairline`, and *that* is what makes a lift read: an element only
-   * looks like it is above another if you can see the other one past its edge,
-   * and only blurs if there is something behind it to blur. The class is applied
-   * in pairs:
-   *
-   *   class="glass border-b border-hairline shadow-lift"
-   */
-  .glass {
-    background: var(--wn-glass, rgba(255, 255, 255, 0.72));
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-  }
-
-  /*
    * The scrollbar.
    *
    * Six pixels, and only for the reader and the list. A wide scrollbar eats the
@@ -168,6 +151,52 @@ body {
       100% 9px;
     background-attachment: local, local, scroll, scroll;
   }
+}
+
+/*
+ * Focus rings, drawn with `outline` rather than `box-shadow`.
+ *
+ * Every control in this app carries `focus-visible:outline-none
+ * focus-visible:ring-2 focus-visible:ring-focus-ring`. The first utility deliberately
+ * blanks the outline so the second can draw the ring — and on eight controls in the
+ * filter rail the second one produced nothing at all, leaving `outline-color` at
+ * `transparent` and `box-shadow` at `none`. Those eight had no visible focus
+ * indication whatsoever. A screenshot of a restyled element would never show it and
+ * neither would `title` or `aria`; only a pixel diff between a focused and a blurred
+ * pill does, and the focused pill was byte-identical to the blurred one in both
+ * schemes.
+ *
+ * The cause is that `ring-2` composes `box-shadow` out of three custom properties,
+ * and the chain does not reliably resolve. It cannot be repaired from the class
+ * list: `shadow-pane` happened to rescue two controls sitting beside the broken ones,
+ * removing every other candidate class rescued nothing, and rewriting the declaration
+ * by hand — in a stylesheet or inline — made the identical value compute correctly,
+ * so the value is sound and the composition around it is what fails.
+ *
+ * So the outline that `outline-none` blanks is filled back in here, and nothing else
+ * is touched. `box-shadow` is deliberately left alone: where the ring composition
+ * works it keeps working, and where a control also carries `shadow-pane` or
+ * `shadow-lift` its own elevation is not thrown away for the length of a focus.
+ *
+ * It wins on specificity, not on order, and that is deliberate. The selector matches
+ * both halves of the pair the codebase ships everywhere —
+ * `focus-visible:outline-none focus-visible:ring-2` — which is (0,3,0) against
+ * Tailwind's (0,2,0), so the utilities cannot out-specify it wherever they land in the
+ * file. Two things that did *not* work are worth recording, because both look right:
+ *
+ *   - Wrapping this in `@layer focus` and declaring that layer last. Tailwind v3 emits
+ *     its utilities as plain unlayered CSS, and unlayered rules beat every layer
+ *     regardless of specificity or position, so the layer guaranteed a loss.
+ *   - Relying on being later in the file at equal specificity. Position after a
+ *     Tailwind build is not something source order gets to promise.
+ *
+ * `outline` is also the right property on its own terms — it follows the element's
+ * border radius, it is what `.wn-range:focus-visible` above already does, and it
+ * carries no custom-property chain that can fail to resolve.
+ */
+.focus-visible\:outline-none.focus-visible\:ring-2:focus-visible {
+  outline: 2px solid var(--wn-focusRing);
+  outline-offset: 2px;
 }
 
 /*
