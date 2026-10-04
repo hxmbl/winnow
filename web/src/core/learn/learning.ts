@@ -24,6 +24,7 @@
 
 import type { Email } from "../model/email";
 import type { BuiltinSmartFilter, EmailSignals } from "../model/signals";
+import { UNSAFE_THRESHOLD } from "../model/signals";
 import {
   defaultWeights,
   isPenalty,
@@ -43,11 +44,17 @@ export const MAX_EVENTS = 400;
 /**
  * How spammy a message has to look before starring it counts as a correction.
  *
- * The threshold the unsafe/spam boundary is drawn at elsewhere in `core`. Below it,
- * a star is an ordinary opinion about an ordinary message and nudging spam
+ * Below it, a star is an ordinary opinion about an ordinary message, and nudging spam
  * sensitivity would teach the classifier to miss phish.
+ *
+ * This is `UNSAFE_THRESHOLD`, and it is derived rather than restated because the two
+ * have to agree: a star on a message the rest of `core` already calls unsafe is the
+ * user contradicting the classifier, and learning from it at a *different* cut-off
+ * than the one that classified the message would teach the model to disagree with
+ * itself. It was two literals of `0.4` and a comment asserting they were the same
+ * number, which is true only until one of them is edited.
  */
-export const SPAM_CONTRADICTION = 0.4;
+export const SPAM_CONTRADICTION = UNSAFE_THRESHOLD;
 
 export type FeedbackAction = "starred" | "unstarred" | "filter_rejected";
 

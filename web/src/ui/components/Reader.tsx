@@ -80,11 +80,14 @@ import type { Mailbox } from "../../core/model/email";
  * own wash, which is a measure of how much machinery was committed to keeping a
  * colour legible rather than saying what it meant.
  *
- * So the shape and the word do the work. The accent survives as a *tint* on the
- * icon, which reinforces a meaning already carried by the glyph and the label
- * rather than being the only carrier of it. Nothing here is a border or an opaque
- * fill: the tags sit on the reader's own surface, and the group is separated from
- * the header above it by spacing.
+ * So the shape and the word do the work, and the accent goes entirely rather than
+ * being kept as a tint: an icon that still needed its bucket's hue to be
+ * interpretable would be carrying the colour anyway, just more quietly, and
+ * `theme.ts` records that the only accent that survived is `starred`, which tints
+ * the star itself. The tag's glyph takes the row's own muted ink, so it reads as
+ * part of the message rather than as a badge competing with it. Nothing here is a
+ * border or an opaque fill either: the tags sit on the reader's own surface, and
+ * the group is separated from the header above it by spacing.
  *
  * The `title` is the explanation from `ui/filterIcons`, so hovering says *why*
  * Winnow thinks this, which is the part a chip never communicated.

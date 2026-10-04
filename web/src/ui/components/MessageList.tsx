@@ -126,8 +126,13 @@ type RowProps = {
  *
  * A glyph is a word somebody already owns. A star means important, a bolt means
  * urgent, a shield means security — in any app, in any language, without a legend.
- * The bucket's accent survives as a tint on the icon, which reinforces a meaning the
- * shape and the row already carry rather than being the only thing carrying it.
+ * The bucket's accent does not survive at all. It was tempting to keep it as a tint
+ * on the glyph — the meaning is settled by then, so the colour would be reinforcing
+ * rather than load-bearing — but a glyph that is still tinted per bucket is still
+ * carrying the colour, only more quietly, and it puts the eleven-hue key back for
+ * anyone who has to decode it. `theme.ts` says the same thing from the token side:
+ * the only accent that outlived the redesign is `starred`. The indicator takes the
+ * row's muted ink and reads as part of the row.
  *
  * The `title` is the reason, from `ui/filterIcons`, and it is what makes hovering
  * explanatory rather than merely decorative: "Important — from someone you read or
@@ -158,10 +163,14 @@ function RowIndicators({ ids }: { ids: readonly BuiltinSmartFilter[] }) {
  *
  * `aria-label` wins over descendant content when a name is computed, so this
  * replaces the row's text wholesale rather than adding to it. That is the point:
- * left to content, the name is sender + subject + preview + timestamp run
- * together into one long string, and the indicator dots are `aria-hidden` — so
- * the one thing that says *why Winnow judged this row* is exactly what a screen
- * reader never hears.
+ * left to content, the name is sender + subject + preview + timestamp run together
+ * into one long string, with the indicators' own labels buried in the middle of it
+ * and in no particular order.
+ *
+ * It was previously argued from the indicators being `aria-hidden`, which they were
+ * when they were coloured dots. They are icons now and each carries an `sr-only`
+ * label, so the reasoning had to change with them — the judgement is still worth
+ * hearing, it is just no longer something a screen reader would miss.
  *
  * Ordered the way the row reads: who, which conversation, what it says, then the
  * state, then the judgement, then when. The visible row is untouched.

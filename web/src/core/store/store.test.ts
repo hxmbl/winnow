@@ -8,7 +8,7 @@ import {
   type PlatformBridge,
 } from "./store";
 import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
-import { builtinFilter, senderFilter } from "../model/signals";
+import { builtinFilter, isUnsafe, senderFilter } from "../model/signals";
 import type { Email, Mailbox } from "../model/email";
 import { LearningModel } from "../learn/learning";
 
@@ -119,7 +119,10 @@ describe("the derived view stays consistent", () => {
     const visible = new Set(store.view.emails.map((e) => e.gmailId));
     for (const message of DEMO_EMAILS) {
       const sig = store.view.signals.get(message.id);
-      if (sig && sig.spamLikelihood >= 0.4 && message.mailbox === "inbox") {
+      // `isUnsafe` rather than the literal `0.4` it used to compare against: written
+      // out, the test kept its own copy of the threshold and would have gone on
+      // passing if the number moved, which is the one thing this test exists to check.
+      if (sig && isUnsafe(sig) && message.mailbox === "inbox") {
         expect(visible.has(message.gmailId)).toBe(false);
       }
     }
