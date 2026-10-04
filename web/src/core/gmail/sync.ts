@@ -108,7 +108,6 @@ export class GmailSyncEngine {
     return this.options.now ?? Date.now;
   }
 
-  /** Refresh, choosing the strategy from whether a cursor exists. */
   /**
    * Refresh, choosing the strategy from whether a cursor exists.
    *
@@ -370,10 +369,4 @@ export class GmailSyncEngine {
     // view with an INBOX label mid-move still lands correctly.
     return { kind: "success", email: { ...email, mailbox: mailboxFor(labels) } };
   }
-
-}
-
-/** Sort newest-first, which is the order every view and the cache expect. */
-export function byNewestFirst(a: Email, b: Email): number {
-  return b.receivedAt - a.receivedAt;
 }

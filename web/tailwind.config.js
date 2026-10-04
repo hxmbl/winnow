@@ -30,8 +30,6 @@ export default {
         "control-border": "var(--wn-controlBorder)",
         "focus-ring": "var(--wn-focusRing)",
 
-        avatar: "var(--wn-avatar)",
-
         danger: "var(--wn-danger)",
         success: "var(--wn-success)",
         notice: "var(--wn-notice)",

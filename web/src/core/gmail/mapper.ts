@@ -26,7 +26,7 @@ import {
   type Mailbox,
 } from "../model/email";
 import { hashId } from "../model/ids";
-import { LABEL, type GmailMessage, type GmailPart } from "./dto";
+import { LABEL, base64UrlDecode, type GmailMessage, type GmailPart } from "./dto";
 import { parseAddressHeader, plainTextFromHtml } from "../mail/html";
 
 /** Which mailbox a set of labels files the message in. */
@@ -128,19 +128,16 @@ function collectAttachments(part: GmailPart | undefined): Attachment[] {
   return out;
 }
 
-/** Decode Gmail's base64url chunked body encoding. */
+/**
+ * Decode Gmail's base64url chunked body encoding.
+ *
+ * A body that will not decode becomes an empty string rather than an exception:
+ * the headers still classify the message and the snippet still previews it, so a
+ * bad body is a worse row, not no row.
+ */
 export function decodeBody(data: string): string {
-  try {
-    const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  } catch {
-    // A malformed body is not a reason to drop the message: the headers still
-    // classify it, and the snippet still shows.
-    return "";
-  }
+  const bytes = base64UrlDecode(data);
+  return bytes === null ? "" : new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
 /** Gmail's snippet, for messages whose payload cannot be decoded. */
@@ -203,8 +200,12 @@ export function toEmail(message: GmailMessage): Email | null {
   const from = headerValue(payload, "From") ?? "";
   const parsedFrom = parseAddressHeader(from);
   // An unparseable `From` still yields a row: the address becomes the raw
-  // header, which classifies as unknown rather than as spam.
-  const sender = parsedFrom?.address ?? from.trim() ?? "unknown@unknown";
+  // header, which classifies as unknown rather than as spam. A message with *no*
+  // `From` at all — rare, but a mailing list or a bounce can manage it — gets the
+  // same placeholder rather than the empty string, which would render as a row with
+  // no sender and no monogram. `??` cannot do this: `from.trim()` is `""`, and `""`
+  // is not nullish, so the fallback below it was dead code.
+  const sender = parsedFrom?.address || from.trim() || "unknown@unknown";
 
   const fallbackDate = Number(message.internalDate) || Date.now();
   const receivedAt = Number.isFinite(Number(message.internalDate))
@@ -217,6 +218,7 @@ export function toEmail(message: GmailMessage): Email | null {
     id: hashId(message.id),
     gmailId: message.id,
     threadId: message.threadId || undefined,
+    messageId: messageIdHeader(headerValue(payload, "Message-ID")),
     sender,
     name: parsedFrom?.name,
     address: parsedFrom?.address,
@@ -234,34 +236,94 @@ export function toEmail(message: GmailMessage): Email | null {
 }
 
 /**
+ * The `Message-ID` header, or `undefined` if there is not a usable one.
+ *
+ * Carried through as-is rather than re-wrapped, because its whole job is to be
+ * the id the *other* client already has. Two things are checked: that it is
+ * actually a `Message-ID` (`<local@domain>`), and that it contains no line break.
+ * The second is a header-injection guard — this value ends up inside a header of
+ * a message Winnow sends, and a `Message-ID` carrying CRLF would let the sender
+ * append arbitrary headers to the reply.
+ */
+export function messageIdHeader(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const value = raw.trim();
+  if (/[\r\n]/.test(value)) return undefined;
+  if (!/^<[^<>\s@]+@[^<>\s@]+>$/.test(value)) return undefined;
+  return value;
+}
+
+/**
  * Decode RFC 2047 encoded words: `=?UTF-8?B?...?=`.
  *
  * Non-ASCII subjects are the overwhelmingly common case, so a subject that
  * fails here is a subject that looks like garbage in the list — the single most
  * visible mapping bug there would be.
+ *
+ * Three things this has to get right, and each was wrong first:
+ *
+ *   - **Both encodings are byte sequences.** Quoted-printable used to go
+ *     byte-by-byte through `String.fromCharCode`, which turns the three escaped
+ *     bytes of an em dash (`=E2=80=94`) into three Latin-1 characters — so every
+ *     accented subject, curly quote and emoji rendered as mojibake.
+ *   - **A word that will not decode is left alone**, rather than the subject
+ *     being lost with it.
+ *   - **Whitespace between two adjacent words is layout, not content** (RFC 2047
+ *     §6.2). Long subjects arrive split exactly this way, and keeping the gap
+ *     doubled it, dropping it glued words together.
  */
 export function decodeMimeWord(value: string): string {
-  return value.replace(
-    /=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g,
-    (_match, charset: string, encoding: string, data: string) => {
-      try {
-        if (encoding.toUpperCase() === "B") {
-          const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
-          const binary = atob(base64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-          return new TextDecoder(charset || "utf-8", { fatal: false }).decode(bytes);
-        }
-        // Quoted-printable: `_` is a space, and `=XX` is a byte.
-        return data
-          .replace(/_/g, " ")
-          .replace(/=([0-9A-Fa-f]{2})/g, (_m, hex: string) =>
-            String.fromCharCode(Number.parseInt(hex, 16)),
-          );
-      } catch {
-        // Leave the encoded word in place rather than losing the subject.
-        return _match;
-      }
-    },
-  );
+  const word = /=\?([^?\s]+)\?([BbQq])\?([^?]*)\?=/g;
+  const out: string[] = [];
+  let at = 0;
+
+  for (let found = word.exec(value); found; found = word.exec(value)) {
+    out.push(value.slice(at, found.index), decodeWord(found));
+    at = found.index + found[0].length;
+
+    const gap = /^\s+/.exec(value.slice(at));
+    if (gap && value.startsWith("=?", at + gap[0].length)) at += gap[0].length;
+  }
+  out.push(value.slice(at));
+  return out.join("");
+}
+
+function decodeWord([match, charset, encoding, data]: RegExpExecArray): string {
+  try {
+    const bytes =
+      encoding.toUpperCase() === "B" ? base64UrlDecode(data) : quotedPrintableBytes(data);
+    // An undecodable word is left in place rather than replaced with nothing,
+    // which would quietly shorten the subject.
+    if (bytes === null) return match;
+    return new TextDecoder(charset || "utf-8", { fatal: false }).decode(bytes);
+  } catch {
+    return match;
+  }
+}
+
+/** `_` is a space and `=XX` is one byte, so the escapes assemble a byte string. */
+function quotedPrintableBytes(data: string): Uint8Array {
+  const bytes: number[] = [];
+  let run = "";
+  /** The literal ASCII between two escaped runs, which must keep its position. */
+  const flush = (): void => {
+    for (const char of run) bytes.push(char.charCodeAt(0));
+    run = "";
+  };
+
+  for (let i = 0; i < data.length; i += 1) {
+    const char = data[i];
+    if (char === "_") {
+      flush();
+      bytes.push(0x20);
+    } else if (char === "=" && /^[0-9A-Fa-f]{2}$/.test(data.slice(i + 1, i + 3))) {
+      flush();
+      bytes.push(Number.parseInt(data.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      run += char;
+    }
+  }
+  flush();
+  return new Uint8Array(bytes);
 }

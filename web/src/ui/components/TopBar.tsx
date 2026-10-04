@@ -1,16 +1,32 @@
 /**
  * The top bar.
  *
- * Four things in a row, in a deliberate order: identity, search, filters,
- * actions. Left to right is "what am I looking at" → "narrow it" → "act on it",
- * and the hairline between the filters and the actions marks exactly that
- * boundary.
+ * Three rows, in a deliberate order: identity and actions, then the filter rail,
+ * then the status line. The rail used to sit inline with everything else on a wide
+ * screen and only got its own row on a narrow one, and that is backwards.
  *
- * The filter strip is rendered twice — inline on a wide screen, on its own row
- * on a narrow one — from the same props object. The narrow copy is
- * `aria-hidden`, because two live copies of the same control list in the
- * accessibility tree is a bug: a screen reader user would hear every pill twice
- * and have no way to tell which one responds to Enter.
+ * The rail is the product. It is where Winnow's opinion about your mail is on
+ * screen, ranked by how much mail each bucket holds, and it is long — the demo
+ * inbox alone puts twenty-eight pills in it. Sharing a row with the mailbox nav,
+ * the search box, five action buttons, two icon buttons and the position cluster
+ * left it about 450px at 1440, which showed *three* pills and a fade. Everything
+ * else on that row is `shrink-0` because it must not reflow; the rail was the only
+ * elastic child, so it absorbed the entire shortfall. The three most important
+ * controls in the app were the three that fit.
+ *
+ * Giving it its own full-width row costs about 30px of chrome and buys roughly
+ * fifteen visible pills instead of three — and it removes the second copy of the
+ * strip entirely. That copy existed only to serve the narrow layout, and was
+ * rendered with `inert` so it would not appear twice to assistive technology: two
+ * renderings, one scroll container, one `ResizeObserver`, one set of overflow
+ * fades, for one control list.
+ *
+ * The status line is last because it is a footnote — but it is the only place a
+ * user can confirm which account they are reading, which on a shared machine
+ * matters, and it is also where the demo says what it is and offers the way out.
+ *
+ * Left-to-right within the first row is "what am I looking at" → "act on it", with
+ * the hairline before the action cluster marking exactly that boundary.
  */
 
 import {
@@ -26,9 +42,12 @@ import {
   Settings2,
   Star,
   Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import { formatRelative } from "../../core/mail/datetime";
+import { shortcutFor } from "../../core/mail/keybinds";
+import { AppMark } from "../AppMark";
 import type { Mailbox } from "../../core/model/email";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 
@@ -57,7 +76,14 @@ type Props = {
   mailboxes: MailboxTab[];
   activeMailbox: Mailbox;
   onSelectMailbox: (mailbox: Mailbox) => void;
-  position: number;
+  /**
+   * Which row the cursor is on, or `null` when it has never moved.
+   *
+   * `null` rather than `0` because "not on anything yet" and "on the first row" are
+   * different states, and rendering the first as `0` in a "3 of 38"-shaped cluster
+   * reads as an empty list.
+   */
+  position: number | null;
   total: number;
   /**
    * What the list is currently showing: "Inbox", "From ada@example.com", or
@@ -100,7 +126,15 @@ type FilterStripProps = React.ComponentProps<typeof FilterStrip>;
 const ICON_BUTTON =
   "flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-35 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
-/** The action cluster. Disabled rather than hidden when there is no selection. */
+/**
+ * The action cluster. Disabled rather than hidden when there is no selection.
+ *
+ * The `hint` is resolved through the keybind table rather than typed in, so a button's
+ * tooltip can only advertise a shortcut the router actually takes. It used to be a
+ * literal per button, which is the drift the cheat sheet's comment describes — `,` and
+ * `⇧U` worked for weeks without appearing anywhere, and nothing stopped a fourth
+ * button from advertising a key that did nothing.
+ */
 function ToolButton({
   onClick,
   label,
@@ -110,7 +144,8 @@ function ToolButton({
 }: {
   onClick: () => void;
   label: string;
-  hint?: string;
+  /** The shortcut, or `null`/omitted when the command has no key. */
+  hint?: string | null;
   disabled?: boolean;
   children: React.ReactNode;
 }) {
@@ -175,15 +210,37 @@ export function TopBar({
     onClear: onClearFilters,
   };
 
-  // The archive button's meaning follows the mailbox, exactly as the `e`
-  // shortcut's does. A toolbar that says "Archive" while you are looking at the
-  // bin, and archives something that is already archived, is a small lie.
+  /*
+    The one context-sensitive verb, and the icon goes with the label.
+
+    Four cases rather than three, because Spam is not Archive or Restore and calling it
+    "Restore" in a spam folder describes an action the user is not being offered. From
+    Spam the button moves the message back to the inbox — which is what Gmail calls
+    "Not spam", what the reader's own button calls it, and what it is.
+
+    The label and the icon were separate decisions and had drifted: the icon had become
+    "not in the inbox, so it points back" while the label still read "Restore". Both now
+    come from the same case.
+  */
   const archiveLabel =
     activeMailbox === "inbox"
       ? "Archive"
       : activeMailbox === "archive"
         ? "Move to inbox"
-        : "Restore";
+        : activeMailbox === "spam"
+          ? "Not spam"
+          : "Restore";
+  // The icon is an element rather than a component reference, so the label and the
+  // glyph come from one expression — and so `no-unused-vars`, which does not track
+  // JSX usage without the React plugin, can see that it is used at all.
+  const archiveIcon =
+    activeMailbox === "inbox" ? (
+      <Archive size={16} strokeWidth={1.9} />
+    ) : activeMailbox === "spam" ? (
+      <Undo2 size={16} strokeWidth={1.9} />
+    ) : (
+      <RotateCcw size={16} strokeWidth={1.9} />
+    );
   const trashLabel = activeMailbox === "trash" ? "Delete permanently" : "Move to trash";
 
   return (
@@ -204,9 +261,9 @@ export function TopBar({
         the desktop layout wants it. One element, two layouts, no duplication and no
         fixed-pixel guesses about how tall the chrome is.
       */}
-      <div className="flex h-auto min-w-0 flex-wrap items-center gap-2 px-3 py-2 sm:h-14 sm:flex-nowrap sm:gap-3 lg:h-16 lg:px-4">
+      <div className="flex h-auto min-w-0 flex-wrap items-center gap-2 px-3 py-2 sm:h-14 sm:flex-nowrap sm:gap-3 sm:px-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center">
-          <img src="./relayLight.svg" alt="" aria-hidden="true" className="h-9 w-9" />
+          <AppMark />
           <span className="sr-only">Winnow</span>
         </div>
 
@@ -261,11 +318,21 @@ export function TopBar({
           shrinkage and collapsed to *zero width* on a 390px phone. Not cramped:
           absent, while still occupying a slot and still being focusable by `/`. The
           row scrolls, so a hard minimum keeps it reachable rather than invisible, and
-          `max-w-[220px]` still stops it eating the bar on a desktop.
+          `max-w-[240px]` still stops it eating the bar on a desktop.
+
+          Now that the rail has its own row, this box has the rest of the first row to
+          itself and can afford to be a little wider — searching is the second thing
+          you do in a mail client and it should not be the smallest thing you can see.
+          420px rather than 240 because of what a cap *below* the available width
+          produces: the actions cluster is `ml-auto`, so the space a narrower box
+          leaves does not close up — it opens into ~380px of nothing between the
+          search field and the first icon on a 1440px window, which reads as a
+          layout mistake rather than as breathing room. A box wide enough to hold a
+          sender's name and a subject fragment is the width that earns the space.
         */}
         <label
           htmlFor="topbar-search"
-          className="order-last flex h-8 w-full min-w-0 items-center gap-2 rounded-full border border-hairline bg-surface-sunken px-3 sm:order-none sm:max-w-[220px] sm:flex-1 sm:min-w-[9.5rem]"
+          className="order-last flex h-8 w-full min-w-0 items-center gap-2 rounded-full border border-hairline bg-surface-sunken px-3 sm:order-none sm:max-w-[420px] sm:flex-1 sm:min-w-[9.5rem]"
         >
           <Search size={14} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
           <input
@@ -279,11 +346,9 @@ export function TopBar({
           />
         </label>
 
-        {/* The inline strip is the live one; the narrow copy below is decorative
-            for sighted users and hidden from assistive tech entirely. */}
-        <FilterStrip {...stripProps} className="hidden min-w-0 flex-1 lg:flex" />
-
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        {/* The inline strip is the live one, and the only one — it moved to its own
+            full-width row below, so there is no second copy to keep inert. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2 max-sm:ml-0 max-sm:w-full max-sm:justify-between">
           <span className="hidden h-6 w-px bg-divider lg:block" aria-hidden="true" />
 
           {/* One border, internal dividers: reads as a single control that holds
@@ -292,7 +357,7 @@ export function TopBar({
             <ToolButton
               onClick={onStar}
               label="Star"
-              hint="s"
+              hint={shortcutFor("toggleStar")}
               disabled={!hasSelection}
             >
               <Star size={16} strokeWidth={1.9} />
@@ -301,31 +366,31 @@ export function TopBar({
             <ToolButton
               onClick={onRead}
               label="Mark read or unread"
-              hint="u"
+              hint={shortcutFor("toggleRead")}
               disabled={!hasSelection}
             >
               <Mail size={16} strokeWidth={1.9} />
             </ToolButton>
-            <ToolButton onClick={onMarkAllRead} label="Mark all read" hint="⇧U">
+            <ToolButton
+              onClick={onMarkAllRead}
+              label="Mark all read"
+              hint={shortcutFor("markAllRead")}
+            >
               <Check size={16} strokeWidth={1.9} />
             </ToolButton>
             <span className="mx-1 h-4 w-px bg-divider" aria-hidden="true" />
             <ToolButton
               onClick={onArchive}
               label={archiveLabel}
-              hint="e"
+              hint={shortcutFor("archive")}
               disabled={!hasSelection}
             >
-              {activeMailbox === "inbox" ? (
-                <Archive size={16} strokeWidth={1.9} />
-              ) : (
-                <RotateCcw size={16} strokeWidth={1.9} />
-              )}
+              {archiveIcon}
             </ToolButton>
             <ToolButton
               onClick={onTrash}
               label={trashLabel}
-              hint="#"
+              hint={shortcutFor("trash")}
               disabled={!hasSelection}
             >
               <Trash2 size={16} strokeWidth={1.9} />
@@ -334,7 +399,7 @@ export function TopBar({
 
           <span className="hidden h-6 w-px bg-divider lg:block" aria-hidden="true" />
 
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 max-sm:order-last max-sm:ml-auto">
             <ToolButton
               onClick={onRefresh}
               label={syncing ? "Syncing" : "Sync now"}
@@ -346,7 +411,7 @@ export function TopBar({
                 className={syncing ? "animate-spin" : ""}
               />
             </ToolButton>
-            <ToolButton onClick={onSettings} label="Settings" hint=",">
+            <ToolButton onClick={onSettings} label="Settings" hint={shortcutFor("openSettings")}>
               <Settings2 size={15} strokeWidth={1.9} />
             </ToolButton>
           </div>
@@ -362,9 +427,18 @@ export function TopBar({
             horizontal scroll of a toolbar could reach it.
 
             Neither dropped element was only information: the active mailbox pill already
-            names the list, and `12/38` reads the same as `12 of 38`.
+            names the list, and `—/38` reads the same as `— of 38`.
+
+            Below `sm` this cluster moves to the *front* of the line it wrapped onto,
+            with the sync and settings buttons pushed to the far right. It used to sit
+            hard against the right edge with 250px of nothing to its left, which reads as
+            a toolbar that failed to lay out rather than as a deliberate arrangement.
+
+            The two `max-sm:order-*` pairs are one swap, not four independent decisions:
+            both clusters are `ml-auto`-pushed on a wide screen by the wrapper above,
+            and both have to give that up below `sm` or the swap achieves nothing.
           */}
-          <div className="flex items-center gap-0.5 rounded-full border border-hairline py-0.5 pl-2.5 pr-1 sm:pl-3">
+          <div className="flex items-center gap-0.5 rounded-full border border-hairline py-0.5 pl-2.5 pr-1 sm:pl-3 max-sm:order-first">
             {/* The list's own name, truncated rather than wrapped: a long sender
                 address must not push the arrows out of the cluster. */}
             <span
@@ -373,7 +447,9 @@ export function TopBar({
             >
               {listTitle}
             </span>
-            <span className="text-ui font-semibold tabular-nums text-ink">{position}</span>
+            <span className="text-ui font-semibold tabular-nums text-ink">
+              {position ?? "—"}
+            </span>
             <span className="text-ui tabular-nums text-ink-subtle">
               <span className="hidden sm:inline">of </span>
               <span className="sm:hidden">/</span>
@@ -401,25 +477,8 @@ export function TopBar({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 px-4 pb-2.5 lg:hidden">
-        {/*
-          The narrow copy of the rail.
-
-          `inert`, not `aria-hidden`. The strip is rendered twice from the same props
-          so it can sit inline at `lg` and on its own row below it, and the two copies
-          are genuinely the same control list. `aria-hidden` hides the second one from
-          a screen reader while leaving every button in it *tabbable* — so a keyboard
-          user walked into a set of controls the assistive technology would not announce,
-          and pressing Enter there toggled a filter nobody had heard of.
-
-          `inert` removes the copy from both the accessibility tree and the tab order,
-          which is what "this is a duplicate, do not use it" actually means. The browser
-          support is complete in every engine this app targets, and the copy is only
-          rendered below `lg` anyway, where the inline one is `hidden`.
-        */}
-        <div inert className="min-w-0 flex-1">
-          <FilterStrip {...stripProps} />
-        </div>
+      <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
+        <FilterStrip {...stripProps} className="min-w-0 flex-1" />
       </div>
 
       {/*
@@ -449,7 +508,9 @@ export function TopBar({
             title="Sign out"
             className="flex shrink-0 items-center gap-1 text-[11.5px] font-semibold text-ink-subtle transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            <span className="max-w-[16rem] truncate">{accountEmail}</span>
+            <span className="max-w-[16rem] truncate" title={accountEmail}>
+              {accountEmail}
+            </span>
             <X size={11} strokeWidth={2.2} aria-hidden="true" />
           </button>
         ) : (
@@ -465,13 +526,19 @@ export function TopBar({
             The failure is rendered beside the button rather than in the app-wide error
             strip, because this is not the app's error — it is this button's, and it
             belongs next to the thing that failed. It stays until the next attempt.
+
+            Wrapped, not truncated. This is where a build-level problem lands — "this
+            build has no Google client id, so it cannot sign in. Set
+            VITE_GMAIL_CLIENT_ID" — and clipping the tail of it with an ellipsis
+            removed the one half of the sentence the user needs. A `title` attribute
+            held the full text, but a hover tooltip on a red line is something nobody
+            discovers while their app will not sign in.
           */
-          <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <div className="flex min-w-0 shrink items-start gap-2">
             {connectError && (
               <span
                 role="alert"
-                className="max-w-[24rem] truncate text-[11.5px] font-medium text-danger"
-                title={connectError}
+                className="max-w-[24rem] text-[11.5px] font-medium leading-snug text-danger"
               >
                 {connectError}
               </span>

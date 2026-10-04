@@ -88,6 +88,86 @@ body {
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  /*
+   * The weight sliders.
+   *
+   * `appearance-none` is what makes the thumb and the track drawable here at all,
+   * and it has one consequence worth stating: it also switches `accent-color` off.
+   * So a range with only a background renders as an empty grey bar with a thumb
+   * floating on it, and every value looks the same until you read the number.
+   * `--wn-range-fill` is set by the caller as a percentage, and the gradient turns
+   * that into the filled part.
+   *
+   * The thumb is styled for both engines because neither implements both
+   * pseudo-elements, the same reason `.thin-scroll` above is written twice.
+   */
+  .wn-range {
+    background: linear-gradient(
+      to right,
+      var(--wn-inkBody) var(--wn-range-fill, 0%),
+      var(--wn-surfaceActive) var(--wn-range-fill, 0%)
+    );
+  }
+
+  .wn-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--wn-inkBody);
+    /* A ring in the panel's own colour, so the thumb reads as sitting *on* the
+       track rather than as a dark lump in a grey bar. */
+    border: 2px solid var(--wn-chrome);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+  }
+
+  .wn-range::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--wn-chrome);
+    border-radius: 999px;
+    background: var(--wn-inkBody);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+  }
+
+  .wn-range:focus-visible {
+    outline: 2px solid var(--wn-focusRing);
+    outline-offset: 4px;
+  }
+
+  /*
+   * A scroller that says it scrolls.
+   *
+   * Two `background-attachment: local` layers over two `scroll` ones: the local
+   * pair is pinned to the content and scrolls away with it, the fixed pair to the
+   * box, so whichever edge has content past it is the edge showing a shadow.
+   * That is why it needs no JavaScript, no scroll listener and no state — the
+   * same reason `background-attachment` is what this is built from rather than
+   * two absolutely-positioned elements toggled on `onScroll`.
+   *
+   * The shadows are on the panel's own colour, because that is what is behind
+   * them: an opaque sheet sitting on a scrim.
+   */
+  .scroll-shadow {
+    background-image:
+      linear-gradient(var(--wn-chrome) 30%, rgb(0 0 0 / 0)),
+      linear-gradient(rgb(0 0 0 / 0), var(--wn-chrome) 70%),
+      linear-gradient(rgb(0 0 0 / 0.1), rgb(0 0 0 / 0)),
+      linear-gradient(rgb(0 0 0 / 0), rgb(0 0 0 / 0.1));
+    background-position:
+      top,
+      bottom,
+      top,
+      bottom;
+    background-repeat: no-repeat;
+    background-size:
+      100% 22px,
+      100% 22px,
+      100% 9px,
+      100% 9px;
+    background-attachment: local, local, scroll, scroll;
+  }
 }
 
 /*

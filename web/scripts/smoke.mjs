@@ -114,21 +114,47 @@ try {
   page.on("pageerror", (error) => errors.push(String(error)));
 
   /**
-   * The composer's discard prompt, answered on the next `Escape`.
+   * Native dialogs are a failure here, not a mechanism.
    *
-   * Registered as a permanent handler rather than per-press: Playwright *dismisses*
-   * dialogs it has no handler for, so a `once("dialog")` registered after the
-   * keystroke is a race, and a handler that is only sometimes attached makes every
-   * assertion about the composer depend on which branch ran first. One handler, one
-   * switch.
+   * The composer's discard confirmation used to be `window.confirm`, and this handler
+   * existed to answer it. It is gone: Tauri's webviews do not reliably implement
+   * `confirm`, so on the desktop the question could not be asked at all, and a
+   * browser-native dialog cannot be styled and blocks the render loop. The
+   * confirmation is a real dialog now — see `Overlay.tsx`'s `ConfirmDialog` — and this
+   * handler stays purely as a tripwire: if anything reaches for `window.confirm`,
+   * `alert` or `prompt` again, the test fails with a message that says why rather than
+   * quietly answering it.
    */
-  let discardAnswer = false;
-  page.on("dialog", (dialog) => (discardAnswer ? dialog.accept() : dialog.dismiss()));
+  page.on("dialog", async (dialog) => {
+    failures.push(
+      `a native dialog was raised: ${dialog.type()} — "${dialog.message()}". ` +
+        `Winnow must ask in-app: window.confirm is unimplemented in a Tauri webview.`,
+    );
+    await dialog.dismiss();
+  });
+
+  /**
+   * The in-app confirmation, answered by clicking one of its two buttons.
+   *
+   * By pointer rather than by keyboard, and deliberately: pressing Escape a second
+   * time *cancels* the confirmation, so a keyboard-driven flow would be testing that
+   * the safe answer is reachable twice rather than that the dialog can be resolved
+   * either way.
+   */
+  const confirmDialog = () => page.locator('[role="dialog"][aria-label="Discard this draft?"]');
+  const answerDiscard = async (accept) => {
+    const dialog = confirmDialog();
+    await dialog.waitFor({ state: "visible", timeout: 5_000 });
+    await dialog.getByRole("button", { name: accept ? "Discard" : "Keep editing" }).click();
+    await dialog.waitFor({ state: "detached", timeout: 5_000 });
+  };
 
   // Re-read after every state change, so nothing here holds a stale handle.
   const rows = () => page.locator("[data-message-id]");
-  // Scoped to the *live* copy of the rail: it is rendered twice (inline at `lg`, on
-  // its own row below it), and counting both would double every number here.
+  // Scoped to the live rail. It was rendered twice — inline at `lg` and again on its
+  // own row below it — and counting both would have doubled every number here; there is
+  // one copy now, and the `:visible` guard documents that it is a layout assumption
+  // rather than a structural one.
   const pills = () => page.locator("header button[aria-pressed]:visible");
   const mailbox = (name) =>
     page.locator('header nav[aria-label="Mailboxes"] button', { hasText: name }).first();
@@ -167,15 +193,57 @@ try {
   require("the demo mailbox has rows", rowCount > 20, `${rowCount} rows`);
   check("the demo mailbox is populated", true, `${rowCount} rows`);
 
-  const sections = await page.locator("section").count();
-  check("rows are grouped into dated sections", sections >= 3, `${sections} sections`);
-
   const pillCount = await pills().count();
   require("the filter rail is populated", pillCount > 5, `${pillCount} pills`);
   check("the filter rail is ranked", true, `${pillCount} pills`);
 
   const title = await listTitle();
   check("the list says what it is showing", Boolean(title?.trim()), title ?? "");
+
+  // The rail is the product, and it used to share a row with the mailbox nav, the
+  // search box, five action buttons, two icon buttons and the position cluster. Every
+  // one of those is `shrink-0` because it must not reflow, so the rail — the only
+  // elastic child — absorbed the whole shortfall and showed three pills at 1440px.
+  // Asserted as a ratio rather than a pixel count, because the number of pills depends
+  // on the mailbox; what matters is that most of them are reachable without scrolling.
+  const rail = await page.evaluate(() => {
+    // Not `header .no-scrollbar.overflow-x-auto` — the mailbox nav is one of those too,
+    // and it is 265px wide for exactly the right reason. The rail is the one holding
+    // pressed-state pills.
+    const scrollers = [...document.querySelectorAll("header div.no-scrollbar")].filter((element) =>
+      element.querySelector("button[aria-pressed]"),
+    );
+    if (scrollers.length !== 1) return { copies: scrollers.length };
+    const scroller = scrollers[0];
+    const pills = [...scroller.querySelectorAll("button[aria-pressed]")];
+    const box = scroller.getBoundingClientRect();
+    const visible = pills.filter((pill) => {
+      const rect = pill.getBoundingClientRect();
+      return rect.right > box.left + 1 && rect.left < box.right - 1;
+    });
+    return {
+      copies: scrollers.length,
+      total: pills.length,
+      visible: visible.length,
+      width: box.width,
+    };
+  });
+  check("the rail is rendered exactly once", rail?.copies === 1, `${rail?.copies} copies`);
+  check("on its own full-width row", (rail?.width ?? 0) > 1000, `${rail?.width}px`);
+  check(
+    "so most of it is reachable without scrolling",
+    (rail?.visible ?? 0) >= Math.min(8, rail?.total ?? 0),
+    `${rail?.visible} of ${rail?.total} pills in ${rail?.width}px`,
+  );
+
+  // The position cluster said "0 of 38" before the keyboard had ever been touched,
+  // which reads as an empty mailbox — and "0 of 0" on a narrowed list.
+  const position = await page.locator("header").getByText(/^(—|\d+)\s*\/?\s*(of\s*)?\d+$/).count();
+  check("the position cluster is not claiming row 0", position > 0);
+  check(
+    "an untouched list shows a dash rather than a row number",
+    (await page.locator("header").getByText("—", { exact: false }).count()) > 0,
+  );
 
   // ── Sign-in is reachable from the demo ─────────────────────────────────────
 
@@ -285,6 +353,103 @@ try {
   await page.locator("#topbar-search").fill("");
   await page.waitForTimeout(300);
   check("clearing the search brings the list back", (await rows().count()) === rowCount);
+
+  // ── Sorting ────────────────────────────────────────────────────────────────
+
+  section("sorting");
+
+  /**
+   * The dated sections, and what they say.
+   *
+   * `section > [role=list]` is the list's own markup: the settings sheet is also a
+   * `<section>`, so a bare `section` selector counted whichever panel happened to be
+   * open. The label is read off the accessible name rather than the rendered header,
+   * because that name is the thing a screen reader gets — and if it stops carrying the
+   * count, the header and the boundary disagree.
+   */
+  const daySections = () => page.locator("section > [role='list']");
+  const sectionNames = async () =>
+    (
+      await page.locator("section[aria-label]").evaluateAll((els) =>
+        els.map((el) => el.getAttribute("aria-label")),
+      )
+    ).join(" · ");
+
+  /**
+   * Change the sort the way a user would: the `Reading` row in Settings. Not by
+   * writing to localStorage, because that would skip the panel entirely and this
+   * is also an assertion that the control is where the copy says it is.
+   */
+  const sortBy = async (label) => {
+    // Blurred first, and deliberately: the search box is still the focused element
+    // at this point, and a `,` typed into a text field is a comma. The keybind
+    // router's `textEditing` branch is right to ignore it — the test has to not be
+    // inside a field.
+    await page.locator("#topbar-search").blur();
+    await page.keyboard.press(",");
+    await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+  };
+
+  const datedSections = async () =>
+    page.locator("section[aria-label]").evaluateAll((els) =>
+      els.map((el) => el.getAttribute("aria-label") ?? ""),
+    );
+
+  check(
+    "the default sort groups the list into dated sections",
+    (await daySections().count()) >= 3,
+    `${await sectionNames()}`,
+  );
+  check(
+    "each section names its day and counts its rows",
+    (await datedSections()).every((name) => /^(Today|Yesterday|This week|Earlier), \d+ messages?$/.test(name)),
+    `${await sectionNames()}`,
+  );
+  check(
+    "and the days run oldest-last, because that is the order they arrived in",
+    (await datedSections()).every((name, i, all) => {
+      const rank = ["Today", "Yesterday", "This week", "Earlier"];
+      return i === 0 || rank.indexOf(name.split(",")[0]) > rank.indexOf(all[i - 1].split(",")[0]);
+    }),
+    `${await sectionNames()}`,
+  );
+
+  /**
+   * The bug these two sorts caused.
+   *
+   * Day headers are a claim about adjacency, which only a chronological list can
+   * make. Sorting by score interleaved the days, so the list read `Today / This
+   * week / Today / …` — and because each section was keyed on its *bucket name*,
+   * every repeat was a duplicate React key. The error count is therefore checked
+   * *per sort*: a run counted at the end could only say that something, somewhere,
+   * logged once.
+   */
+  for (const label of ["Smart Score", "Sender"]) {
+    const before = errors.length;
+    await sortBy(label);
+    check(
+      `${label} renders one flat list, not interleaved day sections`,
+      (await daySections().count()) === 1,
+      `${await daySections().count()} section(s): ${await sectionNames()}`,
+    );
+    check(
+      `${label} logs no duplicate-key error`,
+      errors.length === before,
+      errors.slice(before, before + 1).join(" | "),
+    );
+    check(
+      `${label} still shows every row`,
+      (await rows().count()) === rowCount,
+      `${await rows().count()} of ${rowCount}`,
+    );
+  }
+
+  await sortBy("Date");
+  check("switching back to Date restores the sections", (await daySections().count()) >= 3);
+  check("and the row count is unchanged", (await rows().count()) === rowCount);
 
   // ── The reader ─────────────────────────────────────────────────────────────
 
@@ -450,19 +615,90 @@ try {
   check("typed text lands at the caret, in order", typed.startsWith("Sounds good"), JSON.stringify(typed.slice(0, 30)));
   check("the quoted original is stripped once you start writing", !typed.includes(">"));
 
-  discardAnswer = false;
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(300);
+  // ⌘⏎ sends. Without it a reply is mouse-only: `r` opens the sheet and then the hand
+  // has to leave the home row, which is not what every other mail client on every
+  // platform asks of you. It lives on the sheet rather than in `keybinds.ts` because
+  // the composer's keys are a hard stop there — every one belongs to the field the user
+  // is typing into.
   check(
-    "declining the discard keeps the composer open",
+    "the Send button advertises the shortcut",
+    (await page.locator('[role="dialog"] button:has-text("Send") kbd').count()) > 0,
+  );
+  await page.keyboard.press("Meta+Enter");
+  await page.waitForTimeout(500);
+
+  // The demo has nowhere to send to, which is the one thing it can usefully prove here:
+  // the failure is reported *once*, in the composer, in words a person can act on. It
+  // used to be reported twice — "Cannot send: not signed in." inside the sheet and
+  // "Signing in to Gmail is required to send." in the app-wide strip above it — so one
+  // failed send produced two banners saying different things about the same event.
+  const composerError = page.locator('[role="dialog"][role="dialog"], [role="dialog"] [role="alert"]');
+  check(
+    "the composer reports why it could not send",
+    (await composerError.count()) > 0 &&
+      (await composerError.first().textContent())?.includes("Signing in to Gmail"),
+    (await composerError.first().textContent()) ?? "no message",
+  );
+  check(
+    "and says nothing the user cannot act on",
+    !(await page.locator('body').textContent())?.includes("Cannot send: not signed in"),
+  );
+  check(
+    "and does not also put a banner above the app",
+    (await page.locator('div[role="alert"]:has-text("read-only")').count()) === 0,
+  );
+  check(
+    "the composer stays open so the draft is not lost",
     (await page.locator('textarea[aria-label="Message"]').count()) > 0,
   );
-  discardAnswer = true;
+
+  // The discard path. An untouched draft closes on Escape with no question; a written
+  // one asks. Both halves are asserted, because "always asks" and "never asks" are
+  // both wrong and neither shows up in a screenshot.
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(250);
+  check(
+    "a written draft asks before it is discarded",
+    (await confirmDialog().count()) === 1,
+  );
+  check(
+    "and the draft is still there while the question is open",
+    (await page.locator('textarea[aria-label="Message"]').count()) > 0,
+  );
+  await answerDiscard(false);
+  check(
+    "declining keeps the composer open",
+    (await page.locator('textarea[aria-label="Message"]').count()) > 0,
+  );
+  check(
+    "declining keeps what was typed",
+    (await page.locator('textarea[aria-label="Message"]').inputValue()).startsWith("Sounds good"),
+  );
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  await answerDiscard(true);
   check(
     "accepting the discard closes it",
     (await page.locator('textarea[aria-label="Message"]').count()) === 0,
+  );
+
+  // Escape from the composer with nothing written is not a question. It used to be,
+  // because the prompt could not tell an untouched draft from a written one — so
+  // closing a reply you had not typed into demanded a confirmation, which trains people
+  // to click through confirmations.
+  await openMessage();
+  await page.keyboard.press("r");
+  await page.waitForSelector('textarea[aria-label="Message"]', { timeout: 5_000 });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  check(
+    "an untouched draft closes without asking",
+    (await page.locator('textarea[aria-label="Message"]').count()) === 0,
+  );
+  check(
+    "and asks nothing",
+    (await confirmDialog().count()) === 0,
   );
 
   // Forward. `GmailClient` has had a forward path in it from the start and nothing
@@ -482,9 +718,19 @@ try {
     "Send is disabled with no recipient",
     await page.locator('[role="dialog"] button:has-text("Send")').first().isDisabled(),
   );
-  discardAnswer = true;
+
+  // An untouched forward closes on Escape with no question. It used to ask: the
+  // "is there anything to lose?" test was "is the body empty", and a forward's body is
+  // the conversation — so `f` then Escape demanded confirmation about text Winnow had
+  // put there a second earlier, and the only way out was a second Escape. Confirmations
+  // you are trained to dismiss are how the ones that matter stop working.
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
+  check(
+    "an empty forward closes without asking",
+    (await page.locator('[role="dialog"][aria-label="Forward"]').count()) === 0,
+  );
+  check("and asks nothing", (await confirmDialog().count()) === 0);
 
   await closeReader();
   await openMessage();
@@ -494,12 +740,44 @@ try {
     "`f` opens the forward composer",
     (await page.locator('[role="dialog"][aria-label="Forward"]').count()) > 0,
   );
-  discardAnswer = true;
+  // …and a forward whose body the user has added to is a written draft, so it asks.
+  // Filling in a recipient is deliberately *not* enough: the body is Winnow's, and
+  // discarding a message whose every word Winnow typed loses nothing.
+  await page.locator('input[aria-label="To"]').fill("someone@example.com");
   await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  check(
+    "a forward with only a recipient is still untouched",
+    (await confirmDialog().count()) === 0,
+  );
+
+  await openMessage();
+  await page.keyboard.press("f");
   await page.waitForTimeout(300);
+  await page.locator('textarea[aria-label="Message"]').click();
+  await page.keyboard.type("Worth a look.");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  check(
+    "a forward with a written body asks before it is discarded",
+    (await confirmDialog().count()) === 1,
+  );
+  await answerDiscard(true);
+  await page.waitForTimeout(200);
   await closeReader();
 
-  // ── Mailboxes ──────────────────────────────────────────────────────────────
+  // ── Remote content is a per-message decision ──────────────────────────────
+
+  // The reader's escape hatch used to be a preference change wearing a per-message
+  // label: "Load images" sat under one message and turned on remote content for every
+  // message, permanently. A decision about one message is not a decision about all of
+  // them, and the global switch still exists in Settings where its scope is visible.
+  const demoHasHtml = await page.evaluate(() =>
+    [...document.querySelectorAll("iframe[title^='Message from']")].length,
+  );
+  check("the demo reader renders text, not markup", demoHasHtml === 0);
+
+  // ── The mailboxes ──────────────────────────────────────────────────────────
 
   section("mailboxes");
 
@@ -543,6 +821,40 @@ try {
     `spam ${spamBefore} → ${await unreadBadge("Spam")}`,
   );
 
+  // ── Mark-all-read is undoable ──────────────────────────────────────────────
+
+  // `⇧U` is the one verb in the app with no inverse anywhere on screen: a star is a
+  // toggle, a filed message reappears where it went, a filter has its own pill. It
+  // used to clear a whole mailbox's read state on one keystroke with nothing to bring
+  // it back from, which on a thousand unread is the one mistake in triaging you
+  // cannot walk back.
+  const undo = page.locator('button:has-text("Undo")');
+  check("mark all read offers an undo", (await undo.count()) > 0);
+  check(
+    "which says what it did",
+    (await page.locator("text=Marked everything in this mailbox as read").count()) > 0,
+  );
+
+  await undo.first().click();
+  await page.waitForTimeout(300);
+  check("taking it restores the unread count", (await unreadBadge("Inbox")) !== "0", await unreadBadge("Inbox"));
+  check("and the offer goes away", (await undo.count()) === 0);
+
+  // Which mailbox it acted on has to be visible, and the offer has to survive a
+  // message-level action — the label names the mailbox, and the rollback reads live
+  // state rather than a captured snapshot.
+  await page.locator('button[aria-label="Mark all read"]').click();
+  await page.waitForTimeout(250);
+  await openMessage();
+  check("the offer survives opening a message", (await undo.count()) > 0);
+  await closeReader();
+
+  await undo.first().click();
+  await page.waitForTimeout(250);
+  await goTo("Spam");
+  check("and is gone once the mailbox changes", (await undo.count()) === 0);
+  await goTo("Inbox");
+
   // ── Rail counts are inbox-wide ─────────────────────────────────────────────
 
   // The rail used to be ranked over the *visible* list, so every count read 0 the
@@ -568,8 +880,26 @@ try {
   require("the spam folder has messages", spamRows > 0, `${spamRows} rows`);
   await rows().first().click();
   await page.waitForSelector("article h1", { timeout: 5_000 });
+
+  // Archive from Spam *is* "move to the inbox", so offering both it and the not-spam
+  // button meant two icons with two tooltips for one action — which reads as a toolbar
+  // with a duplicated control. Asserted as an exact count so a third one cannot join
+  // them.
+  const archiveInSpam = page.locator(
+    'button[aria-label="Archive"], button[aria-label="Restore"], button[aria-label="Move to inbox"]',
+  );
+  check(
+    "the spam folder offers exactly one way back to the inbox",
+    (await archiveInSpam.count()) === 0,
+    `${await archiveInSpam.count()} archive-shaped buttons in the reader`,
+  );
+
   const notSpam = page.locator('button[aria-label="Not spam — move to inbox"]');
   check("the spam folder offers a way out of it", (await notSpam.count()) > 0);
+  check(
+    "the toolbar says the same thing as the reader",
+    (await page.locator('button[aria-label="Not spam"]').count()) > 0,
+  );
   await notSpam.first().click();
   await page.waitForTimeout(400);
   check(
@@ -595,6 +925,20 @@ try {
   await page.locator('header button[aria-label^="Hide Newsletters"]:visible').first().click();
   await page.waitForTimeout(400);
 
+  /*
+    The mute says what it did, and offers the way back.
+
+    A mute *is* reversible — the pill stays in the rail with a ↺, and Settings lists it
+    — but the muted pill is sorted to the *end* of the rail, because a muted pill is not
+    filterable and leaving it in place would repoint every digit shortcut after it. So the
+    control the user clicked leaves a 27-pill strip they have probably not scrolled, and
+    the whole visible effect of the click was that something disappeared. A browser is
+    the only place that can see that.
+  */
+  const muteNotice = page.locator('[role="status"]:has-text("Hid Newsletters from the inbox")');
+  check("muting says what it hid", (await muteNotice.count()) > 0);
+  check("and offers an undo", (await muteNotice.getByRole("button", { name: /undo/i }).count()) > 0);
+
   const muted = page.locator('header button[aria-label^="Newsletters, hidden"]:visible').first();
   check("a muted bucket stays on the rail, struck through", (await muted.count()) > 0);
   check("and cannot be switched on as a filter", await muted.isDisabled());
@@ -614,6 +958,25 @@ try {
   );
   check(
     "and its pill is live again",
+    (await page.locator('header button[aria-label^="Newsletters,"]:visible:not([disabled])').count()) > 0,
+  );
+  check(
+    "and the strip's offer goes away with it, rather than leaving an Undo that does nothing",
+    (await page.locator('[role="status"]:has-text("Hid Newsletters")').count()) === 0,
+  );
+
+  // And the other way back: taking the strip's own Undo restores the bucket.
+  await newsletters.hover();
+  await page.waitForTimeout(200);
+  await page.locator('header button[aria-label^="Hide Newsletters"]:visible').first().click();
+  await page.waitForTimeout(400);
+  await page
+    .locator('[role="status"]:has-text("Hid Newsletters from the inbox")')
+    .getByRole("button", { name: /undo/i })
+    .click();
+  await page.waitForTimeout(400);
+  check(
+    "the strip's undo restores the bucket too",
     (await page.locator('header button[aria-label^="Newsletters,"]:visible:not([disabled])').count()) > 0,
   );
 
@@ -785,6 +1148,126 @@ try {
     overflow !== null && overflow <= 1,
     `${overflow}px past`,
   );
+
+  /*
+    The reader has to *fit*.
+
+    Its pane is a flex child, and without `min-w-0` its base size is its content —
+    which is `max-w-[68ch]` of body text, 733px. On a 390px phone that overflowed the
+    line, `body { overflow: hidden }` clipped it, and the message was unreadable: every
+    line ran off the right edge with no way to reach the rest, and the six action buttons
+    went with it. So a phone could read half a message and do nothing with it.
+  */
+  const readerFits = await page.evaluate(() => {
+    const article = document.querySelector("article");
+    if (!article) return null;
+    const box = article.getBoundingClientRect();
+    return {
+      width: Math.round(box.width),
+      viewport: window.innerWidth,
+      past: Math.round(box.right - window.innerWidth),
+    };
+  });
+  check(
+    "the message fits the phone rather than running off it",
+    readerFits !== null && readerFits.past <= 1,
+    JSON.stringify(readerFits),
+  );
+
+  /*
+    Every labelled control, wherever it is — not a fixed list of verbs, because the
+    toolbar's buttons are per-mailbox (Trash offers restore and delete-permanently,
+    Spam offers "Not spam") and this step runs after the trash and block-sender steps.
+    What matters is the claim itself: at this width nothing is off-screen, so every
+    control in the app can be reached.
+  */
+  const reachable = await page.evaluate(() => {
+    // A pill past the end of the rail is not off-screen, it is *scrollable to* — the
+    // rail is a deliberate horizontal scroller with a fade at its edge. So what is
+    // being claimed is that nothing outside such a scroller is out of reach.
+    const scrollable = (el) => {
+      for (let node = el; node && node !== document.body; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowX;
+        if (overflow === "auto" || overflow === "scroll") return true;
+      }
+      return false;
+    };
+    const buttons = [...document.querySelectorAll("button[aria-label]")].filter((b) => {
+      const r = b.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && !scrollable(b);
+    });
+    const offscreen = buttons
+      .filter((b) => {
+        const r = b.getBoundingClientRect();
+        return r.left < -1 || r.right > window.innerWidth + 1;
+      })
+      .map((b) => b.getAttribute("aria-label"));
+    return { total: buttons.length, offscreen };
+  });
+  check(
+    "and no control anywhere in the app is off-screen",
+    reachable.total > 10 && reachable.offscreen.length === 0,
+    `${reachable.total} buttons, off-screen: ${reachable.offscreen.join(", ") || "none"}`,
+  );
+
+  /*
+    The sender's name is the one line in the reader that must never be ellipsised.
+
+    Six 28px icons and a `shrink-0` toolbar sit beside it, so side by side the name is
+    what gives way: it read "Dana Whitfi…" on a phone and "Dana at North…" at 1100px.
+    The reader header is the wrong place to be stingy — it is the first thing you read
+    and the thing you are checking the list row against. Measured as `scrollWidth` so a
+    name that fits by luck at one width and not at the next still fails.
+  */
+  const senderName = await page.evaluate(() => {
+    // The reader's own root, so the pane's `h2` is found rather than some other
+    // heading on the page.
+    const reader = document.querySelector("article")?.closest(".bg-panel");
+    const heading = reader?.querySelector("h2");
+    if (!heading) return null;
+    return {
+      text: heading.textContent?.trim() ?? "",
+      clipped: heading.scrollWidth > heading.clientWidth + 1,
+    };
+  });
+  check(
+    "the sender's name is not truncated to make room for the toolbar",
+    senderName !== null && !senderName.clipped,
+    JSON.stringify(senderName),
+  );
+
+  /*
+    A touch device, which is a different thing from a narrow window.
+
+    Chromium reports `hover: hover` for this page however narrow the viewport is, so
+    nothing above can tell whether a control that only appears on hover exists at all
+    on a phone. It did not: the rail's per-pill *hide* control was `hidden` and revealed
+    on `group-hover`, so on a real phone a bucket Winnow kept over-firing could not be
+    silenced from anywhere — Settings lists what has already been hidden, and the palette
+    is a list of places to go, not of things to change. Hence a second context with
+    `hasTouch`, which is what makes `(hover: none)` match.
+  */
+  const touchContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const touchPage = await touchContext.newPage();
+  touchPage.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  touchPage.on("pageerror", (error) => errors.push(String(error)));
+  await touchPage.goto(URL, { waitUntil: "networkidle" });
+  await touchPage.waitForSelector("[data-message-id]", { timeout: 10_000 });
+
+  const touchMutes = touchPage.locator('button[aria-label^="Hide "], button[aria-label^="Show "]');
+  check(
+    "the rail's hide control exists on a device with no hover",
+    (await touchMutes.count()) > 5,
+    `${await touchMutes.count()} controls`,
+  );
+  check(
+    "and it is visible rather than hover-only",
+    await touchMutes.first().isVisible(),
+    await touchMutes.first().getAttribute("aria-label"),
+  );
+  await touchContext.close();
 
   const back = page.locator('button[aria-label="Back to the list"]');
   check("there is a way back to the list", (await back.count()) > 0);

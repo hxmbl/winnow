@@ -59,21 +59,6 @@ export function tierFor(profile: UserProfile, sender: string): number {
   return 3;
 }
 
-/** The three profile inputs that feed classification for one sender. */
-export type Standing = {
-  tier: number;
-  isQuiet: boolean;
-  trashBias: number;
-};
-
-export function standingFor(profile: UserProfile, sender: string): Standing {
-  return {
-    tier: tierFor(profile, sender),
-    isQuiet: profile.quietSenders.includes(sender),
-    trashBias: trashBiasFor(profile, sender),
-  };
-}
-
 /**
  * A trashed message's contribution to the profile.
  *

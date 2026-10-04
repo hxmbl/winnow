@@ -1,0 +1,54 @@
+/**
+ * The app mark, inline and theme-aware.
+ *
+ * It used to be `<img src="./relayLight.svg">` in the header and on the sign-in
+ * screen, which is a black mark on a white shape — so in dark mode it rendered as
+ * a black shape on a near-black header and effectively disappeared. The name said
+ * `Light`, which is the tell: there was no dark version, and no branch anywhere
+ * that chose one.
+ *
+ * Inlining it fixes that without a second asset or a media query, because the two
+ * colours are now the app's own tokens: `text-ink` for the body and the surface
+ * colour for the slash cut through it. `currentColor` and `var(--wn-chrome)`
+ * therefore follow `applyTheme`, which already handles `systemDark`.
+ *
+ * The path data is the original 512×512 artwork, unchanged — only the two fills are
+ * variables now. `references/relay-logo.svg` is the untouched original.
+ */
+
+export function AppMark({ size = 36 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 512 512"
+      width={size}
+      height={size}
+      aria-hidden="true"
+      className="shrink-0 text-ink"
+    >
+      {/*
+        Two chevrons, each with a slash cut through it. The group transform is the
+        original file's and is what centres the pair in the viewBox.
+      */}
+      <g transform="translate(-35.849192,-11.030521)">
+        <path
+          d="m 234.85817,373.19928 79.97127,-157.64452 57.79819,42.0129 11.19359,-8.03777 7.76226,21.63708 46.42011,41.82405 z"
+          fill="currentColor"
+        />
+        <path
+          d="m 267.08615,348.39093 104.87384,-90.31765 11.86123,-8.54339 6.80232,21.933 z"
+          fill="var(--wn-chrome)"
+        />
+      </g>
+      <g>
+        <path
+          d="m 278.52065,145.69479 -81.8097,160.40216 -56.99102,-41.82406 -16.35541,24.54466 -3.40761,-38.79242 -45.960501,-42.28366 z"
+          fill="currentColor"
+        />
+        <path
+          d="m 224.24298,186.86915 -102.90725,61.08776 2.02879,40.86064 16.35541,-24.54466 z"
+          fill="var(--wn-chrome)"
+        />
+      </g>
+    </svg>
+  );
+}

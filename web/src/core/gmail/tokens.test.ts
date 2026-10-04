@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
-import { EXPIRY_SLACK_MS, MIN_STORED_LIFETIME_MS, TokenManager, type TokenStore } from "./tokens";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  EXPIRY_SLACK_MS,
+  MIN_STORED_LIFETIME_MS,
+  TokenManager,
+  localStorageTokenStore,
+  type TokenStore,
+} from "./tokens";
 import { GmailError, GOOGLE_TOKEN_URL, type TokenSet } from "./dto";
+import { webTokenStore } from "../../platform/types";
 
 /**
  * Poll until `condition` holds, so a test can wait for a request to be genuinely
@@ -447,5 +454,99 @@ describe("the expiry constants", () => {
   it("keeps the stored lifetime above the slack", () => {
     // Otherwise a token can be stored already inside the refresh window.
     expect(MIN_STORED_LIFETIME_MS).toBeGreaterThan(EXPIRY_SLACK_MS);
+  });
+});
+
+describe("localStorageTokenStore", () => {
+  /**
+   * The `localStorage` store, tested through the platform layer's name for it.
+   *
+   * `platform/types.ts` re-exports this rather than keeping its own copy, and the
+   * two had already drifted: this one learned that an unparseable blob is *signed
+   * out* and removes it, while that one caught the parse and returned `null` with
+   * the bad value still in storage. The web build called the latter, so the fix had
+   * been going nowhere — which is the whole argument for having one.
+   *
+   * A hand-rolled stub rather than jsdom, because the suite's environment is
+   * deliberately `node`: the guard that keeps `core/` shareable is that its tests
+   * cannot reach a DOM shim. The store already treats `localStorage` as optional
+   * (`globalThis.localStorage?.`), so a host without one is a supported case and
+   * this stub is the shape of that interface rather than a workaround.
+   */
+  const KEY = "winnow.test.tokens";
+
+  /** Enough of `Storage` for the four methods the store calls, and nothing else. */
+  function stubStorage(seed: Record<string, string> = {}) {
+    const map = new Map(Object.entries(seed));
+    const storage = {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => void map.set(key, value),
+      removeItem: (key: string) => void map.delete(key),
+    };
+    Object.defineProperty(globalThis, "localStorage", {
+      value: storage,
+      configurable: true,
+      writable: true,
+    });
+    return { storage, map };
+  }
+
+  const tokens: TokenSet = { accessToken: "a", refreshToken: "r", expiresAt: 1 };
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis as object, "localStorage");
+  });
+
+  it("round-trips a token set", async () => {
+    stubStorage();
+    const store = localStorageTokenStore(KEY);
+    await store.write(tokens);
+    expect(await store.read()).toEqual(tokens);
+  });
+
+  it("is signed out, not broken, when the stored value will not parse", async () => {
+    stubStorage({ [KEY]: "{not json" });
+    expect(await localStorageTokenStore(KEY).read()).toBeNull();
+  });
+
+  it("and removes it, so the next read is a clean signed-out state", async () => {
+    // Without the removal this is the bug in miniature: a truncated write leaves
+    // the user signed out *and* re-reading the same broken value forever, with
+    // nothing on screen to say why.
+    const { map } = stubStorage({ [KEY]: "{not json" });
+    await localStorageTokenStore(KEY).read();
+    expect(map.has(KEY)).toBe(false);
+  });
+
+  it("treats a value with no access token as no session, and drops it too", async () => {
+    const { map } = stubStorage({ [KEY]: JSON.stringify({ refreshToken: "r" }) });
+    expect(await localStorageTokenStore(KEY).read()).toBeNull();
+    expect(map.has(KEY)).toBe(false);
+  });
+
+  it("clears", async () => {
+    stubStorage();
+    const store = localStorageTokenStore(KEY);
+    await store.write(tokens);
+    await store.clear();
+    expect(await store.read()).toBeNull();
+  });
+
+  it("is signed out, not thrown, on a host with no localStorage at all", async () => {
+    // Safari in private mode and a full quota both make the accessor throw or
+    // vanish. Losing the cache is not worth failing sign-in over.
+    Reflect.deleteProperty(globalThis as object, "localStorage");
+    expect(await localStorageTokenStore(KEY).read()).toBeNull();
+    await expect(localStorageTokenStore(KEY).write(tokens)).resolves.toBeUndefined();
+    await expect(localStorageTokenStore(KEY).clear()).resolves.toBeUndefined();
+  });
+
+  it("shares one key with the platform layer, which is what makes it the same store", async () => {
+    // Both default to the same key. If either moved, a signed-in web session would
+    // silently not be found — the failure one layer up from here.
+    stubStorage();
+    await webTokenStore().write(tokens);
+    expect(await localStorageTokenStore().read()).toEqual(tokens);
+    await webTokenStore().clear();
   });
 });

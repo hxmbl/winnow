@@ -18,6 +18,13 @@
  * where the previous version's bugs came from: the list, the rail and the reader
  * each memoised independently, and briefly disagreed about which filters were
  * active.
+ *
+ * There is deliberately no `useStoreSelector` alongside it. A selector that
+ * derives a slice would have to return the same object for the same snapshot —
+ * `useSyncExternalStore` compares with `Object.is`, so a selector returning a
+ * fresh object or a freshly-computed array would report a change on every render
+ * and loop. That is exactly the bug the caching above exists to prevent, offered
+ * as the obvious-looking optimisation for it.
  */
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
@@ -44,24 +51,5 @@ export function useStore(store: WinnowStore): Snapshot {
   // The third argument is `getServerSnapshot`, for SSR. There is no server here
   // — Winnow is a client app that talks to Gmail directly — but the argument is
   // required, and passing the same function is honest rather than a stub.
-  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
-}
-
-/**
- * Subscribe to one slice of the snapshot.
- *
- * Only worth using when a subtree is expensive enough that re-rendering it for
- * a slice that did not change costs more than recomputing the slice. The
- * comparison is by identity, so it is correct for the object references the
- * store hands out and *wrong* for primitives — a selector returning a number
- * would compare by value and work, but one returning a fresh object each call
- * would re-render on every store change, which is the bug this hook is meant to
- * avoid.
- */
-export function useStoreSelector<T>(
-  store: WinnowStore,
-  select: (snapshot: Snapshot) => T,
-): T {
-  const getSnapshot = useCallback((): T => select(store.getSnapshot()), [store, select]);
   return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }

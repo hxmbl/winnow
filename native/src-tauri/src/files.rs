@@ -63,8 +63,13 @@ pub async fn save_attachment(
     // The write itself is blocking I/O on a file the size of an email attachment.
     // Cheap, but off the async runtime's threads it is not, so it is pushed onto
     // the blocking pool where a slow disk cannot stall another command.
+    //
+    // The two `?`s are the point of the expression — a failed write is reported,
+    // not swallowed, and the path is only returned once the bytes are down. Binding
+    // the result and then discarding it said the same thing and tripped clippy's
+    // `let_unit_value`, which is the correct complaint.
     let target_for_task = target.clone();
-    let written = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         std::fs::write(&target_for_task, &bytes).map_err(|e| {
             format!("could not write {}: {e}", target_for_task.display())
         })
@@ -72,7 +77,6 @@ pub async fn save_attachment(
     .await
     .map_err(|e| format!("the write task failed: {e}"))??;
 
-    let _ = written;
     Ok(Some(target.to_string_lossy().into_owned()))
 }
 

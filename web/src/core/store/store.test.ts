@@ -143,13 +143,23 @@ describe("the derived view stays consistent", () => {
     expect(store.view.result.emptyReason).toBe("filters");
   });
 
-  it("counts what the filters would match, ignoring the search box", () => {
-    // So an empty result can be explained: "0 of 12 match this search" is
-    // actionable in a way that "no results" is not.
+  it("reports a match count that agrees with the list it is next to", () => {
+    // So an empty result can be explained rather than merely reported. The test was
+    // `toBeLessThanOrEqual(total)`, which passes for any implementation whatsoever —
+    // including one returning zero, or `NaN`. And it repeated the field's original
+    // docstring ("what the filters would match, ignoring the search box"), which the
+    // code did not do: it ANDed the search in, so with a search active the count was
+    // just the length of the visible list. It is now honestly that, and worth
+    // asserting exactly.
     const store = demoStore();
     const total = store.view.emails.length;
-    store.setSearchQuery("invoice");
-    expect(store.view.result.matchCount).toBeLessThanOrEqual(total);
+    expect(store.view.result.matchCount).toBe(total);
+
+    store.setSearchQuery("migration");
+    const narrowed = store.view.result.matchCount;
+    expect(narrowed).toBe(store.view.emails.length);
+    expect(narrowed).toBeGreaterThan(0);
+    expect(narrowed).toBeLessThan(total);
   });
 });
 
@@ -230,7 +240,7 @@ describe("muting a bucket", () => {
     // hiding it removes the user's only route to the mail it flagged.
     const store = demoStore();
     store.dismissFilter("unsafe");
-    expect(store.isFilterRemoved("unsafe")).toBe(false);
+    expect(store.getSnapshot().mutedFilters).not.toContain("unsafe");
   });
 });
 
@@ -389,6 +399,379 @@ describe("optimistic actions and their rollback", () => {
     await vi.waitFor(() => {
       expect(store.getSnapshot().all.some((e) => e.id === inBin.id)).toBe(true);
     });
+  });
+});
+
+describe("the derived view", () => {
+  /**
+   * `derive()` used to run on every read.
+   *
+   * It is the most expensive function in the app — profile, whole-inbox classification,
+   * filter, sort, thread — and `getSnapshot` is called by `useSyncExternalStore` on
+   * every render *and* for every subscription check. Worse, `App` re-renders for reasons
+   * that have nothing to do with the store: the reader's scroll step, the composer's
+   * draft, the OS theme. So a single `↓` in the reader re-derived the entire mailbox
+   * over data that had not changed by a byte — measured at 81ms on the 38-message demo,
+   * and seconds on a real inbox.
+   *
+   * These tests pin the memoisation, because the bug it fixes is invisible in a
+   * screenshot and would only show up as "the app feels slow on a big mailbox".
+   */
+  it("reuses the view until the version moves", () => {
+    const store = demoStore();
+    const first = store.view;
+    expect(store.view).toBe(first);
+    // Reading through the React-facing entry point too: this is the path that used to
+    // re-derive twice per render.
+    expect(store.getSnapshot().view).toBe(first);
+    expect(store.getSnapshot().view).toBe(first);
+  });
+
+  it("re-derives after a change", () => {
+    const store = demoStore();
+    const before = store.view;
+    const target = store.view.emails[0];
+
+    store.toggleStar(target.id);
+
+    expect(store.view).not.toBe(before);
+    expect(store.getSnapshot().view).toBe(store.view);
+  });
+
+  it("re-derives when only the cheap fields move", () => {
+    // The learning weights are written to state *before* the debounced reclassify, and
+    // the settings panel reads them synchronously as a slider is dragged. So a
+    // snapshot's cheap fields must never go stale behind a memoised view.
+    const store = demoStore();
+    const before = store.getSnapshot().learning.weights.security;
+
+    store.setSignalWeight("security", 33);
+
+    const after = store.getSnapshot();
+    expect(after.learning.weights.security).toBe(33);
+    expect(after.learning.weights.security).not.toBe(before);
+  });
+
+  it("keeps the view in step with the mutes, which are instance state", () => {
+    // `persistedRemoved` lives on the instance rather than in `StoreState`, so a
+    // memoisation keyed on state alone would miss it. Every mutation of it notifies,
+    // which is what makes the memo sound.
+    const store = demoStore();
+    const before = store.view;
+    expect(store.view.result.emails.length).toBe(before.result.emails.length);
+
+    store.dismissFilter("important");
+
+    expect(store.view).not.toBe(before);
+    expect(store.getSnapshot().mutedFilters).toContain("important");
+  });
+
+  it("re-derives when a discard changes the trash bias", () => {
+    // The same argument for `trashSenders`, which is also instance state and is the
+    // input to the profile's trash bias.
+    const store = demoStore();
+    const target = store.view.emails.find((email) => email.sender)!;
+    const before = store.view.profile.trashBiasBySender[target.sender] ?? 0;
+
+    store.trash(target.id);
+
+    expect(store.view.profile.trashBiasBySender[target.sender] ?? 0).toBeGreaterThan(
+      before,
+    );
+  });
+
+  it("does not build search bags when nothing is being searched", () => {
+    // The bags are a lowercased copy of every message's sender, subject and body. The
+    // pipeline only ever reads them when `searchQuery` has tokens in it, so an unsearched
+    // mailbox was paying for a full lowercased copy of its own text on every derive.
+    const store = demoStore();
+    expect(store.view.searchBags.size).toBe(0);
+
+    store.setSearchQuery("migration");
+    expect(store.view.searchBags.size).toBeGreaterThan(0);
+
+    store.setSearchQuery("");
+    expect(store.view.searchBags.size).toBe(0);
+  });
+
+  it("still searches correctly with the bags built on demand", () => {
+    const store = demoStore();
+    const all = store.view.threads.length;
+    store.setSearchQuery("migration");
+    const narrowed = store.view.threads.length;
+    expect(narrowed).toBeGreaterThan(0);
+    expect(narrowed).toBeLessThan(all);
+    // The map is a cache, not the source of truth: a miss falls back to building one,
+    // so an empty map for a given search would be a silent wrong answer rather than an
+    // error.
+    expect(narrowed).toBe(store.view.threads.length);
+  });
+});
+
+/**
+ * Muting a bucket, and the undo it now offers.
+ *
+ * A mute *is* reversible — the pill stays in the rail with a ↺, and Settings lists
+ * it under "Hidden buckets". What it was not was visible: `orderedRail` sorts muted
+ * buckets to the end, because a muted pill is not filterable and leaving it in place
+ * would repoint every digit shortcut after it. So the pill the user clicked left a
+ * 27-pill strip they have probably not scrolled, and the whole visible effect of the
+ * click was that something disappeared.
+ */
+describe("muting a bucket", () => {
+  function storeWithMail() {
+    const { backend, calls } = fakeBackend();
+    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
+    return { store, calls };
+  }
+
+  it("offers an undo that says which bucket", () => {
+    const { store } = storeWithMail();
+    store.dismissFilter("newsletters");
+    const undo = store.getSnapshot().undo;
+    expect(undo).not.toBeNull();
+    expect(undo?.label).toMatch(/Newsletters/);
+    expect(undo?.label).toMatch(/inbox/);
+  });
+
+  it("and taking it puts the bucket back", () => {
+    const { store } = storeWithMail();
+    const before = store.getSnapshot().mutedFilters;
+    store.dismissFilter("newsletters");
+    expect(store.getSnapshot().mutedFilters).not.toEqual(before);
+
+    store.undoLast();
+
+    expect(store.getSnapshot().mutedFilters).toEqual(before);
+    expect(store.getSnapshot().undo).toBeNull();
+  });
+
+  it("and the mail comes back with it", () => {
+    const { store } = storeWithMail();
+    const inboxCount = () => store.getSnapshot().view.threads.length;
+    const before = inboxCount();
+
+    store.dismissFilter("newsletters");
+    const muted = inboxCount();
+    expect(muted).toBeLessThan(before);
+
+    store.undoLast();
+    expect(inboxCount()).toBe(before);
+  });
+
+  it("which is the same path the pill's own ↺ takes", () => {
+    // One way back, so the two controls cannot disagree about what a mute means.
+    const { store } = storeWithMail();
+    store.dismissFilter("newsletters");
+    store.restoreFilter("newsletters");
+    const viaRestore = store.getSnapshot();
+
+    store.dismissFilter("newsletters");
+    store.undoLast();
+    const viaUndo = store.getSnapshot();
+
+    expect(viaUndo.mutedFilters).toEqual(viaRestore.mutedFilters);
+  });
+
+  it("and either way back drops the offer", () => {
+    // Otherwise the strip keeps a "Hid Newsletters" line whose Undo button has no
+    // handler behind it — the state the offer's own field comment forbids.
+    const { store } = storeWithMail();
+    store.dismissFilter("newsletters");
+    store.restoreFilter("newsletters");
+    expect(store.getSnapshot().undo).toBeNull();
+
+    store.dismissFilter("newsletters");
+    store.undoLast();
+    expect(store.getSnapshot().undo).toBeNull();
+  });
+
+  it("offers nothing for a bucket that is already muted", () => {
+    const { store } = storeWithMail();
+    store.dismissFilter("newsletters");
+    store.dismissFilter("newsletters");
+    // Still exactly one offer, from the first call — a second silent re-mute must
+    // not replace the label with the same text and reset the handler's meaning.
+    expect(store.getSnapshot().undo?.label).toMatch(/Newsletters/);
+  });
+
+  it("does not offer an undo for the bucket that cannot be muted at all", () => {
+    const { store } = storeWithMail();
+    store.dismissFilter("unsafe");
+    expect(store.getSnapshot().undo).toBeNull();
+  });
+
+  it("replaces a mark-all-read offer rather than stacking two", () => {
+    // The strip shows one line. Two actions each with a live handler would leave
+    // the visible one undoing the other.
+    const { store } = storeWithMail();
+    store.markAllRead();
+    expect(store.getSnapshot().undo?.label).toMatch(/read/);
+    store.dismissFilter("newsletters");
+    expect(store.getSnapshot().undo?.label).toMatch(/Newsletters/);
+  });
+
+  it("dismissing the offer leaves the mute in place", () => {
+    const { store } = storeWithMail();
+    store.dismissFilter("newsletters");
+    store.dismissUndo();
+    expect(store.getSnapshot().undo).toBeNull();
+    expect(store.getSnapshot().mutedFilters).toContain("newsletters");
+  });
+});
+
+/**
+ * Mark-all-read: the one verb in the app that can lose information.
+ *
+ * Everything else in triaging has an inverse the user can see — a star is a toggle, a
+ * filed message reappears in the folder it went to, a filter has its own pill. This
+ * one does not: a single `⇧U` on a mailbox with a thousand unread, and the state is
+ * gone with nothing on screen to bring it back from.
+ */
+describe("mark-all-read and its undo", () => {  function storeWithUnread() {
+    const { backend, calls } = fakeBackend();
+    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
+    const unreadBefore = store
+      .getSnapshot()
+      .all.filter((email) => email.mailbox === "inbox" && email.unread).length;
+    expect(unreadBefore).toBeGreaterThan(0);
+    return { store, calls, unreadBefore };
+  }
+
+  it("clears read state for the current mailbox only", () => {
+    const { store } = storeWithUnread();
+    const before = store.getSnapshot();
+    const archivedUnread = before.all.filter(
+      (email) => email.mailbox === "archive" && email.unread,
+    ).length;
+
+    store.markAllRead();
+
+    const after = store.getSnapshot();
+    expect(after.all.filter((email) => email.mailbox === "inbox" && email.unread)).toHaveLength(
+      0,
+    );
+    // The archive's unread state is untouched: clearing it would be a surprise
+    // ("you were looking at the inbox and your archive went quiet") *and* a
+    // divergence, because only the current mailbox is pushed to the server.
+    expect(after.all.filter((email) => email.mailbox === "archive" && email.unread)).toHaveLength(
+      archivedUnread,
+    );
+  });
+
+  it("pushes the change to the server for every message it touched", async () => {
+    const { store, calls } = storeWithUnread();
+    store.markAllRead();
+    await Promise.resolve();
+    const pushes = calls.filter((call) => call.method === "setRead");
+    expect(pushes.length).toBeGreaterThan(0);
+    expect(pushes.every((call) => call.args[1] === true)).toBe(true);
+  });
+
+  it("does nothing, and offers nothing, when there is nothing unread", () => {
+    const { store } = storeWithUnread();
+    store.markAllRead();
+    expect(store.getSnapshot().undo).not.toBeNull();
+
+    // Now the inbox has no unread mail at all, so a second press is a no-op — and
+    // crucially it does not offer an undo that would put the message back as unread.
+    store.markAllRead();
+    store.select(store.getSnapshot().all[0].id);
+    const archiveOnly = store.getSnapshot().all.find((email) => email.mailbox === "archive");
+    if (archiveOnly) store.move(archiveOnly.id, "inbox");
+    store.setMailbox("spam");
+    store.markAllRead();
+    expect(store.getSnapshot().undo).toBeNull();
+  });
+
+  it("offers an undo that restores exactly the messages it touched", () => {
+    const { store, unreadBefore } = storeWithUnread();
+    const ids = store
+      .getSnapshot()
+      .all.filter((email) => email.mailbox === "inbox" && email.unread)
+      .map((email) => email.id);
+
+    store.markAllRead();
+    const undo = store.getSnapshot().undo;
+    expect(undo).not.toBeNull();
+    expect(undo?.label).toBe("Marked everything in this mailbox as read");
+
+    store.undoLast();
+
+    const after = store.getSnapshot();
+    const restored = after.all.filter((email) => ids.includes(email.id) && email.unread);
+    expect(restored).toHaveLength(ids.length);
+    expect(after.undo).toBeNull();
+    expect(unreadBefore).toBeGreaterThan(0);
+  });
+
+  it("does not resurrect a message that was read before the press", () => {
+    const { store } = storeWithUnread();
+    // Read one inbox message by hand first. The undo must not claim it.
+    const alreadyRead = store
+      .getSnapshot()
+      .all.find((email) => email.mailbox === "inbox" && !email.unread);
+    expect(alreadyRead).toBeDefined();
+
+    store.markAllRead();
+    store.undoLast();
+
+    const after = store
+      .getSnapshot()
+      .all.find((email) => email.id === alreadyRead!.id);
+    expect(after?.unread).toBe(false);
+  });
+
+  it("survives an interleaved move — the rollback reads live state", () => {
+    const { store } = storeWithUnread();
+    const target = store.getSnapshot().all.find((email) => email.mailbox === "inbox" && email.unread)!;
+
+    store.markAllRead();
+    // Archive a message that the undo would otherwise restore, in between.
+    store.move(target.id, "archive");
+    store.undoLast();
+
+    const after = store.getSnapshot().all.find((email) => email.id === target.id);
+    // Still archived: the undo restores *read state*, not a stale snapshot of the
+    // message list, so an unrelated change made in between is not clobbered.
+    expect(after?.mailbox).toBe("archive");
+    expect(after?.unread).toBe(true);
+  });
+
+  it("drops the offer when the user changes mailbox", () => {
+    const { store } = storeWithUnread();
+    store.markAllRead();
+    expect(store.getSnapshot().undo).not.toBeNull();
+
+    store.setMailbox("archive");
+    // The label names a mailbox, and it is about to stop being true.
+    expect(store.getSnapshot().undo).toBeNull();
+  });
+
+  it("drops the offer when it is dismissed rather than taken", () => {
+    const { store } = storeWithUnread();
+    store.markAllRead();
+    store.dismissUndo();
+
+    const after = store.getSnapshot();
+    expect(after.undo).toBeNull();
+    // And dismissing is not taking: the mail stays read.
+    expect(after.all.filter((email) => email.mailbox === "inbox" && email.unread)).toHaveLength(
+      0,
+    );
+
+    // With nothing on offer, `undoLast` is a no-op rather than an error.
+    store.undoLast();
+    expect(store.getSnapshot().undo).toBeNull();
+  });
+
+  it("clears the offer on sign-out", async () => {
+    const { store } = storeWithUnread();
+    store.markAllRead();
+    expect(store.getSnapshot().undo).not.toBeNull();
+
+    await store.signOut();
+    expect(store.getSnapshot().undo).toBeNull();
   });
 });
 

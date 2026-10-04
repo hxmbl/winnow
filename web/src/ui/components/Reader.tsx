@@ -39,9 +39,26 @@ import {
   X,
 } from "lucide-react";
 import { formatFullTime, formatRelative } from "../../core/mail/datetime";
+import { shortcutHint } from "../../core/mail/keybinds";
 import { countRemoteReferences } from "../../core/mail/html";
 import { displayAddress, displayName, monogram, type Email } from "../../core/model/email";
 import { badgeFilters, filterLabel, type EmailSignals } from "../../core/model/signals";
+
+/**
+ * The first thing someone said, on one line.
+ *
+ * For a conversation list, where the column has to distinguish messages that share
+ * a subject. Quote markers go first, because a reply whose body opens with
+ * `> On Tuesday, you wrote:` would otherwise lead with the quoted text rather than
+ * with the reply.
+ */
+function firstLine(body: string): string {
+  for (const raw of body.split("\n")) {
+    const line = raw.replace(/^[\s>]+/, "").trim();
+    if (line) return line;
+  }
+  return "";
+}
 import { avatarColor, avatarTextColor } from "../avatarColor";
 import { formatBytes } from "../../core/gmail/mime";
 import type { Mailbox } from "../../core/model/email";
@@ -60,7 +77,12 @@ function Badge({ id }: { id: string }) {
       style={{
         background: `var(--wn-badge-${id}-wash)`,
         border: `1px solid var(--wn-badge-${id}-edge)`,
-        color: `var(--wn-badge-${id})`,
+        // The label uses the *derived* ink, not the accent. The accent is also the
+        // fill at 14%, so the two cancel out: nine of the light palette's twenty-one
+        // accents render as text on their own wash at under 4.5:1 — starred at 2.66,
+        // urgent at 3.54. See `deriveBadgeInk`, which computes this from the palette
+        // rather than from a hand-written table.
+        color: `var(--wn-badge-${id}-ink)`,
       }}
     >
       {filterLabel({ kind: "builtin", id: id as never })}
@@ -80,7 +102,14 @@ type Actions = {
   onNotSpam: () => void;
   onShowOriginal: () => void;
   onBlockSender: () => void;
-  /** Turn image loading on for the whole mailbox, from the blocked-content note. */
+  /**
+   * Turn image loading on for this message.
+   *
+   * Per-message, and labelled accordingly — the button used to say "Load images" while
+   * setting a global preference that persisted, which meant a decision about one
+   * message silently became a decision about all of them. The global switch still
+   * exists in Settings, where its scope is visible.
+   */
   onLoadRemoteContent: () => void;
   /** Open another message in the conversation. */
   onOpenMessage: (id: number) => void;
@@ -103,24 +132,42 @@ function Toolbar({ starred, unread, mailbox, actions }: {
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
 
   /*
-    No "not spam" outside the spam folder.
+    The verbs, and which mailbox decides which.
 
-    It is here, and only here, because the spam folder had no way out: `GmailClient`
-    implemented `markNotSpam` and nothing in the app called it, so a message Gmail
-    misfiled was recoverable only by going to Gmail on the web. One button, in the one
-    folder where the question arises.
+    Three rules, one per mailbox, and each is about not offering the same action twice:
+
+      - **Inbox.** Archive and bin. The ordinary pair.
+      - **Spam.** "Not spam" and bin. Archive is *not* offered, because from Spam it
+        means "move to the inbox" — which is exactly what the not-spam button does. Two
+        icons with two tooltips, one action. It read as a toolbar with a bug in it.
+      - **Bin.** Restore and delete-permanently. Archive is the restore.
+
+    The "not spam" button exists because the spam folder had no way out at all:
+    `GmailClient` implemented `markNotSpam` and nothing in the app called it, so a
+    message Gmail misfiled was recoverable only by going to Gmail on the web.
   */
   const inSpam = mailbox === "spam";
 
+  // The starred fill is the palette's own accent, the same custom property the
+  // list row and the reader's "Starred" chip read. It was a literal `#B8860B` here
+  // and only here, which is exactly the drift the token exists to prevent: the list
+  // row had already been moved onto `--wn-badge-starred` with a comment explaining
+  // why, and this one was missed. The visible symptom is that a starred message
+  // shows a near-invisible dark-gold star in dark mode, where the palette's value
+  // is `#FACC15`.
+  const ICON_BUTTON =
+    "flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+
   return (
-    <div className="flex items-center gap-0.5">
+    // `shrink-0` and, below `sm`, the whole row is a column — see the header.
+    <div className="flex shrink-0 items-center gap-0.5">
       <button
         type="button"
         onClick={actions.onStar}
         aria-pressed={starred}
         aria-label={starred ? "Unstar" : "Star"}
-        title={starred ? "Unstar (s)" : "Star (s)"}
-        className={`${ICON_BUTTON} ${starred ? "text-[#B8860B]" : ""}`}
+        title={shortcutHint(starred ? "Unstar" : "Star", "toggleStar")}
+        className={`${ICON_BUTTON} ${starred ? "text-[var(--wn-badge-starred)]" : ""}`}
       >
         <Star size={15} strokeWidth={1.9} fill={starred ? "currentColor" : "none"} />
       </button>
@@ -128,7 +175,7 @@ function Toolbar({ starred, unread, mailbox, actions }: {
         type="button"
         onClick={actions.onRead}
         aria-label={unread ? "Mark read" : "Mark unread"}
-        title={unread ? "Mark read" : "Mark unread (u)"}
+        title={unread ? "Mark read" : shortcutHint("Mark unread", "toggleRead")}
         className={ICON_BUTTON}
       >
         {unread ? <Mail size={15} strokeWidth={1.9} /> : <MailOpen size={15} strokeWidth={1.9} />}
@@ -138,7 +185,7 @@ function Toolbar({ starred, unread, mailbox, actions }: {
         type="button"
         onClick={actions.onReply}
         aria-label="Reply to all"
-        title="Reply to all (r)"
+        title={shortcutHint("Reply to all", "focusReply")}
         className={ICON_BUTTON}
       >
         <CornerUpLeft size={15} strokeWidth={1.9} />
@@ -147,47 +194,51 @@ function Toolbar({ starred, unread, mailbox, actions }: {
         type="button"
         onClick={actions.onForward}
         aria-label="Forward"
-        title="Forward (f)"
+        title={shortcutHint("Forward", "forward")}
         className={ICON_BUTTON}
       >
         <Forward size={15} strokeWidth={1.9} />
       </button>
-      <button
-        type="button"
-        onClick={actions.onArchive}
-        aria-label={archiveLabel}
-        title={`${archiveLabel} (e)`}
-        className={ICON_BUTTON}
-      >
-        {mailbox === "inbox" ? (
-          <Archive size={15} strokeWidth={1.9} />
-        ) : (
-          <RotateCcw size={15} strokeWidth={1.9} />
-        )}
-      </button>
+      {/*
+        In Spam this *is* the not-spam button, not a second one beside it. Both meant
+        "move to the inbox", so the folder showed two icons and two tooltips for one
+        action — which reads as a toolbar with a duplicated control rather than as a
+        deliberate pair.
+      */}
+      {inSpam ? (
+        <button
+          type="button"
+          onClick={actions.onNotSpam}
+          aria-label="Not spam — move to inbox"
+          title="Not spam — move to inbox"
+          className={ICON_BUTTON}
+        >
+          <Undo2 size={15} strokeWidth={1.9} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={actions.onArchive}
+          aria-label={archiveLabel}
+          title={shortcutHint(archiveLabel, "archive")}
+          className={ICON_BUTTON}
+        >
+          {mailbox === "inbox" ? (
+            <Archive size={15} strokeWidth={1.9} />
+          ) : (
+            <RotateCcw size={15} strokeWidth={1.9} />
+          )}
+        </button>
+      )}
       <button
         type="button"
         onClick={actions.onTrash}
         aria-label={trashLabel}
-        title={`${trashLabel} (#)`}
+        title={shortcutHint(trashLabel, "trash")}
         className={ICON_BUTTON}
       >
         <Trash2 size={15} strokeWidth={1.9} />
       </button>
-      {inSpam && (
-        <>
-          <span className="mx-1 h-4 w-px bg-divider" aria-hidden="true" />
-          <button
-            type="button"
-            onClick={actions.onNotSpam}
-            aria-label="Not spam — move to inbox"
-            title="Not spam — move to inbox"
-            className={ICON_BUTTON}
-          >
-            <Undo2 size={15} strokeWidth={1.9} />
-          </button>
-        </>
-      )}
     </div>
   );
 }
@@ -281,8 +332,21 @@ export function Reader({
         <div className="min-w-0 flex-1">
           {/* The sender is the h2 and the subject the h1 — inverted from the
               usual pattern, and deliberately: the subject is the page's title, so
-              it is the document's h1 and the sender is subordinate to it. */}
-          <div className="flex items-start justify-between gap-3">
+              it is the document's h1 and the sender is subordinate to it.
+
+              A column unless the window is wide enough to afford a row. Six 28px
+              icons and a `shrink-0` toolbar need about 200px, and the pane is 37.9%
+              of the window — so side by side, the name is what gives way: it read
+              "Dana Whitfi…" on a phone and "Dana at North…" at 1100px. The one
+              thing you read first, ellipsised to make room for controls you reach
+              for later, and the reader's own sender line is the wrong place to be
+              stingy.
+
+              1200px rather than `lg` (1024) because `lg` is the width at which the
+              pane appears at all, not the width at which it fits: at 1024 the pane
+              is 388px, which is exactly the case that needed fixing. At 1200 the
+              pane is 455px and the name has its 150px back. */}
+          <div className="flex flex-col gap-2.5 min-[1200px]:flex-row min-[1200px]:items-start min-[1200px]:justify-between min-[1200px]:gap-3">
             <div className="min-w-0">
               <h2 className="truncate text-[15px] font-semibold leading-snug text-ink">
                 {displayName(email)}
@@ -391,24 +455,41 @@ export function Reader({
           )}
 
           {/*
-            The blocked-content note.
+            The remote-content note.
 
             Only when there is remote content and it is *not* being loaded, which is the
-            default and the only state in which the note is about blocking. It carries
-            the escape hatch — the original, in the user's own browser — plus the one
-            click that turns images on, so neither route out of the text-only reader is
+            default and the only state in which the note is about a choice. It carries
+            the escape hatch — the original, in the user's own browser, plus the one click
+            that loads this message — so neither route out of the text-only reader is
             hidden behind a settings panel.
+
+            The count comes from `countRemoteReferences`, which is exact about what it
+            counts: an inline `data:` logo and a `background="#fff"` are not remote
+            references, and reporting them as blocked made this note a false reassurance
+            about the reader's privacy.
           */}
           {email.bodyHtml && blocked > 0 && !loadRemoteContent && (
             <div className="mt-5 max-w-[68ch] rounded-pane border border-hairline bg-surface-sunken px-4 py-3">
               <p className="flex items-center gap-2 text-[13px] font-semibold text-ink-body">
                 <TriangleAlert size={14} strokeWidth={1.9} className="text-ink-muted" aria-hidden="true" />
-                {blocked} remote {blocked === 1 ? "reference was" : "references were"} blocked
+                {blocked} remote {blocked === 1 ? "reference is" : "references are"} not
+                loaded
               </p>
+              {/*
+                The trade-off, stated at the moment it is decided rather than in a
+                settings panel three clicks away.
+
+                Two things were wrong with this before. It said "blocked", which
+                described the *renderer* rather than the choice — Winnow is not loading
+                them, it is declining to, and the difference matters to somebody deciding
+                whether to say yes. And it did not say what "Load images" was scoped to,
+                because it was not scoped to anything: the button sat under one message
+                and turned on remote content for every message, permanently. It is one
+                message now, so the sentence can simply be true.
+              */}
               <p className="mt-1 text-preview text-ink-muted">
-                Winnow shows the plain text of every message, so images and stylesheets
-                from the sender are not loaded — they can confirm you opened a message and
-                roughly where you are.
+                Winnow shows every message as plain text. Loading this one&rsquo;s images
+                tells the sender you opened it, and roughly where you are.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
@@ -416,14 +497,14 @@ export function Reader({
                   onClick={actions.onShowOriginal}
                   className="rounded-full border border-control-border px-3 py-1 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
-                  Open the original in your browser
+                  Open the original
                 </button>
                 <button
                   type="button"
                   onClick={actions.onLoadRemoteContent}
                   className="rounded-full border border-control-border px-3 py-1 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
-                  Load images
+                  Load this message&rsquo;s images
                 </button>
               </div>
             </div>
@@ -469,6 +550,14 @@ export function Reader({
             `focusMessage` is the right entry point rather than a local selection swap:
             it handles the case where the message is not in the current view at all,
             clearing the search and filters that were hiding it.
+
+            Each row leads with the message's own words rather than its subject. In a
+            thread the subjects are the same string three times over — `Re: the
+            migration plan`, `Re: the migration plan`, `Re: the migration plan` — so the
+            column that identifies which message you are about to open was carrying no
+            information at all, while the one thing that does differ, "the sort spills",
+            "I think I know what is happening", was nowhere on screen. The subject is
+            still shown when it genuinely changed, because that *is* information.
           */}
           {others.length > 0 && (
             <div className="mt-8 max-w-[68ch] border-t border-hairline pt-4">
@@ -477,48 +566,79 @@ export function Reader({
                 conversation
               </h3>
               <ul className="mt-2 flex flex-col gap-0.5">
-                {others.map((message) => (
-                  <li key={message.gmailId}>
-                    <button
-                      type="button"
-                      onClick={() => actions.onOpenMessage(message.id)}
-                      className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                    >
-                      <span className="shrink-0 font-semibold text-ink-muted">
-                        {displayName(message)}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-ink-body">
-                        {message.subject || "(no subject)"}
-                      </span>
-                      {/*
-                        Against the *store's* reference instant, not the open message's.
+                {others.map((message) => {
+                  const subject = message.subject.trim();
+                  // A different subject is worth a prefix; the same one is noise. And an
+                  // empty body — a stub, or a message that was entirely a quote — falls
+                  // back to the subject rather than to an empty row.
+                  const preview = firstLine(message.body);
+                  const lead = subject && subject !== email.subject.trim() ? `${subject} — ` : "";
+                  return (
+                    <li key={message.gmailId}>
+                      <button
+                        type="button"
+                        onClick={() => actions.onOpenMessage(message.id)}
+                        className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      >
+                        <span className="shrink-0 font-semibold text-ink-muted">
+                          {displayName(message)}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-ink-body">
+                          {lead}
+                          {preview || message.subject || "(no body)"}
+                        </span>
+                        {/*
+                          Against the *store's* reference instant, not the open message's.
 
-                        Formatted relative to another message's timestamp it reads "in 3
-                        days" for something that arrived three days ago — which is how
-                        the conversation list said the opposite of what it meant. And
-                        `now` rather than `Date.now()`, so the demo's fixed instant still
-                        governs the demo's timestamps.
-                      */}
-                      <span className="shrink-0 tabular-nums text-ink-subtle">
-                        {formatRelative(message.receivedAt, now)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                          Formatted relative to another message's timestamp it reads "in 3
+                          days" for something that arrived three days ago — which is how
+                          the conversation list said the opposite of what it meant. And
+                          `now` rather than `Date.now()`, so the demo's fixed instant still
+                          governs the demo's timestamps.
+                        */}
+                        <span className="shrink-0 tabular-nums text-ink-subtle">
+                          {formatRelative(message.receivedAt, now)}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
 
-          <div className="mt-8 flex flex-wrap gap-2">
+          {/*
+            The sender-level action, as a footer.
+
+            It was the last thing in the flow, directly under the conversation list,
+            styled as a neutral outlined chip. Two problems with that. It reads as part
+            of the conversation — a button about the *sender* sitting inside a list of
+            *messages*, one tap away from a click that throws away every message from
+            that person across every folder. And it inherits the conversation's `mt-8`,
+            so when there is no conversation it floats in the middle of the body with
+            nothing above it.
+
+            A labelled footer, separated by its own rule, is the standard shape for the
+            actions that apply to the message as a whole rather than to its content, and
+            it makes the scope legible before the click rather than after.
+          */}
+          <footer className="mt-8 max-w-[68ch] border-t border-hairline pt-4">
+            <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
+              This sender
+            </h3>
+            <p className="mt-1.5 text-preview text-ink-muted">
+              Everything from {displayName(email)} disappears from every folder, and you can
+              bring it back in Settings.
+            </p>
             <button
               type="button"
               onClick={actions.onBlockSender}
-              className="inline-flex items-center gap-1.5 rounded-full border border-control-border px-3 py-1.5 text-[12.5px] font-semibold text-ink-muted transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-control-border px-3 py-1.5 text-[12.5px] font-semibold text-ink-body transition-colors hover:border-danger hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <Ban size={13} strokeWidth={1.9} aria-hidden="true" />
               Hide everything from {displayName(email)}
             </button>
-          </div>
+          </footer>
         </article>
       </div>
     </div>

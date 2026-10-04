@@ -19,6 +19,7 @@ import { Sheet, SheetHeader } from "./Overlay";
 import {
   SIGNAL_KEYS,
   adjustment,
+  isPenalty,
   type SignalKey,
   type SignalWeights,
 } from "../../core/classify/weights";
@@ -26,6 +27,35 @@ import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
+
+/**
+ * How many feedback events the panel lists.
+ *
+ * The log itself is capped at `MAX_EVENTS`, which a keen user reaches in a couple
+ * of weeks; the panel shows a screenful of the most recent ones because those are
+ * the ones that explain the weights as they stand now.
+ */
+const HISTORY_LIMIT = 100;
+
+/**
+ * One event, in a sentence.
+ *
+ * The bucket name rather than the internal id, because the user muted "New
+ * newsletters", not `newsletters` — and this is the only place the two are
+ * connected, so the event log is readable rather than a dump.
+ */
+function describeEvent(event: FeedbackEvent): string {
+  switch (event.action) {
+    case "starred":
+      return "Starred";
+    case "unstarred":
+      return "Unstarred";
+    case "filter_rejected":
+      return event.rejectedFilter
+        ? `Hid ${FILTER_LABELS[event.rejectedFilter]}`
+        : "Hid a bucket";
+  }
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -89,6 +119,13 @@ export type SettingsProps = {
   adaptive: boolean;
   onAdaptive: (value: boolean) => void;
   onResetWeights: () => void;
+  /**
+   * The feedback log, **newest first**.
+   *
+   * `LearningModel.history`, not `events`: `events` is oldest-first, and a panel
+   * that renders `slice(0, 100)` of an oldest-first list shows the beginning of
+   * the log rather than the part that explains the weights on screen.
+   */
   events: readonly FeedbackEvent[];
   blockedSenders: readonly string[];
   onUnblock: (sender: string) => void;
@@ -124,14 +161,24 @@ function WeightSlider({
         </label>
         <span className="flex items-baseline gap-1.5 text-[12px] tabular-nums">
           <span className="font-semibold text-ink">{value}</span>
-          <span className="text-ink-subtle">default {meta.defaultValue}</span>
+          {/*
+            The default is only worth saying when the value has moved off it.
+
+            Printed unconditionally it read as `22  default 22` — two numbers side
+            by side with no indication that they were the same one, which is the
+            shape of a control that looks broken. With a drift, it becomes the
+            answer to "where did this come from", which is what it is for.
+          */}
           {drift !== 0 && (
-            <span
-              className={`font-semibold ${drift > 0 ? "text-success" : "text-ink-muted"}`}
-              title="How far your feedback has moved this from the default"
-            >
-              {drift > 0 ? `+${drift}` : drift}
-            </span>
+            <>
+              <span className="text-ink-subtle">from {meta.defaultValue}</span>
+              <span
+                className={`font-semibold ${drift > 0 ? "text-success" : "text-ink-muted"}`}
+                title="How far your feedback has moved this from the default"
+              >
+                {drift > 0 ? `+${drift}` : drift}
+              </span>
+            </>
           )}
         </span>
       </div>
@@ -144,7 +191,14 @@ function WeightSlider({
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         aria-describedby={`weight-help-${meta.key}`}
-        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-surface-active accent-[var(--wn-inkBody)]"
+        aria-valuetext={`${value} points, ${meta.label.toLowerCase()}`}
+        // The fill is drawn here rather than by `accent-color`, because
+        // `appearance-none` switches `accent-color` off — so the control rendered
+        // as an empty grey bar with a thumb on it and three different values that
+        // looked alike at a glance. `--wn-range-fill` is the one thing a range
+        // cannot express on its own.
+        style={{ "--wn-range-fill": `${((value - meta.min) / (meta.max - meta.min)) * 100}%` } as React.CSSProperties}
+        className="wn-range h-1.5 w-full cursor-pointer appearance-none rounded-full"
       />
       <p id={`weight-help-${meta.key}`} className="text-[12px] text-ink-subtle">
         {meta.explanation}
@@ -165,7 +219,21 @@ export function Settings(props: SettingsProps) {
       className="flex max-h-[85vh] w-full max-w-[520px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
     >
       <SheetHeader title="Settings" onClose={props.onClose} />
-      <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
+      {/*
+        The scroller, with a shadow that says so.
+
+        The panel is 520px of a 763px viewport for a body of 1219px, so a third of
+        the settings are below the fold — and the last visible row ended flush with
+        the panel edge, which reads as "that is all of them". A `scroll-shadow` on
+        the scroller itself turns the same geometry into an obvious cue, and unlike a
+        one-sided fade it also appears at the *top* once you have scrolled, which is
+        how the reader and the list already tell you where you are.
+
+        No wrapper element: `scroll-shadow` paints its own background, so it has to
+        be the element that scrolls, and an extra div in between is one more thing
+        whose height has to be got right.
+      */}
+      <div className="scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto">
         <Section title="Reading">
         <Row label="Sort messages by">
           <div className="flex gap-1 rounded-full border border-hairline p-0.5">
@@ -210,6 +278,41 @@ export function Settings(props: SettingsProps) {
         </Row>
       </Section>
 
+      {/*
+        Appearance, on its own.
+
+        It was the first row under "How Winnow sorts", which is a heading that
+        makes a claim about everything under it — and a claim about the *sort*
+        says nothing about light and dark. The section headings are how this panel
+        is scanned; one that does not describe its contents costs the reader a
+        second pass over the whole panel.
+      */}
+      <Section title="Appearance">
+        <Row label="Theme">
+          <div
+            role="group"
+            aria-label="Theme"
+            className="flex gap-1 rounded-full border border-hairline p-0.5"
+          >
+            {(["system", "light", "dark"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => props.onAppearance(option)}
+                aria-pressed={props.appearance === option}
+                className={`rounded-full px-2.5 py-1 text-[12px] font-semibold capitalize transition-colors ${
+                  props.appearance === option
+                    ? "bg-surface-active text-ink"
+                    : "text-ink-muted hover:text-ink-body"
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </Row>
+      </Section>
+
       {props.isDesktop && props.backgroundSync !== null && (
         <Section title="Background">
           <Row
@@ -229,6 +332,7 @@ export function Settings(props: SettingsProps) {
                 onChange={(event) =>
                   props.onBackgroundSyncInterval(Number(event.target.value))
                 }
+                aria-label="Check for new mail every"
                 className="rounded-full border border-hairline bg-surface px-3 py-1 text-[12px] font-semibold text-ink-body"
               >
                 <option value={60}>Every minute</option>
@@ -242,26 +346,6 @@ export function Settings(props: SettingsProps) {
       )}
 
       <Section title="How Winnow sorts">
-        <Row label="Appearance">
-          <div className="flex gap-1 rounded-full border border-hairline p-0.5">
-            {(["system", "light", "dark"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => props.onAppearance(option)}
-                aria-pressed={props.appearance === option}
-                className={`rounded-full px-2.5 py-1 text-[12px] font-semibold capitalize transition-colors ${
-                  props.appearance === option
-                    ? "bg-surface-active text-ink"
-                    : "text-ink-muted hover:text-ink-body"
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </Row>
-
         <Row
           label="Learn from what I star"
           hint="Starring a message nudges the signals it carries. Off means only the sliders below change anything."
@@ -273,19 +357,65 @@ export function Settings(props: SettingsProps) {
           />
         </Row>
 
-        <div className="mt-1 flex flex-col gap-4">
-          {SIGNAL_KEYS.map((meta) => (
-            <WeightSlider
-              key={meta.key}
-              meta={meta}
-              weights={props.weights}
-              value={props.weights[meta.key]}
-              onChange={(value) => props.onWeight(meta.key, value)}
-            />
-          ))}
+        {/*
+          The sliders, in a titled sub-block.
+
+          They were directly inside the section's own `flex flex-col gap-3`, which
+          put ten sliders in the same visual group as the two toggles above them —
+          so the eye read the toggles as the eleventh and twelfth sliders. The
+          heading is what separates "two decisions you make" from "ten numbers
+          that describe the model".
+        */}
+        <div className="mt-1 flex flex-col gap-4 border-t border-hairline-soft pt-4">
+          <p className="-mt-1 text-[12px] text-ink-subtle">
+            Weights start at these values and move as you star, unstar and hide
+            buckets. Adjusting one by hand is always allowed.
+          </p>
+
+          {/*
+            Ten identical rows in one column is a form dump, not a control panel:
+            the eye has to read all ten labels to find the one it wants. Splitting
+            on the one distinction that already exists in the model — `isPenalty`,
+            the same function the learning loop uses to decide which way to nudge —
+            halves the search space and says something true about each half.
+
+            The order inside each group is `SIGNAL_KEYS`'s, which is by how much
+            the weight matters, so the big levers stay at the top.
+          */}
+          {([
+            {
+              title: "Signals that raise importance",
+              note: "Points added to a message's score.",
+              keys: SIGNAL_KEYS.filter((meta) => !isPenalty(meta.key)),
+            },
+            {
+              title: "Signals that lower it",
+              note: "Points taken back off.",
+              keys: SIGNAL_KEYS.filter((meta) => isPenalty(meta.key)),
+            },
+          ]).map((group) =>
+            group.keys.length === 0 ? null : (
+              <fieldset key={group.title} className="flex flex-col gap-4">
+                <legend className="sr-only">{group.title}</legend>
+                <div className="-mb-2 flex items-baseline gap-2">
+                  <h4 className="text-[12.5px] font-semibold text-ink-body">{group.title}</h4>
+                  <p className="text-[12px] text-ink-subtle">{group.note}</p>
+                </div>
+                {group.keys.map((meta) => (
+                  <WeightSlider
+                    key={meta.key}
+                    meta={meta}
+                    weights={props.weights}
+                    value={props.weights[meta.key]}
+                    onChange={(value) => props.onWeight(meta.key, value)}
+                  />
+                ))}
+              </fieldset>
+            ),
+          )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={props.onResetWeights}
@@ -298,41 +428,60 @@ export function Settings(props: SettingsProps) {
             type="button"
             onClick={() => setShowHistory((value) => !value)}
             aria-expanded={showHistory}
+            aria-controls="winnow-learning-history"
             className="rounded-full border border-control-border px-3 py-1.5 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            {showHistory ? "Hide" : "Show"} what I've learned ({props.events.length})
+            {showHistory ? "Hide" : "Show"} what I&apos;ve learned
+            {props.events.length > 0 && ` (${props.events.length})`}
           </button>
         </div>
 
         {showHistory && (
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-hairline bg-surface-sunken p-2">
+          <div
+            id="winnow-learning-history"
+            className="max-h-64 overflow-y-auto rounded-lg border border-hairline bg-surface-sunken p-2"
+          >
             {props.events.length === 0 ? (
               <p className="px-2 py-3 text-center text-[12.5px] text-ink-subtle">
                 Nothing yet. Star a message, or hide a filter, and Winnow will record what it
                 did and why.
               </p>
             ) : (
-              <ul className="flex flex-col gap-1">
-                {props.events.slice(0, 100).map((event) => (
-                  <li
-                    key={event.id}
-                    className="flex items-baseline justify-between gap-3 px-2 py-1 text-[12px]"
-                  >
-                    <span className="min-w-0 truncate text-ink-body">
-                      {event.action === "starred" && "Starred"}
-                      {event.action === "unstarred" && "Unstarred"}
-                      {event.action === "filter_rejected" &&
-                        `Hid ${event.rejectedFilter ?? "a filter"}`}
-                      {event.sender && <span className="text-ink-subtle"> · {event.sender}</span>}
-                    </span>
-                    <span className="shrink-0 tabular-nums text-ink-subtle">
-                      {event.predictedImportance !== undefined
-                        ? `predicted ${event.predictedImportance}`
-                        : formatRelative(event.at, Date.now())}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="flex flex-col gap-1">
+                  {props.events.slice(0, HISTORY_LIMIT).map((event) => (
+                    <li
+                      key={event.id}
+                      className="flex items-baseline justify-between gap-3 px-2 py-1 text-[12px]"
+                    >
+                      <span className="min-w-0 truncate text-ink-body">
+                        {describeEvent(event)}
+                        {event.sender && (
+                          <span className="text-ink-subtle"> · {event.sender}</span>
+                        )}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-ink-subtle">
+                        {event.predictedImportance !== undefined
+                          ? `predicted ${event.predictedImportance}`
+                          : formatRelative(event.at, Date.now())}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {/*
+                  The log is capped at `MAX_EVENTS`, so a long-lived install can
+                  genuinely have more here than the panel shows. Saying so is the
+                  difference between "this is everything" and "this is the recent
+                  part" — and the count on the button is the *total*, so a silent
+                  truncation is a visible lie.
+                */}
+                {props.events.length > HISTORY_LIMIT && (
+                  <p className="px-2 py-2 text-center text-[11.5px] text-ink-subtle">
+                    Showing the {HISTORY_LIMIT} most recent of {props.events.length}. Older
+                    entries are kept, but not listed here.
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
@@ -456,6 +605,8 @@ export function Composer({
   const toRef = useRef<HTMLInputElement>(null);
   /** `true` until the mount effect has placed the caret. */
   const placed = useRef(false);
+  /** A forward with no recipient cannot be sent; the button says so. */
+  const canSend = !sending && to.length > 0;
 
   /*
     Focus and caret placement, once per *mount*.
@@ -505,7 +656,28 @@ export function Composer({
       className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
     >
       <SheetHeader title={title} onClose={onClose} />
-      <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
+      <div
+        className="thin-scroll min-h-0 flex-1 overflow-y-auto"
+        onKeyDown={(event) => {
+          /*
+            Send from the keyboard.
+
+            ⌘⏎ / Ctrl⏎ is what every mail client on every platform accepts for this,
+            and without it a reply is mouse-only: `r` opens the sheet, and then the
+            hand has to leave the home row. It cannot live in `keybinds.ts` —
+            the composer's keys are a hard stop there, because every one of them
+            belongs to the field the user is typing into.
+
+            Guarded on the same condition as the button, so the shortcut cannot do
+            anything the button would not, and it is `preventDefault`ed so the
+            textarea does not also insert a newline.
+          */
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            if (canSend) onSend();
+          }
+        }}
+      >
       <div className="flex flex-col gap-3 px-5 py-4">
         <div className="flex items-center gap-2 text-[12.5px]">
           <span className="w-12 shrink-0 text-ink-subtle">To</span>
@@ -554,18 +726,26 @@ export function Composer({
           </p>
         )}
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onSend}
             // A forward with no recipient is unsendable, and a disabled Send is a
             // truthful statement about that. `title` says why, because a greyed-out
             // button with no explanation is its own small puzzle.
-            disabled={sending || to.length === 0}
-            title={to.length === 0 ? "Add at least one recipient" : undefined}
-            className="rounded-full bg-[var(--wn-inkBody)] px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            disabled={!canSend}
+            title={to.length === 0 ? "Add at least one recipient" : "Send (⌘ or Ctrl + ⏎)"}
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--wn-inkBody)] px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {sending ? "Sending…" : "Send"}
+            {!sending && (
+              <kbd
+                aria-hidden="true"
+                className="rounded border border-current/30 px-1 py-px font-mono text-[10.5px] opacity-70"
+              >
+                ⌘⏎
+              </kbd>
+            )}
           </button>
           <button
             type="button"
@@ -574,9 +754,18 @@ export function Composer({
           >
             Discard
           </button>
-          <span className="ml-auto text-right text-[11.5px] text-ink-subtle">
+          {/*
+            What will actually happen to the quoted text.
+
+            The old wording — "the quoted message is kept only if you leave it
+            exactly as it is" — described the rule rather than the consequence, and
+            got the polarity confusing: the quote is *dropped* when you leave it
+            alone, and kept when you edit it. Both sentences below say what the
+            recipient will see.
+          */}
+          <span className="ml-auto max-w-[19rem] text-right text-[11.5px] leading-snug text-ink-subtle">
             {mode === "reply"
-              ? "The quoted message is kept only if you leave it exactly as it is."
+              ? "Winnow adds your text above the quote, and drops the quote if you leave it untouched."
               : "The whole conversation is quoted below, without the reply markers."}
           </span>
         </div>

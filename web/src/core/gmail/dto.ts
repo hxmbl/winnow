@@ -22,6 +22,44 @@ export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
 /**
+ * base64url, per RFC 4648 §5: `+` → `-`, `/` → `_`, padding stripped.
+ *
+ * Every base64url operation in the Gmail layer goes through these two, because
+ * the alphabet is the *wire format* rather than a detail: `messages.send`'s
+ * `raw` field, message body blobs and attachment payloads all arrive URL-safe,
+ * while a `Content-Transfer-Encoding: base64` body inside a message must not be.
+ * Five hand-rolled copies of the same two lines is how the send path ended up
+ * passing plain text where the API wanted an encoded blob.
+ */
+export function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Decode base64url back to bytes.
+ *
+ * Returns `null` rather than throwing for input `atob` rejects, because the
+ * three callers need three different answers to "this did not decode": a message
+ * body becomes `""` and keeps its headers, a `Message-ID` encoded word is left
+ * alone rather than deleted, and an attachment yields no bytes instead of an
+ * exception inside a download. An empty array would hide the difference between
+ * "decoded to nothing" and "could not be decoded".
+ */
+export function base64UrlDecode(text: string): Uint8Array | null {
+  try {
+    const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * One Gmail scope, deliberately.
  *
  * `gmail.modify` covers read, label changes and send. Asking for

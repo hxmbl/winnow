@@ -36,6 +36,146 @@ const BADGE_WASH_ALPHA = 0.14;
 const BADGE_EDGE_ALPHA = 0.34;
 
 /**
+ * The contrast a derived badge label has to clear, against its own wash.
+ *
+ * WCAG AA for text below 18.66px, which every chip label is. The chips are 11.5px.
+ */
+export const BADGE_TEXT_CONTRAST = 4.55;
+
+/**
+ * WCAG relative luminance, and the contrast ratio between two sRGB colours.
+ *
+ * Present because `deriveBadgeInk` needs it, and because a palette that cannot be
+ * checked is a palette that drifts: nine of the light-mode badge accents were
+ * rendering as chip labels at 2.7–4.2:1, which is invisible in a screenshot and
+ * illegible in a room.
+ */
+/** WCAG relative luminance of an `#RRGGBB` colour, 0–1. */
+export function relativeLuminance(hex: string): number {
+  const value = Number.parseInt(hex.slice(1), 16);
+  const channel = (shift: number): number => {
+    const raw = (value >> shift) & 255;
+    const c = raw / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
+}
+
+/** The WCAG contrast ratio between two `#RRGGBB` colours, 1–21. */
+export function contrastRatio(a: string, b: string): number {
+  const first = relativeLuminance(a);
+  const second = relativeLuminance(b);
+  const [high, low] = first > second ? [first, second] : [second, first];
+  return (high + 0.05) / (low + 0.05);
+}
+
+/** `#RRGGBB` with an explicit alpha, for the wash/edge derivations. */
+function rgba(hex: string, alpha: number): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+/** The opaque colour `rgba(accent, alpha)` composites to over `backdrop`. */
+function flatten(accent: string, backdrop: string, alpha: number): string {
+  const a = Number.parseInt(accent.slice(1), 16);
+  const b = Number.parseInt(backdrop.slice(1), 16);
+  const channel = (shift: number): number => {
+    const top = (a >> shift) & 255;
+    const bottom = (b >> shift) & 255;
+    return Math.round(top * alpha + bottom * (1 - alpha));
+  };
+  return `#${[16, 8, 0].map((s) => channel(s).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** `#RRGGBB` nudged `amount` of the way toward `toward`. */
+function mix(hex: string, toward: string, amount: number): string {
+  const a = Number.parseInt(hex.slice(1), 16);
+  const b = Number.parseInt(toward.slice(1), 16);
+  const channel = (shift: number): number => {
+    const from = (a >> shift) & 255;
+    const to = (b >> shift) & 255;
+    return Math.round(from + (to - from) * amount);
+  };
+  return `#${[16, 8, 0].map((s) => channel(s).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * A chip label colour that is legible on its own wash, over every surface.
+ *
+ * The accents are chosen for *hue identity* — red always means urgent, blue
+ * always means security — and a hue that reads correctly at 100% opacity stops
+ * reading correctly as text once it is also the fill behind it at 14%. Measured on
+ * the light palette, nine of the twenty-one badges were between 2.7:1 and 4.2:1 as
+ * a label on their own wash: starred 2.66, urgent 3.54, top_contacts 3.91,
+ * important 3.98. Every one of those was invisible in a screenshot and unreadable
+ * in a room.
+ *
+ * Rather than darken the accents — which would change the star's colour, the row
+ * indicators and the whole palette's character to fix a text problem — the accent
+ * is kept and the *label* is derived: the smallest nudge toward the scheme's own
+ * ink that clears the target on the least favourable surface the chip can sit on.
+ *
+ * Derived rather than hand-listed because there are twenty-one of them per scheme
+ * and a hand-maintained table is exactly the kind that drifts. In the dark palette
+ * every accent already clears the bar, so the derivation returns it unchanged —
+ * which is the correct answer, not a wasted computation.
+ *
+ * Exported so a test can assert the guarantee rather than trusting it.
+ */
+export function deriveBadgeInk(
+  accent: string,
+  surfaces: Record<string, string>,
+  scheme: ThemeName,
+): string {
+  const candidates = badgeBackdrops(surfaces, scheme);
+  // Toward the palette's own text colour: near-black in light, near-white in dark.
+  const toward = surfaces.ink ?? (scheme === "dark" ? "#EDF1F4" : "#15181D");
+  const clears = (color: string): boolean =>
+    candidates.every(
+      (backdrop) =>
+        contrastRatio(color, flatten(color, backdrop, BADGE_WASH_ALPHA)) >=
+        BADGE_TEXT_CONTRAST,
+    );
+
+  if (clears(accent)) return accent;
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = mix(accent, toward, step / 100);
+    if (clears(candidate)) return candidate;
+  }
+  return toward;
+}
+
+/**
+ * The surfaces a chip can be painted on, resolved to opaque colours.
+ *
+ * Exported so a test can assert the guarantee against exactly the set the
+ * derivation used. That matters: an earlier version of the test built its own
+ * list, the two lists drifted, and the "unchanged accent" assertion passed against
+ * a backdrop the derivation had never considered.
+ */
+export function badgeBackdrops(
+  surfaces: Record<string, string>,
+  scheme: ThemeName,
+): string[] {
+  return [
+    surfaces.surface,
+    surfaces.surfaceSunken,
+    surfaces.surfaceHover,
+    surfaces.surfaceActive,
+    surfaces.chrome,
+    surfaces.canvas,
+    // The reader is the one plane drawn as a translucent fill, so the real backdrop
+    // a chip sits on is that fill composited over the canvas. `panel` is the
+    // palette's own value, not the light-mode `PANEL` constant — reading the wrong
+    // one here made every dark chip derive against a near-white background and so
+    // come back as the full light ink.
+    typeof surfaces.panel === "string" && surfaces.panel.startsWith("#")
+      ? flatten(surfaces.panel, surfaces.canvas, scheme === "dark" ? 0.9 : PANEL_ALPHA)
+      : undefined,
+  ].filter((value): value is string => typeof value === "string" && value.startsWith("#"));
+}
+
+/**
  * The semantic names, and their light-mode values.
  *
  * Grouped by the four jobs a colour can do: surfaces, text, lines, and
@@ -77,14 +217,39 @@ const LIGHT: Palette = {
     ink: "#15181D",
     /** Long-form body copy. */
     inkBody: "#3C434C",
-    /** Secondary metadata: addresses, timestamps. */
-    inkMuted: "#767D87",
-    /** Tertiary: section labels, empty-state copy. */
-    inkSubtle: "#8B929C",
+    /**
+     * Secondary metadata: addresses, timestamps.
+     *
+     * Both of these were chosen by eye and both failed WCAG AA against the planes
+     * they sit on — `#767D87` is 4.16:1 on white and `#8B929C` is 3.14:1, at
+     * 11–13px. Neither shows up as a problem in a screenshot; together they are why
+     * the list reads as slightly washed out.
+     *
+     * The values below are the originals darkened just far enough to clear 4.5:1
+     * against every plane each one is actually painted on. Note the asymmetry in
+     * what they have to clear: `inkMuted` also appears on `surfaceActive`, because
+     * a *selected* row raises its secondary text one step, while `inkSubtle` does
+     * not — which is what leaves the two a visible step apart instead of collapsing
+     * onto the same grey. See `theme.test.ts`, which asserts both the contrast and
+     * the ordering.
+     */
+    inkMuted: "#5A5F67",
+    /** Tertiary: section labels, empty-state copy, the row timestamp. */
+    inkSubtle: "#656B72",
     /** Toolbar icon buttons. */
     inkIcon: "#4A515A",
-    /** Search placeholder. */
-    inkPlaceholder: "#8B929C",
+    /** Search placeholder. Same requirement as `inkSubtle`: it is 13px text. */
+    inkPlaceholder: "#656B72",
+
+    // ── Status ──────────────────────────────────────────────────
+    /** Destructive actions and errors. The only red that is not a bucket. */
+    danger: "#B42318",
+    /** Confirmation, and "this worked". */
+    success: "#15803D",
+    /** The notice strip's wash, for a non-blocking message. */
+    notice: "rgba(21, 128, 61, 0.08)",
+    /** The error strip's wash. */
+    dangerWash: "rgba(180, 35, 24, 0.07)",
 
     // ── Lines & controls ────────────────────────────────────────
     /** Default separator. Everything structural uses this unless it needs to recede. */
@@ -97,19 +262,6 @@ const LIGHT: Palette = {
     controlBorder: "rgba(15, 23, 42, 0.1)",
     /** Focus ring. Replaces `ring-neutral-400/60`. */
     focusRing: "rgba(120, 130, 145, 0.55)",
-
-    // ── Avatars ─────────────────────────────────────────────────
-    avatar: "#DDE2E3",
-
-    // ── Status ──────────────────────────────────────────────────
-    /** Destructive actions and errors. The only red that is not a bucket. */
-    danger: "#B42318",
-    /** Confirmation, and "this worked". */
-    success: "#15803D",
-    /** The notice strip's wash, for a non-blocking message. */
-    notice: "rgba(21, 128, 61, 0.08)",
-    /** The error strip's wash. */
-    dangerWash: "rgba(180, 35, 24, 0.07)",
 
     // ── Chrome ──────────────────────────────────────────────────
     scrollbar: "rgba(15, 23, 42, 0.2)",
@@ -174,18 +326,22 @@ const DARK: Palette = {
 
     ink: "#EDF1F4",
     inkBody: "#C3CBD3",
-    inkMuted: "#8D97A2",
-    inkSubtle: "#6C7681",
+    inkMuted: "#9FA8B1",
+    inkSubtle: "#929AA2",
     inkIcon: "#A7B1BC",
-    inkPlaceholder: "#6C7681",
+    /**
+     * The dark palette had the same problem from the other direction: `#6C7681` is
+     * 3.79:1 on `chrome` and 2.84:1 on `surfaceActive` — the row timestamp, the
+     * section header and the status line were all below AA. Lifted to clear 4.5:1 on
+     * the *lightest* surface of this palette, which is the binding case here.
+     */
+    inkPlaceholder: "#929AA2",
 
     hairline: "rgba(255, 255, 255, 0.09)",
     hairlineSoft: "rgba(255, 255, 255, 0.055)",
     divider: "rgba(255, 255, 255, 0.15)",
     controlBorder: "rgba(255, 255, 255, 0.11)",
     focusRing: "rgba(160, 172, 186, 0.7)",
-
-    avatar: "#2A313A",
 
     danger: "#F97066",
     success: "#4ADE80",
@@ -237,11 +393,6 @@ export type ThemeName = keyof typeof PALETTES;
 /** The light palette, for callers that need a value without the active scheme. */
 export const theme = LIGHT.color;
 
-function rgba(hex: string, alpha: number): string {
-  const n = Number.parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
-}
-
 /** The active palette, defaulting to light. */
 export function paletteFor(scheme: ThemeName): Palette {
   return PALETTES[scheme];
@@ -261,15 +412,19 @@ export function applyTheme(root: HTMLElement, scheme: ThemeName = "light"): void
   }
   for (const [key, value] of Object.entries(palette.badge)) {
     root.style.setProperty(`--wn-badge-${key}`, value);
-    // The chip's fill and edge are derived from the same accent, here rather
-    // than in the component. A component cannot derive them: it holds the *name*
-    // `--wn-badge-urgent`, not the resolved hex, and JavaScript has no way to ask
-    // the CSS engine what a custom property currently computes to. Passing that
-    // name to a hex parser silently produced `rgba(0, 0, 10, α)` for every chip —
-    // one identical near-black wash — which is what the reader's badges used to
-    // render.
+    // The chip's fill, edge and label colour are all derived from the same
+    // accent, here rather than in the component. A component cannot derive them:
+    // it holds the *name* `--wn-badge-urgent`, not the resolved hex, and
+    // JavaScript has no way to ask the CSS engine what a custom property
+    // currently computes to. Passing that name to a hex parser silently produced
+    // `rgba(0, 0, 10, α)` for every chip — one identical near-black wash — which
+    // is what the reader's badges used to render.
     root.style.setProperty(`--wn-badge-${key}-wash`, rgba(value, BADGE_WASH_ALPHA));
     root.style.setProperty(`--wn-badge-${key}-edge`, rgba(value, BADGE_EDGE_ALPHA));
+    root.style.setProperty(
+      `--wn-badge-${key}-ink`,
+      deriveBadgeInk(value, palette.color, scheme),
+    );
   }
   for (const [key, value] of Object.entries(palette.elevation)) {
     root.style.setProperty(`--wn-elev-${key}`, value);

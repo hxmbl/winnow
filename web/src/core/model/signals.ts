@@ -262,11 +262,22 @@ export function rowIndicators(signals: EmailSignals): BuiltinSmartFilter[] {
  */
 export type NavigationItem = "inbox" | "spam" | "trash" | "settings";
 
-export const NAVIGATION_ITEMS: readonly { id: NavigationItem; label: string; mailbox?: Mailbox }[] = [
-  { id: "inbox", label: "Inbox", mailbox: "inbox" },
-  { id: "spam", label: "Spam", mailbox: "spam" },
-  { id: "trash", label: "Bin / Trash", mailbox: "trash" },
-  { id: "settings", label: "Settings" },
+/**
+ * The palette's destinations.
+ *
+ * No `label` here on purpose. The three mailboxes take their names from
+ * `MAILBOX_LABEL`, which is what the mailbox tabs, the reader and the deep links
+ * use — so there is exactly one name for a folder in the whole app. This list used
+ * to carry its own, and the copy drifted the moment the two disagreed: the palette
+ * said "Bin / Trash" for the folder every other surface called "Trash", and "Bin"
+ * appears nowhere else in the product. A second spelling of a destination is a
+ * second thing to keep correct.
+ */
+export const NAVIGATION_ITEMS: readonly { id: NavigationItem; mailbox?: Mailbox }[] = [
+  { id: "inbox", mailbox: "inbox" },
+  { id: "spam", mailbox: "spam" },
+  { id: "trash", mailbox: "trash" },
+  { id: "settings" },
 ] as const;
 
 /**

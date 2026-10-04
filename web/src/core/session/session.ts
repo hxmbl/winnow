@@ -31,12 +31,13 @@ import {
 } from "./pendingAuth";
 import { parseRedirect, readOwnParams, stripRedirect } from "./redirect";
 import { GOOGLE_AUTH_URL, GMAIL_SCOPE, GmailError, LABEL } from "../gmail/dto";
-import { buildAuthorizeUrl, createPkcePair, describeAuthError } from "../gmail/pkce";
+import { buildAuthorizeUrl, createPkcePair, describeAuthError, stateMatches } from "../gmail/pkce";
 import type { PlatformInfo } from "../../platform/types";
 import { TokenManager } from "../gmail/tokens";
 import { GmailClient } from "../gmail/client";
 import { GmailSyncEngine, type MailboxCache, type CursorStore } from "../gmail/sync";
-import { buildMime, replyReferences } from "../gmail/mime";
+import { buildMime } from "../gmail/mime";
+import { base64UrlDecode } from "../gmail/dto";
 import type { Email, Mailbox } from "../model/email";
 import { mailboxFor } from "../gmail/mapper";
 import type { Platform } from "../../platform/types";
@@ -75,7 +76,17 @@ export const LOOPBACK_REDIRECT_URI =
  */
 export const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
 
-/** A cache backed by `localStorage` (web) or `storage` (desktop). */
+/**
+ * A cache backed by `localStorage` (web) or `storage` (desktop).
+ *
+ * Every method is individually guarded, and the reason is worth stating once: private
+ * mode in Safari and a full quota both make `localStorage` *throw* rather than return
+ * — and only on some of the accessors. Three of these six were unguarded, so a user
+ * with storage disabled got a working offline cache out of `all()` and then a thrown
+ * exception out of `write()` the first time a sync saved a cursor, which surfaced
+ * mid-sync as a failed refresh on an account that had just worked. Storage being
+ * unavailable is not a reason to fail; it is a reason to do less.
+ */
 export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorStore {
   const readAll = (): Email[] => {
     try {
@@ -127,13 +138,27 @@ export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorSto
     },
 
     async read() {
-      return globalThis.localStorage?.getItem(`${key}.cursor`) ?? null;
+      try {
+        return globalThis.localStorage?.getItem(`${key}.cursor`) ?? null;
+      } catch {
+        // No cursor means a full sync, which is slower and correct. Returning null
+        // rather than throwing is what keeps a blocked-storage user signed in.
+        return null;
+      }
     },
     async write(historyId: string) {
-      globalThis.localStorage?.setItem(`${key}.cursor`, historyId);
+      try {
+        globalThis.localStorage?.setItem(`${key}.cursor`, historyId);
+      } catch {
+        // The next launch does a full sync. Nothing else is affected.
+      }
     },
     async cursorClear() {
-      globalThis.localStorage?.removeItem(`${key}.cursor`);
+      try {
+        globalThis.localStorage?.removeItem(`${key}.cursor`);
+      } catch {
+        // Already unreachable.
+      }
     },
   } as MailboxCache & CursorStore & { cursorClear(): Promise<void> };
 }
@@ -262,7 +287,7 @@ export class GmailSession {
       throw new GmailError(describeAuthError(outcome.error), 0, "declined");
     }
 
-    if (outcome.state !== pkce.state) {
+    if (!stateMatches(pkce.state, outcome.state)) {
       // A redirect we did not issue. Refusing here — before the exchange — is
       // the entire point of the `state` parameter.
       forgetPendingAuth(pkce.state);
@@ -478,8 +503,8 @@ export class GmailSession {
           : [email];
         const raw = buildMime(draft as Parameters<typeof buildMime>[0], {
           from: { address: account.emailAddress, name: account.emailAddress.split("@")[0] },
-          inReplyTo: email.gmailId,
-          references: replyReferences(conversation),
+          inReplyTo: email,
+          references: conversation,
         });
         await client.send(raw, email.threadId);
       },
@@ -487,13 +512,9 @@ export class GmailSession {
       async fetchAttachment(gmailId, attachmentId) {
         const all = await loadCache();
         const response = await client.attachment(gmailId, attachmentId);
-        const encoded = response.data ?? "";
         // Gmail returns base64url; the bytes are handed to the platform layer
         // which encodes them again for its own transport.
-        const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        const bytes = base64UrlDecode(response.data ?? "") ?? new Uint8Array(0);
 
         const email = all.find((candidate) => candidate.gmailId === gmailId);
         const attachment = email?.attachments.find((a) => a.id === attachmentId);

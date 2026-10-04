@@ -17,11 +17,12 @@
  */
 
 import { memo, useEffect, useRef } from "react";
-import { formatRowTime, groupByDay, type DayBucket } from "../../core/mail/datetime";
+import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
 import { displayName, monogram } from "../../core/model/email";
 import { rowIndicators, type EmailSignals } from "../../core/model/signals";
 import { avatarColor, avatarTextColor } from "../avatarColor";
 import { hexA, FILTER_PILLS } from "../filterColors";
+import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
 
 type RowProps = {
@@ -222,6 +223,8 @@ export type EmptyState = {
   reason: EmptyReason;
   onClearFilters: () => void;
   onClearSearch: () => void;
+  onSync: () => void;
+  canSync: boolean;
 };
 
 /**
@@ -231,50 +234,83 @@ export type EmptyState = {
  * [clear them]" tells the user what to do about it, and the three reasons are
  * genuinely different problems with genuinely different fixes.
  */
-function Empty({ reason, onClearFilters, onClearSearch }: EmptyState) {
+function Empty({
+  reason,
+  onClearFilters,
+  onClearSearch,
+  onSync,
+  canSync,
+}: EmptyState) {
+  /**
+   * What the user can do about *this* emptiness.
+   *
+   * Five reasons and five different answers, which is the whole point of the state.
+   * Three of them used to print text with no button, because only `search` and
+   * `filters` had an action attached — so "This mailbox is empty." sat there with
+   * nothing to do even where something *could* be done, and `noSignal` — the one a
+   * user hits by accident, having archived everything in a bucket and watched it go
+   * quiet — explained nothing at all.
+   *
+   * `mailbox` is the only case where the remedy is not about narrowing, and it is
+   * also the only one that depends on something outside the list: there is an
+   * account to sync with, or there is not. Which is why `canSync` is a prop rather
+   * than a constant — offering "Check for new mail" over the demo mailbox would be a
+   * button that cannot do anything.
+   */
+  const remedy = (() => {
+    switch (reason) {
+      case "search":
+        return {
+          body: "Nothing matches that search.",
+          action: { label: "Clear search", run: onClearSearch },
+        };
+      case "filters":
+        return {
+          body: "Nothing matches those filters.",
+          action: { label: "Show everything", run: onClearFilters },
+        };
+      case "hidden":
+        return {
+          body: "Everything here is in a bucket you have hidden.",
+          action: { label: "Show everything", run: onClearFilters },
+        };
+      case "noSignal":
+        return {
+          body: "Winnow is holding every message here back as likely junk.",
+          action: { label: "Show the hidden mail", run: onClearFilters },
+        };
+      case "mailbox":
+        return {
+          body: "There is nothing in this mailbox yet.",
+          action: canSync
+            ? { label: "Check for new mail", run: onSync }
+            : null,
+        };
+      default:
+        return null;
+    }
+  })();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
-      {/*
-        Four reasons and four different fixes, which is the whole point of the state.
-
-        Each of the `unsafe` and `mailbox` cases used to print text with no button,
-        because only `search` and `filters` had an action attached — so "This mailbox is
-        empty." sat there with nothing to do even where something *could* be done. The
-        `unsafe` reason in particular is the one a user hits by accident: they archive
-        every message in a bucket, the bucket goes quiet, the empty list explains
-        nothing, and the only way back is to know that a mute exists.
-
-        "Show everything" is the right button for both of those, because what the user
-        wants from an empty list is to stop filtering — whether the filter was explicit
-        (filters), implicit (muted buckets), or a sync that brought nothing new (mailbox,
-        where the honest answer is "nothing to show, and here is the button that syncs
-        again" — which is the same affordance either way).
-      */}
-      <p className="text-[13.5px] text-ink-muted">
-        {reason === "search" && "Nothing matches that search."}
-        {reason === "filters" && "Nothing matches those filters."}
-        {reason === "hidden" &&
-          "Everything here is in a bucket you have hidden. Show everything to see it."}
-        {reason === "noSignal" &&
-          "Winnow is holding every message here back as likely junk."}
-        {reason === "mailbox" && "This mailbox is empty."}
-      </p>
-      {/*
-        A button for every reason except "there is genuinely no mail", where the useful
-        action is to look again rather than to change a filter that was never set.
-
-        `hidden` and `noSignal` both clear the narrowing — filters and mutes are the
-        same instinct applied at two levels, and one button that does both is less
-        confusing than two that differ only in wording.
-      */}
-      {reason !== null && reason !== "mailbox" && (
-        <button
-          type="button"
-          onClick={reason === "search" ? onClearSearch : onClearFilters}
-          className="rounded-full border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-        >
-          {reason === "search" ? "Clear search" : "Show everything"}
-        </button>
+      {remedy ? (
+        <>
+          <p className="max-w-[26rem] text-[13.5px] text-ink-muted">{remedy.body}</p>
+          {remedy.action && (
+            <button
+              type="button"
+              onClick={remedy.action.run}
+              className="rounded-full border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              {remedy.action.label}
+            </button>
+          )}
+        </>
+      ) : (
+        // `emptyReason` is null only when the list is non-empty, so this branch is
+        // unreachable — but an empty screen with no explanation is worse than a
+        // wrong one, so it says something.
+        <p className="text-[13.5px] text-ink-muted">Nothing to show.</p>
       )}
     </div>
   );
@@ -288,10 +324,22 @@ type Props = {
   unreadIds: ReadonlySet<number>;
   freshIds: ReadonlySet<number>;
   emptyReason: EmptyState["reason"];
+  /**
+   * The list's order, which decides whether day sections mean anything.
+   *
+   * Only a date-sorted list can group by day; the other two sorts interleave the
+   * days, and labelling that interleaving produced a duplicate React key on every
+   * repeated section. See `daySections`.
+   */
+  sortBy: SortBy;
   onSelect: (id: number) => void;
   onToggleStar: (id: number) => void;
   onClearFilters: () => void;
   onClearSearch: () => void;
+  /** Re-fetch. Only offered when the mailbox is empty for want of mail. */
+  onSync: () => void;
+  /** False in the demo, where there is nothing to sync with. */
+  canSync: boolean;
   /** Reference instant for the day sections. */
   now: number;
   className?: string;
@@ -305,20 +353,25 @@ function MessageList({
   unreadIds,
   freshIds,
   emptyReason,
+  sortBy,
   onSelect,
   onToggleStar,
   onClearFilters,
   onClearSearch,
+  onSync,
+  canSync,
   now,
   className = "",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Group by day, but on the *representative* message's date, since that is the
-  // date the row displays.
-  const groups = groupByDay(
-    threads.map((row) => ({ row, receivedAt: row.representative.receivedAt })),
+  // Day sections, on the *representative* message's date, since that is the date the
+  // row displays. One flat section unless the sort is chronological.
+  const sections = daySections(
+    threads,
     now,
+    (row) => row.representative.receivedAt,
+    sortBy === "date",
   );
 
   /**
@@ -329,14 +382,6 @@ function MessageList({
    * *cursor* rather than the selection, because `j` moves the cursor without
    * opening anything, and a list that does not follow the cursor is a list you
    * cannot navigate blind.
-   */
-  /**
-   * Keep the cursor's row in view.
-   *
-   * `block: "nearest"` matters: `"center"` would yank the list on every `j` press,
-   * which in a keyboard-driven client is unusable. And this follows the *cursor* rather
-   * than the selection, because `j` moves the cursor without opening anything, and a
-   * list that does not follow the cursor is a list you cannot navigate blind.
    *
    * The dependency is the *cursor index*, not `threads`. `threads` is a fresh array on
    * every derive, so it was in the dependency list and this effect therefore ran on
@@ -361,6 +406,8 @@ function MessageList({
         reason={emptyReason}
         onClearFilters={onClearFilters}
         onClearSearch={onClearSearch}
+        onSync={onSync}
+        canSync={canSync}
       />
     );
   }
@@ -370,7 +417,7 @@ function MessageList({
       ref={containerRef}
       className={`thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4 ${className}`}
     >
-      {groups.map(({ bucket, label, rows }) => (
+      {sections.map(({ key, label, rows }) => (
         /*
           Each day is its own `section` with an accessible name.
 
@@ -380,11 +427,18 @@ function MessageList({
           communicates. `aria-label` on the section is what turns the visual header into
           a real boundary, and `role="list"`/`listitem` below it is what makes the
           count and the position in the list available to assistive tech.
+
+          `label` is null for a sort that is not chronological, and then there is one
+          section with no header: the boundary would be false, so the whole wrapper
+          collapses to the list itself.
         */
-        <section key={bucket} aria-label={`${label}, ${rows.length} ${rows.length === 1 ? "message" : "messages"}`}>
-          <SectionHeader label={label} count={rows.length} />
+        <section
+          key={key}
+          aria-label={label ? `${label}, ${rows.length} ${rows.length === 1 ? "message" : "messages"}` : undefined}
+        >
+          {label && <SectionHeader label={label} count={rows.length} />}
           <div role="list" className="flex flex-col gap-0.5 px-1.5">
-            {rows.map(({ row }) => {
+            {rows.map(({ row, bucket }) => {
               const email = row.representative;
               const signalsForRow = signals.get(email.id);
               // A row whose signals are missing is not rendered at all: the classifier

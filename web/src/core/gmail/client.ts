@@ -19,6 +19,7 @@ import {
   GmailError,
   GmailHttpError,
   LABEL,
+  base64UrlEncode,
   type GmailAttachmentResponse,
   type GmailHistoryResponse,
   type GmailListResponse,
@@ -112,7 +113,10 @@ export class GmailClient {
       if (!retry.response.ok) {
         throw new GmailHttpError(retry.response.status, retry.text);
       }
-      return JSON.parse(retry.text) as T;
+      // Same empty-body guard as the non-retry path below: a label modify answers
+      // 204, and `JSON.parse("")` on the retry was a SyntaxError reported to the
+      // user as a failed star.
+      return (retry.text ? JSON.parse(retry.text) : {}) as T;
     }
 
     if (!response.ok) throw new GmailHttpError(response.status, text);
@@ -151,11 +155,21 @@ export class GmailClient {
     return this.request<GmailMessage>(`/users/me/messages/${encodeURIComponent(id)}?format=full`);
   }
 
-  /** Changes since `startHistoryId`. */
+  /**
+   * Changes since `startHistoryId`.
+   *
+   * Every history type is asked for. This used to request `messageAdded` alone,
+   * which is the one type a *new* message produces — so an archive, a star, a
+   * mark-read or a delete made anywhere else was never reported, and the
+   * incremental sync quietly kept the stale copy forever. It is worth being
+   * explicit that this is a filter on what Gmail *returns*, not on what Gmail
+   * keeps: all four types are retained for the same window, and `sync.ts` already
+   * applies all four.
+   */
   async history(startHistoryId: string, pageToken?: string): Promise<GmailHistoryResponse> {
     const params = new URLSearchParams({
       startHistoryId,
-      historyTypes: "messageAdded",
+      historyTypes: "messageAdded,labelsAdded,labelsRemoved,messagesDeleted",
     });
     if (pageToken) params.set("pageToken", pageToken);
     return this.request<GmailHistoryResponse>(`/users/me/history?${params}`);
@@ -209,9 +223,19 @@ export class GmailClient {
     await this.request(`/users/me/messages/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
-  /** Send a raw RFC 822 message. See `mime.ts` for the body. */
+  /**
+   * Send a raw RFC 822 message. See `mime.ts` for the body.
+   *
+   * The message is base64url-encoded here, because that is what the API's `raw`
+   * field requires. It used to be put in the JSON body as plain text, which
+   * Gmail accepts for an ASCII-only message and rejects with a 400 as soon as
+   * anything in the headers or the body is non-ASCII — that is, for a mail client
+   * writing to someone in another language, and it failed on send rather than
+   * earlier where it was visible. Encoding belongs at the wire rather than at each
+   * caller, because a caller that forgets it fails only on some messages.
+   */
   async send(raw: string, threadId?: string): Promise<GmailSendResponse> {
-    const body: Record<string, unknown> = { raw };
+    const body: Record<string, unknown> = { raw: base64UrlEncode(new TextEncoder().encode(raw)) };
     if (threadId) body.threadId = threadId;
     return this.request<GmailSendResponse>("/users/me/messages/send", { method: "POST", body });
   }

@@ -147,21 +147,88 @@ export function parseAddressHeader(raw: string): { name?: string; address: strin
 }
 
 /**
- * Strip a body's remote references, for the default privacy posture.
+ * A tag, and the attributes inside it.
  *
- * Winnow does not load remote images by default. A tracking pixel confirms a
- * message was opened and roughly where; a remote stylesheet can exfiltrate
- * anything in the DOM. Both are removed by dropping `src`/`background`/
- * `srcset` from the markup, which leaves the text and layout intact.
+ * Tags rather than the whole document, deliberately. The old counter matched
+ * `src="…"` anywhere in the string, which meant a message whose *text* quoted an HTML
+ * snippet — `<pre>&lt;img src="https://x.example/p.gif"&gt;</pre>`, which is how most
+ * newsletters explain their own unsubscribe link — announced a tracking pixel that
+ * was never going to load. Requiring a real tag means only things a renderer would
+ * actually fetch are counted.
  */
-export function stripRemoteReferences(html: string): string {
-  return html
-    .replace(/\s(?:src|srcset|background|poster)\s*=\s*"(?:(?!").)*"/gi, ' data-blocked-src="true"')
-    .replace(/url\(\s*['"]?(?!data:|#)[^)'\s]*['"]?\s*\)/gi, "url()");
+const TAG = /<[a-zA-Z][^>]*>/g;
+const ATTRIBUTE =
+  /([a-zA-Z][a-zA-Z0-9:_.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+const URL_FUNCTION = /url\(\s*['"]?(?!data:|#)[^)'"\s]*['"]?\s*\)/gi;
+
+/** A `data:` URI: inline bytes already inside the message, involving nobody. */
+const INLINE_DATA_URI = /^\s*data:/i;
+
+/** A value that names something to fetch: a scheme, a protocol-relative URL, or `url()`. */
+const NAMES_A_RESOURCE = /^\s*(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+
+/** Attributes whose value is a URL by definition. */
+const URL_ATTRIBUTES = new Set(["src", "srcset", "poster"]);
+
+/**
+ * The remote references a body contains.
+ *
+ * This feeds a privacy claim — "3 remote references were blocked" tells the user what
+ * Winnow chose not to fetch on their behalf — so it has to be right about what a
+ * *remote reference* is, and it was not. It counted every `src`, `srcset`,
+ * `background` and `poster` attribute anywhere in the document, which sweeps up three
+ * things that are not remote anything:
+ *
+ *   - `data:` URIs, which are bytes already inside the message,
+ *   - `background="#ffffff"`, a colour and not a request,
+ *   - escaped HTML inside the message's own text, which no renderer would fetch.
+ *
+ * A newsletter with an inline logo, a tinted table and a quoted `<img>` snippet
+ * reported "4 remote references were blocked" while fetching nothing. So the note was
+ * telling the user the opposite of the truth about their own privacy — which is worse
+ * than saying nothing, because somebody who reads "nothing was blocked" stops
+ * checking.
+ *
+ * The references are returned rather than counted so the shapes can be asserted; the
+ * count is the presentation of that list, not a separate piece of arithmetic.
+ */
+export function remoteReferences(html: string): string[] {
+  const found: string[] = [];
+
+  for (const tag of html.matchAll(TAG)) {
+    for (const attribute of tag[0].matchAll(ATTRIBUTE)) {
+      const name = attribute[1].toLowerCase();
+      const value = attribute[2] ?? attribute[3] ?? attribute[4] ?? "";
+      if (INLINE_DATA_URI.test(value)) continue;
+
+      if (URL_ATTRIBUTES.has(name)) {
+        found.push(value);
+        continue;
+      }
+
+      if (name === "background") {
+        // The attribute that carries both a colour and a URL. Only the second is a
+        // request, and conflating them is the most common false positive in mail.
+        if (NAMES_A_RESOURCE.test(value)) found.push(value);
+        continue;
+      }
+
+      if (name === "style") {
+        for (const url of value.matchAll(URL_FUNCTION)) found.push(url[0]);
+      }
+    }
+  }
+
+  return found;
 }
 
-/** Count the remote references a body contains, for the "images blocked" note. */
+/**
+ * How many remote references a body contains, for the "images blocked" note.
+ *
+ * A message with none gets no note at all, which is exactly why an inflated count is
+ * a lie rather than a rounding error: the number only ever appears above zero, and it
+ * is read as "this is all Winnow kept you from loading".
+ */
 export function countRemoteReferences(html: string): number {
-  const matches = html.match(/\s(?:src|srcset|background|poster)\s*=\s*"(?:(?!").)*"/gi);
-  return matches?.length ?? 0;
+  return remoteReferences(html).length;
 }

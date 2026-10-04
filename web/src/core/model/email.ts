@@ -90,10 +90,25 @@ export type Draft = {
   inReplyTo?: GmailId;
   threadId?: GmailId;
   /**
-   * The quote block Winnow pre-filled, kept so it can be stripped from the end
-   * of the body if the user leaves it alone. See `core/reply.ts`.
-   */
+ * The quote block Winnow pre-filled, kept so it can be stripped from the end
+ * of the body if the user leaves it alone. See `core/reply.ts`.
+ */
   quoteBlock?: string;
+  /**
+   * The text Winnow put in the body, before the user touched anything.
+   *
+   * Not the same thing as `quoteBlock`, and the distinction is what lets one question
+   * — "is there anything here the user wrote?" — be answered for both a reply and a
+   * forward. A reply's contribution is *empty*: the body is the quote, and anything
+   * above it is the user's. A forward's contribution is the whole conversation, because
+   * that text is meant to stay in the message the user sends.
+   *
+   * So the reply leaves this empty and the forward records its body. Comparing against
+   * it is the honest test for "discarding this loses nothing", which is what the
+   * composer's discard confirmation has to decide — and it is not "is the body
+   * empty", which a forward's body never is.
+   */
+  prefilled?: string;
 };
 
 /** File names the composer should offer as an attachment picker. */
@@ -122,18 +137,6 @@ export function mimeTypeForFilename(filename: string): string {
   return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? "application/octet-stream";
 }
 
-/** True when the browser/Tauri can preview this without downloading it. */
-export function isPreviewable(mimeType: string): boolean {
-  // SVG is excluded explicitly: it is an image that can carry script, and a mail
-  // client that previews one is a mail client that runs a stranger's JavaScript.
-  if (mimeType.includes("svg")) return false;
-  return (
-    mimeType.startsWith("image/") ||
-    mimeType === "application/pdf" ||
-    mimeType.startsWith("text/")
-  );
-}
-
 /**
  * A message, normalised.
  *
@@ -146,6 +149,16 @@ export type Email = {
   gmailId: GmailId;
   /** Absent for a single message with no thread. */
   threadId?: GmailId;
+  /**
+   * The RFC 822 `Message-ID`, verbatim, angle brackets and all.
+   *
+   * Absent on the demo seed and on any row cached by an older build, so every
+   * consumer needs a fallback. It is here because a reply's `In-Reply-To` and
+   * `References` have to name the *real* ids of the conversation: synthesised ones
+   * thread correctly inside Gmail — which matches on its own thread id — and in
+   * nobody else's client, where the reply lands as a new conversation.
+   */
+  messageId?: string;
   /**
    * The envelope sender: the bare address from `From:`. This is the join key
    * for sender pills, trash bias and engagement ranking, so it is deliberately

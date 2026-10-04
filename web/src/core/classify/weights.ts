@@ -154,13 +154,6 @@ export function clampWeight(key: SignalKey, value: number): number {
   return Math.min(Math.max(Math.round(value), meta.min), meta.max);
 }
 
-/** One weight, set safely. Returns a new object so React sees a change. */
-export function setWeight(weights: SignalWeights, key: SignalKey, value: number): SignalWeights {
-  const clamped = clampWeight(key, value);
-  if (weights[key] === clamped) return weights;
-  return { ...weights, [key]: clamped };
-}
-
 /**
  * How far a weight has drifted from its default, for the "learned" badges.
  *

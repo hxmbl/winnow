@@ -215,32 +215,31 @@ pub struct NewMail {
     message_ids: Vec<i64>,
 }
 
-/// What a notification click is worth knowing, and what it is not.
+/// Show a native notification for newly arrived mail.
 ///
+/// Best-effort on platforms where the plugin is unavailable; the browser
+/// adapter's `Notification` path is the fallback for everything else.
+///
+/// **What a notification click is worth knowing, and what it is not.**
 /// `tauri-plugin-notification` exposes no desktop click callback: `on_action` is
 /// mobile-only, and a click on a macOS notification arrives as an *app activation*
-/// carrying no payload. So the ids attached to a notification cannot be read back
-/// at the moment of the click, and the old comment on `NewMail` — "a click can open
-/// the right conversation" — described a capability the desktop build does not have.
+/// carrying no payload. So the ids attached to a notification cannot be read back at
+/// the moment of the click, and the old comment on `NewMail` — "a click can open the
+/// right conversation" — described a capability the desktop build does not have.
 ///
 /// What the desktop build does on a click is reveal the window, handled by
 /// [`crate::tray::reveal`] on `RunEvent::Reopen`. Opening the *specific* message is
 /// the browser build's feature, and the platform interface says so rather than
 /// leaving the two to be discovered as a difference in behaviour.
 ///
-/// The `message_ids` are still sent and still used: a browser build's
-/// `Notification` reads them, and the type is the same on both sides so the wire
-/// shape is one shape.
+/// The `message_ids` are still sent and still used: the plugin round-trips them as
+/// `extra`, and a shell that *can* deliver a payload reads them. Sending them costs
+/// nothing and keeps the wire shape one shape across both hosts.
 ///
-/// The constant exists so the webview's subscription is not conditional on the host
-/// — a platform that cannot emit an event should not require the caller to know that
-/// in advance.
-pub const NOTIFY_ACTION_EVENT: &str = "winnow://notification-action";
-
-/// Show a native notification for newly arrived mail.
-///
-/// Best-effort on platforms where the plugin is unavailable; the browser
-/// adapter's `Notification` path is the fallback for everything else.
+/// Note there is no event constant here for it. There used to be —
+/// `winnow://notification-action` — declared "so the webview's subscription is not
+/// conditional on the host", but nothing emitted it and nothing subscribed to it,
+/// which is the shape a promise takes when the capability behind it does not exist.
 #[tauri::command]
 pub fn notify_new_mail(app: AppHandle, mail: NewMail) -> Result<()> {
     use tauri_plugin_notification::NotificationExt;
@@ -249,9 +248,9 @@ pub fn notify_new_mail(app: AppHandle, mail: NewMail) -> Result<()> {
         .builder()
         .title(mail.title)
         .body(mail.body)
-        // Carry the ids so a click can open the right conversation. The plugin's
-        // `extra` takes a key/value pair rather than a JSON blob, and the ids go
-        // in as a list of numbers, which is what the plugin round-trips.
+        // Carry the ids so a future shell that *can* deliver a payload has them. The
+        // plugin's `extra` takes a key/value pair rather than a JSON blob, and the ids
+        // go in as a list of numbers, which is what the plugin round-trips.
         .extra("messageIds", &mail.message_ids)
         // The group collapses a burst: forty messages arriving together should
         // produce one notification, not forty.

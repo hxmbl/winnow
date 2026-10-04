@@ -24,9 +24,10 @@ import {
   type ScoreRecencyContext,
 } from "./scoring";
 import { classifyEmail } from "./classify";
-import { EMPTY_PROFILE, type UserProfile } from "../model/profile";
+import { buildUserProfile, EMPTY_PROFILE, type UserProfile } from "../model/profile";
 import { NEUTRAL_SIGNALS, type EmailSignals } from "../model/signals";
 import { SIGNAL_KEYS, clampWeight, type SignalWeights } from "./weights";
+import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 import type { Email } from "../model/email";
 
 /** A message with only what a test cares about. */
@@ -215,12 +216,20 @@ describe("calculateWinnowScore — the range", () => {
   });
 
   it("stays inside 0–100 for every message in the demo mailbox", () => {
-    // The demo is the widest set of shapes the app has, including the ones
-    // built to be junk; a score outside the range would be rendered as a
-    // percentage outside the range.
-    expect(scoreOf()).toBeGreaterThanOrEqual(0);
-    expect(scoreOf()).toBeLessThanOrEqual(100);
-    expect(scoreOf({ starred: true }, { spamLikelihood: 1 })).toBe(25);
+    // The demo is the widest set of shapes the app has, including the fixtures
+    // built to be junk, and every message in it carries a body long enough to
+    // trip several intent patterns at once. A score outside the range would be
+    // rendered as a percentage outside the range.
+    const profile = buildUserProfile(DEMO_EMAILS, DEMO_TRASH);
+    const window = recencyWindow(DEMO_EMAILS.map((message) => message.receivedAt));
+    expect(window).not.toBeNull();
+
+    for (const message of DEMO_EMAILS) {
+      const signals = classifyEmail(message, profile);
+      const score = calculateWinnowScore(message, signals, profile, window);
+      expect(score, `"${message.subject}" scored ${score}`).toBeGreaterThanOrEqual(0);
+      expect(score, `"${message.subject}" scored ${score}`).toBeLessThanOrEqual(100);
+    }
   });
 });
 

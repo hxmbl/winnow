@@ -21,6 +21,7 @@ import {
   LearningModel,
   LEARNING_STEP,
   MAX_EVENTS,
+  SPAM_CONTRADICTION,
   type FeedbackEvent,
   type LearningSnapshot,
 } from "./learning";
@@ -231,15 +232,20 @@ describe("starring", () => {
     expect(moved(after, before)).toEqual(["security"]);
   });
 
-  it("does not soften spam sensitivity for a message with no other signal", () => {
-    // A defect, pinned rather than wished away: the spam nudge sits behind
-    // `touched.length > 0`, and a plain spam lure is exactly the message with no
-    // security, urgency, finance or bulk signal on it. So the one message whose
-    // spam call the user has just contradicted is the one that teaches nothing.
+  it("softens spam sensitivity for a bare spam lure", () => {
+    // The spam nudge used to sit behind `touched.length > 0`, and a plain spam lure
+    // is exactly the message with no security, urgency, finance or bulk signal on it.
+    // So the one message whose spam call the user has just contradicted was the one
+    // that taught nothing, while the comment beside it called this "the clearest
+    // possible statement that the spam call was wrong".
     const before = LearningModel.initial().toSnapshot();
     const lure = sig({ spamLikelihood: 0.9, importanceScore: 3 });
     const after = LearningModel.initial().recordStar(email(), lure, true, 1_000);
-    expect(after.weights).toEqual(before.weights);
+
+    expect(after.weights.spamSensitivity).toBe(before.weights.spamSensitivity - LEARNING_STEP);
+    // Only that one. A lure has no other signal to move, and moving anything else on
+    // its behalf would be the model guessing at the user's reason.
+    expect(moved(after, before)).toEqual(["spamSensitivity"]);
     expect(after.events).toHaveLength(1);
   });
 
@@ -298,17 +304,46 @@ describe("starring", () => {
     expect(back.events.map((event) => event.action)).toEqual(["starred", "unstarred"]);
   });
 
-  it("does not restore spam sensitivity on the way back", () => {
-    // The mirror has one seam in it, worth naming: the spam nudge is pushed only
-    // when `starred` is true, so un-starring mail the user starred as junk raises
-    // nothing at all. The correction for a mis-click teaches the model nothing.
+  it("restores spam sensitivity on the way back", () => {
+    // Starring junk says "your spam call was wrong"; unstarring it again says the
+    // opposite, and the two must cancel. The nudge used to be pushed only when
+    // `starred`, so the single most reflexive correction in the product — star, see
+    // it was junk, unstar — left the model permanently one point more trusting of
+    // spam than it started.
     const scored = sig({ security: true, spamLikelihood: 0.8 });
     const message = email({ id: 12 });
     const up = LearningModel.initial().recordStar(message, scored, true, 1_000);
+    expect(up.weights.spamSensitivity).toBe(STANDARD_WEIGHTS.spamSensitivity - LEARNING_STEP);
+
     const back = up.recordStar(message, scored, false, 2_000);
-    expect(back.weights.spamSensitivity).toBe(
-      STANDARD_WEIGHTS.spamSensitivity - LEARNING_STEP,
+    expect(back.weights.spamSensitivity).toBe(STANDARD_WEIGHTS.spamSensitivity);
+    expect(back.weights).toEqual(STANDARD_WEIGHTS);
+  });
+
+  it("softens spam sensitivity for a message with no other signal", () => {
+    // A spam lure is *defined* by carrying none of the touchable signals — no
+    // security, no urgency, no finance. So gating the spam nudge on
+    // `touched.length > 0` excluded precisely the message that most clearly
+    // contradicts the spam call, and the correction was silently dropped.
+    const pureSpamLure = sig({ spamLikelihood: 0.9 });
+
+    const after = LearningModel.initial().recordStar(
+      email({ id: 13 }),
+      pureSpamLure,
+      true,
+      1_000,
     );
+    expect(after.weights.spamSensitivity).toBe(STANDARD_WEIGHTS.spamSensitivity - LEARNING_STEP);
+    // …and nothing else moved, because there was nothing else on the message.
+    expect({ ...after.weights, spamSensitivity: STANDARD_WEIGHTS.spamSensitivity }).toEqual(
+      STANDARD_WEIGHTS,
+    );
+
+    // Below the threshold it stays out of it entirely: a star on ordinary mail is
+    // an opinion about that mail, not evidence about the spam boundary.
+    const borderline = sig({ spamLikelihood: SPAM_CONTRADICTION - 0.01 });
+    const untouched = LearningModel.initial().recordStar(email({ id: 14 }), borderline, true, 1_000);
+    expect(untouched.weights).toEqual(STANDARD_WEIGHTS);
   });
 });
 
@@ -370,7 +405,10 @@ describe("muting a bucket", () => {
       sender: undefined,
       action: "filter_rejected",
       predictedImportance: undefined,
-      activeSignals: [],
+      // The bucket, not the message, decides what a mute moves — so this is set even
+      // with no message behind the mute. Muting Newsletters means the newsletter
+      // signal over-fired, whether or not one particular message triggered the click.
+      activeSignals: ["newsletterPenalty"],
       rejectedFilter: "newsletters",
       at: 1_000,
     });
@@ -385,20 +423,34 @@ describe("muting a bucket", () => {
     expect(scoped.events[0].sender).toBe("billing@acme.example");
     expect(scoped.events[0].predictedImportance).toBe(64);
     expect(scoped.events[0].rejectedFilter).toBe("receipts");
+    // `receipts` is driven by `finance`, not by the urgency this message happened to
+    // carry — the weight that moved is a property of the bucket being muted.
+    expect(scoped.events[0].activeSignals).toEqual(["finance"]);
   });
 
-  it("records the message's signals even where nothing moved", () => {
-    // `activeSignals` is documented as "the signals the event was allowed to
-    // move", and for a scoped mute it is really "the signals on that message".
-    // The two differ only for a bucket with no driving weight — and the panel
-    // renders the list either way.
+  it("records the weights the mute moved, and nothing else", () => {
+    // `activeSignals` means "what this event changed", not "what was on the
+    // message". Muting a bucket with no driving weight moves nothing, so an empty
+    // array is the honest record — and it was previously the message's own signals,
+    // which claimed `urgency` and `actionNeeded` had been adjusted when neither
+    // had. An audit trail that overstates what it did is worse than one that is
+    // silent, because it is believed.
     const scoped = LearningModel.initial().rejectFilter(
       "travel",
       email({ id: 3 }),
       ACTION_NEEDED,
       1_000,
     );
-    expect(scoped.events[0].activeSignals).toEqual(["urgency", "actionNeeded"]);
+    expect(scoped.events[0].activeSignals).toEqual([]);
+
+    // And where the mute *does* drive a weight, that is what gets recorded.
+    const driven = LearningModel.initial().rejectFilter(
+      "receipts",
+      email({ id: 3 }),
+      sig({ finance: true, importanceScore: 40 }),
+      1_000,
+    );
+    expect(driven.events[0].activeSignals).toEqual(["finance"]);
   });
 
   it("never touches spam sensitivity, because unsafe is not muted", () => {

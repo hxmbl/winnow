@@ -40,6 +40,15 @@ export const LEARNING_STEP = 1;
 /** The event log is capped so storage stays bounded. */
 export const MAX_EVENTS = 400;
 
+/**
+ * How spammy a message has to look before starring it counts as a correction.
+ *
+ * The threshold the unsafe/spam boundary is drawn at elsewhere in `core`. Below it,
+ * a star is an ordinary opinion about an ordinary message and nudging spam
+ * sensitivity would teach the classifier to miss phish.
+ */
+export const SPAM_CONTRADICTION = 0.4;
+
 export type FeedbackAction = "starred" | "unstarred" | "filter_rejected";
 
 export type FeedbackEvent = {
@@ -54,7 +63,17 @@ export type FeedbackEvent = {
    * user can tell whether the weights are working for them.
    */
   predictedImportance?: number;
-  /** The signals the event was allowed to move. */
+  /**
+   * The weights this event moved.
+   *
+   * Not "the signals on the message". The two differ exactly where the distinction
+   * matters: muting a bucket with no single driving weight (`travel`, `shipping`,
+   * `codes`) moves nothing, and the old code recorded the message's own signals
+   * anyway — so the audit trail claimed a set of weights had been adjusted when none
+   * had, which is the one thing an audit trail exists to rule out. A reader asking
+   * "what did Winnow learn from this?" wants the answer to that, and an empty array
+   * is a real answer: the user objected, the model had nothing to change.
+   */
   activeSignals: SignalKey[];
   rejectedFilter?: BuiltinSmartFilter;
   at: number;
@@ -206,10 +225,21 @@ export class LearningModel {
     return { weights: this.weights, adaptive: this.adaptive, events: [...this.events] };
   }
 
-  /** A copy of the event log, for the settings panel's history list. */
+  /**
+   * A copy of the event log, newest first.
+   *
+   * Newest first is what the settings panel wants, and the order matters: the
+   * panel reads top-down, and the newest event is the one that explains a ranking
+   * the user is looking at *right now*. The log itself is stored oldest-first
+   * because dropping the oldest at the cap is then a slice of the tail.
+   *
+   * The panel was handed `events` directly and rendered `slice(0, 100)`, which is
+   * the first hundred — so once the log passed a hundred entries (a fortnight of
+   * ordinary starring) everything the panel showed was history, and the newest
+   * hundred events — the ones that actually explain the current weights — were
+   * invisible. The `history` getter existed and was never called.
+   */
   get history(): FeedbackEvent[] {
-    // Newest first: the panel reads top-down and the newest event is the one
-    // that explains a ranking the user is looking at right now.
     return [...this.events].reverse();
   }
 
@@ -245,7 +275,7 @@ export class LearningModel {
     };
 
     let weights = this.weights;
-    if (this.adaptive && touched.length > 0) {
+    if (this.adaptive) {
       const deltas = touched.map((key) => ({
         key,
         // A boosting signal rises when the user starred a message carrying it;
@@ -253,11 +283,32 @@ export class LearningModel {
         // the label it was given.
         delta: LEARNING_STEP * ((isPenalty(key) === starred) ? -1 : 1),
       }));
-      // Starring something the classifier called unsafe is the clearest
-      // possible statement that the spam call was wrong.
-      if (starred && signals.spamLikelihood >= 0.4) {
-        deltas.push({ key: "spamSensitivity", delta: -LEARNING_STEP });
+
+      /**
+       * Starring something the classifier called unsafe is the clearest possible
+       * statement that the spam call was wrong.
+       *
+       * Outside the `touched.length > 0` gate it used to sit inside. That gate is
+       * right for the *touchable* signals — a message carrying none has nothing to
+       * nudge — but a spam lure is precisely that message: `security`, `urgency`,
+       * `finance` and the rest are all absent, which is what makes it read as spam.
+       * So the one correction a user is most explicit about, starring something
+       * wrongly called junk, taught nothing at all, while the comment above it
+       * described it as the clearest signal available.
+       *
+       * Symmetric with the other deltas on purpose. It used to fire only when
+       * `starred`, so a star followed by an unstar — the reflexive way to undo a
+       * mis-click — left `spamSensitivity` permanently one point below where it
+       * started. Unstarring mail that really was spam is the same statement facing
+       * the other way.
+       */
+      if (signals.spamLikelihood >= SPAM_CONTRADICTION) {
+        deltas.push({
+          key: "spamSensitivity",
+          delta: LEARNING_STEP * (starred ? -1 : 1),
+        });
       }
+
       weights = applyDeltas(weights, deltas).weights;
     }
 
@@ -288,7 +339,9 @@ export class LearningModel {
       sender: email?.sender,
       action: "filter_rejected",
       predictedImportance: email && signals ? signals.importanceScore : undefined,
-      activeSignals: email && signals ? touchedKeys(signals) : [],
+      // The driving keys, not the message's own signals — see `activeSignals`. These
+      // are the weights the mute actually nudged.
+      activeSignals: keys,
       rejectedFilter: filter,
       at: now,
     };

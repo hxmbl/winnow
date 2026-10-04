@@ -2,7 +2,8 @@
  * Building an RFC 822 message.
  *
  * Gmail's `messages.send` takes a base64url-encoded raw message, so sending
- * means writing MIME by hand. This is deliberately minimal: text plus
+ * means writing MIME by hand — and the envelope is encoded by `client.ts`, the
+ * one place that touches the wire. This is deliberately minimal: text plus
  * attachments, no alternative bodies, no related-part inline images.
  *
  * Two details that are easy to get wrong and produce mail that clients reject:
@@ -13,11 +14,14 @@
  *     sending to a real person.
  *   - **Header encoding.** A non-ASCII subject or display name must be RFC 2047
  *     encoded; a raw UTF-8 header line is invalid and gets mangled in transit.
+ *
+ * A third only shows up on the *other* side of a reply: the threading headers.
+ * They are built from the message's real `Message-ID`, and getting them wrong
+ * threads the reply in the sender's own account and nowhere else.
  */
 
-import type { Attachment, Draft, Email } from "../model/email";
+import type { Email, Draft } from "../model/email";
 import { mimeTypeForFilename } from "../model/email";
-import { displayName } from "../model/email";
 
 /** A file to attach: its bytes and its name. */
 export type OutgoingAttachment = {
@@ -27,17 +31,6 @@ export type OutgoingAttachment = {
 };
 
 const CRLF = "\r\n";
-
-/**
- * Encode a header value for transport.
- *
- * Only encodes when it has to: a plain ASCII subject is left alone so the raw
- * message stays readable, which matters when debugging a send.
- */
-export function encodeHeaderValue(value: string): string {
-  if (isAsciiPrintable(value)) return value;
-  return `=?UTF-8?B?${base64Utf8(value)}?=`;
-}
 
 /**
  * True when every character is printable ASCII.
@@ -56,21 +49,19 @@ function isAsciiPrintable(value: string): boolean {
 }
 
 /** base64 of a UTF-8 string, as `atob`/`btoa` want it. */
-export function base64Utf8(value: string): string {
+function base64Utf8(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
 
-/** base64url, chunk-free — Gmail accepts either, but url-safe avoids `+` and `/`. */
-export function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-/** RFC 2047 base64 words, split so no encoded word exceeds 75 characters. */
+/**
+ * RFC 2047 base64 words, split so no encoded word exceeds 75 characters.
+ *
+ * Only encodes when it has to: a plain ASCII subject is left alone, so the raw
+ * message stays readable, which matters when debugging a send.
+ */
 function encodeMimeHeader(value: string): string {
   if (isAsciiPrintable(value)) return value;
   const encoded = base64Utf8(value);
@@ -84,15 +75,24 @@ function encodeMimeHeader(value: string): string {
   return chunks.join(CRLF + " ");
 }
 
-/** Collapse every line ending to CRLF. */
-function toCrlf(text: string): string {
-  return text.replace(/\r\n|\r|\n/g, CRLF);
-}
-
+/** What to put in a header, and what the reply is answering. */
 export type BuildOptions = {
   from: { address: string; name?: string };
-  inReplyTo?: string;
-  references?: string[];
+  /**
+   * The message being replied to, for `In-Reply-To` and the tail of `References`.
+   *
+   * The whole message rather than a bare id, because the header has to name the
+   * id *that client* already holds. `buildMime` used to write whatever string it
+   * was handed straight into `In-Reply-To`, so a reply went out as
+   * `In-Reply-To: 18c1f3a2…` — not a Message-ID at all — with a well-formed
+   * `References` list that then ended in that same malformed entry. Gmail still
+   * threaded it, because Gmail matches on its own thread id, so the reply looked
+   * fine in the sender's own account and arrived as a new conversation everywhere
+   * else.
+   */
+  inReplyTo?: Email;
+  /** The rest of the exchange, oldest first. See `replyReferences`. */
+  references?: readonly Email[];
   attachments?: OutgoingAttachment[];
 };
 
@@ -123,8 +123,9 @@ export function buildMime(draft: Draft, options: BuildOptions): string {
   headers.push(`Date: ${new Date().toUTCString()}`);
   headers.push(`Message-ID: <${boundary}@winnow.app>`);
   if (options.inReplyTo) {
-    headers.push(`In-Reply-To: ${options.inReplyTo}`);
-    headers.push(`References: ${[...(options.references ?? []), options.inReplyTo].join(" ")}`);
+    const parent = messageIdFor(options.inReplyTo);
+    headers.push(`In-Reply-To: ${parent}`);
+    headers.push(`References: ${[...replyReferences(options.references ?? []), parent].join(" ")}`);
   }
   headers.push("MIME-Version: 1.0");
 
@@ -158,7 +159,7 @@ export function buildMime(draft: Draft, options: BuildOptions): string {
         `Content-Disposition: attachment; filename="${filename}"`,
         "Content-Transfer-Encoding: base64",
         "",
-        base64UrlChunked(attachment.bytes),
+        base64Chunked(attachment.bytes),
       ].join(CRLF),
     );
   }
@@ -168,24 +169,45 @@ export function buildMime(draft: Draft, options: BuildOptions): string {
   return `${headers.join(CRLF)}${CRLF}${CRLF}${parts.join(CRLF)}`;
 }
 
-/** base64url for the wire, wrapped at 76 characters as the RFC requires. */
-function base64UrlChunked(bytes: Uint8Array): string {
+/**
+ * Standard base64, wrapped at 76 characters as the RFC requires.
+ *
+ * Plain base64, *not* the base64url the API's outer `raw` envelope uses: this is a
+ * `Content-Transfer-Encoding: base64` body, which every receiving client decodes with
+ * the RFC 2045 alphabet, and `-`/`_` are not in it. Written url-safe, an attachment
+ * downloads and then will not open — in someone else's client, which is the only place
+ * you would find out.
+ */
+function base64Chunked(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/(.{76})/g, "$1" + CRLF);
 }
 
-/** The header set for a reply, so `References` can accumulate down a thread. */
-export function replyReferences(conversation: readonly Email[]): string[] {
-  // Oldest first, which is the order the References header is defined to use.
-  return conversation
-    .filter((email) => email.gmailId)
-    .map((email) => `<${email.gmailId}@mail.gmail.com>`);
+/**
+ * A message's RFC 822 id, for `In-Reply-To` and `References`.
+ *
+ * The real one when the message carried it, and a synthesised `<gmailId@…>`
+ * otherwise — which is what every message cached by an older build, and every
+ * message in the demo, has. The synthetic form is not Gmail's, so a reply to one
+ * of those threads in Gmail and not elsewhere; it is still better than a bare id,
+ * which threads in neither.
+ */
+export function messageIdFor(email: Pick<Email, "gmailId" | "messageId">): string {
+  return email.messageId ?? `<${email.gmailId}@mail.gmail.com>`;
 }
 
-/** A short summary of an attachment, for the reader's list. */
-export function describeAttachment(attachment: Attachment): string {
-  return `${attachment.filename} · ${formatBytes(attachment.size)}`;
+/**
+ * The `References` list for a reply: the exchange, oldest first.
+ *
+ * The order is defined by RFC 5322 §3.6.4 and a client that walks it out of
+ * order will treat the reply as belonging to whichever message it saw last.
+ */
+export function replyReferences(conversation: readonly Email[]): string[] {
+  return [...conversation]
+    .sort((a, b) => a.receivedAt - b.receivedAt)
+    .filter((email) => email.gmailId)
+    .map(messageIdFor);
 }
 
 /** Human-readable byte count. Binary units, because that is what mail uses. */
@@ -200,21 +222,3 @@ export function formatBytes(bytes: number): string {
   }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
-
-/** The address a reply should come from, for the outbox. */
-export function senderOf(account: { emailAddress: string }): string {
-  return account.emailAddress;
-}
-
-/** Display name for the outbox, falling back to the local part. */
-export function outboxName(account: { emailAddress: string }): string {
-  return account.emailAddress.split("@")[0];
-}
-
-/** A `Message-ID` for a message being sent. */
-export function messageIdFor(gmailId: string): string {
-  return `<${gmailId}@mail.gmail.com>`;
-}
-
-export { displayName };
-export { toCrlf };

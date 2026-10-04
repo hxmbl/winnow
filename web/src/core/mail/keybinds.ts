@@ -494,9 +494,15 @@ export function shouldSwallow(context: KeyContext, event: KeyModifiers = {}): bo
 /**
  * The keys a command is bound to, as the toolbar prints them.
  *
- * `TopBar` reads this for its button tooltips so a control's advertised shortcut
- * is the one the router actually takes. Returns the first binding that produces
- * the command, or `null`.
+ * `TopBar` and `Reader` read this for their button tooltips, so a control's advertised
+ * shortcut is by construction the one the router takes. It used to be the other way
+ * round: every `title` was a hand-typed literal, and the cheat sheet's own comment
+ * already described the resulting drift — `,` and `⇧U` were working in the app and
+ * appeared nowhere, and a toolbar hint could name a key that did nothing.
+ *
+ * Returns the first binding that produces the command, or `null`. `null` is a real
+ * answer: it means no button should print a shortcut for that command, and the caller
+ * renders the label alone rather than an empty parenthesis.
  */
 export function shortcutFor(command: Command["type"]): string | null {
   const binding = BINDINGS.find((candidate) => {
@@ -508,6 +514,17 @@ export function shortcutFor(command: Command["type"]): string | null {
     return candidate.command.type === command;
   });
   return binding?.keys ?? null;
+}
+
+/**
+ * A tooltip of the form `Label (s)`, or just `Label` when the command has no key.
+ *
+ * In the components rather than here because it is presentation — but the *key* comes
+ * from the table, which is the part that can drift.
+ */
+export function shortcutHint(label: string, command: Command["type"]): string {
+  const keys = shortcutFor(command);
+  return keys ? `${label} (${keys})` : label;
 }
 
 /** A few contexts, chosen to cover the branches a computed command can take. */
@@ -526,9 +543,4 @@ function resolveType(
       ? command({ key: "?", event: {}, context })
       : command;
   return resolved?.type ?? null;
-}
-
-/** The digit a rail position is addressed by, or `null` past the ninth pill. */
-export function digitForRailIndex(railIndex: number): string | null {
-  return railIndex < 9 ? String(railIndex + 1) : null;
 }

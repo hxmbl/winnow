@@ -134,6 +134,11 @@ export function buildReply(
     inReplyTo: latest.gmailId,
     threadId: latest.threadId,
     quoteBlock: quote,
+    // The user's contribution to this body is *nothing*: the quote is the body, and
+    // anything above it is theirs. Stated rather than left to a caller inferring it
+    // from `quoteBlock` being present, because the composer's "is there anything to
+    // lose?" check has to answer differently for a reply and a forward.
+    prefilled: "",
   };
 }
 
@@ -158,10 +163,9 @@ export function buildForward(
     subject: forwardSubject(latest.subject),
     body,
     threadId: latest.threadId,
+    // Unlike a reply, a forward's prefilled text is *meant to stay* — the whole point
+    // of forwarding is that the conversation travels with it. So it is recorded as the
+    // baseline the user is editing, rather than as something to strip.
+    prefilled: body,
   };
-}
-
-/** A blank compose, for a message with no thread to reply to. */
-export function buildCompose(to: string[] = []): Draft {
-  return { to, cc: [], bcc: [], subject: "", body: "" };
 }

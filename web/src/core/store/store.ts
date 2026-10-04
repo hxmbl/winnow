@@ -162,6 +162,26 @@ export type StoreState = {
 
   syncing: boolean;
   /**
+   * A single undo, offered by whatever can be taken back.
+   *
+   * `null` most of the time, and that is the point: an undo strip that is always
+   * on screen is a banner, and a banner you cannot act on is noise. Only one
+   * action is offered at a time because the things that *do* have a natural
+   * inverse do not need one — a star is a toggle, a move is answered by the
+   * message reappearing, a filter has its own pill.
+   *
+   * Two things land here. "Mark everything in this mailbox read" is a single
+   * keystroke (`⇧U`) with no window and no inverse, and on a mailbox with a
+   * thousand unread it is the one mistake in triaging you cannot walk back.
+   * Muting a bucket is the other, for a different reason: the muted pill is sorted
+   * to the *end* of the rail — muted buckets are not filterable, so leaving one in
+   * place would silently repoint every digit shortcut after it — which means the
+   * pill the user just clicked vanishes from a 27-pill strip that they are
+   * unlikely to have scrolled. The mute is reversible at the far end of the rail
+   * and in Settings, but neither is where someone looks immediately after a click.
+   */
+  undo: { label: string } | null;
+  /**
    * What the sync is doing, for the status line. `null` when not syncing.
    *
    * Nullable rather than an enum with an `idle` member, because "is a sync running"
@@ -200,6 +220,17 @@ export type MailboxView = {
   emails: Email[];
   signals: SignalMap;
   profile: UserProfile;
+  /**
+   * Lowercased haystacks for the current mailbox — but only when a search is
+   * actually running.
+   *
+   * Empty otherwise, on purpose. Building a bag means concatenating
+   * sender + subject + body for every message in the mailbox and lowercasing the
+   * result, and the pipeline only ever reads one when `tokens.length > 0`; an
+   * unsearched inbox was paying for a full lowercased copy of its own text on
+   * every derive. `runInboxQuery` falls back to building a single bag on demand,
+   * so the empty map is the fast path rather than a missing feature.
+   */
   searchBags: SearchBags;
   result: InboxResult;
   threads: ThreadRow[];
@@ -351,6 +382,36 @@ export class WinnowStore {
   private version = 0;
   private key = "0";
 
+  /**
+   * The last derived view, and the version it was derived at.
+   *
+   * `derive()` is the most expensive function in the app: it builds the profile,
+   * classifies the whole inbox, filters, sorts and threads. Recomputing it on
+   * every *read* is what makes the list, the rail and the reader impossible to
+   * disagree — but reads happen far more often than changes. `useSyncExternalStore`
+   * calls `getSnapshot` on every render and again for every subscription check,
+   * and `App` re-renders for reasons that have nothing to do with the store at
+   * all (the reader's scroll step, the composer's draft, the OS theme).
+   *
+   * Measured on the 38-message demo inbox, a single `↓` in the reader produced an
+   * 81ms long task — a `scrollStep` update, a re-render, and a full re-derive over
+   * a mailbox that had not changed by a single byte. On a real inbox that is
+   * seconds per keystroke.
+   *
+   * So the view is memoised against `version`, which `notify()` increments and
+   * nothing else does. Every mutation in this class funnels through `set`,
+   * `notify`, or one of the two methods that bump the version directly, so
+   * "the version has not moved" is exactly "nothing the view depends on has
+   * moved" — including `trashSenders` and `persistedRemoved`, which are instance
+   * state rather than `StoreState` and are the reason this cannot simply be a
+   * `useMemo` in the component.
+   *
+   * `getSnapshot` still spreads the current `state` on every call, so the cheap
+   * fields a component reads synchronously (the learning weights, which the
+   * settings panel drags) never go stale behind the debounced reclassify.
+   */
+  private derived: { version: number; view: MailboxView } | null = null;
+
   private backend: MailBackend | undefined;
   private platform: PlatformBridge | undefined;
 
@@ -373,6 +434,15 @@ export class WinnowStore {
 
   /** Reclassify after a debounce, so a slider drag is not a reclassify per tick. */
   private classifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The offered undo's handler.
+   *
+   * On the instance rather than in `StoreState`, because the state field carries
+   * only the label the strip renders and a function in the public snapshot would
+   * make the whole state object unserialisable for no reason.
+   */
+  private undoAction: (() => void) | null = null;
 
   constructor(options: StoreOptions = {}) {
     this.backend = options.backend;
@@ -397,6 +467,7 @@ export class WinnowStore {
       navigationIndex: 0,
       mutedFilters: [],
       syncing: false,
+      undo: null,
       syncPhase: null,
       syncFraction: null,
       syncFetched: 0,
@@ -440,12 +511,21 @@ export class WinnowStore {
 
   getSnapshot = (): Snapshot => {
     this.key = String(this.version);
-    return { ...this.state, view: this.derive(), key: this.key };
+    return { ...this.state, view: this.deriveCached(), key: this.key };
   };
 
   /** The current view, for non-React callers (the keybind handler, tests). */
   get view(): MailboxView {
-    return this.derive();
+    return this.deriveCached();
+  }
+
+  /** `derive()`, at most once per version. See `derived`. */
+  private deriveCached(): MailboxView {
+    const cached = this.derived;
+    if (cached && cached.version === this.version) return cached.view;
+    const view = this.derive();
+    this.derived = { version: this.version, view };
+    return view;
   }
 
   /**
@@ -491,7 +571,12 @@ export class WinnowStore {
       state.mailbox === "inbox"
         ? inboxSignals
         : neutralSignalsFor(mailboxEmails);
-    const searchBags = buildSearchBags(mailboxEmails);
+
+    // Only when a search is running. See `searchBags` — the pipeline builds a bag
+    // on demand for anything the map does not have, so the unsearched case is a
+    // fast path rather than a different code path.
+    const searching = state.searchQuery.trim().length > 0;
+    const searchBags = searching ? buildSearchBags(mailboxEmails) : new Map<number, string>();
 
     const result = runInboxQuery({
       emails: mailboxEmails,
@@ -627,11 +712,6 @@ export class WinnowStore {
    * appear: the settings panel renders an "unhide" row per bucket, so a mute is
    * reversible from a place the user will actually think to look.
    */
-  mutedBuckets(): BuiltinSmartFilter[] {
-    return this.mutedList();
-  }
-
-  /** The muted buckets, in catalog order. */
   private mutedList(): BuiltinSmartFilter[] {
     return BUILTIN_FILTERS.filter((id) => this.persistedRemoved.has(id));
   }
@@ -956,7 +1036,11 @@ export class WinnowStore {
     // list does not contain. Filters go too — a bucket pinned in the inbox means
     // nothing in the archive — and both are persisted together, since "which
     // mailbox am I in" and "what is narrowed inside it" are one decision.
-    this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [] }, {
+    //
+    // The undo offer goes with them: its label names a mailbox, and it is about
+    // to stop being true.
+    this.undoAction = null;
+    this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [], undo: null }, {
       mailbox,
       activeFilters: [],
     });
@@ -1122,11 +1206,17 @@ export class WinnowStore {
       return;
     }
 
-    // A muted bucket cannot be re-activated. Muting is a statement that the bucket
-    // is over-firing, and letting a filter turn it back on would apply a mute and
-    // an activation to the same mail at once — the list would show exactly the
-    // messages the user asked to stop seeing, and the pill would read as if the
+    // A muted bucket cannot be re-activated by filtering. Muting is a statement that
+    // the bucket is over-firing, and letting a filter turn it back on would apply a
+    // mute and an activation to the same mail at once — the list would show exactly
+    // the messages the user asked to stop seeing, and the pill would read as if the
     // mute had not worked.
+    //
+    // `unsafe` is the exception, and it is deliberate rather than a gap: it is the one
+    // bucket the user goes to *on purpose*, and it is never filterable alongside
+    // anything else (see the branch above). Muting it is refused outright, since there
+    // is nothing to unhide — so restoring it is the only way it could come back, and
+    // an `unsafe` bucket can never be muted.
     if (filter.kind === "builtin" && this.persistedRemoved.has(filter.id)) return;
 
     this.setFilters([...active, filter]);
@@ -1166,9 +1256,24 @@ export class WinnowStore {
    * on every launch is not a preference. The bucket stays in the rail, struck
    * through, so the mute can be undone from the same place it was made; see
    * `orderedRail`.
+   *
+   * It also offers an undo strip, which reads as redundant next to that until you
+   * watch the pill move: `orderedRail` sorts muted buckets to the *end*, because a
+   * muted pill is not filterable and leaving it in place would silently repoint
+   * every digit shortcut after it. So the control the user clicked leaves a
+   * 27-pill strip they have probably not scrolled, and the visible effect of the
+   * click is that something disappeared. The strip says what happened and puts the
+   * way back under the hand that did it.
+   *
+   * The undo is installed before anything changes, for the same reason
+   * `markAllRead` does it: the strip must never be able to render an offer with no
+   * handler behind it. Taking it calls `restoreFilter`, which is also what the
+   * pill's own ↺ calls, so there is one code path back.
    */
   dismissFilter(filter: BuiltinSmartFilter): void {
     if (filter === "unsafe" || this.persistedRemoved.has(filter)) return;
+
+    this.undoAction = () => this.restoreFilter(filter);
     this.persistedRemoved.add(filter);
     this.setFilters(
       this.state.activeFilters.filter(
@@ -1181,35 +1286,31 @@ export class WinnowStore {
     // particular message was a bad example, which is a much stronger claim than
     // the user made.
     this.setLearning(this.state.learning.rejectFilter(filter, null, null, this.now()));
-  }
-
-  /** Unmute a bucket. */
-  restoreFilter(filter: BuiltinSmartFilter): void {
-    if (!this.persistedRemoved.delete(filter)) return;
-    this.set(
-      { mutedFilters: this.mutedList() },
-      { removedFilters: [...this.persistedRemoved] },
-    );
+    // `FILTER_LABELS` rather than `filterLabel`: only a *builtin* can be muted, and
+    // `filterLabel` takes a `FilterId`, which is a wider type than this is.
+    //
+    // No count, for the same reason "Marked everything in this mailbox as read" has
+    // none: the pill the user just clicked was showing it a moment ago, and the
+    // strip's job is to name what happened rather than to restate the rail.
+    this.set({ undo: { label: `Hid ${FILTER_LABELS[filter]} from the inbox` } });
   }
 
   /**
-   * Adopt a persisted set of mutes.
+   * Unmute a bucket.
    *
-   * Separate from the constructor because the restored set has to arrive *with*
-   * the persisted filters and mailbox — the three are one decision, split across
-   * three keys — and calling `restoreFilter` per bucket would re-notify and
-   * re-persist on the way in.
+   * Also drops the undo offer, because this is what the offer's own handler calls.
+   * Leaving the strip up would leave a "Hid Newsletters" line with a button that
+   * does nothing — the exact state the strip's field comment says must never
+   * happen, and the reason the offer is installed before the change rather than
+   * after. It is also right for the other caller: someone who unmutes with the
+   * pill's own ↺ has no need to be told how to unmute it again.
    */
-  adoptRemovedFilters(filters: readonly BuiltinSmartFilter[]): void {
-    for (const id of BUILTIN_FILTERS) {
-      if (filters.includes(id)) this.persistedRemoved.add(id);
-    }
-    this.state = { ...this.state, mutedFilters: this.mutedList() };
-    this.notify();
-  }
-
-  isFilterRemoved(filter: BuiltinSmartFilter): boolean {
-    return this.persistedRemoved.has(filter);
+  restoreFilter(filter: BuiltinSmartFilter): void {
+    if (!this.persistedRemoved.delete(filter)) return;
+    this.set(
+      { mutedFilters: this.mutedList(), undo: null },
+      { removedFilters: [...this.persistedRemoved] },
+    );
   }
 
   /** Hide every message from a sender, everywhere. */
@@ -1355,7 +1456,9 @@ export class WinnowStore {
    * pushed to the server, so the rest would snap back on the next sync.
    *
    * The undo is the list of ids it touched, not a captured array: a rollback that
-   * restored a stale snapshot would undo whatever else happened in between.
+   * restored a stale snapshot would undo whatever else happened in between. It is
+   * offered through `state.undo` rather than swallowed, because this is the only
+   * verb in the app with no other way back — see the field's doc comment.
    */
   markAllRead(): void {
     const mailbox = this.state.mailbox;
@@ -1366,15 +1469,52 @@ export class WinnowStore {
     );
     if (ids.size === 0) return;
 
+    // Captured before the state changes, so each id's *prior* flag is what comes
+    // back. Only unread messages are in `ids`, so "prior" is uniformly `true` —
+    // and recording it per id keeps the rollback honest if this ever widens.
+    const restore = new Map(this.state.all.filter((e) => ids.has(e.id)).map((e) => [e.id, e.unread]));
+
+    // Installed before the state changes, so the strip can never render an offer
+    // that has no handler behind it.
+    this.undoAction = () => {
+      this.set({
+        all: this.state.all.map((email) =>
+          restore.has(email.id) ? { ...email, unread: restore.get(email.id)! } : email,
+        ),
+        undo: null,
+      });
+      for (const id of restore.keys()) {
+        void this.backend?.setRead(id, true).catch(() => undefined);
+      }
+      void this.applyPlatform();
+    };
+
     this.set({
       all: this.state.all.map((email) =>
         ids.has(email.id) ? { ...email, unread: false } : email,
       ),
+      undo: { label: "Marked everything in this mailbox as read" },
     });
+
     for (const email of this.state.all) {
       if (ids.has(email.id)) this.backend?.setRead(email.id, true).catch(() => undefined);
     }
     void this.applyPlatform();
+  }
+
+  /** Take back the offered undo, if there is one. */
+  undoLast(): void {
+    const action = this.undoAction;
+    if (!action) return;
+    this.undoAction = null;
+    action();
+  }
+
+  /** Drop the offered undo without taking it. */
+  dismissUndo(): void {
+    if (!this.undoAction) return;
+    this.undoAction = null;
+    this.set({ undo: null });
   }
 
   /**
@@ -1548,19 +1688,34 @@ export class WinnowStore {
    * renders it in place.
    */
   async sendReply(draft: unknown, inReplyTo: string): Promise<void> {
+    /*
+      A demo session has nowhere to send to.
+
+      Thrown rather than reported through `state.error`, and that is the fix for a
+      double message: it used to both set the app-wide strip *and* throw, so one
+      failed send produced two banners saying different things — "Signing in to Gmail
+      is required to send. The demo inbox is read-only." above the app, and "Cannot
+      send: not signed in." inside the composer. The composer owns this error: it is
+      this button's failure, and it renders it in place beside the Send button that
+      caused it.
+
+      The wording is the user-facing sentence, not an internal reason. "Cannot send:
+      not signed in" is a fact about the code; the sentence is a fact about the user's
+      options.
+    */
     if (!this.backend) {
-      // A demo session has nowhere to send to. Saying so beats a button that
-      // silently does nothing.
-      this.set({
-        error: "Signing in to Gmail is required to send. The demo inbox is read-only.",
-      });
-      throw new Error("Cannot send: not signed in.");
+      throw new Error(
+        "Signing in to Gmail is required to send. The demo inbox is read-only.",
+      );
     }
     try {
       await this.backend.sendReply(draft, inReplyTo);
       this.set({ error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "The reply could not be sent.";
+      // Also surfaced app-wide, because this one *is* the app's problem rather than
+      // the composer's: a network failure while sending is not something the user
+      // caused by what they typed, and it will recur on the next message.
       this.set({ error: message });
       throw error instanceof Error ? error : new Error(message);
     }
@@ -1623,6 +1778,7 @@ export class WinnowStore {
   markDemoMode(): void {
     this.backend = undefined;
     this.pendingConnect = null;
+    this.undoAction = null;
     this.set({
       status: "ready",
       account: null,
@@ -1632,6 +1788,7 @@ export class WinnowStore {
       searchQuery: "",
       overlay: "none",
       syncing: false,
+      undo: null,
       syncPhase: null,
       syncFraction: null,
       truncated: false,
@@ -1664,6 +1821,7 @@ export class WinnowStore {
     const mutes = [...this.persistedRemoved];
     this.backend = undefined;
     this.pendingConnect = null;
+    this.undoAction = null;
 
     // Park the background ticker *before* dropping the backend. On the desktop
     // this is a Rust thread that would otherwise keep firing every minute,
@@ -1687,6 +1845,7 @@ export class WinnowStore {
       mailbox: "inbox",
       overlay: "none",
       syncing: false,
+      undo: null,
       syncPhase: null,
       syncFraction: null,
       truncated: false,

@@ -48,6 +48,11 @@ export function avatarColor(sender: string): string {
   return AVATAR_RAMP[domainIndex(domain, AVATAR_RAMP.length)];
 }
 
+/** Every fill in the ramp. So a test can check all of them, not a sample. */
+export function avatarRamp(): readonly string[] {
+  return AVATAR_RAMP;
+}
+
 /**
  * A slightly deeper variant of the same hue, for the monogram's text.
  *
@@ -58,8 +63,24 @@ export function avatarColor(sender: string): string {
 export function avatarTextColor(sender: string): string {
   const domain = (sender.split("@")[1] ?? sender).toLowerCase();
   const base = AVATAR_RAMP[domainIndex(domain, AVATAR_RAMP.length)];
-  return mix(base, "#15181D", 0.55);
+  return mix(base, "#15181D", MONOGRAM_MIX);
 }
+
+/**
+ * How far the monogram is pushed toward ink.
+ *
+ * Solved rather than guessed. The ramp is pastel, so the label has to be much
+ * darker than the fill — and how much *much* differs per step, because the ramp's
+ * lightness range is wide. A single constant either fails the light steps or
+ * turns the dark ones into near-black on near-black.
+ *
+ * At 0.55 the worst step in the ramp was 2.65:1, and the worst was `violet`, not
+ * the lightest colour: a saturated pastel has more luminance than its lightness
+ * suggests. 0.87 is the smallest tenth that clears WCAG AA (4.5:1) for every step,
+ * which is also what the avatar needs as a *graphical* indicator rather than as
+ * text. Exported so a test can assert the property rather than the constant.
+ */
+const MONOGRAM_MIX = 0.87;
 
 /** Blend two hex colours. `amount` is how much of `to` to apply. */
 function mix(from: string, to: string, amount: number): string {
@@ -73,15 +94,7 @@ function mix(from: string, to: string, amount: number): string {
   return `#${[16, 8, 0].map((s) => channel(s).toString(16).padStart(2, "0")).join("")}`;
 }
 
-/**
- * Warm the cache.
- *
- * Kept as an explicit call rather than a module side effect so the import order
- * of the app cannot affect what is rendered, and so it is obvious at the call
- * site that nothing is being fetched.
- */
-export function primeAvatarColors(): void {
-  // Intentionally empty: colours are computed on demand and cached by the
-  // caller. The function survives because it documents that there is no warm-up
-  // cost, and because removing it would be a breaking change to a public module.
-}
+/* Removed: `primeAvatarColors`, an empty function with a comment explaining that
+   it was empty. Nothing called it, and the "warm the cache" framing was wrong —
+   there is no cache, because the computation is a 24-character FNV-1a loop over a
+   domain and six table entries. */

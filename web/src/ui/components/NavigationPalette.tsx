@@ -21,7 +21,7 @@
 
 import { Inbox, Settings, Trash2, TriangleAlert } from "lucide-react";
 import { NAVIGATION_ITEMS, type NavigationItem } from "../../core/model/signals";
-import type { Mailbox } from "../../core/model/email";
+import { MAILBOX_LABEL, type Mailbox } from "../../core/model/email";
 import { Sheet } from "./Overlay";
 
 const ICONS: Record<NavigationItem, typeof Inbox> = {
@@ -30,6 +30,16 @@ const ICONS: Record<NavigationItem, typeof Inbox> = {
   trash: Trash2,
   settings: Settings,
 };
+
+/**
+ * What a row says.
+ *
+ * A mailbox is named by `MAILBOX_LABEL` — the same map the tabs use — so a folder has
+ * one name in the product rather than one per surface. Only Settings, which is not a
+ * mailbox, carries its own.
+ */
+const labelFor = (item: { mailbox?: Mailbox }): string =>
+  item.mailbox ? MAILBOX_LABEL[item.mailbox] : "Settings";
 
 type Props = {
   index: number;
@@ -54,6 +64,7 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
       {NAVIGATION_ITEMS.map((item, i) => {
         const Icon = ICONS[item.id];
         const isActive = i === index;
+        const label = labelFor(item);
         const count = item.mailbox ? (unread[item.mailbox] ?? 0) : 0;
 
         return (
@@ -73,7 +84,7 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
             }`}
           >
             <Icon size={15} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
-            <span className="flex-1 font-medium">{item.label}</span>
+            <span className="flex-1 font-medium">{label}</span>
             {count > 0 && (
               <span className="rounded-full bg-surface-sunken px-1.5 text-[11px] font-semibold tabular-nums text-ink-muted">
                 {count}

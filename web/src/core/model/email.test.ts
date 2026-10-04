@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hashId, localId, threadKey } from "./ids";
-import { displayAddress, displayName, isMailbox, isPreviewable, mimeTypeForFilename, monogram } from "./email";
+import { displayAddress, displayName, isMailbox, mimeTypeForFilename, monogram } from "./email";
 import type { Email } from "./email";
 
 function email(over: Partial<Email> = {}): Email {
@@ -121,18 +121,6 @@ describe("mimeTypeForFilename", () => {
   it("defaults to opaque bytes for anything unknown", () => {
     expect(mimeTypeForFilename("mystery.qqq")).toBe("application/octet-stream");
     expect(mimeTypeForFilename("noextension")).toBe("application/octet-stream");
-  });
-});
-
-describe("isPreviewable", () => {
-  it("previews images, PDFs and text", () => {
-    expect(isPreviewable("image/png")).toBe(true);
-    expect(isPreviewable("application/pdf")).toBe(true);
-    expect(isPreviewable("text/plain")).toBe(true);
-  });
-
-  it("refuses SVG, which can carry script", () => {
-    expect(isPreviewable("image/svg+xml")).toBe(false);
   });
 });
 

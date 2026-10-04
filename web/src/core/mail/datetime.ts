@@ -103,8 +103,6 @@ export function formatListTime(receivedAtMs: number): string {
   return memo(`l${receivedAtMs}`, () => formatterFor("list").format(receivedAtMs));
 }
 
-export { formatterFor as formatAbsolute };
-
 /**
  * Whole local calendar days between two instants.
  *
@@ -126,34 +124,77 @@ export function dayBucket(receivedAt: number, now: number): DayBucket {
   return "earlier";
 }
 
-export function dayLabel(bucket: DayBucket): string {
-  return DAY_LABELS[bucket];
-}
+/** A row paired with the day bucket its timestamp falls in. */
+export type Dated<T> = { row: T; bucket: DayBucket };
 
-export type DayGroup<T> = {
-  bucket: DayBucket;
-  label: string;
-  rows: T[];
+export type DaySection<T> = {
+  /**
+   * Unique within one result.
+   *
+   * Keying on the *bucket name* is a bug rather than a shortcut: sections are runs
+   * of adjacent rows, so any list that is not chronological repeats a bucket and
+   * every repeat collides. It cost six `Encountered two children with the same
+   * key` errors a second on Smart Score, and React documents what it does with
+   * duplicate keys as undefined.
+   */
+  key: string;
+  /**
+   * The header text, or `null` when there is no header.
+   *
+   * A day header is a claim about adjacency: "everything above this arrived
+   * today". Only a date-sorted list can make that claim. Sorted by score or
+   * sender the days interleave, and the list read `Today / This week / Today /
+   * This week` — four headers, none of them true, hiding a list with nothing in
+   * it. So a non-chronological list gets one unlabelled section: the rows still
+   * carry their own bucket, which is what `formatRowTime` needs to decide between
+   * "10:42" and "Mar 3", so nothing is lost but the noise.
+   */
+  label: string | null;
+  rows: Dated<T>[];
 };
 
 /**
- * Collapse a date-sorted list into labelled runs.
+ * Split a displayed list into labelled day runs — or into one unlabelled run.
+ *
+ * The date comes from `receivedAt` rather than from a field, because the list's
+ * rows are *threads*: the date a section must label is the representative
+ * message's, because that is the date the row itself prints.
+ *
+ * `byDate` is required rather than defaulted: it is the one fact this function
+ * cannot infer, because a caller's order may be chronological by accident rather
+ * than by construction, and a default of `true` would turn that accident back
+ * into the bug this exists to prevent.
  *
  * Consecutive rows sharing a bucket merge, so a filtered list that skips a day
  * never shows an empty section header.
  */
-export function groupByDay<T extends { receivedAt: number }>(
+export function daySections<T>(
   rows: readonly T[],
   now: number,
-): DayGroup<T>[] {
-  const groups: DayGroup<T>[] = [];
-  for (const row of rows) {
-    const bucket = dayBucket(row.receivedAt, now);
-    const last = groups[groups.length - 1];
-    if (last && last.bucket === bucket) last.rows.push(row);
-    else groups.push({ bucket, label: DAY_LABELS[bucket], rows: [row] });
+  receivedAt: (row: T) => number,
+  byDate: boolean,
+): DaySection<T>[] {
+  const dated: Dated<T>[] = rows.map((row) => ({ row, bucket: dayBucket(receivedAt(row), now) }));
+  // No rows, no section. Not a section with no rows: an empty `<section>` around
+  // an empty `role="list"` is a landmark a screen reader still announces.
+  if (dated.length === 0) return [];
+  if (!byDate) return [{ key: "all", label: null, rows: dated }];
+
+  const sections: DaySection<T>[] = [];
+  for (const entry of dated) {
+    const last = sections[sections.length - 1];
+    // Every row in `last` shares its first row's bucket — that is what merging on
+    // it means — so the first row is the section's bucket.
+    if (last && last.rows[0].bucket === entry.bucket) last.rows.push(entry);
+    else {
+      sections.push({
+        key: `day-${sections.length}`,
+        label: DAY_LABELS[entry.bucket],
+        rows: [entry],
+      });
+    }
   }
-  return groups;
+  return sections;
 }
 
 /** A short "3 days ago"-style string, for the sync status line. */

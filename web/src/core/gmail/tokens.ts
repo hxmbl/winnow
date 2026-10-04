@@ -383,14 +383,31 @@ function describeTokenRejection(status: number, text: string): [string, AuthErro
   return [`Google returned ${status}: ${text.slice(0, 200)}`, "unknown"];
 }
 
-/** A `TokenStore` backed by `localStorage`, for the web build. */
+/**
+ * A `TokenStore` backed by `localStorage`, for the web build.
+ *
+ * A half-written or hand-edited blob is treated as *signed out*, not as a broken
+ * store: `JSON.parse` used to throw out of `read()`, which `ensureLoaded` records
+ * as a storage failure, and the app then reported an unavailable store forever
+ * with no way back in short of devtools. An unusable value is also removed, so
+ * the next read is a clean "no session" rather than the same parse error again.
+ */
 export function localStorageTokenStore(key = "winnow.gmail.tokens"): TokenStore {
   return {
     async read() {
       const raw = globalThis.localStorage?.getItem(key);
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as TokenSet;
-      if (!parsed?.accessToken) return null;
+      let parsed: TokenSet;
+      try {
+        parsed = JSON.parse(raw) as TokenSet;
+      } catch {
+        globalThis.localStorage?.removeItem(key);
+        return null;
+      }
+      if (!parsed?.accessToken) {
+        globalThis.localStorage?.removeItem(key);
+        return null;
+      }
       return parsed;
     },
     async write(tokens) {

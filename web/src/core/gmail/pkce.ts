@@ -19,12 +19,12 @@
  * one genuinely native part of sign-in, and that lives in `platform/oauth.ts`.
  */
 
-/** base64url, per RFC 4648 §5: `+` → `-`, `/` → `_`, padding stripped. */
-export function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
+import { base64UrlEncode } from "./dto";
+
+// Not re-exported: `base64UrlEncode` lives in `dto` because it is the Gmail wire
+// alphabet rather than anything to do with PKCE, and `pkce.ts` is one of its four
+// callers. An alias here would be a second name for one function, reachable only
+// by importing the crypto module and getting the wrong layer's idea of it.
 
 /** Random bytes from the platform CSPRNG. Throws rather than degrading. */
 function randomBytes(length: number): Uint8Array {
@@ -120,6 +120,13 @@ export type RedirectResult =
  * Returns `none` for anything that is not a completed sign-in, so a caller
  * showing this URL in a browser tab does not mistake an ordinary page load for
  * a successful authorisation.
+ *
+ * ⚠ The desktop build does not parse the redirect in TypeScript at all: Rust binds
+ * the loopback socket, reads the request target and returns an `AuthOutcome`. This
+ * function exists for a host that only has a URL, and the web build uses
+ * `session/redirect.ts`'s own parser instead — which is the one that decides a
+ * code without a state is not a redirect. Keep it that way: two parsers, one of
+ * which half-accepts a stateless code, is a trap.
  */
 export function parseRedirect(input: string): RedirectResult {
   let params: URLSearchParams;

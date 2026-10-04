@@ -45,6 +45,29 @@ type AuthOutcome =
 let activePort: number | null = null;
 
 /**
+ * A sign-in that ran out of time.
+ *
+ * `timed?out` covers `timedout`, `timed-out` and `timeout`, because which one
+ * arrives depends on the Tauri version's own error phrasing rather than on ours.
+ */
+const TIMED_OUT = /\btimed?[\s-]?out\b/i;
+
+/**
+ * A sign-in the user walked away from, as distinct from one that broke.
+ *
+ * **Every one of these needs the trailing `\w*`.** The pattern was
+ * `/\b(cancel|abort|closed|disconnect|dropped)\b/i`, and the `\b` after the group
+ * is what breaks it: a word boundary requires a non-word character on both sides,
+ * so `cancel` matched but `cancelled` — two more letters — did not, nor
+ * `canceled`, nor `aborted`. So the one message `types.ts` names as the canonical
+ * example, "Sign-in was cancelled", classified as `unavailable`: reported as a
+ * fault, which is the single outcome the union exists to prevent. `closed` has
+ * the same problem (`close`/`closes`), and `abandon`/`cancell` are spelled
+ * differently again.
+ */
+const ABANDONED = /\b(cancel|abort|close|disconnect|drop|abandon)\w*\b/i;
+
+/**
  * Tear a listener down.
  *
  * Freeing the port is the point. A listener is a bound socket and a thread that runs
@@ -103,16 +126,20 @@ const keychainTokenStore = (name = "gmail.tokens"): TokenStore => ({
  * A rejected promise is not cached: a transient IPC failure should not pin the
  * app to "this build can do nothing" for the life of the process.
  *
- * **The wire shape is snake_case.** As with `oauth_begin`, Tauri rewrites
- * arguments but not returns. `AppInfo` was declared in Rust with
- * `native_oauth`/`background_sync`/… and read here as `nativeOAuth`/`backgroundSync`,
- * so every capability arrived `undefined`. The consequence was quiet and total:
- * `backgroundSync` read as `undefined`, the settings panel's whole Background
- * section was gated on it, and the desktop user could never turn background sync
- * on — a feature that was implemented, permissioned, and unreachable.
- * `normaliseAppInfo` is the belt to that braces: it accepts either casing, so a
- * future field cannot fail this way silently, and `platform.test.ts` pins the
- * camelCase contract the UI reads.
+ * **Both spellings are accepted, and neither is assumed.** The struct was
+ * originally declared snake_case and read here as camelCase, so every capability
+ * arrived `undefined`. The consequence was quiet and total: `backgroundSync` read
+ * as `undefined`, the settings panel's whole Background section was gated on it,
+ * and the desktop user could never turn background sync on — a feature that was
+ * implemented, permissioned, and unreachable.
+ *
+ * `normaliseAppInfo` is the belt to that braces: it returns the desktop's own
+ * answer when Rust gives it and `false` when it does not — never `undefined`,
+ * which is what made the section not merely wrong but *absent*, with no error
+ * anywhere. Rust now renames the fields explicitly (`nativeOAuth`, and not serde's
+ * `nativeOauth`), so camelCase is the contract; the snake_case arm is what stops a
+ * future struct change from failing this way again. `platform.test.ts` pins both
+ * spellings on both sides.
  */
 let infoPromise: Promise<PlatformInfo> | null = null;
 
@@ -210,8 +237,8 @@ export const desktopPlatform: Platform = {
       // a user who closed the tab — so the sign-in screen told someone their click
       // had been ignored when nothing had been listening at all.
       const message = describeIpcError(error, "the sign-in listener stopped");
-      if (/\btimed?[\s-]?out\b/i.test(message)) return { kind: "timeout" };
-      if (/\b(cancel|abort|closed|disconnect|dropped)\b/i.test(message)) return { kind: "cancelled" };
+      if (TIMED_OUT.test(message)) return { kind: "timeout" };
+      if (ABANDONED.test(message)) return { kind: "cancelled" };
       return { kind: "unavailable", detail: message };
     } finally {
       activePort = null;
@@ -368,16 +395,19 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 /**
- * Rust's `AppInfo` in the shape the UI reads.
+ * Rust's `AppInfo`, in the spelling the wire actually uses.
  *
- * Declared snake_case because that is what serde produces, and mapped up by
- * `normaliseAppInfo` rather than being `rename_all = "camelCase"` in Rust. The
- * asymmetry is deliberate and the reason is worth recording: this is the one
- * struct whose field names are read by two different languages, so the mismatch
- * was invisible in both. Serde's `rename_all` would have made the TypeScript side
- * correct and the Rust side lie, which is the same bug with the fix on the other
- * file. Normalising in one place means the wire format is whatever Rust says and
- * the contract is asserted once, here.
+ * camelCase, because `commands.rs` renames every field explicitly rather than
+ * relying on `rename_all = "camelCase"` — serde's camelCase of `native_oauth` is
+ * `nativeOauth`, which is one capital letter away from what the UI reads and which
+ * no compiler and no test would catch.
+ *
+ * `normaliseAppInfo` is why this type is not simply the return type of `invoke`: the
+ * asymmetry is deliberate and worth recording. This is one of the two structs whose
+ * field names are read by two languages, so the mismatch was invisible in both.
+ * Normalising in one place means the wire format is whatever Rust says and the
+ * contract is asserted once, here — and `platform.test.ts` checks the rename
+ * attributes on the Rust side against the keys read below.
  */
 type AppInfoWire = {
   name: string;
@@ -385,10 +415,15 @@ type AppInfoWire = {
   os: string;
   arch: string;
   kind: "web" | "desktop";
-  native_oauth: boolean;
-  native_secrets: boolean;
-  background_sync: boolean;
-  save_files: boolean;
+  nativeOAuth: boolean;
+  nativeSecrets: boolean;
+  backgroundSync: boolean;
+  saveFiles: boolean;
+  /** Also accepted, so a shell using the other spelling cannot read `false`. */
+  native_oauth?: boolean;
+  native_secrets?: boolean;
+  background_sync?: boolean;
+  save_files?: boolean;
 };
 
 /**
@@ -401,8 +436,8 @@ type AppInfoWire = {
  */
 function normaliseAppInfo(wire: Record<string, unknown>): PlatformInfo {
   const source = wire as Partial<AppInfoWire> & Record<string, unknown>;
-  const flag = (snake: string, camel: string): boolean =>
-    source[snake] === true || source[camel] === true;
+  const flag = (camel: keyof AppInfoWire, snake: keyof AppInfoWire): boolean =>
+    source[camel] === true || source[snake] === true;
 
   return {
     name: typeof source.name === "string" ? source.name : "Winnow",
@@ -410,10 +445,10 @@ function normaliseAppInfo(wire: Record<string, unknown>): PlatformInfo {
     os: typeof source.os === "string" ? source.os : "unknown",
     arch: typeof source.arch === "string" ? source.arch : "unknown",
     kind: source.kind === "desktop" ? "desktop" : "web",
-    nativeOAuth: flag("native_oauth", "nativeOAuth"),
-    nativeSecrets: flag("native_secrets", "nativeSecrets"),
-    backgroundSync: flag("background_sync", "backgroundSync"),
-    saveFiles: flag("save_files", "saveFiles"),
+    nativeOAuth: flag("nativeOAuth", "native_oauth"),
+    nativeSecrets: flag("nativeSecrets", "native_secrets"),
+    backgroundSync: flag("backgroundSync", "background_sync"),
+    saveFiles: flag("saveFiles", "save_files"),
   };
 }
 

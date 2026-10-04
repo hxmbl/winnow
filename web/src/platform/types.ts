@@ -26,7 +26,6 @@
  * gives that sentence teeth — it was previously an exported array with no reader.
  */
 
-import type { TokenSet } from "../core/gmail/dto";
 import type { TokenStore } from "../core/gmail/tokens";
 
 /** What this build can do. Reported to the UI so it can hide what is absent. */
@@ -191,26 +190,15 @@ export const PLATFORM_KEYS = [
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-/** A `TokenStore` for browsers, where the keychain is not available. */
-export function webTokenStore(key = "winnow.gmail.tokens"): TokenStore {
-  return {
-    async read(): Promise<TokenSet | null> {
-      try {
-        const raw = globalThis.localStorage?.getItem(key);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as TokenSet;
-        return parsed?.accessToken ? parsed : null;
-      } catch {
-        // Private-mode Safari and a full quota both throw here. Neither is
-        // worth failing sign-in over; the user simply is not signed in.
-        return null;
-      }
-    },
-    async write(tokens: TokenSet): Promise<void> {
-      globalThis.localStorage?.setItem(key, JSON.stringify(tokens));
-    },
-    async clear(): Promise<void> {
-      globalThis.localStorage?.removeItem(key);
-    },
-  };
-}
+/**
+ * A `TokenStore` for browsers, where the keychain is not available.
+ *
+ * A re-export rather than a second implementation. This used to be its own copy of
+ * the same three methods under the same default key — and the two had already
+ * drifted: the copy in `core/gmail/tokens.ts` learned that an unparseable blob is
+ * *signed out* and removes it, while this one caught the `JSON.parse` and returned
+ * `null` with the bad value still in storage, so every later read hit it again. The
+ * web build calls this one, so the fix had been going nowhere. One implementation,
+ * one behaviour, and the platform layer's name for it.
+ */
+export { localStorageTokenStore as webTokenStore } from "../core/gmail/tokens";

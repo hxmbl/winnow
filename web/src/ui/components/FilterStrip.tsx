@@ -137,17 +137,42 @@ export const FilterStrip = memo(function FilterStrip({
             >
               {label}
               {/* The count is deliberately not a badge: a second shape inside the
-                  pill competes with the pill's own edge at this size. */}
+                  pill competes with the pill's own edge at this size. It carries a
+                  `tabular-nums` so a count changing from 9 to 10 does not shift the
+                  label, and it sits immediately after the label so the pair reads as
+                  one unit — "Important 26" — with the keycap clearly separate. */}
               <span className="text-[11.5px] font-semibold tabular-nums text-ink-muted">
                 {count}
               </span>
+              {/*
+                The shortcut, drawn as a key rather than as a number.
+
+                It was plain adjacent text at `text-ink-subtle`, which made every pill
+                read as one number — "Important 26 1", "Deliveries 2 2" — where the
+                second digit is a keyboard shortcut and the first is a count. On a
+                two-digit count ("26 1") the ambiguity is not stylistic: it is a
+                number that could be misread as twenty-six-one. The keycap separates
+                the two roles at a glance and ties the pill to the same chip the
+                shortcut sheet draws.
+
+                `bg-surface` solid, and *not* `bg-surface/60`. The token colours are CSS
+                custom properties, so Tailwind's `/opacity` modifier produces
+                `rgb(var(--wn-surface) / 0.6)` — which is not a colour — and the fill
+                silently disappears, leaving the key glyph on the pill's wash. That is
+                exactly what `theme.ts` warns about at the top of the file, and the
+                keycap is where it bit.
+
+                `font-mono` because a digit that is a *key* should look like a key, and
+                `ink-muted` rather than `ink-subtle` so it is legible on white in both
+                schemes.
+              */}
               {digit && (
-                <span
+                <kbd
                   aria-hidden="true"
-                  className="hidden text-[11.5px] font-semibold tabular-nums text-ink-subtle group-hover/pill:inline lg:inline"
+                  className="ml-0.5 hidden min-w-[1.05rem] rounded border border-hairline bg-surface px-1 py-px text-center font-mono text-[10.5px] font-semibold leading-[1.35] text-ink-muted group-hover/pill:inline lg:inline"
                 >
                   {digit}
-                </span>
+                </kbd>
               )}
             </button>
 
@@ -162,6 +187,15 @@ export const FilterStrip = memo(function FilterStrip({
               `unsafe` has neither — it is not hidden by default, so there is nothing to
               unhide, and muting it is meaningless (it is the one bucket the user goes to
               on purpose).
+
+              The last clause is the touch device, and it is not decoration. The control
+              was `hidden` and revealed on `group-hover`, which on a phone means never:
+              there is no mute control at all, so a bucket Winnow keeps mis-filing cannot
+              be silenced from the rail. Settings can list what has already been hidden
+              but cannot start it, and the palette is a list of places to go, not a list
+              of things to change. `@media (hover: hover)` scopes the hiding to the
+              devices that actually have a pointer to hover with, exactly as it does for
+              the row star.
             */}
             {id.kind === "builtin" && id.id !== "unsafe" && (
               <button
@@ -177,7 +211,7 @@ export const FilterStrip = memo(function FilterStrip({
                     ? `Show ${label} in the inbox again`
                     : `Hide ${label} from the inbox and tell Winnow it is over-firing`
                 }
-                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-hairline bg-surface text-[10px] leading-none text-ink-muted shadow-pane transition-colors hover:text-ink focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:inline-flex"
+                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-hairline bg-surface text-[10px] leading-none text-ink-muted shadow-pane transition-colors hover:text-ink focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:inline-flex [@media(hover:none)]:inline-flex"
               >
                 {isMuted ? "↺" : "×"}
               </button>

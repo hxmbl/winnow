@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Two favicons, chosen by the OS scheme. The tab strip is not ours to theme, so
+      a single black-on-white mark is invisible in a dark tab — and the app's own
+      mark does not have this problem, being inline and driven by the theme tokens.
+    -->
     <link rel="icon" type="image/svg+xml" href="/relayLight.svg" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/relayDark.svg"
+      media="(prefers-color-scheme: dark)"
+    />
     <title>Winnow</title>
   </head>
   <body>

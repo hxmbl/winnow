@@ -147,6 +147,16 @@ const SUCCESS_PAGE: &str = r#"<!doctype html>
   h1 { margin:0 0 8px; font-size:20px; font-weight:600; }
   p  { margin:0; color:#3C434C; }
   code { font-family: ui-monospace, SFMono-Regular, monospace; font-size:13px; }
+  /* The colours above are Winnow's light palette, hardcoded, so `color-scheme`
+     alone left a white card on a dark browser — which is what this tab looks like
+     for the second or two the user spends reading it. These are the dark palette's
+     own values, so the page matches the app it just signed you in to. */
+  @media (prefers-color-scheme: dark) {
+    body { background:#0F1317; color:#E8EDF2; }
+    .card { background:#1B2027;
+            box-shadow:0 12px 32px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.30); }
+    p { color:#9FA8B1; }
+  }
 </style></head>
 <body><div class="card">
   <h1>Signed in to Winnow</h1>
@@ -158,15 +168,28 @@ const ERROR_PAGE: &str = r#"<!doctype html>
 <title>Winnow could not sign you in</title>
 <style>
   :root { color-scheme: light dark; }
-  body { margin:0; min-height:100vh; display-items:center; justify-content:center;
+  /* `display:grid; place-items:center` — the grid was missing here, so
+     `display-items` was a no-op and the card sat in the top-left corner of the
+     page while the success page beside it was centred. */
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
          font: 15px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
          background:#EFF3F3; color:#15181D; }
   .card { background:#fff; border-radius:14px; padding:32px 36px; max-width:30rem;
           box-shadow:0 12px 32px rgba(15,23,42,.10), 0 2px 6px rgba(15,23,42,.04); }
   h1 { margin:0 0 8px; font-size:20px; font-weight:600; }
-  p  { margin:0; color:#3C434C; }
+  p  { margin:0 0 8px; color:#3C434C; }
   code { font-family: ui-monospace, SFMono-Regular, monospace; font-size:13px;
          color:#C2410C; }
+  /* As on the success page: the palette above is Winnow's light one, so without
+     this the failure page was the one bright surface in a dark browser — which is
+     the page a user is most likely to be staring at, because they are stuck. */
+  @media (prefers-color-scheme: dark) {
+    body { background:#0F1317; color:#E8EDF2; }
+    .card { background:#1B2027;
+            box-shadow:0 12px 32px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.30); }
+    p { color:#9FA8B1; }
+    code { color:#FACC15; }
+  }
 </style></head>
 <body><div class="card">
   <h1>Winnow could not sign you in</h1>

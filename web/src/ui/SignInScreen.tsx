@@ -21,6 +21,7 @@ import { AlertCircle, LogIn, Sparkles } from "lucide-react";
 import { GMAIL_SCOPE } from "../core/gmail/dto";
 import { describeFailure, type AuthFailure } from "../core/session/errors";
 import { isTauri } from "../platform";
+import { AppMark } from "./AppMark";
 
 type Props = {
   /** Called to start sign-in. Resolves or throws; the throw is rendered below. */
@@ -55,7 +56,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo }: Props)
     <div className="flex h-dvh items-center justify-center bg-canvas px-5 py-10">
       <div className="w-full max-w-[400px]">
         <div className="flex flex-col items-center text-center">
-          <img src="./relayLight.svg" alt="" aria-hidden="true" className="h-12 w-12" />
+          <AppMark size={48} />
           <h1 className="mt-4 text-subject font-semibold text-ink">Winnow</h1>
           <p className="mt-2 max-w-[30ch] text-[13.5px] leading-relaxed text-ink-muted">
             An inbox that sorts itself. Winnow reads your mail, works out what is worth your

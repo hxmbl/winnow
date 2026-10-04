@@ -25,10 +25,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { NO_CURSOR, WinnowStore, type Snapshot } from "./core/store/store";
 import { commandForKey, shouldSwallow, type KeyContext } from "./core/mail/keybinds";
-import { NAVIGATION_ITEMS } from "./core/model/signals";
-import { MAILBOX_LABEL, type Mailbox } from "./core/model/email";
+import {
+  badgeFilters,
+  FILTER_LABELS,
+  NAVIGATION_ITEMS,
+} from "./core/model/signals";
+import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
 import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
 import type { Draft } from "./core/model/email";
 import { DEMO_EMAILS } from "./core/data/demo";
@@ -44,6 +49,7 @@ import { Reader } from "./ui/components/Reader";
 import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer, Settings } from "./ui/components/SettingsPanel";
+import { ConfirmDialog } from "./ui/components/Overlay";
 import { SignInScreen } from "./ui/SignInScreen";
 
 type Props = {
@@ -77,19 +83,27 @@ type ComposerState = {
 };
 
 /**
- * Whether a draft still holds only what Winnow put in it.
+ * Whether discarding this draft would lose anything the user wrote.
  *
- * A reply's body *starts* as the quoted original, so "is it untouched" cannot mean "is
- * the body empty" — it means "is there anything above the quote". `stripQuote` removes
- * the quote when it is still an untouched suffix, which is exactly the question, so
- * whatever is left is what the user wrote.
+ * Not "is the body empty", and not "is the body what Winnow put there" — it is
+ * "is the user's *contribution* empty", and the two are different questions depending
+ * on what Winnow pre-filled.
  *
- * A forward has no quote and no recipient, so both halves read as untouched: nothing
- * typed, nowhere to send it. `Composer` disables Send in that case rather than
- * discarding anything.
+ * A reply's body *starts* as the quoted original, so `stripQuote` removes the quote
+ * when it is still an untouched suffix and whatever is left is what the user wrote.
+ * A forward's body is the conversation, and that text is meant to stay in the message
+ * they send — so its baseline is recorded in `Draft.prefilled` and the test is whether
+ * the user has added to it.
+ *
+ * Getting this wrong is not cosmetic. It used to test the body for emptiness, so *every*
+ * forward was "written": opening one with `f` and pressing Escape asked whether you
+ * wanted to throw away a draft containing text Winnow had put there a second earlier,
+ * and the only way to dismiss it was a second Escape — which trains people to click
+ * through confirmations, and makes the ones that matter meaningless.
  */
 function isUntouchedDraft(draft: Draft): boolean {
-  return stripQuote(draft.body, draft.quoteBlock).trim().length === 0;
+  const written = stripQuote(draft.body, draft.quoteBlock).trim();
+  return written === (draft.prefilled ?? "").trim();
 }
 
 export function App({ store }: Props) {
@@ -416,6 +430,41 @@ export function App({ store }: Props) {
   const selected = view.selected;
 
   /**
+   * Announce the open message.
+   *
+   * A keyboard-first client moves the reader with `j` and `k`, and nothing about that
+   * reaches assistive technology: focus stays wherever the last click left it, the
+   * reader is a sibling of the list rather than a focused region, and a screen reader
+   * user pressing `j` through a mailbox hears nothing change at all. The visible pane
+   * changed; the a11y tree did not.
+   *
+   * An `aria-live` region is the fix, and the wording is the part that matters. It is
+   * not "message 3 of 38" — the position cluster already shows that to anyone who can
+   * see it — but who the message is *from* and what it is *about*, because those are
+   * the two facts that let a non-sighted user decide whether to keep reading. That is
+   * also why it is a summary rather than the body: announcing a whole email would
+   * make `j` unusable as a scan.
+   *
+   * `polite`, so it queues behind whatever is being read rather than interrupting it,
+   * and the badges are included because a message being Important or Unsafe is a
+   * material fact about it that the list renders as colourless dots.
+   */
+  const announcement = selected
+    ? [
+        `${displayName(selected)}`,
+        selected.subject || "(no subject)",
+        selected.unread ? "unread" : null,
+        view.signals.get(selected.id)
+          ? badgeFilters(view.signals.get(selected.id)!)
+              .map((id) => FILTER_LABELS[id])
+              .join(", ")
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" — ")
+    : "";
+
+  /**
    * Wrap a store mutation that needs the *current* snapshot.
    *
    * The handler closes over nothing, so it reads through `snapshotRef` at the
@@ -511,39 +560,57 @@ export function App({ store }: Props) {
    * it silently destroyed a typed reply with no confirmation and no draft kept.
    *
    * So: an untouched draft closes straight away (nothing to lose), and a written one
-   * confirms. `Discard` skips the question, because it is the button that already says
-   * the word.
+   * opens a real confirmation rather than calling `window.confirm`. Three reasons for
+   * the in-app dialog rather than the browser's: a Tauri's webview does not reliably
+   * implement `confirm`, so on the desktop the question could not be asked at all; the
+   * native dialog cannot be styled and reads as a web page inside a native window; and
+   * it blocks the render loop, which in a mail client is a frozen window.
+   *
+   * `Discard` skips the question, because it is the button that already says the word.
    */
-  const closeComposer = useCallback(
-    (force = false) => {
-      setComposer((current) => {
-        if (!current) return null;
-        if (force || isUntouchedDraft(current.draft)) return null;
-        if (
-          globalThis.confirm?.(
-            "Discard this draft? Anything you have written will be lost.",
-          )
-        ) {
-          return null;
-        }
-        // Cancelled: keep the composer exactly as it is, including focus.
-        return current;
-      });
-    },
-    [],
-  );
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  const closeComposer = useCallback((force = false) => {
+    setComposer((current) => {
+      if (!current) return null;
+      if (force || isUntouchedDraft(current.draft)) return null;
+      // There is something to lose: ask, and leave the composer exactly as it is
+      // — including focus — if the answer is no.
+      setConfirmDiscard(true);
+      return current;
+    });
+  }, []);
+
+  /** Both buttons of the confirmation, in one place so neither can miss. */
+  const resolveDiscard = useCallback((discard: boolean) => {
+    setConfirmDiscard(false);
+    if (discard) setComposer(null);
+  }, []);
 
   /**
-   * Download one attachment.
+   * The message whose remote content has been loaded for this session only.
    *
-   * Three steps, in this order, and the order is the point: the bytes come from
-   * Gmail, then the OS is asked where to put them. The other way round — showing
-   * a save dialog for a file that then fails to download — makes the user choose
-   * a location for nothing.
+   * The reader's "Load images" is a per-message escape hatch, and it used to be a
+   * global setting change wearing a per-message label. The button read "Load images",
+   * sitting under a message you were reading, and it turned on `loadRemoteContent` —
+   * so every *other* message from then on rendered a 32rem iframe of sender-supplied
+   * markup, and the choice persisted across a reload. Nobody clicking "Load images"
+   * under one message means "show me remote content from everyone, forever".
    *
-   * The desktop shell opens a real save panel; the web build turns the same call
-   * into a download. Both go through the platform, so this is one code path.
+   * Scoped to one message id, and cleared when the selection moves, so the button does
+   * what it says. The global preference in Settings is untouched by it and remains the
+   * way to say yes to everything — which is a decision a user makes once, on purpose,
+   * in a place where the scope is visible.
    */
+  const [remoteFor, setRemoteFor] = useState<number | null>(null);
+
+  // Cleared on navigation, so the hatch does not quietly follow you to the next
+  // message. `selected?.id` rather than the whole snapshot so the effect only runs
+  // when the message actually changes.
+  useEffect(() => {
+    setRemoteFor(null);
+  }, [selected?.id]);
+
   /**
    * Download one attachment.
    *
@@ -864,7 +931,16 @@ export function App({ store }: Props) {
     );
   }
 
-  const position = snapshot.cursorIndex === NO_CURSOR ? 0 : snapshot.cursorIndex + 1;
+  /*
+  Where you are in the list.
+
+  `null` before the first move, and `TopBar` renders that as an em dash. The cursor is
+  `NO_CURSOR` until the user touches the keyboard, and rendering that as `0` produced
+  "Inbox 0 of 38" — which reads as an empty mailbox, and "0 of 0" on a narrowed list,
+  and is wrong on every count. An em dash says the honest thing: there is a list, and
+  you are not on anything in it yet.
+*/
+const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorIndex + 1;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
@@ -918,6 +994,12 @@ export function App({ store }: Props) {
         connectError={connectError}
       />
 
+      {announcement && (
+        <p aria-live="polite" aria-atomic="true" className="sr-only">
+          {announcement}
+        </p>
+      )}
+
       {snapshot.error && (
         <div
           role="alert"
@@ -952,6 +1034,45 @@ export function App({ store }: Props) {
             className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Dismiss
+          </button>
+        </div>
+      )}
+
+      {/*
+        The undo strip.
+
+        `⇧U` clears the read state of a whole mailbox, and unlike every other verb in
+        the app there is no inverse anywhere on screen — the messages are simply gone
+        from the unread count. It used to be the single most destructive keystroke in
+        the product with nothing to offer in return.
+
+        Positioned below the notices rather than over the list: an overlay would cover
+        rows the user may be reading, and this thing appears precisely when they are
+        mid-triage. And it does not expire on a timer — a `⇧U` followed by a two-second
+        pause and a gone toast is worse than no toast, because the user learns the
+        affordance is unreliable. It waits for an explicit dismissal, a different
+        action, or a navigation.
+      */}
+      {snapshot.undo && (
+        <div
+          role="status"
+          className="flex items-center justify-center gap-3 border-b border-hairline bg-chrome px-4 py-2 text-[12.5px]"
+        >
+          <span className="min-w-0 truncate text-ink-muted">{snapshot.undo.label}</span>
+          <button
+            type="button"
+            onClick={store.undoLast.bind(store)}
+            className="shrink-0 rounded-full border border-control-border px-2.5 py-0.5 font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={store.dismissUndo.bind(store)}
+            aria-label="Dismiss"
+            className="shrink-0 rounded-full p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            <X size={12} strokeWidth={2.2} aria-hidden="true" />
           </button>
         </div>
       )}
@@ -993,10 +1114,18 @@ export function App({ store }: Props) {
             unreadIds={unreadIds}
             freshIds={snapshot.recentIds}
             emptyReason={view.result.emptyReason}
+            sortBy={preferences.sortBy}
             onSelect={handleSelectRow}
             onToggleStar={handleToggleStar}
             onClearFilters={store.clearFilters.bind(store)}
             onClearSearch={() => store.setSearchQuery("")}
+            onSync={() => {
+              void store.refresh();
+            }}
+            // Only a real account has something to sync with. Offering the button
+            // over the demo would be a control that cannot do anything, which is the
+            // exact failure the empty state's own copy was written to avoid.
+            canSync={snapshot.account !== null}
             now={snapshot.now}
             className="lg:rounded-pane lg:shadow-pane lg:min-w-0"
           />
@@ -1018,9 +1147,21 @@ export function App({ store }: Props) {
         */}
         <div
           key={selected?.id ?? "empty"}
+          // `w-full min-w-0` below `lg`, and the width is not optional there.
+          //
+          // Without `min-w-0` this pane is a flex item whose base size is its
+          // content — and its content is `max-w-[68ch]` of body text, 733px. On a
+          // 390px phone the line overflowed, `body { overflow: hidden }` clipped it,
+          // and the message was unreadable: every line ran off the right edge with no
+          // way to reach the rest, and the whole action toolbar — star, archive,
+          // reply, forward, trash — sat past the viewport with it. So on a phone you
+          // could read half a message and could not do anything to it.
+          //
+          // The list pane beside it already carries `min-w-0` for the same reason,
+          // which is what made the asymmetry hard to see.
           className={`${
             selected ? "flex" : "hidden lg:flex"
-          } min-h-0 flex-col lg:w-[37.9%] lg:shrink-0 lg:rounded-pane lg:shadow-pane ${
+          } min-h-0 w-full min-w-0 flex-col lg:w-[37.9%] lg:shrink-0 lg:rounded-pane lg:shadow-pane ${
             selected ? "animate-appear" : ""
           }`}
         >
@@ -1029,7 +1170,9 @@ export function App({ store }: Props) {
             conversation={view.conversation}
             signals={selected ? (view.signals.get(selected.id) ?? null) : null}
             mailbox={snapshot.mailbox}
-            loadRemoteContent={preferences.loadRemoteContent}
+            // Either the global preference, or this one message the reader's own
+            // escape hatch has been used on. See `remoteFor`.
+            loadRemoteContent={preferences.loadRemoteContent || remoteFor === selected?.id}
             accountAddress={snapshot.account?.email ?? null}
             now={snapshot.now}
             onClose={store.closeReader.bind(store)}
@@ -1072,9 +1215,10 @@ export function App({ store }: Props) {
                   s.closeReader();
                 }
               }),
-              onLoadRemoteContent: act((s) => {
-                s.setPreferences({ loadRemoteContent: true });
-              }),
+              onLoadRemoteContent: act((_store, snap) => {
+              // Not a preference change: this message only. See `remoteFor`.
+              if (snap.view.selected) setRemoteFor(snap.view.selected.id);
+            }),
               onOpenMessage: (id) => {
                 // `focusMessage` rather than `select`, because the earlier message may
                 // not be in the current list — it may be in another mailbox, or behind
@@ -1147,7 +1291,7 @@ export function App({ store }: Props) {
           adaptive={snapshot.learning.adaptive}
           onAdaptive={store.setAdaptiveLearning.bind(store)}
           onResetWeights={store.resetLearning.bind(store)}
-          events={snapshot.learning.events}
+          events={snapshot.learning.history}
           blockedSenders={preferences.blockedSenders}
           onUnblock={store.unblockSender.bind(store)}
           mutedFilters={snapshot.mutedFilters}
@@ -1192,6 +1336,16 @@ export function App({ store }: Props) {
           onDiscard={() => closeComposer(true)}
           // Escape and the close button ask if there is anything to lose.
           onClose={() => closeComposer()}
+        />
+      )}
+
+      {confirmDiscard && (
+        <ConfirmDialog
+          title="Discard this draft?"
+          body="What you have written will be lost, and nothing is kept."
+          confirmLabel="Discard"
+          onConfirm={() => resolveDiscard(true)}
+          onCancel={() => resolveDiscard(false)}
         />
       )}
     </div>

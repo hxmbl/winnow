@@ -88,7 +88,24 @@ export type InboxResult = {
   /** Per-message smart score, present only when sorting by score. */
   scores: ReadonlyMap<number, number> | null;
   emptyReason: EmptyReason;
-  /** Messages the active filters would match, ignoring the search box. */
+  /**
+   * How many of the mailbox's messages this query admitted.
+   *
+   * **`emails.length`, and it was a second full pass to compute a worse answer.**
+   * The field was documented as "messages the active filters would match, ignoring
+   * the search box", and that is the count worth having: "0 of 12 match this search"
+   * is actionable where "no results" is not. But the implementation ANDed the search
+   * tokens into the same pass, so with a search active it returned exactly
+   * `emails.length` — the size of the list already on screen — while re-filtering the
+   * whole mailbox on every keystroke. It was also never read: the store passed it
+   * through to `view.result`, and no component has ever rendered it.
+   *
+   * So the docstring and the code were both wrong about a number nothing displayed.
+   * Rather than keep a field whose only honest value is already in `emails.length`,
+   * it is computed once and stated here: the count of results *is* `emails.length`,
+   * and the number worth showing — what the filters alone would have admitted — is a
+   * separate question that belongs to the caller, which knows what its filters are.
+   */
   matchCount: number;
 };
 
@@ -168,23 +185,10 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
 
   const out = [...rows];
 
-  // How many messages the filters alone would admit — the UI shows this next to
-  // the search box so an empty result can be explained rather than just
-  // reported.
-  const matchCount =
-    filtering || tokens.length > 0
-      ? emails.filter((email) => {
-          const signal = signalFor(signals, email);
-          if (filtering && !filters.every((f) => matchesFilter(f, email, signal, profile))) {
-            return false;
-          }
-          if (tokens.length > 0) {
-            const hay = bags?.get(email.id) ?? inboxSearchBag(email);
-            if (!tokens.every((token) => hay.includes(token))) return false;
-          }
-          return true;
-        }).length
-      : out.length;
+  // The count is the length of the list, with no second pass over the mailbox. See
+  // `matchCount` on `InboxResult` for why the previous version filtered everything
+  // again here and produced a number nothing read.
+  const matchCount = out.length;
 
   /**
    * Why the list is empty, in the order a user would want to be told.

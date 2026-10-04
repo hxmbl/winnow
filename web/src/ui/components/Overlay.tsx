@@ -34,6 +34,15 @@ import { useCallback, useEffect, useRef } from "react";
 type Props = {
   /** Where focus goes when the sheet opens. Null focuses the sheet itself. */
   initialFocus?: React.RefObject<HTMLElement | null>;
+  /**
+   * What dismissing the sheet means.
+   *
+   * Required, because every sheet here has a real way out and a caller that forgot
+   * one used to get a dialog that could only be closed by the system — the failure
+   * mode when this was optional. `ConfirmDialog` supplies it as its cancel path,
+   * which is the same function as `onEscape`, and that duplication is the point: a
+   * confirmation has to be cancelable by every route.
+   */
   onClose: () => void;
   /** Escape. Defaults to `onClose`. */
   onEscape?: () => void;
@@ -41,8 +50,12 @@ type Props = {
    * Clicking the backdrop closes the sheet.
    *
    * Off by default. A viewer or a list is obviously dismissable by clicking away from
-   * it; a composer holding typed text is not, and the caller passes `onClose` only
-   * after confirming there is nothing to lose.
+   * it; a composer holding typed text is not, and the caller passes `dismissOnBackdrop`
+   * explicitly once it has decided the click is not ambiguous.
+   *
+   * Note this routes to `onClose` and not to `onEscape`: a backdrop click on a
+   * confirmation dialog is not a decision, which is why `ConfirmDialog` turns this
+   * off entirely and lets Escape go to the safe answer via `onEscape`.
    */
   dismissOnBackdrop?: boolean;
   /** `dialog` for content, `menu` for a roving list of destinations. */
@@ -181,6 +194,79 @@ export function Sheet({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * A question that has to be asked before something irreversible.
+ *
+ * Exists because the one place this came up used `window.confirm`, which is the
+ * wrong tool in a desktop shell three separate ways: Tauri's webviews do not
+ * reliably implement it (it is not part of the WebKit contract the app runs on),
+ * a browser-native dialog cannot be styled and so reads as a web page rather than
+ * as part of Winnow, and it blocks the render loop — which in a mail client means
+ * a frozen window if the answer is slow.
+ *
+ * A real dialog also gets the details right: focus lands on *cancel*, Escape
+ * cancels, and Tab cannot leave.
+ */
+export function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  destructive = true,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  /** Red for "this loses something", ink for "this is just a step". */
+  destructive?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <Sheet
+      label={title}
+      onClose={onCancel}
+      // Escape goes to `onCancel`, which is the safe answer for a confirmation.
+      // Stated explicitly rather than left to default to `onClose`, because the
+      // whole reason this component exists is that "close" and "cancel" must not be
+      // allowed to drift apart by accident.
+      onEscape={onCancel}
+      // Not dismissable by clicking away: a click that lands outside a small
+      // dialog is very often a mis-aimed click on the thing behind it, and the
+      // answer to "did you mean to do that?" must never be a discard.
+      dismissOnBackdrop={false}
+      initialFocus={cancelRef}
+      className="w-full max-w-[380px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+    >
+      <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{body}</p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-full border border-control-border px-4 py-1.5 text-[13px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          Keep editing
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className={`rounded-full px-4 py-1.5 text-[13px] font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+            destructive
+              ? "bg-danger text-[var(--wn-surface)]"
+              : "bg-[var(--wn-inkBody)] text-[var(--wn-surface)]"
+          }`}
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </Sheet>
   );
 }
 
