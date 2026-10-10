@@ -21,7 +21,9 @@ Pods/
 # Node
 node_modules/
 web/dist/
+web/dist-gmailtest/
 *.tsbuildinfo
+web/.env.local
 
 # The smoke test's screenshot — an artifact of running the app, not source.
 web/smoke.png
