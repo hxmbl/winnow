@@ -671,6 +671,10 @@ export function sanitizeCssWithCount(
   // Comments first: `expr/**/ession(` is a thing, and stripping rules before
   // comments can hide a keyword from the patterns below.
   let out = decodeCssEscapes(css.replace(/\/\*[\s\S]*?\*\//g, ""));
+  // And again after decoding: `\2f\2a` is `/*`, so a comment can be *spelled*
+  // in escapes and only exist once they are decoded. What is judged below is
+  // what is emitted, so it has to be stripped from the decoded text as well.
+  out = out.replace(/\/\*[\s\S]*?\*\//g, "");
 
   // At-rules that fetch, or that re-declare how the parser reads everything else.
   out = out
@@ -717,7 +721,32 @@ export function sanitizeCssWithCount(
     .filter((declaration) => !/['"][^'"]*(?::\/\/|\/\/)[^'"]*['"]/.test(declaration))
     .join(";");
 
-  return { css: out, blocked };
+  return { css: encodeForEmission(out), blocked };
+}
+
+/**
+ * Put back the two escapes that decoding must not let reach the output.
+ *
+ * Everything above judges the *decoded* text, which is right, and then emits it,
+ * which is where the first version went wrong. Decoding is a change of meaning
+ * in two places:
+ *
+ *   - `\3c /style\3e ` is inert inside a stylesheet and is a literal `</style>`
+ *     once decoded. A sheet is re-homed into a `<style>` element, which is raw text
+ *     that ends at the first `</style`, so emitting the decoded form ends the
+ *     element and turns the rest of the sheet into markup -- an `<img>` that loads
+ *     with images off, a `<meta http-equiv=refresh>`, whatever the sender wrote.
+ *   - `\5c ` is a backslash. Decoded and emitted, it is a *new* escape for the
+ *     browser to decode a second time, so `u\5c 72l(` reaches the walk as
+ *     `u\72l(` -- not a fetch -- and reaches the browser as `url(`.
+ *
+ * Both are re-escaped, so the browser decodes exactly once and reads exactly what
+ * was judged. `</` is the only sequence that can end a raw-text element and it is
+ * never valid CSS outside a string, so `<` on its own is left for the media-query
+ * range syntax that uses it.
+ */
+function encodeForEmission(css: string): string {
+  return css.replace(/\\/g, "\\5c ").replace(/<\//g, "\\3c /");
 }
 
 /** The CSS, without the count. See [`sanitizeCssWithCount`]. */
@@ -1527,7 +1556,9 @@ export function inlineEmailCss(): string {
  * entirely whether the document contains anything else.
  */
 export function emailDocument(body: string, stylesheets: readonly string[] = []): string {
-  const sender = stylesheets.join("\n").trim();
+  // `</` cannot end the element whatever the sheet contains. The sanitiser
+  // already escapes it; this is the backstop for a sheet that came from anywhere else.
+  const sender = stylesheets.join("\n").trim().replace(/<\//g, "\\3c /");
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',

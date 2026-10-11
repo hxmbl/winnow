@@ -15,8 +15,14 @@ import { lookup as dnsLookup } from "node:dns";
 import type * as dns from "node:dns";
 import http from "node:http";
 import https from "node:https";
-import { isPublicAddress } from "./addressPolicy.ts";
-import { ASSET_TIMEOUT_MS, isAssetContentType, MAX_ASSET_BYTES } from "./addressPolicy.ts";
+import { isIP } from "node:net";
+import {
+  ASSET_TIMEOUT_MS,
+  checkUrl,
+  isAssetContentType,
+  isPublicAddress,
+  MAX_ASSET_BYTES,
+} from "./addressPolicy.ts";
 
 /**
  * A DNS resolver that refuses to hand back an address inside the machine.
@@ -88,22 +94,41 @@ type Hop = { status: number; location: string | null; contentType: string; body:
  * The stream is destroyed the moment it passes the limit, so the sender pays for
  * what it sent and not for what it said it sent.
  */
-function requestOnce(url: URL): Promise<Hop | null> {
+function requestOnce(url: URL, budgetMs: number): Promise<Hop | null> {
   return new Promise((resolve) => {
     const transport = url.protocol === "https:" ? https : http;
     let settled = false;
+    const clock: { deadline?: ReturnType<typeof setTimeout> } = {};
     const settle = (value: Hop | null): void => {
       if (settled) return;
       settled = true;
+      if (clock.deadline !== undefined) clearTimeout(clock.deadline);
       resolve(value);
     };
+
+    /*
+     * An address literal never reaches `guardedLookup`. Node's `net` connects to
+     * an IP directly and only calls `lookup` for a *name*, so for
+     * `http://127.0.0.1/` -- or `http://2130706433/`, which the URL parser turns
+     * into it -- the resolver that is the whole defence is simply not consulted.
+     * The literal is judged here instead, on every hop, because a redirect is the
+     * easiest way to put one in front of the proxy.
+     *
+     * `URL.hostname` keeps the brackets on an IPv6 literal, which `isIP` does not
+     * accept and `net` does not want, so they come off first.
+     */
+    const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+    if (isIP(host) !== 0 && !isPublicAddress(host)) {
+      settle(null);
+      return;
+    }
 
     let request;
     try {
       request = transport.request(
         {
           protocol: url.protocol,
-          hostname: url.hostname,
+          hostname: host,
           port: url.port || (url.protocol === "https:" ? 443 : 80),
           path: `${url.pathname}${url.search}`,
           method: "GET",
@@ -131,7 +156,16 @@ function requestOnce(url: URL): Promise<Hop | null> {
             return;
           }
 
+          // Status and type before a byte of the body is read. Neither can change
+          // by reading it, so an error page or an HTML document announced as such
+          // is refused without paying for it.
           const contentType = response.headers["content-type"] ?? "";
+          if (status < 200 || status >= 300 || !isAssetContentType(contentType)) {
+            response.destroy();
+            settle(null);
+            return;
+          }
+
           const declared = Number.parseInt(String(response.headers["content-length"] ?? ""), 10);
           if (Number.isFinite(declared) && declared > MAX_ASSET_BYTES) {
             response.destroy();
@@ -161,10 +195,19 @@ function requestOnce(url: URL): Promise<Hop | null> {
       return;
     }
 
+    // Two clocks. `setTimeout` on the request is an *idle* timer: it resets on
+    // every chunk, so a server that drips a byte every few seconds would hold the
+    // request open indefinitely. The deadline is wall-clock and covers the whole
+    // exchange, which is what the old `AbortSignal.timeout` did.
     request.setTimeout(ASSET_TIMEOUT_MS, () => {
       request.destroy();
       settle(null);
     });
+    clock.deadline = setTimeout(() => {
+      request.destroy();
+      settle(null);
+    }, Math.max(0, budgetMs));
+    clock.deadline.unref?.();
     request.on("error", () => settle(null));
     request.end();
   });
@@ -181,19 +224,21 @@ function requestOnce(url: URL): Promise<Hop | null> {
  */
 export async function fetchAsset(url: string): Promise<{ contentType: string; bytes: Buffer } | null> {
   let current = url;
+  // One budget for the whole fetch, redirects included, rather than one per hop.
+  const deadline = Date.now() + ASSET_TIMEOUT_MS;
 
   for (let hop = 0; hop < 4; hop += 1) {
-    let parsed: URL;
-    try {
-      parsed = new URL(current);
-    } catch {
-      return null;
-    }
+    // The same verdict the first URL got, at every hop: scheme, credentials, and
+    // an address literal. The planner checks the URL in the message; nothing
+    // checked the URL in a `Location` header, and that is the one the sender
+    // chooses after the first check has already passed.
+    const verdict = checkUrl(current);
+    if (!verdict.ok) return null;
 
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    if (parsed.username !== "" || parsed.password !== "") return null;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
 
-    const response = await requestOnce(parsed);
+    const response = await requestOnce(verdict.url, remaining);
     if (response === null) return null;
 
     if (response.status >= 300 && response.status < 400) {
