@@ -191,8 +191,18 @@ child.on("exit", (code, signal) => {
   // …and check each bundle kind that was asked for is actually there, rather than
   // that *a* directory exists. A bundle directory with an empty subdirectory passes
   // the weaker check and ships nothing.
+  //
+  // Note: Tauri organizes bundles by platform subdirectory:
+  // - macOS: bundle/macos/Winnow.app, bundle/dmg/ (if create-dmg installed)
+  // - Linux: bundle/appimage/, bundle/deb/
+  // - Windows: bundle/msi/, bundle/nsis/
+  const platformDir = {
+    darwin: "macos",
+    win32: "windows",
+  }[platform] || "linux";
+
   const missing = bundles.filter((kind) => {
-    const dir = resolve(out, kind);
+    const dir = resolve(out, platformDir, kind);
     if (!existsSync(dir)) return true;
     try {
       return readdirSync(dir).every(
@@ -211,6 +221,11 @@ child.on("exit", (code, signal) => {
     process.exit(1);
   }
 
-  console.log(`\nBundles written to ${out}`);
-  for (const kind of bundles) console.log(`  ${resolve(out, kind)}`);
+  const platformDir = {
+    darwin: "macos",
+    win32: "windows",
+  }[platform] || "linux";
+
+  console.log(`\nBundles written to ${resolve(out, platformDir)}`);
+  for (const kind of bundles) console.log(`  ${resolve(out, platformDir, kind)}`);
 });
