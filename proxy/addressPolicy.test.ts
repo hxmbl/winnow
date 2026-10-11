@@ -14,8 +14,10 @@
 
 import { describe, expect, it } from "vitest";
 import type * as dns from "node:dns";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { checkUrl, isAssetContentType, isPublicAddress } from "./addressPolicy";
-import { guardedLookup } from "./transport";
+import { fetchAsset, guardedLookup } from "./transport";
 
 describe("IPv4", () => {
   it("refuses everything on the inside of a machine or a network", () => {
@@ -226,5 +228,65 @@ describe("guardedLookup", () => {
     const result = await resolve("example.com", { all: true });
     if (result.error !== null) return; // offline: nothing to assert
     expect(Array.isArray(result.addresses)).toBe(true);
+  });
+});
+
+/**
+ * An address literal never reaches `guardedLookup`.
+ *
+ * Node's `net` only calls `lookup` for a name; an IP is connected to directly. So
+ * the resolver cannot be the only judge, and every hop -- a redirect's `Location`
+ * included -- has to be judged on its text as well. These start a real listener on
+ * loopback and assert that the proxy never reaches it.
+ */
+describe("fetchAsset and address literals", () => {
+  const withServer = async (
+    handler: (request: http.IncomingMessage, response: http.ServerResponse) => void,
+    body: (port: number, hits: () => number) => Promise<void>,
+  ) => {
+    let count = 0;
+    const server = http.createServer((request, response) => {
+      count += 1;
+      handler(request, response);
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const { port } = server.address() as AddressInfo;
+    try {
+      await body(port, () => count);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  };
+
+  const image = (_: http.IncomingMessage, response: http.ServerResponse) => {
+    response.setHeader("Content-Type", "image/png");
+    response.end("SECRET");
+  };
+
+  it("refuses a loopback literal without connecting", async () => {
+    await withServer(image, async (port, hits) => {
+      expect(await fetchAsset(`http://127.0.0.1:${port}/p.png`)).toBeNull();
+      expect(hits()).toBe(0);
+    });
+  });
+
+  it("refuses the decimal spelling the URL parser turns into loopback", async () => {
+    await withServer(image, async (port, hits) => {
+      expect(await fetchAsset(`http://2130706433:${port}/p.png`)).toBeNull();
+      expect(hits()).toBe(0);
+    });
+  });
+
+  it("refuses a bracketed IPv6 literal", () => {
+    expect(checkUrl("http://[::1]/p.png").ok).toBe(false);
+    expect(checkUrl("http://[::ffff:127.0.0.1]/p.png").ok).toBe(false);
+  });
+
+  it("judges every hop, so a redirect cannot name a literal the first URL could not", () => {
+    // The first hop has to be public to get this far, which a test cannot stand up
+    // offline. What is pinned instead is that the loop runs `checkUrl` on the
+    // Location target -- the metadata address is refused on its text alone.
+    expect(checkUrl("http://169.254.169.254/latest/meta-data/").ok).toBe(false);
+    expect(checkUrl(new URL("http://0x7f.1/", "https://example.com/a").toString()).ok).toBe(false);
   });
 });

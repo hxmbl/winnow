@@ -260,7 +260,10 @@ export function checkUrl(raw: string): Verdict {
   if (url.username !== "" || url.password !== "") return { ok: false, reason: "credentials" };
 
   // A host that is an IP literal is judged now; a name is judged after resolution.
-  if (isIP(url.hostname) !== 0 && !isPublicAddress(url.hostname)) {
+  // `URL.hostname` keeps the brackets on an IPv6 literal and `isIP` does not
+  // accept them, so `http://[::1]/` used to be read as a name and pass.
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (isIP(host) !== 0 && !isPublicAddress(host)) {
     return { ok: false, reason: "address" };
   }
 
