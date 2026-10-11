@@ -27,7 +27,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -188,26 +188,26 @@ child.on("exit", (code, signal) => {
     process.exit(1);
   }
 
-  // …and check each bundle kind that was asked for is actually there, rather than
-  // that *a* directory exists. A bundle directory with an empty subdirectory passes
-  // the weaker check and ships nothing.
+  // Check each requested bundle kind for an actual artifact, not just a directory.
   //
-  // Note: Tauri organizes bundles by platform subdirectory:
-  // - macOS: bundle/macos/Winnow.app, bundle/dmg/ (if create-dmg installed)
-  // - Linux: bundle/appimage/, bundle/deb/
-  // - Windows: bundle/msi/, bundle/nsis/
-  const platformDir = {
-    darwin: "macos",
-    win32: "windows",
-  }[platform] || "linux";
+  // Tauri writes each bundle kind to bundle/<kind>/, except the macOS
+  // application bundle, which is written under bundle/macos/.
+  const dirFor = (kind) => (kind === "app" ? "macos" : kind);
 
   const missing = bundles.filter((kind) => {
-    const dir = resolve(out, platformDir, kind);
+    const dir = resolve(out, dirFor(kind));
     if (!existsSync(dir)) return true;
     try {
-      return readdirSync(dir).every(
-        (entry) => statSync(resolve(dir, entry)).isDirectory(),
-      );
+      const entries = readdirSync(dir, { withFileTypes: true });
+      if (kind === "app") {
+        return !entries.some(
+          (entry) =>
+            entry.isDirectory() &&
+            entry.name.endsWith(".app") &&
+            existsSync(resolve(dir, entry.name, "Contents", "Info.plist")),
+        );
+      }
+      return !entries.some((entry) => entry.isFile());
     } catch {
       return true;
     }
@@ -221,6 +221,6 @@ child.on("exit", (code, signal) => {
     process.exit(1);
   }
 
-  console.log(`\nBundles written to ${resolve(out, platformDir)}`);
-  for (const kind of bundles) console.log(`  ${resolve(out, platformDir, kind)}`);
+  console.log(`\nBundles written to ${out}`);
+  for (const kind of bundles) console.log(`  ${resolve(out, dirFor(kind))}`);
 });
