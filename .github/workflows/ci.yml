@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel superseded PR runs, but let every push to master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  minesweep:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install minesweep
+        run: |
+          set -euo pipefail
+          TAG="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/hxmbl/minesweep/releases/latest)"
+          TAG="${TAG##*/}"
+          VERSION="${TAG#v}"
+          case "$(uname -m)" in
+            x86_64) ARCH=x86_64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+            *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+          esac
+          FILE="minesweep_${VERSION}_$(uname -s)_${ARCH}.tar.gz"
+          BASE="https://github.com/hxmbl/minesweep/releases/download/${TAG}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$BASE/$FILE"
+          curl -fsSLO "$BASE/checksums.txt"
+          grep " ${FILE}\$" checksums.txt | sha256sum -c -
+          tar -xzf "$FILE" minesweep
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 minesweep "$RUNNER_TEMP/bin/minesweep"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          echo "Installed minesweep ${TAG}"
+
+      - name: Scan for secrets
+        # --config: an auto-discovered .minesweep.yml has its fail-on/policy keys ignored.
+        # Exit 1 = findings >= high, exit 2 = incomplete scan; both fail the job.
+        run: minesweep --config .minesweep.yml --fail-on high --annotations --no-pager .
+
+  npm-checks:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Lint proxy
+        run: npm run lint:proxy
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Production build
+        run: npm run build
