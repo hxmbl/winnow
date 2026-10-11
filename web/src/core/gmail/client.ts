@@ -1,11 +1,19 @@
 /**
  * The Gmail API client.
  *
- * A thin, typed wrapper over `fetch` with one interesting behaviour: a 401
- * triggers exactly one forced token refresh and one retry. After that the error
- * propagates, because a second 401 means the refresh token is gone (revoked,
- * password changed, or the scope changed) and retrying would loop against the
- * API for no gain.
+ * A thin, typed wrapper over `fetch` with two behaviours that live here because
+ * they are properties of the wire rather than of any one caller:
+ *
+ *   - **Quota pacing.** Before each request this layer waits for a token bucket
+ *     of Gmail quota units (`QuotaBucket` / `costOf`), so a sync that pages a
+ *     large mailbox cannot spend an entire minute's 6,000-unit per-user budget
+ *     on back-to-back `messages.get` calls.
+ *   - **Retries only where a retry can help.** A 429, or a 403 carrying a quota
+ *     reason, is retried with bounded backoff (`isRateLimited` / `backoffMs`),
+ *     because that is Google saying "come back later". A 401 triggers exactly
+ *     one forced token refresh and one retry — a second 401 means the grant is
+ *     gone (revoked, password changed, or the scope changed) and looping would
+ *     buy nothing.
  *
  * There is no other cleverness — no batching, no caching, no retry queue.
  * Those belong to `sync.ts`, and keeping them apart means the request layer can
@@ -32,6 +40,144 @@ import { decodeBody, htmlPart } from "./mapper";
 /** Gmail's maximum page size. Asking for more is silently clamped. */
 export const MAX_PAGE_SIZE = 200;
 
+/**
+ * Gmail's per-user quota on new projects is 6,000 units/minute (and 1.2M/minute
+ * for the whole project, which is not the binding constraint for one person).
+ * The bucket refills at 5,000 units/minute — a sixth under the per-user line —
+ * so even a burst that fills the bucket cannot trip the number Google enforces.
+ * One account is signed in at a time, so one bucket per client is one bucket
+ * per user.
+ */
+export const UNITS_PER_MINUTE = 5_000;
+
+/** How many times a rate-limited request is replayed before the error surfaces. */
+export const MAX_RETRIES = 6;
+
+/** The backoff is capped; beyond this, Google has said "leave it alone". */
+export const MAX_BACKOFF_MS = 64_000;
+
+/** A wait. Injectable so tests never sleep on the real clock. */
+export type Sleep = (ms: number) => Promise<void>;
+
+const realSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The quota units one request costs, from Gmail's usage-limits table.
+ *
+ * Costs changed on 1 May 2026: `messages.get` and attachment downloads went
+ * from 5 to 20 each, and nothing got cheaper. Anything this client sends that
+ * is not named here defaults to 5, which is also the correct cost for
+ * `messages.list` and `messages.modify` — so an endpoint left out of the list
+ * charges what it actually costs, and an unlisted endpoint that is really more
+ * expensive errs on the side of spending: a bucket that over-charges makes the
+ * client more polite, never less.
+ */
+export function costOf(path: string, method: string): number {
+  if (method === "POST" && path.endsWith("/send")) return 100;
+  if (method === "DELETE") return 10;
+  if (path.includes("/attachments/")) return 20;
+  // A get of one message or draft, i.e. the `?format=full` requests.
+  if (/\/messages\/[^/?]+\?/.test(path) || /\/drafts\/[^/?]+\?/.test(path)) return 20;
+  if (path.startsWith("/users/me/history")) return 2;
+  if (path.startsWith("/users/me/profile")) return 1;
+  return 5;
+}
+
+/**
+ * Whether a response is Google saying "slow down" rather than "you did
+ * something wrong". HTTP 429 is that, always. A 403 gets read: most 403s are a
+ * permissions problem — a missing scope, an org policy, an admin rule — that
+ * retrying won't fix, so only the quota/rate reasons the API reports in
+ * `error.errors[].reason` are treated as retryable.
+ */
+export function isRateLimited(status: number, body: string): boolean {
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  try {
+    const error = (JSON.parse(body) as {
+      error?: { errors?: { reason?: string }[]; message?: unknown };
+    }).error;
+    const reasons = (error?.errors ?? []).map((entry) => entry.reason ?? "");
+    if (reasons.some((reason) => /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/.test(reason))) {
+      return true;
+    }
+    return /quota exceeded|rate limit/i.test(String(error?.message ?? ""));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Exponential backoff with a full second of jitter, so a retry loop does not
+ * pile every attempt onto the same second. Capped at `MAX_BACKOFF_MS`.
+ */
+export function backoffMs(attempt: number): number {
+  return Math.min(2 ** attempt * 1000 + Math.random() * 1000, MAX_BACKOFF_MS);
+}
+
+/**
+ * A token bucket of Gmail quota units, shared by every request a client makes.
+ *
+ * It refills at `UNITS_PER_MINUTE` per minute up to a burst capacity of the
+ * same size — an idle minute buys at most a minute's worth of spending, so a
+ * burst after a pause is bounded by what Gmail allows in a minute, not by how
+ * long the app sat idle. `take` acquires *before* the request goes out, so the
+ * pacing applies to sync paging and to the burst inside a sync alike.
+ *
+ * `take` calls are serialised through a promise chain: two requests awaiting
+ * the bucket simultaneously cannot hand each other the same units.
+ */
+export class QuotaBucket {
+  private units: number;
+  private last: number;
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly unitsPerMinute: number = UNITS_PER_MINUTE,
+    private readonly now: () => number = Date.now,
+    private readonly sleep: Sleep = realSleep,
+  ) {
+    this.units = unitsPerMinute;
+    this.last = now();
+  }
+
+  /** Wait until `cost` units are available, then consume them. */
+  take(cost: number): Promise<void> {
+    if (cost > this.unitsPerMinute) {
+      return Promise.reject(new RangeError("quota cost exceeds bucket capacity"));
+    }
+    const next = this.queue.then(async () => {
+      for (;;) {
+        const now = this.now();
+        this.units = Math.min(
+          this.unitsPerMinute,
+          this.units + ((now - this.last) / 60_000) * this.unitsPerMinute,
+        );
+        this.last = now;
+        if (this.units >= cost) {
+          this.units -= cost;
+          return;
+        }
+        const waitMs = Math.ceil(((cost - this.units) / this.unitsPerMinute) * 60_000);
+        await this.sleep(waitMs);
+      }
+    });
+    // A rejected `take` must not poison the chain for the request behind it.
+    this.queue = next.catch(() => {});
+    return next;
+  }
+
+  /**
+   * Empty the bucket after a rate-limit response: Google has already decided
+   * the minute's budget is spent, and the remainder of a burst should stop now
+   * rather than spend the *next* minute's refill on the same doomed work.
+   */
+  drain(): void {
+    this.units = 0;
+    this.last = this.now();
+  }
+}
+
 /** The `Authorization` header value, kept in one place. */
 export type TokenProvider = () => Promise<string | null>;
 
@@ -57,11 +203,21 @@ export type GmailClientOptions = {
    * `tokens.ts`; omitted means a 401 is final.
    */
   onUnauthorized?: () => Promise<string | null>;
+  /**
+   * The quota bucket. Injected in tests to disable pacing or observe drains;
+   * production uses one `QuotaBucket` per client.
+   */
+  bucket?: QuotaBucket;
+  /** The clock and the wait, injected in tests so nothing sleeps for real. */
+  now?: () => number;
+  sleep?: Sleep;
 };
 
 export class GmailClient {
   private readonly fetchImpl: FetchLike;
   private readonly onUnauthorized: (() => Promise<string | null>) | undefined;
+  private readonly sleep: Sleep;
+  private readonly bucket: QuotaBucket;
 
   constructor(
     private readonly tokenProvider: TokenProvider,
@@ -72,13 +228,18 @@ export class GmailClient {
     if (!impl) throw new Error("no fetch implementation available");
     this.fetchImpl = impl;
     this.onUnauthorized = options.onUnauthorized;
+    this.sleep = options.sleep ?? realSleep;
+    this.bucket = options.bucket ?? new QuotaBucket(UNITS_PER_MINUTE, options.now, this.sleep);
   }
 
   /**
-   * One request, with one transparent retry after a forced refresh.
+   * One request: paced by the quota bucket, with bounded retries for rate-limit
+   * responses and one transparent retry after a forced token refresh.
    *
-   * `allowRetry` is threaded rather than looped so the retry cannot itself
-   * recurse: a refresh that returns another 401 has to surface, not spin.
+   * `allowRetry` is threaded rather than looped so the 401 retry cannot itself
+   * recurse: a refresh that returns another 401 has to surface, not spin. The
+   * rate-limit retries are capped at `MAX_RETRIES`, and each replay charges the
+   * request's quota cost again, because a replayed request is a real request.
    */
   private async request<T>(
     path: string,
@@ -90,17 +251,29 @@ export class GmailClient {
     }
 
     const url = `${GMAIL_API}${path}`;
+    const method = init.method ?? "GET";
     const send = async (bearer: string) => {
-      const response = await this.fetchImpl(url, {
-        method: init.method ?? "GET",
-        headers: {
-          Authorization: `Bearer ${bearer}`,
-          ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      });
-      const text = await response.text();
-      return { response, text };
+      for (let attempt = 0; ; attempt += 1) {
+        await this.bucket.take(costOf(path, method));
+        const response = await this.fetchImpl(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${bearer}`,
+            ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+          },
+          body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        });
+        const text = await response.text();
+        if (!isRateLimited(response.status, text) || attempt >= MAX_RETRIES) {
+          return { response, text };
+        }
+        // Google has just said the budget is spent. Waiting for the bucket to
+        // refill around *this* request would leave the rest of the burst queued
+        // behind it anyway, so drain instead — everything that follows paces
+        // itself, and this request comes back after a live-server backoff.
+        this.bucket.drain();
+        await this.sleep(backoffMs(attempt));
+      }
     };
 
     const { response, text } = await send(token);
