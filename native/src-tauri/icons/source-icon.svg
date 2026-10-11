@@ -1,23 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#28303A"/>
-      <stop offset="1" stop-color="#15181D"/>
-    </linearGradient>
-    <linearGradient id="blade" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#D8E6E4"/>
-    </linearGradient>
-  </defs>
-
-  <rect width="1024" height="1024" rx="228" ry="228" fill="url(#bg)"/>
-
-  <!-- Winnow mark: the two blades, lifted and scaled from references/relay-logo.svg -->
+  <rect width="1024" height="1024" rx="228" ry="228" fill="#FFFFFF"/>
   <g transform="translate(512 512) scale(1.52) translate(-256 -256)">
-    <path fill="url(#blade)" d="m 234.85817,373.19928 79.97127,-157.64452 57.79819,42.0129 11.19359,-8.03777 7.76226,21.63708 46.42011,41.82405 z"/>
-    <path fill="#15181D" opacity="0.55" d="m 267.08615,348.39093 104.87384,-90.31765 11.86123,-8.54339 6.80232,21.933 z"/>
-    <path fill="url(#blade)" d="m 278.52065,145.69479 -81.8097,160.40216 -56.99102,-41.82406 -16.35541,24.54466 -3.40761,-38.79242 -45.960501,-42.28366 z"/>
-    <path fill="#15181D" opacity="0.55" d="m 224.24298,186.86915 -102.90725,61.08776 2.02879,40.86064 16.35541,-24.54466 z"/>
+    <path fill="#111111" d="m 234.85817,373.19928 79.97127,-157.64452 57.79819,42.0129 11.19359,-8.03777 7.76226,21.63708 46.42011,41.82405 z"/>
+    <path fill="#111111" d="m 278.52065,145.69479 -81.8097,160.40216 -56.99102,-41.82406 -16.35541,24.54466 -3.40761,-38.79242 -45.960501,-42.28366 z"/>
   </g>
 </svg>

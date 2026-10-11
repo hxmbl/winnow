@@ -17,18 +17,7 @@ pub const TRAY_ACTION_EVENT: &str = "winnow://tray-action";
 pub const TRAY_ID: &str = "winnow-tray";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let icon = app.default_window_icon().cloned().unwrap_or_else(|| {
-        // A zero-length image is a *blank* tray icon, which on macOS means an
-        // invisible item in the menu bar — the app looks not to be running at all,
-        // with no window open because the window hides to the tray. Worth a loud
-        // warning rather than a silent fallback, since the fallback is what produces
-        // the "Winnow disappeared" report.
-        eprintln!(
-            "winnow: no bundled window icon found; the tray icon will be blank. \
-             Check that icons/icon.png is present in the bundle."
-        );
-        Image::new_owned(Vec::new(), 32, 32)
-    });
+    let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
 
     let sync = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
     let unread = MenuItem::with_id(app, "unread", "Mark all read", true, None::<&str>)?;
@@ -53,6 +42,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
+        .icon_as_template(true)
         .tooltip("Winnow")
         .menu(&menu)
         .show_menu_on_left_click(false)
