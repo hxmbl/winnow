@@ -151,9 +151,19 @@ const GLOBAL_ATTRS = new Set([
   "size", "span", "style", "title", "valign", "width",
 ]);
 
-/** Attributes allowed only on the element they appear on. */
+/**
+ * Attributes allowed only on the element they appear on.
+ *
+ * **`a` has no `name`, which used to be on it.** A named anchor creates a property
+ * on `window`, so `<a name="config">` inside a message rendered into the app's own
+ * document defines `window.config` -- DOM clobbering, where a page's own globals
+ * are shadowed by elements a third party controls. It is a real technique against
+ * applications that read undeclared globals, and nothing is lost by dropping it:
+ * the reader keeps no `id`s (a sender's would collide with the app's), so a
+ * fragment link in a message goes nowhere either way.
+ */
 const TAG_ATTRS: Record<string, Set<string>> = {
-  a: new Set(["href", "name", "rel", "target"]),
+  a: new Set(["href", "rel", "target"]),
   img: new Set(["src", "srcset", "loading", "decoding", "border", "hspace", "vspace"]),
   blockquote: new Set(["cite"]),
   q: new Set(["cite"]),
@@ -372,12 +382,6 @@ function resolveUrl(
  * needs the same judgement as a `src`. Candidates that do not survive are dropped
  * rather than failing the whole attribute, because a responsive `srcset` with one
  * unsupported candidate still has three that work.
- */
-/**
- * `srcset` is a comma-separated list of `url descriptor` pairs, and each candidate
- * needs the same judgement as a `src`. Candidates that do not survive are dropped
- * rather than failing the whole attribute, because a responsive `srcset` with one
- * unsupported candidate still has three that work.
  *
  * `blocked` is true when *any* candidate was refused, so one withheld reference
  * counts as one — which is what `remoteReferences` does with the attribute, and
@@ -435,73 +439,327 @@ function sanitizeBackground(
 // ── CSS ─────────────────────────────────────────────────────────────────────
 
 /**
+ * CSS functions that name something to fetch, or to execute.
+ *
+ * The first three are the ones that matter; the rest are the long tail that a
+ * standards-reading implementation accumulates. A regular expression cannot find
+ * these safely, which is the entire reason the code below is a scanner:
+ *
+ *   - `u\72l(...)` is `url(...)`. A CSS escape is decoded by the parser *before* the
+ *     function name is read, so a pattern looking for the literal text `url` never
+ *     sees it. The tracking pixel loads with images switched off, silently, and the
+ *     note reports nothing blocked.
+ *   - `image-set("..." 1x)` contains no `url(` at all. It is the same request, and
+ *     the first version passed it through and counted zero.
+ *   - `url(".../a b.png")` has a space in it. A pattern that stops at whitespace
+ *     matched the empty prefix instead of the URL, so this one was *counted* as
+ *     blocked and then loaded anyway -- the one failure mode worth never shipping,
+ *     because a privacy note that says the opposite of the truth is worse than no
+ *     note.
+ *
+ * All three were found by review rather than by a fuzzer, and all three were
+ * confirmed against the shipped code before this rewrite.
+ */
+const CSS_FETCH_FUNCTIONS = new Set([
+  "url",
+  "image-set",
+  "-webkit-image-set",
+  "-moz-image-set",
+  "image",
+  "element",
+  "-moz-element",
+  "cross-fade",
+  "paint",
+]);
+
+/**
+ * Decode CSS escapes, so that what is judged is what a parser would read.
+ *
+ * Two forms, per CSS Syntax 4.3.7: a backslash, up to six hex digits and an optional
+ * trailing space, is that code point; a backslash and anything else is that
+ * character, with a newline in the pair counting as nothing at all.
+ *
+ * This runs *before* the fetch check rather than instead of it. Decoding is not a
+ * defence -- `u\72l` decoded is `url`, which then still has to be caught by the
+ * ordinary rule -- it is the step that lets the ordinary rule see the same text the
+ * browser will. Text with no backslash in it comes back unchanged, so the cost on
+ * ordinary mail is one pass over a string that does not match.
+ */
+function decodeCssEscapes(css: string): string {
+  return css.replace(/\\(?:([0-9a-fA-F]{1,6})[ \n\t\f]?|([\s\S]))/g, (whole, hex: string | undefined, literal: string | undefined) => {
+    if (hex !== undefined) {
+      const code = Number.parseInt(hex, 16);
+      // Out of range: left exactly as written rather than becoming a replacement
+      // character, so a value cannot turn into something the sender did not write.
+      if (!Number.isFinite(code) || code === 0 || code > 0x10ffff) return whole;
+      return String.fromCodePoint(code);
+    }
+    // A backslash-newline is a line continuation and produces nothing.
+    if (literal === "\n" || literal === "\r" || literal === "\f") return "";
+    return literal ?? whole;
+  });
+}
+
+/**
+ * Walk CSS and report every fetch call, with the span it occupies.
+ *
+ * A scanner rather than a pattern, for the reasons on [`CSS_FETCH_FUNCTIONS`]. The
+ * span is the whole call -- name through closing parenthesis -- so a caller can
+ * replace it wholesale instead of trying to edit inside a pair of brackets it has
+ * not matched. Parentheses are counted rather than found by a pattern, because a
+ * `)` inside a quoted argument closes nothing, and quotes are skipped so that
+ * `url("...")` does not end at the first closing bracket in the string.
+ */
+function eachFetchCall(
+  css: string,
+  visit: (name: string, inner: string, start: number, end: number) => void,
+): void {
+  // Runs on text `decodeCssEscapes` has already normalised, so a plain identifier
+  // match finds `url` where the source said `u\72l`.
+  const CALL = /(^|[^\w-])([a-zA-Z-][a-zA-Z0-9-]*)\s*\(/g;
+
+  for (let match = CALL.exec(css); match !== null; match = CALL.exec(css)) {
+    const name = match[2].toLowerCase();
+    if (!CSS_FETCH_FUNCTIONS.has(name)) continue;
+
+    // Group 1 is one separator character or nothing, so the name begins right
+    // after it. Taking the parenthesis instead -- which is the obvious thing to do,
+    // and what the first version did -- rewrites `(args)` and leaves the name
+    // behind: `url(...)` became `urlnone`.
+    const nameStart = match.index + match[1].length;
+    const open = match.index + match[0].length - 1;
+    let depth = 1;
+    let i = open + 1;
+    let quote: string | null = null;
+
+    while (i < css.length && depth > 0) {
+      const char = css[i];
+      if (quote !== null) {
+        if (char === "\\") i += 1;
+        else if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === "(") {
+        depth += 1;
+      } else if (char === ")") {
+        depth -= 1;
+      }
+      i += 1;
+    }
+
+    if (depth !== 0) {
+      // Unterminated, so there is no closing bracket for a parser to find either and
+      // the rest of the declaration is inert. Cut from here to the end.
+      visit(name, css.slice(open + 1), nameStart, css.length);
+      return;
+    }
+    visit(name, css.slice(open + 1, i - 1), nameStart, i);
+    CALL.lastIndex = i;
+  }
+}
+
+/** The address inside a fetch call, with its quotes and surrounding space removed. */
+function cssCallTarget(inner: string): string {
+  return inner.trim().replace(/^['"]/, "").replace(/['"]$/, "").trim();
+}
+
+/**
+ * The functions whose argument is a *list* of candidates rather than one address.
+ *
+ * `image-set("a.png" 1x, "b.png" 2x)` takes several, comma-separated. `url()` takes
+ * exactly one, and the first version split on commas for both -- which turned
+ * `url(data:image/png;base64,iVBOR)` into two candidates, decided the second half
+ * was remote because it did not start with `data:`, and replaced a perfectly
+ * inert inline image with `none`.
+ */
+const CSS_LIST_FUNCTIONS = new Set(["image-set", "-webkit-image-set", "-moz-image-set"]);
+
+/**
+ * Whether a fetch call's argument names something remote.
+ *
+ * A fragment names something in this document and a `data:` URI is bytes already
+ * inside the message; neither involves anybody else, and both are kept.
+ */
+function cssTargetIsRemote(name: string, inner: string): boolean {
+  const trimmed = inner.trim();
+
+  // A single quoted string is one address whatever else it contains, so it is not
+  // split even by a list-taking function: `url("a,b.png")` is a file called
+  // `a,b.png`.
+  const candidates =
+    /^['"]/.test(trimmed) || !CSS_LIST_FUNCTIONS.has(name)
+      ? [trimmed]
+      : trimmed.split(",");
+
+  return candidates.some((part) => {
+    const candidate = stripUrlNoise(decodeEntities(cssCallTarget(part)));
+    if (candidate === "") return false;
+    if (candidate.startsWith("#")) return false;
+    return !/^data:/i.test(candidate);
+  });
+}
+
+/**
+ * Whether a raw declaration names something remote, in any spelling.
+ *
+ * Asked of the *original* text and answered after escape decoding, so that
+ * `u\72l(...)` and `image-set("...")` count as well as `url(...)` does. Used only
+ * for the number in the reader's note, never to decide what gets emitted -- that is
+ * the walk's job.
+ */
+function cssNamesRemote(raw: string): boolean {
+  let found = false;
+  eachFetchCall(decodeCssEscapes(raw), (name, inner) => {
+    if (cssTargetIsRemote(name, inner)) found = true;
+  });
+  return found;
+}
+
+/**
+ * Declarations a sender is not allowed to set, whatever the browser accepts.
+ *
+ * `position: fixed` and `position: sticky` are the two that matter, and they are
+ * the only ways for an element to leave the flow and attach to the viewport. A
+ * message rendered into the app's own document could otherwise put a full-screen
+ * `position: fixed; inset: 0` panel over the whole client -- a fake "your session
+ * expired, sign in" screen, drawn by a stranger, on top of the real one.
+ *
+ * Mail does not use either. Not one message in any real corpus does, and a layout
+ * that genuinely needs one was going to be wrong in a 400px pane anyway.
+ */
+const FORBIDDEN_DECLARATIONS: readonly RegExp[] = [
+  /\bposition\s*:\s*(?:fixed|sticky)\b/gi,
+  // A z-index only means something relative to a stacking context, and the message
+  // container establishes its own, but there is no reason to let a sender set one.
+  /\bz-index\s*:/gi,
+  // `@font-face` pulls a font file from a URL that need not be written as a `url()`.
+  /@font-face/gi,
+];
+
+/** Neutralise the forbidden declarations in a cleaned style attribute. */
+function stripForbiddenDeclarations(style: string): string {
+  return FORBIDDEN_DECLARATIONS.reduce(
+    (out, pattern) => out.replace(pattern, "-winnow-blocked:"),
+    style,
+  );
+}
+
+/**
  * Strip the ways CSS can fetch or execute something, substituting as it goes.
  *
- * Four things are removed, and all four are real in mail: `@import` pulls in a
- * second stylesheet (so blocking the first one blocks nothing), `url()` in a
- * `background` is a request, `expression()` is script in old Internet Explorer, and
- * `behavior:` / `-moz-binding:` are the same idea in different browsers. What is
- * left is inert by construction — colours, fonts, spacing, and layout.
- *
- * **`rewrite` is the render proxy's hook, and it is here rather than in a second
+ * **`rewrite` is the render proxy's hook, and it lives here rather than in a second
  * pass over the finished document for a specific reason.** The proxy's whole claim
  * is that the reader's browser never touches the sender's servers. A rewrite applied
  * afterwards still leaves a document that *contained* a remote `url()` for a moment,
- * and a second pass has to remember to cover every place one can appear — the same
+ * and a second pass has to remember to cover every place one can appear -- the same
  * reason the counter in `html.ts` reads `<style>` blocks as well as attributes.
  * Substituting during the walk means a proxied document never holds a remote address
  * at all.
+ *
+ * Returns the CSS and the number of references it withheld, together, because the
+ * count is the useful half and a caller left to derive it afterwards gets it wrong.
+ * That is exactly the bug the first version of this function had: it rewrote a
+ * withheld `url()` to `none` and then reported zero for a document that was still
+ * fetching, which is the one direction of error that makes somebody stop checking.
  */
-export function sanitizeCss(css: string, rewrite?: ReadonlyMap<string, string>): string {
-  return css
-    // Comments first: `expr/**/ession(` is a thing, and stripping rules before
-    // comments can hide a keyword from the patterns below.
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/@import[^;]*;?/gi, "")
+export function sanitizeCssWithCount(
+  css: string,
+  rewrite?: ReadonlyMap<string, string>,
+): { css: string; blocked: number } {
+  let blocked = 0;
+
+  // Comments first: `expr/**/ession(` is a thing, and stripping rules before
+  // comments can hide a keyword from the patterns below.
+  let out = decodeCssEscapes(css.replace(/\/\*[\s\S]*?\*\//g, ""));
+
+  // At-rules that fetch, or that re-declare how the parser reads everything else.
+  out = out
+    .replace(/@import[^;{}]*;?/gi, "")
     .replace(/@charset[^;]*;?/gi, "")
     .replace(/@namespace[^;]*;?/gi, "")
-    .replace(/url\(\s*['"]?\s*(?!data:)[^)'"\s]*\s*['"]?\s*\)/gi, (match) => {
-      const target = /url\(\s*['"]?(.*?)['"]?\s*\)/i.exec(match)?.[1] ?? "";
-      const mapped = rewrite?.get(target.trim());
-      if (mapped !== undefined) return `url('${mapped}')`;
-      // `url(#gradient)` names something in this document, not a request.
-      if (target.startsWith("#")) return match;
-      return "none";
-    })
+    // `@font-face` whose `src:` is a bare string rather than a `url()` is a fetch
+    // the walk below cannot see. Removing the block is simpler than finding the
+    // one spelling that would get past, and a message that ships no font is a
+    // message that renders in the reader's own.
+    .replace(/@font-face\s*\{[^}]*\}/gi, "");
+
+  /*
+   * The fetch calls, collected first and rewritten back to front, so that replacing
+   * one does not move the offsets of the ones still to be done.
+   */
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  eachFetchCall(out, (name, inner, from, to) => {
+    if (!cssTargetIsRemote(name, inner)) return;
+    blocked += 1;
+    const mapped = rewrite?.get(cssCallTarget(inner));
+    edits.push({ start: from, end: to, text: mapped ? `${name}('${mapped}')` : "none" });
+  });
+  for (const edit of edits.reverse()) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  }
+
+  /*
+   * The remaining ways to execute: script in an old engine, and the two bindings
+   * that were the same idea in different browsers.
+   */
+  out = out
     .replace(/expression\s*\(/gi, "noop(")
     .replace(/behaviou?r\s*:/gi, "-winnow-behavior:")
     .replace(/-moz-binding\s*:/gi, "-winnow-binding:")
-    .replace(/javascript\s*:/gi, "-winnow-js:");
-  }
+    .replace(/javascript\s*:/gi, "-winnow-js:")
+    /*
+     * And the belt to the braces above: a declaration still carrying a quoted
+     * string that names a scheme, or a protocol-relative path, is a fetch however
+     * it is spelled. Run on the *output* of the function walk, so a spelling the
+     * walk did not recognise still lands here.
+     */
+    .split(";")
+    .filter((declaration) => !/['"][^'"]*(?::\/\/|\/\/)[^'"]*['"]/.test(declaration))
+    .join(";");
+
+  return { css: out, blocked };
+}
+
+/** The CSS, without the count. See [`sanitizeCssWithCount`]. */
+export function sanitizeCss(css: string, rewrite?: ReadonlyMap<string, string>): string {
+  return sanitizeCssWithCount(css, rewrite).css;
+}
 
 /**
  * A `style` attribute, sanitised, or dropped.
  *
  * An attribute rather than a block, so there is no selector to reason about and
  * therefore no way for a sender's CSS to reach anything outside the element it is
- * written on. That is a real fidelity cost — email CSS lives almost entirely in
- * `<style>` blocks — and it is the cost that keeps `style` out of the app's
+ * written on. That is a real fidelity cost -- email CSS lives almost entirely in
+ * `<style>` blocks -- and it is the cost that keeps a stylesheet out of the app's
  * document. See [`collectStyles`].
+ *
+ * On top of that, every declaration a sender may not set is neutralised, so that a
+ * `position: fixed` panel cannot leave the message's container. See
+ * [`FORBIDDEN_DECLARATIONS`].
  */
 function sanitizeStyleAttribute(
   raw: string,
   allowRemote: boolean,
   rewrite: ReadonlyMap<string, string> | undefined,
-): { value: string | null; blocked: boolean } {
-  const cleaned = sanitizeCss(decodeEntities(raw), rewrite).trim();
-  if (cleaned === "") return { value: null, blocked: false };
+): { value: string | null; blocked: number } {
+  const cleaned = stripForbiddenDeclarations(
+    sanitizeCssWithCount(decodeEntities(raw), rewrite).css,
+  ).trim();
+  if (cleaned === "") return { value: null, blocked: 0 };
 
-  // Counted against the *original*, not the cleaned text. `sanitizeCss` rewrites a
-  // withheld `url()` to `none`, so asking the cleaned text would report every
-  // remote background as zero and the reader's note would be a lie in the
-  // direction that matters — the one where somebody reads "nothing was blocked"
-  // and stops checking.
-  const namedRemote = /url\(\s*['"]?(?!data:|#)/i.test(stripUrlNoise(decodeEntities(raw)));
-  // Only `allowRemote: false` withholds, so only that can block. When the caller
-  // allowed remote content it is either keeping the reference or substituting it
-  // through `rewrite`, and both of those are the caller's decision rather than a
-  // refusal this function made.
-  return { value: cleaned, blocked: namedRemote && !allowRemote };
+  /*
+   * Withheld or not is decided by `allowRemote`, never by the walk's own count.
+   *
+   * When the caller allowed remote content it is either keeping the reference or
+   * substituting it through `rewrite`, and both of those are the caller's decision
+   * rather than a refusal this function made, so nothing there is "blocked". When it
+   * did not, a named remote is blocked whether or not the walk recognised the
+   * spelling -- which is why the *original* is asked rather than the output, and why
+   * the question goes through `cssNamesRemote` rather than a pattern.
+   */
+  const namedRemote = cssNamesRemote(decodeEntities(raw));
+  return { value: cleaned, blocked: namedRemote && !allowRemote ? 1 : 0 };
 }
 
 /**
@@ -550,9 +808,30 @@ function escapeAttribute(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/** Escape text for the body of the document. */
+/**
+ * Escape text for the body of the document.
+ *
+ * **Decoding first is not optional.** The input is a raw slice of a message body, so
+ * an `&amp;` in it is an ampersand the sender wrote, not the four characters
+ * `&amp;` that the reader should see. Escaping without decoding turns
+ * `Tom &amp; Jerry` into `Tom &amp;amp; Jerry`, which renders as `Tom &amp; Jerry` --
+ * and essentially every newsletter contains one of these, so a sentence with two
+ * ampersands in it loses both.
+ *
+ * The order is decode-then-escape and it does not work the other way round, which
+ * is why this is one function rather than a decode at the call site: the two steps
+ * have to happen together and in that order everywhere, and a call site that
+ * remembered to escape but not to decode reads identically in review.
+ *
+ * `decodeEntities` leaves anything it does not recognise alone, so a bare `&` in
+ * "AT&T" survives the decode and is escaped on the way out, which is what a browser
+ * does with it.
+ */
 function escapeText(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return decodeEntities(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /**
@@ -648,16 +927,22 @@ function readAttributes(html: string, from: number): { attributes: Attribute[]; 
  * closes at the *outer* `</div>`, which is what makes `<form>`-shaped and
  * `<blockquote>`-shaped markup terminate where the sender meant.
  *
- * Returns the index just past the closing tag, or `-1` when the element is never
- * closed — and `-1` means "to the end of the document", which is the correct
- * reading for an unterminated `<script>`.
+ * Returns the index just past the closing tag, or the document's length when the
+ * element is never closed — which is the correct reading for an unterminated
+ * `<script>`.
+ *
+ * **`lower` is the document, lowercased once, rather than something derived here.**
+ * It used to call `html.toLowerCase()` on every invocation, and this function runs
+ * once per dropped element, so a body full of `<button>`s allocated and lowercased
+ * the whole document once each: quadratic in the size of the message, on the path
+ * every message takes. The copy is made once in `sanitizeMailHtml` and threaded
+ * through, which also means the two indices here are guaranteed to line up.
  */
-function findElementEnd(html: string, from: number, name: string): number {
+function findElementEnd(html: string, lower: string, from: number, name: string): number {
   if (RAW_TEXT_TAGS.has(name)) {
     // No markup is parsed inside these, so the first `</name` is the end. This is
     // the whole reason raw-text elements are listed separately: hunting for a
     // balanced `</script>` in script source finds the wrong one.
-    const lower = html.toLowerCase();
     const needle = `</${name}`;
     const at = lower.indexOf(needle, from);
     if (at === -1) return html.length;
@@ -666,7 +951,6 @@ function findElementEnd(html: string, from: number, name: string): number {
   }
 
   const open = new RegExp(`<${name}\\b`, "gi");
-  const lower = html.toLowerCase();
   let depth = 1;
   let cursor = from;
   while (cursor < html.length) {
@@ -776,6 +1060,16 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
   const settings = { ...DEFAULTS, ...options };
   const { allowRemote, inlineParts, rewriteUrls } = settings;
 
+  /*
+   * One lowercased copy of the body, for the element-boundary search.
+   *
+   * Matching a tag name has to be case-insensitive, and doing that per dropped
+   * element re-lowercased the whole document once each. A newsletter full of
+   * buttons or form controls is therefore quadratic in its own size, on the path
+   * every message takes, and the cost is paid before anything is rendered.
+   */
+  const lower = html.toLowerCase();
+
   const out: string[] = [];
   const stylesheets: string[] = [];
   const open: string[] = [];
@@ -883,9 +1177,12 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
     i = parsed.end;
 
     if (name === STYLE_ELEMENT) {
-      const end = findElementEnd(html, i, name);
-      const css = sanitizeCss(html.slice(i, end).replace(/<\/style[^>]*>$/i, ""), rewriteUrls);
-      if (css.trim() !== "") stylesheets.push(css);
+      const end = findElementEnd(html, lower, i, name);
+      const sheet = sanitizeCssWithCount(
+        html.slice(i, end).replace(/<\/style[^>]*>$/i, ""),
+        rewriteUrls,
+      );
+      if (sheet.css.trim() !== "") stylesheets.push(sheet.css);
       i = end;
       continue;
     }
@@ -895,7 +1192,7 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
       // A void element has no end tag to find, so the search would run to the end of
       // the document and swallow the message with it. Skipping the tag is the whole
       // correction; see `VOID_ELEMENTS`.
-      if (!VOID_ELEMENTS.has(name)) i = findElementEnd(html, i, name);
+      if (!VOID_ELEMENTS.has(name)) i = findElementEnd(html, lower, i, name);
       continue;
     }
 
@@ -1089,7 +1386,28 @@ const EMAIL_BASELINE_RULES: readonly Rule[] = [
      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
      font-size: 15px; line-height: 1.55;
      color: #15181D; background: #FFFFFF;
-     overflow-wrap: break-word; -webkit-text-size-adjust: 100%;`,
+     overflow-wrap: break-word; -webkit-text-size-adjust: 100%;
+     /*
+       * The boundary that keeps a message inside its own box.
+       *
+       * \`contain: layout\` makes this element the containing block for its absolutely
+       * and fixed positioned descendants, so a \`position: fixed; inset: 0\` panel in
+       * a message covers the message rather than the viewport. \`contain: paint\`
+       * then clips anything that still manages to paint outside the padding box.
+       * \`isolation: isolate\` gives the message its own stacking context, so a
+       * sender's z-index cannot lift anything above the reader's chrome.
+       *
+       * This is not belt-and-braces for its own sake. The sanitiser strips
+       * \`position: fixed\` and \`z-index\` from style attributes, but \`class\` is still
+       * allowed — "as sent" needs it, because that document keeps the sender's own
+       * stylesheet — and \`class="fixed inset-0 z-50"\` picks up Tailwind utilities
+       * out of the app's own stylesheet. \`overflow-x: auto\` does not help: it does
+       * not clip fixed-position descendants. Containment is the property that
+       * actually bounds them, so it is here rather than relying on the allowlist
+       * having no gap.
+       */
+     contain: layout paint;
+     isolation: isolate;`,
   ],
   [
     "img",

@@ -29,6 +29,18 @@ const ANY_TAG = /<[^>]+>/g;
 /** Three or more consecutive newlines, collapsed to a paragraph break. */
 const EXTRA_BLANK_LINES = /\n{3,}/g;
 
+/*
+ * `nbsp` decodes to a real non-breaking space rather than to an ordinary one.
+ *
+ * It used to be `" "`, which is lossy in a way that was invisible until the
+ * sanitiser started decoding text before escaping it: `Tom&nbsp;Jerry` is a name
+ * with no space in it, and decoding it to a space silently inserted one — and once
+ * inserted, nothing downstream can tell it apart from a space the sender typed.
+ *
+ * Nothing depended on the old mapping. Word splitting splits on `\s`, which
+ * matches U+00A0, so search and classification see the same tokens either way; and
+ * the character renders as a space, so a plain-text body is unchanged on screen.
+ */
 const NAMED_ENTITIES: Record<string, string> = {
   amp: "&",
   lt: "<",
@@ -36,7 +48,7 @@ const NAMED_ENTITIES: Record<string, string> = {
   quot: '"',
   "#39": "'",
   apos: "'",
-  nbsp: " ",
+  nbsp: "\u00a0",
   mdash: "—",
   ndash: "–",
   hellip: "…",

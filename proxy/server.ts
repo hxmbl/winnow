@@ -36,16 +36,10 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
-import { lookup as dnsLookup } from "node:dns/promises";
 import { emailDocument, sanitizeMailHtml } from "../web/src/core/mail/sanitize.ts";
-import {
-  ASSET_TIMEOUT_MS,
-  isAssetContentType,
-  isPublicAddress,
-  MAX_ASSETS_PER_DOCUMENT,
-  MAX_ASSET_BYTES,
-} from "./addressPolicy.ts";
+import { MAX_ASSETS_PER_DOCUMENT } from "./addressPolicy.ts";
 import { planAssets } from "./assets.ts";
+import { fetchAsset } from "./transport.ts";
 
 const PORT = Number.parseInt(process.env.PORT ?? "8787", 10);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -77,94 +71,6 @@ function remember(id: string, asset: CachedAsset): void {
     if (cache.size <= MAX_CACHED_ASSETS) break;
     cache.delete(key);
   }
-}
-
-/**
- * Fetch one asset, if the policy allows it.
- *
- * **The address is judged after resolution, and every address the name came back
- * with is judged.** That is the entire request-forgery defence and there is no
- * second one: a hostname is attacker-controlled data, so checking the text of a URL
- * proves only that the text is innocent. A name that resolves to `127.0.0.1` or to
- * `169.254.169.254` is refused here, which is why this resolves the name itself
- * rather than handing it to `fetch` and trusting the socket to pick.
- *
- * Redirects are followed by hand and re-judged at each hop, because a redirect is
- * just another URL chosen by the party that chose the first one.
- */
-async function fetchAsset(url: string): Promise<{ contentType: string; bytes: Buffer } | null> {
-  let current = url;
-
-  for (let hop = 0; hop < 4; hop += 1) {
-    let parsed: URL;
-    try {
-      parsed = new URL(current);
-    } catch {
-      return null;
-    }
-
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    if (parsed.username !== "" || parsed.password !== "") return null;
-
-    let addresses: Array<{ address: string }>;
-    try {
-      addresses = await dnsLookup(parsed.hostname, { all: true });
-    } catch {
-      return null;
-    }
-    // Every address, not the first. A name with one public and one loopback answer
-    // resolves to whichever the stack prefers, so judging only the first is judging
-    // the one it happened to pick rather than the one it may reach.
-    if (addresses.length === 0) return null;
-    if (addresses.some((entry) => !isPublicAddress(entry.address))) return null;
-
-    let response: Response;
-    try {
-      response = await fetch(current, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(ASSET_TIMEOUT_MS),
-        headers: {
-          // No cookies and no credentials. Some of this is a lie — the sender still
-          // sees the proxy's address and this header cannot undo that — but the
-          // alternative is a proxy that hands out whatever ambient authority the
-          // fetch happens to have, and there is no reason to give it any.
-          Accept: "image/*",
-          "User-Agent": "Winnow/1.0 (render proxy)",
-        },
-      });
-    } catch {
-      return null;
-    }
-
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location) return null;
-      try {
-        current = new URL(location, current).toString();
-      } catch {
-        return null;
-      }
-      continue;
-    }
-
-    if (!response.ok) return null;
-
-    const contentType = response.headers.get("content-type") ?? "";
-    // From the header, before the body is read. An HTML page served with
-    // `image/png` would otherwise be read into the cache and then re-served with
-    // the sender's own content type.
-    if (!isAssetContentType(contentType)) return null;
-
-    const declared = Number.parseInt(response.headers.get("content-length") ?? "", 10);
-    if (Number.isFinite(declared) && declared > MAX_ASSET_BYTES) return null;
-
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.byteLength > MAX_ASSET_BYTES) return null;
-
-    return { contentType, bytes };
-  }
-
-  return null;
 }
 
 /** Headers every response carries, whatever it is. */

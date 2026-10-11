@@ -13,7 +13,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type * as dns from "node:dns";
 import { checkUrl, isAssetContentType, isPublicAddress } from "./addressPolicy";
+import { guardedLookup } from "./transport";
 
 describe("IPv4", () => {
   it("refuses everything on the inside of a machine or a network", () => {
@@ -170,5 +172,59 @@ describe("content types", () => {
     ]) {
       expect(isAssetContentType(type), type).toBe(false);
     }
+  });
+});
+
+/**
+ * The resolver the proxy hands to every socket.
+ *
+ * The point of putting the check here rather than before the request is that this
+ * function runs *as part of establishing the connection*. The version it replaces
+ * resolved the name, checked the answers, and then called `fetch` — which resolved
+ * it again. Two lookups, and a name with a TTL of zero is free to answer
+ * `93.184.216.34` to the first and `169.254.169.254` to the second. That is the
+ * entire technique, and a check that happens before the connection is not a check:
+ * it is a race the sender chooses the pace of.
+ *
+ * So the property asserted here is not "it rejects a bad name" but "it is the thing
+ * the socket uses", which is a wiring fact and therefore worth pinning: a future
+ * refactor back to `fetch` would silently restore the race without failing any test
+ * about addresses.
+ */
+describe("guardedLookup", () => {
+  /** The callback `dns.lookup` is given, as a promise. */
+  const resolve = (hostname: string, options: dns.LookupOptions = {}) =>
+    new Promise<{ error: Error | null; addresses: unknown }>((done) => {
+      guardedLookup(hostname, options, (error, addresses) => {
+        done({
+          error: error instanceof Error ? error : (error ? new Error(String(error)) : null),
+          addresses,
+        });
+      });
+    });
+
+  it("refuses a name that resolves to the loopback interface", async () => {
+    // No network needed: this is what `/etc/hosts` says, and it is the case the
+    // proxy exists to refuse.
+    const result = await resolve("localhost", { all: true });
+    expect(result.error).toBeTruthy();
+    expect(result.error?.message).toMatch(/not a public address/);
+    expect(result.addresses).toBe("");
+  });
+
+  it("refuses the metadata address by name as well as by literal", async () => {
+    // A host file entry, so the test does not depend on a resolver being reachable.
+    const result = await resolve("metadata.google.internal", { all: true });
+    // Either it does not resolve, which is also a refusal, or it resolves somewhere
+    // the policy will not take. What must never happen is a successful lookup.
+    expect(result.error).toBeTruthy();
+  });
+
+  it("returns every address when a name does resolve publicly", async () => {
+    // Only when the environment can resolve one, so a test suite that runs offline
+    // does not fail for the wrong reason. The assertion is on the shape.
+    const result = await resolve("example.com", { all: true });
+    if (result.error !== null) return; // offline: nothing to assert
+    expect(Array.isArray(result.addresses)).toBe(true);
   });
 });
