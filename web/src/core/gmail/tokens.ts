@@ -357,30 +357,84 @@ export class TokenManager {
 /**
  * Turn a rejected token request into something a user can be told.
  *
- * Shared by the code exchange and the refresh, because Google answers the same
- * way for both and the wording should not drift between them.
+ * Used by the code exchange; the refresh path keeps its own, stricter,
+ * handling because there the same replies mean "the grant is gone" and must
+ * clear the session.
  *
- * The three cases are separated because the remedy differs in each, and getting
- * that wrong sends people to the wrong place:
+ * The messages are deliberately *verbose*: the whole reason to show them is
+ * that "could not be verified" gave a developer no route out. Google's own
+ * `error` and `error_description` are echoed (truncated), because they are the
+ * only words that distinguish a spent code from a mismatched redirect URI —
+ * and the sign-in screen shows the message so the person debugging sees the
+ * why, not just the verdict.
+ *
+ * The cases are separated because the remedy differs, and getting that wrong
+ * sends people to the wrong place:
  *
  *   - `invalid_client` is the *build* being wrong — a missing secret, or the
  *     wrong client type. Retrying cannot help.
  *   - `invalid_grant` is this *attempt* being wrong — a spent code, a replayed
  *     verifier, a code issued for a different redirect URI. Start over.
+ *   - `redirect_uri_mismatch` is exactly what it sounds like — the exchange
+ *     named a different URI than the authorize request did.
  *   - anything else is passed through, truncated, because inventing a friendly
  *     message for an error we do not recognise is how a real bug gets reported
  *     as "something went wrong".
  */
 function describeTokenRejection(status: number, text: string): [string, AuthErrorKind] {
-  if (text.includes("invalid_client") || text.includes("unauthorized_client")) {
-    return ["Google rejected this build's client credentials.", "invalid_client"];
+  const rejection = readGoogleRejection(text);
+  const code = rejection?.error ?? "";
+  // Google's own words — `error: error_description` — put inside the sentence,
+  // because those are the only ones that tell a spent code from a mismatched
+  // redirect URI. Dropped when the body is not JSON, where `includes` above
+  // still catches the name.
+  const quote = rejection
+    ? `${rejection.error}${rejection.description ? `: ${rejection.description}` : ""}`
+    : "";
+
+  if (code === "invalid_client" || code === "unauthorized_client" || text.includes("invalid_client") || text.includes("unauthorized_client")) {
+    return [
+      `Google rejected this build's client credentials${quote ? ` (${quote})` : ""}.`,
+      "invalid_client",
+    ];
   }
-  if (text.includes("invalid_grant") || text.includes("invalid_request")) {
-    // Deliberately vague: "invalid_grant" covers a replayed code as well as a
-    // misused one, and saying which would tell an attacker what to fix.
-    return ["Sign-in could not be verified. Please try again.", "state_mismatch"];
+  if (code === "redirect_uri_mismatch" || text.includes("redirect_uri_mismatch")) {
+    return [
+      `Google rejected the token exchange because the redirect URI differed from the one used to sign in${quote ? ` (${quote})` : ""}. The authorize and token requests must name exactly the same URI — a redirect URI written differently in the two places, or the desktop's port placeholder reaching the exchange instead of the real port, reads as a mismatch here.`,
+      "state_mismatch",
+    ];
+  }
+  if (code === "invalid_grant" || code === "invalid_request" || text.includes("invalid_grant") || text.includes("invalid_request")) {
+    return [
+      `Google rejected this sign-in's authorization code${quote ? ` (${quote})` : ""}. A code is single-use and tied to the verifier and redirect URI of the attempt that issued it, so starting the sign-in again is the usual fix.`,
+      "state_mismatch",
+    ];
   }
   return [`Google returned ${status}: ${text.slice(0, 200)}`, "unknown"];
+}
+
+/**
+ * Pull the `error` and `error_description` out of a Google token rejection.
+ *
+ * Google answers the token endpoint in JSON (`{"error": "...", ...}`). The
+ * description is truncated because the screen has no room for a long one, and
+ * it is only ever echoed *inside* a sentence, not trusted as a verdict.
+ */
+function readGoogleRejection(text: string): { error: string; description?: string } | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return null;
+    const error = (parsed as { error?: unknown }).error;
+    if (typeof error !== "string") return null;
+    const description = (parsed as { error_description?: unknown }).error_description;
+    return {
+      error,
+      description: typeof description === "string" ? description.slice(0, 200) : undefined,
+    };
+  } catch {
+    // Not JSON — the body still gets matched by name in `includes` above.
+    return null;
+  }
 }
 
 /**

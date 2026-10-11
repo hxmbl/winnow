@@ -307,16 +307,18 @@ describe("beginSignIn()", () => {
     expect(argsFor("oauth_await")).toEqual({ port: 4242, timeoutMs: 300_000 });
   });
 
-  it("hands the code back exactly as Rust shaped it", async () => {
-    // No mapping, no validation, no invention. A `code` outcome is what the
-    // session exchanges, and a field it rewrites is a field the exchange is
-    // missing.
+  it("hands the code back exactly as Rust shaped it, plus the redirect URI it opened", async () => {
+    // No mapping, no validation of the code. One field is recovered: the
+    // `redirect_uri` the substituted authorize URL actually carried. The session
+    // must name that exact URI at the token exchange — it is the only one that
+    // matches what Google saw — and it is not the placeholder the session built.
     const { desktopPlatform } = await loadDesktop();
     begun(4242, { kind: "code", code: "4/abc", state: "abc" });
     expect(await desktopPlatform.beginSignIn(REQUEST)).toEqual({
       kind: "code",
       code: "4/abc",
       state: "abc",
+      redirectUri: "http://127.0.0.1:4242/",
     });
   });
 
@@ -492,7 +494,12 @@ describe("beginSignIn()", () => {
     expect(argsFor("oauth_cancel")).toEqual({ port: 4242 });
 
     finish({ kind: "code", code: "c", state: "abc" });
-    expect(await pending).toEqual({ kind: "code", code: "c", state: "abc" });
+    expect(await pending).toEqual({
+      kind: "code",
+      code: "c",
+      state: "abc",
+      redirectUri: "http://127.0.0.1:4242/",
+    });
   });
 
   it("does nothing at all when no sign-in is in flight", async () => {

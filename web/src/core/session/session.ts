@@ -79,6 +79,11 @@ export const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
 /** How long a pending cache write waits for more writes to join it. */
 const FLUSH_DEBOUNCE_MS = 250;
 
+/** Wrap a value so it reads in a message — quoted, and visible when empty. */
+function quote(value: string): string {
+  return JSON.stringify(value);
+}
+
 /**
  * A cache backed by `localStorage` (web) or `storage` (desktop).
  *
@@ -384,7 +389,7 @@ export class GmailSession {
       // nothing was listening. The half-finished verifier is dropped either way,
       // because it cannot be completed without a code that will never arrive.
       forgetPendingAuth(pkce.state);
-      throw new GmailError(`Could not listen for the sign-in redirect: ${outcome.detail}`, 0, "network");
+      throw new GmailError(`The sign-in could not be started: ${outcome.detail}`, 0, "network");
     }
 
     if (outcome.kind === "error") {
@@ -394,9 +399,14 @@ export class GmailSession {
 
     if (!stateMatches(pkce.state, outcome.state)) {
       // A redirect we did not issue. Refusing here — before the exchange — is
-      // the entire point of the `state` parameter.
+      // the entire point of the `state` parameter. The two values go into the
+      // message so a failing attempt says which half was wrong.
       forgetPendingAuth(pkce.state);
-      throw new GmailError("Sign-in could not be verified. Please try again.", 0, "state_mismatch");
+      throw new GmailError(
+        `The redirect came back with state ${quote(outcome.state)}, which does not match the state this attempt issued (${quote(pkce.state)}).`,
+        0,
+        "state_mismatch",
+      );
     }
 
     // Clear the stash whether or not the exchange works. Leaving a spent
@@ -409,7 +419,11 @@ export class GmailSession {
       // a navigation, and only the stash survived. On the desktop both agree,
       // and either source works.
       verifier: pending?.verifier ?? pkce.verifier,
-      redirectUri,
+      // The URI the authorize request actually carried, when the platform says
+      // so. On the desktop that is the port-substituted URI Rust handed to the
+      // browser, and Google rejects an exchange that names the placeholder
+      // instead — see `LOOPBACK_REDIRECT_URI` and `desktop.ts`'s `redirectUriIn`.
+      redirectUri: outcome.redirectUri ?? redirectUri,
     });
 
     const profile = await this.client.profile();
@@ -499,7 +513,9 @@ export class GmailSession {
     // point where the exchange happens.
     if (!redirect.state) {
       // No state to check against means no way to prove this redirect is ours.
-      throw new GoogleAuthStateMissing();
+      throw new GoogleAuthStateMissing(
+        "the redirect carried no state parameter, so it cannot be tied to a sign-in this window started.",
+      );
     }
 
     const pending = takePendingAuth(redirect.state);
@@ -507,8 +523,15 @@ export class GmailSession {
       // The state is well-formed but this tab has no verifier for it: either the
       // sign-in was started somewhere else, it expired, or storage was blocked.
       // Refusing is the safe answer — exchanging an unverified code is exactly
-      // the attack the state parameter exists to stop.
-      throw new GoogleAuthStateMissing();
+      // the attack the state parameter exists to stop. The message carries the
+      // likeliest causes, because this is the single most confusing failure in
+      // the flow — a dev builds the site, opens it at localhost, and Google
+      // redirects to 127.0.0.1: a different origin, with no sessionStorage.
+      const here = globalThis.location?.origin ?? "this origin";
+      throw new GoogleAuthStateMissing(
+        `no sign-in in progress issued state ${quote(redirect.state)} on ${here}. ` +
+          "A verifier lives in this tab's own sessionStorage, for one tab and one origin — so this usually means the sign-in was started in another window or tab, the storage was cleared while you were at Google, or the redirect came back on a different origin (http://localhost vs http://127.0.0.1 is the classic case).",
+      );
     }
 
     await this.tokens.exchangeCode({

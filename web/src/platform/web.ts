@@ -16,10 +16,14 @@
  *     toggle could not do anything either. There is a real timer here now, and it
  *     lives here because visibility is a platform question.
  *   - `beginSignIn` returned `{ kind: "cancelled" }` immediately after calling
- *     `location.assign`, on a promise the session layer was awaiting. It worked by
- *     accident: the page is torn down before the value is read. The web flow is
- *     now stated honestly — it navigates and does not resolve — and the session
- *     reads the result from the URL on the way back.
+ *     `location.assign`, on a promise the session layer was awaiting. That did
+ *     not work by accident: the session's continuation is a microtask, and
+ *     microtasks run before the navigation, so the session read "cancelled",
+ *     discarded the pending PKCE verifier, and the redirect back from Google
+ *     found nothing to exchange with — every web sign-in failed with "Sign-in
+ *     could not be verified." The flow is now stated honestly: it navigates and
+ *     does not resolve, and the session reads the result from the URL on the way
+ *     back.
  *   - `saveFile` still has no dialog, and cannot. That one is a real limitation
  *     rather than a missing implementation, and it says so.
  */
@@ -167,11 +171,17 @@ export const webPlatform: WebPlatform = {
    * and every local in it are destroyed. `session.completeWebRedirect` reads the
    * result out of the URL on the way back.
    *
-   * The `cancelled` return exists only so the shared `Platform` type has one shape
-   * for both hosts. It is reached if a browser ever *refused* the navigation —
-   * a blocked redirect, a sandboxed frame — which is a cancellation rather than a
-   * hang, so surfacing it beats waiting forever for a page load that will not
-   * happen.
+   * It was not always honest, and the symptom was exactly the one the user would
+   * report as "Sign-in could not be verified." The old implementation returned
+   * `{ kind: "cancelled" }` the moment it asked the browser to navigate. Whatever
+   * the comment claimed about the page being torn down first, the session's
+   * `await` continuation is a microtask, and microtasks run *before* the
+   * navigation — so the session read "cancelled", threw away the pending PKCE
+   * verifier, and the redirect back from Google found nothing to exchange with.
+   *
+   * A navigation that is *refused* still settles: `location.assign` throws in a
+   * sandboxed frame or when the browser blocks the redirect, and settling with a
+   * failure then beats waiting forever for a page load that will not happen.
    */
   async beginSignIn(request: SignInRequest): Promise<SignInResult> {
     // The verifier is stashed by the session; the state is recorded here so the
@@ -183,11 +193,34 @@ export const webPlatform: WebPlatform = {
       // Storage blocked. The exchange still works — the session's own stash is
       // what matters — only the "signing in…" affordance is lost.
     }
-    //
+
+    const location = globalThis.location;
+    if (!location) {
+      // No browser to navigate: a headless embed. The sign-in cannot proceed,
+      // and it must settle (and be cleaned up) rather than hang forever.
+      return { kind: "unavailable", detail: "there is no browser to navigate to Google" };
+    }
+
     // `location.assign` rather than `window.open`: a popup is blocked unless it is
     // opened synchronously from a user gesture, and this is awaited.
-    globalThis.location?.assign(request.authorizeUrl);
-    return { kind: "cancelled" };
+    try {
+      location.assign(request.authorizeUrl);
+    } catch (error) {
+      // The navigation was refused — a sandboxed frame, a blocked redirect. That
+      // is a cancellation rather than a hang, so surface it instead of hanging on
+      // a promise that would never resolve.
+      return {
+        kind: "unavailable",
+        detail: error instanceof Error ? error.message : "the browser refused to navigate",
+      };
+    }
+
+    // Navigation is under way. Do NOT settle here: resolving with
+    // `{ kind: "cancelled" }` would make the session treat the sign-in as
+    // finished and discard the pending verifier before the browser has even
+    // navigated. The page is about to be torn down and rebuilt around the
+    // redirect back; the session reads the result from the URL then.
+    return new Promise<SignInResult>(() => {});
   },
 
   async cancelSignIn() {

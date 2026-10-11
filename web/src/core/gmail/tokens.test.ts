@@ -253,18 +253,44 @@ describe("TokenManager — failure handling", () => {
     ).rejects.toMatchObject({ kind: "invalid_client" });
   });
 
-  it("does not leak Google's wording for a rejected code", async () => {
-    // `invalid_grant` covers a replayed code as well as a misused one. Echoing
-    // Google's description back would tell an attacker which half to fix.
+  it("says *why* a code was rejected, not just that it was", async () => {
+    // The old wording deliberately kept Google's `error_description` hidden on
+    // the theory that echoing it would tell an attacker what to fix. The cost
+    // was that "could not be verified" gave the developer debugging it no route
+    // out — the exact dead end this sign-in flow kept landing in. The message
+    // now carries Google's own words, truncated, because they are the only ones
+    // that distinguish a spent code from a mismatched redirect URI, and an
+    // attacker probing Google sees the raw response for themselves anyway.
     const { fetchImpl } = tokenFetch({
       status: 400,
       body: { error: "invalid_grant", error_description: "code already used" },
     });
     const manager = new TokenManager({ store: memoryStore(null).store, clientId: "id", fetchImpl });
 
-    await expect(
-      manager.exchangeCode({ code: "c", verifier: "v", redirectUri: "https://x/cb" }),
-    ).rejects.toThrow(/^Sign-in could not be verified/);
+    const reason = await manager
+      .exchangeCode({ code: "c", verifier: "v", redirectUri: "https://x/cb" })
+      .catch((thrown: unknown) => thrown);
+    expect(reason).toMatchObject({ kind: "state_mismatch" });
+    expect((reason as Error).message).toContain("invalid_grant");
+    expect((reason as Error).message).toContain("code already used");
+  });
+
+  it("names a mismatched redirect URI for what it is", async () => {
+    // The desktop build used to send its placeholder loopback port to the token
+    // endpoint instead of the port Rust actually bound — Google answers that
+    // with `redirect_uri_mismatch`, and the message has to say so rather than
+    // hide behind "could not be verified".
+    const { fetchImpl } = tokenFetch({
+      status: 400,
+      body: { error: "redirect_uri_mismatch", error_description: "Bad Request" },
+    });
+    const manager = new TokenManager({ store: memoryStore(null).store, clientId: "id", fetchImpl });
+
+    const reason = await manager
+      .exchangeCode({ code: "c", verifier: "v", redirectUri: "http://127.0.0.1:4242/winnow-oauth" })
+      .catch((thrown: unknown) => thrown);
+    expect(reason).toMatchObject({ kind: "state_mismatch" });
+    expect((reason as Error).message).toContain("redirect URI");
   });
 
   it("reports a network failure distinctly", async () => {

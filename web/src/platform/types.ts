@@ -54,7 +54,25 @@ export type NewMailNotification = {
 
 /** An OAuth attempt that the platform delivered back to us. */
 export type OAuthRedirect =
-  | { kind: "code"; code: string; state: string }
+  | {
+      kind: "code";
+      code: string;
+      state: string;
+      /**
+       * The redirect URI the authorize request actually carried, when the
+       * platform knows it differs from the placeholder the session built.
+       *
+       * The desktop flow's authorize URL is built with a port placeholder that
+       * Rust substitutes once it binds the port — so the URI Google actually saw
+       * only exists on the other side of the boundary. The token exchange must
+       * name that URI exactly, so the desktop platform recovers it from the
+       * substituted URL and returns it here, and the session prefers it over
+       * its own placeholder. The web build never sets it: `parseRedirect` reads
+       * the code out of the URL, and the URI came from the session's own
+       * configuration.
+       */
+      redirectUri?: string;
+    }
   | { kind: "error"; error: string; description: string; state: string }
   | { kind: "cancelled" };
 

@@ -58,6 +58,31 @@ describe("describeFailure", () => {
     expect(failure.hint).toBeTruthy();
   });
 
+  it("carries the reason a redirect could not be matched, verbatim", () => {
+    // The whole point of the verbose rewrite: an unverified redirect has
+    // several different causes with different fixes, and naming the one thrown
+    // (which state arrived, on which origin) is what lets a developer debug it.
+    const failure = describeFailure(
+      new GoogleAuthStateMissing('no sign-in in progress issued state "abc" on http://localhost:5173.'),
+    );
+    expect(failure.message).toContain('no sign-in in progress issued state "abc"');
+    expect(failure.hint).toContain("started in a different window");
+  });
+
+  it("surfaces a specific state mismatch as the hint, not a re-ascribed verdict", () => {
+    // The message stays short; the *why* (the two states, and which differed)
+    // is carried where the screen shows both — the hint.
+    const failure = describeFailure(
+      new GmailError(
+        'The redirect came back with state "other", which does not match the state this attempt issued ("mine").',
+        0,
+        "state_mismatch",
+      ),
+    );
+    expect(failure.message).toBe("Sign-in could not be verified.");
+    expect(failure.hint).toContain('state "other"');
+  });
+
   it("never claims a session problem for a build problem", () => {
     // `invalid_client` is the most misdiagnosable failure in the whole flow: it
     // is a build or registration problem, and the only fix is to rebuild or

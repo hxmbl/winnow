@@ -14,10 +14,19 @@
  * The choice now follows the platform's own capability (`nativeOAuth`) rather
  * than an environment variable that happens to be empty, and a web build with no
  * URI refuses loudly instead of sending a placeholder to Google.
+ *
+ * The last test here covers the second defect in the same flow: the web platform
+ * used to answer `signIn`'s `beginSignIn` with `{ kind: "cancelled" }` the moment
+ * it asked the browser to navigate. The session's continuation is a microtask and
+ * microtasks run *before* the navigation, so it read "cancelled", discarded the
+ * pending PKCE verifier, and the redirect back from Google found nothing to
+ * exchange with — the "Sign-in could not be verified." a user actually got. The
+ * web platform now never settles, and the verifier must survive.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GmailSession, LOOPBACK_PORT_PLACEHOLDER } from "./session";
+import { takePendingAuth } from "./pendingAuth";
 import { GmailError } from "../gmail/dto";
 import type { CursorStore, MailboxCache } from "../gmail/sync";
 import type { TokenStore } from "../gmail/tokens";
@@ -39,8 +48,9 @@ function infoFor(kind: "desktop" | "web"): PlatformInfo {
 }
 
 /**
- * A `Platform` that records the authorize URL it was handed and then reports the
- * user cancelled.
+ * A `Platform` that records the authorize URL it was handed and then behaves the
+ * way the real host does: the desktop reports the user cancelled, the web
+ * navigates and never settles.
  *
  * Only the two methods `signIn` reaches for are real; the rest exist so the
  * object satisfies the interface without a cast of the whole thing. The captured
@@ -60,6 +70,12 @@ function platformFor(kind: "desktop" | "web"): { platform: Platform; opened: str
     oauthClientSecret: () => undefined,
     async beginSignIn(request: SignInRequest): Promise<SignInResult> {
       opened.push(request.authorizeUrl);
+      if (kind === "web") {
+        // Mirrors `web.ts`: the browser is navigating away, so the promise never
+        // settles. Resolving here would be the bug — the session would read
+        // "cancelled", discard the verifier, and the redirect back would fail.
+        return new Promise<SignInResult>(() => {});
+      }
       return { kind: "cancelled" };
     },
     cancelSignIn: async () => {},
@@ -93,8 +109,28 @@ function redirectOf(authorizeUrl: string): string {
   return new URL(authorizeUrl).searchParams.get("redirect_uri") ?? "";
 }
 
+/** Let the async sign-in body run out to the `beginSignIn` call. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A minimal in-memory `sessionStorage`, since this suite runs in Node. */
+function installSessionStorage(): Map<string, string> {
+  const backing = new Map<string, string>();
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => void backing.set(k, v),
+      removeItem: (k: string) => void backing.delete(k),
+    },
+  });
+  return backing;
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  Reflect.deleteProperty(globalThis, "sessionStorage");
 });
 
 describe("the sign-in redirect URI", () => {
@@ -134,10 +170,29 @@ describe("the sign-in redirect URI", () => {
     const { platform, opened } = platformFor("web");
     const session = new GmailSession(platform, cache);
 
-    // `beginSignIn` reporting "cancelled" is incidental — the captured URL is
-    // what matters, and it is captured before the outcome is read.
-    await expect(session.signIn()).rejects.toMatchObject({ kind: "declined" });
+    // The web flow navigates rather than settling: `beginSignIn` never resolves
+    // (mirroring `web.ts`), so `signIn()` is still in flight after the URL has
+    // been built. The captured URL is the assertion, and it was captured before
+    // any outcome could have been read.
+    const inflight = session.signIn();
+    await flush();
+    await flush();
+
     expect(redirectOf(opened[0])).toBe("https://app.example/auth/callback");
+
+    // And the promise must not have settled: nothing has happened yet, the
+    // page has simply been handed to the browser.
+    let settled = false;
+    void inflight.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await flush();
+    expect(settled).toBe(false);
   });
 
   it("refuses on the web when no URI is configured, rather than sending the placeholder", async () => {
@@ -155,5 +210,41 @@ describe("the sign-in redirect URI", () => {
 
     // Nothing was opened, so no URL carrying the placeholder can reach Google.
     expect(opened).toEqual([]);
+  });
+
+  it("keeps the PKCE verifier stashed while the browser navigates", async () => {
+    // The root of the reported failure: `web.ts` used to answer `beginSignIn`
+    // with `{ kind: "cancelled" }` the moment it asked the browser to navigate.
+    // The session's continuation is a microtask and microtasks run before the
+    // navigation, so it read "cancelled", called `forgetPendingAuth`, and the
+    // redirect back from Google found no verifier to exchange the code with —
+    // every web sign-in ended in "Sign-in could not be verified." The platform
+    // now never settles, and the stash has to be there when the page returns.
+    installSessionStorage();
+    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "web.apps.googleusercontent.com");
+    vi.stubEnv("VITE_GMAIL_REDIRECT_URI", "https://app.example/auth/callback");
+    const { platform, opened } = platformFor("web");
+    const session = new GmailSession(platform, cache);
+
+    const inflight = session.signIn();
+    await flush();
+    await flush();
+
+    const state = new URL(opened[0]).searchParams.get("state") ?? "";
+    expect(state).not.toBe("");
+    expect(takePendingAuth(state)?.verifier).toBeTruthy();
+
+    // And nothing has settled: the page is mid-navigation, not failed.
+    let settled = false;
+    void inflight.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await flush();
+    expect(settled).toBe(false);
   });
 });

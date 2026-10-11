@@ -227,10 +227,17 @@ export const desktopPlatform: Platform = {
     }
 
     try {
-      return await invoke<AuthOutcome>("oauth_await", {
+      const outcome = await invoke<AuthOutcome>("oauth_await", {
         port: begun.port,
         timeoutMs: request.timeoutMs,
       });
+      // A code on its own is not enough: the exchange must name the exact URI
+      // Google saw — the one Rust substituted into the authorize URL, not the
+      // placeholder the session still holds (`LOOPBACK_REDIRECT_URI`). Recover
+      // it from the URL that was actually opened and hand it back with the code.
+      if (outcome.kind !== "code") return outcome;
+      const redirectUri = redirectUriIn(begun.authorize_url);
+      return redirectUri ? { ...outcome, redirectUri } : outcome;
     } catch (error) {
       // Three genuinely different endings, and collapsing them into one
       // "cancelled" is what made a listener that never bound indistinguishable from
@@ -469,4 +476,21 @@ function describeIpcError(error: unknown, fallback: string): string {
   const cleaned = message.trim().replace(/\s+/g, " ");
   if (!cleaned) return fallback;
   return cleaned.length > 200 ? `${cleaned.slice(0, 200)}…` : cleaned;
+}
+
+/**
+ * The redirect URI an authorize URL actually carries, decoded.
+ *
+ * The URL Rust returns has the placeholder replaced with the port it bound, so
+ * this is the exact URI Google saw — the one the token exchange must repeat.
+ * Returns `undefined` when the URL cannot be parsed or carries no `redirect_uri`;
+ * the session then falls back to its own value, which for the desktop is the
+ * placeholder — a case that should not occur, because Rust substitutes in place.
+ */
+function redirectUriIn(authorizeUrl: string): string | undefined {
+  try {
+    return new URL(authorizeUrl).searchParams.get("redirect_uri") ?? undefined;
+  } catch {
+    return undefined;
+  }
 }

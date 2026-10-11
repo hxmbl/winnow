@@ -10,10 +10,21 @@
 
 import { isTauri } from "../../platform";
 
-/** A redirect whose `state` did not match the one we issued. */
+/**
+ * A redirect whose `state` could not be matched to a sign-in this window started.
+ *
+ * `detail` explains *which* part was missing — no state at all, or a state with
+ * no verifier behind it — and the likeliest cause. It is shown verbatim, because
+ * every variant has a different fix and a bare "could not be verified" sends
+ * someone retrying the same dead end.
+ */
 export class GoogleAuthStateMissing extends Error {
-  constructor() {
-    super("Sign-in could not be verified. Please try again.");
+  constructor(detail?: string) {
+    super(
+      detail
+        ? `Sign-in could not be verified. ${detail}`
+        : "Sign-in could not be verified. Please try again.",
+    );
     this.name = "GoogleAuthStateMissing";
   }
 }
@@ -56,7 +67,14 @@ export function describeFailure(error: unknown): AuthFailure {
     case "state_mismatch":
       return {
         message: "Sign-in could not be verified.",
-        hint: "Start again from this window.",
+        // The specific why — which state arrived, which origin saw it, what
+        // Google said — lives in the failure's own message, and the screen shows
+        // it so debugging is not a retry loop. The generic phrasing is only for
+        // a failure that said nothing specific.
+        hint:
+          message === "Sign-in could not be verified. Please try again."
+            ? "Start again from this window."
+            : message,
         retryable: true,
       };
     case "reauth_required":
