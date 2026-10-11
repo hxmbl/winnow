@@ -308,20 +308,10 @@ describe("matchesBuiltin — the safe guard", () => {
 
 describe("matchesBuiltin — important", () => {
   it("uses the shared threshold, so the pill and the badge cannot disagree", () => {
-    // Two bugs live here, both the same shape: a rule written twice, drifting once.
-    //
-    // First: the filter matched at 56 while the badge appeared at 70, so messages
-    // existed in an Important filter wearing no badge.
-    //
-    // Second — and worse, because reachable on ordinary mail — the *badge* tested the
-    // threshold alone while the filter also excluded bulk. Nothing subtracts for bulk
-    // mail, so a promotion from a well-ranked sender clears 56 on the sender boost
-    // alone and wore an Important badge the filter would never list. Both sides now
-    // call `isImportant`, so the pairs below are the whole argument: for every
-    // classification, the badge and the filter answer the same question identically.
-    // `urgent: false` on the message throughout. An explicitly urgent *promotion* is
-    // the one case where bulk mail still counts, and it gets its own message below —
-    // sharing one fixture would make the flag's effect impossible to attribute.
+    // Both sides call `isImportant`, so the badge and the filter answer the same
+    // question identically — the pairs below are the whole argument. `urgent: false`
+    // throughout; an explicitly urgent *promotion* is the one case where bulk still
+    // counts and gets its own message, so the flag's effect stays attributable.
     const message = email({ subject: "Notes", body: "Some notes.", urgent: false });
     const base = classifyAll([message], EMPTY_PROFILE).get(message.id)!;
     const scored = (over: Partial<EmailSignals> & { importanceScore: number }): EmailSignals => ({
@@ -376,16 +366,10 @@ describe("matchesBuiltin — important", () => {
   });
 
   it("excludes newsletters and promos even at a high score", () => {
-    // Bulk mail has its own buckets, so a weekly issue at 90 is not Important.
-    // All four combinations, because the predicate names two flags and one of
-    // them guards only the score half — a test that checked one combination
-    // would not notice that.
-    //
-    // `badgeFilters` *is* asserted alongside now. It used to be deliberately left out
-    // of this test with a note saying the two disagreed, which was true: the badge
-    // keyed Important off the score alone, so it badged a newsletter at 90 that this
-    // predicate refused to admit. They share `isImportant` now, and the case table
-    // above is what holds them together.
+    // Bulk mail has its own buckets, so a weekly issue at 90 is not Important. All
+    // four combinations, because the predicate names two flags and one guards only
+    // the score half. `badgeFilters` is asserted alongside because the two share
+    // `isImportant` and must agree.
     const message = email({ subject: "Issue", body: "Unsubscribe. View in browser." });
     const base = classifyAll([message], EMPTY_PROFILE).get(message.id)!;
     expect(base.needsAction).toBe(false);
@@ -423,10 +407,8 @@ describe("matchesBuiltin — important", () => {
 
 describe("matchesBuiltin — read later", () => {
   it("is not a synonym for newsletter", () => {
-    // It used to be `promotional || newsletter`, which made Read later a
-    // duplicate of two buckets that already existed and hid quiet personal mail
-    // that genuinely could be skipped. The admin notice below is neither bulk
-    // nor promotional, and is the kind of message Read later is for.
+    // Read later is not "is a newsletter": the admin notice below is neither bulk
+    // nor promotional, and is the kind of message the bucket is for.
     const admin = inbox.find((m) => m.gmailId === "demo-quiet-2")!;
     const sig = sigFor(admin.gmailId);
     expect(sig.newsletter).toBe(false);
@@ -825,16 +807,10 @@ describe("rankFilters", () => {
   });
 
   it("breaks ties by catalog order, and keeps each tied group together", () => {
-    // Three buckets hold four messages each and four hold two. Between equals
-    // the order is the catalog — receipts, newsletters, promotional — not the
-    // order they happen to be counted in, which for `Map` insertion is the
-    // catalog order too but only by accident.
-    //
-    // `promotional` was in the four-message group until the demo gained a seed
-    // with markup in it; at five it is no longer tied with anything, so the group
-    // is now two buckets and the tie-break is asserted over the pair that
-    // remains. A table that quietly kept the old membership would pass the
-    // membership assertion and fail the ordering one, which is the arrangement.
+    // Between equals the order is the catalog — receipts, newsletters — not the
+    // order they happen to be counted in, which for `Map` insertion is the catalog
+    // order too but only by accident. A table that quietly kept the old membership
+    // would pass the membership assertion and fail the ordering one.
     const counted = countAllFilters(inbox, signals, profile);
     const ranked = rankFilters(inbox, signals, profile);
     const tied: [number, BuiltinSmartFilter[]][] = [

@@ -1,45 +1,20 @@
 /**
  * The allowlist sanitiser.
  *
- * Winnow already had a way to show a message as its sender wrote it — a
- * `sandbox=""` iframe with `srcDoc` — and already had a good reason not to make
- * it the default: rendering sender markup *in the app's origin* is the one thing
- * a mail client must never do, and `html.ts` says so in as many words. The iframe
- * was the escape hatch; it was also, as the screenshots showed, the only way to
- * see a newsletter look like a newsletter.
+ * A tag renders only if it is on the allowlist, and an attribute survives only if it is
+ * too — rather than the other way round. A denylist has to anticipate every element that
+ * can execute code or reach the page, and that list is open: `foreignObject` and
+ * `template` shadow roots arrive years after the denylist was written.
  *
- * So this module is the thing that makes the *default* rich. Its job is to turn a
- * message body into markup that is safe to put in this document, and that means an
- * allowlist: a tag is rendered if it is on the list and a attribute survives only
- * if it is on the list, rather than the other way round. The distinction is not
- * stylistic. A denylist has to anticipate every element that can execute code or
- * reach the page (`script`, `object`, `iframe`, `svg`, `math`, `link`, `meta`,
- * `base`, `form`, …), and the list of those is open — `foreignObject` and
- * `template` shadow roots are the kind of thing that arrives years after the
- * denylist was written. An allowlist only has to enumerate what mail actually
- * uses.
+ * Three properties explain why this is a hand-written scanner rather than a regex:
  *
- * Three properties matter more than anything else here, and each is why the
- * implementation is a hand-written scanner rather than a regular expression:
+ *  1. Entities are decoded before a URL is judged, so `&#106;avascript:` is caught.
+ *  2. Raw-text elements are skipped, not tokenised: `<script>` contents are not markup.
+ *  3. The result is balanced, because sender markup routinely omits `</td>` and an
+ *     unbalanced table swallows everything after it.
  *
- *  1. **Entities are decoded before a URL is judged.** `&#106;avascript:` and
- *     `java&Tab;script:` are the same string to a browser as `javascript:`, and
- *     any check that runs on the raw attribute value judges them innocent. So the
- *     value is decoded, then stripped of the control and whitespace characters a
- *     browser also ignores before it looks at the scheme, and *only then* tested.
- *  2. **Raw-text elements are skipped, not tokenised.** The contents of
- *     `<script>` are not markup; `a > b` inside one must not close the element.
- *     A scanner that hunts for `</script>` the way it hunts for `</p>` turns a
- *     `<script>if (a<b) {}</script>` into live markup.
- *  3. **The result is balanced.** Sender markup routinely omits `</td>` and
- *     `</tr>`, because no browser cared. Injected into a document that *does*
- *     care, an unbalanced table swallows everything after it. So open elements
- *     are tracked and closed.
- *
- * The counts it returns are the same promise `remoteReferences` makes: not
- * "something was filtered" but how many remote references this body names and
- * what happened to each one, because the reader puts that number in front of the
- * user as a privacy claim.
+ * The counts it returns are the same promise `remoteReferences` makes: how many remote
+ * references this body names and what happened to each one.
  */
 
 import { decodeEntities } from "./html.ts";
@@ -49,19 +24,15 @@ import { decodeEntities } from "./html.ts";
 /**
  * Elements removed together with everything inside them.
  *
- * Two different reasons are in here and the distinction is worth keeping:
+ * Three reasons are in here and the distinction is worth keeping:
  *
- *   - **Script carriers** — `script`, `svg`, `math`, `object`, `embed`,
- *     `iframe`, `template`. Their *contents* are code in some reading or
- *     another, and keeping the tag while dropping the body is how
- *     `<template>` shadow DOM and `<svg><foreignObject>` get through.
- *   - **Document furniture** — `link`, `meta`, `base`, `head`'s leftovers.
- *     `base` in particular is a redirect of every relative URL in the body, and
- *     `link rel=stylesheet` is the "a remote stylesheet can exfiltrate anything
- *     in the DOM" case that `html.ts` warns about.
- *   - **Form controls** — `form`, `input`, `button`, `select`. A mail client has
- *     no business rendering a credential prompt inside a message, and a
- *     `<form action=…>` is a silent third-party data sink.
+ *   - **Script carriers** — `script`, `svg`, `math`, `object`, `embed`, `iframe`,
+ *     `template`. Keeping the tag while dropping the body is how `<template>` shadow
+ *     DOM and `<svg><foreignObject>` get through.
+ *   - **Document furniture** — `link`, `meta`, `base`. `base` redirects every relative
+ *     URL, and `link rel=stylesheet` can exfiltrate the DOM.
+ *   - **Form controls** — a credential prompt inside a message, and a silent
+ *     third-party data sink.
  */
 const DROP_WITH_CONTENT = new Set([
   "applet",
@@ -110,30 +81,26 @@ const DROP_WITH_CONTENT = new Set([
 /**
  * `style`, handled separately from the list above because it has two answers.
  *
- * The app drops it: a sender's stylesheet lands in the same document as the
- * reader's own, where `body { background: red }` and `.trash { display: none }`
- * reach past the message. The proxy keeps it, because there the document is a
- * purpose-built one that contains nothing but the message. Either way it is
- * *removed from the body* and handed back, so the caller decides where it goes.
+ * The app drops it (a sender's stylesheet would share the reader's document). The proxy
+ * keeps it, because there the document contains nothing else. Either way it is *removed
+ * from the body* and handed back, so the caller decides where it goes.
  */
 const STYLE_ELEMENT = "style";
 
 /**
  * Elements removed but whose contents are kept.
  *
- * The document envelope. `html`, `body` and `head` are wrappers around content
- * that is still mail, and a message that arrives as a full document — which is
- * most HTML mail — would otherwise lose its entire body to the envelope.
+ * The document envelope: a message that arrives as a full document — which is most HTML
+ * mail — would otherwise lose its entire body to `html`/`body`/`head`.
  */
 const UNWRAP = new Set(["html", "body", "head", "center", "font", "marquee"]);
 
 /**
  * Elements rendered.
  *
- * Table elements are the majority and they are not optional: HTML mail is table
- * layout, and a message that loses its `<table>` is a column of unstyled words.
- * `font` and `center` are 1998-era markup that still arrives, and are handled as
- * unwrapped above so their contents survive.
+ * Table elements are the majority and not optional: HTML mail is table layout, and a
+ * message that loses its `<table>` is a column of unstyled words. `font` and `center`
+ * are handled as unwrapped above so their contents survive.
  */
 const ALLOWED_TAGS = new Set([
   "a", "abbr", "address", "article", "aside", "b", "bdi", "bdo", "big", "blockquote",
@@ -154,13 +121,10 @@ const GLOBAL_ATTRS = new Set([
 /**
  * Attributes allowed only on the element they appear on.
  *
- * **`a` has no `name`, which used to be on it.** A named anchor creates a property
- * on `window`, so `<a name="config">` inside a message rendered into the app's own
- * document defines `window.config` -- DOM clobbering, where a page's own globals
- * are shadowed by elements a third party controls. It is a real technique against
- * applications that read undeclared globals, and nothing is lost by dropping it:
- * the reader keeps no `id`s (a sender's would collide with the app's), so a
- * fragment link in a message goes nowhere either way.
+ * **`a` has no `name`.** A named anchor creates a property on `window`, so
+ * `<a name="config">` inside a message rendered into the app's own document defines
+ * `window.config` -- DOM clobbering. Nothing is lost by dropping it: the reader keeps no
+ * `id`s, so a fragment link goes nowhere either way.
  */
 const TAG_ATTRS: Record<string, Set<string>> = {
   a: new Set(["href", "rel", "target"]),
@@ -189,20 +153,9 @@ const VOID_TAGS = new Set([
 /**
  * Every element HTML defines as having no end tag.
  *
- * A separate list from [`VOID_TAGS`] above, and the difference is which end a name
- * appears on. `VOID_TAGS` is "allowed, and renders as one tag". This one is "a tag
- * whose *contents* must not be skipped" — and that is a security-shaped decision
- * rather than a formatting one.
- *
- * `<meta>`, `<link>`, `<base>`, `<source>`, `<track>`, `<param>`, `<embed>`,
- * `<input>`, `<area>`, `<col>` and `<keygen>` are all dropped with their contents,
- * because their contents *can* be something other than nothing: `<meta>` has no end
- * tag at all, so a scanner looking for `</meta>` does not find one and concludes
- * "this element is unterminated, so everything after it belongs to it". A full HTML
- * document starts with `<head><meta charset="utf-8"><title>…</title></head>`, so
- * the message that has a charset declaration has its entire body swallowed and
- * renders as an empty reader — which is precisely the class of message the rich
- * view exists to show.
+ * Separate from [`VOID_TAGS`]: this one is "a tag whose *contents* must not be skipped".
+ * `<meta>` has no end tag at all, so a scanner looking for `</meta>` concludes everything
+ * after it belongs to it — a full document's `<head>` would have its entire body swallowed.
  */
 const VOID_ELEMENTS = new Set([
   "area", "base", "basefont", "bgsound", "br", "col", "embed", "frame", "hr",
@@ -212,10 +165,8 @@ const VOID_ELEMENTS = new Set([
 /**
  * Elements whose contents are text, not markup.
  *
- * Only one of these survives sanitising (`textarea` is dropped), and that is the
- * point of listing it: the scanner has to know that `<textarea><b>x</b></textarea>`
- * has a *text* body, so that `<textarea>` on its own cannot smuggle an element in
- * through its contents.
+ * The scanner has to know that `<textarea><b>x</b></textarea>` has a *text* body, so
+ * `<textarea>` on its own cannot smuggle an element in through its contents.
  */
 const RAW_TEXT_TAGS = new Set([
   "script", STYLE_ELEMENT, "textarea", "title", "xmp", "plaintext", "listing",
@@ -225,10 +176,8 @@ const RAW_TEXT_TAGS = new Set([
 /**
  * Nesting deeper than this is unwrapped rather than rendered.
  *
- * Browsers cap their own nesting (Chromium at 512, most engines well below), and
- * a sender who ships 40,000 nested `<div>`s gets a layout pass quadratic in depth
- * for a message the reader has to scroll. Unwrapping past the limit keeps the text
- * and drops the depth.
+ * A sender who ships 40,000 nested `<div>`s gets a layout pass quadratic in depth.
+ * Unwrapping past the limit keeps the text and drops the depth.
  */
 const MAX_DEPTH = 64;
 
@@ -241,14 +190,10 @@ const MAX_DIMENSION = 4096;
 // ── URLs ────────────────────────────────────────────────────────────────────
 
 /*
- * What a browser throws away before it decides what a URL's scheme is.
- *
- * Per the URL standard, tab and newline are removed from anywhere in the input and
- * C0 controls and space are trimmed from both ends — so `java<TAB>script:` and
- * `<NUL>javascript:` are both live in every engine, and a scheme check that runs on
- * the raw attribute value judges them innocent. Both are removed here, and only
- * those: an *interior* space is not a control character, it is a space a browser
- * would percent-encode, and deleting it would quietly turn
+ * What a browser throws away before it decides what a URL's scheme is: controls
+ * everywhere, and space at both ends — so `java<TAB>script:` and `<NUL>javascript:`
+ * are live in every engine, and a check on the raw value judges them innocent. An
+ * *interior* space is not a control character; deleting it would turn
  * `https://example.test/a b.png` into a request for a different file.
  */
 const URL_DROP_INNER = new RegExp("[" + "\u0000-\u001F\u007F]", "g");
@@ -268,11 +213,9 @@ const SAFE_DATA_URI = /^data:image\/(png|jpeg|jpg|gif|webp|bmp|x-icon|vnd\.micro
 /**
  * …and SVG, which is the one exception, and only for an image.
  *
- * An SVG loaded by `<img src>` or painted by `background-image` is rendered in a
- * restricted mode: no script, no external references, no form. That is the same
- * reason an `<img>` cannot be a document, and it is why SVG logos — which is most
- * of what a modern brand sends as its logo — render here while the same bytes in an
- * `href` do not.
+ * An SVG loaded by `<img src>` or painted by `background-image` renders in a
+ * restricted mode: no script, no external references, no form. So the same bytes
+ * that render as a logo here are dropped from an `href`.
  */
 const SAFE_IMAGE_SVG = /^data:image\/svg\+xml[;,]/i;
 
@@ -280,23 +223,20 @@ const SAFE_IMAGE_SVG = /^data:image\/svg\+xml[;,]/i;
  * What a URL attribute is for, which decides whether withholding images
  * withholds it.
  *
- * The single most important distinction in this file. A *fetch* — an `<img>`'s
- * `src`, a table's `background`, a `srcset` candidate — tells the sender the
- * message was opened, so `allowRemote: false` has to stop it. A *link* — an
- * `<a>`'s `href` — does not fetch anything until the user clicks it, and the
- * click is routed to the system browser regardless. Blocking those would leave a
- * message whose only call to action was `mailto:` with no way to answer it, which
- * is not a privacy win but a broken reader.
+ * A *fetch* — an `<img>`'s `src`, a table's `background`, a `srcset` candidate —
+ * tells the sender the message was opened, so `allowRemote: false` has to stop it.
+ * A *link* — an `<a>`'s `href` — fetches nothing until clicked, and the click goes
+ * to the system browser regardless. Blocking those would leave a `mailto:`-only
+ * message with no way to answer it, which is not a privacy win but a broken reader.
  */
 type UrlKind = "fetch" | "link";
 
 /**
  * Decide what a URL attribute should become.
  *
- * Returns the URL to emit, or `null` to drop the reference entirely. `blocked` is
- * true when the URL was a remote fetch the caller had not permitted — the
- * difference between "this was withheld" and "this was never a thing", which the
- * reader's note depends on.
+ * `blocked` is true when the URL was a remote fetch the caller had not permitted —
+ * the difference between "this was withheld" and "this was never a thing", which
+ * the reader's note depends on.
  */
 function resolveUrl(
   raw: string,
@@ -305,29 +245,24 @@ function resolveUrl(
   inlineParts: Record<string, string> | undefined,
   rewrite: ReadonlyMap<string, string> | undefined,
 ): { url: string | null; blocked: boolean } {
-  // Decoded first, and stripped second, so the scheme test sees what the browser
-  // will see. Escaping the result on the way out is the caller's job — see
-  // `escapeAttribute`.
+  // Decoded first, stripped second, so the scheme test sees what the browser will.
+  // Escaping the result is the caller's job — see `escapeAttribute`.
   const decoded = stripUrlNoise(decodeEntities(raw));
   if (decoded === "") return { url: null, blocked: false };
 
-  // A proxy address, which the render proxy has already fetched on the reader's
-  // behalf. Checked before everything else and *after* the noise is stripped, so
-  // the key it is looked up by is the same string the document will contain. Not
-  // blocked: nothing is being withheld, it has already been fetched by somebody
-  // other than the reader.
+  // A proxy address, already fetched on the reader's behalf. Looked up *after* the
+  // noise is stripped, so the key matches the string the document will contain.
+  // Not blocked: nothing is withheld.
   const proxied = rewrite?.get(decoded);
   if (proxied !== undefined) return { url: proxied, blocked: false };
 
-  // A fragment. Never leaves the document, so it is not a fetch and never a
-  // privacy question — and a message whose "jump to the footer" link does
-  // nothing is a message with a broken button in it.
+  // A fragment never leaves the document, so it is not a fetch — and a "jump to
+  // the footer" link that does nothing is a broken button.
   if (decoded.startsWith("#")) return { url: decoded, blocked: false };
 
-  // A `cid:` reference is the message's *own* inline part — bytes already in the
-  // email, addressed to nobody else. Substituting the data URI is what makes
-  // half of real HTML mail render, because a marketing email's logo is a `cid:`
-  // and not a URL.
+  // A `cid:` is the message's *own* inline part — bytes already in the email,
+  // addressed to nobody else. Substituting the data URI is what makes a
+  // marketing email's `cid:` logo render.
   const cid = /^cid:(.*)$/i.exec(decoded);
   if (cid) {
     const part = inlineParts?.[cid[1].replace(/^<|>$/g, "").toLowerCase()];
@@ -336,22 +271,20 @@ function resolveUrl(
 
   if (SAFE_DATA_URI.test(decoded)) return { url: decoded, blocked: false };
   if (kind === "fetch" && SAFE_IMAGE_SVG.test(decoded)) return { url: decoded, blocked: false };
-  // Any other `data:` — `text/html`, or an SVG behind a link rather than an image —
-  // is a document, and a document can script. Dropped without counting as a remote
-  // reference, because it was never going to leave the machine.
+  // Any other `data:` — `text/html`, or an SVG behind a link — is a document, and a
+  // document can script. Not counted as remote: it never leaves the machine.
   if (/^data:/i.test(decoded)) return { url: null, blocked: false };
 
-  // Protocol-relative. A browser resolves it against the document, which in the
-  // app is *this app*, so it is remote by definition and is judged as one.
+  // Protocol-relative resolves against the document, which in the app is *this
+  // app* — remote by definition.
   if (decoded.startsWith("//")) {
     return allowRemote ? { url: `https:${decoded}`, blocked: false } : { url: null, blocked: true };
   }
 
   const scheme = /^([a-z][a-z0-9+.-]*:)/i.exec(decoded);
   if (!scheme) {
-    // Relative. There is no base to resolve it against in a sanitised document,
-    // and resolving it against the app's own origin would point the message at
-    // the app's assets. Not remote, just meaningless.
+    // Relative: no base to resolve against, and resolving against the app's origin
+    // would point the message at the app's assets. Not remote, just meaningless.
     return { url: null, blocked: false };
   }
 
@@ -359,17 +292,11 @@ function resolveUrl(
   const isHttp = scheme[1].toLowerCase() === "http:" || scheme[1].toLowerCase() === "https:";
 
   // **A rewrite map is exhaustive for fetches.** If one was supplied, the only
-  // remote address this document may *fetch* is one the map holds — an address the
-  // render proxy has already fetched. Anything else is withheld and counted, even
-  // under `allowRemote: true`, and that is the whole point: the proxy allows itself
+  // remote address this document may *fetch* is one the map holds. Anything else is
+  // withheld and counted even under `allowRemote: true`: the proxy allows itself
   // remote content because *it* does the fetching, so a URL that never went through
-  // it must not survive into a document the reader's browser will act on. Without
-  // this clause a policy-refused address — a loopback literal, say — passed straight
-  // through to the reader's machine, which is the one request the proxy exists to
-  // prevent being made from anywhere but the server.
-  //
-  // Links are exempt, and the exemption is the same distinction as everywhere else
-  // in this file: a `href` fetches nothing until somebody clicks it.
+  // it must not reach the reader's browser. Links are exempt, as everywhere: a
+  // `href` fetches nothing until clicked.
   if (isHttp && kind === "fetch") {
     if (rewrite !== undefined) return { url: null, blocked: true };
     if (!allowRemote) return { url: null, blocked: true };
@@ -378,14 +305,13 @@ function resolveUrl(
 }
 
 /**
- * `srcset` is a comma-separated list of `url descriptor` pairs, and each candidate
- * needs the same judgement as a `src`. Candidates that do not survive are dropped
- * rather than failing the whole attribute, because a responsive `srcset` with one
- * unsupported candidate still has three that work.
+ * `srcset` is a comma-separated list of `url descriptor` pairs, each needing the
+ * same judgement as a `src`. A refused candidate is dropped rather than failing the
+ * whole attribute, since a responsive `srcset` with one bad candidate still has
+ * three that work.
  *
- * `blocked` is true when *any* candidate was refused, so one withheld reference
- * counts as one — which is what `remoteReferences` does with the attribute, and
- * the reader's note is a count rather than a tally of candidates.
+ * `blocked` is true when *any* candidate was refused — one withheld reference
+ * counts as one, matching what `remoteReferences` does with the attribute.
  */
 function sanitizeSrcset(
   raw: string,
@@ -422,9 +348,8 @@ function sanitizeBackground(
   rewrite?: ReadonlyMap<string, string>,
 ): { value: string | null; blocked: boolean } {
   const decoded = stripUrlNoise(decodeEntities(raw));
-  // A named colour or a hex triplet. Deliberately permissive about the name: a
-  // colour that is not a real colour renders as nothing, which is a blemish and
-  // not a hazard.
+  // A named colour or a hex triplet. Deliberately permissive: a name that is not a
+  // real colour renders as nothing, which is a blemish and not a hazard.
   if (/^#[0-9a-f]{3,8}$/i.test(decoded) || /^[a-z]+$/i.test(decoded)) {
     return { value: decoded, blocked: false };
   }
@@ -441,24 +366,17 @@ function sanitizeBackground(
 /**
  * CSS functions that name something to fetch, or to execute.
  *
- * The first three are the ones that matter; the rest are the long tail that a
- * standards-reading implementation accumulates. A regular expression cannot find
- * these safely, which is the entire reason the code below is a scanner:
+ * The first three matter; the rest are the long tail. A regular expression cannot
+ * find these safely, which is why the code below is a scanner:
  *
- *   - `u\72l(...)` is `url(...)`. A CSS escape is decoded by the parser *before* the
- *     function name is read, so a pattern looking for the literal text `url` never
- *     sees it. The tracking pixel loads with images switched off, silently, and the
- *     note reports nothing blocked.
- *   - `image-set("..." 1x)` contains no `url(` at all. It is the same request, and
- *     the first version passed it through and counted zero.
- *   - `url(".../a b.png")` has a space in it. A pattern that stops at whitespace
- *     matched the empty prefix instead of the URL, so this one was *counted* as
- *     blocked and then loaded anyway -- the one failure mode worth never shipping,
- *     because a privacy note that says the opposite of the truth is worse than no
- *     note.
- *
- * All three were found by review rather than by a fuzzer, and all three were
- * confirmed against the shipped code before this rewrite.
+ *   - `u\72l(...)` is `url(...)`. A CSS escape is decoded *before* the function name
+ *     is read, so a pattern looking for the literal `url` never sees it, and the
+ *     tracking pixel loads with images off while the note reports nothing blocked.
+ *   - `image-set("..." 1x)` contains no `url(` at all, but is the same request.
+ *   - `url(".../a b.png")` has a space in it; a pattern that stops at whitespace
+ *     matched the empty prefix, so this one was *counted* as blocked and then loaded
+ *     anyway — the one failure mode worth never shipping, because a privacy note
+ *     that says the opposite of the truth is worse than no note.
  */
 const CSS_FETCH_FUNCTIONS = new Set([
   "url",
@@ -477,20 +395,18 @@ const CSS_FETCH_FUNCTIONS = new Set([
  *
  * Two forms, per CSS Syntax 4.3.7: a backslash, up to six hex digits and an optional
  * trailing space, is that code point; a backslash and anything else is that
- * character, with a newline in the pair counting as nothing at all.
+ * character, with a newline in the pair counting as nothing.
  *
- * This runs *before* the fetch check rather than instead of it. Decoding is not a
- * defence -- `u\72l` decoded is `url`, which then still has to be caught by the
- * ordinary rule -- it is the step that lets the ordinary rule see the same text the
- * browser will. Text with no backslash in it comes back unchanged, so the cost on
- * ordinary mail is one pass over a string that does not match.
+ * This runs *before* the fetch check rather than instead of it: decoding is not a
+ * defence — `u\72l` still has to be caught as `url` by the ordinary rule — it is
+ * the step that lets that rule see the text the browser will.
  */
 function decodeCssEscapes(css: string): string {
   return css.replace(/\\(?:([0-9a-fA-F]{1,6})[ \n\t\f]?|([\s\S]))/g, (whole, hex: string | undefined, literal: string | undefined) => {
     if (hex !== undefined) {
       const code = Number.parseInt(hex, 16);
-      // Out of range: left exactly as written rather than becoming a replacement
-      // character, so a value cannot turn into something the sender did not write.
+      // Out of range: left as written rather than becoming a replacement character,
+      // so a value cannot turn into something the sender did not write.
       if (!Number.isFinite(code) || code === 0 || code > 0x10ffff) return whole;
       return String.fromCodePoint(code);
     }
@@ -504,27 +420,25 @@ function decodeCssEscapes(css: string): string {
  * Walk CSS and report every fetch call, with the span it occupies.
  *
  * A scanner rather than a pattern, for the reasons on [`CSS_FETCH_FUNCTIONS`]. The
- * span is the whole call -- name through closing parenthesis -- so a caller can
- * replace it wholesale instead of trying to edit inside a pair of brackets it has
- * not matched. Parentheses are counted rather than found by a pattern, because a
- * `)` inside a quoted argument closes nothing, and quotes are skipped so that
- * `url("...")` does not end at the first closing bracket in the string.
+ * span is the whole call — name through closing parenthesis — so a caller can
+ * replace it wholesale. Parentheses are counted, not matched: a `)` inside a quoted
+ * argument closes nothing, and quotes are skipped so `url("...")` does not end at
+ * the first bracket in the string.
  */
 function eachFetchCall(
   css: string,
   visit: (name: string, inner: string, start: number, end: number) => void,
 ): void {
-  // Runs on text `decodeCssEscapes` has already normalised, so a plain identifier
-  // match finds `url` where the source said `u\72l`.
+  // Runs on text `decodeCssEscapes` already normalised, so a plain identifier match
+  // finds `url` where the source said `u\72l`.
   const CALL = /(^|[^\w-])([a-zA-Z-][a-zA-Z0-9-]*)\s*\(/g;
 
   for (let match = CALL.exec(css); match !== null; match = CALL.exec(css)) {
     const name = match[2].toLowerCase();
     if (!CSS_FETCH_FUNCTIONS.has(name)) continue;
 
-    // Group 1 is one separator character or nothing, so the name begins right
-    // after it. Taking the parenthesis instead -- which is the obvious thing to do,
-    // and what the first version did -- rewrites `(args)` and leaves the name
+    // Group 1 is one separator character or nothing, so the name begins right after
+    // it. Taking the parenthesis instead rewrites `(args)` and leaves the name
     // behind: `url(...)` became `urlnone`.
     const nameStart = match.index + match[1].length;
     const open = match.index + match[0].length - 1;
@@ -548,8 +462,8 @@ function eachFetchCall(
     }
 
     if (depth !== 0) {
-      // Unterminated, so there is no closing bracket for a parser to find either and
-      // the rest of the declaration is inert. Cut from here to the end.
+      // Unterminated: no closing bracket for a parser either, so the rest is inert.
+      // Cut from here to the end.
       visit(name, css.slice(open + 1), nameStart, css.length);
       return;
     }
@@ -566,26 +480,23 @@ function cssCallTarget(inner: string): string {
 /**
  * The functions whose argument is a *list* of candidates rather than one address.
  *
- * `image-set("a.png" 1x, "b.png" 2x)` takes several, comma-separated. `url()` takes
- * exactly one, and the first version split on commas for both -- which turned
- * `url(data:image/png;base64,iVBOR)` into two candidates, decided the second half
- * was remote because it did not start with `data:`, and replaced a perfectly
- * inert inline image with `none`.
+ * `image-set("a.png" 1x, "b.png" 2x)` takes several, comma-separated; `url()` takes
+ * exactly one. Splitting on commas for both turned `url(data:image/png;base64,...)`
+ * into two candidates and replaced an inert inline image with `none`.
  */
 const CSS_LIST_FUNCTIONS = new Set(["image-set", "-webkit-image-set", "-moz-image-set"]);
 
 /**
  * Whether a fetch call's argument names something remote.
  *
- * A fragment names something in this document and a `data:` URI is bytes already
- * inside the message; neither involves anybody else, and both are kept.
+ * A fragment names something in this document and a `data:` URI is bytes already in
+ * the message; neither involves anybody else.
  */
 function cssTargetIsRemote(name: string, inner: string): boolean {
   const trimmed = inner.trim();
 
-  // A single quoted string is one address whatever else it contains, so it is not
-  // split even by a list-taking function: `url("a,b.png")` is a file called
-  // `a,b.png`.
+  // A quoted string is one address whatever it contains, so it is not split even by
+  // a list-taking function: `url("a,b.png")` is a file called `a,b.png`.
   const candidates =
     /^['"]/.test(trimmed) || !CSS_LIST_FUNCTIONS.has(name)
       ? [trimmed]
@@ -602,10 +513,9 @@ function cssTargetIsRemote(name: string, inner: string): boolean {
 /**
  * Whether a raw declaration names something remote, in any spelling.
  *
- * Asked of the *original* text and answered after escape decoding, so that
- * `u\72l(...)` and `image-set("...")` count as well as `url(...)` does. Used only
- * for the number in the reader's note, never to decide what gets emitted -- that is
- * the walk's job.
+ * Asked of the *original* text and answered after escape decoding, so `u\72l(...)`
+ * and `image-set("...")` count as well as `url(...)`. Used only for the reader's
+ * note, never to decide what is emitted — that is the walk's job.
  */
 function cssNamesRemote(raw: string): boolean {
   let found = false;
@@ -618,19 +528,16 @@ function cssNamesRemote(raw: string): boolean {
 /**
  * Declarations a sender is not allowed to set, whatever the browser accepts.
  *
- * `position: fixed` and `position: sticky` are the two that matter, and they are
- * the only ways for an element to leave the flow and attach to the viewport. A
- * message rendered into the app's own document could otherwise put a full-screen
- * `position: fixed; inset: 0` panel over the whole client -- a fake "your session
- * expired, sign in" screen, drawn by a stranger, on top of the real one.
- *
- * Mail does not use either. Not one message in any real corpus does, and a layout
- * that genuinely needs one was going to be wrong in a 400px pane anyway.
+ * `position: fixed` and `sticky` are the only ways for an element to leave the flow
+ * and attach to the viewport — so a message could otherwise put a full-screen
+ * `position: fixed; inset: 0` panel over the whole client, a fake "your session
+ * expired, sign in" screen drawn by a stranger on top of the real one. Mail does
+ * not use either, and a layout that needs one was wrong in a 400px pane anyway.
  */
 const FORBIDDEN_DECLARATIONS: readonly RegExp[] = [
   /\bposition\s*:\s*(?:fixed|sticky)\b/gi,
-  // A z-index only means something relative to a stacking context, and the message
-  // container establishes its own, but there is no reason to let a sender set one.
+  // The message container establishes its own stacking context, but there is no
+  // reason to let a sender set a z-index.
   /\bz-index\s*:/gi,
   // `@font-face` pulls a font file from a URL that need not be written as a `url()`.
   /@font-face/gi,
@@ -648,19 +555,16 @@ function stripForbiddenDeclarations(style: string): string {
  * Strip the ways CSS can fetch or execute something, substituting as it goes.
  *
  * **`rewrite` is the render proxy's hook, and it lives here rather than in a second
- * pass over the finished document for a specific reason.** The proxy's whole claim
- * is that the reader's browser never touches the sender's servers. A rewrite applied
- * afterwards still leaves a document that *contained* a remote `url()` for a moment,
- * and a second pass has to remember to cover every place one can appear -- the same
- * reason the counter in `html.ts` reads `<style>` blocks as well as attributes.
- * Substituting during the walk means a proxied document never holds a remote address
- * at all.
+ * pass over the finished document.** The proxy's claim is that the reader's browser
+ * never touches the sender's servers; a rewrite applied afterwards still leaves a
+ * document that *contained* a remote `url()` for a moment, and a second pass has to
+ * remember every place one can appear. Substituting during the walk means a proxied
+ * document never holds a remote address at all.
  *
- * Returns the CSS and the number of references it withheld, together, because the
- * count is the useful half and a caller left to derive it afterwards gets it wrong.
- * That is exactly the bug the first version of this function had: it rewrote a
- * withheld `url()` to `none` and then reported zero for a document that was still
- * fetching, which is the one direction of error that makes somebody stop checking.
+ * The CSS and the number of references withheld come back together, because a
+ * caller left to derive the count afterwards gets it wrong: rewriting a withheld
+ * `url()` to `none` and then reporting zero is the one direction of error that makes
+ * somebody stop checking.
  */
 export function sanitizeCssWithCount(
   css: string,
@@ -671,9 +575,8 @@ export function sanitizeCssWithCount(
   // Comments first: `expr/**/ession(` is a thing, and stripping rules before
   // comments can hide a keyword from the patterns below.
   let out = decodeCssEscapes(css.replace(/\/\*[\s\S]*?\*\//g, ""));
-  // And again after decoding: `\2f\2a` is `/*`, so a comment can be *spelled*
-  // in escapes and only exist once they are decoded. What is judged below is
-  // what is emitted, so it has to be stripped from the decoded text as well.
+  // And again after decoding: `\2f\2a` is `/*`, so a comment can be *spelled* in
+  // escapes and only exist once decoded.
   out = out.replace(/\/\*[\s\S]*?\*\//g, "");
 
   // At-rules that fetch, or that re-declare how the parser reads everything else.
@@ -681,10 +584,9 @@ export function sanitizeCssWithCount(
     .replace(/@import[^;{}]*;?/gi, "")
     .replace(/@charset[^;]*;?/gi, "")
     .replace(/@namespace[^;]*;?/gi, "")
-    // `@font-face` whose `src:` is a bare string rather than a `url()` is a fetch
-    // the walk below cannot see. Removing the block is simpler than finding the
-    // one spelling that would get past, and a message that ships no font is a
-    // message that renders in the reader's own.
+    // `@font-face` whose `src:` is a bare string rather than a `url()` is a fetch the
+    // walk below cannot see. Removing the block is simpler, and a message that ships
+    // no font renders in the reader's own.
     .replace(/@font-face\s*\{[^}]*\}/gi, "");
 
   /*
@@ -702,20 +604,16 @@ export function sanitizeCssWithCount(
     out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
   }
 
-  /*
-   * The remaining ways to execute: script in an old engine, and the two bindings
-   * that were the same idea in different browsers.
-   */
+  /* The remaining ways to execute: script in an old engine, and two browser-specific bindings. */
   out = out
     .replace(/expression\s*\(/gi, "noop(")
     .replace(/behaviou?r\s*:/gi, "-winnow-behavior:")
     .replace(/-moz-binding\s*:/gi, "-winnow-binding:")
     .replace(/javascript\s*:/gi, "-winnow-js:")
     /*
-     * And the belt to the braces above: a declaration still carrying a quoted
-     * string that names a scheme, or a protocol-relative path, is a fetch however
-     * it is spelled. Run on the *output* of the function walk, so a spelling the
-     * walk did not recognise still lands here.
+     * The belt to the braces above: a declaration carrying a quoted string that names
+     * a scheme, or a protocol-relative path, is a fetch however it is spelled. Run on
+     * the *output* of the walk, so a spelling it did not recognise still lands here.
      */
     .split(";")
     .filter((declaration) => !/['"][^'"]*(?::\/\/|\/\/)[^'"]*['"]/.test(declaration))
@@ -727,23 +625,18 @@ export function sanitizeCssWithCount(
 /**
  * Put back the two escapes that decoding must not let reach the output.
  *
- * Everything above judges the *decoded* text, which is right, and then emits it,
- * which is where the first version went wrong. Decoding is a change of meaning
- * in two places:
+ * Everything above judges the *decoded* text, then emits it, and decoding changes
+ * meaning in two places:
  *
- *   - `\3c /style\3e ` is inert inside a stylesheet and is a literal `</style>`
- *     once decoded. A sheet is re-homed into a `<style>` element, which is raw text
- *     that ends at the first `</style`, so emitting the decoded form ends the
- *     element and turns the rest of the sheet into markup -- an `<img>` that loads
- *     with images off, a `<meta http-equiv=refresh>`, whatever the sender wrote.
- *   - `\5c ` is a backslash. Decoded and emitted, it is a *new* escape for the
- *     browser to decode a second time, so `u\5c 72l(` reaches the walk as
- *     `u\72l(` -- not a fetch -- and reaches the browser as `url(`.
+ *   - `\3c /style\3e ` is inert inside a stylesheet but a literal `</style>` once
+ *     decoded. A sheet is re-homed into a `<style>` element, so emitting the decoded
+ *     form ends the element and turns the rest of the sheet into markup.
+ *   - `\5c ` is a backslash. Decoded and emitted it is a *new* escape, so `u\5c 72l(`
+ *     reaches the walk as `u\72l(` — not a fetch — and the browser as `url(`.
  *
- * Both are re-escaped, so the browser decodes exactly once and reads exactly what
- * was judged. `</` is the only sequence that can end a raw-text element and it is
- * never valid CSS outside a string, so `<` on its own is left for the media-query
- * range syntax that uses it.
+ * Both are re-escaped, so the browser decodes exactly once and reads what was
+ * judged. `</` is the only sequence that can end a raw-text element and is never
+ * valid CSS outside a string, so `<` on its own is left for media-query range syntax.
  */
 function encodeForEmission(css: string): string {
   return css.replace(/\\/g, "\\5c ").replace(/<\//g, "\\3c /");
@@ -757,13 +650,12 @@ export function sanitizeCss(css: string, rewrite?: ReadonlyMap<string, string>):
 /**
  * A `style` attribute, sanitised, or dropped.
  *
- * An attribute rather than a block, so there is no selector to reason about and
- * therefore no way for a sender's CSS to reach anything outside the element it is
- * written on. That is a real fidelity cost -- email CSS lives almost entirely in
- * `<style>` blocks -- and it is the cost that keeps a stylesheet out of the app's
- * document. See [`collectStyles`].
+ * An attribute rather than a block, so there is no selector and no way for a
+ * sender's CSS to reach outside the element it is written on. That is a real
+ * fidelity cost — email CSS lives almost entirely in `<style>` blocks — and it is
+ * what keeps a stylesheet out of the app's document. See [`collectStyles`].
  *
- * On top of that, every declaration a sender may not set is neutralised, so that a
+ * Every declaration a sender may not set is also neutralised, so a
  * `position: fixed` panel cannot leave the message's container. See
  * [`FORBIDDEN_DECLARATIONS`].
  */
@@ -780,12 +672,11 @@ function sanitizeStyleAttribute(
   /*
    * Withheld or not is decided by `allowRemote`, never by the walk's own count.
    *
-   * When the caller allowed remote content it is either keeping the reference or
-   * substituting it through `rewrite`, and both of those are the caller's decision
-   * rather than a refusal this function made, so nothing there is "blocked". When it
-   * did not, a named remote is blocked whether or not the walk recognised the
-   * spelling -- which is why the *original* is asked rather than the output, and why
-   * the question goes through `cssNamesRemote` rather than a pattern.
+   * When the caller allowed remote content it either keeps the reference or
+   * substitutes it through `rewrite` — the caller's decision, not a refusal, so
+   * nothing is "blocked". When it did not, a named remote is blocked whether or not
+   * the walk recognised the spelling, which is why the *original* is asked through
+   * `cssNamesRemote` rather than the output.
    */
   const namedRemote = cssNamesRemote(decodeEntities(raw));
   return { value: cleaned, blocked: namedRemote && !allowRemote ? 1 : 0 };
@@ -794,14 +685,11 @@ function sanitizeStyleAttribute(
 /**
  * Tags that a start tag implicitly closes.
  *
- * A browser does not require `</td>` before the next `<td>`, and HTML mail omits
- * it constantly — Outlook's generated markup is mostly unbalanced tables. The
- * unclosed cell then nests inside its predecessor, so a three-column layout comes
- * out as one column nested three deep, and a `<li>` run never becomes a list.
- *
- * So opening one of these closes any of the listed tags that are currently open.
- * Kept short and conservative: these are the pairs that occur in mail, and a
- * cleverer table would be a cleverer way to be wrong.
+ * A browser does not require `</td>` before the next `<td>`, and HTML mail omits it
+ * constantly — Outlook's generated markup is mostly unbalanced tables. An unclosed
+ * cell nests inside its predecessor, so a three-column layout arrives as one column
+ * nested three deep. Opening one of these closes any listed tag already open. Kept
+ * short and conservative: a cleverer table would be a cleverer way to be wrong.
  */
 const IMPLICITLY_CLOSES: Record<string, readonly string[]> = {
   td: ["td", "th"],
@@ -840,21 +728,14 @@ function escapeAttribute(value: string): string {
 /**
  * Escape text for the body of the document.
  *
- * **Decoding first is not optional.** The input is a raw slice of a message body, so
- * an `&amp;` in it is an ampersand the sender wrote, not the four characters
- * `&amp;` that the reader should see. Escaping without decoding turns
- * `Tom &amp; Jerry` into `Tom &amp;amp; Jerry`, which renders as `Tom &amp; Jerry` --
- * and essentially every newsletter contains one of these, so a sentence with two
- * ampersands in it loses both.
- *
- * The order is decode-then-escape and it does not work the other way round, which
- * is why this is one function rather than a decode at the call site: the two steps
- * have to happen together and in that order everywhere, and a call site that
- * remembered to escape but not to decode reads identically in review.
+ * **Decoding first is not optional.** The input is a raw slice of the message, so an
+ * `&amp;` in it is an ampersand the sender wrote. Escaping without decoding turns
+ * `Tom &amp; Jerry` into `Tom &amp;amp; Jerry`, and every newsletter contains one of
+ * these. The order is decode-then-escape, which is why this is one function: a call
+ * site that remembered to escape but not to decode reads identically in review.
  *
  * `decodeEntities` leaves anything it does not recognise alone, so a bare `&` in
- * "AT&T" survives the decode and is escaped on the way out, which is what a browser
- * does with it.
+ * "AT&T" survives the decode and is escaped on the way out, as a browser does.
  */
 function escapeText(value: string): string {
   return decodeEntities(value)
@@ -867,13 +748,13 @@ function escapeText(value: string): string {
  * Read a tag's attributes.
  *
  * `from` is just past the tag name. Returns the attributes and the index just past
- * the closing `>`, or `null` if the tag never closes — in which case the `<` is
- * not a tag at all and becomes text, which is what a browser does with it.
+ * the closing `>`, or `null` if the tag never closes — in which case the `<` becomes
+ * text, as a browser would.
  *
- * The scanner is character-wise rather than a regex because an attribute value
- * may contain `>`, and a pattern that stops at the first `>` mangles
- * `<a title="1 > 0">` into two tags. Quoted values are the only place a `>` is
- * allowed, so tracking one bit of "inside quotes" is sufficient and exact.
+ * Character-wise rather than a regex because an attribute value may contain `>`, and
+ * a pattern stopping at the first `>` mangles `<a title="1 > 0">` into two tags.
+ * Quoted values are the only place a `>` is allowed, so one bit of "inside quotes"
+ * is sufficient and exact.
  */
 function readAttributes(html: string, from: number): { attributes: Attribute[]; end: number; selfClosing: boolean } | null {
   const attributes: Attribute[] = [];
@@ -893,8 +774,8 @@ function readAttributes(html: string, from: number): { attributes: Attribute[]; 
       continue;
     }
 
-    // `/` before `>` is the self-closing marker. Anywhere else it is junk that a
-    // browser skips, and skipping it is what a browser does.
+    // `/` before `>` is the self-closing marker; anywhere else it is junk a browser
+    // skips.
     if (char === "/") {
       if (html[i + 1] === ">") {
         selfClosing = true;
@@ -909,8 +790,8 @@ function readAttributes(html: string, from: number): { attributes: Attribute[]; 
     const nameStart = i;
     while (i < html.length && !/[\s=/>]/.test(html[i])) i += 1;
     if (i === nameStart) {
-      // A character that is neither a name nor whitespace nor `>`: skip it rather
-      // than looping forever. Browsers do the same.
+      // Neither a name nor whitespace nor `>`: skip rather than loop forever, as a
+      // browser does.
       i += 1;
       continue;
     }
@@ -920,10 +801,8 @@ function readAttributes(html: string, from: number): { attributes: Attribute[]; 
     let j = i;
     while (j < html.length && /\s/.test(html[j])) j += 1;
     if (html[j] !== "=") {
-      // A bare attribute. `<td nowrap>` is the common one and it is meaningful to
-      // nobody; `<td bgcolor>` with no value is dropped below by the allowlist
-      // check on a missing value. Recorded as an empty value either way so the
-      // tag's shape survives.
+      // A bare attribute (`<td nowrap>`). Recorded as an empty value so the tag's
+      // shape survives; a value-less `<td bgcolor>` is dropped by the allowlist.
       attributes.push({ name, value: "" });
       continue;
     }
@@ -952,26 +831,21 @@ function readAttributes(html: string, from: number): { attributes: Attribute[]; 
 /**
  * Find the end of an element's contents.
  *
- * `nesting` counts same-name open elements so that `<div><div></div></div>`
- * closes at the *outer* `</div>`, which is what makes `<form>`-shaped and
- * `<blockquote>`-shaped markup terminate where the sender meant.
- *
+ * Same-name open elements are counted so `<div><div></div></div>` closes at the
+ * *outer* `</div>`, which makes nested markup terminate where the sender meant.
  * Returns the index just past the closing tag, or the document's length when the
- * element is never closed — which is the correct reading for an unterminated
- * `<script>`.
+ * element is never closed — the correct reading for an unterminated `<script>`.
  *
- * **`lower` is the document, lowercased once, rather than something derived here.**
- * It used to call `html.toLowerCase()` on every invocation, and this function runs
- * once per dropped element, so a body full of `<button>`s allocated and lowercased
- * the whole document once each: quadratic in the size of the message, on the path
- * every message takes. The copy is made once in `sanitizeMailHtml` and threaded
- * through, which also means the two indices here are guaranteed to line up.
+ * **`lower` is the document, lowercased once, rather than derived here.** Lowercasing
+ * per invocation made a body full of `<button>`s quadratic on the path every message
+ * takes; the copy is made once in `sanitizeMailHtml` and threaded through, which also
+ * guarantees the two indices line up.
  */
 function findElementEnd(html: string, lower: string, from: number, name: string): number {
   if (RAW_TEXT_TAGS.has(name)) {
-    // No markup is parsed inside these, so the first `</name` is the end. This is
-    // the whole reason raw-text elements are listed separately: hunting for a
-    // balanced `</script>` in script source finds the wrong one.
+    // No markup is parsed inside these, so the first `</name` is the end — the reason
+    // raw-text elements are listed separately: hunting a balanced `</script>` in
+    // script source finds the wrong one.
     const needle = `</${name}`;
     const at = lower.indexOf(needle, from);
     if (at === -1) return html.length;
@@ -1007,10 +881,9 @@ export type SanitizeOptions = {
   /**
    * May the result fetch anything over the network?
    *
-   * `false` is the app's default and is not a limitation — it is the answer the
-   * reader's image-consent promise requires. Withholding the reference and
-   * counting it is what makes "3 remote references were blocked" a fact about
-   * this message rather than a disclosure after the fact.
+   * `false` is the app's default and not a limitation — it is what the reader's
+   * image-consent promise requires. Withholding and counting is what makes "3
+   * remote references were blocked" a fact about this message.
    */
   allowRemote: boolean;
   /**
@@ -1023,21 +896,18 @@ export type SanitizeOptions = {
   /**
    * Keep the message's `<style>` blocks instead of dropping them.
    *
-   * `false` in the app, where a sender's stylesheet shares a document with the
-   * reader. `true` for the proxy, whose document contains nothing else. The
-   * blocks come back in [`SanitizedMail.stylesheets`] either way, sanitised, and
-   * the caller decides whether to use them.
+   * `false` in the app, where a sender's stylesheet would share the reader's
+   * document; `true` for the proxy, whose document contains nothing else. The
+   * blocks come back in [`SanitizedMail.stylesheets`] either way.
    */
   collectStyles?: boolean;
   /**
    * Addresses to substitute while sanitising. The render proxy's hook.
    *
-   * A remote address in this map is replaced with the path the proxy serves it
-   * from, and is *not* counted as blocked: it has already been fetched, by
-   * somebody other than the reader. Substitution happens inside the walk rather
-   * than in a pass over the finished document, so a proxied body never contains a
-   * remote address at all — not briefly, and not in a `<style>` block that a second
-   * pass would have had to remember to cover.
+   * A remote address in this map becomes the path the proxy serves it from and is
+   * *not* counted as blocked: it has already been fetched, by somebody other than
+   * the reader. Substitution happens inside the walk, so a proxied body never holds
+   * a remote address at all.
    */
   rewriteUrls?: ReadonlyMap<string, string>;
 };
@@ -1054,8 +924,8 @@ export type SanitizedMail = {
   /**
    * Whether the output hit [`MAX_OUTPUT`] and was cut short.
    *
-   * Reported rather than silent, because a truncated message that looks complete
-   * is the one failure mode here that produces no visible symptom.
+   * Reported rather than silent: a truncated message that looks complete produces no
+   * visible symptom.
    */
   truncated: boolean;
 };
@@ -1066,13 +936,12 @@ const DEFAULTS: SanitizeOptions = { allowRemote: false };
 /**
  * Turn a message body into markup that is safe to render in this document.
  *
- * The security contract, stated as a list so it can be checked against rather
- * than inferred:
+ * The security contract:
  *
  *   - no element outside the allowlist is rendered, and the ones dropped with
  *     their contents are dropped *with* their contents;
- *   - no attribute outside the allowlist survives, and every `on*` handler is
- *     gone because `on*` is not on any list;
+ *   - no attribute outside the allowlist survives, and every `on*` handler is gone
+ *     because `on*` is not on any list;
  *   - no `style` block reaches the output unless `collectStyles` asked for it, and
  *     a `style` attribute has had every fetch and every script removed;
  *   - no URL survives that is not `http`, `https`, `mailto`, `tel`, `sms`, `ftp`,
@@ -1080,23 +949,15 @@ const DEFAULTS: SanitizeOptions = { allowRemote: false };
  *   - no element is left open, so a sender's missing `</td>` cannot swallow the
  *     rest of the reader's document.
  *
- * What it does *not* claim: that the output is harmless as a standalone document,
- * or safe to render in the app's origin without the container's own CSS. It is
- * safe to render *as message content inside the reader's message container*,
- * which is what every caller does.
+ * It does *not* claim to be harmless as a standalone document: it is safe only *as
+ * message content inside the reader's message container*.
  */
 export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions> = {}): SanitizedMail {
   const settings = { ...DEFAULTS, ...options };
   const { allowRemote, inlineParts, rewriteUrls } = settings;
 
-  /*
-   * One lowercased copy of the body, for the element-boundary search.
-   *
-   * Matching a tag name has to be case-insensitive, and doing that per dropped
-   * element re-lowercased the whole document once each. A newsletter full of
-   * buttons or form controls is therefore quadratic in its own size, on the path
-   * every message takes, and the cost is paid before anything is rendered.
-   */
+  // One lowercased copy of the body, for the element-boundary search: lowercasing
+  // per dropped element made a newsletter full of buttons quadratic in its own size.
   const lower = html.toLowerCase();
 
   const out: string[] = [];
@@ -1140,28 +1001,24 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
 
     const next = html[lt + 1];
 
-    // Not a tag. A browser treats `<` followed by anything that cannot begin a
-    // name, an end tag, a comment or a declaration as literal text, and so does
-    // this — which is what keeps "a < b" readable instead of eating it.
+    // Not a tag: `<` followed by anything that cannot begin a name, end tag, comment
+    // or declaration is literal text, which keeps "a < b" readable.
     if (next === undefined || !/[a-zA-Z!/?]/.test(next)) {
       if (!write("&lt;")) break;
       i = lt + 1;
       continue;
     }
 
-    // Comment. All of them, including the conditional ones
-    // (`<!--[if mso]>…<![endif]-->`) whose contents are conditional markup for a
-    // client that no longer exists and whose comment syntax can hide a tag from a
-    // scanner that skips to `-->` naively.
+    // Comment, including the conditional ones (`<!--[if mso]>…<![endif]-->`), whose
+    // syntax can hide a tag from a scanner that skips to `-->` naively.
     if (html.startsWith("<!--", lt)) {
       const end = html.indexOf("-->", lt + 4);
       i = end === -1 ? html.length : end + 3;
       continue;
     }
 
-    // Doctype, CDATA, processing instruction. Dropped: none of them carry content,
-    // and a CDATA section in an HTML document is a parsing-mode confusion waiting
-    // to happen.
+    // Doctype, CDATA, processing instruction. Dropped: none carry content, and a
+    // CDATA section in HTML is a parsing-mode confusion waiting to happen.
     if (next === "!" || next === "?") {
       const end = html.indexOf(">", lt);
       i = end === -1 ? html.length : end + 1;
@@ -1178,10 +1035,9 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
       if (DROP_WITH_CONTENT.has(name) || !ALLOWED_TAGS.has(name)) continue;
 
       const at = open.lastIndexOf(name);
-      // Unbalanced markup: an end tag for something that is not open is dropped,
-      // and anything it *should* have closed is closed first, which is the
-      // browser's behaviour and the only reason a `</td>` with no `<td>` does not
-      // take the rest of the document with it.
+      // Unbalanced markup: an end tag for something not open is dropped, and anything
+      // it *should* have closed is closed first — the only reason a `</td>` with no
+      // `<td>` does not take the rest of the document with it.
       if (at === -1) continue;
       while (open.length > at) {
         const closing = open.pop()!;
@@ -1195,9 +1051,8 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
     const name = html.slice(lt + 1, lt + 1 + (nameEnd === -1 ? html.length : nameEnd)).toLowerCase();
     const parsed = readAttributes(html, lt + 1 + name.length);
 
-    // `<a href="x>y">` — a tag that never closes is not a tag. The `<` becomes
-    // text and scanning resumes from the character after it, so the `>` inside
-    // the attribute value is not then swallowed as a tag delimiter.
+    // A tag that never closes is not a tag: the `<` becomes text and scanning
+    // resumes after it, so the `>` inside the attribute value is not swallowed.
     if (parsed === null) {
       if (!write("&lt;")) break;
       i = lt + 1;
@@ -1218,41 +1073,36 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
 
     if (DROP_WITH_CONTENT.has(name)) {
       droppedElements += 1;
-      // A void element has no end tag to find, so the search would run to the end of
-      // the document and swallow the message with it. Skipping the tag is the whole
-      // correction; see `VOID_ELEMENTS`.
+      // A void element has no end tag, so the search would run to the end of the
+      // document and swallow the message. See `VOID_ELEMENTS`.
       if (!VOID_ELEMENTS.has(name)) i = findElementEnd(html, lower, i, name);
       continue;
     }
 
     if (UNWRAP.has(name)) {
-      // The envelope, and `font`/`center` from the era before CSS. The tag goes
-      // and its *contents stay*: scanning resumes at `i`, which is just past the
-      // start tag, so the body of a message that arrived as a full document —
-      // which is most HTML mail — is scanned rather than skipped. Treating this
-      // as "drop with contents" would empty the reader of exactly the messages
-      // the rich view exists to show.
+      // The envelope, and `font`/`center` from before CSS. The tag goes and its
+      // *contents stay* — scanning resumes just past the start tag — so a message
+      // that arrived as a full document is scanned rather than skipped.
       continue;
     }
 
     if (!ALLOWED_TAGS.has(name)) {
-      // Unknown, and not on the drop-with-content list. Its contents are kept,
-      // because an unrecognised element in mail is nearly always a wrapper
-      // (`<section>`, `<article>`, a vendor's `<v:roundrect>`) and throwing the
-      // contents away loses the message.
+      // Unknown, not on the drop-with-content list. Its contents are kept: an
+      // unrecognised element in mail is nearly always a wrapper (`<section>`,
+      // `<article>`, a vendor's `<v:roundrect>`).
       continue;
     }
 
     if (open.length >= MAX_DEPTH) {
-      // Too deep. Unwrapped rather than rendered, which keeps the text and drops
-      // the depth. No end tag is pushed, so nothing to balance later.
+      // Too deep. Unwrapped rather than rendered, keeping the text and dropping the
+      // depth; no end tag is pushed, so nothing to balance later.
       continue;
     }
 
     const attrs: string[] = [];
-    // Whether the anchor ended up with somewhere to go. The `target`/`rel` pair
-    // below is only emitted when it does, because `target="_blank"` on an
-    // element with no `href` is a decorative lie the click handler cannot honour.
+    // Whether the anchor ended up with somewhere to go; the `target`/`rel` pair below
+    // is only emitted when it did, because `target="_blank"` with no `href` is a
+    // decorative lie the click handler cannot honour.
     let href = false;
 
     for (const attribute of parsed.attributes) {
@@ -1260,8 +1110,7 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
         GLOBAL_ATTRS.has(attribute.name) ||
         TAG_ATTRS[name]?.has(attribute.name) === true;
 
-      // `on*` is not on any list, and an `xmlns` that renames the document's
-      // namespace is not on any list either.
+      // Neither `on*` nor an `xmlns` that renames the namespace is on any list.
       if (!allowed) continue;
 
       const value = attribute.value;
@@ -1280,13 +1129,11 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
           if (resolved.blocked) blockedRemote += 1;
           if (resolved.url) {
             attrs.push(`src="${escapeAttribute(resolved.url)}"`);
-            // Lazy, so a message with forty images does not open forty sockets
-            // before the reader has scrolled to any of them.
+            // Lazy, so forty images do not open forty sockets before any is seen.
             attrs.push('loading="lazy"', 'decoding="async"');
           } else if (resolved.blocked) {
-            // The element survives with its address kept in a data attribute. It
-            // renders as the placeholder the stylesheet draws, keeps its `alt`, and
-            // stays in the document so the reader can account for it.
+            // The element survives with its address in a data attribute, so it keeps
+            // its `alt` and the reader can account for it.
             attrs.push(`data-wn-blocked-src="${escapeAttribute(stripUrlNoise(decodeEntities(value)))}"`);
           }
           break;
@@ -1311,31 +1158,26 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
         }
         case "width":
         case "height": {
-          // A percentage is a *proportion*, and clamping one to `MAX_DIMENSION`
-          // would turn `width="100%"` into `width="4096px"` — which is how a
-          // message that fits becomes a message that does not. Only an absolute
-          // number is a dimension worth capping.
+          // A percentage is a *proportion*; clamping `width="100%"` to
+          // `MAX_DIMENSION` is how a message that fits becomes one that does not.
           if (/%$/.test(value.trim())) {
             attrs.push(`${attribute.name}="${escapeAttribute(value.trim())}"`);
             break;
           }
           const numeric = Number.parseInt(value, 10);
           if (Number.isFinite(numeric) && numeric > 0) {
-            // A dimension is clamped rather than dropped: the layout is usually
-            // still right at the clamped value, whereas a dropped `width` is
-            // always wrong.
+            // Clamped rather than dropped: the layout is usually still right, whereas
+            // a dropped `width` is always wrong.
             attrs.push(`${attribute.name}="${Math.min(numeric, MAX_DIMENSION)}"`);
           }
           break;
         }
         case "target":
         case "rel": {
-          // Both are ours to choose, and both are dropped whatever the sender
-          // wrote. A message's links open outside Winnow — the container's click
-          // handler routes them to the system browser, a different origin — so
-          // the message never gets a handle on this window. Emitted after the
-          // loop rather than here, because the sender may have put `rel` after
-          // `href` and an element may have had its `href` dropped entirely.
+          // Both are ours to choose and dropped whatever the sender wrote: links open
+          // in the system browser, so the message never gets a handle on this window.
+          // Emitted after the loop, because `rel` may follow `href` and the `href` may
+          // have been dropped entirely.
           break;
         }
         default: {
@@ -1354,14 +1196,8 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
       attrs.push('data-wn-code-block=""');
     }
 
-    // `name` on an anchor is a fragment target, not an id, and is harmless; but a
-    // duplicate `id` from a sender would collide with the app's own, so no `id` is
-    // on any list in the first place.
-
     // Implicit closing, before the element is pushed. A browser does not need
-    // `</td>` before the next `<td>`, and HTML mail omits it constantly; without
-    // this an unclosed cell nests inside its predecessor and a three-column
-    // layout arrives as one column three deep.
+    // `</td>` before the next `<td>`, and HTML mail omits it constantly.
     const closable = IMPLICITLY_CLOSES[name];
     if (closable) {
       while (open.length > 0 && closable.includes(open[open.length - 1])) {
@@ -1393,20 +1229,15 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
 /**
  * One rule, one job, kept as data so both consumers get the same thing.
  *
- * This was two copies of a stylesheet — one rooted at `body` for the standalone
- * document, one rooted at `[data-wn-email]` for the reader — and the pair had
- * every chance to drift, which is a defect this codebase has already paid for
- * twice with theme tokens that existed in the Tailwind config and not in
- * `theme.ts`. So there is one list, and [`emailDocumentCss`] and
- * [`inlineEmailCss`] are two serialisations of it.
+ * Two copies of a stylesheet — one rooted at `body`, one at `[data-wn-email]` — had
+ * every chance to drift, a defect this codebase has already paid for with theme
+ * tokens that existed in the Tailwind config and not in `theme.ts`. So there is one
+ * list, and [`emailDocumentCss`] and [`inlineEmailCss`] are two serialisations.
  *
- * **The container keeps a light surface in both themes, on purpose.** Winnow's
- * reader is dark in the dark scheme, and a message that inherited that would be a
- * white newsletter — `color: #333`, `background: #fff`, a blue hero — rendered in
- * dark-mode grey, which is unreadable. Gmail and Apple Mail both keep the message
- * on the sender's own surface and put chrome around it, and that is the correct
- * answer rather than a compromise: the message is the sender's document, and the
- * app's palette is the app's.
+ * **The container keeps a light surface in both themes, on purpose.** A white
+ * newsletter (`color: #333`, `background: #fff`) rendered in dark-mode grey is
+ * unreadable; like Gmail and Apple Mail, the message keeps the sender's own surface
+ * and the app puts chrome around it.
  */
 const CONTAINER = "--container";
 
@@ -1449,10 +1280,9 @@ const EMAIL_BASELINE_RULES: readonly Rule[] = [
   ],
   [
     "table",
-    // A wide message scrolls rather than being cut off — see the note in
-    // `MessageBody`. `max-width` alone cannot achieve that: an auto-layout table
-    // sizes itself to its contents, so a `max-width: 100%` whose percentage
-    // resolves against that same content width never binds.
+    // A wide message scrolls rather than being cut off (see `MessageBody`): an
+    // auto-layout table sizes to its contents, so a `max-width: 100%` resolving
+    // against that content width never binds.
     `max-width: 100%;`,
   ],
   ["td, th", `word-break: break-word; overflow-wrap: anywhere;`],
@@ -1478,15 +1308,13 @@ const EMAIL_BASELINE_RULES: readonly Rule[] = [
   ["li", `margin: 0.25em 0;`],
   [
     "div",
-    // Gmail puts every message in a `div` and Outlook's generated markup is
-    // mostly nested `div`s; without this a wrapper inherits the reader's font
-    // size and a message arrives as 11px chrome rather than as a message.
+    // Gmail wraps every message in a `div` and Outlook emits nested `div`s; without
+    // this a wrapper inherits the reader's font size and arrives as 11px chrome.
     `font-size: inherit;`,
   ],
-  // An image whose address was withheld. It stays in the document with its
-  // `alt`, so the reader can still account for it, and it is drawn so its
-  // absence is a visible gap rather than a silent one — which is the difference
-  // between "Winnow withheld this" and "this message has a gap in it".
+  // An image whose address was withheld. It stays with its `alt` so the reader can
+  // account for it, and is drawn so its absence is a visible gap rather than a
+  // silent one.
   [
     "img[data-wn-blocked-src]",
     `display: inline-block; min-width: 1.5em; min-height: 1.5em; max-width: 100%;
@@ -1497,20 +1325,17 @@ const EMAIL_BASELINE_RULES: readonly Rule[] = [
 /**
  * The attribute every container carries, in both forms.
  *
- * A hook for the stylesheet and for a test to find the message body by what it
- * *is*, and deliberately not a class: `class` collides with the sender's own
- * class names, which are arbitrary strings chosen by whoever built the message.
+ * A hook for the stylesheet and for tests, deliberately not a class: `class`
+ * collides with the sender's own arbitrary class names.
  */
 const CONTAINER_ATTRIBUTE = "data-wn-email";
 
 /**
  * Serialise the baseline, choosing what the container selector resolves to.
  *
- * Every part of a selector *list* is scoped, not just the first. `[data-wn-email]
- * h4, h5, h6` reads as "an `h4` inside a message, or any `h5` or `h6` on the
- * page" — so prefixing the list once would have left the reader's own headings
- * reachable from this stylesheet, which is the entire thing this function exists
- * to prevent. The test for it splits on commas for the same reason.
+ * Every part of a selector *list* is scoped, not just the first: `[data-wn-email]
+ * h4, h5, h6` would otherwise reach the reader's own headings, which is the whole
+ * thing this exists to prevent.
  */
 function serialiseBaseline(container: string): string {
   return EMAIL_BASELINE_RULES.map(([selector, declarations]) => {
@@ -1528,8 +1353,8 @@ function serialiseBaseline(container: string): string {
 /**
  * The baseline as a standalone stylesheet, for a document of its own.
  *
- * This is what the sandboxed frame and the render proxy both use, and it is what
- * `emailDocument` inlines into the frame it builds.
+ * What the sandboxed frame and the render proxy both use, and what `emailDocument`
+ * inlines.
  */
 export function emailDocumentCss(): string {
   return serialiseBaseline("body");
@@ -1538,14 +1363,11 @@ export function emailDocumentCss(): string {
 /**
  * The baseline as a scoped stylesheet, for rendering into the reader's document.
  *
- * Every selector is descended from `[data-wn-email]`, so not one rule here can
- * reach the reader's own chrome, and — the other half of the same guarantee — no
- * rule in the reader's stylesheet can restyle a message unless it also names that
- * attribute. Scoping by rewriting the selectors rather than by wrapping in `@media`
- * or a `ShadowRoot` is a deliberate choice: the media query would have to be
- * replicated for every width, and a shadow root would put the sender's markup in a
- * document that inherits nothing from the app, which is the *document* form's job
- * and not this one's.
+ * Every selector descends from `[data-wn-email]`, so no rule here can reach the
+ * reader's chrome and no reader rule can restyle a message without naming that
+ * attribute. Rewriting selectors rather than using `@media` or a `ShadowRoot` is
+ * deliberate: the query would need replicating per width, and a shadow root would
+ * inherit nothing from the app — the *document* form's job, not this one's.
  */
 export function inlineEmailCss(): string {
   return serialiseBaseline(`[${CONTAINER_ATTRIBUTE}]`);
@@ -1554,22 +1376,18 @@ export function inlineEmailCss(): string {
 /**
  * Build a complete, standalone document for a message.
  *
- * For the two places that need one: the reader's "Show as the sender wrote it",
- * which is a `sandbox=""` frame pointed at this, and the render proxy, which
- * serves this. The sender's own stylesheets come back from the sanitiser already
- * sanitised and are re-homed into this document's `<head>`, which is why keeping
- * them is safe here and dropping them is necessary there — the difference is
- * entirely whether the document contains anything else.
+ * For the reader's "Show as the sender wrote it" (`sandbox=""` frame) and the render
+ * proxy. The sender's stylesheets come back already sanitised and are re-homed here,
+ * which is safe because this document contains nothing else.
  */
 export function emailDocument(body: string, stylesheets: readonly string[] = []): string {
-  // `</` cannot end the element whatever the sheet contains. The sanitiser
-  // already escapes it; this is the backstop for a sheet that came from anywhere else.
+  // `</` cannot end the element whatever the sheet contains; the sanitiser already
+  // escapes it, so this is the backstop for a sheet from anywhere else.
   const sender = stylesheets.join("\n").trim().replace(/<\//g, "\\3c /");
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
-    // Without this the document claims a light surface it does not have, and a
-    // white newsletter renders as a white block on a black pane.
+    // Without this a white newsletter renders as a white block on a black pane.
     '<meta name="color-scheme" content="light">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     sender ? `<style>${sender}</style>` : "",

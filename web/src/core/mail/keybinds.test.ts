@@ -12,10 +12,8 @@ import {
 
 /**
  * Every command type `commandForKey` can produce, across every reachable context.
- *
- * Derived from the *router* rather than from the table, so this stays correct as
- * either side changes — and so a command that only exists in the `Command` union,
- * with no key that reaches it, fails here rather than in someone's hands.
+ * Derived from the *router*, not the table, so a command in the union that no key
+ * reaches fails here.
  */
 function reachableCommandTypes(): Set<string> {
   const types = new Set<string>();
@@ -51,10 +49,8 @@ function reachableCommandTypes(): Set<string> {
 
 /**
  * Every command type a single binding can produce, across reachable contexts.
- *
- * Probed through `commandForKey` rather than by calling `binding.command`
- * directly, because a binding that the router never reaches produces nothing in
- * the app — and calling it by hand would happily report one.
+ * Probed through `commandForKey`, so a binding the router never reaches reports
+ * nothing.
  */
 function commandTypesOf(binding: Binding): string[] {
   const types = new Set<string>();
@@ -78,12 +74,8 @@ function context(over: Partial<KeyContext> = {}): KeyContext {
 }
 
 /**
- * Every context a command can fire in.
- *
- * The cheat-sheet contract is checked against *all* of them rather than one
- * generous one, because a binding that only works in a state no user is ever in is
- * still a binding that does not work. This is the enumeration: the contexts the
- * table's guards actually branch on.
+ * Every context a command can fire in, checked against all of them: a binding that
+ * only works in a state no user is ever in is still a binding that does not work.
  */
 const REACHABLE_CONTEXTS: readonly KeyContext[] = [
   DEFAULT_CONTEXT,
@@ -118,9 +110,7 @@ describe("commandForKey — system modifiers", () => {
   });
 
   it("treats shift as noise, so Shift+J still selects", () => {
-    // Caps Lock and the numeric keypad are the same kind of noise. A user with
-    // caps on — or a filter picker where a digit is shift-produced — was getting
-    // nothing at all.
+    // Caps Lock and the numeric keypad are the same kind of noise.
     expect(commandForKey("j", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({
       type: "moveSelection",
       delta: 1,
@@ -183,8 +173,7 @@ describe("commandForKey — the shortcut sheet is modal", () => {
   });
 
   it("closes on Escape", () => {
-    // The generic Escape rule already does this; the sheet's own table has to as
-    // well, or `SHEET_BINDINGS` would be a second, driftable answer.
+    // The generic Escape rule already does this, but the sheet's own table must too.
     expect(commandForKey("Escape", sheet)).toEqual({ type: "dismissOverlay" });
   });
 });
@@ -201,8 +190,7 @@ describe("commandForKey — the mailbox palette is modal", () => {
   });
 
   it("swallows the canvas actions", () => {
-    // Not a preference: behind a palette, `e` must not archive the message the
-    // user is not looking at.
+    // Behind a palette, `e` must not archive the message the user is not looking at.
     for (const key of ["s", "e", "m", "u", "#"]) {
       expect(commandForKey(key, palette), key).toBeNull();
     }
@@ -215,15 +203,12 @@ describe("commandForKey — the mailbox palette is modal", () => {
   it("bounds-checks a digit against the rail length", () => {
     expect(commandForKey("1", palette)).toEqual({ type: "toggleFilter", railIndex: 0 });
     expect(commandForKey("3", palette)).toEqual({ type: "toggleFilter", railIndex: 2 });
-    // `4` is past the end: a rail with three pills has no fourth position, and
-    // acting on it would toggle an arbitrary filter.
+    // `4` is past the end of a three-pill rail.
     expect(commandForKey("4", palette)).toBeNull();
   });
 
   it("keeps Shift+1 for itself, so a digit never opens the palette", () => {
-    // The bug this pins: the palette's `!` row accepted a bare `1`, so pressing `1`
-    // with the palette open both toggled a filter *and* would have closed the
-    // palette — one keystroke with two answers, neither of them the obvious one.
+    // Pins that the palette's `!` row no longer accepts a bare `1`.
     const shifted = commandForKey("1", palette, { shiftKey: true });
     expect(shifted).toEqual({ type: "toggleNavigation" });
     expect(commandForKey("1", palette, { shiftKey: false })).toEqual({
@@ -240,8 +225,7 @@ describe("commandForKey — the canvas", () => {
   });
 
   it("scrolls instead of moving when a message is open", () => {
-    // With the reader open, the arrows belong to the reader. Moving the list
-    // underneath an open message is disorienting.
+    // With the reader open, the arrows belong to the reader.
     const open = context({ viewerOpen: true });
     expect(commandForKey("ArrowDown", open)).toEqual({ type: "scrollReader", delta: 1 });
     expect(commandForKey("ArrowUp", open)).toEqual({ type: "scrollReader", delta: -1 });
@@ -263,8 +247,7 @@ describe("commandForKey — the canvas", () => {
   });
 
   it("gates every action on having a target", () => {
-    // No target means no message, so `s` must not reach the store and act on
-    // whatever happened to be selected in another pane.
+    // No target means no message for these to act on.
     for (const key of ["s", "e", "m", "u", "#"]) {
       expect(commandForKey(key, DEFAULT_CONTEXT), key).toBeNull();
     }
@@ -276,18 +259,15 @@ describe("commandForKey — the canvas", () => {
   });
 
   it("forwards only when a message is open", () => {
-    // Forwarding needs a message to forward. Gating it on `viewerOpen` rather than
-    // on `hasActionTarget` is what keeps `f` from firing on a bare cursor: the
-    // cursor can exist with nothing highlighted.
+    // Gating on `viewerOpen` rather than `hasActionTarget` keeps `f` off a bare cursor.
     expect(commandForKey("f", DEFAULT_CONTEXT)).toBeNull();
     expect(commandForKey("f", context({ hasActionTarget: true }))).toBeNull();
     expect(commandForKey("f", context({ viewerOpen: true }))).toEqual({ type: "forward" });
   });
 
   it("marks the whole mailbox read only with shift", () => {
-    // The most destructive thing on the canvas, and the one with no undo. It gets
-    // a modifier precisely because `u` is already the read/unread toggle and a
-    // bare letter for "mark everything read" would be one mis-aimed keystroke.
+    // `u` is already read/unread; a bare letter for this would be one mis-aimed
+    // keystroke.
     expect(commandForKey("u", context({ hasActionTarget: true }))).toEqual({
       type: "toggleRead",
     });
@@ -298,8 +278,7 @@ describe("commandForKey — the canvas", () => {
   });
 
   it("always allows search, settings and the two overlays", () => {
-    // These are safe with or without a target: search and settings are not
-    // destructive, and the sheets are views.
+    // Safe with or without a target.
     expect(commandForKey("/", DEFAULT_CONTEXT)).toEqual({ type: "focusSearch" });
     expect(commandForKey(",", DEFAULT_CONTEXT)).toEqual({ type: "openSettings" });
     expect(commandForKey("?", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({
@@ -311,9 +290,7 @@ describe("commandForKey — the canvas", () => {
   });
 
   it("distinguishes `/` from `?` on a layout where both arrive as slash", () => {
-    // On a German or Nordic keyboard `?` *is* `/` with shift. If the two bindings
-    // could not tell shift apart, one of them would be unreachable on exactly the
-    // layouts that need it.
+    // On a German or Nordic keyboard `?` is `/` with shift.
     expect(commandForKey("/", DEFAULT_CONTEXT, { shiftKey: false })).toEqual({
       type: "focusSearch",
     });
@@ -323,9 +300,7 @@ describe("commandForKey — the canvas", () => {
   });
 
   it("reaches the palette on a layout where `!` is not Shift+1", () => {
-    // A French keyboard produces a bare `&` with no shift at all. Requiring shift
-    // would make the palette unreachable there, so the character is accepted on
-    // its own and only the *digit* 1 demands shift.
+    // A French keyboard produces a bare `&`; only the *digit* 1 demands shift.
     expect(commandForKey("&", DEFAULT_CONTEXT)).toEqual({ type: "toggleNavigation" });
     expect(commandForKey("1", context({ railCount: 9 }), { shiftKey: true })).toEqual({
       type: "toggleNavigation",
@@ -339,8 +314,7 @@ describe("commandForKey — the canvas", () => {
 
 describe("commandForKey — the composer", () => {
   it("closes on Escape rather than blurring a field nobody can see", () => {
-    // The composer's textarea is a text field, so the generic rule would blur it —
-    // which closes nothing, because the sheet is still up over it.
+    // The generic rule would blur the composer's textarea, closing nothing.
     const typing = context({ textEditing: true, composerOpen: true });
     expect(commandForKey("Escape", typing)).toEqual({ type: "closeComposer" });
     // …and still refuses to eat the letters being typed.
@@ -370,9 +344,7 @@ describe("commandForKey — digit keys", () => {
   });
 
   it("never toggle a filter for a shifted digit", () => {
-    // On a US layout `!` arrives as `event.key === "1"` with shift held. It must
-    // open the palette, never filter 1 — otherwise the palette and the rail
-    // fight over the same physical keypress.
+    // On a US layout `!` arrives as `1` with shift; it must open the palette.
     const shifted = commandForKey("1", context({ railCount: 9 }), { shiftKey: true });
     expect(shifted).toEqual({ type: "toggleNavigation" });
     expect(shifted).not.toEqual({ type: "toggleFilter", railIndex: 0 });
@@ -388,8 +360,7 @@ describe("commandForKey — digit keys", () => {
 
 describe("shouldSwallow", () => {
   it("consumes an unmatched key outside a text field", () => {
-    // Otherwise macOS beeps — the alert for "nothing handled this" — and a
-    // keyboard-first app beeping at you looks broken.
+    // Otherwise macOS beeps, which reads as broken in a keyboard-first app.
     expect(shouldSwallow(DEFAULT_CONTEXT, {})).toBe(true);
   });
 
@@ -398,8 +369,8 @@ describe("shouldSwallow", () => {
   });
 
   it("never consumes inside the composer", () => {
-    // The composer's own Escape is handled by `commandForKey`, so consuming here
-    // would double-prevent it and the sheet would never close.
+    // The composer's Escape is handled by `commandForKey`; swallowing here would
+    // double-prevent it.
     expect(shouldSwallow(context({ composerOpen: true }), {})).toBe(false);
   });
 
@@ -414,41 +385,31 @@ describe("shouldSwallow", () => {
   });
 
   /**
-   * The exemption that cost the app its entire keyboard tab order.
-   *
-   * `Tab` is unbound, so it reached the swallow and was consumed. Consuming Tab
-   * does not merely fail to beep — it cancels the browser's focus advance, so
-   * nothing in the app could be reached by Tab at all: every `focus-visible` ring
-   * in the codebase was a ring no user could see. Asserted here because the
-   * swallow is otherwise "consume everything unmatched", which is exactly the
-   * shape of rule that quietly swallows the one key it must not.
+   * The exemption that cost the app its entire keyboard tab order: Tab was unbound,
+   * reached the swallow, and was consumed — cancelling focus advance.
    */
   it("never consumes Tab, in either direction", () => {
     expect(shouldSwallow(DEFAULT_CONTEXT, { key: "Tab" })).toBe(false);
-    // Shift is not a system modifier — it types `⇧U` and `⇧1` — but it does not
-    // need to be, because `Shift+Tab` still arrives with `key === "Tab"`.
+    // Shift is not exempt, but `Shift+Tab` still arrives with `key === "Tab"`.
     expect(shouldSwallow(DEFAULT_CONTEXT, { key: "Tab", shiftKey: true })).toBe(false);
   });
 
   it("still consumes the keys either side of Tab", () => {
-    // The exemption is Tab and not "navigation keys", so that adding a binding
-    // later does not quietly widen the hole.
+    // The exemption is Tab, not "navigation keys".
     for (const key of ["ArrowDown", "ArrowUp", "Enter", "Space", "Escape"]) {
       expect(shouldSwallow(DEFAULT_CONTEXT, { key }), key).toBe(true);
     }
   });
 
   it("leaves Shift alone, because Shift types bindings", () => {
-    // The tempting fix — adding `shiftKey` to the system modifiers — would have
-    // cost `⇧U` and `⇧1`, so this pins the reason the exemption is keyed on `key`.
+    // Adding `shiftKey` to the system modifiers would cost `⇧U` and `⇧1`.
     expect(shouldSwallow(DEFAULT_CONTEXT, { key: "U", shiftKey: true })).toBe(true);
   });
 });
 
 describe("the cheat sheet", () => {
   it("has no duplicate key descriptions", () => {
-    // Two rows claiming the same key is the exact drift the sheet is supposed
-    // to prevent, since it is generated from the router.
+    // Two rows claiming the same key is the drift the sheet prevents.
     const seen = new Set<string>();
     for (const binding of BINDINGS) {
       expect(seen.has(binding.keys), `duplicate sheet entry: ${binding.keys}`).toBe(false);
@@ -457,14 +418,9 @@ describe("the cheat sheet", () => {
   });
 
   it("routes every key it advertises, in a context where it is meant to work", () => {
-    // Each advertised key must produce its advertised command, so the
-    // documentation cannot drift from the behaviour.
-    //
-    // The context is chosen per key rather than maximally generous, because a
-    // maximally generous context is not a real one: `o` is suppressed while the
-    // reader is open, and `r` only works with a message open. A test that forced
-    // everything on at once would be asserting a state no user is ever in, and
-    // would pass a binding that can never fire.
+    // Each advertised key must produce its advertised command. The context is
+    // chosen per key rather than maximally generous, because a maximally generous
+    // context is not a real one.
     const contexts: Record<string, KeyContext> = {
       // Opening needs a row highlighted, and the reader closed.
       o: context({ hasActionTarget: true, viewerOpen: false }),
@@ -475,7 +431,7 @@ describe("the cheat sheet", () => {
       // Replying and forwarding need the reader open.
       r: context({ viewerOpen: true, hasActionTarget: true }),
       f: context({ viewerOpen: true, hasActionTarget: true }),
-      // Escape closes the topmost layer; with only the reader open, that is it.
+      // Escape closes the topmost layer; only the reader is open.
       Escape: context({ viewerOpen: true, hasActionTarget: true }),
       // Digits need a rail to address.
       "1": context({ railCount: 9, hasActionTarget: true }),
@@ -483,8 +439,7 @@ describe("the cheat sheet", () => {
 
     for (const binding of BINDINGS) {
       for (const key of binding.matches.keys) {
-        // A row whose modifier is required has to be pressed with it, or the
-        // assertion would be testing a keystroke the binding rejects.
+        // Press a required modifier, or the assertion tests a rejected keystroke.
         const event =
           binding.matches.shift === true ? { shiftKey: true } : { shiftKey: false };
         const ctx = contexts[key] ?? context({ hasActionTarget: true, railCount: 9 });
@@ -495,10 +450,8 @@ describe("the cheat sheet", () => {
   });
 
   it("routes every command in the union to some key in some context", () => {
-    // The floor. A command nobody can produce is dead code wearing a type
-    // annotation, and it used to be invisible: `restore` sat in the union and in
-    // `App.tsx`'s switch for the whole life of the project with no binding
-    // anywhere that produced it.
+    // The floor: a command nobody can produce is dead code wearing a type
+    // annotation.
     const reachable = reachableCommandTypes();
     const expected: Command["type"][] = [
       "moveSelection",
@@ -530,17 +483,14 @@ describe("the cheat sheet", () => {
       expect(reachable.has(type), `no key produces "${type}"`).toBe(true);
     }
 
-    // And nothing produces a command outside that list, which catches a binding
-    // added for an action nobody wired up.
+    // Nothing produces a command outside that list either.
     for (const type of reachable) {
       expect(expected.includes(type as Command["type"]), `unhandled command: ${type}`).toBe(true);
     }
   });
 
   it("documents every action it can take, and nothing it cannot", () => {
-    // `BINDINGS` is the cheat sheet. A row may produce several commands — Escape
-    // alone covers four, and the arrows cover two — so this is a containment check
-    // rather than a bijection.
+    // A row may produce several commands, so this is a containment check.
     const reachable = reachableCommandTypes();
 
     for (const binding of BINDINGS) {
@@ -553,8 +503,7 @@ describe("the cheat sheet", () => {
       }
     }
 
-    // Every command with a sheet row of its own must name a printable key, since
-    // the sheet renders `keys` and the user reads it.
+    // The sheet renders `keys` and `help`, so neither may be blank.
     for (const binding of BINDINGS) {
       expect(binding.keys.trim(), "a sheet row with a blank key column").not.toBe("");
       expect(binding.help.trim(), `sheet row "${binding.keys}" has no description`).not.toBe("");
@@ -562,15 +511,10 @@ describe("the cheat sheet", () => {
   });
 
   it("lets no keystroke satisfy two rows that would both act on it", () => {
-    // The drift the sheet exists to prevent, checked as behaviour rather than as
-    // prose.
-    //
-    // Sharing a key *list* is fine and necessary — `?` and `/` are the same
-    // physical key on a German layout, and `1` is both a rail position and
-    // `Shift+1`. What must not happen is two rows that would each produce a
-    // command for one keystroke: the first silently wins, so the second is
-    // documentation of nothing, and reordering the table would silently change
-    // what a key does.
+    // Sharing a key *list* is fine — `?` and `/` are the same physical key, and `1`
+    // is both a rail position and `Shift+1`. What must not happen is two rows that
+    // would each produce a command for one keystroke: the first silently wins and
+    // the second documents nothing.
     const ambiguous: string[] = [];
 
     for (const ctx of REACHABLE_CONTEXTS) {

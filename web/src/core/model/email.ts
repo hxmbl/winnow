@@ -1,26 +1,15 @@
 /**
- * The vocabulary of a message.
- *
- * Every other module in `core/` speaks these types, so this file is the one
- * place a field gets added. The split is deliberate:
- *
- *   - `Email` is the *product* view: normalised, denormalised into the exact
- *     fields the classifier and the reader need, and safe to persist as-is.
- *   - `RawEmail` (in `gmail/dto.ts`) is the *wire* view: whatever Gmail
- *     returned. `gmail/mapper.ts` is the only thing that converts one to the
- *     other.
- *
- * That boundary is what lets a demo seed, a Gmail sync and a future IMAP
- * account all feed the same store.
+ * Message vocabulary types.
+ * Email = product view (normalised); RawEmail = wire view (gmail/dto.ts).
+ * gmail/mapper.ts converts between them.
  */
 
-/** Unix milliseconds. The single time unit in the whole app. */
+/** Unix milliseconds (app-wide). */
 export type Millis = number;
 
-/** Gmail's own message id. Stable across syncs; the cache keys on it. */
+/** Gmail message ID. */
 export type GmailId = string;
 
-/** Which mailbox a message is filed in. Mirrors the Swift `EmailMailbox`. */
 export type Mailbox = "inbox" | "archive" | "trash" | "spam";
 
 export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "trash", "spam"];
@@ -32,7 +21,7 @@ export const MAILBOX_LABEL: Record<Mailbox, string> = {
   spam: "Spam",
 };
 
-/** Message categories Gmail supplies. Only some affect classification. */
+/** Gmail categories. */
 export type EmailCategory =
   | "primary"
   | "social"
@@ -43,10 +32,7 @@ export type EmailCategory =
   | "receipts"
   | "newsletter";
 
-/**
- * Gmail's own category, mapped onto the coarser union the classifier reads.
- * Anything unrecognised falls back to `primary` rather than being dropped.
- */
+/** Maps Gmail category labels to internal union (fallback primary). */
 export const CATEGORY_MAP: Record<string, EmailCategory> = {
   CATEGORY_PRIMARY: "primary",
   CATEGORY_SOCIAL: "social",
@@ -58,60 +44,36 @@ export const CATEGORY_MAP: Record<string, EmailCategory> = {
   CATEGORY_NEWSLETTERS: "newsletter",
 };
 
-/**
- * An attachment's metadata. The bytes are fetched on demand — an inbox view
- * that preloaded every PDF would be unusable.
- */
+/** Attachment metadata (bytes fetched on demand). */
 export type Attachment = {
-  /** Gmail attachmentId; the handle used to download. */
+  /** Gmail attachmentId for download. */
   id: string;
-  /** MIME part path within the message, e.g. `1.2`. */
+  /** MIME part path, e.g. `1.2`. */
   partId: string;
   filename: string;
   mimeType: string;
-  /** Bytes, as reported by Gmail. */
+  /** Bytes (reported by Gmail). */
   size: number;
-  /**
-   * True for images the message inlines. Winnow strips them along with all
-   * other remote content by default, so they are kept for the "show remote
-   * content" escape hatch.
-   */
+  /** Inline images kept for "show remote content" escape hatch. */
   inline: boolean;
 };
 
-/** A reply, as composed in the composer. */
+/** Reply/composer draft. */
 export type Draft = {
   to: string[];
   cc: string[];
   bcc: string[];
   subject: string;
   body: string;
-  /** Gmail thread being replied to, for `In-Reply-To`/`References`. */
+  /** Gmail thread for `In-Reply-To`/`References`. */
   inReplyTo?: GmailId;
   threadId?: GmailId;
-  /**
- * The quote block Winnow pre-filled, kept so it can be stripped from the end
- * of the body if the user leaves it alone. See `core/reply.ts`.
- */
+  /** Prefilled quote block (see `core/reply.ts`). */
   quoteBlock?: string;
-  /**
-   * The text Winnow put in the body, before the user touched anything.
-   *
-   * Not the same thing as `quoteBlock`, and the distinction is what lets one question
-   * — "is there anything here the user wrote?" — be answered for both a reply and a
-   * forward. A reply's contribution is *empty*: the body is the quote, and anything
-   * above it is the user's. A forward's contribution is the whole conversation, because
-   * that text is meant to stay in the message the user sends.
-   *
-   * So the reply leaves this empty and the forward records its body. Comparing against
-   * it is the honest test for "discarding this loses nothing", which is what the
-   * composer's discard confirmation has to decide — and it is not "is the body
-   * empty", which a forward's body never is.
-   */
+  /** Prefilled body before user edits (comparison for discard confirmation). */
   prefilled?: string;
 };
 
-/** File names the composer should offer as an attachment picker. */
 export const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
   pdf: "application/pdf",
   png: "image/png",
@@ -131,72 +93,45 @@ export const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
   ics: "text/calendar",
 };
 
-/** Guess an attachment's type from its name, defaulting to opaque bytes. */
 export function mimeTypeForFilename(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? "application/octet-stream";
 }
 
 /**
- * A message, normalised.
- *
- * `id` is a numeric hash of the Gmail id — a stable, compact key for React and
- * for URL deep links. `gmailId` is the authority; `id` is derived from it, so
- * the two can never disagree.
+ * Normalised message.
+ * id = numeric hash of Gmail id (React/URL key). gmailId = authority.
  */
 export type Email = {
   id: number;
   gmailId: GmailId;
-  /** Absent for a single message with no thread. */
+  /** Absent for single-message threads. */
   threadId?: GmailId;
-  /**
-   * The RFC 822 `Message-ID`, verbatim, angle brackets and all.
-   *
-   * Absent on the demo seed and on any row cached by an older build, so every
-   * consumer needs a fallback. It is here because a reply's `In-Reply-To` and
-   * `References` have to name the *real* ids of the conversation: synthesised ones
-   * thread correctly inside Gmail — which matches on its own thread id — and in
-   * nobody else's client, where the reply lands as a new conversation.
-   */
+  /** RFC 822 Message-ID (may be absent in demo/cached older builds). */
   messageId?: string;
-  /**
-   * The envelope sender: the bare address from `From:`. This is the join key
-   * for sender pills, trash bias and engagement ranking, so it is deliberately
-   * the *address* and not the display name — two people at one company, or one
-   * person across an alias, must not split into two senders.
-   */
+  /** Envelope sender (bare address). Join key for sender grouping. */
   sender: string;
-  /**
-   * The address as it appeared in the header, when that differs from
-   * `sender`. Almost always the same value; kept separate so a message that
-   * arrived via a forwarding service keeps its original `From:` for display
-   * while still being attributed to the envelope sender for ranking.
-   */
+  /** Original header address if different from sender. */
   address?: string;
-  /** Display name from the header, if the sender supplied a usable one. */
+  /** Header display name. */
   name?: string;
-  /** Where the message was filed. */
   mailbox: Mailbox;
   receivedAt: Millis;
   subject: string;
-  /** Plain text. Always present, even when the message was HTML-only. */
+  /** Plain text (always present). */
   body: string;
-  /** Original HTML, kept for the reader's rich view. */
+  /** Original HTML. */
   bodyHtml?: string;
   category: EmailCategory;
   starred: boolean;
   unread: boolean;
   attachments: Attachment[];
-  /** Gmail's per-message spam score, 0–100, when available. */
+  /** Gmail spam score 0-100, if available. */
   spamScore?: number;
-  /**
-   * True when the sender or Gmail marked the message urgent. Bypasses the
-   * keyword test for urgency — a person flagged it, so trust them.
-   */
+  /** Person/Gmail marked urgent (bypasses keyword test). */
   urgent: boolean;
 };
 
-/** What a sender looks like to the user. The reader and list must agree. */
 export function displayName(email: Email): string {
   const name = email.name?.trim();
   if (name) return name;
@@ -204,24 +139,16 @@ export function displayName(email: Email): string {
   return local || email.sender;
 }
 
-/** The full address, for the reader's byline. */
 export function displayAddress(email: Email): string {
   return email.address ?? email.sender;
 }
 
-/**
- * A single-cap monogram for the avatar.
- *
- * Deliberately the *first* character rather than two initials: with a 40px
- * circle, "Ada Lovelace" as "AL" competes with the name next to it, while "A"
- * reads as an avatar at a glance.
- */
+/** Single-cap monogram for avatar (first char only). */
 export function monogram(email: Email): string {
   const source = displayName(email).trim();
   return (source[0] ?? "?").toUpperCase();
 }
 
-/** Everything the type layer needs to narrow an untrusted value. */
 export function isMailbox(value: unknown): value is Mailbox {
   return typeof value === "string" && (MAILBOXES as readonly string[]).includes(value);
 }

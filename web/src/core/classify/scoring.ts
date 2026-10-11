@@ -1,14 +1,9 @@
 /**
- * The "Smart Score" sort.
+ * The "Smart Score" sort: one 0–100 number per message, used only for ordering.
  *
- * A single 0–100 number per message, used only for ordering. It is
- * deliberately *not* the importance score: importance is the learnable engine
- * whose weights the user tunes, and if sorting were driven by it, then every
- * slider drag would silently reorder the inbox. This one is fixed, so the sort
- * stays stable while the tuning moves underneath it.
- *
- * The two do share `senderRankBonus`, so they agree about *who* matters even
- * though they disagree about *how much* each signal is worth.
+ * Deliberately *not* the importance score — importance is the learnable engine, and
+ * sorting by it would reorder the inbox on every slider drag. This one is fixed, and
+ * the two share `senderRankBonus`, so they agree about *who* matters, not *how much*.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Classification/Scoring.swift`.
  */
@@ -22,10 +17,9 @@ import { senderRankBonus } from "./classify";
 /**
  * Intent tells and what each contributes.
  *
- * Kept separate from the `heuristics` keyword tables on purpose. Those drive
- * the learnable importance engine; these fix the sort. They overlap in spirit
- * but not in tokens — merging them would make the sort wobble whenever a
- * weight changed.
+ * Separate from the `heuristics` keyword tables on purpose: those drive the
+ * learnable importance engine, these fix the sort, so merging them would make the
+ * sort wobble whenever a weight changed.
  */
 const INTENT_PATTERNS: readonly { pattern: RegExp; weight: number }[] = [
   { pattern: compile("\\b(?:security|password|2fa|breach|unauthorized|suspicious|login attempt)\\b"), weight: 15 },
@@ -43,12 +37,11 @@ const INTENT_PATTERNS: readonly { pattern: RegExp; weight: number }[] = [
 export const MAX_RECENCY_BONUS = 3;
 
 /**
- * The age window a score is computed against: the span of the messages being
- * scored.
+ * The age window a score is computed against: the span of the messages being scored.
  *
- * Relative on purpose. "New" has to mean *new relative to this inbox* — if it
- * were relative to the wall clock, the same inbox would sort differently
- * tomorrow and the sort would be impossible to reason about while triaging.
+ * Relative on purpose — if it were relative to the wall clock, the same inbox would
+ * sort differently tomorrow and the sort would be impossible to reason about while
+ * triaging.
  */
 export type ScoreRecencyContext = {
   oldestReceivedAt: number;
@@ -67,12 +60,11 @@ export function recencyWindow(timestamps: readonly number[]): ScoreRecencyContex
 }
 
 /**
- * Up to `MAX_RECENCY_BONUS` points, interpolated across the scored set's age
- * span: the newest message gets all of it, the oldest gets none.
+ * Up to `MAX_RECENCY_BONUS` points, interpolated across the scored set's age span:
+ * the newest message gets all of it, the oldest none.
  *
  * Messages outside the window clamp to its edges, and a degenerate window (one
- * timestamp, or all identical) yields 0 — there is nothing to prioritise
- * against, so the nudge is simply absent rather than arbitrary.
+ * timestamp, or all identical) yields 0 — there is nothing to prioritise against.
  */
 export function relativeRecencyBonus(
   receivedAt: number,

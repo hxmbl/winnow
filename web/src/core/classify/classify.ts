@@ -1,15 +1,9 @@
 /**
  * The classifier: one message in, one set of signals out.
  *
- * Pure and synchronous. The same message and profile always produce the same
- * signals, which is what makes a cached classification valid across restarts
- * and what makes the tests below worth having.
- *
- * The shape of the function is: compute every signal, then compute spam
- * likelihood from a mix of hard tells (empty subject, phishing phrasing) and
- * soft ones (trash bias, bulk-mail overlap), then fold both into an importance
- * score. Spam is computed *before* importance because importance has to pay
- * for it — that ordering is the whole design.
+ * Pure and synchronous, so a cached classification stays valid across restarts.
+ * Spam likelihood is computed before importance — importance has to pay for it,
+ * and that ordering is the whole design.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Classification/Classifier.swift`.
  */
@@ -48,10 +42,9 @@ export const LONG_READ_WORDS = 250;
 /**
  * Subject + body only, lowercased.
  *
- * The sender is deliberately excluded. A mailbox called `newsletter@…` is not
- * a newsletter, and `billing@…` is not a bill — matching the address would
- * make classification a function of who you are rather than what was said.
- * Search *does* include the sender; see `inboxSearchBag`.
+ * The sender is deliberately excluded: a mailbox called `newsletter@…` is not a
+ * newsletter, and `billing@…` is not a bill, so classification is about what was
+ * said rather than who said it. Search *does* include the sender; see `inboxSearchBag`.
  */
 export function contentBag(email: Email): string {
   return `${email.subject} ${email.body}`.toLowerCase();
@@ -70,33 +63,23 @@ export function inboxSearchBag(email: Email): string {
 /**
  * True when the message arrived from a social platform's address.
  *
- * **Host-suffix matching, not substring.** `line.includes(domain)` read
- * `notlinkedin.com.evil.example` and `linkedin.com.attacker.test` as LinkedIn,
- * because both contain `linkedin.com`. The signal is a claim about who sent the
- * mail, and a phisher controls the entire domain right of the registrable name —
- * so a substring test here lets anyone claim any platform by writing its name into
- * their own hostname, which is precisely the confusion the `social` bucket exists
- * to prevent.
+ * **Host-suffix matching, not substring.** A host matches when it *is* the domain
+ * or ends with `.<domain>`, admitting `mail.linkedin.com` and rejecting
+ * `notlinkedin.com` and `linkedin.com.evil.example`. A substring test lets anyone
+ * claim any platform by writing its name into their own hostname — exactly the
+ * confusion the `social` bucket exists to prevent. The `local@host` part is taken
+ * explicitly so a display address with no `@` — `LinkedIn <notifications>`, which
+ * several of these send — is still judged on its host.
  *
- * A host matches when it *is* the domain or ends with `.<domain>`, which admits
- * `www.linkedin.com`, `mail.linkedin.com` and any other subdomain a platform
- * legitimately sends from, and rejects `notlinkedin.com` and
- * `linkedin.com.evil.example`. The address is compared with the `local@host` part
- * taken explicitly rather than by looking for an `@`, because a display address
- * with no `@` in it — `LinkedIn <notifications>`, which is what several of these
- * send — should still be judged on its host and not silently treated as a miss.
- *
- * Punycode is not decoded here: `xn--` hosts arrive already in ASCII from the
- * envelope, and an internationalised hostname cannot match an ASCII table anyway.
+ * Punycode is not decoded: `xn--` hosts arrive already in ASCII from the envelope,
+ * and an internationalised hostname cannot match an ASCII table anyway.
  */
 export function matchesSocialDomain(email: Email): boolean {
   const lines = [email.sender, email.address ?? ""];
   return lines.some((line) => {
     const at = line.lastIndexOf("@");
-    // A display name in angle brackets — `LinkedIn <notifications@linkedin.com>` —
-    // leaves the host followed by `>`, and a bare domain can carry a trailing dot.
-    // Stripped before comparing, or the legitimate form misses and only the bare
-    // one works, which is backwards.
+    // A display name leaves the host followed by `>`, and a bare domain can carry a
+    // trailing dot; both are stripped before comparing, or the legitimate form misses.
     const tail = (at >= 0 ? line.slice(at + 1) : line.split(/\s+/).pop() ?? "")
       .trim()
       // Everything a display name or an RFC 5322 comment can leave behind.
@@ -111,12 +94,9 @@ export function matchesSocialDomain(email: Email): boolean {
 }
 
 /**
- * Engagement bonus, as a fraction of the top-sender boost.
- *
- * Tier 0 gets all of it, tier 1 two thirds, tier 2 one third, everyone else
- * nothing. Shared by the importance and smart-score formulas so the two agree
- * about who matters — they used to disagree, and a message could be Important
- * while scoring poorly on Smart Score.
+ * Engagement bonus, as a fraction of the top-sender boost: tier 0 gets all of it,
+ * tier 1 two thirds, tier 2 one third, everyone else nothing. Shared by the
+ * importance and smart-score formulas so the two agree about who matters.
  */
 export function senderRankBonus(
   profile: UserProfile,
@@ -212,17 +192,14 @@ export function classifyEmail(
   if (phishingRegex.test(actionText)) spamLikelihood += 0.3;
   else if (clickHereRegex.test(actionText)) spamLikelihood += 0.08;
 
-  // Coercion is scored on top of the phishing test, not inside it. That test is
-  // binary, so a message that already matched "verify your password" gained
-  // nothing from also threatening to delete the account — which is exactly the
-  // message that should score highest. Coercion is the ingredient that separates
-  // a clumsy real notice from a campaign, so it carries its own weight and is
-  // additive.
+  // Coercion is scored on top of the binary phishing test, which gave a message
+  // that already matched "verify your password" nothing for also threatening to
+  // delete the account — exactly the message that should score highest. It is the
+  // ingredient that separates a clumsy real notice from a campaign.
   //
-  // Capped at 0.45 rather than summed freely: two coercive phrasings in one
-  // message should not be worth more than the threshold on their own plus a
-  // little, or a long, earnest, urgent-but-real letter about an expiring
-  // document would tip over into unsafe on volume of worry alone.
+  // Capped at 0.45: two coercive phrasings should not be worth more than the
+  // threshold on their own, or a long, earnest, urgent-but-real letter about an
+  // expiring document would tip over into unsafe on volume of worry alone.
   if (coercionRegex.test(actionText)) spamLikelihood += 0.45;
 
   const spamHits = spamKeywords.count(text);
@@ -272,10 +249,8 @@ export function classifyEmail(
 }
 
 /**
- * Classify a batch, returning a map keyed by the UI id.
- *
- * The map is what the list, the rail ranking and the badges all read, so
- * classification happens once per inbox rather than once per render.
+ * Classify a batch, keyed by the UI id — what the list, rail ranking and badges all
+ * read, so classification happens once per inbox rather than once per render.
  */
 export type SignalMap = ReadonlyMap<number, EmailSignals>;
 

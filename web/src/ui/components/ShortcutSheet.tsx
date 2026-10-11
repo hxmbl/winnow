@@ -1,20 +1,9 @@
 /**
  * The keyboard cheat sheet.
  *
- * Rendered from `BINDINGS`, the same array the router reads. That is the whole point:
- * the previous version maintained this list by hand and it had already drifted from the
- * code, which is how a shortcut sheet becomes a small lie — and when the router became
- * table-driven, `,` and `⇧U` had been working in the app for weeks without appearing
- * here. A binding cannot exist without a row now, and a test asserts both directions:
- * every row resolves, and every command is documented by some row or is one of Escape's
- * targets.
- *
- * The modal behaviour — focus in, focus trapped, focus restored, Escape closes — comes
- * from `Overlay`, which is shared with the settings panel and the composer. Each of
- * those had its own incomplete version.
- *
- * `380px` wide, `pane` radius, monospaced key chips — it is an overlay, not a page, and
- * it should read as something summoned rather than navigated to.
+ * Rendered from `BINDINGS`, the same array the router reads, so it cannot become the
+ * small lie a hand-maintained list does; a test asserts every row resolves and every
+ * command is documented. Modal behaviour comes from `Overlay`.
  */
 
 import { BINDINGS } from "../../core/mail/keybinds";

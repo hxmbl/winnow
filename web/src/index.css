@@ -2,12 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/*
- * The app owns the whole viewport — there is no page to scroll, only panes.
- * `overscroll-behavior` stops a trackpad gesture that reaches the end of a pane
- * from then scrolling the window behind it, which in a Tauri window means the
- * whole app shifting under the user's fingers.
- */
 html,
 body,
 #root {
@@ -22,26 +16,14 @@ body {
   font-family: theme("fontFamily.sans");
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* A mail client is open for hours. Selecting text is for the *message*, not
-     for the chrome, so it is off globally and re-enabled where it matters. */
   user-select: none;
 }
 
-/* Selection is for content the user might want to copy. */
 .selectable {
   user-select: text;
 }
 
 @layer components {
-  /*
-   * The scrollbar.
-   *
-   * Six pixels, and only for the reader and the list. A wide scrollbar eats the
-   * gutter that carries the layout's whole sense of depth, and an always-visible
-   * one competes with the content. `scrollbar-width` is the standard property;
-   * the WebKit block is the fallback, and the two are written together because
-   * neither browser implements both.
-   */
   .thin-scroll {
     scrollbar-width: thin;
     scrollbar-color: var(--wn-scrollbar, rgba(0, 0, 0, 0.2)) transparent;
@@ -61,8 +43,6 @@ body {
     border-radius: 999px;
   }
 
-  /* The pill strip hides its scrollbar entirely: a partially-visible row of
-     pills with a scrollbar under it reads as a broken carousel. */
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -72,19 +52,6 @@ body {
     display: none;
   }
 
-  /*
-   * The weight sliders.
-   *
-   * `appearance-none` is what makes the thumb and the track drawable here at all,
-   * and it has one consequence worth stating: it also switches `accent-color` off.
-   * So a range with only a background renders as an empty grey bar with a thumb
-   * floating on it, and every value looks the same until you read the number.
-   * `--wn-range-fill` is set by the caller as a percentage, and the gradient turns
-   * that into the filled part.
-   *
-   * The thumb is styled for both engines because neither implements both
-   * pseudo-elements, the same reason `.thin-scroll` above is written twice.
-   */
   .wn-range {
     background: linear-gradient(
       to right,
@@ -99,8 +66,6 @@ body {
     height: 14px;
     border-radius: 999px;
     background: var(--wn-inkBody);
-    /* A ring in the panel's own colour, so the thumb reads as sitting *on* the
-       track rather than as a dark lump in a grey bar. */
     border: 2px solid var(--wn-chrome);
     box-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
   }
@@ -119,19 +84,6 @@ body {
     outline-offset: 4px;
   }
 
-  /*
-   * A scroller that says it scrolls.
-   *
-   * Two `background-attachment: local` layers over two `scroll` ones: the local
-   * pair is pinned to the content and scrolls away with it, the fixed pair to the
-   * box, so whichever edge has content past it is the edge showing a shadow.
-   * That is why it needs no JavaScript, no scroll listener and no state — the
-   * same reason `background-attachment` is what this is built from rather than
-   * two absolutely-positioned elements toggled on `onScroll`.
-   *
-   * The shadows are on the panel's own colour, because that is what is behind
-   * them: an opaque sheet sitting on a scrim.
-   */
   .scroll-shadow {
     background-image:
       linear-gradient(var(--wn-chrome) 30%, rgb(0 0 0 / 0)),
@@ -153,60 +105,11 @@ body {
   }
 }
 
-/*
- * Focus rings, drawn with `outline` rather than `box-shadow`.
- *
- * Every control in this app carries `focus-visible:outline-none
- * focus-visible:ring-2 focus-visible:ring-focus-ring`. The first utility deliberately
- * blanks the outline so the second can draw the ring — and on eight controls in the
- * filter rail the second one produced nothing at all, leaving `outline-color` at
- * `transparent` and `box-shadow` at `none`. Those eight had no visible focus
- * indication whatsoever. A screenshot of a restyled element would never show it and
- * neither would `title` or `aria`; only a pixel diff between a focused and a blurred
- * pill does, and the focused pill was byte-identical to the blurred one in both
- * schemes.
- *
- * The cause is that `ring-2` composes `box-shadow` out of three custom properties,
- * and the chain does not reliably resolve. It cannot be repaired from the class
- * list: `shadow-pane` happened to rescue two controls sitting beside the broken ones,
- * removing every other candidate class rescued nothing, and rewriting the declaration
- * by hand — in a stylesheet or inline — made the identical value compute correctly,
- * so the value is sound and the composition around it is what fails.
- *
- * So the outline that `outline-none` blanks is filled back in here, and nothing else
- * is touched. `box-shadow` is deliberately left alone: where the ring composition
- * works it keeps working, and where a control also carries `shadow-pane` or
- * `shadow-lift` its own elevation is not thrown away for the length of a focus.
- *
- * It wins on specificity, not on order, and that is deliberate. The selector matches
- * both halves of the pair the codebase ships everywhere —
- * `focus-visible:outline-none focus-visible:ring-2` — which is (0,3,0) against
- * Tailwind's (0,2,0), so the utilities cannot out-specify it wherever they land in the
- * file. Two things that did *not* work are worth recording, because both look right:
- *
- *   - Wrapping this in `@layer focus` and declaring that layer last. Tailwind v3 emits
- *     its utilities as plain unlayered CSS, and unlayered rules beat every layer
- *     regardless of specificity or position, so the layer guaranteed a loss.
- *   - Relying on being later in the file at equal specificity. Position after a
- *     Tailwind build is not something source order gets to promise.
- *
- * `outline` is also the right property on its own terms — it follows the element's
- * border radius, it is what `.wn-range:focus-visible` above already does, and it
- * carries no custom-property chain that can fail to resolve.
- */
 .focus-visible\:outline-none.focus-visible\:ring-2:focus-visible {
   outline: 2px solid var(--wn-focusRing);
   outline-offset: 2px;
 }
 
-/*
- * Respect the OS setting.
- *
- * Not a nicety: this is a keyboard-first app, and a user who has asked the
- * system to reduce motion is telling us that animation is costing them
- * something. The transitions here are the "this content is new" cue, and they
- * are not worth failing that preference over.
- */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

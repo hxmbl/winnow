@@ -1,18 +1,12 @@
 /**
- * Tunable signal weights.
- *
- * These are the numbers the user can move and the learning loop nudges. The
- * defaults reproduce the hand-tuned constants exactly, so a fresh install
- * behaves like a tuned one; every adjustment from there is explicit.
+ * Tunable signal weights — the numbers the user moves and the learning loop nudges.
  *
  * Two properties are load-bearing:
  *
- *   - **Clamped ranges.** A runaway feedback loop, or a slider dragged past
- *     its stop, must not be able to invert or explode a signal's influence.
- *     `SIGNAL_KEYS` owns the range so `setWeight` cannot skip the clamp.
- *   - **Integer values.** The Swift pipeline truncated to `Int` at each step;
- *     matching that keeps scores comparable with the old implementation and
- *     keeps rounding from accumulating across a dozen additions.
+ *   - **Clamped ranges.** `SIGNAL_KEYS` owns the range so `setWeight` cannot skip
+ *     the clamp; a runaway loop must not invert or explode a signal's influence.
+ *   - **Integer values.** Matching the Swift pipeline's per-step truncation keeps
+ *     scores comparable and stops rounding accumulating across a dozen additions.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Learning/SignalWeights.swift`.
  */
@@ -157,8 +151,8 @@ export function clampWeight(key: SignalKey, value: number): number {
 /**
  * How far a weight has drifted from its default, for the "learned" badges.
  *
- * The drift is signed on purpose: it answers "is this one tuned above or below
- * where Winnow shipped it", and a bare absolute value would hide which way.
+ * Signed on purpose: it answers "is this tuned above or below where Winnow shipped
+ * it", and a bare absolute value would hide which way.
  */
 export function adjustment(weights: SignalWeights, key: SignalKey): number {
   return weights[key] - signalMeta(key).defaultValue;
@@ -168,8 +162,7 @@ export function adjustment(weights: SignalWeights, key: SignalKey): number {
  * Weights that move *against* the message being important.
  *
  * The learning loop needs this to know which way to nudge: starring mail that
- * carries a penalty signal means the penalty was too harsh, so the penalty
- * should shrink, not grow.
+ * carries a penalty signal means the penalty was too harsh, so it should shrink.
  */
 export function isPenalty(key: SignalKey): boolean {
   return (

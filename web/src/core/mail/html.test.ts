@@ -1,16 +1,8 @@
 /**
  * Reading a message's HTML safely, and counting what it would have fetched.
  *
- * `html.ts` is where the reader's privacy posture lives, so its arithmetic is worth
- * testing directly. The second half of this file is about `countRemoteReferences`,
- * and the reason it needs its own file is that the number it produces is a *claim to
- * the user* rather than a formatting detail: "3 remote references were blocked" says
- * what Winnow declined to fetch on their behalf.
- *
- * A false reassurance is worse than silence there. A message whose count includes its
- * own inline logo and its background colours tells somebody who has decided to trust
- * this client with their inbox that nothing was blocked — and that is exactly the
- * moment they stop checking.
+ * The counter's number is a claim to the user, so its precision matters: a false
+ * reassurance that nothing was blocked is worse than silence.
  */
 
 import { describe, expect, it } from "vitest";
@@ -30,14 +22,12 @@ describe("countRemoteReferences", () => {
   });
 
   it("does not count an inline data: image", () => {
-    // Bytes already in the message. Counting it told the user something was blocked
-    // when nothing left their machine.
+    // Bytes already in the message; nothing left the machine.
     expect(countRemoteReferences('<img src="data:image/png;base64,iVBORw0KGgo=">')).toBe(0);
   });
 
   it("does not count a background colour", () => {
-    // The single most common false positive in mail HTML. `background` is an attribute
-    // that carries both a colour and a URL, and only one of those is a request.
+    // `background` carries a colour or a URL; only the URL is a request.
     expect(countRemoteReferences('<td background="#ffffff">')).toBe(0);
     expect(countRemoteReferences('<td background="red">')).toBe(0);
     expect(countRemoteReferences('<body style="background: #ffffff">')).toBe(0);
@@ -67,8 +57,7 @@ describe("countRemoteReferences", () => {
   });
 
   it("is not confused by a srcset with several candidates", () => {
-    // One request set, and the number the user reads should not be three times the
-    // thing they would see load.
+    // srcset is one request set, not one per candidate.
     expect(remoteReferences('<img srcset="https://a.example/1x.png 1x">')).toEqual([
       "https://a.example/1x.png 1x",
     ]);
@@ -80,19 +69,15 @@ describe("countRemoteReferences", () => {
   });
 
   it("does not count the strings a message merely mentions", () => {
-    // A plain-text message quoting an HTML snippet is text, and a mail client that
-    // counted `<img src=…>` inside a code sample would announce a tracking pixel that
-    // was never going to load.
+    // Quoted HTML in text is text, not a tracking pixel.
     expect(
       countRemoteReferences('<pre>&lt;img src="https://x.example/p.gif"&gt;</pre>'),
     ).toBe(0);
   });
 
   /**
-   * The regression this exists for, stated as one number.
-   *
-   * A newsletter with an inline logo and a tinted table used to report three blocked
-   * references while fetching nothing.
+   * The regression this exists for: a decorative newsletter used to report three
+   * blocked references while fetching nothing.
    */
   it("does not inflate the note for a decorative newsletter body", () => {
     const newsletter =
@@ -103,11 +88,8 @@ describe("countRemoteReferences", () => {
   });
 
   /**
-   * And it must not under-report either.
-   *
-   * The same care in the other direction: a single tracking pixel is the case the
-   * note exists for, and a counter that misses it is the bug the feature was added to
-   * fix.
+   * And it must not under-report either: a lone tracking pixel is the case the
+   * note exists for.
    */
   it("does not miss a lone tracking pixel", () => {
     expect(countRemoteReferences('<img width="1" height="1" src="https://x.example/p.gif">')).toBe(
@@ -129,15 +111,8 @@ describe("countRemoteReferences", () => {
   });
 });
 /**
- * A `<style>` block is the other half of the counter, and it was missing.
- *
- * The cases above pin the false positives — `data:` URIs, `background="#fff"`, a
- * newsletter quoting an `<img>` snippet — and the direction that matters most for
- * a privacy claim is the opposite one. A counter that under-reports says "nothing
- * was blocked", and somebody who reads that stops checking. Modern mail keeps its
- * layout in a `<style>` block and its font imports, sprite sheets and tracking
- * scripts with it, so a counter that only read attributes reported zero for
- * precisely the messages that fetch the most.
+ * `<style>` blocks are the other half of the counter; without them a message that
+ * fetches the most reports zero.
  */
 describe("remote references inside a <style> block", () => {
   it("counts a font import", () => {
@@ -150,9 +125,8 @@ describe("remote references inside a <style> block", () => {
   });
 
   it("counts an import once, not once per spelling of it", () => {
-    // `@import url(x)` matches both the import pattern and the `url()` pattern, so
-    // a naive double scan reports 2 for one font. A counter that double-counts is
-    // the same class of lie as one that under-counts.
+    // `@import url(x)` matches both patterns; a double-count is the same class of
+    // lie as an under-count.
     expect(countRemoteReferences("<style>@import url(https://x.example/f.css);</style>")).toBe(1);
   });
 
@@ -176,8 +150,7 @@ describe("remote references inside a <style> block", () => {
   });
 
   it("does not count the word url() inside a quoted snippet in the body text", () => {
-    // The escaped-HTML case the attribute scan already guards, on the other side
-    // of it: a newsletter explaining its own unsubscribe link quotes a stylesheet.
+    // Escaped HTML in the text is text, not a stylesheet.
     const html = "<pre>&lt;style&gt;a{background:url(https://x.example/a.png)}&lt;/style&gt;</pre>";
     expect(countRemoteReferences(html)).toBe(0);
   });

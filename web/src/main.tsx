@@ -1,22 +1,18 @@
 /**
  * The entry point.
  *
- * Almost nothing happens here, and that is deliberate. It reads the platform,
- * asks the OS what it can do, restores what the last session persisted, and
- * renders. The product is in `core/`, the pixels are in `ui/`, and this file's only
- * job is to connect them to whichever host it was loaded by.
+ * Reads the platform, asks the OS what it can do, restores what the last session
+ * persisted, and renders. The product is in `core/`, the pixels are in `ui/`, and this
+ * file's only job is to connect them to whichever host loaded it.
  *
- * The one decision worth stating: the app renders *immediately*, in demo mode,
- * before any network call. A mail client that shows a spinner on launch is a mail
- * client that cannot be opened offline, and the classification — the whole product —
- * is something the user should be able to see the moment they open the app. If a
- * Gmail session exists it is adopted in the background and the mailbox replaces the
- * demo.
+ * The app renders *immediately*, in demo mode, before any network call: a mail client
+ * that shows a spinner on launch cannot be opened offline, and the classification is
+ * something the user should see the moment they open the app. A Gmail session, if one
+ * exists, is adopted in the background and replaces the demo.
  *
- * And the demo is not a dead end: the mailbox offers "Connect Gmail" from it, which
- * is the only route to sign-in on a fresh install. The app boots with
- * `status: "ready"` and no backend, so it never shows the sign-in screen first — and
- * without that button, sign-in was unreachable until you had already signed in.
+ * The demo is not a dead end: it offers "Connect Gmail", the only route to sign-in on a
+ * fresh install, since the app boots `ready` with no backend and never shows the sign-in
+ * screen first.
  */
 
 import { StrictMode } from "react";
@@ -38,14 +34,8 @@ if (!container) throw new Error("no #root element to mount into");
 /**
  * Persistence keys.
  *
- * One object so the write path and the read path cannot drift — which they had:
- * `persist` wrote four keys and `restore` read one, so the learning model, the
- * active filters and the last mailbox were all saved to `localStorage` on every
- * change and never read back. A user who tuned the weights over a fortnight came
- * back to a factory-fresh classifier every morning, with nothing to indicate it.
- *
- * Versioned per key, because these are four independent blobs and only some of them
- * gain fields.
+ * One object so the write path and the read path cannot drift. Versioned per key,
+ * because these are independent blobs and only some of them gain fields.
  */
 const STORAGE_KEYS = {
   preferences: "winnow.preferences.v1",
@@ -58,11 +48,10 @@ const STORAGE_KEYS = {
 /**
  * Read one key, or `null` for anything unusable.
  *
- * Every read is individually guarded rather than the whole restore being wrapped in
- * one `try`: a corrupt *learning* snapshot is no reason to also lose the user's
- * appearance, their sort order, and their blocked-sender list. Storage being
- * unavailable — private mode, a full quota — lands here too, and returns `null` for
- * every key, which is the correct answer for all five.
+ * Each read is individually guarded rather than wrapping the whole restore in one
+ * `try`: a corrupt *learning* snapshot is no reason to also lose the user's appearance,
+ * sort order, and blocked-sender list. Storage being unavailable — private mode, a full
+ * quota — lands here too.
  */
 function read<T>(key: string, revive: (raw: unknown) => T | null): T | null {
   try {
@@ -79,8 +68,7 @@ function write(key: string, value: unknown): void {
     globalThis.localStorage?.setItem(key, JSON.stringify(value));
   } catch {
     // A full quota or a private-mode browser throws here. The app keeps working from
-    // memory; only the *next* launch loses the settings, which is a much better
-    // failure than an exception during a star toggle.
+    // memory; only the *next* launch loses the settings.
   }
 }
 
@@ -111,13 +99,9 @@ function revivePreferences(raw: unknown): Partial<Preferences> | null {
     out.appearance = source.appearance;
   }
   /*
-   * The image policy, with the old boolean read as a migration rather than dropped.
-   *
-   * A previous version stored `loadRemoteContent: boolean`. Someone who had turned
-   * it on means it, and silently resetting them to "never" would be a small privacy
-   * regression in the wrong direction — while resetting them to "ask" would quietly
-   * re-prompt somebody who had already answered. `true` maps to `always` and
-   * `false` to `never`, which is exactly what each setting meant.
+   * The image policy, with the old boolean read as a migration rather than dropped:
+   * `true` maps to `always` and `false` to `never`, which is exactly what each setting
+   * meant. Resetting someone who had already answered would be wrong in either direction.
    */
   if (source.imagePolicy === "ask" || source.imagePolicy === "always" || source.imagePolicy === "never") {
     out.imagePolicy = source.imagePolicy;
@@ -145,18 +129,16 @@ function revivePreferences(raw: unknown): Partial<Preferences> | null {
 /**
  * What the last session persisted, or `null` for a first run.
  *
- * Five independent reads, each guarded on its own — see `read`. The result is passed
- * to `store.restoreState` rather than applied key by key, so the store derives once
- * against a fully-restored world instead of reclassifying the mailbox three times on
- * the way there.
+ * Five independent reads, each guarded on its own — see `read`. Passed to
+ * `store.restoreState` whole rather than applied key by key, so the store derives once
+ * against a fully-restored world.
  */
 function loadPersisted(): PersistedState {
   return {
     preferences: read(STORAGE_KEYS.preferences, revivePreferences) ?? undefined,
-    // Round-tripped through the store's own `filterKey`, rather than a second
-    // spelling written here. The persisted form is a string; the in-memory form is a
-    // `FilterId`; and the function that maps between them lives in exactly one place
-    // in `core`, which is the only place it can be kept correct.
+    // Round-tripped through the store's own `filterKey` rather than a second spelling
+    // written here: the mapping between the persisted string and the in-memory `FilterId`
+    // lives in exactly one place in `core`.
     activeFilters: read(STORAGE_KEYS.filters, (raw) =>
       Array.isArray(raw)
         ? raw
@@ -183,9 +165,9 @@ type PersistedState = {
 /**
  * The store, seeded with the demo mailbox and restored from the last session.
  *
- * `attach` breaks the construction cycle: the session bridge needs the store, and
- * the store needs the session's backend. Neither is built here — the bridge is
- * created inside `App` on mount, once the platform has been read.
+ * `attach` breaks the construction cycle: the session bridge needs the store and the
+ * store needs the session's backend, so neither is built here — the bridge is created
+ * inside `App` on mount.
  */
 const persisted = loadPersisted();
 
@@ -195,10 +177,9 @@ const store = new WinnowStore({
   // The seed is built around this instant, so the list's day sections are computed
   // against it. Live mail replaces it with the wall clock on connect.
   now: DEMO_NOW,
-  // Preferences go through the constructor rather than `restoreState`, because they
-  // are part of the initial state: a store constructed with the demo seed and then
-  // told to use dark mode has to render dark on its first paint, not flash light and
-  // correct itself a frame later.
+  // Preferences go through the constructor rather than `restoreState` because they are
+  // part of the initial state: a store built with the demo seed and then told to use dark
+  // mode must render dark on first paint, not flash light and correct a frame later.
   preferences: persisted.preferences,
 });
 
@@ -208,14 +189,11 @@ store.restoreState(persisted);
 /**
  * Persist whatever the store says changed.
  *
- * Only the keys present in the patch are written, and each is written whole. The
- * subtlety is that `preferences` arrives as a *partial* — `{ blockedSenders: [...] }`
- * from a block action — so writing the patch verbatim would replace the stored
- * preferences object with that one field, silently reverting appearance, sort order
- * and everything else on the next launch. That is what happened: hiding one spammer
- * from the reader's button and reloading reset the entire settings panel.
- *
- * So a partial preferences patch is merged into what is stored.
+ * Only the keys present in the patch are written, each whole. The subtlety is that
+ * `preferences` arrives as a *partial* — `{ blockedSenders: [...] }` from a block
+ * action — so writing it verbatim would replace the stored preferences with that one
+ * field, silently reverting appearance and sort order on the next launch. So a partial
+ * preferences patch is merged into what is stored.
  */
 function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): void {
   if (patch.preferences) {
@@ -231,11 +209,10 @@ function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): 
 /**
  * The platform bridge.
  *
- * `notifyNewMail`, `setUnreadBadge` and `setBackgroundSync` are what the store calls
- * — it holds product state and asks the OS to reflect it. `openExternal` and
- * `saveAttachment` are *not* on this bridge: both are one-shot reads a component
- * performs directly, and routing them through the store would mean reaching past it
- * for a non-mutation. They were declared on `PlatformBridge` and never called.
+ * `notifyNewMail`, `setUnreadBadge` and `setBackgroundSync` are what the store calls:
+ * it holds product state and asks the OS to reflect it. `openExternal` and
+ * `saveAttachment` are *not* here — both are one-shot reads a component performs
+ * directly, and routing them through the store would mean reaching past it.
  */
 const platformBridge = {
   notifyNewMail: async (emails: readonly { id: number; sender: string; name?: string; subject: string }[]) => {
@@ -261,14 +238,9 @@ const platformBridge = {
 /**
  * Ask the OS what this build can do, then wire everything that depends on knowing.
  *
- * `info()` is best-effort. The wiring below used to live inside this callback with no
- * `.catch`, so a rejection left the store with *no* platform bridge at all: no
- * notifications, no badge, no background sync, no tray, no deep links — and, because
- * `onPersist` is wired in the same block, no persistence either. Every preference
- * silently stopped being saved, with nothing on screen to say so.
- *
- * `App` renders the same `null` while the answer is in flight as it does when the
- * answer never comes, which is the honest reading: a build that cannot report its
+ * `info()` is best-effort: a rejection here must not leave the store with no platform
+ * bridge *and* no persistence (both are wired in the block below). `App` treats an
+ * in-flight answer and a missing one the same — a build that cannot report its
  * capabilities is a build with none of the extras.
  */
 void platform
@@ -280,15 +252,13 @@ void platform
   .then(() => {
     store.attach({ platform: platformBridge, onPersist: persist });
 
-    // The background ticker. Registered here rather than in `App` because it is not
-    // UI: a tick means "check the account", and the store already knows how.
-    // Subscribing once at startup also means a tick that fires while the user is on
-    // the sign-in screen is not silently dropped.
+    // The background ticker. Registered here rather than in `App` because it is not UI:
+    // a tick means "check the account", and the store already knows how. Subscribing once
+    // at startup also means a tick that fires on the sign-in screen is not silently
+    // dropped.
     //
-    // The unsubscribe is kept and released on `pagehide`. The desktop listener holds
-    // a closure over the store for the life of the process, and `desktop.ts`
-    // documents that a leaked listener is what it avoids internally — so the caller
-    // should not leak it too.
+    // The unsubscribe is released on `pagehide`: the desktop listener holds a closure
+    // over the store for the life of the process, so the caller should not leak it.
     const unlistenTick = platform.onBackgroundTick(() => {
       void store.refresh();
     });
@@ -335,9 +305,9 @@ function wireDesktopEvents(): void {
   // why the default arm is a deliberate no-op rather than a guess.
   const unlistenTray = desktopPlatformExtras.onTrayAction((action) => {
     switch (action) {
-      // `open` is handled entirely in Rust (`tray::reveal`), so it is never emitted
-      // on macOS, where the tray menu has no such item. The arm is kept so a future
-      // platform that does emit it behaves, and `tray.rs`'s comment points here.
+      // `open` is handled entirely in Rust (`tray::reveal`) and never emitted on macOS,
+      // where the tray menu has no such item. The arm is kept so a platform that does
+      // emit it behaves; `tray.rs` points here.
       case "open":
         void platform.focusWindow();
         break;

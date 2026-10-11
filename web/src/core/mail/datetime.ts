@@ -1,20 +1,13 @@
 /**
  * Time, formatted.
  *
- * Two questions get answered, and they need different strings:
+ * `formatRowTime` answers "when did this land?" for a list row: a clock time
+ * inside Today, a date beyond, decided by the day bucket. `formatFullTime` is
+ * the same unambiguously, in the reader.
  *
- *   - `formatRowTime`  — "when did this land?" while scanning a list. The
- *     useful answer depends on how far back you are: inside Today a clock time
- *     is all you need, but repeating "10:42 AM" down a section of last month
- *     says nothing. So the *day bucket* decides, and the section header is the
- *     only thing that has to reason about dates.
- *   - `formatFullTime` — the same, unambiguously, in the reader.
- *
- * Everything is built from calendar fields rather than by dividing local
- * midnights, so a daylight-saving shift between two dates cannot round the
- * difference to the wrong whole day. And `now` is always a parameter: the demo
- * seed passes its own reference instant, and the sync engine passes the real
- * clock, so neither depends on a hidden `Date.now()`.
+ * Days are counted from calendar fields rather than by dividing local midnights,
+ * so a DST shift cannot round the difference to the wrong day. `now` is always a
+ * parameter, never a hidden `Date.now()`.
  */
 
 export type DayBucket = "today" | "yesterday" | "week" | "earlier";
@@ -48,8 +41,8 @@ const FORMAT_OPTS: Record<FormatterKey, Intl.DateTimeFormatOptions> = {
 
 /**
  * `Intl.DateTimeFormat` is expensive to construct — roughly an order of
- * magnitude more than to use — and these are called per list row per render.
- * One instance per format, for the session.
+ * magnitude more than to use — and these run per list row per render. One
+ * instance per format, for the session.
  */
 const formatters = new Map<FormatterKey, Intl.DateTimeFormat>();
 
@@ -64,8 +57,8 @@ function formatterFor(key: FormatterKey): Intl.DateTimeFormat {
 
 /**
  * Formatting is a pure function of the timestamp, so a list re-rendering on
- * hover reuses every string. Capped, and cleared wholesale rather than
- * evicted one-by-one: at this size a full rebuild is cheaper than the bookkeeping.
+ * hover reuses every string. Cleared wholesale rather than evicted one-by-one:
+ * at this size a full rebuild is cheaper than the bookkeeping.
  */
 const cache = new Map<string, string>();
 const CACHE_LIMIT = 4096;
@@ -95,9 +88,7 @@ export function formatFullTime(receivedAtMs: number): string {
 /**
  * The reader's absolute timestamp, and the reply attribution.
  *
- * The Swift implementation formatted this with `dateStyle: .medium` and
- * `timeStyle: .short`, which is the same thing — the attribution line is
- * supposed to read like the header of the message it quotes.
+ * The attribution should read like the header of the message it quotes.
  */
 export function formatListTime(receivedAtMs: number): string {
   return memo(`l${receivedAtMs}`, () => formatterFor("list").format(receivedAtMs));
@@ -106,9 +97,9 @@ export function formatListTime(receivedAtMs: number): string {
 /**
  * Whole local calendar days between two instants.
  *
- * Built from the date fields and re-based on UTC, so a 23- or 25-hour DST day
- * still counts as exactly one day. Dividing by `DAY_MS` would drift by an hour
- * twice a year and mislabel a message as "Yesterday".
+ * Re-based on UTC, so a 23- or 25-hour DST day still counts as exactly one day;
+ * dividing by `DAY_MS` would drift by an hour twice a year and mislabel a message
+ * as "Yesterday".
  */
 function dayIndex(ms: number): number {
   const date = new Date(ms);
@@ -133,21 +124,17 @@ export type DaySection<T> = {
    *
    * Keying on the *bucket name* is a bug rather than a shortcut: sections are runs
    * of adjacent rows, so any list that is not chronological repeats a bucket and
-   * every repeat collides. It cost six `Encountered two children with the same
-   * key` errors a second on Smart Score, and React documents what it does with
-   * duplicate keys as undefined.
+   * every repeat collides.
    */
   key: string;
   /**
    * The header text, or `null` when there is no header.
    *
-   * A day header is a claim about adjacency: "everything above this arrived
-   * today". Only a date-sorted list can make that claim. Sorted by score or
-   * sender the days interleave, and the list read `Today / This week / Today /
-   * This week` — four headers, none of them true, hiding a list with nothing in
-   * it. So a non-chronological list gets one unlabelled section: the rows still
-   * carry their own bucket, which is what `formatRowTime` needs to decide between
-   * "10:42" and "Mar 3", so nothing is lost but the noise.
+   * A day header claims adjacency — "everything above this arrived today" — which
+   * only a date-sorted list can assert. Sorted by score or sender the days
+   * interleave, so a non-chronological list gets one unlabelled section; the rows
+   * still carry their own bucket, which is what `formatRowTime` needs to choose
+   * between "10:42" and "Mar 3".
    */
   label: string | null;
   rows: Dated<T>[];
@@ -156,14 +143,13 @@ export type DaySection<T> = {
 /**
  * Split a displayed list into labelled day runs — or into one unlabelled run.
  *
- * The date comes from `receivedAt` rather than from a field, because the list's
- * rows are *threads*: the date a section must label is the representative
- * message's, because that is the date the row itself prints.
+ * The date comes from `receivedAt` rather than from a field, because the rows are
+ * *threads*: the section labels the representative message's date, the one the
+ * row itself prints.
  *
  * `byDate` is required rather than defaulted: it is the one fact this function
- * cannot infer, because a caller's order may be chronological by accident rather
- * than by construction, and a default of `true` would turn that accident back
- * into the bug this exists to prevent.
+ * cannot infer, and a default of `true` would turn a chronological-by-accident
+ * caller back into the bug this exists to prevent.
  *
  * Consecutive rows sharing a bucket merge, so a filtered list that skips a day
  * never shows an empty section header.

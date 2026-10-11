@@ -1,33 +1,23 @@
 /**
  * The navigation drawer.
  *
- * What the logo opens. It replaces the permanent mailbox menu of four pills, and it
- * is a drawer rather than a sidebar for the reason `NavigationPalette` is an overlay:
- * a folder rail permanently spends ~200px of a full-window reading surface on four
- * destinations the user visits deliberately rather than continuously.
+ * What the logo opens. A drawer rather than a sidebar for the reason `NavigationPalette`
+ * is an overlay: a permanent folder rail spends ~200px of a full-window reading surface
+ * on four destinations the user visits deliberately rather than continuously.
  *
- * **It is a surface of the window, not a component in it.** The panel is flush to
- * the left edge and full height — no inset, no rounding, no margin — because a
- * rounded panel floating 16px from the edge reads as a dialog *pretending* to be a
- * sidebar, and the difference is exactly what "does this belong here" is made of.
- * The fill is `--wn-veil` behind a `backdrop-filter`, so the list and reader stay
- * legible through it as texture rather than being replaced by an opaque card, and
- * the whole thing sits on a `--wn-scrim` rather than on a black rectangle.
+ * **It is a surface of the window, not a component in it.** The panel is flush to the
+ * left edge and full height — no inset, no rounding, no margin — because a rounded panel
+ * floating 16px from the edge reads as a dialog *pretending* to be a sidebar. The fill is
+ * `--wn-veil` behind a `backdrop-filter`, on a `--wn-scrim`, so the list and reader stay
+ * legible through it as texture.
  *
- * The motion matches the object: it comes *out of the left edge* with a
- * translation and no scale, because a place arriving is not a card appearing.
+ * The motion matches the object: it comes *out of the left edge* with a translation and
+ * no scale, because a place arriving is not a card appearing.
  *
- * **It is a `dialog`, not a `menu`,** even though every row is a destination. The
- * palette on `!` is the `menu` — it is a roving list activated by a single key and
- * dismissed with Escape. This one is opened with a pointer at a specific place in
- * the chrome, contains the account you are signed in as and a way out of it, and
- * has to be dismissible by clicking beside it. That is a dialog with buttons in it.
- *
- * The account row is the reason the drawer holds anything the old bar's status line
- * held. "Which account am I reading" matters on a shared machine, and it belongs
- * next to "sign out" rather than in a footnote strip above the mailbox — where the
- * demo disclaimer now lives instead, inside the mailbox, where it is about the
- * mail rather than about the app.
+ * **It is a `dialog`, not a `menu`,** even though every row is a destination: it is
+ * opened with a pointer at a specific place in the chrome, contains the account you are
+ * signed in as and a way out, and is dismissible by clicking beside it. The `!` palette
+ * is the `menu`.
  */
 
 import { Inbox, LogIn, LogOut, RefreshCw, Settings, Trash2, TriangleAlert, X } from "lucide-react";
@@ -86,11 +76,9 @@ export function NavDrawer({
       {/*
         Mailboxes.
 
-        A plain list rather than a row of pills: this is a place to go, and a place
-        is a row. The active one is `sheen` — the same illumination the rail uses
-        for an active filter, because they are the same idea, and having one way of
-        saying "this is the one you are in" is worth more than having two that look
-        slightly different.
+        A plain list rather than a row of pills: this is a place to go, and a place is a
+        row. The active one is `sheen` — the same illumination the rail uses for an active
+        filter, because they are the same idea.
       */}
       <nav aria-label="Mailboxes" className="mt-2 flex flex-col gap-0.5 px-2">
         {mailboxes.map((mailbox) => {
@@ -137,15 +125,12 @@ export function NavDrawer({
       {/*
         The account, at the foot of the drawer.
 
-        Pushed to the bottom rather than sitting under the mailboxes because it is
-        not a destination — it is *who you are*, and the two read very differently.
-        A hairline above it rather than a filled box, because the alternative was
-        another bordered container and this drawer has spent its whole budget on
-        avoiding those.
+        Pushed to the bottom rather than sitting under the mailboxes because it is not a
+        destination — it is *who you are*. A hairline above it rather than a filled box,
+        because the alternative was another bordered container.
 
-        Sync lives here too. It is not an email action and it is not navigation
-        either, and the drawer is the one surface that is about the app rather than
-        about a message.
+        Sync lives here too: it is neither an email action nor navigation, and the drawer
+        is the one surface that is about the app rather than about a message.
       */}
       <div className="mt-auto px-4 pb-4 pt-6">
         <div className="h-px w-full bg-hairline" />
@@ -198,10 +183,8 @@ export function NavDrawer({
 /**
  * The four mailboxes.
  *
- * The same glyphs the `!` palette uses, so the two navigation surfaces are
- * visibly the same set of places — they were built from separate `ICONS` maps and
- * had already drifted to the point where `MAILBOX_LABEL` was the only thing keeping
- * the names in step.
+ * The same glyphs the `!` palette uses, so the two navigation surfaces are visibly the
+ * same set of places.
  */
 function MailboxIcon({ id }: { id: Mailbox }) {
   const props = { size: 15, strokeWidth: 1.9, className: "shrink-0 text-ink-muted" } as const;

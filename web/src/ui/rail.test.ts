@@ -1,10 +1,9 @@
 /**
  * The filter rail's contents.
  *
- * The rule worth testing here is the one about active senders keeping their pill.
- * It looks like a small cosmetic decision and it is not: getting it wrong makes a
- * filter that the user turned on impossible to turn off with the pointer, which
- * is a control that has silently stopped existing.
+ * The rule worth testing here is active senders keeping their pill: getting it wrong
+ * makes a filter the user turned on impossible to turn off with the pointer, a control
+ * that has silently stopped existing.
  */
 
 import { describe, expect, it } from "vitest";
@@ -49,8 +48,8 @@ describe("buildPills", () => {
   });
 
   it("keeps an active sender's pill so it can be turned off", () => {
-    // The regression this exists for: the pill that turned the filter on used to
-    // disappear, leaving "All" as the only way back.
+    // The pill that turned the filter on must not disappear, leaving "All" as the
+    // only way back.
     const pills = buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, [
       senderFilter("grace@example.com"),
     ]);
@@ -58,9 +57,9 @@ describe("buildPills", () => {
   });
 
   it("keeps an active sender that has fallen out of the top-N", () => {
-    // The ranking shifts as mail arrives, so a sender can drop off the rail while
-    // its filter is still applied. Dropping the pill would leave the filter on
-    // with no visible control — the app would look like it had lost state.
+    // The ranking shifts as mail arrives, so a sender can drop off the rail while its
+    // filter is still applied — dropping the pill would leave the filter on with no
+    // visible control.
     const pills = buildPills(RAIL, COUNTS, ["ada@example.com"], SENDER_COUNTS, [
       senderFilter("alan@example.com"),
     ]);
@@ -79,10 +78,9 @@ describe("buildPills", () => {
   });
 
   it("ignores an active bucket that is not in the rail", () => {
-    // A filter persisted from an older build, naming a bucket the current rail
-    // does not show — a bucket that has since been dropped, or one the ranking
-    // has put out of the top-N. It must not appear as a pill the user cannot
-    // recognise, and it must not break the rail either.
+    // A filter persisted from an older build, naming a bucket the current rail does
+    // not show. It must not appear as a pill the user cannot recognise, and it must
+    // not break the rail either.
     const narrowed: BuiltinSmartFilter[] = ["important"];
     const pills = buildPills(narrowed, COUNTS, SENDERS, SENDER_COUNTS, [
       builtinFilter("shipping"),
@@ -92,8 +90,8 @@ describe("buildPills", () => {
   });
 
   it("gives a bucket with no count a zero rather than nothing", () => {
-    // An empty bucket still gets a pill: a filter that shows nothing and a filter
-    // you cannot select are different, and hiding the pill hides the latter.
+    // An empty bucket still gets a pill: a filter that shows nothing and a filter you
+    // cannot select are different, and hiding the pill hides the latter.
     const pills = buildPills(["important"], new Map(), [], new Map(), []);
     expect(pills[0].count).toBe(0);
   });
@@ -106,8 +104,8 @@ describe("digitFor", () => {
   });
 
   it("gives nothing past the ninth", () => {
-    // There is no key for a tenth position, so printing a digit would be
-    // promising a shortcut that does not exist.
+    // There is no key for a tenth position, so printing a digit would promise a
+    // shortcut that does not exist.
     expect(digitFor(9)).toBeNull();
     expect(digitFor(20)).toBeNull();
   });

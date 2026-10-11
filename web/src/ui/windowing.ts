@@ -1,19 +1,15 @@
 /**
  * Windowing arithmetic for a variable-height list.
  *
- * Split out from `MessageList` because the arithmetic is the part with no DOM in
- * it and therefore the part worth testing directly: the component around it is
- * layout and event handling, this is the part that has to be *right*.
+ * Split out from `MessageList` because the arithmetic is the part with no DOM in it and
+ * therefore the part worth testing directly; the component around it is layout and event
+ * handling.
  *
- * ## Why measured rather than fixed
- *
- * A row's height is not a constant. It carries a preview line when the message
- * has a body and an indicator row when the classifier found something to say, so
- * a real row is somewhere between 53px and 82px — a 55% spread. A fixed-height
- * virtualiser over a list like that either overlaps rows or leaves gaps, so the
- * heights are measured as they render and unmeasured items are assumed to be the
- * estimate below. The estimate only has to be close: every rendered row corrects
- * its own entry, and an item's offset is the sum of the entries before it.
+ * A row's height is not a constant — 53px to 82px, depending on preview line and
+ * indicator row — so a fixed-height virtualiser would overlap rows or leave gaps. Heights
+ * are measured as they render; unmeasured items assume the estimate below, and every
+ * rendered row corrects its own entry, since an item's offset is the sum of the entries
+ * before it.
  *
  * `css-behavior` on the estimate is deliberate — an assumed height must not be
  * animatable, or the scrollbar would jitter on every correction.

@@ -16,10 +16,9 @@ import type { EmailSignals } from "../model/signals";
 /**
  * A message with only what a test cares about.
  *
- * The sender is a real-looking address because `example.com` is itself a spam
- * tell — leaving it here would add 0.18 to every fixture that does not care
- * about spam and quietly make "not raised by" assertions unprovable. The one
- * test that is *about* that tell passes `someone@example.com` explicitly.
+ * The sender is a real-looking address because `example.com` is itself a spam tell
+ * (+0.18), which would make "not raised by" assertions unprovable; the one test
+ * about that tell passes `someone@example.com` explicitly.
  */
 function email(over: Partial<Email> = {}): Email {
   return {
@@ -57,8 +56,7 @@ describe("classifyEmail — security", () => {
   });
 
   it("treats a bare login code as a code, not an alarm", () => {
-    // The distinction the Swift implementation made deliberately: "your OTP is
-    // 1234" is something to copy, not something to worry about. Classifying it
+    // "Your OTP is 1234" is something to copy, not to worry about. Classifying it
     // as security put every 2FA message in the Security bucket.
     const signals = classifyEmail(
       email({ subject: "Your verification code", body: "Your verification code is 418902." }),
@@ -103,15 +101,12 @@ describe("classifyEmail — security", () => {
 });
 
 describe("classifyEmail — keyword matching is word-bounded", () => {
-  // Every row below names a phrase that is genuinely in a table and is a
-  // substring of a word people actually write. Under `String.includes` each one
-  // fires; with word boundaries on both ends none of them do. The control beside
-  // each hazard is the same slot with the phrase spelled out, which is what
-  // makes the row mean something: a matcher that matched nothing at all would
-  // fail the control.
-  //
-  // The sender is a real address on purpose. `example.com` is itself a spam
-  // tell, and mixing the two hides which of them is under test.
+  // Each row names a phrase in a table that is a substring of a word people
+  // actually write: under `String.includes` it fires, with word boundaries it does
+  // not. The control beside each hazard spells the phrase out, so a matcher that
+  // matched nothing at all would still fail the control. The sender is real on
+  // purpose: `example.com` is itself a spam tell, and mixing the two hides which is
+  // under test.
   const hazards: {
     phrase: string;
     signal: keyof EmailSignals;
@@ -158,12 +153,9 @@ describe("classifyEmail — keyword matching is word-bounded", () => {
   });
 
   it("still reads the phrase when it is written out", () => {
-    // The other half of every hazard row. Without it the table above would also
-    // be satisfied by a table that had been emptied.
-    //
-    // "check   in" is three spaces on purpose: the matcher allows flexible
-    // whitespace inside a phrase, because the alternative is a line wrap
-    // silently costing a message its bucket.
+    // The other half of every hazard row: without it the table above would also pass
+    // on an emptied table. "check   in" is three spaces on purpose — flexible
+    // whitespace, so a line wrap does not silently cost a message its bucket.
     for (const row of hazards) {
       const signals = classifyEmail(row.control, EMPTY_PROFILE);
       expect(signals[row.signal], row.phrase).toBe(true);
@@ -434,14 +426,11 @@ describe("classifyEmail — spam likelihood", () => {
 
   it("is raised by a coercive threat even when the phishing phrases already matched", () => {
     // The regression this exists for. `phishingRegex` is a *binary* test worth a
-    // flat 0.3, so adding the coercion phrases to it changed nothing for a
-    // message that already said "verify your password" — which is to say, for
-    // precisely the worst kind of message. This one scored 0.30, below the
-    // threshold, while a subtler campaign scored exactly 0.40.
-    //
-    // The threat is the part that separates a campaign from a clumsy real notice,
-    // so it is scored additively rather than folded into the binary test:
-    // 0.3 for the credential demand plus 0.45 for the coercion.
+    // flat 0.3, so folding the coercion phrases in changed nothing for a message
+    // that already said "verify your password" — precisely the worst kind of
+    // message. The threat is what separates a campaign from a clumsy real notice,
+    // so it is scored additively: 0.3 for the credential demand plus 0.45 for the
+    // coercion.
     const signals = classifyEmail(
       email({
         sender: "service@account-verify.example",
@@ -455,12 +444,10 @@ describe("classifyEmail — spam likelihood", () => {
   });
 
   it("is not raised by a genuine notice about a delinquent account", () => {
-    // The other half of that fix, and the reason the coercion patterns require a
-    // *demand* alongside the threat. A bank warning that an unpaid account will
-    // be closed is real, common, and must not be filed as phishing — otherwise
-    // the Unsafe bucket cries wolf, which is the only way to make it useless.
-    //
-    // Zero, not merely under the threshold: there is no tell here at all.
+    // The coercion patterns require a *demand* alongside the threat. A bank warning
+    // that an unpaid account will be closed is real and common, and filing it as
+    // phishing is how the Unsafe bucket learns to cry wolf. Zero, not merely under
+    // the threshold: there is no tell here at all.
     const signals = classifyEmail(
       email({
         sender: "billing@bank.example",
@@ -493,13 +480,9 @@ describe("classifyEmail — spam likelihood", () => {
   });
 
   it("recognises the commonest account-security notice of all", () => {
-    // The table had "unrecognized device" — which almost nobody writes, because
-    // a service calling your own phone unrecognised reads as a bug to the person
-    // receiving it — and missed the form every major service actually uses.
-    //
-    // The body deliberately carries nothing but the same phrase: an earlier
-    // version mentioned "review your sign-in history", which is the other entry
-    // in the table, so deleting the new-device phrase left the test green.
+    // The body deliberately carries nothing but the same phrase: an earlier version
+    // also mentioned "review your sign-in history", the other entry in the table, so
+    // deleting the new-device phrase left the test green.
     const signals = classifyEmail(
       email({
         sender: "noreply@dropbox.com",
@@ -799,11 +782,9 @@ describe("classifyEmail — social domains", () => {
   });
 
   it("matches the host, not a substring of it", () => {
-    // This is the security-relevant half. The old test was `line.includes(domain)`,
-    // so `notlinkedin.com` and `linkedin.com.evil.example` both read as LinkedIn —
-    // and a phisher controls everything to the right of the registrable name. A
-    // signal that can be claimed by writing a platform's name into your own
-    // hostname is worse than no signal, because it files the phish as a routine
+    // The security-relevant half: `line.includes(domain)` read `notlinkedin.com` and
+    // `linkedin.com.evil.example` as LinkedIn, and a phisher controls everything to
+    // the right of the registrable name — so the phish files as a routine
     // notification.
     const forgeries = [
       "notifications@notlinkedin.com",
@@ -909,9 +890,8 @@ describe("senderRankBonus", () => {
   });
 
   it("agrees with the tier function", () => {
-    // The two ladders have to stay in step: `senderRankBonus` pays the points
-    // and `tierFor` is what the profile and the UI read, and they used to
-    // disagree.
+    // The two ladders have to stay in step: `senderRankBonus` pays the points and
+    // `tierFor` is what the profile and the UI read.
     expect(tierFor(profile, "a@x.com")).toBe(0);
     expect(tierFor(profile, "b@x.com")).toBe(1);
     expect(tierFor(profile, "c@x.com")).toBe(1);

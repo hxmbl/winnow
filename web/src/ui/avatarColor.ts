@@ -2,19 +2,18 @@
  * Avatar colours.
  *
  * The rule that shapes this file: **no profile pictures.** A gravatar is a
- * third-party request to a company the user never chose to contact, fired once
- * per sender in the list, on every launch. For a mail client that is a
- * meaningful privacy leak and a meaningful latency cost, in exchange for
+ * third-party request to a company the user never chose to contact, fired once per
+ * sender on every launch — a meaningful privacy leak and latency cost in exchange for
  * decoration.
  *
- * So the avatar is a monogram on a colour derived from the sender's domain.
- * Zero network, stable across sessions, and — because the hue is walked from a
- * small ramp rather than a continuous wheel — distinct enough to recognise a
- * sender you deal with daily.
+ * So the avatar is a monogram on a colour derived from the sender's domain. Zero
+ * network, stable across sessions, and — because the hue is walked from a small ramp
+ * rather than a continuous wheel — distinct enough to recognise a sender you deal
+ * with daily.
  *
- * (The previous version sampled the dominant colour out of a canvas and kept the
- * machinery for it, with `PROFILE_PICTURES` empty. None of that code could run,
- * so every avatar in the app was the same grey.)
+ * (The previous version sampled a canvas colour and kept the machinery for it, with
+ * `PROFILE_PICTURES` empty. None of that code could run, so every avatar in the app
+ * was the same grey.)
  */
 
 /** The ramp, walked by hash. Matches `filterColors.RAMP` minus the alert hues. */
@@ -69,16 +68,10 @@ export function avatarTextColor(sender: string): string {
 /**
  * How far the monogram is pushed toward ink.
  *
- * Solved rather than guessed. The ramp is pastel, so the label has to be much
- * darker than the fill — and how much *much* differs per step, because the ramp's
- * lightness range is wide. A single constant either fails the light steps or
- * turns the dark ones into near-black on near-black.
- *
- * At 0.55 the worst step in the ramp was 2.65:1, and the worst was `violet`, not
- * the lightest colour: a saturated pastel has more luminance than its lightness
- * suggests. 0.87 is the smallest tenth that clears WCAG AA (4.5:1) for every step,
- * which is also what the avatar needs as a *graphical* indicator rather than as
- * text. Exported so a test can assert the property rather than the constant.
+ * The ramp is pastel with a wide lightness range, so a single constant's worst step is
+ * `violet`, not the lightest colour: a saturated pastel has more luminance than its
+ * lightness suggests. 0.87 is the smallest tenth that clears WCAG AA (4.5:1) for every
+ * step.
  */
 const MONOGRAM_MIX = 0.87;
 
@@ -94,7 +87,3 @@ function mix(from: string, to: string, amount: number): string {
   return `#${[16, 8, 0].map((s) => channel(s).toString(16).padStart(2, "0")).join("")}`;
 }
 
-/* Removed: `primeAvatarColors`, an empty function with a comment explaining that
-   it was empty. Nothing called it, and the "warm the cache" framing was wrong —
-   there is no cache, because the computation is a 24-character FNV-1a loop over a
-   domain and six table entries. */

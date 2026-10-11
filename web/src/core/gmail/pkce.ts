@@ -1,30 +1,20 @@
 /**
  * PKCE: proving the token exchange is with the app that started it.
  *
- * A desktop app cannot keep a client secret, so RFC 7636's proof-key exchange
- * is what stops an intercepted authorization code from being useful. The shape:
+ * Desktop app cannot keep a client secret; RFC 7636 stops an intercepted code
+ * being useful. Shape: generate random verifier (32 bytes → base64url); send
+ * only its SHA-256 hash as challenge; exchange code with verifier. Only
+ * challenge leaves until exchange.
  *
- *   1. Generate a random **verifier** (32 bytes → base64url, 43 characters).
- *   2. Send only its SHA-256 hash, base64url'd, as the **challenge**.
- *   3. Exchange the code with the *verifier*.
- *
- * Only the challenge leaves the machine until step 3, so an attacker who
- * captures the redirect sees a hash they cannot reverse into a verifier.
- *
- * The `state` parameter is a separate defence, against CSRF: it is echoed in
- * the redirect and compared, so a redirect planted by an attacker (carrying
- * *their* code) is rejected before any token is exchanged.
- *
- * This module is environment-agnostic. Where the redirect is *delivered* is the
- * one genuinely native part of sign-in, and that lives in `platform/oauth.ts`.
+ * `state` is a separate CSRF defence (echoed in redirect and compared) so a
+ * redirect carrying an attacker's code is rejected before token exchange.
+ * Redirect delivery is native and lives in `platform/oauth.ts`.
  */
 
 import { base64UrlEncode } from "./dto";
 
-// Not re-exported: `base64UrlEncode` lives in `dto` because it is the Gmail wire
-// alphabet rather than anything to do with PKCE, and `pkce.ts` is one of its four
-// callers. An alias here would be a second name for one function, reachable only
-// by importing the crypto module and getting the wrong layer's idea of it.
+// `base64UrlEncode` lives in `dto` (Gmail wire alphabet); `pkce.ts` is one of
+// its callers. No re-export to avoid confusing layers.
 
 /** Random bytes from the platform CSPRNG. Throws rather than degrading. */
 function randomBytes(length: number): Uint8Array {
@@ -57,9 +47,8 @@ export type PkcePair = {
 /**
  * Create a verifier/challenge/state triple.
  *
- * 32 bytes is comfortably above the RFC's 43-character minimum, and the state
- * is a separate 16 bytes so the two can never be confused for one another in a
- * log or a stack trace.
+ * 32 bytes for verifier (above RFC's 43-char minimum). State is 16 bytes
+ * separate to avoid confusion in logs/stack traces.
  */
 export async function createPkcePair(): Promise<PkcePair> {
   const verifier = base64UrlEncode(randomBytes(32));
@@ -82,11 +71,8 @@ export type AuthorizeParams = {
 /**
  * The Google authorize URL.
  *
- * `access_type=offline` and `prompt=consent` are both deliberate. Without
- * `offline` Google issues no refresh token at all, so the app would need
- * re-authenticating every hour. Without `consent` a second sign-in returns no
- * refresh token either — Google treats an existing grant as sufficient — which
- * is the single most common cause of "it worked once and then stopped".
+ * `access_type=offline` and `prompt=consent` ensure Google issues a refresh
+ * token (without `consent` a second sign-in may return none).
  */
 export function buildAuthorizeUrl(
   endpoint: string,
@@ -117,16 +103,9 @@ export type RedirectResult =
 /**
  * Read a redirect — a URL or a query string — into a result.
  *
- * Returns `none` for anything that is not a completed sign-in, so a caller
- * showing this URL in a browser tab does not mistake an ordinary page load for
- * a successful authorisation.
- *
- * ⚠ The desktop build does not parse the redirect in TypeScript at all: Rust binds
- * the loopback socket, reads the request target and returns an `AuthOutcome`. This
- * function exists for a host that only has a URL, and the web build uses
- * `session/redirect.ts`'s own parser instead — which is the one that decides a
- * code without a state is not a redirect. Keep it that way: two parsers, one of
- * which half-accepts a stateless code, is a trap.
+ * Returns `none` for anything that is not a completed sign-in. The desktop build
+ * parses redirects in Rust (not here); the web build uses its own parser in
+ * `session/redirect.ts`.
  */
 export function parseRedirect(input: string): RedirectResult {
   let params: URLSearchParams;
@@ -160,11 +139,8 @@ export function parseRedirect(input: string): RedirectResult {
 
 /** True when the redirect's `state` matches the one we issued. */
 export function stateMatches(issued: string, received: string): boolean {
-  // Both are non-empty: an empty received state is a redirect we did not make,
-  // and accepting it would defeat the check entirely.
+  // Both must be non-empty to avoid accepting an unmade redirect.
   if (!issued || !received) return false;
-  // Constant-time is overkill for a random 16-byte value, but the comparison
-  // is short enough that it costs nothing and removes the question.
   if (issued.length !== received.length) return false;
   let diff = 0;
   for (let i = 0; i < issued.length; i += 1) diff |= issued.charCodeAt(i) ^ received.charCodeAt(i);

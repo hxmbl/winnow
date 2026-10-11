@@ -1,35 +1,11 @@
 /**
  * The reader.
  *
- * A mail client spends most of its life on this screen, so the decisions here
- * are about reading rather than about looking.
- *
- * **The body renders as markup, and that is a change of position rather than a
- * change of mind.** This file used to open by saying that the body is text and not
- * HTML, and that was correct then: the only way to show a message as its sender
- * wrote it was a `sandbox=""` iframe, which is safe but is not something a
- * newsletter can be read in. A newsletter in that state is a column of words with
- * its URLs spelled out, and no amount of correctness makes that a good reader.
- *
- * What changed is not the principle but what can be asserted about it. There is now
- * a sanitiser (`core/mail/sanitize.ts`) with an allowlist and a test for every way a
- * sender attacks one, so "this markup is safe to put in our document" became
- * something a build can check rather than something to hope for. The body is now
- * rendered inline by `MessageBody`, which also keeps the plain text one tap away
- * and still offers the untouched original in a sandboxed frame. The sandbox never
- * went anywhere: it is what "As sent" is.
- *
- * **Remote content is still blocked by default.** Rendering markup inline does not
- * change who gets to learn that a message was opened. The consent decision is still
- * `core/mail/imageConsent`, it is still a choice the reader makes before reading
- * rather than a disclosure afterwards, and the count of withheld references is
- * still stated rather than hidden — so the "images blocked" affordance is honest
- * about what it is withholding.
- *
- * **The badges come from the same predicates as the filters.** One shared
- * threshold, so a message wearing an "Important" chip is in the Important pill
- * and vice versa. An earlier version had the filter at 56 and the badge at 70,
- * and users could not tell which they were looking at.
+ * The body renders as sanitised markup inline (`MessageBody`, via
+ * `core/mail/sanitize.ts`) rather than as text; the untouched original is still offered
+ * in a sandboxed frame as "As sent". Remote content stays blocked by default, and the
+ * badges come from the same predicates as the filters, so an "Important" chip and the
+ * Important pill always agree.
  */
 
 import { useEffect, useRef } from "react";
@@ -66,10 +42,8 @@ import { platform } from "../../platform";
 /**
  * The first thing someone said, on one line.
  *
- * For a conversation list, where the column has to distinguish messages that share
- * a subject. Quote markers go first, because a reply whose body opens with
- * `> On Tuesday, you wrote:` would otherwise lead with the quoted text rather than
- * with the reply.
+ * Used to distinguish messages that share a subject; quote markers are stripped first,
+ * so a reply leads with the reply rather than the quoted text.
  */
 function firstLine(body: string): string {
   for (const raw of body.split("\n")) {
@@ -85,33 +59,14 @@ import type { Mailbox } from "../../core/model/email";
 /**
  * A smart filter that applies to the open message.
  *
- * **Icon and word, never colour alone.** This was a chip whose whole identity was
- * a wash of the bucket's accent — an eleven-hue pill carrying no information a
- * screen could read without knowing the palette, and nothing at all to a reader
- * with a colour vision deficiency, in dark mode, or in a screenshot. `theme.ts`
- * spends a hundred lines deriving chip label colours that clear WCAG AA on their
- * own wash, which is a measure of how much machinery was committed to keeping a
- * colour legible rather than saying what it meant.
- *
- * So the shape and the word do the work, and the accent goes entirely rather than
- * being kept as a tint: an icon that still needed its bucket's hue to be
- * interpretable would be carrying the colour anyway, just more quietly, and
- * `theme.ts` records that the only accent that survived is `starred`, which tints
- * the star itself. The tag's glyph takes the row's own muted ink, so it reads as
- * part of the message rather than as a badge competing with it. Nothing here is a
- * border or an opaque fill either: the tags sit on the reader's own surface, and
- * the group is separated from the header above it by spacing.
- *
- * The `title` is the explanation from `ui/filterIcons`, so hovering says *why*
- * Winnow thinks this, which is the part a chip never communicated.
+ * Icon and word, never colour alone. The `title` is the explanation from
+ * `ui/filterIcons`, so hovering says *why* Winnow thinks this.
  */
 function FilterTag({ id }: { id: BuiltinSmartFilter }) {
   const { Icon, label, title } = filterIcon(id);
   return (
     <span
-      // `data-filter-tag` so the smoke test can find these by what they *are* rather
-      // than by a `title` attribute, which the list rows also carry and which a
-      // future explanatory tooltip elsewhere would collide with.
+      // `data-filter-tag` so tests can find these by what they *are*, not by `title`.
       data-filter-tag={id}
       className="inline-flex items-center gap-1.5 rounded-full bg-sheen py-1 pl-1.5 pr-2.5 text-[11.5px] font-medium text-ink-body"
       title={title}
@@ -135,28 +90,14 @@ type Actions = {
   onNotSpam: () => void;
   onShowOriginal: () => void;
   onBlockSender: () => void;
-  /**
-   * Turn image loading on for this message only.
-   *
-   * Per-message, and labelled accordingly — the button used to say "Load images"
-   * while setting a global preference that persisted, which meant a decision about
-   * one message silently became a decision about all of them.
-   */
+  /** Turn image loading on for this message only. */
   onLoadRemoteContent: () => void;
-  /**
-   * Load images from now on, for every message.
-   *
-   * The second of the three answers, and the one that needed a real destination: the
-   * offer previously had "load this one" and nothing else, so a user who had decided
-   * they trusted their mail had to say it again on every single message.
-   */
+  /** Load images from now on, for every message. */
   onAlwaysLoadRemoteContent: () => void;
   /**
    * Stop being asked — load images for nobody, silently, from now on.
    *
-   * Not the same as declining *this* message. Someone who has been asked three times
-   * wants their mail to render, and a boolean-only model had nowhere to record that,
-   * so the choice simply did not exist and the offer would have repeated forever.
+   * Not the same as declining *this* message; a boolean could not express it.
    */
   onNeverLoadRemoteContent: () => void;
   /** Open another message in the conversation. */
@@ -170,10 +111,8 @@ const ICON_BUTTON =
 /**
  * A quiet text button, for the places in this pane that are not the toolbar.
  *
- * `bg-sheen` rather than a bordered pill. There are four of these in the reader and
- * every one is secondary — an escape hatch beside the thing it escapes from — and
- * four outlined pills in a column is a column of boxes. At rest they are almost
- * invisible; the fill is the hover, and the text is always legible.
+ * `bg-sheen` rather than a bordered pill: four outlined pills in a column is a column
+ * of boxes. At rest they are almost invisible; the fill is the hover.
  */
 const QUIET_BUTTON =
   "rounded-full bg-sheen px-3 py-1.5 text-[12.5px] font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
@@ -184,36 +123,17 @@ function Toolbar({ starred, unread, mailbox, actions }: {
   mailbox: Mailbox;
   actions: Actions;
 }) {
-  // Context-sensitive, and the label follows the action rather than the verb:
-  // "Restore" in the bin, because that is what the button will do.
+  // The label follows the action rather than the verb: "Restore" in the bin, because
+  // that is what the button will do.
   const archiveLabel =
     mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : "Restore";
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
 
-  /*
-    The verbs, and which mailbox decides which.
-
-    Three rules, one per mailbox, and each is about not offering the same action twice:
-
-      - **Inbox.** Archive and bin. The ordinary pair.
-      - **Spam.** "Not spam" and bin. Archive is *not* offered, because from Spam it
-        means "move to the inbox" — which is exactly what the not-spam button does. Two
-        icons with two tooltips, one action. It read as a toolbar with a bug in it.
-      - **Bin.** Restore and delete-permanently. Archive is the restore.
-
-    The "not spam" button exists because the spam folder had no way out at all:
-    `GmailClient` implemented `markNotSpam` and nothing in the app called it, so a
-    message Gmail misfiled was recoverable only by going to Gmail on the web.
-  */
   const inSpam = mailbox === "spam";
 
-  // The starred fill is the palette's own accent, the same custom property the
-  // list row and the reader's "Starred" chip read. It was a literal `#B8860B` here
-  // and only here, which is exactly the drift the token exists to prevent: the list
-  // row had already been moved onto `--wn-badge-starred` with a comment explaining
-  // why, and this one was missed. The visible symptom is that a starred message
-  // shows a near-invisible dark-gold star in dark mode, where the palette's value
-  // is `#FACC15`.
+  // The starred fill is the palette's own accent, the same custom property the list
+  // row reads. A literal here was missed when the list row moved onto
+  // `--wn-badge-starred`, and a hard-coded gold goes near-invisible in dark mode.
   const ICON_BUTTON =
     "flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
@@ -258,12 +178,8 @@ function Toolbar({ starred, unread, mailbox, actions }: {
       >
         <Forward size={15} strokeWidth={1.9} />
       </button>
-      {/*
-        In Spam this *is* the not-spam button, not a second one beside it. Both meant
-        "move to the inbox", so the folder showed two icons and two tooltips for one
-        action — which reads as a toolbar with a duplicated control rather than as a
-        deliberate pair.
-      */}
+      {/* In Spam this *is* the not-spam button, not a second one beside it — both
+          mean "move to the inbox". */}
       {inSpam ? (
         <button
           type="button"
@@ -310,26 +226,18 @@ type Props = {
   /**
    * Whether *this* message's images are showing.
    *
-   * Resolved by `App.tsx` from the global policy and the per-message override, so
-   * the reader never has to know which of the two is in force — and so "should the
-   * offer appear" is one boolean rather than the reader re-deriving a three-way
-   * policy it was handed pieces of.
+   * Resolved by `App.tsx` from the global policy and the per-message override, so the
+   * reader never has to know which is in force.
    */
   imagesAllowed: boolean;
-  /**
-   * Whether to offer the choice at all.
-   *
-   * `false` once the user has answered for good. A preference to "never be asked"
-   * that still showed the question would not be a preference.
-   */
+  /** Whether to offer the choice at all. `false` once the user has answered for good. */
   askAboutImages: boolean;
   accountAddress: string | null;
   /**
    * The reference instant for relative timestamps in this pane.
    *
-   * Passed in rather than read from the clock so the demo's fixed instant governs the
-   * demo's timestamps, and so the reader cannot disagree with the list beside it —
-   * two "2h ago"s a minute apart is the kind of detail that makes an app feel broken.
+   * Passed in rather than read from the clock, so the demo's fixed instant governs the
+   * demo's timestamps and the reader cannot disagree with the list beside it.
    */
   now: number;
   onClose: () => void;
@@ -339,11 +247,8 @@ type Props = {
   /**
    * True when this message's HTML body has not arrived yet.
    *
-   * A separate prop rather than something the reader infers from `email.bodyHtml`
-   * being absent, because absent means two different things: not fetched yet, or a
-   * plain-text message that will never have one. The store knows which, and a reader
-   * that guessed would either spin forever on plain-text mail or show an empty body
-   * with no explanation.
+   * A separate prop rather than inferred from `email.bodyHtml` being absent, because
+   * absent means either "not fetched yet" or "plain text that will never have one".
    */
   bodyPending: boolean;
   /** Ask for the HTML body of the open message. */
@@ -370,10 +275,8 @@ export function Reader({
   /**
    * Ask for the HTML body when this message does not have one.
    *
-   * The store keeps HTML for a recent window and drops it from the rest, so opening
-   * something older is the normal case rather than an edge one. Keyed on the message
-   * id so holding `j` down the list walks through the fetches rather than re-asking
-   * for the first one.
+   * Keyed on the message id, so holding `j` down the list walks through the fetches
+   * rather than re-asking for the first one.
    */
   const emailId = email?.id ?? null;
   const hasHtml = email?.bodyHtml !== undefined;
@@ -410,19 +313,15 @@ export function Reader({
   /**
    * The offer, and only when there is something to decide.
    *
-   * `blocked > 0` because a message with no remote references has no trade-off to
-   * put to anybody, and an offer with nothing behind it is noise. `askAboutImages`
-   * because "never ask again" has to actually mean never — re-asking somebody who
-   * already answered is how a preference stops being one.
+   * `blocked > 0` because a message with no remote references has no trade-off to put
+   * to anybody. `askAboutImages` because "never ask again" has to mean never.
    */
   const offerImages = email.bodyHtml !== undefined && blocked > 0 && !imagesAllowed && askAboutImages;
 
   return (
-    // `data-reader` so a test can reach the pane as a whole. The header's `<time>`
+    // `data-reader` so a test can reach the pane as a whole — the header's `<time>`
     // lives outside `<article>`, so "which message is open" cannot be answered from
-    // the article alone — and answering it from the article is what made the
-    // conversation check compare a subject it knew was identical across all three
-    // messages against a timestamp that was never there.
+    // the article alone.
     <div data-reader="" className="flex min-h-0 flex-1 flex-col">
       {/* Mobile-only back bar. On a wide screen the reader is a pane beside the
           list, so closing it would be redundant. */}
@@ -441,10 +340,9 @@ export function Reader({
       {/*
         The header.
 
-        No rule under it. The reader's surface is the same one the message body sits
-        on, and a `border-b` here drew a hard line across the pane that the flat
-        layout does not otherwise have — the separation is the 20px of padding below
-        it and the change in type size, which is enough.
+        No rule under it: a `border-b` drew a hard line across the pane that the flat
+        layout does not otherwise have, so the separation is the padding below and the
+        change in type size.
       */}
       <div className="flex items-start gap-3 px-5 pb-4 pt-4">
         <span
@@ -456,22 +354,13 @@ export function Reader({
         </span>
 
         <div className="min-w-0 flex-1">
-          {/* The sender is the h2 and the subject the h1 — inverted from the
-              usual pattern, and deliberately: the subject is the page's title, so
-              it is the document's h1 and the sender is subordinate to it.
+          {/* The sender is the h2 and the subject the h1 — inverted from the usual
+              pattern, and deliberately: the subject is the page's title, so it is the
+              document's h1 and the sender is subordinate to it.
 
-              A column unless the window is wide enough to afford a row. Six 28px
-              icons and a `shrink-0` toolbar need about 200px, and the pane is 37.9%
-              of the window — so side by side, the name is what gives way: it read
-              "Dana Whitfi…" on a phone and "Dana at North…" at 1100px. The one
-              thing you read first, ellipsised to make room for controls you reach
-              for later, and the reader's own sender line is the wrong place to be
-              stingy.
-
-              1200px rather than `lg` (1024) because `lg` is the width at which the
-              pane appears at all, not the width at which it fits: at 1024 the pane
-              is 388px, which is exactly the case that needed fixing. At 1200 the
-              pane is 455px and the name has its 150px back. */}
+              1200px rather than `lg` (1024): `lg` is the width at which the pane appears
+              at all, not the width at which it fits. Below 1200px the name is what gives
+              way, and it ellipsised to make room for controls you reach for later. */}
           <div className="flex flex-col gap-2.5 min-[1200px]:flex-row min-[1200px]:items-start min-[1200px]:justify-between min-[1200px]:gap-3">
             <div className="min-w-0">
               <h2 className="truncate text-[15px] font-semibold leading-snug text-ink">
@@ -511,26 +400,12 @@ export function Reader({
           {/*
             The image decision, at the very top of the email.
 
-            It goes *here* rather than at the bottom of the message, and rather than
-            in Settings, because it is a decision about this message that has to be
-            made before reading it — and because the thing it governs is not an
-            optional extra at the end, it is whether the mail looks like the mail
-            the sender sent. The previous version put a bordered card under the
-            body, where it read as an attachment notice: something to scroll to
-            after you had already decided the message did not need it.
+            It goes *here* because it is a decision about this message that has to be
+            made before reading it — the thing it governs is whether the mail looks like
+            the mail the sender sent.
 
-            Three answers, because there are three distinct intentions and a
-            two-button offer cannot express the third:
-
-              · **this message** — you opened this one, you want to see it, and you
-                have made no claim about the next one;
-              · **from now on** — you have decided you trust your mail;
-              · **don't ask** — you have decided you would rather read it as text
-                and stop being interrupted about it.
-
-            The third is the one the old boolean could not hold, and without it the
-            first two were the only available answers, so somebody who wanted plain
-            text forever had to decline on every message, forever.
+            Three answers, because there are three distinct intentions and a two-button
+            offer cannot express the third: this message, from now on, don't ask.
           */}
           {offerImages && (
             <div className="mb-5 max-w-[68ch] rounded-pane bg-sheen px-4 py-3.5">
@@ -584,17 +459,12 @@ export function Reader({
           {/*
             The body itself.
 
-            Was the extracted plain text and nothing else, which is why a newsletter
-            arrived as a column of words with its URLs spelled out — see
-            `MessageBody`, which now owns all three forms and the control that picks
-            between them. The plain text is still one tap away and is still what the
-            classifier read and what a reply quotes, so the two views cannot disagree
-            about what the message says.
+            `MessageBody` owns all three forms and the control that picks between them.
+            The plain text is still one tap away and is still what the classifier read
+            and what a reply quotes, so the two views cannot disagree.
 
-            `onOpenLink` routes a click out to the system browser rather than
-            letting it navigate the app. That is the same reason the old
-            "Open the original" button opens in the browser and not in a `winnow:`
-            deep link: a link in a message must reach a different origin, or it
+            `onOpenLink` routes a click out to the system browser rather than letting it
+            navigate the app: a link in a message must reach a different origin, or it
             reaches this one.
           */}
           <MessageBody
@@ -606,11 +476,8 @@ export function Reader({
           {/*
             The rich version is on its way.
 
-            Worth saying out loud rather than rendering nothing: the plain text is
-            already complete, so a reader who opens an older message would otherwise
-            conclude the message simply has no formatting — when in fact the markup is
-            arriving, and the reason it was not resident is that Winnow does not keep
-            two thirds of every message in memory for the sake of one open pane.
+            Said out loud because the plain text is already complete: rendering nothing
+            would read as "this message has no formatting" when the markup is arriving.
           */}
           {bodyPending && (
             <p
@@ -625,19 +492,9 @@ export function Reader({
           {/*
             The standing account of what the message was still fetching.
 
-            It used to sit above a `h-[32rem]` iframe and read "N remote things are
-            loading · scripts and links are blocked", which was true only in the
-            state it could appear in. `MessageBody` now renders the sanitised markup
-            inline and offers "As sent" for the untouched original, so this note
-            appears in *both* states — and "are loading" is the opposite of the truth
-            when images are off, which is the state it appears in most often. A
-            privacy note that says the wrong thing is worse than no note: somebody
-            reads it, believes the message is talking to their own machine, and stops
-            thinking about it.
-
-            So the wording follows the answer rather than the presence of a panel.
-            `scripts and links are blocked` is unconditional and stays — no form of
-            this message runs a sender's script.
+            `scripts and links are blocked` is unconditional. The count's verb follows
+            the answer, because "are loading" is the opposite of the truth when images
+            are off — and a privacy note that says the wrong thing is worse than none.
           */}
           {email.bodyHtml && blocked > 0 && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -661,15 +518,12 @@ export function Reader({
           )}
 
           {/*
-            When images are off *and* the user has said never to ask, there is nothing
-            left to say about it — the offer above is suppressed and this one line is
+            When images are off *and* the user has said never to ask, this one line is
             the whole of it.
 
-            It is here, at the end, rather than at the top with the offer, because it
-            is a *status* and not a question: there is no button, so it cannot be the
-            first thing in the message, and a card-shaped notice with no action in it
-            is the exact shape the redesign is removing. One muted sentence at the
-            bottom of a text-only message is enough to explain why it looks like this.
+            It is at the end, not at the top with the offer, because it is a *status*
+            and not a question: there is no button, so it cannot be the first thing in
+            the message.
           */}
           {email.bodyHtml && blocked > 0 && !imagesAllowed && !askAboutImages && (
             <p className="mt-6 max-w-[68ch] text-[12px] text-ink-subtle">
@@ -710,31 +564,20 @@ export function Reader({
             The rest of the conversation.
 
             Clickable, because a thread you cannot read past the newest message is half
-            a thread. The list was previously a set of `<span>`s with no handler, so the
-            only way to see an earlier message was to find it in the inbox list and open
-            it there — and a message that has been archived is not in the inbox list at
-            all, so for those it was not reachable at all.
+            a thread. `focusMessage` is the right entry point rather than a local
+            selection swap: it handles the case where the message is not in the current
+            view at all, clearing the search and filters that were hiding it.
 
-            `focusMessage` is the right entry point rather than a local selection swap:
-            it handles the case where the message is not in the current view at all,
-            clearing the search and filters that were hiding it.
-
-            Each row leads with the message's own words rather than its subject. In a
-            thread the subjects are the same string three times over — `Re: the
-            migration plan`, `Re: the migration plan`, `Re: the migration plan` — so the
-            column that identifies which message you are about to open was carrying no
-            information at all, while the one thing that does differ, "the sort spills",
-            "I think I know what is happening", was nowhere on screen. The subject is
-            still shown when it genuinely changed, because that *is* information.
+            Each row leads with the message's own words rather than its subject: in a
+            thread the subjects are the same string three times over, while the body is
+            the one thing that differs.
           */}
           {/*
             Spacing, not a rule.
 
-            Both of these used to carry a `border-t`, which in a scrolling document
-            draws a line across the full measure every time the reader moves to a
-            different message with a different number of replies. They are separated
-            now by 32–40px and an uppercase micro label, which is enough structure
-            without a mark that appears and disappears as the message changes.
+            A `border-t` here draws a line across the full measure every time the reader
+            moves to a message with a different number of replies. They are separated by
+            32–40px and an uppercase micro label instead.
           */}
           {others.length > 0 && (
             <div className="mt-10 max-w-[68ch]">
@@ -745,9 +588,9 @@ export function Reader({
               <ul className="mt-2 flex flex-col gap-0.5">
                 {others.map((message) => {
                   const subject = message.subject.trim();
-                  // A different subject is worth a prefix; the same one is noise. And an
-                  // empty body — a stub, or a message that was entirely a quote — falls
-                  // back to the subject rather than to an empty row.
+                  // A changed subject is worth a prefix; the same one is noise. An empty
+                  // body — a stub, or a message that was entirely a quote — falls back
+                  // to the subject rather than to an empty row.
                   const preview = firstLine(message.body);
                   const lead = subject && subject !== email.subject.trim() ? `${subject} — ` : "";
                   return (
@@ -765,13 +608,10 @@ export function Reader({
                           {preview || message.subject || "(no body)"}
                         </span>
                         {/*
-                          Against the *store's* reference instant, not the open message's.
-
-                          Formatted relative to another message's timestamp it reads "in 3
-                          days" for something that arrived three days ago — which is how
-                          the conversation list said the opposite of what it meant. And
-                          `now` rather than `Date.now()`, so the demo's fixed instant still
-                          governs the demo's timestamps.
+                          Against the *store's* reference instant, not the open message's:
+                          formatted relative to another message's timestamp it reads "in 3
+                          days" for something that arrived three days ago. `now` rather
+                          than `Date.now()` so the demo's fixed instant still governs.
                         */}
                         <span className="shrink-0 tabular-nums text-ink-subtle">
                           {formatRelative(message.receivedAt, now)}
@@ -787,17 +627,10 @@ export function Reader({
           {/*
             The sender-level action, as a footer.
 
-            It was the last thing in the flow, directly under the conversation list,
-            styled as a neutral outlined chip. Two problems with that. It reads as part
-            of the conversation — a button about the *sender* sitting inside a list of
-            *messages*, one tap away from a click that throws away every message from
-            that person across every folder. And it inherits the conversation's `mt-8`,
-            so when there is no conversation it floats in the middle of the body with
-            nothing above it.
-
-            A labelled footer, separated by its own rule, is the standard shape for the
-            actions that apply to the message as a whole rather than to its content, and
-            it makes the scope legible before the click rather than after.
+            It was a neutral outlined chip directly under the conversation list, so it
+            read as part of the conversation — a button about the *sender* sitting inside
+            a list of *messages*. A labelled footer, separated by its own rule, makes the
+            scope legible before the click rather than after.
           */}
           <footer className="mt-10 max-w-[68ch]">
             <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">

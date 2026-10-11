@@ -39,8 +39,8 @@ describe("quotedBody", () => {
   });
 
   it("renders an empty line as a bare marker with no trailing space", () => {
-    // A trailing space survives into the sent message and shows up as a stray
-    // blank line in every client the recipient uses.
+    // A trailing space survives into the sent message as a stray blank line in every
+    // client the recipient uses.
     expect(quotedBody("one\n\ntwo")).toBe("> one\n>\n> two");
     for (const line of quotedBody("one\n\ntwo").split("\n")) {
       expect(line).toBe(line.trimEnd());
@@ -69,8 +69,8 @@ describe("attributionLine", () => {
 
 describe("quoteBlockFor", () => {
   it("strips the HTML when there is no plain text", () => {
-    // Webmail clients routinely send `text/html` only. Without this fallback
-    // the quote would be empty and the reply would lose its context entirely.
+    // Webmail clients routinely send `text/html` only; without this fallback the quote
+    // would be empty and the reply would lose its context.
     const htmlOnly = email({ body: "", bodyHtml: "<p>Hello</p><p>World</p>" });
     const block = quoteBlockFor(htmlOnly);
     expect(block).toContain("> Hello");
@@ -90,10 +90,9 @@ describe("isIntactSuffix", () => {
   });
 
   it("is false when the user edited the quoted text itself", () => {
-    // A `startsWith` check would silently delete the user's edits. The quote
-    // only leaves as a byte-for-byte suffix — note the block here is the *whole*
-    // original quote, so a body that kept the text but changed a word no
-    // longer ends with it.
+    // A `startsWith` check would silently delete the user's edits; the quote only leaves
+    // as a byte-for-byte suffix. The block here is the *whole* original quote, so a body
+    // that kept the text but changed a word no longer ends with it.
     const block = "> On Tuesday, Ada wrote:\n> Hello";
     expect(isIntactSuffix(`reply\n${block}`, block)).toBe(true);
     expect(isIntactSuffix("reply\n> On Tuesday, Ada wrote:\n> Hello there", block)).toBe(false);
@@ -105,8 +104,8 @@ describe("isIntactSuffix", () => {
   });
 
   it("is false for an empty block", () => {
-    // An empty block matches every string as a suffix, so a user who cleared
-    // the composer would have that read as "the quote is intact".
+    // An empty block matches every string as a suffix, so a cleared composer would read
+    // as "the quote is intact".
     expect(isIntactSuffix("anything", "")).toBe(false);
     expect(isIntactSuffix("anything", undefined)).toBe(false);
   });
@@ -138,8 +137,8 @@ describe("subjects", () => {
   });
 
   it("does not double the prefix whatever the case", () => {
-    // Clients disagree about case, and treating `RE:` as unprefixed produced
-    // `Re: RE: Re: …` over a long thread.
+    // Clients disagree about case; treating `RE:` as unprefixed produced `Re: RE: Re: …`
+    // over a long thread.
     for (const subject of ["RE: The plan", "re: the plan", "Re: The plan"]) {
       expect(replySubject(subject)).toBe(subject);
     }
@@ -184,9 +183,9 @@ describe("buildReply", () => {
   it("keeps the quote block so it can be stripped if untouched", () => {
     const original = email();
     const draft = buildReply(original, [original]);
-    // Stripping the pre-filled quote must leave the composer empty, not leave
-    // the attribution stranded on its own — which is what happens if the
-    // template's own newlines are counted as part of the block.
+    // Stripping the pre-filled quote must leave the composer empty, not the attribution
+    // stranded on its own — which happens if the template's newlines count as part of the
+    // block.
     expect(draft.quoteBlock).toBeDefined();
     expect(stripQuote(draft.body, draft.quoteBlock).trim()).toBe("");
   });
@@ -195,9 +194,9 @@ describe("buildReply", () => {
     const original = email();
     const draft = buildReply(original, [original]);
     const typed = `My answer.\n${draft.body}`;
-    // The user's own words survive and only the quote goes: the quote is still
-    // byte-for-byte the end of the body, so it was never edited and is safe to
-    // remove. What must never happen is losing the text the user wrote.
+    // The user's own words survive and only the quote goes: it is still byte-for-byte the
+    // end of the body, so it was never edited and is safe to remove. Losing the user's text
+    // is what must never happen.
     const stripped = stripQuote(typed, draft.quoteBlock);
     expect(stripped).toBe("My answer.\n");
     expect(stripped).toContain("My answer.");
@@ -219,8 +218,8 @@ describe("buildForward", () => {
 
 describe("plainTextFromHtml", () => {
   it("drops script contents, not just the tags", () => {
-    // Reversing these two steps leaves JavaScript source in the middle of a
-    // quoted reply, which is both ugly and a phishing tell in itself.
+    // Reversing these two steps leaves JavaScript source in the middle of a quoted reply —
+    // ugly, and a phishing tell in itself.
     const text = plainTextFromHtml("<p>Hello</p><script>alert('x')</script><p>World</p>");
     expect(text).toContain("Hello");
     expect(text).toContain("World");
@@ -266,10 +265,9 @@ describe("plainTextFromHtml", () => {
 
 describe("sanitizeDisplayName", () => {
   it("strips zero-width and bidi characters", () => {
-    // A name containing a bidi override renders as a different name than it
-    // is: the visible text reads "GitHub Support" while the code points carry
-    // a right-to-left override that reorders what a human sees. This is the
-    // oldest trick in display-name spoofing.
+    // A name containing a bidi override renders as a different name than it is: the
+    // visible text reads "GitHub Support" while the code points carry a right-to-left
+    // override that reorders what a human sees — the oldest trick in display-name spoofing.
     const spoofed = "GitHub Support\u202E";
     const clean = sanitizeDisplayName(spoofed);
     expect(clean).toBe("GitHub Support");
@@ -277,24 +275,22 @@ describe("sanitizeDisplayName", () => {
   });
 
   it("strips zero-width joiners and non-joiners", () => {
-    // A zero-width character in the middle of a name breaks naive equality
-    // checks, so "ada\u200b@example.com" and "ada@example.com" compare
-    // differently while looking identical.
+    // A zero-width character breaks naive equality checks: "ada\u200b@example.com" and
+    // "ada@example.com" compare differently while looking identical.
     expect(sanitizeDisplayName("A\u200bda")).toBe("Ada");
     expect(sanitizeDisplayName("A\u200dda")).toBe("Ada");
   });
 
   it("strips control characters", () => {
-    // A NUL in a header value truncates the string in some parsers, so
-    // everything after it would vanish from the byline.
+    // A NUL in a header value truncates the string in some parsers, so everything after it
+    // vanishes from the byline.
     expect(sanitizeDisplayName("A\u0000da")).toBe("Ada");
     expect(sanitizeDisplayName("A\u0007da")).toBe("Ada");
   });
 
   it("leaves ordinary non-ASCII names alone", () => {
-    // The sanitiser must not quietly become a transliterator — a name in any
-    // script is a legitimate name, and mangling it would be a visible bug in
-    // exactly the case the sanitiser exists to protect.
+    // The sanitiser must not become a transliterator: a name in any script is legitimate,
+    // and mangling it would be a visible bug in exactly the case the sanitiser protects.
     expect(sanitizeDisplayName("Ada Lovelace")).toBe("Ada Lovelace");
     expect(sanitizeDisplayName("\u4E2D\u5927 花子")).toBe("\u4E2D\u5927 花子");
     expect(sanitizeDisplayName("Zo\u00EB M\u00FCller")).toBe("Zo\u00EB M\u00FCller");

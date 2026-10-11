@@ -1,21 +1,13 @@
 /**
  * The classifier's vocabulary: keyword tables and regexes.
  *
- * This is the part of Winnow that decides what the user sees, so the tables are
- * narrow on purpose. A broad keyword is worse than none: it puts ordinary mail
- * in a bucket, and a bucket the user cannot trust is a bucket they will mute.
- *
  * Two structural rules hold across every table:
  *
- *   1. **No vendor names.** "FedEx" appears in neither the shipping nor the
- *      spam table. Buckets are a *kind* of mail, so they survive a sender
- *      change and mean the same thing across accounts. (Vendor names *are*
- *      fine in the social-domain list, because there the domain is the whole
- *      signal — a mention from a platform is what makes it social.)
- *
- *   2. **No overlap between gated tables.** Several signals are gated on
- *      `!security`, and `codes` is gated on it too — so a phrase in both
- *      `securityKeywords` and `codesKeywords` makes the codes entry
+ *   1. **No vendor names.** A bucket is a *kind* of mail, so it survives a sender
+ *      change. (Vendor names are fine in `SOCIAL_DOMAINS`, where the domain *is*
+ *      the signal.)
+ *   2. **No overlap between gated tables.** `codes` is gated on `!security`, so a
+ *      phrase in both `securityKeywords` and `codesKeywords` makes the codes entry
  *      unreachable. Tests assert the tables do not overlap.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Classification/Heuristics.swift`.
@@ -28,10 +20,9 @@ import { compile, KeywordTable } from "./text";
 /**
  * Something is *wrong* with the account.
  *
- * Deliberately excludes the code half of a login notice. "Your OTP is 1234" is
- * a copyable code, not an alarm, and belongs in `codesKeywords`. Bare
- * "authentication" is excluded too — it fires inside "authentication code".
- * Name the failure modes instead.
+ * Deliberately excludes the code half of a login notice — "Your OTP is 1234" is a
+ * copyable code, not an alarm, and belongs in `codesKeywords` — and bare
+ * "authentication", which fires inside "authentication code".
  */
 export const securityKeywords = new KeywordTable([
   "verify your account",
@@ -52,20 +43,11 @@ export const securityKeywords = new KeywordTable([
   "unusual sign-in",
   "unusual sign in",
   "unrecognized device",
-  // The new-device notice, which is how Dropbox, Google, Apple and most banks
-  // word the *commonest* account-security event there is. The table had
-  // "unrecognized device" — which almost nobody writes, because a service
-  // calling your own phone unrecognised reads as a bug to the recipient — and
-  // missed this entirely, so a routine Dropbox new-device alert was not filed as
-  // security at all.
-  //
-  // Narrower than it looks, and the narrowness is the point. An earlier attempt
-  // added "signed in to your account" alongside this, which fired on "You signed
-  // in to your account from a new device" — the *welcome-back* mail sent after a
-  // legitimate sign-in. That phrase alone cannot tell a new device from a known
-  // one, which is the entire content of these notices. So the entries below
-  // require the *newness*, and "sign-in history" is the action a real alert
-  // offers.
+  // The new-device notice is how Dropbox, Google, Apple and most banks word the
+  // commonest account-security event there is. Narrower than it looks: "signed in
+  // to your account" alone fires on the *welcome-back* mail sent after a legitimate
+  // sign-in, so the entries below require the *newness*, and "sign-in history" is
+  // the action a real alert offers.
   "new device signed in",
   "new device has signed in",
   "sign-in history",
@@ -107,9 +89,9 @@ export const urgentKeywords = new KeywordTable([
 /**
  * Classic scam wording, stacking per distinct hit.
  *
- * Everyday words stay out on purpose. "Congratulations" and "unlimited" appear
- * in real benefit and bank notices, and junking those teaches the user to
- * ignore the Unsafe bucket — which is the one bucket that must never cry wolf.
+ * Everyday words stay out on purpose — "Congratulations" and "unlimited" appear in
+ * real benefit and bank notices, and junking those teaches the user to ignore the
+ * Unsafe bucket, which must never cry wolf.
  */
 export const spamKeywords = new KeywordTable([
   "claim your prize",
@@ -298,11 +280,10 @@ export const promoRegex = compile(
 /**
  * Real phishing copy.
  *
- * "Click here" only counts next to account or credential language, because
- * every newsletter has a click-here link. "Unusual sign-in" is deliberately
- * *not* here: it is a security tell (and is in `securityKeywords`), but banks
- * send it about genuine fraud, and treating it as phishing would bury exactly
- * the alert the user needs.
+ * "Click here" only counts next to account or credential language — every
+ * newsletter has a click-here link. "Unusual sign-in" is deliberately *not* here:
+ * banks send it about genuine fraud, and treating it as phishing would bury the
+ * alert the user needs.
  */
 export const phishingRegex = compile(
   "\\b(?:account has been compromised|verify your password|suspended account|click here.{0,80}(?:password|account|verify|identity|login|credential))\\b",
@@ -312,30 +293,21 @@ export const phishingRegex = compile(
  * Coercion: a deadline or a threat, wrapped around a demand.
  *
  * Separate from `phishingRegex` rather than folded into it, because that test is
- * *binary* — one hit is 0.3 whether it matched one phrase or five. Folding
- * coercion in changed nothing for the message that motivated this: the fixture
- * threatening permanent data removal still scored 0.30, below the unsafe
- * threshold, because it already matched "verify your password".
+ * *binary* — one hit is 0.3 whether it matched one phrase or five — so folding
+ * coercion in changed nothing for the message that already matched "verify your
+ * password". What makes a campaign worse than a bare credential demand is the
+ * threat attached to it, and that deserves to score above the threshold on its own.
  *
- * What makes a campaign worse than a bare credential demand is the threat
- * attached to it. "Verify your password" could be a clumsy real notice. "Your
- * account will be suspended unless you verify immediately, and all associated
- * data will be removed" is not something a genuine institution sends about a
- * password — it is the coercion that makes phishing work, and it deserves to
- * score above the threshold on its own.
- *
- * Every alternative requires a *demand* alongside the threat, which is what
- * keeps genuine enforcement notices out. A bank saying "your account will be
- * closed if the balance remains unpaid" matches neither: no credential demand,
- * and no deletion threat. Those are real and common, and misfiling them as
- * unsafe is how the Unsafe bucket learns to cry wolf.
+ * Every alternative requires a *demand* alongside the threat, which keeps genuine
+ * enforcement notices out: misfiling those is how the Unsafe bucket learns to cry
+ * wolf.
  */
 export const coercionRegex = compile(
   [
-    // A credential demand carrying a deadline or a condition. This is the core
-    // shape, and the demand is required in every alternative — a bare
-    // "your account will be suspended" is a real bank notice, and treating it as
-    // coercion would put genuine enforcement mail in the Unsafe bucket.
+    // A credential demand carrying a deadline or a condition. The demand is
+    // required in every alternative — a bare "your account will be suspended" is a
+    // real bank notice, and treating it as coercion would misfile genuine
+    // enforcement mail.
     "(?:verif|confirm|update|renew)\\w* your (?:password|account|credentials|identity|access).{0,80}(?:hour|minute|day|immediately|unless|expire)",
     "unless you verif",
     // Data destruction as the stated consequence. No institution phrases it this
@@ -397,11 +369,8 @@ export function bodyWordCount(body: string): number {
  * Whether a subject reads as shouting: mostly capitals, and more than one
  * exclamation mark.
  *
- * Counted over ASCII letters only. Accented capitals are vanishingly rare in
- * spam subjects, and excluding them stops a French or Turkish subject from
- * looking shouted. Done with one pass and no regexes — this runs per message
- * on every classification, and the Swift version used two `replace` passes
- * here.
+ * Counted over ASCII letters only, so a French or Turkish subject does not look
+ * shouted. One pass and no regexes — this runs per message on every classification.
  */
 export function isShoutySubject(subject: string): boolean {
   let upper = 0;

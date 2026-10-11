@@ -1,22 +1,15 @@
 /**
  * The mailbox palette, on `!`.
  *
- * A four-row overlay rather than a permanent sidebar. The reasoning is about
- * frequency: a mail client is a full-window reading surface, and a permanent folder
- * rail permanently spends 200px of it on four destinations the user visits
- * deliberately rather than continuously. The palette costs nothing until summoned, and
- * `!` is one key from anywhere.
+ * A four-row overlay rather than a permanent sidebar: a mail client is a full-window
+ * reading surface, and a folder rail spends 200px of it on destinations the user visits
+ * deliberately rather than continuously. The palette costs nothing until summoned.
  *
- * Archive is deliberately absent — the same reasoning as the Swift implementation's.
- * You go to Archive to look for something; you do not flip to it while triaging, and a
- * fifth row for it would dilute the four that matter.
+ * Archive is deliberately absent — you go to Archive to look for something, you do not
+ * flip to it while triaging, and a fifth row would dilute the four that matter.
  *
- * **It is a `menu`, not a `dialog`.** The rows are destinations with a roving
- * selection rather than content to be read, which is exactly the menu pattern — and
- * `aria-activedescendant` is what makes it announce correctly. The previous version was
- * `role="menu"` with nothing pointing at the highlighted row, so a screen reader
- * announced "menu, 4 items" and never which one was selected; and it had no
- * `tabIndex`, so the palette could not be focused at all from the keyboard alone.
+ * **It is a `menu`, not a `dialog`:** the rows are destinations with a roving selection,
+ * and `aria-activedescendant` is what makes it announce which row is highlighted.
  */
 
 import { Inbox, Settings, Trash2, TriangleAlert } from "lucide-react";
@@ -34,9 +27,8 @@ const ICONS: Record<NavigationItem, typeof Inbox> = {
 /**
  * What a row says.
  *
- * A mailbox is named by `MAILBOX_LABEL` — the same map the tabs use — so a folder has
- * one name in the product rather than one per surface. Only Settings, which is not a
- * mailbox, carries its own.
+ * A mailbox is named by `MAILBOX_LABEL` — the same map the tabs use — so a folder has one
+ * name in the product. Only Settings, which is not a mailbox, carries its own.
  */
 const labelFor = (item: { mailbox?: Mailbox }): string =>
   item.mailbox ? MAILBOX_LABEL[item.mailbox] : "Settings";
@@ -56,8 +48,8 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
       role="menu"
       label="Switch mailbox"
       onClose={onClose}
-      // Without this the palette is announced as a menu with four items and no
-      // position, which is the entire thing a menu is supposed to convey.
+      // Without this the palette is announced as a menu with four items and no position,
+      // which is the entire thing a menu is supposed to convey.
       activeDescendant={active ? `nav-row-${active.id}` : undefined}
       className="animate-sheet w-full max-w-[280px] overflow-hidden rounded-pane border border-hairline bg-chrome p-1.5 shadow-lift"
     >
@@ -73,9 +65,8 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
             id={`nav-row-${item.id}`}
             type="button"
             role="menuitem"
-            // `aria-selected` is not valid on a menuitem, and `aria-checked` would
-            // claim it is a toggle. The correct signal for "this is the row Enter will
-            // activate" on a menu is `aria-activedescendant` on the *menu*, which is
+            // `aria-selected` is not valid on a menuitem, and `aria-checked` would claim
+            // it is a toggle. The correct signal is `aria-activedescendant` on the *menu*,
             // set above.
             tabIndex={-1}
             onClick={() => onActivate(item.id)}

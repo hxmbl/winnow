@@ -2,14 +2,11 @@
  * The Gmail wire types.
  *
  * These mirror the API's JSON and nothing else. They are *not* the app's
- * `Email` type: a raw message has `labelIds`, an RFC 822 `payload` tree of
- * base64 blobs, and a header map. Converting one to the other is
- * `mapper.ts`'s job, and keeping the two apart means a Gmail API change lands
+ * `Email` type: conversion happens in `mapper.ts`, so a Gmail API change lands
  * in one file rather than rippling through the classifier and the list.
  *
- * Every field is optional where the API omits it, because Gmail omits more than
- * its documentation admits — a message with no `payload` is a draft stub, and
- * a header may be absent entirely.
+ * Fields are optional where the API omits them — e.g., a message with no
+ * `payload` is a draft stub, and a header may be absent entirely.
  */
 
 /** The base URL every Gmail request is built from. */
@@ -25,11 +22,9 @@ export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
  * base64url, per RFC 4648 §5: `+` → `-`, `/` → `_`, padding stripped.
  *
  * Every base64url operation in the Gmail layer goes through these two, because
- * the alphabet is the *wire format* rather than a detail: `messages.send`'s
- * `raw` field, message body blobs and attachment payloads all arrive URL-safe,
- * while a `Content-Transfer-Encoding: base64` body inside a message must not be.
- * Five hand-rolled copies of the same two lines is how the send path ended up
- * passing plain text where the API wanted an encoded blob.
+ * the alphabet is the wire format: `messages.send`'s `raw` field, message body
+ * blobs and attachment payloads all arrive URL-safe, while a
+ * `Content-Transfer-Encoding: base64` body inside a message must not be.
  */
 export function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
@@ -40,12 +35,10 @@ export function base64UrlEncode(bytes: Uint8Array): string {
 /**
  * Decode base64url back to bytes.
  *
- * Returns `null` rather than throwing for input `atob` rejects, because the
- * three callers need three different answers to "this did not decode": a message
- * body becomes `""` and keeps its headers, a `Message-ID` encoded word is left
- * alone rather than deleted, and an attachment yields no bytes instead of an
- * exception inside a download. An empty array would hide the difference between
- * "decoded to nothing" and "could not be decoded".
+ * Returns `null` rather than throwing for input `atob` rejects: a message body
+ * becomes `""` and keeps its headers, a `Message-ID` encoded word is left alone
+ * rather than deleted, and an attachment yields no bytes instead of an exception
+ * inside a download.
  */
 export function base64UrlDecode(text: string): Uint8Array | null {
   try {
@@ -62,10 +55,8 @@ export function base64UrlDecode(text: string): Uint8Array | null {
 /**
  * One Gmail scope, deliberately.
  *
- * `gmail.modify` covers read, label changes and send. Asking for
- * `gmail.readonly` plus `gmail.send` plus `gmail.settings.basic` would produce
- * three consent screens' worth of warnings for the same access, and the user
- * would have no idea what they had agreed to.
+ * `gmail.modify` covers read, label changes and send — simpler consent than
+ * requesting separate scopes for read, send and settings.
  */
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 
@@ -169,19 +160,12 @@ export type AuthErrorKind =
   | "reauth_required"
   | "network"
   | "timeout"
-  /**
-   * The build is missing something it needs — a client id, a redirect URI, or a
-   * secret.
-   */
+  /** The build is missing something it needs — a client id, redirect URI or secret. */
   | "config"
   /**
    * Google accepted the request but refused the identity: a wrong secret, or a
-   * client whose type forbids the flow it was asked to perform.
-   *
-   * Distinct from `config` because the fix is not the same. `config` means
-   * "this was never built correctly"; this means "this was built for a different
-   * client type", which for Winnow is usually a Desktop-app client configured
-   * with a web redirect URI, or the reverse.
+   * client whose type forbids the flow it was asked to perform (e.g., a Desktop
+   * client misconfigured with a web redirect URI, or vice versa).
    */
   | "invalid_client"
   | "unknown";

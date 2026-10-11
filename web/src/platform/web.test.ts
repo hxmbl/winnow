@@ -1,16 +1,5 @@
 /**
- * The web platform's sign-in navigation.
- *
- * The behavioral contract of `beginSignIn` on the web is the fix these tests
- * pin: the promise **must not settle** after asking the browser to navigate.
- * The session layer `await`s it; if it resolves with `{ kind: "cancelled" }`,
- * the session reads a cancellation, discards the pending PKCE verifier (a
- * microtask — it runs before the navigation), and the redirect back from Google
- * finds nothing to exchange with. That was the reported failure: every web
- * sign-in ended in "Sign-in could not be verified."
- *
- * Only a navigation the browser *refused* settles, with a fault — hanging
- * forever on a page load that cannot happen is worse than saying so.
+ * Web platform sign-in tests.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -76,7 +65,6 @@ describe("webPlatform.beginSignIn", () => {
     await flush();
 
     expect(assigned).toEqual([AUTHORIZE_URL]);
-    // So the sign-in screen can show "signing in…" across the reload.
     expect(globalThis.sessionStorage?.getItem("winnow.pendingState")).toBe("s0");
     expect(settled).toBeNull();
   });
@@ -93,8 +81,6 @@ describe("webPlatform.beginSignIn", () => {
   });
 
   it("settles with a fault when there is no browser to navigate", async () => {
-    // For example a headless embed. A never-resolving promise here would hang
-    // the calling session forever, so it must say so and settle.
     const result: SignInResult = await webPlatform.beginSignIn(REQUEST);
     expect(result).toEqual({
       kind: "unavailable",

@@ -1,19 +1,15 @@
 /**
  * Sign-in.
  *
- * Two states and a lot of restraint. The screen has one job, and the main thing
- * it must *not* do is ask for anything the product does not need: one scope,
- * explained in one sentence, in plain words rather than a URL.
+ * Two states and a lot of restraint. The screen has one job and asks for exactly one
+ * scope, explained in one sentence in plain words rather than a URL.
  *
- * The failure copy is specific because sign-in fails for identifiable reasons
- * and a generic "something went wrong" sends the user to the one place they
- * cannot fix it. `core/session/errors.ts` does the mapping; this component only
- * renders it.
+ * Failure copy is specific because sign-in fails for identifiable reasons, and a
+ * generic "something went wrong" sends the user to the one place they cannot fix it.
+ * `core/session/errors.ts` does the mapping; this component only renders it.
  *
- * Below the fold, the demo mailbox. Not a consolation prize — it is how you
- * evaluate the classification, and Winnow's whole product is the classification.
- * Requiring a Google account before you can see whether the sorting is any good
- * is a product failure, not a safety feature.
+ * Below the fold, the demo mailbox — not a consolation prize, but how you evaluate the
+ * classification, which is Winnow's whole product.
  */
 
 import { useEffect, useState } from "react";
@@ -37,8 +33,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo }: Props)
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<AuthFailure | null>(null);
 
-  // A failure left over from a previous attempt should not greet the user who
-  // just arrived.
+  // A failure from a previous attempt should not greet the user who just arrived.
   useEffect(() => setFailure(null), []);
 
   async function start() {

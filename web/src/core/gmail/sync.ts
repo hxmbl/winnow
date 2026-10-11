@@ -1,30 +1,17 @@
 /**
  * Keeping the local cache in step with Gmail.
  *
- * Two strategies, chosen by state:
+ * Two strategies:
  *
  * - **Full sync** — first sign-in, or a cursor Gmail no longer retains. Pages
  *   four views (`in:inbox`, everything else, `in:trash`, `in:spam`), fetches
- *   each message, and files it under the bucket its labels imply.
+ *   each message, and files it by its labels.
  * - **Incremental sync** — every refresh after that. Reads `history.list` since
  *   the stored cursor and re-fetches each touched message *whole*.
  *
- * Three decisions in the incremental path are worth stating, because each was a
- * bug first:
- *
- * 1. **Re-fetch, never apply the diff.** A history record says "label X was
- *    added to message Y". Reconstructing state from a diff means trusting that
- *    every label change was reported and applied, and one missed event leaves
- *    a message in the wrong mailbox forever. Re-fetching is one request per
- *    changed message and cannot drift.
- * 2. **The cursor only advances on a clean run.** A single failed fetch means
- *    the cache is not yet a faithful copy, so advancing the cursor would skip
- *    that message on the next sync and it would never arrive.
- * 3. **A 404 from history means full rebuild.** Gmail only retains history for
- *    a limited window; past it, the cursor is invalid rather than merely
- *    stale. Falling back to a full sync is the only correct response.
- *
- * Ported from `legacy/swift-native/Sources/winnow/Gmail/Sync/GmailSyncEngine.swift`.
+ * Decisions: re-fetch, never apply the diff (cannot drift). Cursor only advances
+ * on a clean run (avoids skipping failed messages). A 404 from history means full
+ * rebuild (cursor expired).
  */
 
 import type { Email, Mailbox } from "../model/email";
@@ -46,11 +33,9 @@ export interface MailboxCache {
   clear(): Promise<void>;
   /**
    * Force any coalesced write to land, throwing if it could not be persisted.
-   *
-   * Optional, because a store that writes through on every call has nothing to
-   * flush. A store that batches has one, and the sync engine must call it before
-   * recording a cursor: the cursor asserts "the cache is a faithful copy as of
-   * this history id", and that is only true if the cache actually reached disk.
+   * Optional. If present, the sync engine calls it before recording a cursor —
+   * the cursor asserts "the cache is a faithful copy as of this history id", so
+   * the cache must have reached disk.
    */
   flush?(): Promise<void>;
 }
@@ -66,8 +51,7 @@ export interface CursorStore {
 const VIEWS: readonly { query: string; cap: number }[] = [
   // The inbox is the product; it is never truncated.
   { query: "in:inbox", cap: Number.POSITIVE_INFINITY },
-  // "Archived" means All Mail minus the folder-ish buckets: sent and drafts are
-  // mail the user wrote, and spam is quarantined. Neither is archived mail.
+  // "Archived" means All Mail minus the folder-ish buckets: sent, drafts and spam.
   { query: "-in:inbox -in:trash -in:sent -in:draft -in:spam", cap: 500 },
   { query: "in:trash", cap: 500 },
   { query: "in:spam", cap: 500 },
@@ -99,11 +83,8 @@ export type SyncResult = {
   /**
    * True when the mailbox could not be written to persistent storage.
    *
-   * Distinct from `failed`, which counts messages that could not be *fetched*.
-   * This says the sync itself succeeded and the offline cache was still lost —
-   * which used to be reported by silently discarding a `QuotaExceededError`, so
-   * that a user past roughly 2,000 messages had a "working" offline cache that
-   * was never written, on every launch, with no indication of it.
+   * Distinct from `failed` (messages that could not be *fetched*): sync succeeded
+   * but the offline cache was not persisted.
    */
   cacheUnpersisted: boolean;
   durationMs: number;
@@ -130,11 +111,8 @@ export class GmailSyncEngine {
   /**
    * Refresh, choosing the strategy from whether a cursor exists.
    *
-   * `onProgress` is accepted per-call rather than only in the constructor because
-   * the reporter is the *caller's*: the store attaches one, the tests attach
-   * another, and neither should have to be built before the engine exists. Both
-   * strategies are also given the caller's reporter, so a full sync does not lose
-   * its progress the moment the store hands over a fresh callback.
+   * `onProgress` is accepted per-call because the reporter is the caller's; both
+   * strategies are given the caller's reporter.
    */
   async sync(options: { onProgress?: (progress: SyncProgress) => void } = {}): Promise<SyncResult> {
     const cursor = await this.options.cursor.read();
@@ -151,9 +129,8 @@ export class GmailSyncEngine {
   /**
    * Page every view, fetch every message, and replace the cache.
    *
-   * Replaces rather than merges: after a full sync, `seen` is the complete
-   * truth about what exists, so anything else in the cache was deleted
-   * server-side and must go. Merging would leave ghosts behind forever.
+   * Replaces rather than merges: `seen` is the complete truth about what exists,
+   * so anything else in the cache was deleted server-side and must go.
    */
   async full(onProgress?: (progress: SyncProgress) => void): Promise<SyncResult> {
     const started = this.now();
@@ -163,8 +140,8 @@ export class GmailSyncEngine {
     };
     report({ phase: "full", fraction: 0, fetched: 0, failed: 0 });
 
-    // Taken *before* the pages, so anything that arrives while we are paging
-    // is picked up by the next incremental sync rather than being missed.
+    // Taken before the pages, so anything that arrives while paging is picked up
+    // by the next incremental sync rather than being missed.
     const profile = await this.options.client.profile();
 
     const seen = new Set<string>();
@@ -199,8 +176,8 @@ export class GmailSyncEngine {
 
         pageToken = response.nextPageToken;
 
-        // Hitting the cap with pages still available means this view is
-        // larger than we are willing to walk.
+        // Hitting the cap with pages still available means the view is larger
+        // than we are willing to walk.
         if (collected >= view.cap && pageToken) {
           truncated = true;
           pageToken = undefined;
@@ -261,10 +238,10 @@ export class GmailSyncEngine {
 
     await this.options.cache.keepOnly([...seen]);
 
-    // Land any coalesced write before making a claim that depends on it. A cursor
-    // means "the cache is a faithful copy as of this history id", so writing one
-    // over a cache that failed to persist would leave the next launch believing a
-    // mailbox it does not have — and skipping the sync that would rebuild it.
+    // Land any coalesced write before making a claim that depends on it. A
+    // cursor means "the cache is a faithful copy as of this history id", so
+    // writing one over a cache that failed to persist would leave the next launch
+    // believing a mailbox it does not have.
     const cacheUnpersisted = !(await this.flushCache());
 
     // The cursor is only trustworthy when the cache is a faithful copy.
@@ -329,9 +306,9 @@ export class GmailSyncEngine {
   /**
    * Land any coalesced cache write. Returns `false` if it could not be persisted.
    *
-   * Reported rather than thrown: the messages themselves arrived fine, and the
-   * session is fully usable in memory. Failing the whole sync would be a worse
-   * answer than telling the user their offline cache did not save.
+   * Reported rather than thrown: messages arrived fine, session is usable in
+   * memory. Better to report that the offline cache did not save than to fail
+   * the whole sync.
    */
   private async flushCache(): Promise<boolean> {
     try {
@@ -346,8 +323,8 @@ export class GmailSyncEngine {
    * Apply one history record.
    *
    * Every touched message is re-fetched whole rather than having its labels
-   * patched, so the resulting state is always derived from what the server
-   * currently says. Returns how many fetches failed.
+   * patched, so the resulting state is always derived from what the server says.
+   * Returns how many fetches failed.
    */
   private async applyRecord(record: {
     messagesDeleted?: { id: string }[];

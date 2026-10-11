@@ -1,12 +1,11 @@
 /**
  * Tests for the windowing arithmetic.
  *
- * `MessageList` itself has no component tests — it is layout and events — so this
- * is where the "does the window land on the right rows" question is actually
- * answered. Every case here is a bug that a rendered list would hide: an off-by-
- * one in the binary search shows up as a blank strip at the bottom of the list,
- * and a mis-clamped `scrollTopForIndex` shows up as the cursor refusing to reach
- * the last message.
+ * `MessageList` has no component tests — it is layout and events — so this is where the
+ * "does the window land on the right rows" question is answered. Each case is a bug a
+ * rendered list would hide: an off-by-one in the binary search is a blank strip at the
+ * bottom of the list, and a mis-clamped `scrollTopForIndex` is the cursor refusing to
+ * reach the last message.
  */
 
 import { describe, expect, it } from "vitest";

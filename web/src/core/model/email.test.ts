@@ -35,12 +35,10 @@ describe("hashId", () => {
   });
 
   it("separates ids that differ by one character", () => {
-    // FNV-1a avalanche: neighbouring ids must not land on neighbouring numbers.
     expect(hashId("msg-1")).not.toBe(hashId("msg-2"));
   });
 
   it("hashes non-ASCII by its UTF-8 bytes, not its code units", () => {
-    // Same bytes, different UTF-16 representation paths through to one value.
     expect(hashId("café")).toBe(hashId("café"));
   });
 });
@@ -52,8 +50,6 @@ describe("threadKey", () => {
   });
 
   it("keeps a thread-less message on its own", () => {
-    // Without the fallback every thread-less message would collapse into one
-    // bogus conversation.
     expect(threadKey({ gmailId: "a" })).toBe("single-a");
     expect(threadKey({ gmailId: "b" })).not.toBe(threadKey({ gmailId: "a" }));
   });
@@ -85,7 +81,6 @@ describe("displayName", () => {
   });
 
   it("ignores a whitespace-only name", () => {
-    // Gmail headers are attacker-influenced; a name of "  " must not win.
     expect(displayName(email({ name: "   ", sender: "ada@example.com" }))).toBe("ada");
   });
 });

@@ -1,27 +1,24 @@
 /**
  * Scale guard rails.
  *
- * Ported in spirit from `legacy/swift-native/Tests/winnowTests/PerformanceTests.swift`,
- * which guarded the classification pipeline with wall-clock ceilings. Those two
- * tests did not survive the React rewrite, and the mailbox they measured — ~114
- * messages — is the same order as the demo seed. So nothing in CI ever ran the
- * pipeline at a size a real account reaches, and the costs below accumulated
+ * Ported in spirit from the Swift suite's `PerformanceTests`, which guarded the pipeline
+ * with wall-clock ceilings. Those tests did not survive the React rewrite, and the
+ * ~114-message mailbox they measured is the same order as the demo seed, so nothing in CI
+ * ran the pipeline at a size a real account reaches. The costs below then accumulated
  * unnoticed:
  *
  *   - a full `derive()` reclassified the entire inbox every 60 seconds, because
  *     `state.now` is part of the state `derive()` is memoised against;
- *   - a full sync upserted the cache every 25 messages, and each upsert parsed and
- *     re-serialised the whole mailbox.
+ *   - a full sync upserted the cache every 25 messages, each upsert parsing and
+ *     re-serialising the whole mailbox.
  *
- * Two kinds of assertion live here, on purpose:
+ * Two kinds of assertion live here:
  *
- *   - **Work counts**, which are deterministic and name the regression exactly. A
- *     clock tick must classify zero messages. If someone moves `now` back into the
- *     memo's key, this fails on any machine, in any load.
- *   - **Wall-clock ceilings**, which are the Swift precedent and catch the costs
- *     nobody thought to count. They are deliberately loose and take the best of
- *     three runs, because they exist to catch an order-of-magnitude regression
- *     rather than to benchmark.
+ *   - **Work counts**, deterministic and naming the regression exactly: a clock tick must
+ *     classify zero messages, so moving `now` back into the memo's key fails on any
+ *     machine, under any load.
+ *   - **Wall-clock ceilings**, deliberately loose and taking the best of three runs, to
+ *     catch an order-of-magnitude regression rather than to benchmark.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -47,11 +44,10 @@ function synth(n: number): Email[] {
 /**
  * A backend that does nothing.
  *
- * Only its *presence* matters here: `startClock` deliberately freezes the clock
- * without one, because the demo's fixed instant is what makes the seed's day
- * sections deterministic. Reproducing a live-mail regression therefore needs a
- * backend attached, which is the honest shape of the bug anyway — it only ever
- * bit people signed in to a real account.
+ * Only its *presence* matters: `startClock` freezes the clock without one, because the
+ * demo's fixed instant keeps the seed's day sections deterministic. Reproducing a
+ * live-mail regression therefore needs a backend, which is the honest shape of the bug —
+ * it only bit people signed in.
  */
 const inertBackend: MailBackend = {
   async sync() {
@@ -111,10 +107,10 @@ function harness(n: number): { backend: MailBackend } {
 
 describe("scale: a clock tick", () => {
   it("classifies nothing, however big the mailbox", async () => {
-    // The regression, named directly. `state.now` advances every 60 seconds to keep
-    // relative timestamps and day headings true, which used to invalidate the
-    // derived view and reclassify every message in the inbox — on an idle app,
-    // forever. Measured at 271ms per tick for 5,000 messages.
+    // The regression, named directly: `state.now` advances every 60 seconds to keep
+    // relative timestamps and day headings true, which used to invalidate the derived view
+    // and reclassify every inbox message — on an idle app, forever. 271ms per tick at
+    // 5,000 messages.
     const classify = await import("../classify/classify");
     const spy = vi.spyOn(classify, "classifyAll");
 
@@ -127,10 +123,10 @@ describe("scale: a clock tick", () => {
       const afterPrime = spy.mock.calls.length;
       expect(afterPrime).toBeGreaterThan(0);
 
-      // Ten clock ticks, reading the view after each — which is what a render does.
-      // Reading it *matters*: `notify()` only bumps the version, so without a read
-      // here `derive()` would never run and this test would pass even with the memo
-      // deleted. A guard rail that cannot fail is not a guard rail.
+      // Ten clock ticks, reading the view after each — what a render does. Reading
+      // *matters*: `notify()` only bumps the version, so without a read `derive()` never
+      // runs and this test passes even with the memo deleted. A guard rail that cannot
+      // fail is not a guard rail.
       for (let i = 0; i < 10; i += 1) {
         vi.advanceTimersByTime(60_000);
         void store.view;
@@ -144,14 +140,13 @@ describe("scale: a clock tick", () => {
 
   it("still reclassifies when the weights actually move", async () => {
     // The other half of the contract: the memo must not be sticky. A weight change
-    // is exactly the kind of edit that invalidates classification, and a cache that
-    // ignored it would silently stop respecting the sliders.
+    // invalidates classification, and a cache that ignored it would silently stop
+    // respecting the sliders.
     //
-    // Driven through `setSignalWeight` rather than `scheduleReclassify` because that
-    // is what a slider drag actually calls. `LearningModel.setWeight` returns a new
-    // model with a new `weights` object, which is the identity the memo keys on;
-    // `scheduleReclassify` on its own only notifies, and would pass even if the
-    // memo had ignored weights entirely.
+    // Driven through `setSignalWeight` because that is what a slider drag calls.
+    // `setWeight` returns a new model with a new `weights` object, the identity the memo
+    // keys on; `scheduleReclassify` alone only notifies, and would pass even if the memo
+    // ignored weights entirely.
     const classify = await import("../classify/classify");
     const spy = vi.spyOn(classify, "classifyAll");
 
@@ -160,9 +155,8 @@ describe("scale: a clock tick", () => {
     const before = spy.mock.calls.length;
 
     store.setSignalWeight("security", 100);
-    // The reclassify is debounced behind the drag, and `notify` only bumps the
-    // version — nothing re-derives until a consumer asks for the view. Reading it
-    // is what a render would do.
+    // The reclassify is debounced behind the drag, and `notify` only bumps the version —
+    // nothing re-derives until a consumer asks for the view, which is what a render does.
     await new Promise((resolve) => setTimeout(resolve, 140));
     void store.view;
 
@@ -175,8 +169,8 @@ describe("scale: the inbox analysis", () => {
     const store = new WinnowStore({ seed: synth(5000) });
     void store.view; // warm the JIT, so this measures steady state
 
-    // ~271ms for a cold 5,000-message derive before the memo. A ceiling this loose
-    // still catches the order-of-magnitude regression while surviving a loaded box.
+    // ~271ms for a cold 5,000-message derive before the memo; a ceiling this loose still
+    // catches the order-of-magnitude regression while surviving a loaded box.
     const ms = timed(3, () => {
       store.scheduleReclassify();
       void store.view;
@@ -196,9 +190,9 @@ describe("scale: the view", () => {
 
 describe("scale: resident bodies", () => {
   it("a 5,000-message mailbox holds no HTML on state.all", async () => {
-    // The bound itself, at the size it exists for. `BODY_RETENTION` drops the HTML
-    // from every message on the way in — the bodies live in a side-map, so the mailbox
-    // in memory is the 33% that is not `bodyHtml`.
+    // The bound itself, at the size it exists for: `BODY_RETENTION` drops the HTML from
+    // every message on the way in, so the mailbox in memory is the 33% that is not
+    // `bodyHtml`.
     const { backend } = harness(5000);
     const store = new WinnowStore();
     store.attach({ backend });
@@ -208,9 +202,9 @@ describe("scale: resident bodies", () => {
     expect(all.length).toBe(5000);
     expect(all.filter((e) => e.bodyHtml !== undefined)).toHaveLength(0);
 
-    // And the plain text — which the classifier and the preview line both read — is all
-    // still there. A bound that quietly emptied `body` would pass the check above and
-    // break every keyword match on old mail.
+    // And the plain text — read by the classifier and the preview line — is all still
+    // there: a bound that quietly emptied `body` would pass the check above and break
+    // every keyword match on old mail.
     expect(all.filter((e) => e.body.trim() === "")).toHaveLength(0);
   });
 });

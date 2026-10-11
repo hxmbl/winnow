@@ -1,11 +1,8 @@
 /**
  * Does this message belong in this bucket?
  *
- * One predicate, shared by the list pipeline, the rail ranking and the badge
- * renderer. That sharing is the point: when these were three separate
- * implementations, the "Important" filter matched at 56 while the "Important"
- * badge only appeared at 70, so messages existed in a filter with no badge and
- * users could not tell which threshold they were looking at.
+ * One predicate shared by the list pipeline, the rail ranking and the badge
+ * renderer, so a filter and its badge can never disagree about the threshold.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Classification/FilterMatching.swift`
  * and `FilterCatalog.swift`.
@@ -25,37 +22,25 @@ import {
 import type { UserProfile } from "../model/profile";
 
 /**
- * The importance score at or below which a message is skippable.
- *
- * Equal to the classifier's base score, which is what makes it the right
- * boundary: anything that earned no positive signal lands on it, and anything
- * that earned one is above it. "Read later" then means precisely what a user
- * wants from it — mail with no reason to open it now.
+ * The importance score at or below which a message is skippable: the classifier's
+ * base score. Anything that earned no positive signal lands on it, and anything
+ * that earned one is above it — so "Read later" is mail with no reason to open it
+ * now.
  */
 export const SKIPPABLE_SCORE = 50;
 
 /**
  * The bucket test.
  *
- * **`safe` is applied once, in `countAllFilters`, not here.** Five of the predicates
- * have no spam guard of their own: `starred`, `security`, `newsletters`,
- * `promotional`, `top_contacts` and `quiet_contacts`. Each of those is a statement
- * about the message rather than a judgement about whether to show it — you starred
- * it, it *is* a security notice, it *is* from someone you correspond with — and
- * gating them here would make "Security" empty for the one message the user most
- * wants to see filed there.
+ * **The `safe` guard is applied once, in `countAllFilters`, not here.** `starred`,
+ * `security`, `newsletters`, `promotional`, `top_contacts` and `quiet_contacts`
+ * deliberately have no spam guard: each is a statement about the message — you
+ * starred it, it *is* a security notice — and gating them would empty "Security"
+ * for the one message the user most wants filed there.
  *
- * So an earlier version of this docstring claimed every bucket except `unsafe` was
- * `safe && …`, which was false for those six, and the comment did not match the
- * code. The behaviour was right; the claim was the defect, and it mattered because
- * the claim is what a future change reads before adding a seventh guard. The guard
- * lives in the one place that counts every bucket — see `countAllFilters`.
- *
- * **The consequence, stated rather than hidden:** clicking a bucket whose predicate
- * lacks a guard *can* surface unsafe mail. `starred` and `security` do so
- * deliberately, and `demo-security-2` — a lure deliberately filed as starred in the
- * seed — really does match `quiet_contacts`. The count a pill shows is guarded; the
- * list behind it is not, for those buckets by design.
+ * The consequence, stated rather than hidden: clicking one of those buckets *can*
+ * surface unsafe mail. The count a pill shows is guarded; the list behind it is
+ * not, by design.
  */
 export function matchesBuiltin(
   filter: BuiltinSmartFilter,
@@ -130,24 +115,11 @@ export function matchesBuiltin(
       return signals.promotional;
 
     case "low_priority":
-      // Genuinely skippable — not "is a newsletter". An earlier version used
-      // `promotional || newsletter` here, which made Read later a synonym for
-      // two buckets that already existed and hid quiet personal mail.
-      //
-      // The score test is `<= SKIPPABLE_SCORE`, where the base score is 50, and the
-      // boundary is load-bearing in both directions. With a strict `< 50` a message
-      // carrying no signal at all scored exactly 50 and was excluded, so the only
-      // mail that could reach Read later was mail from a *penalised* sender — the
-      // bucket meant "skippable" and selected for "quiet or demoted" instead. But
-      // the symmetric mistake is just as bad: a 2FA code and a social mention both
-      // score exactly 50 too, and filing those under Read later is precisely the
-      // "hides mail you needed" failure the bucket exists to avoid.
-      //
-      // So the boundary holds the score and the *other* signals decide: anything
-      // the user was explicitly asked to deal with is excluded by name, and
-      // everything else that earned no positive signal falls in. That is what makes
-      // "Read later" mean the same thing the classifier's own base score does —
-      // mail with no reason to open it now.
+      // Genuinely skippable — not "is a newsletter". The score test is
+      // `<= SKIPPABLE_SCORE`, and the boundary is load-bearing both ways: a strict
+      // `< 50` excluded a message carrying no signal at all (it scored exactly 50),
+      // while a 2FA code and a social mention also score exactly 50, and the named
+      // signals keep those out.
       return (
         !email.starred &&
         !signals.urgentText &&
@@ -193,21 +165,11 @@ export function matchesFilter(
 /**
  * How many messages in the inbox land in each bucket.
  *
- * `unsafe` is the exception, and it has to be. Every other bucket is defined with
- * a `safe && …` guard — a message the classifier thinks is junk must not appear
- * in a bucket that means "worth your attention", or the user reads a phishing
- * lure by explicitly asking for Security. The `unsafe` bucket *is* the junk, so
- * counting it the same way would report the safety valve as permanently empty and
- * pin it nowhere.
- *
- * So the guard is applied once, here, to every bucket except `unsafe`, rather than
- * being left to each predicate. Applying it per-predicate is what let spam into
- * the Security count anyway: `security` is the one positive bucket whose predicate
- * has no `safe` guard — `signals.security` is a fact about the message, not a
- * judgement about whether to show it — so a phished "your account is suspended"
- * notice was counted under Security *and* under Unsafe at the same time. That
- * inflated the count, and since the rail ranks by count, it also moved Security
- * above buckets that genuinely had more mail in them.
+ * `unsafe` is the exception: every other bucket is guarded with `safe && …`, and
+ * the `unsafe` bucket *is* the junk, so counting it the same way would leave the
+ * safety valve permanently empty. The guard is applied here, once, rather than per
+ * predicate — `security` has no guard of its own, so a phished notice was counted
+ * under Security *and* Unsafe, inflating the count the rail ranks by.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Classification/FilterCatalog.swift`,
  * which guards the loop rather than the predicates for the same reason.
@@ -239,18 +201,12 @@ const ALL_FILTER_IDS: readonly BuiltinSmartFilter[] = BUILTIN_FILTERS;
  *
  * Three groups, and the grouping is the design:
  *
- *   1. **Permanent** — Important and Deliveries, pinned first *even when
- *      empty*. They are the two buckets a user reaches for on a bad day, and a
- *      pill that disappears exactly when you need it is worse than no pill.
- *   2. **Magic** — everything else with mail in it right now, busiest first.
- *      An empty bucket is hidden: it advertises a count of zero and offers
- *      nothing, so it just costs a slot in the rail.
- *   3. **Unsafe** — pinned last, as the deliberate safety valve. It is the one
- *      bucket you go to on purpose, so it never competes for position.
- *
- * Note that Unsafe is counted here even though the other buckets exclude spam
- * rows. Its members *are* the spam-scored rows, so skipping them would count
- * zero and pin it somewhere meaningless.
+ *   1. **Permanent** — Important and Deliveries, pinned first *even when empty*.
+ *      A pill that disappears exactly when you need it is worse than no pill.
+ *   2. **Magic** — everything else with mail in it right now, busiest first. An
+ *      empty bucket just costs a slot in the rail.
+ *   3. **Unsafe** — pinned last, the one bucket you go to on purpose, so it never
+ *      competes for position.
  */
 export function rankFilters(
   inbox: readonly Email[],

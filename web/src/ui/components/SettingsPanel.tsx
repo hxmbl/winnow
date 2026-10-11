@@ -1,16 +1,9 @@
 /**
  * Settings, and the reply composer.
  *
- * Two panels in one file because they share the sheet chrome and the escape
- * handling, and because splitting them would mean two files each re-deciding
- * what a modal is.
- *
- * The interesting part of this screen is the learning section. It exists at all
- * because "Winnow ranks your mail" is a claim, and a claim the user cannot
- * inspect or correct is not one they can trust. So every weight is a slider with
- * its default shown, the *drift* from that default is displayed, and the event
- * log is one click away. A user who thinks the ranking is wrong can see exactly
- * which signal is responsible and move it.
+ * Two panels in one file because they share the sheet chrome and the escape handling.
+ * The learning section exists so "Winnow ranks your mail" is a claim the user can
+ * inspect and correct.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -32,12 +25,9 @@ import type { FeedbackEvent } from "../../core/learn/learning";
 /**
  * The three standing answers about remote images.
  *
- * Order is the order of the question's escalating commitment, which is also the order
- * of consequence: the least permanent answer is on the left.
- *
- * `never` is disabled rather than hidden when the host cannot render HTML at all,
- * because hiding one option would leave a group of three showing two, which reads as
- * a layout bug rather than as a capability limit.
+ * Order is the order of escalating commitment. `never` is disabled rather than hidden
+ * when the host cannot render HTML, because a group of three showing two reads as a
+ * layout bug rather than a capability limit.
  */
 const IMAGE_POLICY_CHOICES: readonly { value: ImagePolicy; label: string }[] = [
   { value: "ask", label: "Ask each time" },
@@ -48,18 +38,16 @@ const IMAGE_POLICY_CHOICES: readonly { value: ImagePolicy; label: string }[] = [
 /**
  * How many feedback events the panel lists.
  *
- * The log itself is capped at `MAX_EVENTS`, which a keen user reaches in a couple
- * of weeks; the panel shows a screenful of the most recent ones because those are
- * the ones that explain the weights as they stand now.
+ * The log itself is capped at `MAX_EVENTS`; the panel shows the most recent ones,
+ * because those explain the weights as they stand now.
  */
 const HISTORY_LIMIT = 100;
 
 /**
  * One event, in a sentence.
  *
- * The bucket name rather than the internal id, because the user muted "New
- * newsletters", not `newsletters` — and this is the only place the two are
- * connected, so the event log is readable rather than a dump.
+ * The bucket name rather than the internal id, so the event log is readable rather
+ * than a dump.
  */
 function describeEvent(event: FeedbackEvent): string {
   switch (event.action) {
@@ -116,10 +104,9 @@ export type SettingsProps = {
   /**
    * Whether the reader can render a message's own markup at all.
    *
-   * True on both hosts — the reader puts the sender's HTML in a `sandbox=""` iframe,
-   * which loads its images without running a line of it. The flag is here so a future
-   * build that genuinely cannot (a webview without iframe isolation, say) hides the
-   * row rather than offering a switch that would do nothing.
+   * True on both hosts; here so a future build that genuinely cannot (a webview
+   * without iframe isolation, say) hides the row rather than offering a switch that
+   * would do nothing.
    */
   canLoadRemoteContent: boolean;
   /** The standing answer about remote images. See `IMAGE_POLICY_CHOICES`. */
@@ -138,11 +125,9 @@ export type SettingsProps = {
   onAdaptive: (value: boolean) => void;
   onResetWeights: () => void;
   /**
-   * The feedback log, **newest first**.
-   *
-   * `LearningModel.history`, not `events`: `events` is oldest-first, and a panel
-   * that renders `slice(0, 100)` of an oldest-first list shows the beginning of
-   * the log rather than the part that explains the weights on screen.
+   * The feedback log, **newest first** (`LearningModel.history`). `events` is
+   * oldest-first, so slicing that would show the beginning of the log rather than
+   * the part that explains the weights on screen.
    */
   events: readonly FeedbackEvent[];
   blockedSenders: readonly string[];
@@ -167,9 +152,8 @@ function WeightSlider({
   value: number;
   onChange: (value: number) => void;
 }) {
-  // Signed, so the badge answers "tuned up or tuned down" rather than just "how
-  // far". Computed through the shared helper so the panel and the learning loop
-  // cannot disagree about what drift means.
+  // Signed, and computed through the shared helper so the panel and the learning
+  // loop cannot disagree about what drift means.
   const drift = adjustment(weights, meta.key);
   return (
     <div className="flex flex-col gap-1">
@@ -180,12 +164,10 @@ function WeightSlider({
         <span className="flex items-baseline gap-1.5 text-[12px] tabular-nums">
           <span className="font-semibold text-ink">{value}</span>
           {/*
-            The default is only worth saying when the value has moved off it.
-
-            Printed unconditionally it read as `22  default 22` — two numbers side
-            by side with no indication that they were the same one, which is the
-            shape of a control that looks broken. With a drift, it becomes the
-            answer to "where did this come from", which is what it is for.
+            The default is only worth saying when the value has moved off it: printed
+            unconditionally it read as `22  default 22` — two numbers with no
+            indication that they were the same one. With a drift, it answers "where
+            did this come from".
           */}
           {drift !== 0 && (
             <>
@@ -210,11 +192,8 @@ function WeightSlider({
         onChange={(event) => onChange(Number(event.target.value))}
         aria-describedby={`weight-help-${meta.key}`}
         aria-valuetext={`${value} points, ${meta.label.toLowerCase()}`}
-        // The fill is drawn here rather than by `accent-color`, because
-        // `appearance-none` switches `accent-color` off — so the control rendered
-        // as an empty grey bar with a thumb on it and three different values that
-        // looked alike at a glance. `--wn-range-fill` is the one thing a range
-        // cannot express on its own.
+        // `appearance-none` switches `accent-color` off, so the fill is drawn via
+        // `--wn-range-fill` — the one thing a range cannot express on its own.
         style={{ "--wn-range-fill": `${((value - meta.min) / (meta.max - meta.min)) * 100}%` } as React.CSSProperties}
         className="wn-range h-1.5 w-full cursor-pointer appearance-none rounded-full"
       />
@@ -232,7 +211,7 @@ export function Settings(props: SettingsProps) {
     <Sheet
       label="Settings"
       onClose={props.onClose}
-      // The sheet scrolled its own body, not the panel, so the panel is not itself the
+      // The sheet's body scrolls, not the panel, so the panel is not itself the
       // scroller — which keeps the focus trap's `offsetParent` check meaningful.
       className="flex max-h-[85vh] w-full max-w-[520px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
     >
@@ -240,16 +219,12 @@ export function Settings(props: SettingsProps) {
       {/*
         The scroller, with a shadow that says so.
 
-        The panel is 520px of a 763px viewport for a body of 1219px, so a third of
-        the settings are below the fold — and the last visible row ended flush with
-        the panel edge, which reads as "that is all of them". A `scroll-shadow` on
-        the scroller itself turns the same geometry into an obvious cue, and unlike a
-        one-sided fade it also appears at the *top* once you have scrolled, which is
-        how the reader and the list already tell you where you are.
+        A `scroll-shadow` on the scroller itself turns the below-the-fold content into
+        an obvious cue, and unlike a one-sided fade it also appears at the *top* once
+        you have scrolled.
 
-        No wrapper element: `scroll-shadow` paints its own background, so it has to
-        be the element that scrolls, and an extra div in between is one more thing
-        whose height has to be got right.
+        No wrapper element: `scroll-shadow` paints its own background, so it has to be
+        the element that scrolls.
       */}
       <div className="scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto">
         <Section title="Reading">
@@ -279,15 +254,10 @@ export function Settings(props: SettingsProps) {
           This was a toggle, and a toggle has two positions. "Load" and "don't load"
           cannot say the third thing a user actually wants, which is *stop asking* —
           and that is not the same as "never": somebody who has been asked three times
-          wants their mail to look like mail. With only two positions the only way to
-          express it was to decline on every message, forever.
+          wants their mail to look like mail.
 
-          The reader offers the same three answers per message; this is where the
-          standing one lives, so its scope is visible rather than implied. A segmented
-          control rather than three buttons because it is one setting with three
-          values, and the group is the point: three separate controls would read as
-          three independent switches and could be left in a combination that means
-          nothing.
+          A segmented control rather than three buttons because it is one setting with
+          three values.
         */}
         <Row
           label="Remote images"
@@ -333,11 +303,9 @@ export function Settings(props: SettingsProps) {
       {/*
         Appearance, on its own.
 
-        It was the first row under "How Winnow sorts", which is a heading that
-        makes a claim about everything under it — and a claim about the *sort*
-        says nothing about light and dark. The section headings are how this panel
-        is scanned; one that does not describe its contents costs the reader a
-        second pass over the whole panel.
+        It was the first row under "How Winnow sorts", a heading that makes a claim
+        about everything under it — and a claim about the *sort* says nothing about
+        light and dark.
       */}
       <Section title="Appearance">
         <Row label="Theme">
@@ -412,11 +380,9 @@ export function Settings(props: SettingsProps) {
         {/*
           The sliders, in a titled sub-block.
 
-          They were directly inside the section's own `flex flex-col gap-3`, which
-          put ten sliders in the same visual group as the two toggles above them —
-          so the eye read the toggles as the eleventh and twelfth sliders. The
-          heading is what separates "two decisions you make" from "ten numbers
-          that describe the model".
+          They were directly inside the section's own `flex flex-col gap-3`, which put
+          ten sliders in the same visual group as the two toggles above them — so the
+          eye read the toggles as the eleventh and twelfth sliders.
         */}
         <div className="mt-1 flex flex-col gap-4 border-t border-hairline-soft pt-4">
           <p className="-mt-1 text-[12px] text-ink-subtle">
@@ -425,14 +391,13 @@ export function Settings(props: SettingsProps) {
           </p>
 
           {/*
-            Ten identical rows in one column is a form dump, not a control panel:
-            the eye has to read all ten labels to find the one it wants. Splitting
-            on the one distinction that already exists in the model — `isPenalty`,
-            the same function the learning loop uses to decide which way to nudge —
-            halves the search space and says something true about each half.
+            Ten identical rows in one column is a form dump: the eye has to read all
+            ten labels to find the one it wants. Splitting on the one distinction that
+            already exists in the model — `isPenalty`, the same function the learning
+            loop uses — halves the search space.
 
-            The order inside each group is `SIGNAL_KEYS`'s, which is by how much
-            the weight matters, so the big levers stay at the top.
+            The order inside each group is `SIGNAL_KEYS`'s, by how much the weight
+            matters.
           */}
           {([
             {
@@ -521,11 +486,9 @@ export function Settings(props: SettingsProps) {
                   ))}
                 </ul>
                 {/*
-                  The log is capped at `MAX_EVENTS`, so a long-lived install can
-                  genuinely have more here than the panel shows. Saying so is the
-                  difference between "this is everything" and "this is the recent
-                  part" — and the count on the button is the *total*, so a silent
-                  truncation is a visible lie.
+                  The log is capped at `MAX_EVENTS`, so a long-lived install can have
+                  more here than the panel shows. The count on the button is the
+                  *total*, so a silent truncation would be a lie.
                 */}
                 {props.events.length > HISTORY_LIMIT && (
                   <p className="px-2 py-2 text-center text-[11.5px] text-ink-subtle">
@@ -559,12 +522,8 @@ export function Settings(props: SettingsProps) {
       {/*
         The muted buckets.
 
-        The rail also carries them, struck through, with a restore control on each — so
-        this section is a second route rather than the only one. It exists because the
-        rail is a strip that scrolls, and a bucket muted weeks ago is not something
-        anyone scrolls to look for. A setting you cannot find is a setting you have to
-        remember, and what would have to be remembered here is "which bucket did I
-        kill".
+        A second route to unmute, because the rail is a strip that scrolls and a bucket
+        muted weeks ago is not something anyone scrolls to look for.
       */}
       {props.mutedFilters.length > 0 && (
         <Section title={`Hidden buckets (${props.mutedFilters.length})`}>
@@ -663,27 +622,18 @@ export function Composer({
   /*
     Focus and caret placement, once per *mount*.
 
-    This effect used to depend on `body.length`, which changes on every keystroke —
-    so every character re-ran it and called `setSelectionRange(0, 0)`. Typing put the
-    caret back at the start each time, which means `hello` came out as `olleh`: reply,
-    the one thing a mail client cannot get wrong, was unusable. The comment above the
-    old version argued the dependency was there on purpose, and it was the argument
-    that kept it there.
+    This used to depend on `body.length`, so every keystroke re-ran it and reset the
+    caret to the start — which means `hello` came out as `olleh`. `placed` makes it
+    once-only without an empty dependency array that would be a lie about what this
+    depends on.
 
-    The intent it was defending is real and is now served explicitly: put the caret at
-    the *top* of the body, above the quote, so what the user types goes above what is
-    being replied to. A forward has no quote, so its caret goes to the top too, which
-    is where a forward's own text belongs. `placed` makes it once-only without an empty
-    dependency array, which would be a lie about what this depends on.
+    The intent is still to put the caret at the *top* of the body, above the quote, so
+    what the user types goes above what is being replied to.
 
-    **A forward does not touch the body at all.** `Sheet` is told to focus the To field
-    for a forward (`initialFocus`), and this effect ran *after* that — React fires a
-    child's effects before its parent's, so `Sheet` focused the To input, and then this
-    immediately stole it for the textarea. The stated intent above ("a forward's caret
-    goes to the top") is about the body once you have chosen to write in it; deciding
-    *which* field you start in belongs to `Sheet`, and the two must not both answer it.
-    Getting this wrong meant a forward opened with the caret in an empty body while Send
-    stayed disabled for want of a recipient — the sheet looked broken and nothing said why.
+    **A forward does not touch the body at all.** `Sheet` focuses the To field for a
+    forward (`initialFocus`), and React fires a child's effects before its parent's, so
+    this immediately stole it for the textarea. Deciding *which* field you start in
+    belongs to `Sheet`, and the two must not both answer it.
   */
   useEffect(() => {
     if (placed.current || mode === "forward") return;
@@ -701,8 +651,7 @@ export function Composer({
       // The composer is not dismissable by clicking away from it. A click just
       // outside a 640px dialog is not "I have decided to abandon this", and it used to
       // destroy a typed reply with no confirmation and no draft kept. Escape and the
-      // close button still work, and both go through `onClose`, which *may* confirm —
-      // so the destructive paths still exist and they still ask.
+      // close button still work, and both go through `onClose`, which *may* confirm.
       dismissOnBackdrop={false}
       initialFocus={mode === "forward" ? toRef : bodyRef}
       className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
@@ -714,14 +663,12 @@ export function Composer({
           /*
             Send from the keyboard.
 
-            ⌘⏎ / Ctrl⏎ is what every mail client on every platform accepts for this,
-            and without it a reply is mouse-only: `r` opens the sheet, and then the
-            hand has to leave the home row. It cannot live in `keybinds.ts` —
-            the composer's keys are a hard stop there, because every one of them
-            belongs to the field the user is typing into.
+            ⌘⏎ / Ctrl⏎ is what every mail client on every platform accepts for this, and
+            without it a reply is mouse-only. It cannot live in `keybinds.ts` — the
+            composer's keys are a hard stop there, because every one of them belongs to
+            the field the user is typing into.
 
-            Guarded on the same condition as the button, so the shortcut cannot do
-            anything the button would not, and it is `preventDefault`ed so the
+            Guarded on the same condition as the button, and `preventDefault`ed so the
             textarea does not also insert a newline.
           */
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -807,13 +754,9 @@ export function Composer({
             Discard
           </button>
           {/*
-            What will actually happen to the quoted text.
-
-            The old wording — "the quoted message is kept only if you leave it
-            exactly as it is" — described the rule rather than the consequence, and
-            got the polarity confusing: the quote is *dropped* when you leave it
-            alone, and kept when you edit it. Both sentences below say what the
-            recipient will see.
+            What will actually happen to the quoted text: it is *dropped* when you leave
+            it alone and kept when you edit it, so both sentences say what the recipient
+            will see.
           */}
           <span className="ml-auto max-w-[19rem] text-right text-[11.5px] leading-snug text-ink-subtle">
             {mode === "reply"

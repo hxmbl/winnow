@@ -1,10 +1,4 @@
-/**
- * The per-sender engagement profile.
- *
- * This is the layer that decides who "Top contacts" means and who "Quiet
- * contacts" means, and both of those were subtly wrong when this file was
- * written. The tests below are the record of that.
- */
+
 
 import { describe, expect, it } from "vitest";
 import {
@@ -15,7 +9,6 @@ import {
 } from "./profile";
 import type { Email, EmailCategory } from "./email";
 
-/** A minimal message from `sender`, `count` times over. */
 function mail(
   sender: string,
   count: number,
@@ -41,13 +34,6 @@ function mail(
 
 describe("buildUserProfile", () => {
   it("ranks a correspondent above a retailer sending the same volume", () => {
-    // The defect this whole layer had. Ranking on volume alone put
-    // `deals@shop.example` — four promotions — level with a colleague writing
-    // four messages, and the demo's "Top contacts" bucket showed the retailer.
-    // A user who sees that once stops trusting the bucket.
-    // Six other correspondents, so the top-6 slice is actually a ranking rather
-    // than the whole population. With only two senders both fit whatever their
-    // scores, and the assertion would pass even with the discount removed.
     const profile = buildUserProfile(
       [
         ...mail("deals@shop.example", 4, { category: "promotions" }),
@@ -66,18 +52,11 @@ describe("buildUserProfile", () => {
   });
 
   it("still counts bulk mail towards the quiet tail", () => {
-    // The discount is on the *engagement score* only. "Quiet" is about how often
-    // mail arrives, regardless of who it is from — a retailer sending one mail a
-    // month is a quiet correspondent in the only sense that matters to a user
-    // who never promoted it.
     const profile = buildUserProfile([...mail("deals@shop.example", 1)], []);
     expect(profile.quietSenders).toContain("deals@shop.example");
   });
 
   it("counts a promotion in the first-time list like any other message", () => {
-    // Same reason: "new sender" is about novelty, not tone. Filtering bulk out
-    // of this list would mean a user is never told about the newsletters that
-    // just started arriving — which is precisely when they want to know.
     const profile = buildUserProfile(
       mail("deals@shop.example", 1, { category: "promotions" }),
       [],
@@ -86,10 +65,6 @@ describe("buildUserProfile", () => {
   });
 
   it("keeps a colleague who forwards the occasional newsletter", () => {
-    // The per-message discount has to be per *message*. A flat penalty on a
-    // sender would push someone who forwards one digest among six real replies
-    // out of their own top contacts, which is the failure the weight of 1.0 for
-    // `primary` exists to prevent.
     const profile = buildUserProfile(
       [
         ...mail("dana@northwind.example", 6),
@@ -126,12 +101,6 @@ describe("buildUserProfile", () => {
   });
 
   it("keeps the bias unbounded in the profile but clamped where it is used", () => {
-    // Two different things, easy to conflate. `trashBiasBySender` is a raw ratio
-    // and is *meant* to approach 1 — it is the honest description of a sender
-    // whose every message gets binned. `MAX_TRASH_BIAS` is where the classifier
-    // clamps it, because a confidence that drives a score cannot also drive a
-    // certainty. Asserting the clamp here would demand that the profile lie
-    // about the ratio in order to satisfy a limit that belongs downstream.
     const profile = buildUserProfile(
       [],
       Array.from({ length: 50 }, () => ({ sender: "spam@x.example" })),
@@ -144,12 +113,6 @@ describe("buildUserProfile", () => {
   });
 
   it("produces the same ranking every time", () => {
-    // The quiet tail sorts by volume, and a typical mailbox has a dozen senders
-    // with exactly one message each. Without a tie-break the cut falls among
-    // them according to `Map` iteration order, so the same inbox produced a
-    // different "Quiet contacts" list on a different run — and the demo failed
-    // its own fixture intermittently. A ranking that decides what is hidden
-    // cannot be a shuffle.
     const inbox = [
       ...mail("zeta@example.com", 1),
       ...mail("alpha@example.com", 1),
@@ -172,10 +135,6 @@ describe("buildUserProfile", () => {
   });
 
   it("does not reorder top contacts when the input is shuffled", () => {
-    // The same property, from the other direction: the profile is a function of
-    // the *set* of mail, not of the order it arrived in. Gmail's history order
-    // is not stable across syncs, and a ranking that moved when nothing had
-    // would show the user a different rail for no reason.
     const inbox = [
       ...mail("dana@northwind.example", 4),
       ...mail("marcus@northwind.example", 4),
@@ -198,8 +157,6 @@ describe("buildUserProfile", () => {
   });
 
   it("treats the empty profile as usable everywhere", () => {
-    // `EMPTY_PROFILE` is what the classifier is given before any mail has been
-    // seen, so it has to satisfy the same shape as a built one.
     expect(EMPTY_PROFILE.topSenders).toEqual([]);
     expect(EMPTY_PROFILE.quietSenders).toEqual([]);
   });

@@ -39,8 +39,8 @@ function fakeBackend() {
     },
     async deletePermanently(id) {
       record("deletePermanently", id);
-      // Honours `failNext`, so the rollback path is reachable. A delete that
-      // could not fail would make the undo untestable.
+      // Honours `failNext`, so the rollback path is reachable; a delete that could not
+      // fail would make the undo untestable.
       if (shouldFail) throw new Error("network down");
     },
     async sendReply() {
@@ -91,9 +91,8 @@ function fakePlatform() {
 /**
  * A store seeded with the demo mailbox, as the app starts it.
  *
- * The array is copied: `DEMO_EMAILS` is module state shared by every test in
- * this file, and a store that mutated it in place would make tests depend on
- * the order they ran in.
+ * The array is copied: `DEMO_EMAILS` is module state shared by every test in this
+ * file, and a store that mutated it in place would make tests order-dependent.
  */
 function demoStore() {
   return new WinnowStore({ seed: [...DEMO_EMAILS], seedTrash: DEMO_TRASH });
@@ -105,23 +104,23 @@ describe("the derived view stays consistent", () => {
     const view = store.view;
     expect(view.emails.length).toBeGreaterThan(0);
     expect(view.threads.length).toBeGreaterThan(0);
-    // Every visible message has signals, so the reader's badges agree with the
-    // list's filter counts.
+    // Every visible message has signals, so the reader's badges agree with the list's
+    // filter counts.
     for (const email of view.emails) {
       expect(view.signals.has(email.id)).toBe(true);
     }
   });
 
   it("hides spam from the unfiltered inbox", () => {
-    // The default inbox has to be clean, or the first thing a user sees is
-    // junk and the Unsafe bucket means nothing.
+    // The default inbox has to be clean, or the first thing a user sees is junk and the
+    // Unsafe bucket means nothing.
     const store = demoStore();
     const visible = new Set(store.view.emails.map((e) => e.gmailId));
     for (const message of DEMO_EMAILS) {
       const sig = store.view.signals.get(message.id);
-      // `isUnsafe` rather than the literal `0.4` it used to compare against: written
-      // out, the test kept its own copy of the threshold and would have gone on
-      // passing if the number moved, which is the one thing this test exists to check.
+      // `isUnsafe` rather than the literal `0.4`: written out, the test kept its own copy
+      // of the threshold and would go on passing if the number moved — the one thing it
+      // exists to check.
       if (sig && isUnsafe(sig) && message.mailbox === "inbox") {
         expect(visible.has(message.gmailId)).toBe(false);
       }
@@ -153,12 +152,9 @@ describe("the derived view stays consistent", () => {
 
   it("reports a match count that agrees with the list it is next to", () => {
     // So an empty result can be explained rather than merely reported. The test was
-    // `toBeLessThanOrEqual(total)`, which passes for any implementation whatsoever —
-    // including one returning zero, or `NaN`. And it repeated the field's original
-    // docstring ("what the filters would match, ignoring the search box"), which the
-    // code did not do: it ANDed the search in, so with a search active the count was
-    // just the length of the visible list. It is now honestly that, and worth
-    // asserting exactly.
+    // `toBeLessThanOrEqual(total)`, which passes for any implementation — including one
+    // returning zero, or `NaN` — and repeated a docstring the code did not honour: with a
+    // search active the count is just the length of the visible list. Asserted exactly.
     const store = demoStore();
     const total = store.view.emails.length;
     expect(store.view.result.matchCount).toBe(total);
@@ -184,8 +180,8 @@ describe("filter toggling", () => {
   });
 
   it("makes unsafe exclusive", () => {
-    // "Important and Unsafe" is always empty, so selecting Unsafe replaces
-    // rather than adds.
+    // "Important and Unsafe" is always empty, so selecting Unsafe replaces rather than
+    // adds.
     const store = demoStore();
     store.toggleFilter(builtinFilter("important"));
     store.toggleFilter(builtinFilter("unsafe"));
@@ -219,8 +215,8 @@ describe("muting a bucket", () => {
   });
 
   it("does not remove the message itself", () => {
-    // Muting is a view decision, not a deletion. Nothing has been deleted from
-    // the server, so nothing should vanish from the store.
+    // Muting is a view decision, not a deletion: nothing was deleted from the server, so
+    // nothing should vanish from the store.
     const store = demoStore();
     const count = store.getSnapshot().all.length;
     store.dismissFilter("newsletters");
@@ -244,8 +240,8 @@ describe("muting a bucket", () => {
   });
 
   it("refuses to mute unsafe", () => {
-    // The one bucket that must never be silenced: it is the safety valve, and
-    // hiding it removes the user's only route to the mail it flagged.
+    // The one bucket that must never be silenced: hiding it removes the user's only
+    // route to the mail it flagged.
     const store = demoStore();
     store.dismissFilter("unsafe");
     expect(store.getSnapshot().mutedFilters).not.toContain("unsafe");
@@ -268,14 +264,12 @@ describe("optimistic actions and their rollback", () => {
   });
 
   it("rolls the star back when the server refuses", async () => {
-    // The user clicked; the app must not leave the UI lying about what was
-    // saved.
+    // The user clicked; the app must not leave the UI lying about what was saved.
     //
-    // Note the two phases are asserted *separately and synchronously*. An
-    // `await` between them would let the rejection land first, and the test
-    // would only ever see the final state — which is the state that matters
-    // least, since the optimistic flip is what the user actually watched
-    // happen.
+    // The two phases are asserted *separately and synchronously*: an `await` between
+    // them would let the rejection land first, and the test would only see the final
+    // state — the one that matters least, since the optimistic flip is what the user
+    // watched happen.
     const { backend, failNext } = fakeBackend();
     const store = demoStore();
     store.attach({ backend });
@@ -296,9 +290,9 @@ describe("optimistic actions and their rollback", () => {
   });
 
   it("keeps the message when a delete fails, rather than only the label", async () => {
-    // The strongest form of the rollback test, and the one that distinguishes a
-    // real undo from a re-sync: no second backend call is made, so the message
-    // can only come back from the captured snapshot the undo restores.
+    // The strongest form of the rollback test, and what distinguishes a real undo from a
+    // re-sync: no second backend call is made, so the message can only come back from the
+    // captured snapshot the undo restores.
     const { backend, failNext, calls } = fakeBackend();
     const store = demoStore();
     store.attach({ backend });
@@ -338,15 +332,13 @@ describe("optimistic actions and their rollback", () => {
     const target = store.view.emails[0];
     store.move(target.id, "trash");
     store.archive(target.id);
-    // Restoring has to land in the inbox, not in the archive: a message that
-    // came back from the bin where the user had put it belongs where they
-    // expect it.
+    // Restoring has to land in the inbox, not the archive: a message that came back from
+    // the bin belongs where the user expects it.
     expect(store.getSnapshot().all.find((e) => e.id === target.id)!.mailbox).toBe("inbox");
   });
 
   it("marks a moved message read", async () => {
-    // Filing a message is dealing with it. Leaving it bold in the next mailbox
-    // is noise.
+    // Filing a message is dealing with it; leaving it bold in the next mailbox is noise.
     const store = demoStore();
     const unread = store.getSnapshot().all.find((e) => e.mailbox === "inbox" && e.unread);
     if (!unread) return;
@@ -373,8 +365,7 @@ describe("optimistic actions and their rollback", () => {
   });
 
   it("deletes permanently only from the bin", async () => {
-    // The destructive action is reachable only where the user has already said
-    // this is rubbish.
+    // The destructive action is reachable only where the user has said this is rubbish.
     const { backend, calls } = fakeBackend();
     const store = demoStore();
     store.attach({ backend });
@@ -390,8 +381,8 @@ describe("optimistic actions and their rollback", () => {
   });
 
   it("restores a deleted message when the server refuses", async () => {
-    // Deletion is the one action that is not merely a label change, so losing a
-    // message to a failed call is the worst failure mode in the app.
+    // Deletion is the one action that is not merely a label change, so losing a message
+    // to a failed call is the worst failure mode in the app.
     const { backend, failNext } = fakeBackend();
     const store = demoStore();
     store.attach({ backend });
@@ -415,22 +406,21 @@ describe("the derived view", () => {
    * `derive()` used to run on every read.
    *
    * It is the most expensive function in the app — profile, whole-inbox classification,
-   * filter, sort, thread — and `getSnapshot` is called by `useSyncExternalStore` on
-   * every render *and* for every subscription check. Worse, `App` re-renders for reasons
-   * that have nothing to do with the store: the reader's scroll step, the composer's
-   * draft, the OS theme. So a single `↓` in the reader re-derived the entire mailbox
-   * over data that had not changed by a byte — measured at 81ms on the 38-message demo,
-   * and seconds on a real inbox.
+   * filter, sort, thread — and `getSnapshot` runs on every render *and* every
+   * subscription check. `App` also re-renders for reasons unrelated to the store — the
+   * reader's scroll, the composer's draft, the OS theme — so a single `↓` re-derived the
+   * whole mailbox over unchanged data: 81ms on the 38-message demo, seconds on a real
+   * inbox.
    *
-   * These tests pin the memoisation, because the bug it fixes is invisible in a
-   * screenshot and would only show up as "the app feels slow on a big mailbox".
+   * These tests pin the memoisation, since the bug is invisible in a screenshot and would
+   * only show up as "the app feels slow on a big mailbox".
    */
   it("reuses the view until the version moves", () => {
     const store = demoStore();
     const first = store.view;
     expect(store.view).toBe(first);
-    // Reading through the React-facing entry point too: this is the path that used to
-    // re-derive twice per render.
+    // Read through the React-facing entry point too: the path that used to re-derive
+    // twice per render.
     expect(store.getSnapshot().view).toBe(first);
     expect(store.getSnapshot().view).toBe(first);
   });
@@ -448,8 +438,8 @@ describe("the derived view", () => {
 
   it("re-derives when only the cheap fields move", () => {
     // The learning weights are written to state *before* the debounced reclassify, and
-    // the settings panel reads them synchronously as a slider is dragged. So a
-    // snapshot's cheap fields must never go stale behind a memoised view.
+    // the settings panel reads them synchronously as a slider is dragged, so a snapshot's
+    // cheap fields must never go stale behind a memoised view.
     const store = demoStore();
     const before = store.getSnapshot().learning.weights.security;
 
@@ -461,9 +451,8 @@ describe("the derived view", () => {
   });
 
   it("keeps the view in step with the mutes, which are instance state", () => {
-    // `persistedRemoved` lives on the instance rather than in `StoreState`, so a
-    // memoisation keyed on state alone would miss it. Every mutation of it notifies,
-    // which is what makes the memo sound.
+    // `persistedRemoved` lives on the instance, not in `StoreState`, so a memo keyed on
+    // state alone would miss it; every mutation of it notifies, which makes the memo sound.
     const store = demoStore();
     const before = store.view;
     expect(store.view.result.emails.length).toBe(before.result.emails.length);
@@ -475,8 +464,8 @@ describe("the derived view", () => {
   });
 
   it("re-derives when a discard changes the trash bias", () => {
-    // The same argument for `trashSenders`, which is also instance state and is the
-    // input to the profile's trash bias.
+    // The same for `trashSenders`, also instance state and the input to the profile's
+    // trash bias.
     const store = demoStore();
     const target = store.view.emails.find((email) => email.sender)!;
     const before = store.view.profile.trashBiasBySender[target.sender] ?? 0;
@@ -490,8 +479,8 @@ describe("the derived view", () => {
 
   it("does not build search bags when nothing is being searched", () => {
     // The bags are a lowercased copy of every message's sender, subject and body. The
-    // pipeline only ever reads them when `searchQuery` has tokens in it, so an unsearched
-    // mailbox was paying for a full lowercased copy of its own text on every derive.
+    // pipeline reads them only when `searchQuery` has tokens, so an unsearched mailbox was
+    // paying for a full lowercased copy of its text on every derive.
     const store = demoStore();
     expect(store.view.searchBags.size).toBe(0);
 
@@ -509,9 +498,8 @@ describe("the derived view", () => {
     const narrowed = store.view.threads.length;
     expect(narrowed).toBeGreaterThan(0);
     expect(narrowed).toBeLessThan(all);
-    // The map is a cache, not the source of truth: a miss falls back to building one,
-    // so an empty map for a given search would be a silent wrong answer rather than an
-    // error.
+    // The map is a cache, not the source of truth: a miss falls back to building one, so
+    // an empty map for a given search would be a silent wrong answer rather than an error.
     expect(narrowed).toBe(store.view.threads.length);
   });
 });
@@ -519,12 +507,10 @@ describe("the derived view", () => {
 /**
  * Muting a bucket, and the undo it now offers.
  *
- * A mute *is* reversible — the pill stays in the rail with a ↺, and Settings lists
- * it under "Hidden buckets". What it was not was visible: `orderedRail` sorts muted
- * buckets to the end, because a muted pill is not filterable and leaving it in place
- * would repoint every digit shortcut after it. So the pill the user clicked left a
- * 27-pill strip they have probably not scrolled, and the whole visible effect of the
- * click was that something disappeared.
+ * A mute *is* reversible — the pill stays in the rail with a ↺, and Settings lists it
+ * under "Hidden buckets". What it was not was *visible*: `orderedRail` sorts muted
+ * buckets to the end, so the pill the user clicked left a 27-pill strip they have
+ * probably not scrolled, and the whole visible effect was that something disappeared.
  */
 describe("muting a bucket", () => {
   function storeWithMail() {
@@ -582,8 +568,8 @@ describe("muting a bucket", () => {
   });
 
   it("and either way back drops the offer", () => {
-    // Otherwise the strip keeps a "Hid Newsletters" line whose Undo button has no
-    // handler behind it — the state the offer's own field comment forbids.
+    // Otherwise the strip keeps a "Hid Newsletters" line whose Undo button has no handler
+    // behind it — the state the offer's field comment forbids.
     const { store } = storeWithMail();
     store.dismissFilter("newsletters");
     store.restoreFilter("newsletters");
@@ -598,8 +584,8 @@ describe("muting a bucket", () => {
     const { store } = storeWithMail();
     store.dismissFilter("newsletters");
     store.dismissFilter("newsletters");
-    // Still exactly one offer, from the first call — a second silent re-mute must
-    // not replace the label with the same text and reset the handler's meaning.
+    // Still exactly one offer, from the first call: a second silent re-mute must not
+    // replace the label and reset the handler's meaning.
     expect(store.getSnapshot().undo?.label).toMatch(/Newsletters/);
   });
 
@@ -610,8 +596,8 @@ describe("muting a bucket", () => {
   });
 
   it("replaces a mark-all-read offer rather than stacking two", () => {
-    // The strip shows one line. Two actions each with a live handler would leave
-    // the visible one undoing the other.
+    // The strip shows one line; two actions each with a live handler would leave the
+    // visible one undoing the other.
     const { store } = storeWithMail();
     store.markAllRead();
     expect(store.getSnapshot().undo?.label).toMatch(/read/);
@@ -631,10 +617,10 @@ describe("muting a bucket", () => {
 /**
  * Mark-all-read: the one verb in the app that can lose information.
  *
- * Everything else in triaging has an inverse the user can see — a star is a toggle, a
- * filed message reappears in the folder it went to, a filter has its own pill. This
- * one does not: a single `⇧U` on a mailbox with a thousand unread, and the state is
- * gone with nothing on screen to bring it back from.
+ * Everything else in triaging has a visible inverse — a star is a toggle, a filed message
+ * reappears in the folder it went to, a filter has its own pill. This one does not: a
+ * single `⇧U` on a mailbox with a thousand unread, and the state is gone with nothing on
+ * screen to bring it back.
  */
 describe("mark-all-read and its undo", () => {  function storeWithUnread() {
     const { backend, calls } = fakeBackend();
@@ -659,9 +645,8 @@ describe("mark-all-read and its undo", () => {  function storeWithUnread() {
     expect(after.all.filter((email) => email.mailbox === "inbox" && email.unread)).toHaveLength(
       0,
     );
-    // The archive's unread state is untouched: clearing it would be a surprise
-    // ("you were looking at the inbox and your archive went quiet") *and* a
-    // divergence, because only the current mailbox is pushed to the server.
+    // The archive's unread state is untouched: clearing it would be a surprise *and* a
+    // divergence, since only the current mailbox is pushed to the server.
     expect(after.all.filter((email) => email.mailbox === "archive" && email.unread)).toHaveLength(
       archivedUnread,
     );
@@ -681,8 +666,8 @@ describe("mark-all-read and its undo", () => {  function storeWithUnread() {
     store.markAllRead();
     expect(store.getSnapshot().undo).not.toBeNull();
 
-    // Now the inbox has no unread mail at all, so a second press is a no-op — and
-    // crucially it does not offer an undo that would put the message back as unread.
+    // Now the inbox has no unread mail, so a second press is a no-op — and it must not
+    // offer an undo that would put the message back as unread.
     store.markAllRead();
     store.select(store.getSnapshot().all[0].id);
     const archiveOnly = store.getSnapshot().all.find((email) => email.mailbox === "archive");
@@ -740,8 +725,8 @@ describe("mark-all-read and its undo", () => {  function storeWithUnread() {
     store.undoLast();
 
     const after = store.getSnapshot().all.find((email) => email.id === target.id);
-    // Still archived: the undo restores *read state*, not a stale snapshot of the
-    // message list, so an unrelated change made in between is not clobbered.
+    // Still archived: the undo restores *read state*, not a stale snapshot of the list, so
+    // an unrelated change made in between is not clobbered.
     expect(after?.mailbox).toBe("archive");
     expect(after?.unread).toBe(true);
   });
@@ -791,8 +776,7 @@ describe("the cursor", () => {
   });
 
   it("starts at the bottom on the first move backwards", () => {
-    // Pressing `k` on a fresh list should land on the newest message, not
-    // refuse to move.
+    // Pressing `k` on a fresh list should land on the newest message, not refuse to move.
     const store = demoStore();
     store.moveCursor(-1);
     expect(store.getSnapshot().cursorIndex).toBe(store.view.threads.length - 1);
@@ -802,8 +786,8 @@ describe("the cursor", () => {
     const store = demoStore();
     const last = store.view.threads.length - 1;
 
-    // `k` on a fresh list lands on the last row — the no-cursor rule. Pressing
-    // it again walks *up*, which is the direction `k` names.
+    // `k` on a fresh list lands on the last row — the no-cursor rule. Pressing it again
+    // walks *up*, the direction `k` names.
     store.moveCursor(-1);
     expect(store.getSnapshot().cursorIndex).toBe(last);
     store.moveCursor(-1);
@@ -819,8 +803,8 @@ describe("the cursor", () => {
   });
 
   it("stays put on an empty list", () => {
-    // A `j` with nothing in the list must not leave a cursor pointing at a row
-    // that does not exist, or the next message that arrives inherits it.
+    // A `j` with nothing in the list must not leave a cursor pointing at a row that does
+    // not exist, or the next arriving message inherits it.
     const store = new WinnowStore({ seed: [] });
     store.moveCursor(1);
     store.moveCursor(-1);
@@ -829,8 +813,8 @@ describe("the cursor", () => {
   });
 
   it("follows the reader when one is open", () => {
-    // Moving with `j` while reading carries the reader along, so the list and
-    // the open message never disagree about which is current.
+    // Moving with `j` while reading carries the reader along, so the list and the open
+    // message never disagree about which is current.
     const store = demoStore();
     store.openRow(0);
     const first = store.getSnapshot().selectedId;
@@ -839,17 +823,17 @@ describe("the cursor", () => {
   });
 
   it("opens the message it moves to, because the reader is already on screen", () => {
-    // `j` takes the reader with it rather than moving a highlight and needing a
-    // second keypress. In a two-pane client the reader is right there; making
-    // the user press `o` to fill it is two keystrokes to see what they asked for.
+    // `j` takes the reader with it rather than moving a highlight and needing a second
+    // keypress: in a two-pane client the reader is right there, so pressing `o` to fill it
+    // is two keystrokes to see what was asked for.
     const store = demoStore();
     store.moveCursor(1);
     expect(store.getSnapshot().selectedId).toBe(store.view.threads[0].representative.id);
   });
 
   it("follows the row that takes the cursor's place after a move", () => {
-    // Filing the message under the cursor should leave the cursor on the next
-    // one, which is what the user most likely wants.
+    // Filing the message under the cursor should leave the cursor on the next one, which
+    // is what the user most likely wants.
     const store = demoStore();
     store.openRow(0);
     const second = store.view.threads[1];
@@ -871,8 +855,8 @@ describe("following a message by id", () => {
   });
 
   it("clears the filters that were hiding the message", () => {
-    // Filters are transient view state. A link has to be able to reach its
-    // message, and doing nothing would look exactly like a broken link.
+    // Filters are transient view state: a link has to reach its message, and doing nothing
+    // would look exactly like a broken link.
     const store = demoStore();
     const target = store.view.threads[2].representative.id;
     store.toggleFilter(builtinFilter("important"));
@@ -894,11 +878,11 @@ describe("following a message by id", () => {
   });
 
   it("switches to the mailbox the message is actually in", () => {
-    // Following a link to something in the bin means going to the bin, not
-    // clearing filters in the inbox and finding nothing.
+    // Following a link to something in the bin means going to the bin, not clearing
+    // filters in the inbox and finding nothing.
     const store = demoStore();
-    // Archived rather than trashed: the default view already excludes spam, and
-    // using the bin as well would be testing a mailbox the demo barely seeds.
+    // Archived rather than trashed: the default view already excludes spam, and the bin
+    // would be testing a mailbox the demo barely seeds.
     const target = store.view.emails[0];
     store.move(target.id, "archive");
 
@@ -908,9 +892,8 @@ describe("following a message by id", () => {
   });
 
   it("leaves the cursor on the row, not just the selection", () => {
-    // The cursor and the selection are separate pieces of state, and a reader
-    // opened with the cursor at NO_CURSOR leaves the keyboard navigation
-    // pointing at nothing.
+    // The cursor and the selection are separate, and a reader opened at `NO_CURSOR` leaves
+    // keyboard navigation pointing at nothing.
     const store = demoStore();
     store.toggleFilter(builtinFilter("important"));
     const last = store.view.emails[store.view.emails.length - 1];
@@ -925,16 +908,16 @@ describe("following a message by id", () => {
   });
 
   it("reports false for a message that does not exist", () => {
-    // A stale link has to be distinguishable from a successful jump, or the
-    // caller cannot decide whether to say anything.
+    // A stale link has to be distinguishable from a successful jump, or the caller cannot
+    // decide whether to say anything.
     const store = demoStore();
     expect(store.focusMessage(-999)).toBe(false);
     expect(store.getSnapshot().selectedId).toBeNull();
   });
 
   it("closes an open overlay", () => {
-    // Following a link while the settings panel is open should land on the
-    // message, not leave the panel covering it.
+    // Following a link while the settings panel is open should land on the message, not
+    // leave the panel covering it.
     const store = demoStore();
     store.setOverlay("settings");
     store.focusMessage(store.view.threads[1].representative.id);
@@ -945,20 +928,19 @@ describe("following a message by id", () => {
 /**
  * The reader represents the message the user selected.
  *
- * A smart filter is a statement about which rows to *show*. It used to be a statement
- * about what the reader showed too, because the open message was resolved out of the
- * filtered rows: toggling a bucket mid-triage silently replaced the email being read
- * with whatever had taken the cursor's place, or closed the reader outright.
+ * A smart filter says which rows to *show*. It used to say what the reader showed too,
+ * because the open message was resolved out of the filtered rows: toggling a bucket
+ * mid-triage silently replaced the email being read with whatever took the cursor's
+ * place, or closed the reader outright.
  *
- * The distinction the store now draws is between a message that has *left* and one that
- * is merely *not being shown*, and it is worth pinning from both sides — the first
- * half of this block is the regression, the second is the guarantee that fixing it did
- * not turn the reader into something that can never close.
+ * The store now distinguishes a message that has *left* from one merely *not being
+ * shown*, pinned from both sides — the first half of this block is the regression, the
+ * second the guarantee that the fix did not make the reader unclosable.
  */
 describe("the reader and the filters", () => {
   it("keeps the open message when a filter is turned on", () => {
-    // The last row, and a filter chosen because it is narrow, so the message is
-    // genuinely excluded rather than incidentally still matching.
+    // The last row, and a narrow filter, so the message is genuinely excluded rather than
+    // incidentally still matching.
     const store = demoStore();
     const last = store.view.threads.length - 1;
     store.openRow(last);
@@ -986,8 +968,8 @@ describe("the reader and the filters", () => {
     const id = store.view.selected?.id;
 
     store.setSearchQuery("zzzznothingmatchesthis");
-    // The result is empty and the reader is still open, which is the whole point: an
-    // empty *result* is not an empty mailbox.
+    // The result is empty and the reader is still open, which is the point: an empty
+    // *result* is not an empty mailbox.
     expect(store.view.result.emptyReason).toBe("search");
     expect(store.view.selected?.id).toBe(id);
   });
@@ -1021,8 +1003,8 @@ describe("the reader and the filters", () => {
 });
 
 describe("mailbox switching", () => {  it("drops the selection and the filters", () => {
-    // A selection from the inbox means nothing in the bin, and leaving it would
-    // show a message the list does not contain.
+    // A selection from the inbox means nothing in the bin, and leaving it would show a
+    // message the list does not contain.
     const store = demoStore();
     store.openRow(0);
     store.toggleFilter(builtinFilter("important"));
@@ -1062,8 +1044,8 @@ describe("blocking a sender", () => {
   });
 
   it("removes them from the engagement ranking, not just the list", () => {
-    // Otherwise a blocked sender's volume still pushes them up `topSenders`,
-    // which is the opposite of blocking.
+    // Otherwise a blocked sender's volume still pushes them up `topSenders`, the opposite
+    // of blocking.
     const store = demoStore();
     const sender = store.view.emails[0].sender;
     store.blockSender(sender);
@@ -1082,8 +1064,8 @@ describe("blocking a sender", () => {
 
 describe("learning from stars", () => {
   it("records the event before the flip", () => {
-    // Recording it afterwards would let the model learn from the star's own
-    // contribution to the importance score — the model grading its homework.
+    // Recording it afterwards would let the model learn from the star's own contribution
+    // to the importance score — the model grading its homework.
     const store = demoStore();
     const before = store.getSnapshot().learning.events.length;
     store.toggleStar(store.view.emails[0].id);
@@ -1091,8 +1073,8 @@ describe("learning from stars", () => {
   });
 
   it("captures the pre-feedback prediction", () => {
-    // Otherwise the settings panel cannot show "you rated this 42, we predicted
-    // 71", which is the only way a user can tell whether tuning is working.
+    // Otherwise the settings panel cannot show "you rated this 42, we predicted 71", the
+    // only way a user can tell whether tuning is working.
     const store = demoStore();
     const target = store.view.emails[0];
     const predicted = store.view.signals.get(target.id)!.importanceScore;
@@ -1103,8 +1085,8 @@ describe("learning from stars", () => {
 
   it("moves a weight in the right direction", () => {
     const store = demoStore();
-    // A security message: starring it should raise the security weight, because
-    // the user wanted to see more of that.
+    // A security message: starring it should raise the security weight, because the user
+    // wanted more of that.
     const security = store.view.emails.find(
       (e) => store.view.signals.get(e.id)?.security,
     )!;
@@ -1163,8 +1145,8 @@ describe("learning from stars", () => {
 
 describe("persistence", () => {
   it("reports what changed, rather than the whole state", () => {
-    // The persisted surface is small on purpose: writing the entire store on
-    // every keystroke is how a search box ends up in your keychain.
+    // The persisted surface is small on purpose: writing the whole store on every
+    // keystroke is how a search box ends up in your keychain.
     const patches: unknown[] = [];
     const store = demoStore();
     store.attach({ onPersist: (patch) => patches.push(patch) });
@@ -1178,8 +1160,8 @@ describe("persistence", () => {
   });
 
   it("restores weights from a snapshot written by an older build", () => {
-    // A snapshot that predates a weight must still load rather than producing
-    // `undefined` arithmetic downstream.
+    // A snapshot that predates a weight must still load rather than producing `undefined`
+    // arithmetic downstream.
     const partial = { weights: { security: 30 }, adaptive: true, events: [] };
     const model = LearningModel.fromSnapshot(partial);
     expect(model.weights.security).toBe(30);
@@ -1187,10 +1169,10 @@ describe("persistence", () => {
   });
 
   it("survives a corrupt snapshot rather than losing the app", () => {
-    // `localStorage` is user-writable and a half-finished write is possible, so this
-    // input is reachable in practice — not just in a test. Anything unusable falls back
-    // to the default; nothing throws, because a thrown error here would cost the user
-    // the app rather than just their tuning.
+    // `localStorage` is user-writable and a half-finished write is possible, so this input
+    // is reachable in practice, not just in a test. Anything unusable falls back to the
+    // default; nothing throws, since a throw here would cost the user the app, not just
+    // their tuning.
     const junk: unknown[] = [
       null,
       undefined,
@@ -1215,9 +1197,9 @@ describe("persistence", () => {
   });
 
   it("clamps a restored weight that is outside its own range", () => {
-    // The settings panel renders `value` straight onto a slider, so an
-    // out-of-range stored number would put the thumb somewhere the slider cannot
-    // represent — and then the next edit would snap it to an unrelated number.
+    // The settings panel renders `value` straight onto a slider, so an out-of-range stored
+    // number would put the thumb where the slider cannot represent it — and the next edit
+    // would snap it to an unrelated number.
     const model = LearningModel.fromSnapshot({ weights: { security: 9999 } });
     expect(model.weights.security).toBeLessThanOrEqual(100);
 
@@ -1226,8 +1208,7 @@ describe("persistence", () => {
   });
 
   it("drops a weight it does not recognise", () => {
-    // A weight added by a *newer* build, or a typo, must not survive into the
-    // model as a key nothing reads.
+    // A weight added by a *newer* build, or a typo, must not survive as a key nothing reads.
     const model = LearningModel.fromSnapshot({
       weights: { security: 20, someFutureWeight: 99 },
     });
@@ -1271,8 +1252,8 @@ describe("notifications and the OS badge", () => {
   });
 
   it("parks the background ticker when the window is focused", async () => {
-    // A visible window syncs on its own timer; the native ticker exists for the
-    // hidden case, so asking for both means two syncs racing each other.
+    // A visible window syncs on its own timer; the native ticker exists for the hidden
+    // case, so asking for both means two syncs racing.
     const { backend } = fakeBackend();
     const { platform, calls } = fakePlatform();
     const store = demoStore();
@@ -1305,9 +1286,9 @@ describe("sign out", () => {
   });
 
   it("parks the background ticker", async () => {
-    // Otherwise the desktop's Rust thread keeps firing every minute against a
-    // backend that no longer exists, and the user watches a signed-out app
-    // making requests it cannot authenticate.
+    // Otherwise the desktop's Rust thread keeps firing every minute against a backend that
+    // no longer exists, and the user watches a signed-out app make requests it cannot
+    // authenticate.
     const { backend } = fakeBackend();
     const { platform, calls } = fakePlatform();
     const store = demoStore();
@@ -1321,8 +1302,8 @@ describe("sign out", () => {
   });
 
   it("clears the unread badge", async () => {
-    // A signed-out app showing "12 unread" on the dock badge is a lie the user
-    // has to look at, and there is no inbox behind it to explain.
+    // A signed-out app showing "12 unread" on the dock badge is a lie the user has to look
+    // at, with no inbox behind it to explain.
     const { backend } = fakeBackend();
     const { platform, calls } = fakePlatform();
     const store = demoStore();
@@ -1350,8 +1331,7 @@ describe("sync failure reporting", () => {
   });
 
   it("surfaces a partial failure rather than claiming everything loaded", async () => {
-    // "All caught up" over a cache that is missing messages is worse than an
-    // error message.
+    // "All caught up" over a cache missing messages is worse than an error message.
     const store = demoStore();
     const backend = {
       async sync() {
@@ -1376,8 +1356,8 @@ describe("sync failure reporting", () => {
   });
 
   it("reports a truncated view as a notice, not an error", async () => {
-    // A capped mailbox is not a failure and does not resolve on retry, so it must
-    // not be wearing the error banner's clothes.
+    // A capped mailbox is not a failure and does not resolve on retry, so it must not wear
+    // the error banner's clothes.
     const store = demoStore();
     const backend = {
       async sync() {
@@ -1422,8 +1402,8 @@ describe("subscriptions", () => {
   });
 
   it("returns a snapshot with a changing key, so React sees the update", () => {
-    // `useSyncExternalStore` compares by reference; a monotonically increasing
-    // key is what makes "did it change?" answerable without a deep compare.
+    // `useSyncExternalStore` compares by reference; a monotonically increasing key makes
+    // "did it change?" answerable without a deep compare.
     const store = demoStore();
     const first = store.getSnapshot();
     const second = store.getSnapshot();
@@ -1444,10 +1424,9 @@ describe("syncNotice", () => {
   });
 
   it("reports a cache that could not be written", () => {
-    // The flag is worthless if it never reaches the user, and it reaches the user
-    // through this string. Before, the `QuotaExceededError` was discarded inside the
-    // cache and the app reported a healthy sync while the offline copy of a large
-    // mailbox had never once been written.
+    // The flag is worthless if it never reaches the user, and it reaches them through this
+    // string. Before, the `QuotaExceededError` was discarded inside the cache and the app
+    // reported a healthy sync while the offline copy of a large mailbox was never written.
     expect(syncNotice({ truncated: false, cacheUnpersisted: true })).toMatch(
       /too large to save offline/,
     );
@@ -1469,8 +1448,8 @@ describe("body retention", () => {
    * A backend serving `n` messages, each with a distinct HTML body.
    *
    * Needed because the fetch path only runs *outside* the retention window, and the
-   * 38-message demo seed sits entirely inside it — which is the point: for any mailbox
-   * under 500, opening a message never touches the network.
+   * 38-message demo seed sits entirely inside it — for any mailbox under 500, opening a
+   * message never touches the network.
    */
   function bigBackend(n: number) {
     const calls: { method: string; args: unknown[] }[] = [];
@@ -1520,24 +1499,23 @@ describe("body retention", () => {
   }
 
   it("keeps no HTML on state.all, however recent", async () => {
-    // `state.all` is uniformly body-free. That is the whole bound — the resident bodies
-    // live in a side-map, so nothing has to ask whether a given message happens to be
-    // inside the window.
+    // `state.all` is uniformly body-free — the whole bound. Resident bodies live in a
+    // side-map, so nothing has to ask whether a message is inside the window.
     const { store } = await storeOver(600);
     expect(store.getSnapshot().all.some((e) => e.bodyHtml !== undefined)).toBe(false);
   });
 
   it("keeps the plain-text body, so classification is untouched", async () => {
-    // The load-bearing half. `contentBag` is `subject + body`, so bounding the HTML must
-    // cost the classifier nothing — and the list's preview line reads `body` too.
+    // The load-bearing half: `contentBag` is `subject + body`, so bounding the HTML costs
+    // the classifier nothing — and the list's preview reads `body` too.
     const { store } = await storeOver(600);
     expect(store.getSnapshot().all.filter((e) => e.body.trim() === "")).toHaveLength(0);
     expect(store.view.signals.size).toBeGreaterThan(0);
   });
 
   it("needs no fetch for a message inside the window", async () => {
-    // The other half of the retention policy: the common case costs nothing. The newest
-    // 500 have their HTML already, so opening one never reaches the network.
+    // The other half of the retention policy: the common case costs nothing, since the
+    // newest 500 already have their HTML.
     const { store, calls } = await storeOver(600);
     const newest = store.getSnapshot().all.slice().sort((a, b) => b.receivedAt - a.receivedAt)[0]!;
     store.select(newest.id);
@@ -1584,9 +1562,8 @@ describe("body retention", () => {
   });
 
   it("treats a plain-text message as answered, so it is never refetched", async () => {
-    // `undefined` from `fetchBody` means "this message has no HTML part", which is the
-    // answer for all plain-text mail. Treating it as "not loaded yet" would refetch it
-    // on every render, forever.
+    // `undefined` from `fetchBody` means "no HTML part", the answer for all plain-text
+    // mail; treating it as "not loaded yet" would refetch it on every render, forever.
     const { backend, calls } = bigBackend(600);
     const plain: MailBackend = {
       ...backend,
@@ -1610,9 +1587,9 @@ describe("body retention", () => {
   });
 
   it("attaching a body does not reclassify the inbox", async () => {
-    // The reason bodies live beside `state.all` rather than on it. Rebuilding the array
-    // changes its identity, which invalidates `inboxAnalysis`, which reclassifies
-    // everything — a 271ms stall at 5,000 messages, every time an old message is opened.
+    // The reason bodies live beside `state.all` rather than on it: rebuilding the array
+    // changes its identity, invalidating `inboxAnalysis` and reclassifying everything — a
+    // 271ms stall at 5,000 messages, every time an old message is opened.
     const classify = await import("../classify/classify");
     const spy = vi.spyOn(classify, "classifyAll");
 
@@ -1628,8 +1605,8 @@ describe("body retention", () => {
   });
 
   it("a message inside the window needs no fetch even when it has no HTML", async () => {
-    // The sync already walked it, so its body question is settled. Without this,
-    // opening plain-text mail inside the window would cost a request every time.
+    // The sync already walked it, so its body question is settled; without this, opening
+    // plain-text mail inside the window would cost a request every time.
     const { backend, calls } = bigBackend(3);
     const textOnly: MailBackend = {
       ...backend,

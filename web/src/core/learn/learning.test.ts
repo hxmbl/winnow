@@ -1,19 +1,13 @@
 /**
  * The learning model.
  *
- * Two things are worth a test file of their own here.
+ * *Direction* is the first thing worth pinning: a sign error is the one bug here the
+ * app cannot show — the weights move, the ranking simply gets worse for as long as
+ * feedback continues — so each nudge is checked by name rather than by "it went up".
  *
- * The first is *direction*. Every nudge is a claim about which way a signal was
- * wrong, and a sign error is the one bug in this module the app cannot show: the
- * weights move, the number changes, and the ranking simply gets worse for as
- * long as the user keeps giving feedback. So each nudge is pinned by name rather
- * than by "it went up".
- *
- * The second is that `fromSnapshot` is a reader for untrusted input. What it gets
- * is `localStorage`, which a user can edit by hand and which can hold half a
- * write from a tab that was closed mid-save, so "never throws" is a requirement
- * and not a style preference — a thrown error there costs the user the app
- * rather than their tuning.
+ * The second is that `fromSnapshot` reads untrusted input (`localStorage`, which a
+ * user can edit and which can hold half a write), so "never throws" is a requirement:
+ * a thrown error costs the user the app rather than their tuning.
  */
 
 import { describe, expect, it } from "vitest";
@@ -233,11 +227,8 @@ describe("starring", () => {
   });
 
   it("softens spam sensitivity for a bare spam lure", () => {
-    // The spam nudge used to sit behind `touched.length > 0`, and a plain spam lure
-    // is exactly the message with no security, urgency, finance or bulk signal on it.
-    // So the one message whose spam call the user has just contradicted was the one
-    // that taught nothing, while the comment beside it called this "the clearest
-    // possible statement that the spam call was wrong".
+    // A plain spam lure carries no security, urgency, finance or bulk signal, which
+    // is exactly the message whose spam call the user has just contradicted.
     const before = LearningModel.initial().toSnapshot();
     const lure = sig({ spamLikelihood: 0.9, importanceScore: 3 });
     const after = LearningModel.initial().recordStar(email(), lure, true, 1_000);
@@ -306,10 +297,8 @@ describe("starring", () => {
 
   it("restores spam sensitivity on the way back", () => {
     // Starring junk says "your spam call was wrong"; unstarring it again says the
-    // opposite, and the two must cancel. The nudge used to be pushed only when
-    // `starred`, so the single most reflexive correction in the product — star, see
-    // it was junk, unstar — left the model permanently one point more trusting of
-    // spam than it started.
+    // opposite, and the two must cancel — star, see it was junk, unstar is the most
+    // reflexive correction in the product.
     const scored = sig({ security: true, spamLikelihood: 0.8 });
     const message = email({ id: 12 });
     const up = LearningModel.initial().recordStar(message, scored, true, 1_000);
@@ -322,9 +311,8 @@ describe("starring", () => {
 
   it("softens spam sensitivity for a message with no other signal", () => {
     // A spam lure is *defined* by carrying none of the touchable signals — no
-    // security, no urgency, no finance. So gating the spam nudge on
-    // `touched.length > 0` excluded precisely the message that most clearly
-    // contradicts the spam call, and the correction was silently dropped.
+    // security, no urgency, no finance — so gating the spam nudge on
+    // `touched.length > 0` excluded precisely the message that contradicts the call.
     const pureSpamLure = sig({ spamLikelihood: 0.9 });
 
     const after = LearningModel.initial().recordStar(
@@ -429,12 +417,10 @@ describe("muting a bucket", () => {
   });
 
   it("records the weights the mute moved, and nothing else", () => {
-    // `activeSignals` means "what this event changed", not "what was on the
-    // message". Muting a bucket with no driving weight moves nothing, so an empty
-    // array is the honest record — and it was previously the message's own signals,
-    // which claimed `urgency` and `actionNeeded` had been adjusted when neither
-    // had. An audit trail that overstates what it did is worse than one that is
-    // silent, because it is believed.
+    // `activeSignals` means "what this event changed", not "what was on the message".
+    // Muting a bucket with no driving weight moves nothing, so an empty array is the
+    // honest record — an audit trail that overstates what it did is worse than one
+    // that is silent, because it is believed.
     const scoped = LearningModel.initial().rejectFilter(
       "travel",
       email({ id: 3 }),

@@ -1,19 +1,14 @@
 /**
  * Gmail's message → Winnow's `Email`.
  *
- * The only place the wire format and the product format meet. Four decisions
- * here are worth stating, because each one is a judgement about a sender-
- * controlled input:
+ * The only place the wire format and the product format meet. Four decisions:
  *
- * 1. **`From` is parsed, not trusted.** The address is extracted from
- *    `Display Name <addr@example.com>`; the display name is sanitised of
- *    control characters, because a name containing a zero-width or bidi
- *    override can render as a different name than it is.
- * 2. **Plain text wins.** A `text/plain` leaf is preferred over `text/html`
- *    even when both exist, because the classifier reads text and the reader
- *    quotes text. HTML is kept alongside for the "show original" path.
- * 3. **Attachments are metadata only.** The bytes are fetched on demand; an
- *    inbox that preloaded every PDF would not open.
+ * 1. **`From` is parsed, not trusted.** The display name is sanitised of control
+ *    characters (e.g., zero-width or bidi overrides) because they can render as
+ *    a different name than it is.
+ * 2. **Plain text wins.** A `text/plain` leaf is preferred over `text/html` when
+ *    both exist; HTML is kept alongside for the "show original" path.
+ * 3. **Attachments are metadata only.** Bytes are fetched on demand.
  * 4. **Internal date wins over the `Date:` header.** Gmail's `internalDate` is
  *    when the message was received; a sender can put anything in `Date:`.
  */
@@ -31,9 +26,9 @@ import { parseAddressHeader, plainTextFromHtml } from "../mail/html";
 
 /** Which mailbox a set of labels files the message in. */
 export function mailboxFor(labelIds: readonly string[]): Mailbox {
-  // Order matters: trash beats spam beats inbox. A message can legitimately
-  // carry more than one of these during the moment a filter moves it, and
-  // "where can the user get rid of it" is the better question.
+  // Order matters: trash beats spam beats inbox; a message can carry more than
+  // one of these mid-move, and "where can the user get rid of it" is the
+  // better question.
   if (labelIds.includes(LABEL.trash)) return "trash";
   if (labelIds.includes(LABEL.spam)) return "spam";
   if (labelIds.includes(LABEL.inbox)) return "inbox";
@@ -50,11 +45,7 @@ export function headerValue(part: GmailPart | undefined, name: string): string |
 }
 
 /**
- * Walk the MIME tree, calling `visit` for every leaf.
- *
- * Gmail's payload is a tree: `multipart/alternative` containing a `text/plain`
- * and a `text/html`, which itself may contain inline images. Only leaves
- * carry data, so only leaves are interesting.
+ * Walk the MIME tree, calling `visit` for every leaf. Only leaves carry data.
  */
 function forEachLeaf(part: GmailPart | undefined, visit: (leaf: GmailPart) => void): void {
   if (!part) return;
@@ -92,11 +83,8 @@ export function htmlPart(part: GmailPart | undefined): GmailPart | undefined {
 /**
  * Every attachment worth offering, in the order Gmail listed them.
  *
- * Gmail lists an inline image (a signature logo, a tracking pixel) with an
- * `attachmentId` like any other attachment, and a `Content-ID` header when it
- * was meant to be referenced from the HTML body. Those are excluded: they are
- * part of the message's rendering, not something the user attached, and
- * offering them turns a two-file email into a five-item attachment list.
+ * Inline images (signature logos, tracking pixels) with a `Content-ID` header
+ * are excluded — they're part of rendering, not user attachments.
  */
 function collectAttachments(part: GmailPart | undefined): Attachment[] {
   const out: Attachment[] = [];
@@ -137,8 +125,7 @@ function collectAttachments(part: GmailPart | undefined): Attachment[] {
  * Decode Gmail's base64url chunked body encoding.
  *
  * A body that will not decode becomes an empty string rather than an exception:
- * the headers still classify the message and the snippet still previews it, so a
- * bad body is a worse row, not no row.
+ * the headers still classify the message and the snippet still previews it.
  */
 export function decodeBody(data: string): string {
   const bytes = base64UrlDecode(data);
@@ -160,8 +147,7 @@ export function parseDateHeader(value: string | undefined, fallback: number): nu
 /**
  * The category Gmail assigned, mapped onto Winnow's union.
  *
- * An unrecognised category becomes `primary` rather than being dropped, so a
- * new Gmail label degrades to "ordinary mail" instead of a hole in the union.
+ * An unrecognised category becomes `primary` rather than being dropped.
  */
 function categoryFor(labelIds: readonly string[]): EmailCategory {
   for (const label of labelIds) {
@@ -175,9 +161,7 @@ function categoryFor(labelIds: readonly string[]): EmailCategory {
  * Map a Gmail message to an `Email`, or `null` when it is not something Winnow
  * shows.
  *
- * `null` means "drop it", and is returned for a message the user cannot act on:
- * an outbox or draft stub with no body, which would otherwise appear as an
- * empty row in the inbox.
+ * `null` means drop it — e.g., an outbox or draft stub with no body.
  */
 export function toEmail(message: GmailMessage): Email | null {
   const labelIds = message.labelIds ?? [];
@@ -205,11 +189,8 @@ export function toEmail(message: GmailMessage): Email | null {
   const from = headerValue(payload, "From") ?? "";
   const parsedFrom = parseAddressHeader(from);
   // An unparseable `From` still yields a row: the address becomes the raw
-  // header, which classifies as unknown rather than as spam. A message with *no*
-  // `From` at all — rare, but a mailing list or a bounce can manage it — gets the
-  // same placeholder rather than the empty string, which would render as a row with
-  // no sender and no monogram. `??` cannot do this: `from.trim()` is `""`, and `""`
-  // is not nullish, so the fallback below it was dead code.
+  // header. A message with no `From` at all gets a placeholder rather than an
+  // empty sender (`""` is not nullish).
   const sender = parsedFrom?.address || from.trim() || "unknown@unknown";
 
   const fallbackDate = Number(message.internalDate) || Date.now();
@@ -243,12 +224,8 @@ export function toEmail(message: GmailMessage): Email | null {
 /**
  * The `Message-ID` header, or `undefined` if there is not a usable one.
  *
- * Carried through as-is rather than re-wrapped, because its whole job is to be
- * the id the *other* client already has. Two things are checked: that it is
- * actually a `Message-ID` (`<local@domain>`), and that it contains no line break.
- * The second is a header-injection guard — this value ends up inside a header of
- * a message Winnow sends, and a `Message-ID` carrying CRLF would let the sender
- * append arbitrary headers to the reply.
+ * Carried through as-is (must be `<local@domain>` with no line breaks) — a CRLF
+ * would let a sender append arbitrary headers to a reply.
  */
 export function messageIdHeader(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
@@ -261,21 +238,9 @@ export function messageIdHeader(raw: string | undefined): string | undefined {
 /**
  * Decode RFC 2047 encoded words: `=?UTF-8?B?...?=`.
  *
- * Non-ASCII subjects are the overwhelmingly common case, so a subject that
- * fails here is a subject that looks like garbage in the list — the single most
- * visible mapping bug there would be.
- *
- * Three things this has to get right, and each was wrong first:
- *
- *   - **Both encodings are byte sequences.** Quoted-printable used to go
- *     byte-by-byte through `String.fromCharCode`, which turns the three escaped
- *     bytes of an em dash (`=E2=80=94`) into three Latin-1 characters — so every
- *     accented subject, curly quote and emoji rendered as mojibake.
- *   - **A word that will not decode is left alone**, rather than the subject
- *     being lost with it.
- *   - **Whitespace between two adjacent words is layout, not content** (RFC 2047
- *     §6.2). Long subjects arrive split exactly this way, and keeping the gap
- *     doubled it, dropping it glued words together.
+ * Both encodings are byte sequences. A word that won't decode is left alone
+ * rather than losing the subject. Whitespace between two adjacent encoded words
+ * is layout, not content (RFC 2047 §6.2).
  */
 export function decodeMimeWord(value: string): string {
   const word = /=\?([^?\s]+)\?([BbQq])\?([^?]*)\?=/g;
@@ -297,8 +262,7 @@ function decodeWord([match, charset, encoding, data]: RegExpExecArray): string {
   try {
     const bytes =
       encoding.toUpperCase() === "B" ? base64UrlDecode(data) : quotedPrintableBytes(data);
-    // An undecodable word is left in place rather than replaced with nothing,
-    // which would quietly shorten the subject.
+    // An undecodable word is left in place rather than replaced with nothing.
     if (bytes === null) return match;
     return new TextDecoder(charset || "utf-8", { fatal: false }).decode(bytes);
   } catch {

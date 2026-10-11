@@ -1,19 +1,13 @@
 /**
  * The message list.
  *
- * Three lines a row, ragged right, no rules between rows — the section headers
- * do the separating. A border on every row is what made an earlier version read
- * as one long ruled table rather than as a list of messages.
- *
- * The row is the densest thing in the app and it has to earn that. Sender,
- * subject and preview in three lines, with the timestamp right-aligned on the
- * first. Each line truncates independently, so a long subject never pushes the
- * preview out of the row.
+ * Three lines a row, ragged right, no rules between rows — the section headers do the
+ * separating. Sender, subject and preview, with the timestamp right-aligned on the
+ * first; each line truncates independently, so a long subject never pushes the preview
+ * out of the row.
  *
  * Rows are memoised on exactly the four things that change their appearance, so
- * selecting a message re-renders two rows rather than a thousand. The
- * alternative — letting the list re-render and hoping React's reconciliation is
- * cheap enough — was measurably not, once the inbox passed a few hundred rows.
+ * selecting a message re-renders two rows rather than a thousand.
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -41,9 +35,8 @@ import {
 /**
  * One entry in the windowed list: a day header, or a message row.
  *
- * A flat union rather than a nested section/row tree, because windowing needs a
- * single index space to slice — and because a viewport edge can land in the middle
- * of a day, which a `<section>` wrapper cannot survive.
+ * A flat union rather than a nested section/row tree, because windowing needs a single
+ * index space to slice — and a viewport edge can land in the middle of a day.
  */
 type ListItem =
   | { kind: "header"; key: string; section: DaySection; label: string; count: number }
@@ -69,8 +62,7 @@ type DaySection = {
  * Which item the keyboard cursor is on.
  *
  * `cursorIndex` counts *rows*, not items, so it has to be walked past the headers.
- * Returns `null` when the cursor is out of range — which is a real state, not an
- * error: `NO_CURSOR` is `-1` and means nothing is selected yet.
+ * Returns `null` when out of range — a real state, not an error: `NO_CURSOR` is `-1`.
  */
 function rowIndexForCursor(items: readonly ListItem[], cursorIndex: number): number | null {
   if (cursorIndex < 0) return null;
@@ -118,29 +110,21 @@ type RowProps = {
 /**
  * What Winnow thinks of a row, as icons.
  *
- * **This is the change from coloured dots, and it is the whole point of it.** Six
- * 6px dots in eleven categorical hues is a colour key: it cannot be read at a
- * glance, it cannot be read at all without learning the ramp, it disappears in dark
- * mode where several of the hues land within a few percent of each other, and it is
- * nothing whatsoever to a reader with a colour vision deficiency.
+ * **This is the change from coloured dots, and it is the whole point of it.** Six 6px
+ * dots in eleven categorical hues cannot be read at a glance, disappear in dark mode,
+ * and mean nothing to a reader with a colour vision deficiency.
  *
- * A glyph is a word somebody already owns. A star means important, a bolt means
- * urgent, a shield means security — in any app, in any language, without a legend.
- * The bucket's accent does not survive at all. It was tempting to keep it as a tint
- * on the glyph — the meaning is settled by then, so the colour would be reinforcing
- * rather than load-bearing — but a glyph that is still tinted per bucket is still
- * carrying the colour, only more quietly, and it puts the eleven-hue key back for
- * anyone who has to decode it. `theme.ts` says the same thing from the token side:
- * the only accent that outlived the redesign is `starred`. The indicator takes the
- * row's muted ink and reads as part of the row.
+ * A glyph is a word somebody already owns — a star means important, a bolt urgent, a
+ * shield security — in any app, in any language, without a legend. The bucket's accent
+ * does not survive at all: a glyph still tinted per bucket is still carrying the colour,
+ * only more quietly, which puts the eleven-hue key back. The indicator takes the row's
+ * muted ink instead.
  *
- * The `title` is the reason, from `ui/filterIcons`, and it is what makes hovering
- * explanatory rather than merely decorative: "Important — from someone you read or
- * reply to" tells the reader what to do with the information, where a dot told them
- * nothing and a chip told them only the verdict.
+ * The `title` is the reason, from `ui/filterIcons`, which makes hovering explanatory
+ * rather than merely decorative.
  *
- * The same icons and the same explanations are used by the reader's filter row, so a
- * bucket cannot mean one thing in a list and another in the message.
+ * The same icons and explanations are used by the reader's filter row, so a bucket cannot
+ * mean one thing in a list and another in the message.
  */
 function RowIndicators({ ids }: { ids: readonly BuiltinSmartFilter[] }) {
   return (
@@ -161,19 +145,13 @@ function RowIndicators({ ids }: { ids: readonly BuiltinSmartFilter[] }) {
 /**
  * The row's accessible name.
  *
- * `aria-label` wins over descendant content when a name is computed, so this
- * replaces the row's text wholesale rather than adding to it. That is the point:
- * left to content, the name is sender + subject + preview + timestamp run together
- * into one long string, with the indicators' own labels buried in the middle of it
- * and in no particular order.
+ * `aria-label` wins over descendant content when a name is computed, so this replaces the
+ * row's text wholesale rather than adding to it: left to content, the name would be sender
+ * + subject + preview + timestamp run together, with the indicators' labels buried in the
+ * middle.
  *
- * It was previously argued from the indicators being `aria-hidden`, which they were
- * when they were coloured dots. They are icons now and each carries an `sr-only`
- * label, so the reasoning had to change with them — the judgement is still worth
- * hearing, it is just no longer something a screen reader would miss.
- *
- * Ordered the way the row reads: who, which conversation, what it says, then the
- * state, then the judgement, then when. The visible row is untouched.
+ * Ordered the way the row reads: who, which conversation, what it says, then the state,
+ * then the judgement, then when. The visible row is untouched.
  */
 function rowAccessibleName({
   email,
@@ -195,8 +173,8 @@ function rowAccessibleName({
   parts.push(email.subject || "no subject");
   if (unread) parts.push("unread");
   if (fresh) parts.push("new");
-  // Lowercased because these run as a comma list inside a sentence, not as a set
-  // of pill captions: "security, urgent" rather than "Security, Urgent".
+  // Lowercased because these run as a comma list inside a sentence, not as a set of pill
+  // captions: "security, urgent" rather than "Security, Urgent".
   if (indicators.length > 0) {
     parts.push(indicators.map((id) => FILTER_LABELS[id].toLowerCase()).join(", "));
   }
@@ -222,30 +200,21 @@ const Row = memo(function Row({
     <div
       className={`group/row relative flex w-full items-start gap-3 rounded-md px-2.5 py-2 text-left transition-colors ${
         /*
-         * Selection as `sheen` rather than `surfaceActive`.
-         *
-         * An opaque step lighter than the list is a third plane, and the surface
-         * already has two. `sheen` is a wash of the palette's own ink, so the row is
-         * marked without introducing another value to keep track of — and it
-         * darkens on a light scheme and lightens on a dark one, which an opaque hex
-         * cannot do.
+         * Selection as `sheen` rather than `surfaceActive`. An opaque step lighter than
+         * the list is a third plane, and the surface already has two. `sheen` is a wash
+         * of the palette's own ink, so it darkens on a light scheme and lightens on a
+         * dark one, which an opaque hex cannot do.
          */
         selected ? "bg-sheen" : "hover:bg-surface-hover"
       }`}
     >
       {/*
-        The row is a `<button>`, and the star is its *sibling*.
-
-        Both were correct at different times and the comment above outlived the change:
-        an earlier version put the star inside the row button, which is invalid HTML and
-        breaks keyboard navigation entirely. That was fixed by making the row a
-        `div[role=button]` with two sibling buttons — and this is now a real `<button>`
-        again, so it is focusable, works with Space, and is announced as a button
-        without a role to be interpreted.
+        The row is a `<button>`, and the star is its *sibling* — putting the star inside
+        the row button is invalid HTML and breaks keyboard navigation.
 
         `aria-current="true"` rather than `aria-selected`, because the selected option of
-        a listbox needs a `listbox` parent and this list is a set of independent
-        choices, not a single-select list.
+        a listbox needs a `listbox` parent and this list is a set of independent choices,
+        not a single-select list.
       */}
       <button
         type="button"
@@ -276,8 +245,7 @@ const Row = memo(function Row({
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
             <span className="flex min-w-0 items-center gap-1.5">
-              {/* Unread is a weight, not a dot. A dot is a thing Gmail invented
-                  and users have to learn; weight is how print has always
+              {/* Unread is a weight, not a dot: weight is how print has always
                   signalled it, and it survives a screenshot. */}
               <span
                 className={`truncate text-row ${
@@ -293,8 +261,7 @@ const Row = memo(function Row({
               )}
               {fresh && (
                 // `aria-hidden` because the row's own name now carries "new" — and
-                // `aria-label` on a role-less `<span>` is not reliably exposed anyway,
-                // so this was a label that mostly did nothing.
+                // `aria-label` on a role-less `<span>` is not reliably exposed anyway.
                 <span
                   aria-hidden="true"
                   className="h-1.5 w-1.5 shrink-0 rounded-full bg-success"
@@ -302,15 +269,8 @@ const Row = memo(function Row({
               )}
             </span>
             {/*
-             * The judgements ride on the line that was already there.
-             *
-             * They were a fourth line under the preview, which is the one place the
-             * redesign was stacking rather than integrating: rows came out 72px or
-             * 56px depending on whether a row had indicators, so the list lost its
-             * rhythm and the icons read as a separate band of content rather than as
-             * something about this message. Beside the timestamp they cost no height,
-             * every row is the same three lines, and the icons are still in the corner
-             * the eye already goes to for "what is this, and when".
+             * The judgements ride on the line that was already there, beside the
+             * timestamp, so they cost no height: every row is the same three lines.
              */}
             <span className="flex shrink-0 items-baseline gap-2">
               {indicators.length > 0 && (
@@ -346,11 +306,10 @@ const Row = memo(function Row({
 
         Visible on hover, on keyboard focus, and *always* on a device with no hover.
 
-        `opacity-0` with reveal-on-hover was the rule, and it produced a 24px invisible
-        tappable target on every touch device — a control you could hit by accident and
-        could not aim at. `@media (hover: hover)` scopes the hiding to the devices that
-        actually have a pointer to hover with, so a phone shows it outright and a mouse
-        still gets a quiet list.
+        `opacity-0` with reveal-on-hover produced a 24px invisible tappable target on
+        every touch device. `@media (hover: hover)` scopes the hiding to devices that
+        actually have a pointer, so a phone shows it outright and a mouse still gets a
+        quiet list.
       */}
       <button
         type="button"
@@ -360,13 +319,11 @@ const Row = memo(function Row({
         className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-opacity hover:bg-sheen hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/row:opacity-100 aria-pressed:opacity-100 not-[[hover:hover]]:opacity-0"
       >
         {/*
-          The star is a sprite rather than a lucide icon so that the filled and outline
-          states are the same shape at the same weight — a star that gains a stroke
-          weight when you fill it does not read as the same object turning on.
+          The star is a sprite rather than a lucide icon so the filled and outline states
+          are the same shape at the same weight.
 
           The colour comes from `--wn-badge-starred`, the same token the reader's badge
-          and the palette use. It was a literal `#B8860B`, which meant the star's colour
-          could not follow the theme and had to be changed in two places whenever it did.
+          and the palette use, so it follows the theme.
         */}
         <svg
           viewBox="0 0 24 24"
@@ -388,17 +345,10 @@ const Row = memo(function Row({
 /**
  * The day heading.
  *
- * Not sticky itself. It used to be — `sticky top-0` inside its `<section>` — and
- * that no longer works once the list is windowed, because the containing block is
- * now the translated window rather than the whole day. The pinned copy is drawn
- * over the scroller by `MessageList`; this is the in-flow original, which scrolls
- * away normally and is what that pinned copy is painted over.
- *
- * The background is opaque for the same reason: the pinned copy sits on top of rows
- * scrolling underneath it.
- *
- * The label is aligned to the avatar edge below it, because the label describes
- * the rows and should sit where the rows start.
+ * Not sticky itself: once the list is windowed, the containing block is the translated
+ * window, so `sticky top-0` no longer works. `MessageList` draws the pinned copy over the
+ * scroller; this is the in-flow original that copy is painted over, which is why the
+ * background is opaque.
  */
 function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
@@ -422,9 +372,8 @@ export type EmptyState = {
 /**
  * The empty state, which says *why* rather than just reporting emptiness.
  *
- * "No messages match" is not actionable. "Nothing matches these two filters —
- * [clear them]" tells the user what to do about it, and the three reasons are
- * genuinely different problems with genuinely different fixes.
+ * "No messages match" is not actionable; the three reasons are genuinely different
+ * problems with genuinely different fixes.
  */
 function Empty({
   reason,
@@ -437,17 +386,9 @@ function Empty({
    * What the user can do about *this* emptiness.
    *
    * Five reasons and five different answers, which is the whole point of the state.
-   * Three of them used to print text with no button, because only `search` and
-   * `filters` had an action attached — so "This mailbox is empty." sat there with
-   * nothing to do even where something *could* be done, and `noSignal` — the one a
-   * user hits by accident, having archived everything in a bucket and watched it go
-   * quiet — explained nothing at all.
-   *
-   * `mailbox` is the only case where the remedy is not about narrowing, and it is
-   * also the only one that depends on something outside the list: there is an
-   * account to sync with, or there is not. Which is why `canSync` is a prop rather
-   * than a constant — offering "Check for new mail" over the demo mailbox would be a
-   * button that cannot do anything.
+   * `mailbox` is the only case where the remedy depends on something outside the list,
+   * which is why `canSync` is a prop — offering "Check for new mail" over the demo
+   * mailbox would be a button that cannot do anything.
    */
   const remedy = (() => {
     switch (reason) {
@@ -500,8 +441,8 @@ function Empty({
         </>
       ) : (
         // `emptyReason` is null only when the list is non-empty, so this branch is
-        // unreachable — but an empty screen with no explanation is worse than a
-        // wrong one, so it says something.
+        // unreachable — but an empty screen with no explanation is worse than a wrong
+        // one, so it says something.
         <p className="text-[13.5px] text-ink-muted">Nothing to show.</p>
       )}
     </div>
@@ -519,9 +460,9 @@ type Props = {
   /**
    * The list's order, which decides whether day sections mean anything.
    *
-   * Only a date-sorted list can group by day; the other two sorts interleave the
-   * days, and labelling that interleaving produced a duplicate React key on every
-   * repeated section. See `daySections`.
+   * Only a date-sorted list can group by day; the other two sorts interleave the days,
+   * and labelling that produced a duplicate React key on every repeated section. See
+   * `daySections`.
    */
   sortBy: SortBy;
   onSelect: (id: number) => void;
@@ -556,8 +497,8 @@ function MessageList({
   className = "",
 }: Props) {
 
-  // Day sections, on the *representative* message's date, since that is the date the
-  // row displays. One flat section unless the sort is chronological.
+  // Day sections, on the *representative* message's date, since that is the date the row
+  // displays. One flat section unless the sort is chronological.
   const sections = daySections(
     threads,
     now,
@@ -566,15 +507,13 @@ function MessageList({
   );
 
   /**
-   * The sections flattened into one index space, so headers and rows can be
-   * windowed together.
+   * The sections flattened into one index space, so headers and rows can be windowed
+   * together.
    *
-   * Rows whose signals are missing are dropped here rather than at render time. The
-   * classifier runs over the whole mailbox before anything is shown, so a miss means
-   * the message left the list between the two passes. Filtering here is what keeps
-   * the flattened index and `cursorIndex` in agreement — filtering during render
-   * would leave holes that `querySelectorAll`-by-index silently miscounts, which is
-   * what the cursor-follow effect used to do.
+   * Rows whose signals are missing are dropped here rather than at render time.
+   * Filtering during render would leave holes that `querySelectorAll`-by-index silently
+   * miscounts, and the classifier runs over the whole mailbox before anything is shown,
+   * so a miss means the message left the list between the two passes.
    */
   const items = useMemo<ListItem[]>(() => {
     const out: ListItem[] = [];
@@ -595,9 +534,9 @@ function MessageList({
   /**
    * Measured heights, by item key.
    *
-   * A `Map` keyed by identity rather than an array by index because the list is
-   * rebuilt on every derive — an index-keyed cache would be invalidated wholesale
-   * by an unrelated change and every row would have to be measured again.
+   * A `Map` keyed by identity rather than an array by index, because the list is rebuilt
+   * on every derive — an index-keyed cache would be invalidated wholesale by an unrelated
+   * change and every row would have to be measured again.
    */
   const heightsRef = useRef(new Map<string, number>());
   /** Bumped when a measurement changes an offset, to force the prefix sums. */
@@ -610,8 +549,8 @@ function MessageList({
       computeOffsets(items.length, items.map((item) => heightsRef.current.get(item.key) ?? null), (i) =>
         items[i]!.kind === "header" ? ESTIMATED_HEADER_HEIGHT : ESTIMATED_ROW_HEIGHT,
       ),
-    // `measureVersion` is the dependency that matters: `heightsRef` is a ref, so
-    // mutating it does not invalidate this memo on its own.
+    // `measureVersion` is the dependency that matters: `heightsRef` is a ref, so mutating
+    // it does not invalidate this memo on its own.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, measureVersion],
   );
@@ -633,9 +572,9 @@ function MessageList({
   /**
    * Height bookkeeping for every mounted item.
    *
-   * A `ResizeObserver` rather than `offsetHeight` on mount, because a row's height
-   * is not known when it mounts — the fonts may not have loaded and the preview line
-   * may not have wrapped yet — and it changes again if the pane is resized.
+   * A `ResizeObserver` rather than `offsetHeight` on mount, because a row's height is not
+   * known when it mounts — fonts may not have loaded and the preview may not have wrapped
+   * — and it changes again if the pane is resized.
    */
   const itemObserver = useRef<ResizeObserver | null>(null);
   if (!itemObserver.current && typeof ResizeObserver !== "undefined") {
@@ -650,16 +589,10 @@ function MessageList({
   /**
    * The scroller itself, as state rather than a ref.
    *
-   * A callback ref instead of `useRef` + an effect keyed on `[]`, and the reason is
-   * specific: the empty state replaces the list wholesale, so the scroller *unmounts*
-   * whenever a search matches nothing and **mounts a different element** when the
-   * search is cleared. An effect with `[]` dependencies does not re-run for that — the
-   * component instance is the same — so the new element got no scroll listener and no
-   * viewport height. The list then looked correct while scrolling did nothing, which is
-   * exactly the failure the integration test caught and a fresh-page check cannot.
-   *
-   * Keying the effect on the element makes the attach follow the DOM rather than the
-   * component.
+   * A callback ref rather than `useRef` + an effect keyed on `[]`: the empty state
+   * replaces the list wholesale, so the scroller unmounts and **mounts a different
+   * element** when the search is cleared. An effect with `[]` dependencies does not
+   * re-run for that, so the new element got no scroll listener or viewport height.
    */
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
 
@@ -727,36 +660,24 @@ function MessageList({
   /**
    * Keep the cursor's row in view.
    *
-   * `block: "nearest"` matters: `"center"` would yank the list on every `j`
-   * press, which in a keyboard-driven client is unusable. And this follows the
-   * *cursor* rather than the selection, because `j` moves the cursor without
-   * opening anything, and a list that does not follow the cursor is a list you
-   * cannot navigate blind.
+   * `block: "nearest"` matters: `"center"` would yank the list on every `j` press. And
+   * this follows the *cursor* rather than the selection, because `j` moves the cursor
+   * without opening anything.
    *
-   * The dependency is the *cursor index*, not `threads`. `threads` is a fresh array on
-   * every derive, so it was in the dependency list and this effect therefore ran on
-   * every store change — including the 80ms debounced reclassify after a weight tweak
-   * and every background sync. The visible symptom was a user who had scrolled away
-   * from the cursor being yanked back to it every few seconds while reading.
-   *
-   * The count is included because it is the other way this can go wrong: the cursor
-   * index stays put while the list *shrinks* under it, and the row that needs following
-   * is now a different one. Following on a length change and on a cursor move covers
-   * both without re-running on every unrelated update.
+   * The dependency is the *cursor index*, not `threads`: `threads` is a fresh array on
+   * every derive, so it made this run on every store change — including the 80ms debounced
+   * reclassify after a weight tweak — and yank a user who had scrolled away back to the
+   * cursor. The count is included because the list can *shrink* under a fixed cursor index.
    */
   useEffect(() => {
     if (cursorIndex < 0) return;
     const element = scroller;
     if (!element) return;
 
-    // Scroll by *offset*, not by `querySelectorAll` index. Two reasons, and the
-    // second is the one that made this wrong before: only a window of the list is
-    // mounted, so an index into the DOM is an index into whatever happened to be
-    // visible; and rows whose signals were missing were skipped at render time,
-    // which shifted every index after them.
-    //
-    // `block: "nearest"` semantics — only move when the target is actually off
-    // screen, because `"center"` would yank the list on every `j` press.
+    // Scroll by *offset*, not by `querySelectorAll` index: only a window of the list is
+    // mounted, so an index into the DOM is an index into whatever happened to be visible,
+    // and rows whose signals were missing were skipped at render time, shifting every
+    // index after them.
     const rowIndex = rowIndexForCursor(items, cursorIndex);
     if (rowIndex === null) return;
 
@@ -784,25 +705,24 @@ function MessageList({
   }
 
   return (
-    // A positioning wrapper, so the pinned day header can sit over the scroller
-    // rather than inside it. See the note on the overlay below for why it cannot
-    // simply be `sticky` inside the scroll content.
+    // A positioning wrapper, so the pinned day header can sit over the scroller rather
+    // than inside it. See the note on the overlay below.
     <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${className}`}>
       <div
         ref={setScroller}
-        // The true row count, for anything that needs the size of the list rather than
-        // the size of the window. The smoke test asserts against this: `[data-message-id]`
-        // is now a window, so counting those elements measures the viewport.
+        // The true row count, for anything that needs the size of the list rather than the
+        // size of the window. The smoke test asserts against it: `[data-message-id]` is only
+        // the mounted window, so counting those elements measures the viewport.
         data-row-count={rowCount}
         className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4"
       >
       {/*
         The scroll extent, and the window positioned inside it.
 
-        The outer div is the full height of the list so the scrollbar is honest; the
-        inner one is translated to the first mounted item's offset. Only the mounted
-        rows exist as DOM, which is the entire point — a 5,000-message inbox used to
-        build 5,000 row subtrees.
+        The outer div is the full height of the list so the scrollbar is honest; the inner
+        one is translated to the first mounted item's offset. Only the mounted rows exist
+        as DOM, which is the entire point — a 5,000-message inbox used to build 5,000 row
+        subtrees.
       */}
       <div style={{ height: offsets[items.length] ?? 0, position: "relative" }}>
         <div
@@ -816,27 +736,19 @@ function MessageList({
 
             The heading was purely visual before, so a screen reader heard one
             undifferentiated list of messages with no indication of where today ended and
-            yesterday began — which is the single most useful thing the grouping
-            communicates.
-
-            The section wrapper is gone because a window cannot contain part of a
-            `<section>`: a day boundary would be cut in half by the viewport edge. The
-            boundary is preserved as a header item in the flat list plus
-            `aria-label` on the list, which is the same information in a shape that
-            survives windowing.
-
-            `label` is null for a sort that is not chronological, and then there are no
-            header items at all: the boundary would be false, so there is nothing to
-            announce.
+            yesterday began. The section wrapper is gone because a window cannot contain
+            part of a `<section>` — a day boundary would be cut in half by the viewport
+            edge — so the boundary is preserved as a header item plus `aria-label` on the
+            list. `label` is null for a sort that is not chronological, and then there are
+            no header items at all: the boundary would be false.
           */}
           {/*
             Rendered items, re-wrapped into the day sections they belong to.
 
-            A window cannot hold a whole `<section>`, but it can hold the *run* of
-            mounted items that share one — so a day split across the window edge
-            renders as two sections with the same accessible name rather than one
-            section with a hole in it. The name carries the day's full count, so a
-            screen reader still hears "Today, 12 messages" rather than a partial day.
+            A window cannot hold a whole `<section>`, but it can hold the *run* of mounted
+            items that share one — so a day split across the window edge renders as two
+            sections with the same accessible name rather than one section with a hole.
+            The name carries the day's full count.
           */}
           {runsInWindow(items, start, end).map((run) => (
             <section
@@ -880,16 +792,15 @@ function MessageList({
       {/*
         The day header, pinned while its day scrolls under it.
 
-        `position: sticky` cannot be used for this any more, which is why this sits
-        outside the scroller instead of inside it. Sticky resolves against the nearest
-        scrolling ancestor *within its own containing block*; the containing block here
-        is the translated window, so a sticky header would stop sticking the moment it
-        scrolled out of the window — which is exactly when it is needed. Tracking the
-        scroll position and painting the current header over the top is the same
-        behaviour without the dependency.
+        It sits outside the scroller because `position: sticky` cannot be used: sticky
+        resolves against the nearest scrolling ancestor *within its own containing block*,
+        and the containing block here is the translated window, so a sticky header would
+        stop sticking the moment it scrolled out of the window — exactly when it is
+        needed. Tracking the scroll position and painting the current header over the top
+        is the same behaviour without the dependency.
 
-        `pointer-events-none` because this is a copy of a header that is also in the
-        flow below; it must not swallow a click meant for the row underneath.
+        `pointer-events-none` because this is a copy of a header that is also in the flow
+        below; it must not swallow a click meant for the row underneath.
       */}
       {stickyHeader && (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10">

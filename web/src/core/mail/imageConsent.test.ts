@@ -1,16 +1,7 @@
 /**
- * The remote-image consent rule.
- *
- * This is the decision that decides whether a sender learns that a message was
- * opened: a tracking pixel firing is an answer to that question, given away for
- * free. It was two expressions in `App.tsx` with no test at all, which is how it
- * came to have a hole in it — the per-message grant was an `||` against the
- * standing policy, so nothing could veto it and "never" did not mean never.
- *
- * These are written as rules about a boundary rather than as tests of a branch,
- * because the failure mode is not a crash. It is a policy quietly not applying,
- * which no assertion about a return value will notice unless the rule itself is
- * written down.
+ * The remote-image consent rule: the decision that decides whether a sender
+ * learns a message was opened. Written as rules about a boundary, since the
+ * failure mode is a policy quietly not applying rather than a crash.
  */
 import { describe, expect, it } from "vitest";
 import { resolveImageConsent, type ImageConsent, type ImagePolicy } from "./imageConsent";
@@ -28,8 +19,7 @@ describe("resolveImageConsent", () => {
     });
 
     it("offers the choice", () => {
-      // The default has to *ask*; a default that silently loaded, or silently
-      // refused, would each be a privacy decision made without the user.
+      // The default must ask; loading or refusing silently would decide for the user.
       expect(at("ask", null).askAboutImages).toBe(true);
     });
   });
@@ -40,8 +30,7 @@ describe("resolveImageConsent", () => {
     });
 
     it("stays permissive when a grant points at some other message", () => {
-      // The standing answer does not depend on the grant at all, so a stale grant
-      // from another message cannot change it.
+      // The standing answer ignores the grant, so a stale one cannot change it.
       expect(at("always", OTHER_MESSAGE).imagesAllowed).toBe(true);
     });
   });
@@ -52,11 +41,8 @@ describe("resolveImageConsent", () => {
     });
 
     it("ignores a grant made before the policy was set to never", () => {
-      // The regression this module exists for. The user allowed images for one
-      // message, then went and answered "never"; the grant used to survive that,
-      // because the expression was `always || granted`, and no clause could veto
-      // it. The tracking pixel kept firing for that message until they navigated
-      // away and back and the grant happened to clear.
+      // The regression this module exists for: the grant used to survive a later
+      // "never".
       expect(at("never", MESSAGE).imagesAllowed).toBe(false);
     });
 
@@ -65,8 +51,7 @@ describe("resolveImageConsent", () => {
     });
 
     it("does not ask, so there is no way back in from here", () => {
-      // If `never` asked, the offer would be the way to re-open a decision the
-      // user has already made.
+      // If `never` asked, the offer would re-open a decision already made.
       expect(at("never", null).askAboutImages).toBe(false);
     });
   });
@@ -83,9 +68,8 @@ describe("resolveImageConsent", () => {
     });
 
     it("does not carry when nothing is selected", () => {
-      // An empty reader must not match a grant: `grantedFor !== null` on its own
-      // would be enough to make this true, which is why the comparison is to the
-      // selected id rather than to a bare "has a grant".
+      // An empty reader must not match a grant; the check compares ids, not a
+      // bare "has a grant".
       expect(at("ask", MESSAGE, null).imagesAllowed).toBe(false);
     });
 
@@ -97,10 +81,8 @@ describe("resolveImageConsent", () => {
 
   describe("the shape of the answer", () => {
     it("never reports ask as true while also allowing", () => {
-      // Asking a question and permitting the thing being asked about cannot both
-      // be true; the reader renders the offer above the message and the sandboxed
-      // frame below it, so a state with both would show the message loaded while
-      // asking whether to load it.
+      // Asking and permitting at once would render the offer over an already-loaded
+      // message.
       for (const policy of ["ask", "always", "never"] as ImagePolicy[]) {
         for (const grantedFor of [null, MESSAGE, OTHER_MESSAGE]) {
           for (const selectedId of [null, MESSAGE, OTHER_MESSAGE]) {
@@ -112,8 +94,7 @@ describe("resolveImageConsent", () => {
     });
 
     it("loads images only when something permitted it", () => {
-      // The invariant stated directly: permission is never inferred. Every case
-      // that returns true has a reason the user gave.
+      // Permission is never inferred; every true case has a reason the user gave.
       const cases: ImageConsent[] = [
         { policy: "always", grantedFor: null, selectedId: null },
         { policy: "always", grantedFor: null, selectedId: MESSAGE },

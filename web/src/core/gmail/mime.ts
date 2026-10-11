@@ -1,23 +1,14 @@
 /**
  * Building an RFC 822 message.
  *
- * Gmail's `messages.send` takes a base64url-encoded raw message, so sending
- * means writing MIME by hand — and the envelope is encoded by `client.ts`, the
- * one place that touches the wire. This is deliberately minimal: text plus
- * attachments, no alternative bodies, no related-part inline images.
+ * Gmail's `messages.send` takes a base64url-encoded raw message; this is
+ * deliberately minimal: text plus attachments, no alternative bodies, no
+ * related-part inline images. Envelope encoding is in `client.ts`.
  *
- * Two details that are easy to get wrong and produce mail that clients reject:
- *
- *   - **Line endings.** RFC 822 requires CRLF. A raw LF-only message is
- *     accepted by Gmail's API and then renders with a joined-together body in
- *     some clients, which is exactly the kind of bug that only shows up after
- *     sending to a real person.
- *   - **Header encoding.** A non-ASCII subject or display name must be RFC 2047
- *     encoded; a raw UTF-8 header line is invalid and gets mangled in transit.
- *
- * A third only shows up on the *other* side of a reply: the threading headers.
- * They are built from the message's real `Message-ID`, and getting them wrong
- * threads the reply in the sender's own account and nowhere else.
+ * Key details: RFC 822 requires CRLF (LF-only is accepted by the API but renders
+ * badly in some clients). Non-ASCII subjects/display names must be RFC 2047
+ * encoded. Threading headers are built from the message's real `Message-ID` — getting
+ * them wrong threads the reply in the sender's own account and nowhere else.
  */
 
 import type { Email, Draft } from "../model/email";
@@ -35,10 +26,8 @@ const CRLF = "\r\n";
 /**
  * True when every character is printable ASCII.
  *
- * Written as a character-code loop rather than a regex: a regex over a negated
- * printable range is exactly the `no-control-regex` case, and the eslint
- * disable it needs would sit in a security-sensitive file explaining a rule
- * rather than a hazard.
+ * Written as a character-code loop rather than a regex to avoid the need for a
+ * `no-control-regex` exception.
  */
 function isAsciiPrintable(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
@@ -59,8 +48,8 @@ function base64Utf8(value: string): string {
 /**
  * RFC 2047 base64 words, split so no encoded word exceeds 75 characters.
  *
- * Only encodes when it has to: a plain ASCII subject is left alone, so the raw
- * message stays readable, which matters when debugging a send.
+ * Only encodes when it has to: a plain ASCII subject is left alone for
+ * readability when debugging a send.
  */
 function encodeMimeHeader(value: string): string {
   if (isAsciiPrintable(value)) return value;
@@ -82,13 +71,7 @@ export type BuildOptions = {
    * The message being replied to, for `In-Reply-To` and the tail of `References`.
    *
    * The whole message rather than a bare id, because the header has to name the
-   * id *that client* already holds. `buildMime` used to write whatever string it
-   * was handed straight into `In-Reply-To`, so a reply went out as
-   * `In-Reply-To: 18c1f3a2…` — not a Message-ID at all — with a well-formed
-   * `References` list that then ended in that same malformed entry. Gmail still
-   * threaded it, because Gmail matches on its own thread id, so the reply looked
-   * fine in the sender's own account and arrived as a new conversation everywhere
-   * else.
+   * id *that client* already holds.
    */
   inReplyTo?: Email;
   /** The rest of the exchange, oldest first. See `replyReferences`. */
@@ -105,9 +88,8 @@ function fromHeader(from: BuildOptions["from"]): string {
 /**
  * Build the raw message for `draft`.
  *
- * The body goes out as `text/plain; charset=utf-8` with `format=flowed`
- * semantics left off: `format=flowed` lets a client rewrap the quoted lines
- * and silently mangle a `>` block, which defeats the point of quoting.
+ * The body goes out as `text/plain; charset=utf-8` with `format=flowed` left
+ * off to avoid silently mangling quoted lines.
  */
 export function buildMime(draft: Draft, options: BuildOptions): string {
   const boundary = `winnow-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
@@ -172,11 +154,8 @@ export function buildMime(draft: Draft, options: BuildOptions): string {
 /**
  * Standard base64, wrapped at 76 characters as the RFC requires.
  *
- * Plain base64, *not* the base64url the API's outer `raw` envelope uses: this is a
- * `Content-Transfer-Encoding: base64` body, which every receiving client decodes with
- * the RFC 2045 alphabet, and `-`/`_` are not in it. Written url-safe, an attachment
- * downloads and then will not open — in someone else's client, which is the only place
- * you would find out.
+ * Plain base64, not base64url. This is `Content-Transfer-Encoding: base64` for a
+ * part body; the outer API `raw` envelope uses base64url.
  */
 function base64Chunked(bytes: Uint8Array): string {
   let binary = "";
@@ -187,21 +166,15 @@ function base64Chunked(bytes: Uint8Array): string {
 /**
  * A message's RFC 822 id, for `In-Reply-To` and `References`.
  *
- * The real one when the message carried it, and a synthesised `<gmailId@…>`
- * otherwise — which is what every message cached by an older build, and every
- * message in the demo, has. The synthetic form is not Gmail's, so a reply to one
- * of those threads in Gmail and not elsewhere; it is still better than a bare id,
- * which threads in neither.
+ * The real one when the message carried it; otherwise a synthesised
+ * `<gmailId@mail.gmail.com>` — better than a bare id, which threads nowhere.
  */
 export function messageIdFor(email: Pick<Email, "gmailId" | "messageId">): string {
   return email.messageId ?? `<${email.gmailId}@mail.gmail.com>`;
 }
 
 /**
- * The `References` list for a reply: the exchange, oldest first.
- *
- * The order is defined by RFC 5322 §3.6.4 and a client that walks it out of
- * order will treat the reply as belonging to whichever message it saw last.
+ * The `References` list for a reply: the exchange, oldest first (RFC 5322 §3.6.4).
  */
 export function replyReferences(conversation: readonly Email[]): string[] {
   return [...conversation]

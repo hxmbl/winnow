@@ -1,17 +1,11 @@
 /**
  * The list pipeline: search, filter, sort.
  *
- * This is the hottest function in the app, and it is also the one whose three
- * performance properties are all statements about work *not* being done: bags
- * are passed in rather than rebuilt, signals are read from a map the caller
- * built, and the Smart Score is computed only after filtering and only when the
- * user asked for it. Each of those is asserted here on its own terms, because a
- * regression in any of them is invisible in the output and expensive in the
- * frame budget.
- *
- * The other thing being pinned is honesty about emptiness. A list that is empty
- * for five different reasons has to say which one, and the precedence between
- * them is the part that decides which remedy the UI offers.
+ * The hottest function in the app, and the one whose three performance properties
+ * are all statements about work *not* being done — bags passed in, signals read from
+ * a caller-built map, score computed only after filtering. Each is asserted here,
+ * since a regression in any is invisible in the output. The other thing pinned is
+ * honesty about emptiness: an empty list has five reasons and must say which.
  */
 
 import { describe, expect, it } from "vitest";
@@ -139,11 +133,9 @@ describe("runInboxQuery — search", () => {
   });
 
   it("ANDs whitespace-separated tokens rather than matching the whole query", () => {
-    // The bug this guards. The previous behaviour was a substring search on the
-    // raw query, so "invoice march" found nothing at all: no message contains
-    // that exact run of characters. The control line below is what makes this
-    // assertion falsifiable — if the run *were* present somewhere, a substring
-    // search would pass for the right-looking wrong reason.
+    // The bug this guards: a substring search on the raw query means "invoice march"
+    // finds nothing, since no message contains that exact run. The control line below
+    // makes the assertion falsifiable.
     expect(buildSearchBags(three).get(1)).not.toContain("invoice march");
 
     expect(gmailIds(runInboxQuery(query({ emails: three, searchQuery: "invoice march" })))).toEqual([
@@ -355,12 +347,8 @@ describe("runInboxQuery — matchCount", () => {
   });
 
   it("is the number of results, under every combination", () => {
-    // It used to be a second full pass over the mailbox that ANDed the search into
-    // the filters — so with a search active it returned the size of the list already
-    // on screen, at the cost of re-filtering everything on every keystroke, and its
-    // docstring promised something else entirely. It was never read by any
-    // component. Now it is simply the length of the result, and the interesting
-    // property is that it cannot disagree with what is rendered.
+    // Now simply the length of the result; the interesting property is that it
+    // cannot disagree with what is rendered.
     const cases = [
       { label: "nothing narrowing", searchQuery: "", filters: [] as readonly FilterId[] },
       { label: "search only", searchQuery: "invoice", filters: [] as readonly FilterId[] },

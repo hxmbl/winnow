@@ -1,33 +1,12 @@
 /**
- * The bridge between the UI and a signed-in Gmail account.
- *
- * The app component does not import the Gmail layer — it is handed one of these
- * instead. Two things fall out of that:
- *
- *   - The demo path never constructs a token manager, a client or a sync engine,
- *     so there is nothing to accidentally fire a request at.
- *   - The wiring lives in one small function that can be read in one screen,
- *     rather than being spread across the component that renders the UI.
- *
- * The OAuth shape is chosen by the *platform*, not by the code here. On the
- * desktop, `platform.beginSignIn` opens the system browser and waits on a
- * loopback listener; on the web it navigates and reads the redirect out of the
- * URL. Both return the same `{ kind, code, state }` result, so this file has no
- * branch for it.
+ * Bridge between UI and signed-in Gmail account.
  */
 
 import { GmailSession, localCache } from "./session";
 import type { Platform } from "../../platform/types";
 import type { MailBackend, WinnowStore } from "../store/store";
 
-/**
- * A finished web sign-in, plus whatever the link was pointing at.
- *
- * `view` carries the app's own query parameters — `?view=spam&message=12` — so
- * that a shared link survives the trip to Google and back. Someone who was sent
- * a link to their spam folder and had to sign in first should land on their
- * spam folder, not on the inbox.
- */
+/** A finished web sign-in, plus the link target. */
 export type CompletedRedirect = {
   email: string;
   view?: Record<string, string>;
@@ -40,25 +19,11 @@ export type SessionBridge = {
   accountEmail(): Promise<string>;
   /** Run the OAuth flow to completion. Throws a `GmailError` on any failure. */
   signIn(): Promise<{ email: string }>;
-  /**
-   * Finish a sign-in the browser delivered by navigating back.
-   *
-   * Returns `null` when the current URL is not a redirect — the normal boot, and
-   * the desktop's situation too, where the code never passed through the URL.
-   * Must be called before `hasSession`, because a completed web redirect is the
-   * thing that creates the session in the first place.
-   */
+  /** Finish a sign-in delivered via redirect. Returns null if no redirect. */
   completeWebRedirect(): Promise<CompletedRedirect | null>;
   /** The store-facing backend. */
   backend(): MailBackend;
-  /**
-   * Download one attachment's bytes.
-   *
-   * Exposed on the bridge rather than only on the backend because it is the one
-   * operation the reader performs directly: it is not a mutation, so it does not
-   * belong in the optimistic-update path, and routing it through the backend
-   * would mean reaching past the store for a read.
-   */
+  /** Download one attachment's bytes. */
   fetchAttachment(
     gmailId: string,
     attachmentId: string,
@@ -67,24 +32,7 @@ export type SessionBridge = {
   signOut(): Promise<void>;
 };
 
-/**
- * Build a bridge over a `Platform`.
- *
- * The cache is `localStorage` on both hosts, which is a deliberate
- * simplification rather than an oversight: the *tokens* go to the OS keychain on
- * the desktop, and the message cache is not a secret so much as a copy of mail
- * the user has already chosen to download. Putting it in IndexedDB instead would
- * buy nothing and cost a second serialisation path.
- *
- * That reasoning holds for *where* the cache lives and not for how big it is.
- * `localStorage` is capped around 5MB per origin, and a mailbox with HTML bodies
- * measures ~2.4KB a message — so a real account crosses the ceiling somewhere
- * around 2,000 messages, which a Gmail inbox passes in a month or two. Past that
- * the write fails, and the honest response is to say so: `localCache.flush`
- * reports the failure, the sync engine turns it into `cacheUnpersisted`, and the
- * store puts it in the sync notice. An IndexedDB cache is the fix for the ceiling
- * itself, and is the next thing to do here rather than a done one.
- */
+/** Build a bridge over a `Platform`. */
 export function createSessionBridge(platform: Platform, store: WinnowStore): SessionBridge {
   const session = new GmailSession(platform, localCache());
 
@@ -95,10 +43,7 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
       try {
         return await session.accountEmail();
       } catch {
-        // A stored session whose profile call fails is a session that needs
-        // re-authorising, not a signed-in user with a bad address. So the
-        // address falls back to whatever the token set was issued for, and the
-        // next sync is what will discover whether it still works.
+        // Stored session needs re-authorizing; fall back to issued account name.
         return "your account";
       }
     },
@@ -113,8 +58,6 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
       session.backend().fetchAttachment(gmailId, attachmentId),
 
     async signOut() {
-      // `session.signOut` already clears the pending sign-in stash; the store
-      // half is what drops the mailbox from memory.
       await session.signOut();
       await store.signOut();
     },

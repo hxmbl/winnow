@@ -1,54 +1,10 @@
-/**
- * One message, with the HTML half of it, for the demo mailbox to show what the
- * reader does with a real newsletter.
- *
- * It is here for a specific reason rather than as decoration. The change that made
- * a newsletter render like a newsletter also introduced a sanitiser, a three-way
- * view switch, an image-consent flow that only appears when there is something to
- * consent to, and a proxy. All of that is invisible in a demo whose messages are
- * plain text — and an invisible feature is one nobody reviews.
- *
- * So this body is written to be *awkward*, in the ways real marketing mail is:
- *
- *   - it arrives as a whole document, because most HTML mail does, and an
- *     implementation that treats `html`/`body`/`head` as content to skip shows an
- *     empty reader;
- *   - it has its layout in a `<style>` block rather than in attributes, which the
- *     app drops and the proxy keeps — so the same message looks like two different
- *     emails in two different views, which is the honest answer;
- *   - it names two remote images and embeds one, so the "images are off" offer has
- *     something to be an offer about;
- *   - it has an `onclick`, a `<script>`, a `javascript:` link, a tracking pixel and
- *     a conditional comment, so the sanitiser's rules are doing visible work on the
- *     one screen somebody will actually look at;
- *   - its remote images are `https://cdn.winnow.example`, which does not resolve.
- *     A demo that reached the real internet would be a demo that made a request
- *     because somebody clicked something, and a placeholder that 404s is both safer
- *     and a more honest demonstration of what "blocked" looks like.
- */
+/** Demo newsletter HTML for rich rendering (sanitiser/image consent demo). */
 
-/** A 1×1 transparent GIF, the shape an inline logo usually takes. */
 const PIXEL =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
-/**
- * A wide illustration, so an embedded image has some actual size on screen.
- *
- * A 2px gradient bar would be the same picture; this is three phone-shaped
- * panels, because the thing a reader is checking is whether an `<img>` inside a
- * `<td>` inside a table lands at the right width, and a bar that thin cannot tell
- * them. Which is also why it is an SVG rather than a PNG: most brand logos now
- * are, and the sanitiser has to treat `data:image/svg+xml` in an image slot as
- * inert while treating the same bytes behind a link as a document.
- */
 const HERO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1NzYgMTgwIiB3aWR0aD0iNTc2IiBoZWlnaHQ9IjE4MCI+CjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNkM5Q0ZEIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMEEzRUVGIi8+CjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPgo8cmVjdCB3aWR0aD0iNTc2IiBoZWlnaHQ9IjE4MCIgZmlsbD0idXJsKCNiZykiLz4KPGcgZmlsbD0iI0ZGRkZGRiI+CjxyZWN0IHg9IjQwIiB5PSIyNiIgd2lkdGg9IjE1MCIgaGVpZ2h0PSIxMjgiIHJ4PSIxNCIgZmlsbC1vcGFjaXR5PSIwLjk1Ii8+CjxyZWN0IHg9IjIxMyIgeT0iMjYiIHdpZHRoPSIxNTAiIGhlaWdodD0iMTI4IiByeD0iMTQiIGZpbGwtb3BhY2l0eT0iMC44Ii8+CjxyZWN0IHg9IjM4NiIgeT0iMjYiIHdpZHRoPSIxNTAiIGhlaWdodD0iMTI4IiByeD0iMTQiIGZpbGwtb3BhY2l0eT0iMC42NSIvPgo8L2c+CjxnIGZpbGw9IiMyRjVCRDAiPgo8cmVjdCB4PSI1NiIgeT0iNDQiIHdpZHRoPSI4NiIgaGVpZ2h0PSI5IiByeD0iNC41Ii8+CjxyZWN0IHg9IjU2IiB5PSI2MiIgd2lkdGg9IjExOCIgaGVpZ2h0PSI3IiByeD0iMy41IiBmaWxsLW9wYWNpdHk9IjAuNTUiLz4KPHJlY3QgeD0iMjI5IiB5PSI0NCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSI5IiByeD0iNC41Ii8+CjxyZWN0IHg9IjIyOSIgeT0iNjIiIHdpZHRoPSI3MiIgaGVpZ2h0PSI3IiByeD0iMy41IiBmaWxsLW9wYWNpdHk9IjAuNSIvPgo8cmVjdCB4PSI0MDIiIHk9IjQ0IiB3aWR0aD0iOTQiIGhlaWdodD0iOSIgcng9IjQuNSIvPgo8cmVjdCB4PSI0MDIiIHk9IjYyIiB3aWR0aD0iMTE4IiBoZWlnaHQ9IjciIHJ4PSIzLjUiIGZpbGwtb3BhY2l0eT0iMC40NSIvPgo8cmVjdCB4PSI0MDIiIHk9Ijc4IiB3aWR0aD0iODgiIGhlaWdodD0iNyIgcng9IjMuNSIgZmlsbC1vcGFjaXR5PSIwLjQ1Ii8+CjwvZz4KPGcgZmlsbD0iIzJGNUJEMCIgZmlsbC1vcGFjaXR5PSIwLjIyIj4KPHJlY3QgeD0iNTYiIHk9Ijg2IiB3aWR0aD0iMTE4IiBoZWlnaHQ9IjUyIiByeD0iOCIvPgo8cmVjdCB4PSIyMjkiIHk9Ijg2IiB3aWR0aD0iMTE4IiBoZWlnaHQ9IjUyIiByeD0iOCIvPgo8cmVjdCB4PSI0MDIiIHk9IjEwMCIgd2lkdGg9IjExOCIgaGVpZ2h0PSIzOCIgcng9IjgiLz4KPC9nPgo8L3N2Zz4=";
 
-/**
- * The HTML half of the demo newsletter.
- *
- * Exported rather than inlined so `demo.ts` keeps one seed entry readable, and so
- * this can be pointed at from a test without dragging the whole seed in.
- */
 export const DEMO_NEWSLETTER_HTML = `<!doctype html>
 <html>
 <head>
@@ -157,13 +113,6 @@ export const DEMO_NEWSLETTER_HTML = `<!doctype html>
 </body>
 </html>`;
 
-/**
- * The text half of the same message.
- *
- * Written out rather than extracted from the HTML, and that is the point: the text
- * is what the classifier reads and what a reply quotes, so it has to be a real
- * rendering of the message rather than whatever a tag stripper produced.
- */
 export const DEMO_NEWSLETTER_TEXT = `Introducing Hark Pro
 
 Hark Pro is here. It remembers what you tell it, uses its own cloud computer, and solves problems you might not realise you had.

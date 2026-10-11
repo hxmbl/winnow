@@ -1,11 +1,4 @@
-/**
- * The wording of a failed sign-in.
- *
- * This layer is pure copy, and pure copy is exactly the kind of code that rots
- * silently: a new `AuthErrorKind` gets added upstream, the switch falls through
- * to `default`, and the user is shown a raw HTTP body. The last test in this
- * file exists to make that impossible.
- */
+/** Wording of failed sign-in. */
 
 import { describe, expect, it } from "vitest";
 import { describeFailure, shortFailure, GoogleAuthStateMissing } from "./errors";

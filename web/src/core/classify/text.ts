@@ -1,17 +1,11 @@
 /**
  * Phrase matching for the classifier.
  *
- * The one rule here is that keyword matching is **whole-phrase with word
- * boundaries**, never `String.includes`. That is not a detail: `"otp"` inside
- * "hotel", `"ups"` inside "groups", `"free"` inside "freedom", `"due"` inside
- * "reduce" — a substring search turns four of those into live misclassifications
- * on real inboxes, and the resulting "Security" and "Deliveries" buckets are
- * worse than useless.
- *
- * A second rule: every pattern is compiled exactly once, at module load.
- * Classification runs over the whole inbox on every keystroke, and rebuilding
- * a dozen regexes per message dominated the profile timings in the Swift
- * implementation.
+ * Keyword matching is **whole-phrase with word boundaries**, never
+ * `String.includes` — `"otp"` inside "hotel", `"free"` inside "freedom", `"due"`
+ * inside "reduce" would all become live misclassifications. Every pattern is
+ * compiled once at module load, since classification runs over the whole inbox on
+ * every keystroke.
  */
 
 /** Escape the regex metacharacters in a literal phrase. */
@@ -22,8 +16,8 @@ function escapeRegExp(literal: string): string {
 /**
  * Compile a case-insensitive pattern, once.
  *
- * Patterns are literals in this codebase, so a bad one is a typo caught by the
- * tests rather than a runtime surprise.
+ * Patterns are literals here, so a bad one is a typo caught by the tests rather
+ * than a runtime surprise.
  */
 export function compile(pattern: string, flags = "i"): RegExp {
   return new RegExp(pattern, flags);

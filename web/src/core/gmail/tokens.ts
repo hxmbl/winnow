@@ -1,28 +1,17 @@
 /**
  * Tokens: storage, refresh, and the races around them.
  *
- * The hard part of a desktop mail client is not exchanging a code for a token.
- * It is that tokens expire hourly and *many things need them at once* — a sync
- * paging 200 messages, a list scrolling, a reply being sent. Three specific
- * failures had to be designed out:
+ * Tokens expire hourly and many things need them at once (sync paging 200
+ * messages, scrolling, sending). Failures designed out:
  *
- *   1. **A burst of 401s triggering a burst of refreshes.** Fixed with
- *      single-flight: the first caller creates the refresh, everyone else awaits
- *      the same promise. One refresh, not forty.
- *   2. **A refresh completing after sign-out**, handing a token to code that no
- *      longer has a session. Fixed with a generation counter: every refresh
- *      captures the generation it started under, and a result is discarded if
- *      the generation moved while it was in flight.
- *   3. **`invalid_grant` treated as retryable.** It is not. It means the
- *      refresh token is revoked, which only re-authorising can fix, so the
- *      token set is cleared immediately and the user is told to sign in again.
+ * 1. Burst of 401s → single-flight (one refresh, not many).
+ * 2. Refresh completing after sign-out → generation counter; results from an old
+ *    generation are discarded.
+ * 3. `invalid_grant` is not retryable (refresh token revoked) → clear and
+ *    re-auth.
  *
- * A fourth detail is easy to miss: the stored lifetime is floored at
- * `max(expires_in, 65)`. A pathological `expires_in` of 30 would otherwise make
- * every single API call refresh, turning a working session into a rate-limit
- * problem.
- *
- * Ported from `legacy/swift-native/Sources/winnow/Gmail/Auth/TokenManager.swift`.
+ * Stored lifetime is floored at `max(expires_in, 65)`; without this, a tiny
+ * `expires_in` can make every API call refresh (rate-limit problem).
  */
 
 import {
@@ -41,11 +30,9 @@ export const MIN_STORED_LIFETIME_MS = EXPIRY_SLACK_MS + 5_000;
 /**
  * Where a token set lives.
  *
- * Implemented two ways, and the difference is the whole reason this is behind
- * an interface: the desktop build backs it with the OS keychain (a Rust command
- * in `platform/desktop.ts`), and the web build with `localStorage`. A refresh
- * token in `localStorage` is readable by any XSS on the page; the same token in
- * the macOS Keychain is not.
+ * Desktop backs with OS keychain (Rust command in `platform/desktop.ts`), web
+ * with `localStorage`. A refresh token in `localStorage` is readable by XSS on
+ * the page; not so in the keychain.
  */
 export interface TokenStore {
   read(): Promise<TokenSet | null>;
@@ -87,15 +74,9 @@ export class TokenManager {
   /**
    * Load from the store once.
    *
-   * A store failure is remembered separately from "no tokens", because they
-   * mean different things to the user: one is "you are signed out", the other
-   * is "your keychain is locked". Conflating them produced a sign-in screen
-   * that kept reappearing while the real problem was an unavailable keychain.
-   *
-   * The generation check is not paranoia. A keychain read is genuinely
-   * asynchronous, so this can be in flight when the user hits "sign out" — and
-   * without the guard the read resolves *after* `clear()` and puts the tokens
-   * straight back, leaving a session that looks signed out and is not.
+   * A store failure is remembered separately from "no tokens" (e.g., "keychain
+   * locked" vs "signed out"). The generation check prevents a read that resolves
+   * after `clear()` from resurrecting tokens.
    */
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
@@ -162,8 +143,8 @@ export class TokenManager {
   /**
    * A token good for at least `EXPIRY_SLACK_MS`, refreshing if needed.
    *
-   * Returns `null` when there is no session, so callers can treat "signed out"
-   * and "expired" as the same branch.
+   * Returns `null` when there is no session, so callers treat "signed out" and
+   * "expired" the same way.
    */
   async validAccessToken(): Promise<string | null> {
     await this.ensureLoaded();
@@ -182,8 +163,8 @@ export class TokenManager {
   /**
    * The single-flight refresh.
    *
-   * Every concurrent caller awaits the same promise, so a page of 200 messages
-   * arriving at once produces one token request rather than two hundred.
+   * Every concurrent caller awaits the same promise, so a burst produces one
+   * token request rather than many.
    */
   private refresh(): Promise<string> {
     if (this.inflight) return this.inflight;
@@ -209,11 +190,9 @@ export class TokenManager {
   private async doRefresh(generation: number): Promise<string> {
     const refreshToken = this.tokens?.refreshToken;
     if (!refreshToken) {
-      // No refresh token means there is nothing to refresh *with*, so the
-      // session is over regardless of what the access token's expiry says.
-      // `clear()` is deliberately skipped: it would wipe a token set that may
-      // have been adopted while this refresh was in flight (see the generation
-      // check below), losing a perfectly good new session.
+      // No refresh token — nothing to refresh with. `clear()` is skipped because
+      // a token set may have been adopted while this refresh was in flight (see
+      // generation check below), losing a perfectly good new session.
       const error = new GmailError("Sign in again to continue.", 401, "reauth_required");
       error.name = "GmailNoRefreshToken";
       throw error;
@@ -245,10 +224,8 @@ export class TokenManager {
     if (!response.ok) {
       const text = await response.text();
 
-      // A wrong client secret is not a dead grant, so it must not clear the
-      // session — checked before the 400/401 branch below, which does. Wiping a
-      // working session because the *build* is misconfigured would force a
-      // re-authorisation that would fail the same way.
+      // A wrong client secret is not a dead grant — do not clear the session;
+      // checked before the 400/401 branch that would.
       if (text.includes("invalid_client")) {
         throw new GmailError(
           "Google rejected this build's client credentials.",
@@ -257,9 +234,8 @@ export class TokenManager {
         );
       }
 
-      // 400 and 401 are the two that mean "this grant is gone": `invalid_grant`
-      // covers a revoked token, an expired one, and a changed password. All
-      // three need the user, not a retry.
+      // 400 and 401 mean "this grant is gone" (`invalid_grant` covers a revoked
+      // token, an expired one, or a changed password). The user must re-auth.
       if (response.status === 400 || response.status === 401) {
         await this.clear();
         throw new GmailError(
@@ -277,9 +253,9 @@ export class TokenManager {
       scope?: string;
     };
 
-    // The generation moved while we were in flight: the user signed out, or a
-    // new session was adopted. This token belongs to a session that no longer
-    // exists, so it is dropped rather than resurrected.
+    // The generation moved while in flight: the user signed out, or a new
+    // session was adopted. Drop the token rather than resurrecting the old
+    // session.
     if (generation !== this.generation) {
       throw new GmailError("Sign in again to continue.", 401, "reauth_required");
     }
@@ -342,8 +318,8 @@ export class TokenManager {
 
     const tokens: TokenSet = {
       accessToken: payload.access_token,
-      // A re-authorisation with `prompt=consent` always returns one, but a
-      // defensive fallback avoids signing the user straight back out.
+      // A re-authorisation with `prompt=consent` always returns one; defensive
+      // fallback avoids signing the user straight back out.
       refreshToken: payload.refresh_token ?? this.tokens?.refreshToken,
       expiresAt: Date.now() + Math.max((payload.expires_in ?? 3600) * 1000, MIN_STORED_LIFETIME_MS),
       scope: payload.scope,
@@ -357,29 +333,13 @@ export class TokenManager {
 /**
  * Turn a rejected token request into something a user can be told.
  *
- * Used by the code exchange; the refresh path keeps its own, stricter,
- * handling because there the same replies mean "the grant is gone" and must
- * clear the session.
- *
- * The messages are deliberately *verbose*: the whole reason to show them is
- * that "could not be verified" gave a developer no route out. Google's own
- * `error` and `error_description` are echoed (truncated), because they are the
- * only words that distinguish a spent code from a mismatched redirect URI —
- * and the sign-in screen shows the message so the person debugging sees the
- * why, not just the verdict.
- *
- * The cases are separated because the remedy differs, and getting that wrong
- * sends people to the wrong place:
- *
- *   - `invalid_client` is the *build* being wrong — a missing secret, or the
- *     wrong client type. Retrying cannot help.
- *   - `invalid_grant` is this *attempt* being wrong — a spent code, a replayed
- *     verifier, a code issued for a different redirect URI. Start over.
- *   - `redirect_uri_mismatch` is exactly what it sounds like — the exchange
- *     named a different URI than the authorize request did.
- *   - anything else is passed through, truncated, because inventing a friendly
- *     message for an error we do not recognise is how a real bug gets reported
- *     as "something went wrong".
+ * Used by the code exchange. Google's own `error` and `error_description` are
+ * echoed (truncated) because they distinguish a spent code from a mismatched
+ * redirect URI. Remedies differ: `invalid_client` means the build is wrong
+ * (missing secret/wrong client type, cannot retry); `invalid_grant`/`invalid_request`
+ * mean this attempt is wrong (spent code/replayed verifier/wrong redirect) — start
+ * over; `redirect_uri_mismatch` means the exchange named a different URI than the
+ * authorize request. Anything else is passed through, truncated.
  */
 function describeTokenRejection(status: number, text: string): [string, AuthErrorKind] {
   const rejection = readGoogleRejection(text);
@@ -416,9 +376,8 @@ function describeTokenRejection(status: number, text: string): [string, AuthErro
 /**
  * Pull the `error` and `error_description` out of a Google token rejection.
  *
- * Google answers the token endpoint in JSON (`{"error": "...", ...}`). The
- * description is truncated because the screen has no room for a long one, and
- * it is only ever echoed *inside* a sentence, not trusted as a verdict.
+ * Google answers in JSON. The description is truncated and echoed inside a
+ * sentence, not trusted as a verdict.
  */
 function readGoogleRejection(text: string): { error: string; description?: string } | null {
   try {
@@ -440,11 +399,9 @@ function readGoogleRejection(text: string): { error: string; description?: strin
 /**
  * A `TokenStore` backed by `localStorage`, for the web build.
  *
- * A half-written or hand-edited blob is treated as *signed out*, not as a broken
- * store: `JSON.parse` used to throw out of `read()`, which `ensureLoaded` records
- * as a storage failure, and the app then reported an unavailable store forever
- * with no way back in short of devtools. An unusable value is also removed, so
- * the next read is a clean "no session" rather than the same parse error again.
+ * A half-written or hand-edited blob is treated as signed out (not a broken
+ * store): if `JSON.parse` fails or the value is unusable, the item is removed so
+ * the next read returns a clean "no session".
  */
 export function localStorageTokenStore(key = "winnow.gmail.tokens"): TokenStore {
   return {

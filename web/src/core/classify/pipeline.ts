@@ -1,18 +1,12 @@
 /**
  * The list pipeline: search, filter, sort.
  *
- * Everything the list shows passes through here, which makes this the hottest
- * function in the app — it runs on every keystroke over every message. Three
- * properties keep it fast, and all three are about *not doing work that is not
- * needed*:
+ * The hottest function in the app — it runs on every keystroke over every message.
+ * Three properties keep it fast, all about not doing unneeded work:
  *
- *   1. Search bags are built once and passed in, rather than re-concatenating
- *      sender + subject + body per row per keystroke.
- *   2. Signals come from a map the caller built; the classifier never runs
- *      inside the filter path.
+ *   1. Search bags are built once and passed in, not re-concatenated per row.
+ *   2. Signals come from a map the caller built; the classifier never runs here.
  *   3. The Smart Score is computed *after* filtering, only when sorting by it.
- *      Computing it first — as an earlier version did — cost a regex pass over
- *      every message for a sort the user may not have selected.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Classification/InboxPipeline.swift`.
  */
@@ -42,23 +36,14 @@ export function buildSearchBags(emails: readonly Email[]): SearchBags {
 /**
  * Why the list is empty — drives which empty state the UI shows.
  *
- * Five reasons rather than three because "there is nothing here" has three quite
- * different causes with three quite different remedies, and conflating them either
- * blames the user for a filter they did not set or leaves them with an empty screen and
- * no button.
- *
- *   - `mailbox` — there genuinely is no mail here. The remedy is to sync.
- *   - `search` — the query is too narrow. The remedy is to clear it.
- *   - `filters` — the buckets are too narrow. The remedy is to clear them.
- *   - `hidden` — the mailbox has mail and *buckets the user muted* are hiding all of
- *     it. The remedy is the same (stop narrowing) but the explanation is different, and
- *     saying "nothing matches those filters" when the user set no filters is the kind of
- *     small lie that makes an app untrustworthy.
- *   - `noSignal` — the mailbox has mail and the default inbox's own spam rule is hiding
- *     all of it.
- *
- * The old `unsafe` reason meant "a bucket you have hidden" and was only reachable when
- * `removed.size > 0`, which is exactly `hidden`.
+ *   - `mailbox` — no mail here. The remedy is to sync.
+ *   - `search` — the query is too narrow. Clear it.
+ *   - `filters` — the buckets are too narrow. Clear them.
+ *   - `hidden` — the mailbox has mail but a bucket the user *muted* is hiding all
+ *     of it; saying "nothing matches those filters" when they set none would be a
+ *     small lie.
+ *   - `noSignal` — the mailbox has mail and the default inbox's own spam rule is
+ *     hiding all of it.
  */
 export type EmptyReason =
   | "mailbox"
@@ -89,22 +74,13 @@ export type InboxResult = {
   scores: ReadonlyMap<number, number> | null;
   emptyReason: EmptyReason;
   /**
-   * How many of the mailbox's messages this query admitted.
+   * How many of the mailbox's messages this query admitted: plain `emails.length`.
    *
-   * **`emails.length`, and it was a second full pass to compute a worse answer.**
-   * The field was documented as "messages the active filters would match, ignoring
-   * the search box", and that is the count worth having: "0 of 12 match this search"
-   * is actionable where "no results" is not. But the implementation ANDed the search
-   * tokens into the same pass, so with a search active it returned exactly
-   * `emails.length` — the size of the list already on screen — while re-filtering the
-   * whole mailbox on every keystroke. It was also never read: the store passed it
-   * through to `view.result`, and no component has ever rendered it.
-   *
-   * So the docstring and the code were both wrong about a number nothing displayed.
-   * Rather than keep a field whose only honest value is already in `emails.length`,
-   * it is computed once and stated here: the count of results *is* `emails.length`,
-   * and the number worth showing — what the filters alone would have admitted — is a
-   * separate question that belongs to the caller, which knows what its filters are.
+   * It was a second full pass over the mailbox that ANDed the search into the same
+   * pass — so with a search active it returned exactly `emails.length` while
+   * re-filtering everything on every keystroke, and nothing ever rendered it. The
+   * count of results *is* `emails.length`; what the filters alone would have admitted
+   * is a separate question that belongs to the caller.
    */
   matchCount: number;
 };
@@ -119,9 +95,8 @@ function signalFor(
 /**
  * Run the pipeline.
  *
- * Search is AND across whitespace-separated tokens. A substring search on the
- * whole query — the previous behaviour — meant "invoice march" found nothing
- * at all, because no single message contains that exact run of characters.
+ * Search is AND across whitespace-separated tokens: a whole-query substring search
+ * meant "invoice march" found nothing, since no message contains that exact run.
  */
 export function runInboxQuery(query: InboxQuery): InboxResult {
   const { emails, profile, signals, filters, searchQuery, sortBy } = query;
@@ -185,26 +160,15 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
 
   const out = [...rows];
 
-  // The count is the length of the list, with no second pass over the mailbox. See
-  // `matchCount` on `InboxResult` for why the previous version filtered everything
-  // again here and produced a number nothing read.
+  // The count is the length of the list, with no second pass over the mailbox.
   const matchCount = out.length;
 
   /**
    * Why the list is empty, in the order a user would want to be told.
    *
-   * The `hidden` case is the one that was missing, and it is the most confusing of the
-   * four: the mailbox has mail, the user asked for no filter, and the list is empty
-   * anyway. That happens when every message in the mailbox is in a bucket they muted —
-   * archive everything in "Newsletters", and Archive goes quiet. The empty state used
-   * to say "This mailbox is empty", which is a statement about their mail that is
-   * plainly false, and offered no way out.
-   *
-   * `noSignal` is the mirror case: the mailbox has messages and they are all unsafe, so
-   * the default inbox hides them. That reads as an empty bin from inside the bin. (The
-   * store now leaves non-inbox mail unclassified, so in practice this fires for an inbox
-   * of nothing but spam — but the pipeline is shared, and a caller that *does* classify
-   * a spam folder needs the honest answer.)
+   * `hidden` is the subtlest: the mailbox has mail, the user asked for no filter, and
+   * the list is empty because every message is in a bucket they muted. `noSignal` is
+   * the mirror: the mail is all unsafe and the default inbox hides it.
    */
   let emptyReason: EmptyReason = null;
   if (out.length === 0) {

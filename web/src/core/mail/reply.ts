@@ -1,20 +1,13 @@
 /**
  * Building a reply.
  *
- * Two jobs, and the second is the interesting one.
+ * Quoting (attribution, `>` prefixing, HTML-to-text fallback) is here, ported from
+ * the Swift implementation. An empty line becomes a bare `>` with no trailing
+ * space — a trailing space survives into the sent message as a stray blank line.
  *
- * **Quoting.** The attribution line, the `>` prefixing, and the HTML-to-text
- * fallback are all here, ported verbatim from the Swift implementation. The
- * prefixing rule that matters: an empty line becomes a bare `>` with *no*
- * trailing space, because a trailing space survives into the sent message and
- * shows up as a stray blank line in every mail client the recipient uses.
- *
- * **Removing the quote.** When a user replies, edits the top of the quoted
- * text, and sends, the quote must stay — that is their message now. So the
- * block is only ever stripped when it is still an untouched *suffix* of the
- * body. A `startsWith` check would silently delete a user's edits.
- *
- * Ported from `legacy/swift-native/Sources/winnow/Support/ReplyQuoting.swift`.
+ * A quote is stripped only while it is still an untouched *suffix* of the body, so
+ * edits above it are never deleted. Ported from
+ * `legacy/swift-native/Sources/winnow/Support/ReplyQuoting.swift`.
  */
 
 import type { Email, Draft } from "../model/email";
@@ -24,9 +17,7 @@ import { plainTextFromHtml } from "./html";
 
 /** Prefixes every line of the original message with `> `. */
 export function quotedBody(source: string): string {
-  // An empty body quotes to nothing, not to a lone `>`. A body that arrives
-  // empty (an image-only message, or a failed HTML decode) would otherwise
-  // produce a reply that opens with a bare quote marker and nothing under it.
+  // An empty body quotes to nothing, not to a lone `>`.
   if (source.length === 0) return "";
   return source
     .split("\n")
@@ -35,21 +26,16 @@ export function quotedBody(source: string): string {
 }
 
 /**
- * The attribution line above a quote.
- *
- * Reuses the list-row formatter so the attribution reads like the header of
- * the message it is quoting — using a different format here was a small
- * inconsistency that read as a bug.
+ * The attribution line above a quote, using the list-row formatter so it reads
+ * like the header of the message it quotes.
  */
 export function attributionLine(email: Email): string {
   return `On ${formatListTime(email.receivedAt)}, ${displayName(email)} wrote:`;
 }
 
 /**
- * The full quote block: attribution, then the original message.
- *
- * Falls back to stripping the HTML when there is no plain text, which happens
- * for mail sent from a webmail client that only emits `text/html`.
+ * The full quote block: attribution, then the original message, falling back to
+ * stripped HTML when there is no plain text.
  */
 export function quoteBlockFor(email: Email): string {
   const source = email.body.trim().length > 0 ? email.body : plainTextFromHtml(email.bodyHtml ?? "");
@@ -59,11 +45,8 @@ export function quoteBlockFor(email: Email): string {
 }
 
 /**
- * Whether `text` still ends with `block`, unmodified.
- *
- * Both the block and the text must be non-empty: an empty block would match
- * every string as a suffix, and a user who cleared the composer should not have
- * that read as "the quote is intact".
+ * Whether `text` still ends with `block`, unmodified. Both must be non-empty: an
+ * empty block would match every string as a suffix.
  */
 export function isIntactSuffix(text: string, block: string | undefined): boolean {
   if (!block || block.length === 0) return false;
@@ -78,11 +61,8 @@ export function stripQuote(body: string, block: string | undefined): string {
 }
 
 /**
- * `Re: ` the subject, without doubling it.
- *
- * The check is on the lowercased subject because mail clients disagree about
- * case — `RE:`, `Re:`, `re:` all mean the same thing, and treating `RE:` as
- * unprefixed produced `Re: RE: Re: …` over a long thread.
+ * `Re: ` the subject, without doubling it. The check is lowercased because mail
+ * clients disagree about case — `RE:`, `Re:`, `re:` all mean the same thing.
  */
 export function replySubject(subject: string): string {
   const trimmed = subject.trim();
@@ -90,7 +70,6 @@ export function replySubject(subject: string): string {
   return `Re: ${trimmed}`;
 }
 
-/** Strip a leading quote block and blank lines, for a clean forward. */
 export function forwardSubject(subject: string): string {
   const trimmed = subject.trim();
   if (trimmed.toLowerCase().startsWith("fwd:")) return trimmed;
@@ -98,10 +77,8 @@ export function forwardSubject(subject: string): string {
 }
 
 /**
- * A reply draft, pre-filled with the quote.
- *
- * `replyAll` takes the addresses from the thread rather than from one message,
- * because the person who needs to answer is usually the one who wrote last.
+ * A reply draft, pre-filled with the quote. `replyAll` takes addresses from the
+ * thread rather than from one message.
  */
 export function buildReply(
   original: Email,
@@ -125,19 +102,12 @@ export function buildReply(
     cc: [],
     bcc: [],
     subject: replySubject(latest.subject),
-    // The quote starts the body, with no leading blank line, so that
-    // `quoteBlock` is a true suffix of `body` and the user's first keystroke
-    // lands above it. A leading `\n` here would leave the block stranded by a
-    // newline that is not part of it, and stripping the quote would then leave
-    // that newline behind.
+    // No leading blank line, so the quote block stays a true suffix of `body`.
     body: quote,
     inReplyTo: latest.gmailId,
     threadId: latest.threadId,
     quoteBlock: quote,
-    // The user's contribution to this body is *nothing*: the quote is the body, and
-    // anything above it is theirs. Stated rather than left to a caller inferring it
-    // from `quoteBlock` being present, because the composer's "is there anything to
-    // lose?" check has to answer differently for a reply and a forward.
+    // A reply's body is entirely the quote; anything above it is the user's.
     prefilled: "",
   };
 }
@@ -163,9 +133,7 @@ export function buildForward(
     subject: forwardSubject(latest.subject),
     body,
     threadId: latest.threadId,
-    // Unlike a reply, a forward's prefilled text is *meant to stay* — the whole point
-    // of forwarding is that the conversation travels with it. So it is recorded as the
-    // baseline the user is editing, rather than as something to strip.
+    // Unlike a reply, a forward's prefilled text is *meant to stay*.
     prefilled: body,
   };
 }

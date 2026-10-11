@@ -1,8 +1,8 @@
 /**
  * The request layer.
  *
- * Two behaviours are worth pinning down and neither is visible in the types: the
- * single forced refresh after a 401, and the URLs the sync engine depends on.
+ * Two behaviours: the single forced refresh after a 401, and the URLs the sync
+ * engine depends on.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -54,8 +54,8 @@ describe("GmailClient — the request", () => {
   });
 
   it("accepts an empty body rather than trying to parse one", async () => {
-    // The label-modify endpoints answer 204, and `JSON.parse("")` threw a
-    // SyntaxError that surfaced to the user as a failed star.
+    // The label-modify endpoints answer 204; `JSON.parse("")` threw a SyntaxError
+    // that surfaced to the user as a failed star.
     const { fetchImpl } = stubFetch([{ status: 204 }]);
     await expect(client(fetchImpl).setStarred("m1", true)).resolves.toBeUndefined();
   });
@@ -146,9 +146,8 @@ describe("GmailClient — the verbs", () => {
   });
 
   it("base64url-encodes the raw message, which is what the field requires", async () => {
-    // Sent as plain JSON text before. Gmail accepts that for an ASCII-only
-    // message and 400s on "Invalid raw" the moment a header or the body contains
-    // anything non-ASCII — a failure that appears only on some sends.
+    // Plain text in the JSON field is accepted for ASCII-only messages but 400s
+    // on any non-ASCII header or body.
     const { fetchImpl, calls } = stubFetch([{ status: 200, body: '{"id":"s1","threadId":"t1"}' }]);
     await client(fetchImpl).send("Réunion — Friday");
     const sent = JSON.parse(calls[0].init!.body!).raw as string;
@@ -165,8 +164,8 @@ describe("GmailClient — the verbs", () => {
 
 describe("GmailClient — the queries the sync engine relies on", () => {
   it("passes the page token through untouched", async () => {
-    // The engine's pagination is driven entirely by `nextPageToken`, so a token
-    // that arrived mangled would silently truncate a mailbox.
+    // The engine's pagination is driven entirely by `nextPageToken`; a mangled
+    // token would silently truncate a mailbox.
     const { fetchImpl, calls } = stubFetch([{ status: 200 }, { status: 200 }]);
     const gmail = client(fetchImpl);
     await gmail.list("in:inbox", 200);
@@ -176,9 +175,9 @@ describe("GmailClient — the queries the sync engine relies on", () => {
   });
 
   it("asks for every history type, not just new mail", async () => {
-    // Requesting `messageAdded` alone meant an archive, a star, a mark-read or a
-    // delete made in another client was never reported, so the incremental sync
-    // kept the stale copy forever.
+    // Requesting `messageAdded` alone meant an archive, star, mark-read or delete
+    // made elsewhere was never reported, so the incremental sync kept the stale
+    // copy forever.
     const { fetchImpl, calls } = stubFetch([{ status: 200 }]);
     await client(fetchImpl).history("1234");
     const types = new URLSearchParams(calls[0].url.split("?")[1]).get("historyTypes")!.split(",");

@@ -1,37 +1,23 @@
 /**
- * The smart-filter icon vocabulary.
+ * The smart-filter icon vocabulary: one map, one meaning per bucket, read by both the
+ * list row and the reader.
  *
- * One map, one meaning per bucket, read by both the list row and the reader. It
- * exists because the previous design communicated a bucket with a *coloured dot* —
- * six of them, in a row, in the categorical ramp — and that is a colour key the
- * user has to learn, cannot read at a glance, and loses entirely in dark mode, in
- * a screenshot, and to anyone with a colour vision deficiency.
+ * The shape carries the meaning and the colour is gone, so a bucket reads the same in
+ * dark mode, in a screenshot, and to anyone with a colour vision deficiency.
+ * `important` is a filled star because importance is what a star means everywhere;
+ * `urgent` is a lightning bolt; `security` is a shield. An icon the user already
+ * recognises needs no legend, and a legend is a thing to be read once and remembered
+ * forever.
  *
- * So the shape carries the meaning and the colour is gone. `important` is a filled
- * star because importance is what a star means everywhere; `urgent` is a
- * lightning bolt; `security` is a shield. None of those are Winnow's invention,
- * which is the point — an icon the user already recognises needs no legend, and a
- * legend is a thing to be read once and remembered forever.
+ * Kept in one file, keyed by bucket id, so a bucket cannot mean one shape in a row and
+ * another in the reader — the drift that made "why does this say Urgent there and not
+ * here" a reasonable question.
  *
- * ## Why one file and not two call sites
- *
- * The reader and the row both classify, and they used to classify *differently*:
- * the row drew a dot from `rowIndicators` (which hides category buckets) and the
- * reader drew a chip from `badgeFilters` (which does not). Two renderings of one
- * judgement, in the same window, on the same message. The icon lives here, keyed
- * by the bucket id, so a bucket cannot mean one shape in a row and another in the
- * reader — the drift that made "why does this say Urgent there and not here" a
- * reasonable question.
- *
- * ## The explanation
- *
- * `FILTER_EXPLANATIONS` is what the icon's `title` and accessible name say. A bare
- * icon is a claim the user has to decode; the hover text is the same claim in
- * words, and it is what makes the shape *explanatory* rather than merely
- * decorative. It is short on purpose — a tooltip is read at a glance, mid-triage.
- *
- * `FILTER_LABELS` in `core/model/signals` remains the canonical *name* of a
- * bucket. This file does not restate it; it says what the name means here.
+ * `FILTER_EXPLANATIONS` is what the icon's `title` and accessible name say: the same
+ * claim in words, which makes the shape *explanatory* rather than merely decorative. It
+ * is short on purpose — a tooltip is read at a glance, mid-triage. `FILTER_LABELS` in
+ * `core/model/signals` remains the canonical *name* of a bucket; this file says what the
+ * name means here.
  */
 
 import {
@@ -62,16 +48,14 @@ import { FILTER_LABELS, type BuiltinSmartFilter } from "../core/model/signals";
 /**
  * One icon per bucket.
  *
- * Pairs that would otherwise collide are separated on *shape* rather than colour,
- * which is why `shipping` is a box and `travel` is a plane and not two shades of
- * the same green.
+ * Colliding pairs are separated on *shape* rather than colour, which is why `shipping`
+ * is a box and `travel` is a plane and not two shades of the same green.
  *
  * **`important` is deliberately not a star.** The row already has a star on it, and
  * that star is a *control* — pressing it is how you star a message. An "important"
  * glyph that looked like it would mean the same thing put a non-interactive icon
- * directly above an interactive one, on every row, and the only way to tell them
- * apart was to know which one was which. A bookmark is the nearest thing that means
- * "set aside" and does not collide with anything else in the app.
+ * directly above an interactive one on every row. A bookmark is the nearest thing that
+ * means "set aside" and does not collide with anything else.
  */
 export const FILTER_ICONS: Record<
   BuiltinSmartFilter,
@@ -104,13 +88,13 @@ export const FILTER_ICONS: Record<
 /**
  * Why Winnow thinks a message is in a bucket, in a few words.
  *
- * Deliberately phrased as a claim about the *message* rather than as a restatement
- * of the label. "Important" on its own is the classifier's verdict and tells the
- * reader nothing; "Important — from someone you reply to" is the reason, and it is
- * the reason that makes a user willing to act on the verdict.
+ * Phrased as a claim about the *message*, not a restatement of the label: "Important"
+ * is the classifier's verdict and tells the reader nothing; "Important — from someone
+ * you reply to" is the reason, and the reason is what makes a user willing to act on
+ * the verdict.
  *
- * Kept short. These are `title` attributes read in passing while scanning a list,
- * not paragraphs.
+ * Kept short. These are `title` attributes read in passing while scanning a list, not
+ * paragraphs.
  */
 export const FILTER_EXPLANATIONS: Record<BuiltinSmartFilter, string> = {
   important: "Important — from someone you read or reply to",

@@ -1,32 +1,14 @@
 /**
  * The modal sheet every overlay is built from.
  *
- * One component because there are four, and they had drifted into four different
- * opinions about what a modal is. Three things were wrong in all of them:
+ * `aria-modal="true"` is made true here: focus is moved in, trapped while open, and
+ * restored on the way out; Escape is handled here; and the backdrop is opt-in, because the
+ * composer must not be dismissable by a stray click.
  *
- *   - **`aria-modal="true"` with nothing to make it true.** No focus trap, so Tab
- *     walked out of the sheet and into the inert page behind it, and no focus
- *     restore, so dismissing a sheet dropped the caret at the top of the document.
- *     A dialog that lets you tab into the page it is covering is not a dialog.
- *   - **No Escape.** Each overlay relied on the app's global keybind handler, which
- *     meant the composer's Escape did nothing (`App.tsx` sets `ready: false` when the
- *     composer is open, and the router returns nothing for a context that is not
- *     ready) — so a sheet had a close button, a backdrop and a working Escape
- *     handler *somewhere else*, and the composer's Escape simply did not exist.
- *   - **A backdrop click handler on a non-interactive element.** `role="presentation"`
- *     was there to silence the a11y warning, which silenced the real problem: a click
- *     outside a dialog is ambiguous. For a viewer it is obviously "close"; for a
- *     composer with a typed reply in it, it destroys work.
- *
- * So: focus is moved in, trapped while open, and restored to whatever had it on the
- * way out; Escape is handled here; and the backdrop is opt-in, because the composer
- * must not be dismissable by a stray click.
- *
- * `role="dialog"` with `aria-modal` is right for the settings sheet and the composer,
- * which contain focusable content the user must reach. For the palette — a list of
- * destinations with its own roving selection — `role="menu"` with `aria-activedescendant`
- * is the correct pattern, so the palette keeps its own role and takes the focus
- * handling from here.
+ * `role="dialog"` with `aria-modal` is right for the settings sheet and the composer. For
+ * the palette — a list of destinations with its own roving selection — `role="menu"` with
+ * `aria-activedescendant` is the correct pattern, so it keeps its own role and takes the
+ * focus handling from here.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -37,11 +19,10 @@ type Props = {
   /**
    * What dismissing the sheet means.
    *
-   * Required, because every sheet here has a real way out and a caller that forgot
-   * one used to get a dialog that could only be closed by the system — the failure
-   * mode when this was optional. `ConfirmDialog` supplies it as its cancel path,
-   * which is the same function as `onEscape`, and that duplication is the point: a
-   * confirmation has to be cancelable by every route.
+   * Required, because every sheet here has a real way out; optional, a caller could ship a
+   * dialog that could only be closed by the system. `ConfirmDialog` supplies it as its
+   * cancel path, which is the same function as `onEscape` — a confirmation has to be
+   * cancelable by every route.
    */
   onClose: () => void;
   /** Escape. Defaults to `onClose`. */
@@ -49,13 +30,13 @@ type Props = {
   /**
    * Clicking the backdrop closes the sheet.
    *
-   * Off by default. A viewer or a list is obviously dismissable by clicking away from
-   * it; a composer holding typed text is not, and the caller passes `dismissOnBackdrop`
-   * explicitly once it has decided the click is not ambiguous.
+   * Off by default: a viewer or a list is obviously dismissable by clicking away; a
+   * composer holding typed text is not, and the caller passes this explicitly once it has
+   * decided the click is not ambiguous.
    *
-   * Note this routes to `onClose` and not to `onEscape`: a backdrop click on a
-   * confirmation dialog is not a decision, which is why `ConfirmDialog` turns this
-   * off entirely and lets Escape go to the safe answer via `onEscape`.
+   * Routes to `onClose`, not `onEscape`: a backdrop click on a confirmation dialog is not
+   * a decision, which is why `ConfirmDialog` turns this off and lets Escape go to the safe
+   * answer via `onEscape`.
    */
   dismissOnBackdrop?: boolean;
   /** `dialog` for content, `menu` for a roving list of destinations. */
@@ -65,17 +46,16 @@ type Props = {
   /**
    * `aria-activedescendant` for a `menu`.
    *
-   * Ignored for a `dialog`, which has no such concept. Passed in rather than derived,
-   * because the element ids belong to whoever rendered the rows.
+   * Ignored for a `dialog`. Passed in rather than derived, because the element ids belong
+   * to whoever rendered the rows.
    */
   activeDescendant?: string;
   /**
    * Where the panel sits in the backdrop.
    *
-   * `center` for a sheet that is about content, and `left` for the navigation
-   * drawer, which is about *place* and belongs against the edge it emerges from —
-   * a panel floating in the middle of the window says "dialog", and this one is a
-   * place you go.
+   * `center` for a sheet that is about content, and `left` for the navigation drawer,
+   * which is about *place* and belongs against the edge it emerges from — a panel floating
+   * in the middle of the window says "dialog".
    */
   placement?: "center" | "left";
   className?: string;
@@ -89,15 +69,13 @@ const FOCUSABLE =
 /**
  * How a surface arrives.
  *
- * Two motions, because the two surfaces are different objects. A sheet *appears*:
- * it is content that was not there, so it can scale a hair as it settles. The drawer
- * *emerges* — it is a place, sliding out of the edge it belongs to, and scaling it
- * would make it read as a card rather than as a surface of the window.
+ * Two motions, because the two surfaces are different objects. A sheet *appears*: it is
+ * content that was not there, so it can scale a hair as it settles. The drawer *emerges*
+ * — it is a place, sliding out of the edge it belongs to, and scaling it would make it
+ * read as a card rather than as a surface of the window.
  *
- * Kept as whole keyframe names rather than as inline `style` so they stay in
- * `tailwind.config.js` with every other animation, and so `prefers-reduced-motion`
- * in `index.css` reaches them by the same `animation-duration` override it already
- * applies to everything else.
+ * Kept as whole keyframe names rather than inline `style` so they stay in
+ * `tailwind.config.js` and `prefers-reduced-motion` in `index.css` reaches them.
  */
 const SURFACE_ENTER = {
   center: "animate-sheet",
@@ -123,17 +101,16 @@ export function Sheet({
   // Move focus in, and remember where it came from.
   //
   // Recorded in an effect rather than during render because reading
-  // `document.activeElement` during render is a side effect, and because the element
-  // that had focus when the sheet *opened* is not necessarily the one that had it
-  // when the effect runs.
+  // `document.activeElement` during render is a side effect, and the element that had
+  // focus when the sheet *opened* is not necessarily the one it has when the effect runs.
   useEffect(() => {
     restoreRef.current = document.activeElement as HTMLElement | null;
     const target = initialFocus?.current ?? panelRef.current;
     target?.focus();
     return () => {
-      // Restored on unmount rather than by the caller, so every overlay gets it and
-      // none can forget. `preventScroll` because a sheet scrolled the page under it
-      // and restoring focus would otherwise jump the user back down.
+      // Restored on unmount rather than by the caller, so every overlay gets it. `preventScroll`
+      // because a sheet scrolled the page under it and restoring focus would otherwise jump
+      // the user back down.
       restoreRef.current?.focus?.({ preventScroll: true });
     };
   }, [initialFocus]);
@@ -141,23 +118,21 @@ export function Sheet({
   /*
     The focus trap.
 
-    Tab and Shift+Tab are intercepted at the panel's edges and wrapped, which is the
-    only behaviour `aria-modal` actually promises: that the content outside is not
-    reachable by keyboard. The two other things `aria-modal` implies — that the
-    background is inert to a screen reader, and that nothing outside is clickable — are
-    handled by the backdrop, which covers it.
+    Tab and Shift+Tab are intercepted at the panel's edges and wrapped, which is the only
+    behaviour `aria-modal` actually promises: that the content outside is not reachable by
+    keyboard. The other two implications — the background is inert to a screen reader, and
+    nothing outside is clickable — are handled by the backdrop covering it.
 
-    Implemented on `keydown` rather than by mutating `tabindex` on every focusable
-    element in the document, because the latter has to be undone reliably and there are
-    three overlays that can be open at different times.
+    On `keydown` rather than by mutating `tabindex` on every focusable element, because the
+    latter has to be undone reliably and there are three overlays that can be open.
   */
   const onKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key === "Escape") {
-      // Handled here rather than left to the app's global handler, because a global
-      // handler has to be told about every sheet and gets it wrong when a new one is
-      // added. `stopPropagation` so the app's `window` listener does not also act on
-      // it — two handlers closing two different things for one Escape is how a sheet
-      // closes the reader *and* itself.
+      // Handled here rather than left to the app's global handler, because a global handler
+      // has to be told about every sheet and gets it wrong when a new one is added.
+      // `stopPropagation` so the app's `window` listener does not also act on it — two
+      // handlers closing two different things for one Escape is how a sheet closes the
+      // reader *and* itself.
       event.stopPropagation();
       event.preventDefault();
       (onEscape ?? onClose)();
@@ -170,13 +145,11 @@ export function Sheet({
     if (!panel) return;
     const focusable = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
       // `getClientRects()` rather than `offsetParent !== null`, which was wrong in both
-      // directions. `offsetParent` is null for a `position: fixed` element — so any
-      // fixed content inside a sheet (a tooltip, a dropdown, a sticky footer) was being
-      // dropped from the tab order while very much on screen. And it is the wrong
-      // instrument for the case it was written for: a hidden control that is still in
-      // the tab order is a trap of the other kind, focus landing on something the user
-      // cannot see. A rect list answers the actual question — does this box exist on
-      // screen — for both fixed and static positioning alike.
+      // directions: `offsetParent` is null for a `position: fixed` element, so fixed
+      // content inside a sheet was dropped from the tab order while on screen; and it is
+      // the wrong instrument for a hidden control that is still in the tab order. A rect
+      // list answers the actual question — does this box exist on screen — for fixed and
+      // static positioning alike.
       //
       // `getBoundingClientRect()` would do the same thing for a zero-size box, but a
       // control with no area is not one anybody can click either.

@@ -1,10 +1,9 @@
 /**
  * Time formatting and day bucketing.
  *
- * The bucketing tests deliberately construct `now` from local calendar fields
- * rather than from `Date.now()`, because the whole point of `dayBucket` is that
- * it compares *local* days — a test that happened to run in a week containing a
- * daylight-saving shift would otherwise fail twice a year for the right reason.
+ * The tests build `now` from local calendar fields rather than `Date.now()`,
+ * because `dayBucket` compares *local* days — a test in a week with a DST shift
+ * would otherwise fail twice a year for the right reason.
  */
 
 import { describe, expect, it } from "vitest";
@@ -27,19 +26,15 @@ function rows(...daysAgo: number[]): { id: number; receivedAt: number }[] {
   return daysAgo.map((days, i) => ({ id: i + 1, receivedAt: local(days) }));
 }
 
-/**
- * The list's rows are threads, so the date a section labels is read through a
- * selector. Every call below passes the same one, so the tests say what they
- * mean to say.
- */
+/** Sections read their date through a selector, as the thread rows require. */
 type Row = { id: number; receivedAt: number };
 const receivedAt = (row: Row) => row.receivedAt;
 const sections = (list: Row[], byDate: boolean) => daySections(list, local(0), receivedAt, byDate);
 
 describe("dayBucket", () => {
   it("calls the future today", () => {
-    // A clock skewed a few minutes ahead — or a server that stamps in a timezone
-    // ahead of the reader's — must not push this morning's mail into "Yesterday".
+    // A clock skewed ahead — or a server that stamps in a timezone ahead of the
+    // reader's — must not push this morning's mail into "Yesterday".
     const now = local(0, 12);
     expect(dayBucket(local(0, 13), now)).toBe("today");
     expect(dayBucket(local(0, 1), now)).toBe("today");
@@ -60,8 +55,8 @@ describe("dayBucket", () => {
 
   it("counts whole local days, so a short DST day is still one day", () => {
     // 23-hour and 25-hour days exist. Dividing the instant difference by 24h
-    // rounds a message on the far side of a spring-forward to the wrong day;
-    // comparing re-based calendar fields does not.
+    // rounds a message across a spring-forward to the wrong day; re-based calendar
+    // fields do not.
     const spring = new Date(2026, 2, 8, 12, 0, 0, 0).getTime(); // 8 Mar 2026, US DST start
     const nightBefore = new Date(2026, 2, 8, 1, 30, 0, 0).getTime();
     expect(spring - nightBefore).toBeLessThan(DAY_MS);
@@ -78,7 +73,7 @@ describe("daySections", () => {
 
   it("gives every section a distinct key", () => {
     // Keyed on the bucket name this was `today`, `week`, `today` — three React
-    // children with a key two of them shared, which React logs on every render.
+    // children two of which shared a key.
     const found = sections(rows(0, 3, 0, 3, 0), true);
     expect(new Set(found.map((s) => s.key)).size).toBe(found.length);
   });
@@ -91,9 +86,9 @@ describe("daySections", () => {
   });
 
   it("returns one unlabelled section when the list is not chronological", () => {
-    // Sorting by score or sender interleaves the days. The headers were then
-    // assertions about adjacency that could not be true — `Today / This week /
-    // Today` — and every repeat collided on a key.
+    // Sorting by score or sender interleaves the days, so the headers would be
+    // adjacency claims that cannot be true — `Today / This week / Today` — and
+    // every repeat would collide on a key.
     const found = sections(rows(0, 3, 0, 40, 0), false);
     expect(found).toHaveLength(1);
     expect(found[0].label).toBeNull();

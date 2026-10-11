@@ -1,16 +1,10 @@
 /**
  * The Smart Score sort.
  *
- * Two things are defended here, and the first is the reason this file exists:
- * the number is *fixed*. Sorting the inbox by the learnable importance score
- * meant every slider drag silently reordered the list underneath the user, so
- * this score takes no weight set at all and must not move when the tuning does.
- *
- * The second is that it is a number a user can be shown and reasoned about.
- * Every term is an integer, the total is clamped to 0–100, and the recency nudge
- * is relative to the set being ranked rather than to the wall clock — an inbox
- * that re-ranked itself tomorrow would make the sort impossible to think about
- * while triaging.
+ * The number is *fixed*: computing it from the learnable importance score would let
+ * every slider drag reorder the list, so this one takes no weight set. It is also a
+ * number a user can be shown — every term is an integer, the total clamps to 0–100,
+ * and the recency nudge is relative to the set being ranked, not the wall clock.
  */
 
 import { describe, expect, it } from "vitest";

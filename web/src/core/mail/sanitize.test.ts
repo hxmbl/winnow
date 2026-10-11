@@ -1,16 +1,12 @@
 /**
  * The sanitiser, tested as an attacker would use it.
  *
- * Every case here is a thing a real message does or a real sender has tried, and
- * the assertions are on what survives rather than on how it is implemented. Where
- * a rule exists to stop a specific historical failure the test says which one, in
- * a comment, because a rule whose reason has been deleted becomes a rule somebody
- * "simplifies" away.
- *
- * The file is `.ts` and not `.tsx` and the environment is plain Node, per
- * `vitest.config.ts`. Nothing here touches `document`, which is what lets the same
- * sanitiser run in the app, in the tests, and in the render proxy's Node process
- * without a DOM shim.
+ * Every case here is a thing a real message does or a real sender has tried; the
+ * assertions are on what survives rather than on implementation. Where a rule
+ * exists to stop a specific historical failure the test says which one. The file
+ * is `.ts` (plain Node environment) and nothing touches `document`, so the same
+ * sanitiser runs in the app, tests and the render proxy's Node process without a
+ * DOM shim.
  */
 
 import { describe, expect, it } from "vitest";

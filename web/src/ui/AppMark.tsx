@@ -1,16 +1,13 @@
 /**
  * The app mark, inline and theme-aware.
  *
- * It used to be `<img src="./relayLight.svg">` in the header and on the sign-in
- * screen, which is a black mark on a white shape — so in dark mode it rendered as
- * a black shape on a near-black header and effectively disappeared. The name said
- * `Light`, which is the tell: there was no dark version, and no branch anywhere
- * that chose one.
+ * Inlining it removes the need for a second asset or a media query: the two colours
+ * are the app's own tokens — `currentColor` for the body and `var(--wn-chrome)` for
+ * the slash cut through it — so they follow `applyTheme`, which already handles
+ * `systemDark`.
  *
- * Inlining it fixes that without a second asset or a media query, because the two
- * colours are now the app's own tokens: `text-ink` for the body and the surface
- * colour for the slash cut through it. `currentColor` and `var(--wn-chrome)`
- * therefore follow `applyTheme`, which already handles `systemDark`.
+ * The name said `Light`, which is the tell: there was no dark version, and no branch
+ * anywhere that chose one.
  *
  * The path data is the original 512×512 artwork, unchanged — only the two fills are
  * variables now.
@@ -26,8 +23,8 @@ export function AppMark({ size = 36 }: { size?: number }) {
       className="shrink-0 text-ink"
     >
       {/*
-        Two chevrons, each with a slash cut through it. The group transform is the
-        original file's and is what centres the pair in the viewBox.
+        Two chevrons, each with a slash cut through it. The group transform centres
+        the pair in the viewBox.
       */}
       <g transform="translate(-35.849192,-11.030521)">
         <path

@@ -1,23 +1,17 @@
 /**
  * Learning from what the user does.
  *
- * The premise: Winnow has no training data, so the cheapest honest signal is
- * the user's own thumb. Starring a message means "this is what I wanted to
- * see", and every signal present on it is evidence that the weight for that
- * signal is too low. Unstarring means the reverse. Muting a bucket means the
- * signals driving that bucket are misfiring.
+ * Winnow has no training data, so the cheapest honest signal is the user's own
+ * thumb: starring a message means the weights for its signals are too low,
+ * unstarring the reverse, muting a bucket means its driving signals misfired.
  *
- * Three constraints keep this from becoming a machine that confidently learns
- * the wrong thing:
+ * Three constraints keep it from confidently learning the wrong thing:
  *
- *   1. **Small steps.** One star moves a weight by 1 point, not by enough to
- *      reorder the inbox. Twenty stars are what should change the ranking; one
- *      mis-click should not.
- *   2. **Clamping.** Every move respects the signal's range, so a loop cannot
- *      invert a weight or run it away.
- *   3. **A capped log.** Up to 400 events, oldest dropped. The events are the
- *      audit trail that makes a surprising ranking explainable ("why is this
- *      here?") rather than a second copy of the inbox.
+ *   1. **Small steps.** One star moves a weight by 1 point, so twenty stars change
+ *      the ranking and one mis-click does not.
+ *   2. **Clamping.** Every move respects the signal's range.
+ *   3. **A capped log.** Up to 400 events, oldest dropped — the audit trail that
+ *      makes a surprising ranking explainable.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Learning/LearningModel.swift`.
  */
@@ -44,15 +38,10 @@ export const MAX_EVENTS = 400;
 /**
  * How spammy a message has to look before starring it counts as a correction.
  *
- * Below it, a star is an ordinary opinion about an ordinary message, and nudging spam
- * sensitivity would teach the classifier to miss phish.
- *
- * This is `UNSAFE_THRESHOLD`, and it is derived rather than restated because the two
- * have to agree: a star on a message the rest of `core` already calls unsafe is the
- * user contradicting the classifier, and learning from it at a *different* cut-off
- * than the one that classified the message would teach the model to disagree with
- * itself. It was two literals of `0.4` and a comment asserting they were the same
- * number, which is true only until one of them is edited.
+ * Derived from `UNSAFE_THRESHOLD` — the two have to agree, since a star on a message
+ * `core` already calls unsafe is the user contradicting the classifier. Below it a
+ * star is an ordinary opinion, and nudging spam sensitivity would teach the
+ * classifier to miss phish.
  */
 export const SPAM_CONTRADICTION = UNSAFE_THRESHOLD;
 
@@ -71,15 +60,10 @@ export type FeedbackEvent = {
    */
   predictedImportance?: number;
   /**
-   * The weights this event moved.
-   *
-   * Not "the signals on the message". The two differ exactly where the distinction
-   * matters: muting a bucket with no single driving weight (`travel`, `shipping`,
-   * `codes`) moves nothing, and the old code recorded the message's own signals
-   * anyway — so the audit trail claimed a set of weights had been adjusted when none
-   * had, which is the one thing an audit trail exists to rule out. A reader asking
-   * "what did Winnow learn from this?" wants the answer to that, and an empty array
-   * is a real answer: the user objected, the model had nothing to change.
+   * The weights this event moved — not "the signals on the message". Muting a
+   * bucket with no single driving weight (`travel`, `shipping`, `codes`) moves
+   * nothing, and an empty array is a real answer: the user objected, the model had
+   * nothing to change.
    */
   activeSignals: SignalKey[];
   rejectedFilter?: BuiltinSmartFilter;
@@ -183,21 +167,12 @@ export class LearningModel {
   /**
    * Rebuild from what was persisted.
    *
-   * A *tolerant* constructor, because the input is `localStorage`: anything can be
-   * in there, including a snapshot from a build that knew fewer weights, a value
-   * a user edited by hand, or half a write from a tab that was closed mid-save.
-   *
-   *   - **Weights** merge over the defaults, so a weight added since the snapshot
-   *     was written is present at its default rather than `undefined`. A weight
-   *     that is not a finite number is dropped for the same reason; one that is
-   *     finite is clamped into its own range, because the panel's sliders will
-   *     happily render an out-of-range value as a thumb at the far end.
-   *   - **`adaptive`** falls back to on, because the alternative — reading
-   *     `undefined` as off — would silently stop the learning loop the user never
-   *     turned off.
-   *   - **Events** are filtered to well-formed entries. A malformed one is
-   *     dropped rather than allowed to reach the panel, which renders
-   *     `event.sender` and `event.at` directly.
+   * Tolerant, because the input is `localStorage`: anything can be in there. Weights
+   * merge over the defaults (a weight added since the snapshot was written is present
+   * at its default; a non-finite one is dropped) and are clamped, since the sliders
+   * render an out-of-range value as a thumb at the far end. `adaptive` falls back to
+   * on, so reading `undefined` cannot silently stop the loop. Events are filtered to
+   * well-formed entries the panel can render.
    *
    * Nothing here throws. A corrupt snapshot costs the user their tuning; a thrown
    * error costs them the app.
@@ -233,18 +208,10 @@ export class LearningModel {
   }
 
   /**
-   * A copy of the event log, newest first.
-   *
-   * Newest first is what the settings panel wants, and the order matters: the
-   * panel reads top-down, and the newest event is the one that explains a ranking
-   * the user is looking at *right now*. The log itself is stored oldest-first
-   * because dropping the oldest at the cap is then a slice of the tail.
-   *
-   * The panel was handed `events` directly and rendered `slice(0, 100)`, which is
-   * the first hundred — so once the log passed a hundred entries (a fortnight of
-   * ordinary starring) everything the panel showed was history, and the newest
-   * hundred events — the ones that actually explain the current weights — were
-   * invisible. The `history` getter existed and was never called.
+   * A copy of the event log, newest first — what the settings panel wants, since the
+   * newest event is the one that explains a ranking the user is looking at *now*. The
+   * log itself is stored oldest-first so dropping the oldest at the cap is a tail
+   * slice.
    */
   get history(): FeedbackEvent[] {
     return [...this.events].reverse();
@@ -295,19 +262,10 @@ export class LearningModel {
        * Starring something the classifier called unsafe is the clearest possible
        * statement that the spam call was wrong.
        *
-       * Outside the `touched.length > 0` gate it used to sit inside. That gate is
-       * right for the *touchable* signals — a message carrying none has nothing to
-       * nudge — but a spam lure is precisely that message: `security`, `urgency`,
-       * `finance` and the rest are all absent, which is what makes it read as spam.
-       * So the one correction a user is most explicit about, starring something
-       * wrongly called junk, taught nothing at all, while the comment above it
-       * described it as the clearest signal available.
-       *
-       * Symmetric with the other deltas on purpose. It used to fire only when
-       * `starred`, so a star followed by an unstar — the reflexive way to undo a
-       * mis-click — left `spamSensitivity` permanently one point below where it
-       * started. Unstarring mail that really was spam is the same statement facing
-       * the other way.
+       * Outside the `touched.length > 0` gate: a spam lure carries none of the
+       * touchable signals, which is what makes it read as spam, so the correction
+       * users are most explicit about would otherwise teach nothing. It fires in
+       * both directions on purpose, so a star followed by an unstar cancels.
        */
       if (signals.spamLikelihood >= SPAM_CONTRADICTION) {
         deltas.push({

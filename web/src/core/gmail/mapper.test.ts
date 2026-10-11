@@ -1,11 +1,10 @@
 /**
  * Gmail's wire format → Winnow's `Email`.
  *
- * This is where sender-controlled input first becomes something the UI trusts, so
- * the tests are weighted towards the ways a real inbox lies: a `From` that does not
- * parse, a display name carrying bidi overrides, an encoded-word subject, a payload
- * with no text part, an inline signature logo counted as an attachment, and a
- * `Date:` header that disagrees with `internalDate`.
+ * Tests cover sender-controlled edge cases: unparseable `From`, display name
+ * carrying bidi overrides, encoded-word subjects, payloads with no text part,
+ * inline signature logos counted as attachments, and `Date:` disagreeing with
+ * `internalDate`.
  */
 
 import { describe, expect, it } from "vitest";
@@ -71,8 +70,8 @@ describe("headerValue", () => {
   });
 
   it("is undefined rather than empty for a header that is not there", () => {
-    // The caller distinguishes "absent" from "present but blank" in two places —
-    // an absent `From` gets a placeholder, a blank one does not.
+    // The caller distinguishes "absent" from "present but blank": an absent `From`
+    // gets a placeholder, a blank one does not.
     expect(headerValue(undefined, "From")).toBeUndefined();
     expect(headerValue({ headers: [] }, "From")).toBeUndefined();
   });
@@ -98,9 +97,8 @@ describe("decodeMimeWord", () => {
   });
 
   it("decodes a multi-byte character rather than three Latin-1 ones", () => {
-    // `=E2=80=94` is an em dash in UTF-8. Read byte-by-byte it is `â` + two
-    // control characters, which is how every accented subject in a Q-encoded
-    // header rendered before.
+    // `=E2=80=94` is an em dash in UTF-8; read byte-by-byte it would render
+    // as three characters (mojibake).
     expect(decodeMimeWord("=?UTF-8?Q?Invoice_=E2=80=94_0412?=")).toBe("Invoice — 0412");
   });
 
@@ -123,9 +121,9 @@ describe("decodeMimeWord", () => {
   });
 
   it("decodes each word in a subject, which is how long subjects arrive", () => {
-    // A subject over the RFC's 75-character limit arrives split into several
-    // encoded words separated by whitespace that is layout, not content. Keeping
-    // it put a second space in the middle of the subject.
+    // Subjects over the RFC's 75-character limit arrive split into encoded words
+    // separated by whitespace that is layout, not content. Keeping that space put
+    // a duplicate space in the middle of the subject.
     const encoded = ["=?UTF-8?Q?Your_invoice?=", " ", "=?UTF-8?Q?_=E2=80=94_=E2=82=AC?="].join("");
     expect(decodeMimeWord(encoded)).toBe("Your invoice — €");
   });
@@ -142,7 +140,7 @@ describe("decodeBody", () => {
   });
 
   it("returns empty rather than throwing on input atob rejects", () => {
-    // The headers still classify the message and the snippet still previews it, so
+    // The headers still classify the message and the snippet still previews it;
     // a bad body is a worse row, not no row.
     expect(decodeBody("!!!not base64!!!")).toBe("");
   });
@@ -169,8 +167,8 @@ describe("toEmail — sender", () => {
   });
 
   it("strips a display name that carries a bidi override", () => {
-    // A name that renders as something else than it is is the oldest trick in
-    // spoofing, so the sanitiser runs before anything is shown or classified.
+    // A name that renders as something else than it is is a spoofing trick; the
+    // sanitiser runs before anything is shown or classified.
     const hostile = "Ada\u202ELoyevace";
     const email = toEmail(
       message({
@@ -191,8 +189,8 @@ describe("toEmail — sender", () => {
   });
 
   it("gives a message with no From at all a placeholder, not an empty sender", () => {
-    // `from.trim() ?? "unknown@unknown"` was the old code: `""` is not nullish, so
-    // the fallback could never run and the row rendered with no name at all.
+    // `""` is not nullish, so the fallback cannot be `from.trim() ?? ...`; a
+    // message with no `From` must get a placeholder.
     const email = toEmail(message({ payload: part({ headers: [] }) }))!;
     expect(email.sender).toBe("unknown@unknown");
   });
@@ -262,8 +260,8 @@ describe("messageIdHeader", () => {
   });
 
   it("refuses a value carrying a line break", () => {
-    // This ends up inside a header of a message Winnow sends, so a `Message-ID`
-    // with a CRLF in it would let the sender append headers to the reply.
+    // Ends up inside a header of a message Winnow sends; a `Message-ID` with a
+    // CRLF would let the sender append headers to the reply.
     expect(messageIdHeader("<a@b>\r\nBcc: someone@else.com")).toBeUndefined();
     expect(messageIdHeader("<a@b>\nX-Evil: yes")).toBeUndefined();
   });
@@ -279,8 +277,8 @@ describe("messageIdHeader", () => {
 
 describe("toEmail — the rest", () => {
   it("carries the Message-ID through, so a reply can thread on it", () => {
-    // Gmail threads a reply on its own thread id and the recipient's client
-    // threads it on this. Carrying it is the only way the second works.
+    // Gmail threads a reply on its own thread id; the recipient's client threads
+    // it on this. Carrying it is the only way the second works.
     const email = toEmail(
       message({
         payload: part({
@@ -295,7 +293,7 @@ describe("toEmail — the rest", () => {
   });
 
   it("trusts internalDate over the Date: header", () => {
-    // A sender can put anything in `Date:`. `internalDate` is when Gmail received it.
+    // A sender can put anything in `Date:`; `internalDate` is when Gmail received it.
     const email = toEmail(
       message({
         internalDate: "1770000000000",

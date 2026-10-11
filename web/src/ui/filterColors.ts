@@ -1,32 +1,23 @@
 /**
  * Colour for a bucket.
  *
- * Colour carries meaning here, and it is the *only* colourful thing in the app
- * — so the assignment below is the design's most load-bearing set of decisions.
- * Red always means urgent, blue always means security, and the greys at the
- * quiet end mean "nothing is wrong here". A user learns these in a day and then
- * reads the rail without reading it.
+ * Colour carries meaning here, and it is the *only* colourful thing in the app: red
+ * always means urgent, blue always means security, and the greys at the quiet end mean
+ * "nothing is wrong here".
  *
- * Two constraints shaped the ramp:
- *
- *   1. **Every hue is already washed out.** The accents sit at roughly 40%
- *      opacity on white, so a row of pills reads as a soft spectrum rather than
- *      as a row of alert boxes. Saturation is applied through the alpha, not the
- *      hue.
- *   2. **Sender pills are grey, not coloured.** A sender's colour is derived
- *      from their own address, so if senders were tinted the sender pills would
- *      compete with the semantic ones for the same attention.
+ * Two constraints shaped the ramp: every hue is already washed out (saturation through
+ * alpha, not hue), and sender pills are grey rather than tinted so they do not compete
+ * with the semantic ones.
  */
 
 import type { BuiltinSmartFilter } from "../core/model/signals";
 
 export type PillColors = {
-  /** Saturated midpoint of the resting gradient. */
+  /** Saturated accent colour. */
   accent: string;
   /**
-   * Tinted neutral at both ends of the resting gradient. Derived from `accent`
-   * (same hue, low saturation, high lightness) unless given — the flat greys
-   * set it explicitly so they render dead level.
+   * Tinted neutral; derived from `accent` unless given — the flat greys set it
+   * explicitly so they render dead level.
    */
   edge?: string;
   /** Resting fill opacity. */
@@ -115,12 +106,10 @@ export const RAMP = {
 /**
  * Semantic assignment, one entry per bucket.
  *
- * The greys are not laziness. `newsletters`, `low_priority` and `quiet_contacts`
- * are all buckets whose content is *fine* — the user is not being warned about
- * anything — so giving them a saturated hue would say "act on this" about mail
- * that needs no action. The ramp's warm end is reserved for things that are
- * genuinely wrong or genuinely urgent, which is the only way a colour strip can
- * be read at a glance.
+ * The greys are not laziness: `newsletters`, `low_priority` and `quiet_contacts` hold
+ * content that is *fine*, and a saturated hue would say "act on this" about mail that
+ * needs none. The warm end is reserved for what is genuinely wrong or urgent, which is
+ * the only way a colour strip can be read at a glance.
  */
 export const FILTER_PILLS: Record<BuiltinSmartFilter, PillColors> = {
   // The loud end: something is wrong or something is on fire.
@@ -159,22 +148,20 @@ export const FILTER_PILLS: Record<BuiltinSmartFilter, PillColors> = {
 /**
  * A stable colour per sender, derived from the address.
  *
- * Not from a profile picture: loading one is a third-party request to a company
- * the user has not chosen to contact, on every avatar in the list. Hashing the
- * address gives a senders' pills a consistent identity across sessions and
- * accounts at zero network cost, and it keeps the semantic hues as the only
+ * Not from a profile picture: loading one is a third-party request, once per avatar in
+ * the list. Hashing the address gives a sender's pill a consistent identity across
+ * sessions and accounts at zero network cost, and keeps the semantic hues the only
  * meaningful colour in the strip.
  *
- * The hue comes from the *domain*, not the local part, so `ada@` and
- * `grace@` at one company share a colour — which is the association a person
- * actually has.
+ * The hue comes from the *domain*, not the local part, so `ada@` and `grace@` at one
+ * company share a colour — the association a person actually has.
  */
 export function senderPillColors(sender: string): PillColors {
   const domain = sender.split("@")[1]?.toLowerCase() ?? sender.toLowerCase();
 
   // FNV-1a, so the same domain always gets the same hue. Kept local rather than
-  // imported: this is a colour, not an identity, and it must not collide with
-  // the message-id hash space.
+  // imported: this is a colour, not an identity, and must not collide with the
+  // message-id hash space.
   let hash = 0x811c9dc5;
   for (let i = 0; i < domain.length; i += 1) {
     hash ^= domain.charCodeAt(i);
@@ -205,22 +192,16 @@ export function senderPillColors(sender: string): PillColors {
 /**
  * A pill's fill.
  *
- * Was a three-stop horizontal gradient — edge, accent, edge — so the colour read
- * as a glow down the middle of the pill, with a *second* opaque gradient plus an
- * inset ring for the selected state. Two gradients and an edge per pill, twenty-odd
- * pills in a row: the rail came out looking like a shelf of sweets, and it was the
- * single loudest thing in a window that is mostly a reading surface.
+ * The accent is a flat tint and nothing else: it identifies the bucket alongside the
+ * label, and it does not have to carry the meaning alone. At these alphas a row of them
+ * reads as one quiet line rather than as twenty separate objects — once two gradients
+ * and an edge per pill made the rail come out looking like a shelf of sweets, and it
+ * was the single loudest thing in a window that is mostly a reading surface.
  *
- * Now the accent is a flat tint and nothing else. It identifies the bucket
- * alongside the label; it does not have to carry the meaning alone; and at these
- * alphas a row of them reads as one quiet line rather than as twenty separate
- * objects.
- *
- * Selected state adds `--wn-sheen` — a low-alpha wash of the palette's own ink, so
- * it darkens on a light scheme and lightens on a dark one — *over* the tint. That
- * is the whole selection affordance: the pill lifts toward the light rather than
- * being replaced by a differently-filled object, which is what the inset ring was
- * doing badly.
+ * Selected state adds `--wn-sheen` — a low-alpha wash of the palette's own ink, so it
+ * darkens on a light scheme and lightens on a dark one — *over* the tint. That is the
+ * whole selection affordance: the pill lifts toward the light rather than being replaced
+ * by a differently-filled object.
  *
  * Background layers paint front to back, so the sheen is written first.
  */
@@ -232,10 +213,6 @@ export function pillBackground(colors: PillColors, on: boolean): string {
 }
 
 /**
- * The badge accents live in `theme.ts`, not here.
- *
- * They used to be duplicated as `BADGE_COLORS`, which is how they came to
- * disagree with the palette the app actually renders — two sources of truth for one
- * colour, one of which nothing displayed. `--wn-badge-<id>` is now the same source
- * for everything that reads one, which is the star on a row and in the reader.
+ * The badge accents live in `theme.ts`, not here: `--wn-badge-<id>` is the single
+ * source for everything that reads one, which is the star on a row and in the reader.
  */
