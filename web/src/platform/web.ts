@@ -95,7 +95,9 @@ export const webPlatform: WebPlatform = {
     try {
       const state = new URL(request.authorizeUrl).searchParams.get("state");
       if (state) globalThis.sessionStorage?.setItem(PENDING_STATE_KEY, state);
-    } catch {}
+    } catch {
+      // Ignore URL parsing errors; sign-in flow will proceed without persisted state if necessary
+    }
 
     const location = globalThis.location;
     if (!location) {
@@ -119,7 +121,9 @@ export const webPlatform: WebPlatform = {
   async cancelSignIn() {
     try {
       globalThis.sessionStorage?.removeItem(PENDING_STATE_KEY);
-    } catch {}
+    } catch {
+      // Ignore storage errors
+    }
   },
 
   readRedirectFromLocation(): OAuthRedirect | null {
