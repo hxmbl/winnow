@@ -169,7 +169,10 @@ export type AuthErrorKind =
   | "reauth_required"
   | "network"
   | "timeout"
-  /** The build is missing something it needs — a client id, or a secret. */
+  /**
+   * The build is missing something it needs — a client id, a redirect URI, or a
+   * secret.
+   */
   | "config"
   /**
    * Google accepted the request but refused the identity: a wrong secret, or a

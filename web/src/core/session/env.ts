@@ -46,9 +46,11 @@ export function clientSecretFromEnv(): string | undefined {
  * The registered redirect URI for a web build.
  *
  * Empty for the desktop, which uses a loopback URI on an ephemeral port instead
- * — see `LOOPBACK_REDIRECT_URI`. Its absence is what tells the platform layer
- * "this is a desktop-shaped client", which is why the two variables are read
- * together rather than independently.
+ * — see `LOOPBACK_REDIRECT_URI`. Absence alone is not what identifies the
+ * desktop, though: a web build with nothing set is a misconfiguration, not a
+ * desktop in a tab. Which URI is correct follows from the platform's
+ * `nativeOAuth` capability (see `GmailSession.redirectUri`); this reader only
+ * supplies the value when a build has one.
  */
 export function webRedirectUriFromEnv(): string {
   return read("VITE_GMAIL_REDIRECT_URI").trim();

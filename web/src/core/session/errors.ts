@@ -68,7 +68,11 @@ export function describeFailure(error: unknown): AuthFailure {
     case "config":
       return {
         message: "This build is not configured to sign in.",
-        hint: "Set VITE_GMAIL_CLIENT_ID and rebuild.",
+        // Three variables, and which one is missing depends on the host: every
+        // build needs a client id, a website needs a registered redirect URI and
+        // a secret, and the desktop needs neither of the last two. Naming all
+        // three is honest and beats sending someone to the wrong settings page.
+        hint: "A desktop build needs VITE_GMAIL_CLIENT_ID; a website also needs VITE_GMAIL_REDIRECT_URI and VITE_GMAIL_CLIENT_SECRET. Set them and rebuild.",
         retryable: false,
       };
     case "invalid_client":

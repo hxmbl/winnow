@@ -344,7 +344,7 @@ export class GmailSession {
     }
 
     const pkce = await createPkcePair();
-    const redirectUri = this.redirectUri();
+    const redirectUri = await this.redirectUri();
 
     const authorizeUrl = buildAuthorizeUrl(GOOGLE_AUTH_URL, {
       clientId,
@@ -419,13 +419,41 @@ export class GmailSession {
   /**
    * The redirect URI for this build.
    *
-   * The desktop listener's port is not knowable until the OS hands one out, so
-   * the loopback URI carries a placeholder that Rust substitutes. The web build
-   * needs a real, registered URI instead — and cannot use the loopback one,
-   * because a page has no ability to bind a port.
+   * Two shapes, and which one is correct follows from how OAuth is *delivered*,
+   * which is a platform capability:
+   *
+   *   - **Desktop** — the loopback URI, whose port is a placeholder Rust
+   *     substitutes once the OS hands one out.
+   *   - **Web** — a real, registered URI, because a page has no ability to bind
+   *     a port and so cannot use the loopback one.
+   *
+   * The distinction has to be drawn from the platform, not from whether
+   * `VITE_GMAIL_REDIRECT_URI` happens to be set. That variable is empty in a
+   * desktop build by design, so `webRedirectUriFromEnv() || LOOPBACK_REDIRECT_URI`
+   * read an empty value as "desktop" and — on a web build with no URI configured
+   * — fell through to the loopback placeholder. The browser then navigated to
+   * Google with `__WINNOW_LOOPBACK_PORT__` in the `redirect_uri`, which is a
+   * well-formed URL naming a port nothing is listening on, so Google rejected it
+   * with `Error 400: invalid_request` and the only clue was a token the code
+   * never appears to build.
+   *
+   * A web build with no registered URI is a configuration error, and it says so
+   * rather than sending a placeholder to Google. Desktop ignores the web variable
+   * entirely, matching how it already ignores `VITE_GMAIL_CLIENT_SECRET`.
    */
-  private redirectUri(): string {
-    return webRedirectUriFromEnv() || LOOPBACK_REDIRECT_URI;
+  private async redirectUri(): Promise<string> {
+    const { nativeOAuth } = await this.platform.info();
+    if (nativeOAuth) return LOOPBACK_REDIRECT_URI;
+
+    const configured = webRedirectUriFromEnv();
+    if (!configured) {
+      throw new GmailError(
+        "This build has no Google redirect URI, so it cannot sign in. Set VITE_GMAIL_REDIRECT_URI to the URI registered for this site and rebuild.",
+        0,
+        "config",
+      );
+    }
+    return configured;
   }
 
   /**
