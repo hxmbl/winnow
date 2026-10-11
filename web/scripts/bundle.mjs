@@ -221,11 +221,6 @@ child.on("exit", (code, signal) => {
     process.exit(1);
   }
 
-  const platformDir = {
-    darwin: "macos",
-    win32: "windows",
-  }[platform] || "linux";
-
   console.log(`\nBundles written to ${resolve(out, platformDir)}`);
   for (const kind of bundles) console.log(`  ${resolve(out, platformDir, kind)}`);
 });
