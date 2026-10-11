@@ -21,9 +21,14 @@
  *   - **Every signal has a fixture.** Security, codes, shipping, travel, events,
  *     social, spam, newsletters — each bucket has at least one message that
  *     exists to be classified into it, and the tests assert as much.
+ *   - **All demo messages have HTML.** With the new rich rendering, demo
+ *     messages include HTML bodies (via `toHtml()`) to showcase the rich view,
+ *     plain view, and the sanitiser. The Hark newsletter has full markup with
+ *     images and tracking pixels to test the image consent flow.
  */
 
 import { hashId } from "../model/ids";
+import { DEMO_NEWSLETTER_HTML, DEMO_NEWSLETTER_TEXT } from "./demoNewsletter";
 import type { Email, EmailCategory, Mailbox } from "../model/email";
 import type { TrashRecord } from "../model/profile";
 
@@ -48,6 +53,14 @@ type Seed = {
   at: number;
   subject: string;
   body: string;
+  /**
+   * The message's HTML, for showcasing the rich rendering.
+   *
+   * Most seeds now have this (via `toHtml()`), so the demo can show the new
+   * rich view by default. The text body is still what the classifier reads and
+   * what a reply quotes, so both paths remain visible and testable.
+   */
+  bodyHtml?: string;
   category?: EmailCategory;
   starred?: boolean;
   urgent?: boolean;
@@ -101,7 +114,50 @@ Happy to talk any of this through. If it is easier, the two paragraphs about
 the query plans can be their own thread, because I suspect they are a different
 conversation with a different set of people in it.`;
 
+/**
+ * Convert plain text to simple HTML for demo messages.
+ *
+ * Replaces double newlines with <p> tags and single newlines with <br>.
+ * This gives demo messages basic HTML structure to showcase the new
+ * rich rendering while keeping the content simple and safe.
+ */
+function toHtml(text: string): string {
+  return text
+    .split('\n\n')
+    .map(para => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
 const seeds: readonly Seed[] = [
+  // ── The newsletter with full markup ───────────────────────────────────────
+  //
+  // First, because it is the newest and because every other reason the demo exists
+  // is easier to see with it on screen: a bucket to have sorted, a sender to be
+  // recognised, and an image decision that is actually a decision. This message
+  // has rich HTML markup with embedded images and remote tracking pixels, so the
+  // rich view, the plain view, "as sent" and the image offer are all reachable
+  // without signing in to anything.
+  //
+  // Note: Most other demo messages now also have HTML bodies (via toHtml()) to
+  // showcase the new rich rendering, but this one has the full newsletter markup
+  // with styling, images, and tracking pixels to test the sanitiser and image
+  // consent flow.
+  {
+    id: "demo-newsletter-3",
+    sender: "noreply@email.hark.example",
+    name: "Hark",
+    at: 4 * DAY,
+    subject: "Introducing Hark Pro",
+    body: DEMO_NEWSLETTER_TEXT,
+    bodyHtml: DEMO_NEWSLETTER_HTML,
+    category: "promotions",
+    // It claims the bucket the classifier will actually put it in, which the demo
+    // test asserts. That is not a formality: "it reads as a newsletter" and "it
+    // scores as promotional" are both defensible descriptions of this message, and
+    // a demo badge the classifier disagrees with teaches the user to distrust the
+    // whole rail.
+    demonstrates: "promotional",
+  },
   // ── Security ──────────────────────────────────────────────────────────────
   {
     id: "demo-security-1",
@@ -117,6 +173,14 @@ Location: Lisbon, Portugal Device: Firefox on Linux Time: 08:14 UTC
 If this was you, no action is needed. If it was not, you should reset your password and review your active sessions immediately. We have not restricted your account, because a lockout would leave you unable to check whether the sign-in was yours.
 
 If you did not make this request, reply to this message and we will escalate it to the fraud team.`,
+    bodyHtml: toHtml(`
+We noticed a sign-in to your account from a device we do not recognise.
+
+Location: Lisbon, Portugal Device: Firefox on Linux Time: 08:14 UTC
+
+If this was you, no action is needed. If it was not, you should reset your password and review your active sessions immediately. We have not restricted your account, because a lockout would leave you unable to check whether the sign-in was yours.
+
+If you did not make this request, reply to this message and we will escalate it to the fraud team.`),
     category: "updates",
     unread: true,
     demonstrates: "security",
@@ -138,6 +202,12 @@ A critical security alert. Your account has been compromised and you need to ver
 Click here to secure your account: https://github-security227.com/verify
 
 This link expires in 30 minutes. Failure to verify your identity will result in your account being suspended.`,
+    bodyHtml: toHtml(`
+A critical security alert. Your account has been compromised and you need to verify your password immediately.
+
+Click here to secure your account: https://github-security227.com/verify
+
+This link expires in 30 minutes. Failure to verify your identity will result in your account being suspended.`),
     demonstrates: "unsafe",
   },
   {
@@ -150,6 +220,10 @@ This link expires in 30 minutes. Failure to verify your identity will result in 
 A new device signed in to your account. If this was you, you can dismiss this notice. If not, please review your sign-in history.
 
 Device: MacBook Pro Location: London, United Kingdom`,
+    bodyHtml: toHtml(`
+A new device signed in to your account. If this was you, you can dismiss this notice. If not, please review your sign-in history.
+
+Device: MacBook Pro Location: London, United Kingdom`),
     category: "updates",
     demonstrates: "security",
   },
@@ -165,6 +239,10 @@ Device: MacBook Pro Location: London, United Kingdom`,
 Your verification code is 418 902.
 
 It expires in 10 minutes. We will never ask you for it by email, phone or chat, and no one at Okta will ask you for it. If you did not request this code, you can ignore this message and nothing will have changed.`,
+    bodyHtml: toHtml(`
+Your verification code is 418 902.
+
+It expires in 10 minutes. We will never ask you for it by email, phone or chat, and no one at Okta will ask you for it. If you did not request this code, you can ignore this message and nothing will have changed.`),
     category: "updates",
     demonstrates: "codes",
   },
@@ -178,6 +256,10 @@ It expires in 10 minutes. We will never ask you for it by email, phone or chat, 
 Use sign-in code 7741 to continue.
 
 This code is valid for 15 minutes and can be used once. If you did not try to sign in, someone may have your password.`,
+    bodyHtml: toHtml(`
+Use sign-in code 7741 to continue.
+
+This code is valid for 15 minutes and can be used once. If you did not try to sign in, someone may have your password.`),
     category: "updates",
     demonstrates: "codes",
   },
@@ -195,6 +277,12 @@ Good news — your order is on its way.
 Tracking number: 1Z999AA10123456784 Estimated delivery: Tuesday, 12 May
 
 You can track your package at any time. There is no need to sign for the delivery, and the courier will leave it in a safe place if you are not home.`,
+    bodyHtml: toHtml(`
+Good news — your order is on its way.
+
+Tracking number: 1Z999AA10123456784 Estimated delivery: Tuesday, 12 May
+
+You can track your package at any time. There is no need to sign for the delivery, and the courier will leave it in a safe place if you are not home.`),
     category: "updates",
     demonstrates: "shipping",
   },
@@ -208,6 +296,10 @@ You can track your package at any time. There is no need to sign for the deliver
 Your parcel is out for delivery today between 9am and 1pm.
 
 The courier attempted a delivery yesterday and could not leave the package safely. They will try again today. If you are not going to be home, the delivery will be held at the depot for collection.`,
+    bodyHtml: toHtml(`
+Your parcel is out for delivery today between 9am and 1pm.
+
+The courier attempted a delivery yesterday and could not leave the package safely. They will try again today. If you are not going to be home, the delivery will be held at the depot for collection.`),
     category: "updates",
     demonstrates: "shipping",
   },
@@ -225,6 +317,12 @@ Check-in is now open for your flight.
 Flight: NA 447 From: London Heathrow (LHR) To: Lisbon (LIS) Departure gate: B22 Boarding: 07:35
 
 Your boarding pass is attached to this message. You do not need to print it — the gate agent can scan the barcode on your phone. Bags must be checked by 07:00.`,
+    bodyHtml: toHtml(`
+Check-in is now open for your flight.
+
+Flight: NA 447 From: London Heathrow (LHR) To: Lisbon (LIS) Departure gate: B22 Boarding: 07:35
+
+Your boarding pass is attached to this message. You do not need to print it — the gate agent can scan the barcode on your phone. Bags must be checked by 07:00.`),
     category: "reservations",
     demonstrates: "travel",
   },
@@ -240,6 +338,12 @@ Your booking confirmation for Casa do Sol, Lisbon.
 Check-in: 11 May from 15:00 Check-out: 15 May by 11:00 Rooms: 1 double
 
 Breakfast is included. The hotel can arrange airport transfer if you need it; let us know at least 24 hours ahead.`,
+    bodyHtml: toHtml(`
+Your booking confirmation for Casa do Sol, Lisbon.
+
+Check-in: 11 May from 15:00 Check-out: 15 May by 11:00 Rooms: 1 double
+
+Breakfast is included. The hotel can arrange airport transfer if you need it; let us know at least 24 hours ahead.`),
     category: "reservations",
     demonstrates: "travel",
   },
@@ -257,6 +361,12 @@ You are invited to an architecture review.
 When: Thursday 14 May, 10:00–11:30 Where: Room 2.04 and video call
 
 The agenda is in the shared doc. Please read it beforehand — the last one ran over because we spent twenty minutes on context that should have been in the document. If you cannot make it, an rsvp would help.`,
+    bodyHtml: toHtml(`
+You are invited to an architecture review.
+
+When: Thursday 14 May, 10:00–11:30 Where: Room 2.04 and video call
+
+The agenda is in the shared doc. Please read it beforehand — the last one ran over because we spent twenty minutes on context that should have been in the document. If you cannot make it, an rsvp would help.`),
     category: "updates",
     demonstrates: "events",
   },
@@ -272,6 +382,12 @@ A hands-on workshop on async Rust, three hours, no prior async experience assume
 Reserve your spot now — the room holds 40 and it filled the last two times.
 
 Snacks and coffee provided. Please bring a laptop.`,
+    bodyHtml: toHtml(`
+A hands-on workshop on async Rust, three hours, no prior async experience assumed.
+
+Reserve your spot now — the room holds 40 and it filled the last two times.
+
+Snacks and coffee provided. Please bring a laptop.`),
     category: "updates",
     demonstrates: "events",
   },
@@ -289,6 +405,12 @@ Your bill for April is ready. Total due: £84.20, due 24 May.
 This is your regular direct debit, so no action is needed unless the amount has changed. The detailed breakdown is below, and the standing charge is unchanged from last quarter.
 
 If you would like to switch tariff, the deadline is the 20th.`,
+    bodyHtml: toHtml(`
+Your bill for April is ready. Total due: £84.20, due 24 May.
+
+This is your regular direct debit, so no action is needed unless the amount has changed. The detailed breakdown is below, and the standing charge is unchanged from last quarter.
+
+If you would like to switch tariff, the deadline is the 20th.`),
     category: "receipts",
     demonstrates: "receipts",
   },
@@ -304,6 +426,12 @@ Thanks for stopping by.
 2 × filter coffee      £7.00 1 × almond croissant   £4.50 -------------------------- Total                 £11.50
 
 Paid by card ending 4417. No change given.`,
+    bodyHtml: toHtml(`
+Thanks for stopping by.
+
+2 × filter coffee      £7.00 1 × almond croissant   £4.50 -------------------------- Total                 £11.50
+
+Paid by card ending 4417. No change given.`),
     category: "receipts",
     demonstrates: "receipts",
   },
@@ -319,6 +447,12 @@ Invoice 2026-0412 for the period 1–30 April.
 Plan: Team, monthly       £48.00 Bandwidth overage        £12.40 -------------------------------- Amount due               £60.40
 
 Payment is due within 14 days. Your subscription renewed automatically on 1 May.`,
+    bodyHtml: toHtml(`
+Invoice 2026-0412 for the period 1–30 April.
+
+Plan: Team, monthly       £48.00 Bandwidth overage        £12.40 -------------------------------- Amount due               £60.40
+
+Payment is due within 14 days. Your subscription renewed automatically on 1 May.`),
     category: "receipts",
     demonstrates: "receipts",
   },
@@ -338,6 +472,14 @@ I know that is short notice and I would rather tell you badly early than well la
 Nothing else changed. The plan is the same one we agreed.
 
 Can you confirm by 16:00 today?`,
+    bodyHtml: toHtml(`
+The window moved. It is now Thursday 07:00, not Friday.
+
+I know that is short notice and I would rather tell you badly early than well late. If Thursday does not work for you, say so today and I will find another slot this week.
+
+Nothing else changed. The plan is the same one we agreed.
+
+Can you confirm by 16:00 today?`),
     category: "primary",
     urgent: true,
     unread: true,
@@ -355,6 +497,12 @@ Thanks for the notes — the query-plan section is the part I was worried about.
 Could you send the two slow queries again? I would like to run them here before we commit to the index change, because if the third one is slow for a different reason the index will not fix it and we will have spent a week finding out.
 
 No rush on this — before the end of the week is fine.`,
+    bodyHtml: toHtml(`
+Thanks for the notes — the query-plan section is the part I was worried about.
+
+Could you send the two slow queries again? I would like to run them here before we commit to the index change, because if the third one is slow for a different reason the index will not fix it and we will have spent a week finding out.
+
+No rush on this — before the end of the week is fine.`),
     category: "primary",
     threadId: "demo-thread-migration",
     demonstrates: "needs_action",
@@ -369,6 +517,10 @@ No rush on this — before the end of the week is fine.`,
 Agreed on the ordering. I would start the data copy on the read replica rather than production — it is an hour behind, which does not matter for a migration rehearsal, and it takes the load off the primary while we find out whether the concurrent write path works at all.
 
 Let me know your thoughts.`,
+    bodyHtml: toHtml(`
+Agreed on the ordering. I would start the data copy on the read replica rather than production — it is an hour behind, which does not matter for a migration rehearsal, and it takes the load off the primary while we find out whether the concurrent write path works at all.
+
+Let me know your thoughts.`),
     category: "primary",
     threadId: "demo-thread-migration",
     demonstrates: "needs_action",
@@ -385,6 +537,12 @@ Both queries attached. The third one is the group-by, and I think I know what is
 A covering index should fix it, but I want to confirm on the replica first rather than take your word and a guess.
 
 Let me know what you think of the plan.`,
+    bodyHtml: toHtml(`
+Both queries attached. The third one is the group-by, and I think I know what is happening with it now — it is not the scan, it is that the sort spills. The intermediate result does not fit in the work memory and it is going to disk twice.
+
+A covering index should fix it, but I want to confirm on the replica first rather than take your word and a guess.
+
+Let me know what you think of the plan.`),
     category: "primary",
     threadId: "demo-thread-migration",
     unread: true,
@@ -401,6 +559,12 @@ Your annual return has been received and accepted.
 Company: Northwind Analytics Ltd Period ended: 31 December 2025 Filed: 14 April 2026
 
 No further action is required. A copy is attached for your records.`,
+    bodyHtml: toHtml(`
+Your annual return has been received and accepted.
+
+Company: Northwind Analytics Ltd Period ended: 31 December 2025 Filed: 14 April 2026
+
+No further action is required. A copy is attached for your records.`),
     category: "updates",
     attachments: [{ filename: "annual-return-2025.pdf", mimeType: "application/pdf", size: 184_320 }],
     demonstrates: "attachments",
@@ -414,6 +578,7 @@ No further action is required. A copy is attached for your records.`,
     at: 6 * DAY,
     subject: "Re: the migration plan",
     body: LONG_BODY,
+    bodyHtml: toHtml(LONG_BODY),
     category: "primary",
     threadId: "demo-thread-migration",
     demonstrates: "long_reads",
@@ -452,6 +617,22 @@ we vacated in March.
 If you can get the payment schedule corrected I will sign this afternoon. If the
 notices address is going to take a few days, that is fine too, I would rather it
 were right than quick.`,
+    bodyHtml: toHtml(`I have read it twice against the version from Tuesday and I think this one
+works. The clause that was bothering me is gone, and the indemnity wording is now
+the version our lawyer actually sent back, which I did not expect to survive this
+round.
+
+Two small things, neither of which I think should hold anything up:
+
+The payment schedule still says 45 days in section 3, and the summary at the top
+says 30. One of them is out of date.
+
+The address for the notices clause is the old one — the Rickmans building, which
+we vacated in March.
+
+If you can get the payment schedule corrected I will sign this afternoon. If the
+notices address is going to take a few days, that is fine too, I would rather it
+were right than quick.`),
     category: "primary",
     starred: true,
     demonstrates: "starred",
@@ -472,6 +653,12 @@ were right than quick.`,
 
 If that does not work I will do 09:30 remotely. No need to reply if 10:00 is
 fine, I will just move it.`,
+    bodyHtml: toHtml(`Room booking fell through for tomorrow morning, so could we move standup to
+10:00 instead of 09:30? It is only me and Tom for the first half anyway, and the
+09:30 slot is double-booked in the small room.
+
+If that does not work I will do 09:30 remotely. No need to reply if 10:00 is
+fine, I will just move it.`),
     category: "primary",
     unread: true,
     threadId: "demo-thread-standup",
@@ -498,6 +685,18 @@ lawyer today — I would rather have the conversation than let the date slip
 quietly.
 
 Either way I would like to send something tonight rather than nothing.`,
+    bodyHtml: toHtml(`I need to know today, because the counterparty's board meets Friday morning
+and they have asked twice whether we will have signed by then.
+
+If we are not signing this week, please tell them directly rather than letting it
+drift. A clear no this week costs us one quarter. A vague maybe costs us the
+relationship, because they will plan around a signature that was never coming.
+
+If it comes down to the indemnity language, tell me and I will take it to our
+lawyer today — I would rather have the conversation than let the date slip
+quietly.
+
+Either way I would like to send something tonight rather than nothing.`),
     category: "primary",
     unread: true,
     demonstrates: "important",
@@ -516,6 +715,10 @@ Either way I would like to send something tonight rather than nothing.`,
 the ones I took.
 
 The one of the harbour at dusk is the good one.`,
+    bodyHtml: toHtml(`Forwarding these because the printer wants originals and these are better than
+the ones I took.
+
+The one of the harbour at dusk is the good one.`),
     category: "primary",
     demonstrates: "low_priority",
   },
@@ -531,6 +734,10 @@ The one of the harbour at dusk is the good one.`,
 sign. Reading it this week.
 
 No rush to reply, I know you have a thing on at the moment.`,
+    bodyHtml: toHtml(`Found it in a second-hand shop in Malmö, which is either a coincidence or a
+sign. Reading it this week.
+
+No rush to reply, I know you have a thing on at the moment.`),
     category: "primary",
     demonstrates: "low_priority",
   },
@@ -548,6 +755,12 @@ View in browser · Manage preferences · Unsubscribe
 This week: a post on incremental view maintenance, a debugging write-up about a memory leak that took three weeks to find, and a short piece on why most internal tools are rewritten twice.
 
 Also in this issue: the twelve links we read, and one genuinely good talk about estimating distributed systems.`,
+    bodyHtml: toHtml(`
+View in browser · Manage preferences · Unsubscribe
+
+This week: a post on incremental view maintenance, a debugging write-up about a memory leak that took three weeks to find, and a short piece on why most internal tools are rewritten twice.
+
+Also in this issue: the twelve links we read, and one genuinely good talk about estimating distributed systems.`),
     category: "newsletter",
     demonstrates: "newsletters",
   },
@@ -563,6 +776,12 @@ You are receiving this because you subscribed. Unsubscribe at any time from the 
 In this issue: a city guide with no hotel recommendations, an interview about the economics of repair, and a long argument about whether the browser is a runtime or an operating system.
 
 View in browser.`,
+    bodyHtml: toHtml(`
+You are receiving this because you subscribed. Unsubscribe at any time from the link below, or manage preferences to choose what you get.
+
+In this issue: a city guide with no hotel recommendations, an interview about the economics of repair, and a long argument about whether the browser is a runtime or an operating system.
+
+View in browser.`),
     category: "newsletter",
     demonstrates: "newsletters",
   },
@@ -580,6 +799,12 @@ View in browser.`,
 Use code SPRING48 at checkout. Free shipping on orders over £50. Offer ends tonight — this is a limited time deal and the prices go back up at midnight whether or not you buy anything.
 
 Unsubscribe from these emails.`,
+    bodyHtml: toHtml(`
+48% off everything, today only. Flash sale, ends at midnight.
+
+Use code SPRING48 at checkout. Free shipping on orders over £50. Offer ends tonight — this is a limited time deal and the prices go back up at midnight whether or not you buy anything.
+
+Unsubscribe from these emails.`),
     category: "promotions",
     demonstrates: "promotional",
   },
@@ -595,6 +820,12 @@ Today's top products.
 1. A very small database      — 20% off the first year 2. A deploy tool              — free for open source 3. A design system            — new pricing
 
 Unsubscribe · Manage preferences · View in browser`,
+    bodyHtml: toHtml(`
+Today's top products.
+
+1. A very small database      — 20% off the first year 2. A deploy tool              — free for open source 3. A design system            — new pricing
+
+Unsubscribe · Manage preferences · View in browser`),
     category: "promotions",
     demonstrates: "promotional",
   },
@@ -612,6 +843,12 @@ Sam Okafor mentioned you in a post.
 "Spend a morning reading the query plans on the thing you are about to optimise. It is the highest-leverage hour available to you and almost nobody takes it."
 
 You have 3 new notifications.`,
+    bodyHtml: toHtml(`
+Sam Okafor mentioned you in a post.
+
+"Spend a morning reading the query plans on the thing you are about to optimise. It is the highest-leverage hour available to you and almost nobody takes it."
+
+You have 3 new notifications.`),
     category: "social",
     demonstrates: "social",
   },
@@ -627,6 +864,12 @@ Someone commented on your post in r/rust.
 "You can do it without an async runtime, but you will be reimplementing one poorly. The question is not whether you need the runtime but whether you want to own it."
 
 Reply to the comment.`,
+    bodyHtml: toHtml(`
+Someone commented on your post in r/rust.
+
+"You can do it without an async runtime, but you will be reimplementing one poorly. The question is not whether you need the runtime but whether you want to own it."
+
+Reply to the comment.`),
     category: "social",
     demonstrates: "social",
   },
@@ -642,6 +885,10 @@ Reply to the comment.`,
 Are you around thursday afternoon? I am in the office that day and would like to talk through the staging plan before it goes anywhere near production.
 
 The usual place, 15:00? If that is too tight I can do friday morning instead.`,
+    bodyHtml: toHtml(`
+Are you around thursday afternoon? I am in the office that day and would like to talk through the staging plan before it goes anywhere near production.
+
+The usual place, 15:00? If that is too tight I can do friday morning instead.`),
     category: "primary",
     threadId: "demo-thread-coffee",
     demonstrates: "top_contacts",
@@ -656,6 +903,10 @@ The usual place, 15:00? If that is too tight I can do friday morning instead.`,
 Thursday 15:00 works. I will bring the staging numbers, you bring the opinions.
 
 If it runs long there is a place nearby that does a proper lunch rather than sandwiches, if that helps motivate either of us.`,
+    bodyHtml: toHtml(`
+Thursday 15:00 works. I will bring the staging numbers, you bring the opinions.
+
+If it runs long there is a place nearby that does a proper lunch rather than sandwiches, if that helps motivate either of us.`),
     category: "primary",
     threadId: "demo-thread-coffee",
     demonstrates: "top_contacts",
@@ -670,6 +921,10 @@ If it runs long there is a place nearby that does a proper lunch rather than san
 Do we still have the spare key for the annexe? The lock was replaced last month and I cannot find the new one.
 
 No rush.`,
+    bodyHtml: toHtml(`
+Do we still have the spare key for the annexe? The lock was replaced last month and I cannot find the new one.
+
+No rush.`),
     category: "primary",
     demonstrates: "top_contacts",
   },
@@ -683,6 +938,10 @@ No rush.`,
 The kettle in the annexe has stopped heating. I have put a temporary sign on it so nobody wastes ten minutes waiting for it.
 
 I have ordered a replacement. It should arrive tuesday.`,
+    bodyHtml: toHtml(`
+The kettle in the annexe has stopped heating. I have put a temporary sign on it so nobody wastes ten minutes waiting for it.
+
+I have ordered a replacement. It should arrive tuesday.`),
     category: "primary",
     demonstrates: "top_contacts",
   },
@@ -694,6 +953,8 @@ I have ordered a replacement. It should arrive tuesday.`,
     subject: "fire drill on tuesday",
     body: `
 Building-wide fire drill on tuesday at 10:30. The whole floor evacuates via the back stairs, so the front entrance will be blocked for about twenty minutes.`,
+    bodyHtml: toHtml(`
+Building-wide fire drill on tuesday at 10:30. The whole floor evacuates via the back stairs, so the front entrance will be blocked for about twenty minutes.`),
     category: "updates",
     demonstrates: "top_contacts",
   },
@@ -709,6 +970,10 @@ Building-wide fire drill on tuesday at 10:30. The whole floor evacuates via the 
 I have read the plan. Two comments, both small.
 
 The rehearsal on the replica is the right call. I would add one more thing to it: run the rollback, not just the forward path. We have never actually executed the rollback on real data, and a rollback that has not been run is a rumour.`,
+    bodyHtml: toHtml(`
+I have read the plan. Two comments, both small.
+
+The rehearsal on the replica is the right call. I would add one more thing to it: run the rollback, not just the forward path. We have never actually executed the rollback on real data, and a rollback that has not been run is a rumour.`),
     category: "primary",
     threadId: "demo-thread-staging",
   },
@@ -722,6 +987,10 @@ The rehearsal on the replica is the right call. I would add one more thing to it
 Second comment: the timeline assumes nobody is on leave. Two people are, in the last week of the month.
 
 I do not think that should move the date. I think the date should assume one person can always be reached, which is a different kind of planning.`,
+    bodyHtml: toHtml(`
+Second comment: the timeline assumes nobody is on leave. Two people are, in the last week of the month.
+
+I do not think that should move the date. I think the date should assume one person can always be reached, which is a different kind of planning.`),
     category: "primary",
     threadId: "demo-thread-staging",
   },
@@ -739,6 +1008,12 @@ I am reaching out because we help teams with the specific problem you described 
 Would you be the right person to talk to about this, or is there someone else on the team who handles data infrastructure? A short call would be ideal but I am happy to send details in writing if that is easier.
 
 Best regards, Samir`,
+    bodyHtml: toHtml(`
+I am reaching out because we help teams with the specific problem you described on your site.
+
+Would you be the right person to talk to about this, or is there someone else on the team who handles data infrastructure? A short call would be ideal but I am happy to send details in writing if that is easier.
+
+Best regards, Samir`),
     category: "primary",
     demonstrates: "new_senders",
   },
@@ -752,6 +1027,10 @@ Best regards, Samir`,
 We are hiring for a role that your experience maps onto almost exactly, and I wanted to reach out directly rather than through a portal.
 
 Is this something you would be open to a short conversation about?`,
+    bodyHtml: toHtml(`
+We are hiring for a role that your experience maps onto almost exactly, and I wanted to reach out directly rather than through a portal.
+
+Is this something you would be open to a short conversation about?`),
     category: "primary",
     demonstrates: "new_senders",
   },
@@ -767,6 +1046,10 @@ Is this something you would be open to a short conversation about?`,
 Just confirming the time. It is 18:30 rather than 19:00, because of the room booking changing. Same place as last time.
 
 If that no longer works, let me know and we can find another slot.`,
+    bodyHtml: toHtml(`
+Just confirming the time. It is 18:30 rather than 19:00, because of the room booking changing. Same place as last time.
+
+If that no longer works, let me know and we can find another slot.`),
     category: "primary",
     unread: true,
     demonstrates: "quiet_contacts",
@@ -781,6 +1064,10 @@ If that no longer works, let me know and we can find another slot.`,
 Lift 2 will be out of service on the 22nd while it is serviced. Lift 1 will be running as normal, and the goods lift is unaffected.
 
 The 22nd is a Wednesday.`,
+    bodyHtml: toHtml(`
+Lift 2 will be out of service on the 22nd while it is serviced. Lift 1 will be running as normal, and the goods lift is unaffected.
+
+The 22nd is a Wednesday.`),
     category: "updates",
     demonstrates: "quiet_contacts",
   },
@@ -796,6 +1083,10 @@ The 22nd is a Wednesday.`,
 60% off, last chance, today only. Flash sale. Limited time. Offer ends tonight.
 
 Unsubscribe.`,
+    bodyHtml: toHtml(`
+60% off, last chance, today only. Flash sale. Limited time. Offer ends tonight.
+
+Unsubscribe.`),
     category: "promotions",
   },
   {
@@ -808,6 +1099,10 @@ Unsubscribe.`,
 70% off today only. Flash sale, limited time, ends tonight. Unsubscribe · Manage preferences.
 
 Buy now before the price goes up.`,
+    bodyHtml: toHtml(`
+70% off today only. Flash sale, limited time, ends tonight. Unsubscribe · Manage preferences.
+
+Buy now before the price goes up.`),
     category: "promotions",
   },
 
@@ -819,6 +1114,7 @@ Buy now before the price goes up.`,
     at: 35 * MINUTE,
     subject: "",
     body: "Click here to claim your prize",
+    bodyHtml: toHtml("Click here to claim your prize"),
     category: "promotions",
     demonstrates: "unsafe",
   },
@@ -834,6 +1130,12 @@ CONGRATULATIONS!!! YOU HAVE WON THE UNLIMITED CASH PRIZE!!!
 Click here to claim your free money now. Act now — this offer expires soon and we will not be able to contact you again. Earn money from home with no cost to you!
 
 Call now to claim your cash bonus!`,
+    bodyHtml: toHtml(`
+CONGRATULATIONS!!! YOU HAVE WON THE UNLIMITED CASH PRIZE!!!
+
+Click here to claim your free money now. Act now — this offer expires soon and we will not be able to contact you again. Earn money from home with no cost to you!
+
+Call now to claim your cash bonus!`),
     category: "promotions",
     demonstrates: "unsafe",
   },
@@ -849,6 +1151,12 @@ Your account will be suspended unless you verify your password immediately.
 Click here to verify your account: https://account-verify.example/login
 
 Failure to comply within 24 hours will result in permanent closure of your account and all associated data will be removed.`,
+    bodyHtml: toHtml(`
+Your account will be suspended unless you verify your password immediately.
+
+Click here to verify your account: https://account-verify.example/login
+
+Failure to comply within 24 hours will result in permanent closure of your account and all associated data will be removed.`),
     category: "promotions",
     demonstrates: "unsafe",
   },
@@ -866,6 +1174,12 @@ Your booking is confirmed.
 Booking reference: QK7T2P Outbound: 3 April, 07:10, London Heathrow Return: 10 April, 18:40, Lisbon
 
 Check-in opens 24 hours before departure. Your seat allocation is in the app.`,
+    bodyHtml: toHtml(`
+Your booking is confirmed.
+
+Booking reference: QK7T2P Outbound: 3 April, 07:10, London Heathrow Return: 10 April, 18:40, Lisbon
+
+Check-in opens 24 hours before departure. Your seat allocation is in the app.`),
     category: "reservations",
   },
   {
@@ -875,6 +1189,7 @@ Check-in opens 24 hours before departure. Your seat allocation is in the app.`,
     at: 9 * DAY,
     subject: "MEGA SALE!!!",
     body: "MEGA SALE!!! Buy now, act now, free gift with every order!!!",
+    bodyHtml: toHtml("MEGA SALE!!! Buy now, act now, free gift with every order!!!"),
     category: "promotions",
   },
   {
@@ -884,6 +1199,7 @@ Check-in opens 24 hours before departure. Your seat allocation is in the app.`,
     at: 12 * DAY,
     subject: "flash sale",
     body: "Flash sale. Limited time. Free shipping. Today only.",
+    bodyHtml: toHtml("Flash sale. Limited time. Free shipping. Today only."),
     category: "promotions",
   },
   {
@@ -893,6 +1209,7 @@ Check-in opens 24 hours before departure. Your seat allocation is in the app.`,
     at: 14 * DAY,
     subject: "top products",
     body: "Today's top products. Unsubscribe. Manage preferences.",
+    bodyHtml: toHtml("Today's top products. Unsubscribe. Manage preferences."),
     category: "promotions",
   },
   {
@@ -902,6 +1219,7 @@ Check-in opens 24 hours before departure. Your seat allocation is in the app.`,
     at: 13 * DAY,
     subject: "URGENT CLAIM",
     body: "You have won! Claim your prize now. Free money. Act now.",
+    bodyHtml: toHtml("You have won! Claim your prize now. Free money. Act now."),
     category: "promotions",
   },
 ];
@@ -927,10 +1245,10 @@ function toEmail(seed: Seed): Email {
     receivedAt: ago(seed.at),
     subject: seed.subject,
     body: seed.body,
-    // The demo has no HTML, so the reader renders the text body. That is also
-    // the honest default: a real message arrives with both, and the mapper
-    // keeps the HTML only when it differs from the text.
-    bodyHtml: undefined,
+    // Present only where the seed has it. The mapper's rule is the same one: a
+    // real message arrives with both halves, and the HTML is kept only when it
+    // says something the text does not.
+    bodyHtml: seed.bodyHtml,
     category: seed.category ?? "primary",
     starred: seed.starred ?? false,
     unread: seed.unread ?? false,

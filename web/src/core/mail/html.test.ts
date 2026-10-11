@@ -128,3 +128,57 @@ describe("countRemoteReferences", () => {
     ]);
   });
 });
+/**
+ * A `<style>` block is the other half of the counter, and it was missing.
+ *
+ * The cases above pin the false positives — `data:` URIs, `background="#fff"`, a
+ * newsletter quoting an `<img>` snippet — and the direction that matters most for
+ * a privacy claim is the opposite one. A counter that under-reports says "nothing
+ * was blocked", and somebody who reads that stops checking. Modern mail keeps its
+ * layout in a `<style>` block and its font imports, sprite sheets and tracking
+ * scripts with it, so a counter that only read attributes reported zero for
+ * precisely the messages that fetch the most.
+ */
+describe("remote references inside a <style> block", () => {
+  it("counts a font import", () => {
+    expect(countRemoteReferences("<style>@import url('https://x.example/f.css');</style>")).toBe(1);
+  });
+
+  it("counts the bare @import spelling, which has no url() around it", () => {
+    expect(countRemoteReferences("<style>@import 'https://x.example/f.css';</style>")).toBe(1);
+    expect(countRemoteReferences('<style>@import "https://x.example/f.css";</style>')).toBe(1);
+  });
+
+  it("counts an import once, not once per spelling of it", () => {
+    // `@import url(x)` matches both the import pattern and the `url()` pattern, so
+    // a naive double scan reports 2 for one font. A counter that double-counts is
+    // the same class of lie as one that under-counts.
+    expect(countRemoteReferences("<style>@import url(https://x.example/f.css);</style>")).toBe(1);
+  });
+
+  it("counts every url() a rule paints", () => {
+    expect(
+      countRemoteReferences(
+        "<style>.a{background:url(https://x.example/a.png)}.b{background:url(https://x.example/b.png)}</style>",
+      ),
+    ).toBe(2);
+  });
+
+  it("counts an import that sits inside a full document's head", () => {
+    const html =
+      "<html><head><style>@import url(https://x.example/f.css);</style></head><body><p>x</p></body></html>";
+    expect(countRemoteReferences(html)).toBe(1);
+  });
+
+  it("does not count a local url() or a data: one", () => {
+    expect(countRemoteReferences("<style>a{fill:url(#gradient)}</style>")).toBe(0);
+    expect(countRemoteReferences("<style>a{background:url(data:image/png;base64,iVBOR)}</style>")).toBe(0);
+  });
+
+  it("does not count the word url() inside a quoted snippet in the body text", () => {
+    // The escaped-HTML case the attribute scan already guards, on the other side
+    // of it: a newsletter explaining its own unsubscribe link quotes a stylesheet.
+    const html = "<pre>&lt;style&gt;a{background:url(https://x.example/a.png)}&lt;/style&gt;</pre>";
+    expect(countRemoteReferences(html)).toBe(0);
+  });
+});

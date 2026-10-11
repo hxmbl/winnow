@@ -11,10 +11,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
-    "check": "npm run typecheck && npm run lint && npm run test",
+    "check": "npm run typecheck && npm run lint && npm run lint:proxy && npm run test",
     "smoke": "npm run build && node scripts/smoke.mjs",
     "tauri:dev": "cd ../native && cargo tauri dev",
-    "tauri:build": "node scripts/bundle.mjs"
+    "tauri:build": "node scripts/bundle.mjs",
+    "proxy": "node --experimental-strip-types ../proxy/server.ts",
+    "lint:proxy": "cd .. && web/node_modules/.bin/eslint --config web/eslint.proxy.config.mjs proxy"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

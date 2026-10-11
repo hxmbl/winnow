@@ -9,12 +9,12 @@
  * into newlines, then strip the remaining tags. Reversing the first two steps
  * would leave JavaScript source in the middle of a quoted reply.
  *
- * **Rendering.** The reader never injects message HTML into the document
- * unsanitised — a sender controls it completely. Rather than write an
- * allowlist-based sanitiser, Winnow renders text and offers a per-message
- * "show the original" that opens in the system browser, outside the app's
- * origin. That is a smaller amount of security-critical code, which is the
- * right trade for a mail client.
+ * **Rendering.** The reader does not inject unsanitised message HTML into the
+ * document. It sanitises it first — allowlists, entity-aware URL checks, a
+ * balancing pass — and renders the result inline; the untouched original is one
+ * click away, in a `sandbox=""` frame, which is a different origin and runs none
+ * of the sender's code. The sanitiser is `sanitize.ts`, and the remote-reference
+ * counting in this file is what tells the reader what that rendering withheld.
  */
 
 /** Containers whose *contents* are code, not prose. */
@@ -160,6 +160,8 @@ const TAG = /<[a-zA-Z][^>]*>/g;
 const ATTRIBUTE =
   /([a-zA-Z][a-zA-Z0-9:_.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
 const URL_FUNCTION = /url\(\s*['"]?(?!data:|#)[^)'"\s]*['"]?\s*\)/gi;
+/** `@import` with or without a `url()` around it. Both spellings fetch. */
+const AT_IMPORT = /@import\s+(?:url\(\s*)?['"]?(?!data:|#)[^;)'"\s]*/gi;
 
 /** A `data:` URI: inline bytes already inside the message, involving nobody. */
 const INLINE_DATA_URI = /^\s*data:/i;
@@ -169,6 +171,9 @@ const NAMES_A_RESOURCE = /^\s*(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 
 /** Attributes whose value is a URL by definition. */
 const URL_ATTRIBUTES = new Set(["src", "srcset", "poster"]);
+
+/** A `<style>` element and its contents, which is the one place CSS can fetch. */
+const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 
 /**
  * The remote references a body contains.
@@ -188,6 +193,13 @@ const URL_ATTRIBUTES = new Set(["src", "srcset", "poster"]);
  * telling the user the opposite of the truth about their own privacy — which is worse
  * than saying nothing, because somebody who reads "nothing was blocked" stops
  * checking.
+ *
+ * It also ran the other way. It looked at attributes only, so a message whose whole
+ * layout lived in a `<style>` block — which is most modern mail — reported nothing at
+ * all while its stylesheet pulled a font, a tracking script and a sprite sheet. The
+ * count is the reader's whole explanation of what it withheld, so an undercount is the
+ * failure that matters: it reads as "nothing was blocked", and somebody who reads
+ * that stops looking.
  *
  * The references are returned rather than counted so the shapes can be asserted; the
  * count is the presentation of that list, not a separate piece of arithmetic.
@@ -217,6 +229,18 @@ export function remoteReferences(html: string): string[] {
         for (const url of value.matchAll(URL_FUNCTION)) found.push(url[0]);
       }
     }
+  }
+
+  // `<style>` contents, which is where a modern message keeps its layout and
+  // therefore its font imports and its sprite sheets. `@import` is matched and
+  // *removed* first, because `@import url(…)` would otherwise also match
+  // `URL_FUNCTION` and one import would be counted twice — and a counter that
+  // double-counts is the same class of lie as one that under-counts, just less
+  // embarrassing.
+  for (const block of html.matchAll(STYLE_BLOCK)) {
+    const withoutImports = (block[1] ?? "").replace(AT_IMPORT, "");
+    for (const imported of (block[1] ?? "").matchAll(AT_IMPORT)) found.push(imported[0]);
+    for (const url of withoutImports.matchAll(URL_FUNCTION)) found.push(url[0]);
   }
 
   return found;

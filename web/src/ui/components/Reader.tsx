@@ -4,17 +4,27 @@
  * A mail client spends most of its life on this screen, so the decisions here
  * are about reading rather than about looking.
  *
- * **The body is text, not HTML.** A sender controls their message completely, so
- * rendering it as markup means running their code in the app's origin — with
- * access to everything the app knows. Winnow renders the plain text the sync
- * already extracted, which is also what the classifier read and what the quote
- * uses, so what you read is what Winnow decided about. The original HTML is one
- * click away, in your browser, which is a different origin entirely.
+ * **The body renders as markup, and that is a change of position rather than a
+ * change of mind.** This file used to open by saying that the body is text and not
+ * HTML, and that was correct then: the only way to show a message as its sender
+ * wrote it was a `sandbox=""` iframe, which is safe but is not something a
+ * newsletter can be read in. A newsletter in that state is a column of words with
+ * its URLs spelled out, and no amount of correctness makes that a good reader.
  *
- * **Remote content is blocked by default.** A tracking pixel confirms a message
- * was opened and roughly where; a remote stylesheet can exfiltrate anything in
- * the DOM. The count of blocked references is stated rather than hidden, so the
- * "images blocked" affordance is honest about what it is withholding.
+ * What changed is not the principle but what can be asserted about it. There is now
+ * a sanitiser (`core/mail/sanitize.ts`) with an allowlist and a test for every way a
+ * sender attacks one, so "this markup is safe to put in our document" became
+ * something a build can check rather than something to hope for. The body is now
+ * rendered inline by `MessageBody`, which also keeps the plain text one tap away
+ * and still offers the untouched original in a sandboxed frame. The sandbox never
+ * went anywhere: it is what "As sent" is.
+ *
+ * **Remote content is still blocked by default.** Rendering markup inline does not
+ * change who gets to learn that a message was opened. The consent decision is still
+ * `core/mail/imageConsent`, it is still a choice the reader makes before reading
+ * rather than a disclosure afterwards, and the count of withheld references is
+ * still stated rather than hidden — so the "images blocked" affordance is honest
+ * about what it is withholding.
  *
  * **The badges come from the same predicates as the filters.** One shared
  * threshold, so a message wearing an "Important" chip is in the Important pill
@@ -27,6 +37,7 @@ import {
   Archive,
   Ban,
   CornerUpLeft,
+  Eye,
   EyeOff,
   Forward,
   ImageOff,
@@ -49,6 +60,8 @@ import {
   type EmailSignals,
 } from "../../core/model/signals";
 import { filterIcon } from "../filterIcons";
+import { MessageBody } from "./MessageBody";
+import { platform } from "../../platform";
 
 /**
  * The first thing someone said, on one line.
@@ -569,29 +582,33 @@ export function Reader({
           </h1>
 
           {/*
-            The sender controls this text entirely, so it is rendered as text.
+            The body itself.
 
-            `whitespace-pre-wrap` preserves the sender's own paragraph breaks
-            without re-wrapping to the pane width — an email body is
-            pre-formatted by convention, and reflowing it would shred the quoted
-            reply underneath. The *font* is the system sans rather than a
-            monospace one, because this is prose a person wrote, and monospace
-            makes ordinary email read as a log file. The monospace stack is
-            still used for the one place it is right: nothing here, which is
-            the point — there is no code in an email body worth a monospace
-            treatment, and pretending otherwise costs legibility on every
-            message.
+            Was the extracted plain text and nothing else, which is why a newsletter
+            arrived as a column of words with its URLs spelled out — see
+            `MessageBody`, which now owns all three forms and the control that picks
+            between them. The plain text is still one tap away and is still what the
+            classifier read and what a reply quotes, so the two views cannot disagree
+            about what the message says.
+
+            `onOpenLink` routes a click out to the system browser rather than
+            letting it navigate the app. That is the same reason the old
+            "Open the original" button opens in the browser and not in a `winnow:`
+            deep link: a link in a message must reach a different origin, or it
+            reaches this one.
           */}
-          <div className="selectable mt-4 max-w-[68ch] whitespace-pre-wrap text-body text-ink-body">
-            {email.body}
-          </div>
+          <MessageBody
+            email={email}
+            imagesAllowed={imagesAllowed}
+            onOpenLink={(url) => void platform.openExternal(url)}
+          />
 
           {/*
             The rich version is on its way.
 
-            Worth saying out loud rather than rendering nothing: the plain text above is
+            Worth saying out loud rather than rendering nothing: the plain text is
             already complete, so a reader who opens an older message would otherwise
-            conclude the message simply had no formatting — when in fact the markup is
+            conclude the message simply has no formatting — when in fact the markup is
             arriving, and the reason it was not resident is that Winnow does not keep
             two thirds of every message in memory for the sake of one open pane.
           */}
@@ -606,70 +623,40 @@ export function Reader({
           )}
 
           {/*
-            The message as its sender wrote it.
+            The standing account of what the message was still fetching.
 
-            **This is the only place in the app where a sender's markup is rendered**,
-            and the sandbox is the whole security argument. `sandbox=""` — the empty
-            string, with *no token named* — is the most restrictive value the attribute
-            can take: no scripts, no forms, no popups, no top-level navigation, no
-            plugins, and an opaque origin rather than this app's. Every one of those is
-            load-bearing. Adding `allow-same-origin` would hand a message the ability
-            to reach `localStorage`, the store and the keybind listener; adding
-            `allow-scripts` would let it run code at all. Neither is negotiable for
-            "faithful rendering", and neither is needed for it — tables, styles, and
-            images all work fine with nothing granted.
+            It used to sit above a `h-[32rem]` iframe and read "N remote things are
+            loading · scripts and links are blocked", which was true only in the
+            state it could appear in. `MessageBody` now renders the sanitised markup
+            inline and offers "As sent" for the untouched original, so this note
+            appears in *both* states — and "are loading" is the opposite of the truth
+            when images are off, which is the state it appears in most often. A
+            privacy note that says the wrong thing is worse than no note: somebody
+            reads it, believes the message is talking to their own machine, and stops
+            thinking about it.
 
-            The frame is only ever mounted once `imagesAllowed` is true, and that is
-            the second half of the boundary rather than a detail: a sandbox does *not*
-            block remote images, so rendering the frame at all would fetch them. The
-            offer above is therefore the thing standing between a tracking pixel and
-            the sender, and it is a real choice rather than a disclosure that happens
-            after the fact. The rule behind `imagesAllowed` is in
-            `core/mail/imageConsent`, which is where it is tested.
-
-            All of it sits behind an explicit opt-in because the cost is real and is
-            stated on screen — the sender learns the message was opened and roughly
-            where — which is why it is off by default and why the text rendering above
-            is what most messages get. A toggle that only removed this panel, as it
-            used to, was a control that changed nothing and took away the app's own
-            explanation of itself.
-
-            `referrerPolicy="no-referrer"` so that even once images are allowed, the
-            request does not carry the URL of the message being read.
-
-            `key` on the frame: the document changes when the message does, and a
-            reused frame would keep the previous message's scroll position and its
-            already-loaded images. The reader is already remounted per selection by
-            its parent, so this is belt to those braces.
+            So the wording follows the answer rather than the presence of a panel.
+            `scripts and links are blocked` is unconditional and stays — no form of
+            this message runs a sender's script.
           */}
-          {email.bodyHtml && imagesAllowed && (
-            <div className="mt-6 max-w-[68ch]">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="flex items-center gap-2 text-[12px] font-medium text-ink-muted">
+          {email.bodyHtml && blocked > 0 && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="flex items-center gap-2 text-[12px] font-medium text-ink-muted">
+                {imagesAllowed ? (
+                  <Eye size={13} strokeWidth={1.9} aria-hidden="true" />
+                ) : (
                   <EyeOff size={13} strokeWidth={1.9} aria-hidden="true" />
-                  {blocked} remote {blocked === 1 ? "thing is" : "things are"} loading · scripts
-                  and links are blocked
-                </p>
-                <button
-                  type="button"
-                  onClick={actions.onShowOriginal}
-                  className="text-[12px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                >
-                  Open the original
-                </button>
-              </div>
-              <iframe
-                key={email.id}
-                title={`Message from ${displayName(email)}`}
-                srcDoc={email.bodyHtml}
-                // An empty `sandbox`, deliberately. Empty is the *most* restrictive
-                // value there is: every capability is off. Naming `allow-same-origin`
-                // here would give the frame access to this app's own origin, which is
-                // the one thing that would make rendering a sender's markup dangerous.
-                sandbox=""
-                referrerPolicy="no-referrer"
-                className="h-[32rem] w-full rounded-pane bg-surface-sunken"
-              />
+                )}
+                {blocked} remote {blocked === 1 ? "thing is" : "things are"}{" "}
+                {imagesAllowed ? "loading" : "withheld"} · scripts and links are blocked
+              </p>
+              <button
+                type="button"
+                onClick={actions.onShowOriginal}
+                className="text-[12px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Open the original
+              </button>
             </div>
           )}
 

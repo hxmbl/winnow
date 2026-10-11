@@ -246,7 +246,7 @@ describe("matchesBuiltin — unsafe", () => {
         expected.includes(message.gmailId),
       );
     }
-    expect(DEMO_EMAILS).toHaveLength(52);
+    expect(DEMO_EMAILS).toHaveLength(53);
   });
 });
 
@@ -700,7 +700,7 @@ describe("countAllFilters", () => {
     // as urgent and is a first-time sender, so those two are one lower too.
     expect(counted.get("security")).toBe(2);
     expect(counted.get("urgent")).toBe(3);
-    expect(counted.get("new_senders")).toBe(25);
+    expect(counted.get("new_senders")).toBe(26);
     expect(counted.get("unsafe")).toBe(1);
   });
 
@@ -738,7 +738,7 @@ describe("countAllFilters", () => {
     // Each number below was derived by reading the seed, not by asking the code.
     // `starred` is 1 because `demo-starred-1` is the only starred message in the
     // inbox; `attachments` is 1 because `demo-action-4` is the only message
-    // carrying one; `low_priority` is 10 because ten of the 44 carry no signal
+    // carrying one; `low_priority` is 11 because eleven of the 45 carry no signal
     // and score 50 or below. A seed edit means re-deriving this table, and that
     // is the intended cost: the alternative is a count that drifts with nobody
     // noticing, which is the defect this file exists to catch.
@@ -755,12 +755,12 @@ describe("countAllFilters", () => {
       ["starred", 1],
       ["unread", 6],
       ["attachments", 1],
-      ["new_senders", 25],
+      ["new_senders", 26],
       ["top_contacts", 11],
       ["quiet_contacts", 12],
       ["newsletters", 4],
-      ["promotional", 4],
-      ["low_priority", 10],
+      ["promotional", 5],
+      ["low_priority", 11],
       ["long_reads", 1],
       ["social", 2],
       ["unsafe", 1],
@@ -808,9 +808,9 @@ describe("rankFilters", () => {
       "top_contacts",
       "low_priority",
       "unread",
+      "promotional",
       "receipts",
       "newsletters",
-      "promotional",
       "urgent",
       "security",
       "codes",
@@ -829,10 +829,16 @@ describe("rankFilters", () => {
     // the order is the catalog — receipts, newsletters, promotional — not the
     // order they happen to be counted in, which for `Map` insertion is the
     // catalog order too but only by accident.
+    //
+    // `promotional` was in the four-message group until the demo gained a seed
+    // with markup in it; at five it is no longer tied with anything, so the group
+    // is now two buckets and the tie-break is asserted over the pair that
+    // remains. A table that quietly kept the old membership would pass the
+    // membership assertion and fail the ordering one, which is the arrangement.
     const counted = countAllFilters(inbox, signals, profile);
     const ranked = rankFilters(inbox, signals, profile);
     const tied: [number, BuiltinSmartFilter[]][] = [
-      [4, ["receipts", "newsletters", "promotional"]],
+      [4, ["receipts", "newsletters"]],
       [2, ["codes", "travel", "events", "social"]],
       [1, ["starred", "attachments", "long_reads"]],
     ];
@@ -850,10 +856,10 @@ describe("rankFilters", () => {
     // A bucket the rail advertises but that nothing lands in is a pill leading
     // to an empty list. The empty mailbox is the easy half; this is the half
     // that bites, since the demo does have a starred message and taking it out
-    // leaves 43 messages still ranking.
+    // leaves 44 messages still ranking.
     const unstarred = inbox.filter((m) => !m.starred);
     const ranked = rankFilters(unstarred, classifyAll(unstarred, profile), profile);
-    expect(unstarred.length).toBe(43);
+    expect(unstarred.length).toBe(44);
     expect(ranked).not.toContain("starred");
     expect(ranked).toContain("important");
     expect(ranked).toContain("social");
@@ -881,9 +887,9 @@ describe("rankFilters", () => {
       "top_contacts",
       "low_priority",
       "unread",
+      "promotional",
       "receipts",
       "newsletters",
-      "promotional",
       "urgent",
       "security",
       "codes",

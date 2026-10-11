@@ -1144,10 +1144,127 @@ try {
   // label: "Load images" sat under one message and turned on remote content for every
   // message, permanently. A decision about one message is not a decision about all of
   // them, and the global switch still exists in Settings where its scope is visible.
-  const demoHasHtml = await page.evaluate(() =>
-    [...document.querySelectorAll("iframe[title^='Message from']")].length,
+  // With the new rich HTML rendering, demo messages now have HTML bodies that render
+  // inline by default. The check is now that the rich view is available when a
+  // message is opened.
+  await page.keyboard.press("j");
+  await page.waitForTimeout(200);
+  const demoHasRichView = await page.evaluate(() =>
+    [...document.querySelectorAll("button")].filter(b => b.textContent?.includes("Rich")).length,
   );
-  check("the demo reader renders text, not markup", demoHasHtml === 0);
+  check("the demo reader offers a rich view for HTML messages", demoHasRichView > 0);
+
+  /*
+   * The rich view, on the one demo message that has markup.
+   *
+   * This is the assertion the whole feature exists to be able to make. It used to be
+   * impossible to write: a newsletter rendered as a column of words with its URLs
+   * spelled out, so there was nothing about it to assert beyond "no iframe". Now the
+   * assertions are about what actually reached the document — the table layout is
+   * there, the embedded image loaded, the remote ones are placeholders with no `src`,
+   * and nothing a sender could have put in it survived.
+   */
+  // Reached by search rather than by scrolling for it. The list is windowed, so a row
+  // that is not inside the current viewport does not exist in the DOM to be clicked,
+  // and a locator waiting on one hangs for the full timeout. Search is also the more
+  // honest route: it is how a reader finds a message four days old.
+  await page.keyboard.press("/");
+  await page.locator("#winnow-search").fill("Hark Pro");
+  await page.waitForTimeout(400);
+  await openMessage();
+  await page.waitForTimeout(700);
+
+  const rendered = await page.evaluate(() => {
+    const host = document.querySelector("[data-wn-email]");
+    if (!host) return null;
+    const images = [...host.querySelectorAll("img")];
+    return {
+      tables: host.querySelectorAll("table").length,
+      headings: [...host.querySelectorAll("h1")].map((h) => h.textContent.trim()),
+      // The inline logo and the embedded illustration are bytes already inside the
+      // message, so they render. The tracking pixel and the CDN hero are remote, so
+      // they do not — and they do not carry a `src` a browser could follow.
+      loaded: images.filter((i) => (i.getAttribute("src") ?? "").startsWith("data:")).length,
+      withheld: images.filter((i) => i.hasAttribute("data-wn-blocked-src")).length,
+      fetchable: images.filter((i) => (i.getAttribute("src") ?? "").startsWith("http")).length,
+      scripts: host.querySelectorAll("script, iframe, object, embed, form").length,
+      handlers: host.querySelectorAll("[onclick], [onerror], [onload]").length,
+      // A `javascript:` link must not survive as an `href` either.
+      jsLinks: [...host.querySelectorAll("a")].filter((a) =>
+        (a.getAttribute("href") ?? "").toLowerCase().startsWith("javascript:")).length,
+    };
+  });
+
+  check("a message with markup renders its layout, not a column of words", rendered?.tables > 0,
+    `${rendered?.tables} tables`);
+  check("the sender's own typography reaches the document", rendered?.headings.join(" ") === "hark pro is here",
+    JSON.stringify(rendered?.headings));
+  check("the message's own images render", rendered?.loaded === 2, `${rendered?.loaded} loaded`);
+  check("and its remote ones do not, with nothing left a browser could fetch",
+    rendered?.fetchable === 0 && rendered?.withheld === 2,
+    `${rendered?.fetchable} fetchable, ${rendered?.withheld} withheld`);
+  check("no script, frame, object or form survives sanitising", rendered?.scripts === 0,
+    `${rendered?.scripts} found`);
+  check("no event handler survives", rendered?.handlers === 0, `${rendered?.handlers} found`);
+  check("no javascript: link survives", rendered?.jsLinks === 0, `${rendered?.jsLinks} found`);
+
+  // The other two forms, and the switch between them.
+  const forms = page.locator('[role="group"][aria-label="How to show this message"] button');
+  const labels = await forms.allTextContents();
+  check("the body offers rich, plain and the original", labels.join("|") === "Rich|Plain text|As sent",
+    labels.join("|"));
+
+  await forms.nth(1).click();
+  await page.waitForTimeout(300);
+  const plainShown = await page.evaluate(() => {
+    const host = document.querySelector("[data-wn-email]");
+    return host === null && document.body.innerText.includes("Hark Pro is here.");
+  });
+  check("plain text is the extracted prose, with no markup", plainShown);
+
+  await forms.nth(2).click();
+  await page.waitForTimeout(600);
+  const sent = await page.evaluate(() => {
+    const frame = [...document.querySelectorAll("iframe")].find((f) => f.title === "Message as sent");
+    if (!frame) return null;
+    const doc = frame.getAttribute("srcdoc") ?? "";
+    return {
+      sandbox: frame.getAttribute("sandbox"),
+      referrer: frame.getAttribute("referrerpolicy"),
+      hasSenderCss: doc.includes("Georgia"),
+      noScript: !/<script/i.test(doc),
+      noRemoteInHead: !/@import|url\(\s*['"]?https?:/i.test(doc),
+    };
+  });
+  check("the original is sandboxed with nothing granted", sent?.sandbox === "", JSON.stringify(sent?.sandbox));
+  check("and sends no referrer", sent?.referrer === "no-referrer", String(sent?.referrer));
+  check("and keeps the sender's own stylesheet, which the rich view has to drop", sent?.hasSenderCss === true);
+  check("with no script and no remote reference in its document",
+    sent?.noScript === true && sent?.noRemoteInHead === true, JSON.stringify(sent));
+
+  await forms.nth(0).click();
+  await page.waitForTimeout(300);
+
+  // A link in a message must leave the app rather than navigate it.
+  const navigated = await page.evaluate(() => {
+    let opened = null;
+    const real = window.open;
+    window.open = (url) => { opened = url; return null; };
+    const link = document.querySelector("[data-wn-email] a[href^='https://']");
+    link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    window.open = real;
+    return { opened, href: link?.getAttribute("href") ?? null };
+  });
+  check("a link in a message is handed to the system browser, not followed in place",
+    navigated.opened === navigated.href && String(navigated.href).startsWith("https://"),
+    JSON.stringify(navigated));
+
+  await closeReader();
+  // Clear the search, because the mailbox is handed back to the rest of the run.
+  await page.locator("#winnow-search").fill("");
+  await page.waitForTimeout(250);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
 
   // ── The mailboxes ──────────────────────────────────────────────────────────
 
