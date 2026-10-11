@@ -43,12 +43,13 @@ export const MAX_PAGE_SIZE = 200;
 /**
  * Gmail's per-user quota on new projects is 6,000 units/minute (and 1.2M/minute
  * for the whole project, which is not the binding constraint for one person).
- * The bucket refills at 5,000 units/minute — a sixth under the per-user line —
- * so even a burst that fills the bucket cannot trip the number Google enforces.
- * One account is signed in at a time, so one bucket per client is one bucket
- * per user.
+ * The bucket refills at 4,800 units/minute and holds at most 1,000 burst units.
+ * Even the maximum burst plus a full minute of refill stays below Google's
+ * 6,000-unit per-user limit. One account is signed in at a time, so one bucket
+ * per client is one bucket per user.
  */
-export const UNITS_PER_MINUTE = 5_000;
+export const UNITS_PER_MINUTE = 4_800;
+export const BURST_UNITS = 1_000;
 
 /** How many times a rate-limited request is replayed before the error surfaces. */
 export const MAX_RETRIES = 6;
@@ -118,11 +119,9 @@ export function backoffMs(attempt: number): number {
 /**
  * A token bucket of Gmail quota units, shared by every request a client makes.
  *
- * It refills at `UNITS_PER_MINUTE` per minute up to a burst capacity of the
- * same size — an idle minute buys at most a minute's worth of spending, so a
- * burst after a pause is bounded by what Gmail allows in a minute, not by how
- * long the app sat idle. `take` acquires *before* the request goes out, so the
- * pacing applies to sync paging and to the burst inside a sync alike.
+ * It refills at `UNITS_PER_MINUTE` per minute up to a separate burst capacity.
+ * `take` acquires *before* the request goes out, so the pacing applies to sync
+ * paging and to the burst inside a sync alike.
  *
  * `take` calls are serialised through a promise chain: two requests awaiting
  * the bucket simultaneously cannot hand each other the same units.
@@ -136,21 +135,22 @@ export class QuotaBucket {
     private readonly unitsPerMinute: number = UNITS_PER_MINUTE,
     private readonly now: () => number = Date.now,
     private readonly sleep: Sleep = realSleep,
+    private readonly capacity: number = Math.min(BURST_UNITS, unitsPerMinute),
   ) {
-    this.units = unitsPerMinute;
+    this.units = capacity;
     this.last = now();
   }
 
   /** Wait until `cost` units are available, then consume them. */
   take(cost: number): Promise<void> {
-    if (cost > this.unitsPerMinute) {
+    if (cost > this.capacity) {
       return Promise.reject(new RangeError("quota cost exceeds bucket capacity"));
     }
     const next = this.queue.then(async () => {
       for (;;) {
         const now = this.now();
         this.units = Math.min(
-          this.unitsPerMinute,
+          this.capacity,
           this.units + ((now - this.last) / 60_000) * this.unitsPerMinute,
         );
         this.last = now;

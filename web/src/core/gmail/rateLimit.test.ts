@@ -11,10 +11,12 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  BURST_UNITS,
   GmailClient,
   MAX_BACKOFF_MS,
   MAX_RETRIES,
   QuotaBucket,
+  UNITS_PER_MINUTE,
   backoffMs,
   costOf,
   isRateLimited,
@@ -111,7 +113,7 @@ describe("QuotaBucket — the meter", () => {
   // A bucket of 60 units/minute refills one unit per second, which keeps the
   // arithmetic exact: a deficit of `d` units is a wait of `d` seconds.
   const bucket = (clock: ReturnType<typeof fakeClock>) =>
-    new QuotaBucket(60, clock.now, clock.sleep);
+    new QuotaBucket(60, clock.now, clock.sleep, 60);
 
   it("spends immediately while the burst capacity holds", async () => {
     const clock = fakeClock();
@@ -173,6 +175,28 @@ describe("QuotaBucket — the meter", () => {
     await b.take(3);
     // 60 capacity + 60 seconds of refill == 70 units taken, none served early.
     expect(clock.ms()).toBe(10_000);
+  });
+
+  it("limits every 60-second window to burst capacity plus one minute of refill", async () => {
+    const clock = fakeClock();
+    const b = new QuotaBucket(UNITS_PER_MINUTE, clock.now, clock.sleep);
+    const grants: number[] = [];
+    const requestCount = BURST_UNITS + UNITS_PER_MINUTE + 1_000;
+
+    for (let i = 0; i < requestCount; i += 1) {
+      await b.take(1);
+      grants.push(clock.ms());
+    }
+
+    let windowEnd = 0;
+    for (let windowStart = 0; windowStart < grants.length; windowStart += 1) {
+      windowEnd = Math.max(windowEnd, windowStart);
+      const boundary = grants[windowStart] + 60_000;
+      while (windowEnd < grants.length && grants[windowEnd] < boundary) {
+        windowEnd += 1;
+      }
+      expect(windowEnd - windowStart).toBeLessThanOrEqual(BURST_UNITS + UNITS_PER_MINUTE);
+    }
   });
 });
 
