@@ -357,3 +357,7 @@ stingy: it is the first thing you read and the thing you check the list row agai
 The threshold is 1200px rather than `lg` because `lg` is the width at which the pane
 *appears*, not the width at which it fits — at 1024 the pane is 388px, which is exactly
 the case that needed fixing.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
