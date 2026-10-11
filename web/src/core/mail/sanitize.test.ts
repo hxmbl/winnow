@@ -297,6 +297,12 @@ describe("structure", () => {
     expect(clean(html)).toContain('cellpadding="0"');
   });
 
+  it("marks pre blocks with data-wn-code-block for copy buttons", () => {
+    const html = "<pre>const x = 1;</pre>";
+    const result = clean(html);
+    expect(result).toContain('data-wn-code-block=""');
+  });
+
   it("keeps the table attributes that carry a layout", () => {
     const html = '<table border="0" cellspacing="0" width="600" bgcolor="#ffffff" align="center">';
     const result = clean(html);

@@ -1349,6 +1349,11 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
       attrs.push('target="_blank"', 'rel="noopener noreferrer nofollow"');
     }
 
+    // Mark `<pre>` blocks so the reader can add copy buttons to them.
+    if (name === "pre") {
+      attrs.push('data-wn-code-block=""');
+    }
+
     // `name` on an anchor is a fragment target, not an id, and is harmless; but a
     // duplicate `id` from a sender would collide with the app's own, so no `id` is
     // on any list in the first place.
@@ -1459,7 +1464,8 @@ const EMAIL_BASELINE_RULES: readonly Rule[] = [
   [
     "pre",
     `margin: 1em 0; padding: 0.85em 1em; background: #F3F5F6; border-radius: 8px; overflow-x: auto;
-     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.5;`,
+     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.5;
+     position: relative;`,
   ],
   ["code", `font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em;`],
   ["hr", `border: 0; border-top: 1px solid #E4E7E9; margin: 1.5em 0;`],

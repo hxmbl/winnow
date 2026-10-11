@@ -30,7 +30,7 @@
  * gets to learn that a message was opened.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Code2, Eye, Server, Type } from "lucide-react";
 import {
   emailDocument,
@@ -148,8 +148,96 @@ function RichBody({
   html: string;
   onOpenLink: (url: string) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Add copy buttons to code blocks after the HTML is rendered
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const codeBlocks = container.querySelectorAll('pre[data-wn-code-block]');
+    codeBlocks.forEach((pre) => {
+      const preElement = pre as HTMLPreElement;
+      // Set position relative on the pre element if it's not already
+      if (getComputedStyle(preElement).position === "static") {
+        preElement.style.position = "relative";
+      }
+
+      // Check if a copy button already exists
+      if (preElement.querySelector('[data-wn-copy-button]')) return;
+
+      // Create a wrapper for the copy button
+      const buttonWrapper = document.createElement("div");
+      buttonWrapper.setAttribute("data-wn-copy-button", "");
+      buttonWrapper.style.position = "absolute";
+      buttonWrapper.style.top = "0.5em";
+      buttonWrapper.style.right = "0.5em";
+      buttonWrapper.style.opacity = "0";
+      buttonWrapper.style.transition = "opacity 0.15s ease";
+
+      // Create the button element
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className =
+        "flex h-7 w-7 items-center justify-center rounded bg-white text-ink-muted shadow-sm transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+      button.setAttribute("aria-label", "Copy code");
+      button.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+
+      let copied = false;
+      let timeoutId: number | null = null;
+
+      const handleCopy = async () => {
+        try {
+          await navigator.clipboard.writeText(preElement.textContent || "");
+          copied = true;
+          button.setAttribute("aria-label", "Copied");
+          button.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+          if (timeoutId !== null) {
+            window.clearTimeout(timeoutId);
+          }
+          timeoutId = window.setTimeout(() => {
+            copied = false;
+            button.setAttribute("aria-label", "Copy code");
+            button.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+            if (!copied) {
+              buttonWrapper.style.opacity = "0";
+            }
+          }, 2000);
+        } catch (error) {
+          console.error("Failed to copy code:", error);
+        }
+      };
+
+      button.addEventListener("click", handleCopy);
+
+      // Show/hide on hover
+      preElement.addEventListener("mouseenter", () => {
+        buttonWrapper.style.opacity = "1";
+      });
+      preElement.addEventListener("mouseleave", () => {
+        if (!copied) {
+          buttonWrapper.style.opacity = "0";
+        }
+      });
+
+      buttonWrapper.appendChild(button);
+      preElement.appendChild(buttonWrapper);
+    });
+
+    return () => {
+      // Clean up on unmount
+      codeBlocks.forEach((pre) => {
+        const button = pre.querySelector('[data-wn-copy-button]');
+        if (button) {
+          button.remove();
+        }
+      });
+    };
+  }, [html]);
+
   return (
     <div
+      ref={containerRef}
       data-wn-email=""
       onClick={(event) => {
         const anchor = (event.target as HTMLElement).closest?.("a[href]");
