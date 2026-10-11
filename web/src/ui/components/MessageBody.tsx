@@ -142,7 +142,10 @@ function RichBody({
       buttonWrapper.style.position = "absolute";
       buttonWrapper.style.top = "0.5em";
       buttonWrapper.style.right = "0.5em";
-      buttonWrapper.style.opacity = "0";
+      // Keep the control available on touch screens, where hover does not exist.
+      // On pointer devices it appears on hover or keyboard focus.
+      const canHover = window.matchMedia?.("(hover: hover)").matches ?? false;
+      buttonWrapper.style.opacity = canHover ? "0" : "1";
       buttonWrapper.style.transition = "opacity 0.15s ease";
 
       const button = document.createElement("button");
@@ -154,6 +157,11 @@ function RichBody({
 
       let copied = false;
       let timeoutId: number | null = null;
+      const copyIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+      const showButton = () => { buttonWrapper.style.opacity = "1"; };
+      const hideButton = () => {
+        if (!copied && document.activeElement !== button) buttonWrapper.style.opacity = canHover ? "0" : "1";
+      };
 
       const handleCopy = async () => {
         try {
@@ -167,26 +175,26 @@ function RichBody({
           timeoutId = window.setTimeout(() => {
             copied = false;
             button.setAttribute("aria-label", "Copy code");
-            button.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-            if (!copied) {
-              buttonWrapper.style.opacity = "0";
-            }
+            button.innerHTML = copyIcon;
+            hideButton();
           }, 2000);
         } catch (error) {
           console.error("Failed to copy code:", error);
+          button.setAttribute("aria-label", "Could not copy code");
+          button.title = "Could not copy code. Clipboard access was blocked.";
+          if (timeoutId !== null) window.clearTimeout(timeoutId);
+          timeoutId = window.setTimeout(() => {
+            button.setAttribute("aria-label", "Copy code");
+            button.removeAttribute("title");
+          }, 3000);
         }
       };
 
       button.addEventListener("click", handleCopy);
-
-      preElement.addEventListener("mouseenter", () => {
-        buttonWrapper.style.opacity = "1";
-      });
-      preElement.addEventListener("mouseleave", () => {
-        if (!copied) {
-          buttonWrapper.style.opacity = "0";
-        }
-      });
+      button.addEventListener("focus", showButton);
+      button.addEventListener("blur", hideButton);
+      preElement.addEventListener("mouseenter", showButton);
+      preElement.addEventListener("mouseleave", hideButton);
 
       buttonWrapper.appendChild(button);
       preElement.appendChild(buttonWrapper);
