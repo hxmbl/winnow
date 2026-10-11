@@ -22,6 +22,7 @@ import { GMAIL_SCOPE } from "../core/gmail/dto";
 import { describeFailure, type AuthFailure } from "../core/session/errors";
 import { isTauri } from "../platform";
 import { AppMark } from "./AppMark";
+import { ErrorText } from "./components/ErrorText";
 
 type Props = {
   /** Called to start sign-in. Resolves or throws; the throw is rendered below. */
@@ -83,19 +84,21 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo }: Props)
             {failure && (
               <div
                 role="alert"
-                className="mt-3 rounded-pane border border-hairline bg-danger-wash px-4 py-3"
+                className="mt-3 rounded-pane border border-hairline bg-danger-wash px-4 py-3 text-left"
               >
-                <p className="flex items-start gap-2 text-[13px] font-semibold text-ink">
+                <div className="flex items-start gap-2 text-[13px] font-semibold text-ink">
                   <AlertCircle
                     size={15}
                     strokeWidth={2}
                     className="mt-px shrink-0 text-danger"
                     aria-hidden="true"
                   />
-                  {failure.message}
-                </p>
+                  <ErrorText text={failure.message} />
+                </div>
                 {failure.hint && (
-                  <p className="mt-1 pl-[23px] text-[12.5px] text-ink-muted">{failure.hint}</p>
+                  <div className="mt-1 pl-[23px] text-[12.5px] text-ink-muted">
+                    <ErrorText text={failure.hint} />
+                  </div>
                 )}
               </div>
             )}

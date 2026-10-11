@@ -53,6 +53,7 @@ import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer, Settings } from "./ui/components/SettingsPanel";
 import { ConfirmDialog } from "./ui/components/Overlay";
+import { ErrorText } from "./ui/components/ErrorText";
 import { SignInScreen } from "./ui/SignInScreen";
 
 type Props = {
@@ -1210,9 +1211,9 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             </div>
           )}
           {connectError && (
-            <p role="alert" className="px-4 pb-2 text-[11.5px] font-medium text-danger">
-              {connectError}
-            </p>
+            <div role="alert" className="px-4 pb-2 text-[11.5px] font-medium text-danger">
+              <ErrorText text={connectError} />
+            </div>
           )}
           <MessageList
             threads={view.threads}
