@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hashId, localId, threadKey } from "./ids";
-import { displayAddress, displayName, isMailbox, mimeTypeForFilename, monogram } from "./email";
+import { displayAddress, displayName, isMailbox, MAILBOXES, MAILBOX_LABEL, mimeTypeForFilename, monogram } from "./email";
 import type { Email } from "./email";
 
 function email(over: Partial<Email> = {}): Email {
@@ -120,9 +120,16 @@ describe("mimeTypeForFilename", () => {
 });
 
 describe("isMailbox", () => {
-  it("narrows only the four real mailboxes", () => {
+  it("narrows only the real mailboxes", () => {
     expect(isMailbox("spam")).toBe(true);
+    expect(isMailbox("sent")).toBe(true);
     expect(isMailbox("drafts")).toBe(false);
     expect(isMailbox(7)).toBe(false);
+  });
+
+  it("gives every mailbox exactly one label", () => {
+    // "One name per folder" — the palette reads `MAILBOX_LABEL` too, so a mailbox
+    // without one renders as `undefined` rather than as a row with no text.
+    expect(Object.keys(MAILBOX_LABEL).sort()).toEqual([...MAILBOXES].sort());
   });
 });

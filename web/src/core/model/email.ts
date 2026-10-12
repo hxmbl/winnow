@@ -10,13 +10,14 @@ export type Millis = number;
 /** Gmail message ID. */
 export type GmailId = string;
 
-export type Mailbox = "inbox" | "archive" | "trash" | "spam";
+export type Mailbox = "inbox" | "archive" | "sent" | "trash" | "spam";
 
-export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "trash", "spam"];
+export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
 
 export const MAILBOX_LABEL: Record<Mailbox, string> = {
   inbox: "Inbox",
   archive: "Archive",
+  sent: "Sent",
   trash: "Trash",
   spam: "Spam",
 };

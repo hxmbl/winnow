@@ -625,7 +625,16 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.inbox]);
             break;
           case "archive":
-            await client.removeLabels(gmailId, [LABEL.trash, LABEL.spam, LABEL.inbox]);
+            // Every folder label, including SENT. Gmail files by label rather than by
+            // "not in the inbox", so leaving SENT on would keep an archived message in
+            // the Sent folder it was supposed to have left — and `mailboxFor` reads
+            // SENT, so it would keep showing up in Sent too.
+            await client.removeLabels(gmailId, [
+              LABEL.trash,
+              LABEL.spam,
+              LABEL.inbox,
+              LABEL.sent,
+            ]);
             break;
           case "trash":
             await client.addLabels(gmailId, [LABEL.trash]);
@@ -635,6 +644,15 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.spam]);
             await client.removeLabels(gmailId, [LABEL.inbox]);
             break;
+          case "sent":
+            // Unreachable: nothing in the product files mail into Sent, because the
+            // label is set by Gmail at the moment it sends. Said rather than left
+            // implicit, so adding a "file into Sent" action later finds this.
+            throw new GmailError(
+              "Mail cannot be filed into Sent — Gmail applies that label when it sends.",
+              400,
+              "unknown",
+            );
         }
       },
       async setRead(id, read) {

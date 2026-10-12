@@ -53,8 +53,8 @@ import { defaultWeights, type SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
 import type { SyncProgress } from "../gmail/sync";
 
-/** The four mailboxes, in the order the sidebar shows them. */
-export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "trash", "spam"];
+/** The five mailboxes, in the order the sidebar shows them. */
+export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
 
 /**
  * Which half of a sync is running, for the status line.
@@ -1426,8 +1426,15 @@ export class WinnowStore {
   archive(id: number): void {
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!email) return;
-    const destination: Mailbox =
-      email.mailbox === "inbox" ? "archive" : email.mailbox === "archive" ? "inbox" : "inbox";
+    let destination: Mailbox;
+    if (email.mailbox === "inbox") destination = "archive";
+    else if (email.mailbox === "archive") destination = "inbox";
+    // Sent is the one mailbox where `e` cannot mean "put it back where it came from":
+    // the server has no way to move a message back into the sent folder, so the honest
+    // answer is that archiving mail you wrote files it with the rest of the archive and
+    // leaves Sent — which is what the user meant by pressing it.
+    else if (email.mailbox === "sent") destination = "archive";
+    else destination = "inbox";
     this.move(id, destination);
   }
 

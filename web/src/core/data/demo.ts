@@ -1161,6 +1161,108 @@ Failure to comply within 24 hours will result in permanent closure of your accou
     demonstrates: "unsafe",
   },
 
+  // ── Sent mail, so the mailbox is one side of a conversation ───────────────
+  //
+  // Sent used to be thrown away by the sync engine, on the reasonable grounds that
+  // a mail client shows you other people's mail. That left three things it should not
+  // have: the Sent mailbox was unreachable, the migration thread had a hole in the
+  // middle where the user's own replies should be, and the composer's recipient
+  // suggestions had nothing to suggest.
+  //
+  // So these are real messages with real recipients, and one of them sits inside the
+  // migration thread where its reply belongs. The account address is the demo user's
+  // own, because the recipient index excludes it — a suggestion to write to yourself is
+  // the one result that would make the feature look broken rather than useful.
+  {
+    id: "demo-sent-1",
+    sender: "alex@northwind.example",
+    name: "Alex Moreau",
+    at: 4 * DAY,
+    subject: "Re: the migration plan",
+    body: `
+Agreed on the replica. Start the copy there and leave production alone until we have a
+row count we can reconcile.
+
+I will take the compliance question to the auditors on Thursday — if the freeze collides
+with the audit window we move the migration rather than the audit, because the audit has
+an external date attached to it and the migration does not.`,
+    bodyHtml: toHtml(`
+Agreed on the replica. Start the copy there and leave production alone until we have a
+row count we can reconcile.
+
+I will take the compliance question to the auditors on Thursday — if the freeze collides
+with the audit window we move the migration rather than the audit, because the audit has
+an external date attached to it and the migration does not.`),
+    category: "primary",
+    threadId: "demo-thread-migration",
+  },
+  {
+    id: "demo-sent-2",
+    sender: "alex@northwind.example",
+    name: "Alex Moreau",
+    at: 9 * DAY,
+    subject: "Notes from the Quarry Lane walkthrough",
+    body: `
+Helena — thanks for the walkthrough. Three things came out of it that I did not expect.
+
+The loading floor is not level and nobody on the team knew. That is a safety question
+before it is an accessibility one, so it goes to the landlord this week rather than onto
+a backlog.
+
+Can you send the as-built drawings across? I want to check them against what we were
+shown, because the stair run and the ramp appear to be on different drawings.`,
+    bodyHtml: toHtml(`
+Helena — thanks for the walkthrough. Three things came out of it that I did not expect.
+
+The loading floor is not level and nobody on the team knew. That is a safety question
+before it is an accessibility one, so it goes to the landlord this week rather than onto
+a backlog.
+
+Can you send the as-built drawings across? I want to check them against what we were
+shown, because the stair run and the ramp appear to be on different drawings.`),
+    category: "primary",
+  },
+  {
+    id: "demo-sent-3",
+    sender: "alex@northwind.example",
+    name: "Alex Moreau",
+    at: 16 * DAY,
+    subject: "Re: index strategy",
+    body: `
+Priya — the partial index is cheaper to build and the planner already prefers it on the
+replica. I would take it and revisit only if the third query is still slow after the
+covering index lands.
+
+Not urgent, but worth a decision before the next release so we are not changing the index
+twice.`,
+    bodyHtml: toHtml(`
+Priya — the partial index is cheaper to build and the planner already prefers it on the
+replica. I would take it and revisit only if the third query is still slow after the
+covering index lands.
+
+Not urgent, but worth a decision before the next release so we are not changing the index
+twice.`),
+    category: "primary",
+  },
+  {
+    id: "demo-sent-4",
+    sender: "alex@northwind.example",
+    name: "Alex Moreau",
+    at: 26 * DAY,
+    subject: "Field notes, week 3",
+    body: `
+Tomás — the third site is the interesting one. The transects run north-south on the plan
+and east-west on the ground, which is either a drafting error or two seasons of data.
+
+Either way I can work around it, so no rush.`,
+    bodyHtml: toHtml(`
+Tomás — the third site is the interesting one. The transects run north-south on the plan
+and east-west on the ground, which is either a drafting error or two seasons of data.
+
+Either way I can work around it, so no rush.`),
+    category: "primary",
+  },
+
   // ── Archived and binned fixtures, so those views are not empty ────────────
   {
     id: "demo-archived-1",
@@ -1227,6 +1329,7 @@ Check-in opens 24 hours before departure. Your seat allocation is in the app.`),
 /** Which mailbox a seed lands in, from its id prefix. */
 function mailboxForSeed(id: string): Mailbox {
   if (id.startsWith("demo-archived")) return "archive";
+  if (id.startsWith("demo-sent")) return "sent";
   if (id.startsWith("demo-trash")) return "trash";
   if (id.startsWith("demo-spam")) return "spam";
   return "inbox";

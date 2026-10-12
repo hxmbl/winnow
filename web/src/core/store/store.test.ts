@@ -324,6 +324,19 @@ describe("optimistic actions and their rollback", () => {
     expect(store.getSnapshot().all.find((e) => e.id === target.id)!.mailbox).toBe("inbox");
   });
 
+  it("archives mail the user wrote rather than putting it in the inbox", () => {
+    // Sent is the one mailbox where `e` cannot mean "put it back where it came from":
+    // the server cannot move a message into the sent folder, so the only honest
+    // destination is the archive. Falling through to the inbox would file somebody's
+    // own reply as unread inbound mail from themselves.
+    const store = demoStore();
+    const sent = store.getSnapshot().all.find((e) => e.mailbox === "sent");
+    if (!sent) throw new Error("the demo seed has no sent mail to archive");
+
+    store.archive(sent.id);
+    expect(store.getSnapshot().all.find((e) => e.id === sent.id)!.mailbox).toBe("archive");
+  });
+
   it("restores from the bin rather than archiving", async () => {
     const { backend } = fakeBackend();
     const store = demoStore();

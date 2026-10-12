@@ -4,15 +4,47 @@ import { describe, expect, it } from "vitest";
 import { DEMO_EMAILS, DEMO_EXPECTATIONS, DEMO_NOW, DEMO_TRASH } from "./demo";
 import { classifyEmail, contentBag, type SignalMap } from "../classify/classify";
 import { matchesBuiltin, rankFilters } from "../classify/filters";
-import { buildUserProfile } from "../model/profile";
-import { BUILTIN_FILTERS, type BuiltinSmartFilter } from "../model/signals";
+import { buildUserProfile, type UserProfile } from "../model/profile";
+import type { Email } from "../model/email";
+import {
+  BUILTIN_FILTERS,
+  type BuiltinSmartFilter,
+  type EmailSignals,
+} from "../model/signals";
 
+/** What `seed()` produced, for the helpers that read it. */
+type Seeded = { profile: UserProfile; signals: SignalMap };
+
+/**
+ * The profile and the signals, the way the store builds them.
+ *
+ * Over the **inbox**, not over the whole mailbox: `buildUserProfile` takes an inbox
+ * and `store.inboxAnalysis` hands it one, because learning "who you read" from the bin
+ * or the archive teaches the model the wrong thing. This fixture used to pass
+ * `DEMO_EMAILS` wholesale, which was indistinguishable from production only while every
+ * seed was inbox mail — and the moment a Sent folder existed, four messages the user
+ * wrote silently promoted their own address into `topSenders` and pushed a colleague out
+ * of `top_contacts`. A fixture that models production has to model its inputs too.
+ */
 function seed() {
-  const profile = buildUserProfile(DEMO_EMAILS, []);
+  const inbox = DEMO_EMAILS.filter((email) => email.mailbox === "inbox");
+  const profile = buildUserProfile(inbox, []);
   const signals: SignalMap = new Map(
-    DEMO_EMAILS.map((email) => [email.id, classifyEmail(email, profile)]),
+    inbox.map((email) => [email.id, classifyEmail(email, profile)]),
   );
   return { profile, signals };
+}
+
+/**
+ * One message's signals, classified on demand if the inbox pass did not cover it.
+ *
+ * Three seeds claim a bucket from the spam mailbox, and the inbox pass does not reach
+ * them. They are still checked: "every message claiming a bucket lands in it" is a claim
+ * about the whole seed, and quietly skipping the rows the fast path missed would turn it
+ * into a claim about most of it.
+ */
+function signalFor(email: Email, seeded: Seeded): EmailSignals {
+  return seeded.signals.get(email.id) ?? classifyEmail(email, seeded.profile);
 }
 
 describe("the demo mailbox", () => {
@@ -28,7 +60,8 @@ describe("the demo mailbox", () => {
   });
 
   it("puts each demonstration in the bucket it claims", () => {
-    const { profile, signals } = seed();
+    const seeded = seed();
+    const { profile } = seeded;
     const byGmailId = new Map(DEMO_EMAILS.map((email) => [email.gmailId, email]));
     const failures: string[] = [];
 
@@ -39,7 +72,7 @@ describe("the demo mailbox", () => {
           failures.push(`${bucket}: the seed names ${id}, which is not in the mailbox`);
           continue;
         }
-        const signal = signals.get(email.id)!;
+        const signal = signalFor(email, seeded);
         if (!matchesBuiltin(bucket as BuiltinSmartFilter, email, signal, profile)) {
           failures.push(`${bucket}: "${email.subject}" does not actually land there`);
         }
@@ -99,7 +132,8 @@ describe("the demo mailbox", () => {
 
 describe("the rail over the demo", () => {
   it("ranks every non-empty bucket, and hides the empty ones", () => {
-    const { profile, signals } = seed();
+    const seeded = seed();
+    const { profile, signals } = seeded;
     const ranked = rankFilters(DEMO_EMAILS, signals, profile);
 
     // Nothing is duplicated, and Unsafe is always present.
@@ -110,7 +144,12 @@ describe("the rail over the demo", () => {
       const reachable = ids.some((id) => {
         const email = DEMO_EMAILS.find((candidate) => candidate.gmailId === id);
         return email
-          ? matchesBuiltin(bucket as BuiltinSmartFilter, email, signals.get(email.id)!, profile)
+          ? matchesBuiltin(
+              bucket as BuiltinSmartFilter,
+              email,
+              signalFor(email, seeded),
+              profile,
+            )
           : false;
       });
       if (reachable) {

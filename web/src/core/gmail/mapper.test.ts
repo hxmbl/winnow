@@ -61,6 +61,19 @@ describe("mailboxFor", () => {
     expect(mailboxFor([])).toBe("archive");
     expect(mailboxFor([LABEL.starred, LABEL.important])).toBe("archive");
   });
+
+  it("files mail the user wrote as sent", () => {
+    expect(mailboxFor([LABEL.sent])).toBe("sent");
+  });
+
+  it("prefers inbox over sent, because a message in both is one you sent to yourself", () => {
+    expect(mailboxFor([LABEL.sent, LABEL.inbox])).toBe("inbox");
+  });
+
+  it("still prefers trash and spam over sent", () => {
+    expect(mailboxFor([LABEL.sent, LABEL.spam])).toBe("spam");
+    expect(mailboxFor([LABEL.sent, LABEL.trash])).toBe("trash");
+  });
 });
 
 describe("headerValue", () => {

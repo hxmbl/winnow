@@ -26,12 +26,16 @@ import { parseAddressHeader, plainTextFromHtml } from "../mail/html";
 
 /** Which mailbox a set of labels files the message in. */
 export function mailboxFor(labelIds: readonly string[]): Mailbox {
-  // Order matters: trash beats spam beats inbox; a message can carry more than
+  // Order matters: trash beats spam beats inbox beats sent; a message can carry more than
   // one of these mid-move, and "where can the user get rid of it" is the
   // better question.
+  //
+  // Sent sits below inbox rather than beside it, because a message that is both is one
+  // you sent *to yourself* and it belongs where the rest of your mail is.
   if (labelIds.includes(LABEL.trash)) return "trash";
   if (labelIds.includes(LABEL.spam)) return "spam";
   if (labelIds.includes(LABEL.inbox)) return "inbox";
+  if (labelIds.includes(LABEL.sent)) return "sent";
   return "archive";
 }
 

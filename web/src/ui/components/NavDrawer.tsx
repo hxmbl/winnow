@@ -20,7 +20,7 @@
  * is the `menu`.
  */
 
-import { Inbox, LogIn, LogOut, RefreshCw, Settings, Trash2, TriangleAlert, X } from "lucide-react";
+import { Inbox, LogIn, LogOut, RefreshCw, Send, Settings, Trash2, TriangleAlert, X } from "lucide-react";
 import { Sheet } from "./Overlay";
 import type { Mailbox } from "../../core/model/email";
 
@@ -181,7 +181,7 @@ export function NavDrawer({
 }
 
 /**
- * The four mailboxes.
+ * The mailboxes.
  *
  * The same glyphs the `!` palette uses, so the two navigation surfaces are visibly the
  * same set of places.
@@ -190,6 +190,7 @@ function MailboxIcon({ id }: { id: Mailbox }) {
   const props = { size: 15, strokeWidth: 1.9, className: "shrink-0 text-ink-muted" } as const;
   if (id === "spam") return <TriangleAlert {...props} aria-hidden="true" />;
   if (id === "trash") return <Trash2 {...props} aria-hidden="true" />;
+  if (id === "sent") return <Send {...props} aria-hidden="true" />;
   if (id === "archive") {
     return (
       <svg

@@ -174,11 +174,22 @@ export function rowIndicators(email: Email, signals: EmailSignals): BuiltinSmart
 
 // ── Mailbox navigation ──────────────────────────────────────────────────────
 
-export type NavigationItem = "inbox" | "spam" | "trash" | "settings";
+export type NavigationItem = "inbox" | "spam" | "trash" | "sent" | "settings";
+
+/**
+ * The `!` palette's rows.
+ *
+ * Sent sits after Trash rather than after Inbox on purpose: a row that moves silently
+ * repoints the digit shortcut that went with it, and three of these four destinations
+ * are places somebody triages from. Sent is somewhere you go on purpose — to find
+ * something you wrote, or to see who you have been writing to — which is the same
+ * category of destination Settings is in, and the same one Archive is absent for.
+ */
 export const NAVIGATION_ITEMS: readonly { id: NavigationItem; mailbox?: Mailbox }[] = [
   { id: "inbox", mailbox: "inbox" },
   { id: "spam", mailbox: "spam" },
   { id: "trash", mailbox: "trash" },
+  { id: "sent", mailbox: "sent" },
   { id: "settings" },
 ] as const;
 

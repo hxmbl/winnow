@@ -1275,12 +1275,32 @@ try {
   // `aria-label`, and `text=` matches visible text only.
   await page.waitForSelector('[role="menu"]', { timeout: 5_000 });
   const paletteRows = await page.locator('[role="menu"] [role="menuitem"]').count();
-  check("the navigation palette opens", paletteRows === 4, `${paletteRows} rows`);
+  check("the navigation palette opens", paletteRows === 5, `${paletteRows} rows`);
+  // Sent is a folder now, and this palette is the only place it is reachable on a phone
+  // — so a row that is missing here is a mailbox that cannot be opened at all.
+  check(
+    "and it carries Sent",
+    (await page.locator('[role="menu"] [role="menuitem"]:has-text("Sent")').count()) === 1,
+  );
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(250);
   check("Enter in the palette switches mailbox", (await page.locator('[role="menu"]').count()) === 0);
+
+  // …and Sent is a mailbox with mail in it, not an empty row. This is also the only
+  // place the demo can show mail the user wrote.
+  await page.keyboard.press("!");
+  await page.waitForSelector('[role="menu"]', { timeout: 5_000 });
+  await page.getByRole("menuitem", { name: "Sent" }).click();
+  await page.waitForTimeout(300);
+  check("Sent opens", (await page.locator('[role="menu"]').count()) === 0);
+  check(
+    "and holds what the user wrote",
+    (await page.locator('[data-message-id]').count()) > 0,
+    `${await page.locator('[data-message-id]').count()} rows`,
+  );
+  await goTo("Inbox");
 
   // ── Mark all read is scoped to the mailbox on screen ───────────────────────
 
