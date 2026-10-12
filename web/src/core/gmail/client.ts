@@ -345,6 +345,7 @@ export class GmailClient {
 
   /** Add a label. `addLabelIds` is the documented field name for the API. */
   async addLabels(id: string, labelIds: string[]): Promise<void> {
+    refuseFixedLabels(labelIds);
     await this.request(`/users/me/messages/${encodeURIComponent(id)}/modify`, {
       method: "POST",
       body: { addLabelIds: labelIds },
@@ -352,6 +353,7 @@ export class GmailClient {
   }
 
   async removeLabels(id: string, labelIds: string[]): Promise<void> {
+    refuseFixedLabels(labelIds);
     await this.request(`/users/me/messages/${encodeURIComponent(id)}/modify`, {
       method: "POST",
       body: { removeLabelIds: labelIds },
@@ -419,5 +421,20 @@ export class GmailClient {
     const params = new URLSearchParams({ maxResults: String(maxResults) });
     if (pageToken) params.set("pageToken", pageToken);
     return this.request<GmailListResponse>(`/users/me/drafts?${params}`);
+  }
+}
+
+/**
+ * SENT and DRAFT are set by Gmail itself and cannot be added or removed through
+ * `messages.modify`: the API answers 400 "Invalid label: SENT" and applies none of the
+ * other changes in the same call. Refused here, before the request, so a caller that
+ * lists one fails loudly in tests instead of quietly breaking every archive in prod.
+ */
+const FIXED_LABELS: readonly string[] = [LABEL.sent, LABEL.draft];
+
+function refuseFixedLabels(labelIds: readonly string[]): void {
+  const fixed = labelIds.filter((label) => FIXED_LABELS.includes(label));
+  if (fixed.length > 0) {
+    throw new GmailError(`Gmail does not allow changing the ${fixed.join(", ")} label.`, 400, "unknown");
   }
 }

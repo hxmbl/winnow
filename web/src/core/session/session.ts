@@ -625,16 +625,9 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.inbox]);
             break;
           case "archive":
-            // Every folder label, including SENT. Gmail files by label rather than by
-            // "not in the inbox", so leaving SENT on would keep an archived message in
-            // the Sent folder it was supposed to have left — and `mailboxFor` reads
-            // SENT, so it would keep showing up in Sent too.
-            await client.removeLabels(gmailId, [
-              LABEL.trash,
-              LABEL.spam,
-              LABEL.inbox,
-              LABEL.sent,
-            ]);
+            // Not SENT: Gmail sets that label itself and rejects it in a modify call
+            // with 400, which would fail every archive, not just archives of sent mail.
+            await client.removeLabels(gmailId, [LABEL.trash, LABEL.spam, LABEL.inbox]);
             break;
           case "trash":
             await client.addLabels(gmailId, [LABEL.trash]);
