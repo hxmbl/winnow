@@ -11,6 +11,7 @@
 
 use crate::oauth::{AuthOutcome, Sessions};
 use serde::{Deserialize, Serialize};
+#[cfg_attr(mobile, allow(unused_imports))]
 use tauri::{AppHandle, Manager, State};
 
 type Result<T> = std::result::Result<T, String>;
@@ -58,6 +59,9 @@ pub fn app_info(app: AppHandle) -> AppInfo {
         version: app.package_info().version.to_string(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
+        // "desktop" on a phone too, for now: it tells the web layer to use the native
+        // platform (keychain, notifications, the opener) rather than the browser one.
+        // A distinct "mobile" kind is Phase 2 of the mobile plan.
         kind: "desktop",
         // Four capabilities, all true, and each one is a thing this crate
         // implements: `oauth.rs` has the loopback listener, `secrets.rs` has the
@@ -359,6 +363,8 @@ pub fn set_unread_badge(app: AppHandle, count: i64) -> Result<()> {
     // reach, and `set_badge_count(Some(-1))` is the sort of thing that renders as
     // an empty badge or, on some platforms, an error dialog.
     let count = count.max(0);
+    #[cfg(mobile)]
+    let _ = (&app, count);
 
     #[cfg(target_os = "macos")]
     if let Some(window) = app.get_webview_window("main") {
@@ -367,6 +373,7 @@ pub fn set_unread_badge(app: AppHandle, count: i64) -> Result<()> {
             .map_err(|e| format!("could not set the dock badge: {e}"))?;
     }
 
+    #[cfg(desktop)]
     if let Some(tray) = app.tray_by_id(crate::tray::TRAY_ID) {
         let label = match count {
             0 => "Winnow".to_string(),
@@ -456,7 +463,10 @@ mod tests {
             version: "0.1.0".into(),
             os: "macos".into(),
             arch: "aarch64".into(),
-            kind: "desktop",
+            // "desktop" on a phone too, for now: it tells the web layer to use the native
+        // platform (keychain, notifications, the opener) rather than the browser one.
+        // A distinct "mobile" kind is Phase 2 of the mobile plan.
+        kind: "desktop",
             native_oauth: true,
             native_secrets: true,
             background_sync: true,

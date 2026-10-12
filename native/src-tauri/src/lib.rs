@@ -23,11 +23,19 @@ pub mod files;
 pub mod oauth;
 pub mod scheduler;
 pub mod secrets;
+#[cfg(desktop)]
 pub mod tray;
 
-use tauri::{Emitter, Manager};
+#[cfg(desktop)]
+use tauri::Emitter;
+use tauri::Manager;
 
-/// Build and run the Winnow desktop application.
+/// Build and run the Winnow application: the desktop shell, or the Android/iOS one.
+///
+/// The tray, autostart, single-instance and hide-on-close are desktop ideas and are
+/// gated on `desktop`; everything else is shared. On a phone the OS owns the window,
+/// so there is nothing to reveal and nothing to hide.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // `single_instance` has to be registered *first*, before any other plugin.
     // Tauri requires it: it must be able to detect and forward a second launch
@@ -89,11 +97,14 @@ pub fn run() {
             // Skipped when launched with `--minimized`, which is how the autostart
             // entry point starts it: a login item that opens a window over
             // whatever the user is doing is exactly the behaviour people disable.
+            #[cfg(desktop)]
             if payload.event() == tauri::webview::PageLoadEvent::Finished
                 && !std::env::args().any(|arg| arg == "--minimized")
             {
                 tray::reveal(window.app_handle());
             }
+            #[cfg(mobile)]
+            let _ = (window, payload);
         })
         .setup(|app| {
             // Autostart is *registered* here and *enabled* by the user from the
@@ -110,6 +121,7 @@ pub fn run() {
 
             app.manage(oauth::Sessions::default());
             deep_link::register(app.handle())?;
+            #[cfg(desktop)]
             tray::build(app.handle())?;
             scheduler::install(app.handle());
 
@@ -125,7 +137,7 @@ pub fn run() {
                     let _ = window.hide();
                 }
                 #[cfg(not(desktop))]
-                let _ = api;
+                let _ = (api, window);
             }
         })
         .build(tauri::generate_context!())

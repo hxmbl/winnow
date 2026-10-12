@@ -52,6 +52,9 @@ pub fn register(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Runtime registration is a Linux/Windows thing; on macOS and the phones the
+    // schemes come from the bundle's own manifest.
+    #[cfg(desktop)]
     for scheme in SCHEMES {
         // A registration failure is not fatal: the app still works, it just will
         // not be reachable from a link in another program.

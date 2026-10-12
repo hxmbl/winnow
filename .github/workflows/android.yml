@@ -1,0 +1,93 @@
+name: Android
+
+# A debug APK to sideload. Signed with the Android debug key, arm64 only.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, feat/android-shell]
+    paths:
+      - "native/**"
+      - "web/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: |
+          sdkmanager --install "ndk;${NDK_VERSION}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install Tauri CLI
+        run: cargo binstall tauri-cli --version "^2" --no-confirm
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      # The generated Gradle project is not committed yet; generate it fresh.
+      - name: Generate the Android project
+        working-directory: native
+        run: |
+          cargo tauri android init --ci
+          cargo tauri icon src-tauri/icons/icon.png
+
+      - name: Build the APK
+        working-directory: native
+        run: cargo tauri android build --debug --apk --target aarch64 --ci
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: winnow-debug-apk
+          path: native/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14
