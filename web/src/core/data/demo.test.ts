@@ -1,7 +1,7 @@
 
 
 import { describe, expect, it } from "vitest";
-import { DEMO_EMAILS, DEMO_EXPECTATIONS, DEMO_NOW, DEMO_TRASH } from "./demo";
+import { DEMO_EMAILS, DEMO_EXPECTATIONS, DEMO_NOW, DEMO_TRASH, demoMailbox } from "./demo";
 import { classifyEmail, contentBag, type SignalMap } from "../classify/classify";
 import { matchesBuiltin, rankFilters } from "../classify/filters";
 import { buildUserProfile, type UserProfile } from "../model/profile";
@@ -198,5 +198,23 @@ describe("the rail over the demo", () => {
   it("gives a distinct avatar colour per sender", () => {
     const senders = [...new Set(DEMO_EMAILS.map((email) => email.sender))];
     expect(senders.length).toBeGreaterThan(5);
+  });
+});
+describe("demoMailbox", () => {
+  it("moves the seed onto the real clock without changing its shape", () => {
+    const now = Date.UTC(2026, 9, 12, 20, 0, 0);
+    const demo = demoMailbox(now);
+    expect(demo.now).toBe(now);
+    expect(demo.emails).toHaveLength(DEMO_EMAILS.length);
+    for (const [i, email] of demo.emails.entries()) {
+      expect(email.receivedAt).toBeLessThanOrEqual(now);
+      expect(email.receivedAt - DEMO_EMAILS[i]!.receivedAt).toBe(now - DEMO_NOW);
+    }
+  });
+
+  it("never moves the seed backwards", () => {
+    const demo = demoMailbox(DEMO_NOW - 1000);
+    expect(demo.now).toBe(DEMO_NOW);
+    expect(demo.emails[0]!.receivedAt).toBe(DEMO_EMAILS[0]!.receivedAt);
   });
 });

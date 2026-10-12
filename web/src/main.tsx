@@ -19,7 +19,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { WinnowStore } from "./core/store/store";
-import { DEMO_EMAILS, DEMO_NOW, DEMO_TRASH } from "./core/data/demo";
+import { DEMO_TRASH, demoMailbox } from "./core/data/demo";
 import { desktopPlatformExtras, isTauri, platform } from "./platform";
 import { BUILTIN_FILTERS, filterKey, parseFilterKey } from "./core/model/signals";
 import { MAILBOX_ORDER } from "./core/store/store";
@@ -171,12 +171,14 @@ type PersistedState = {
  */
 const persisted = loadPersisted();
 
+const demo = demoMailbox();
+
 const store = new WinnowStore({
-  seed: DEMO_EMAILS,
+  seed: demo.emails,
   seedTrash: DEMO_TRASH,
-  // The seed is built around this instant, so the list's day sections are computed
-  // against it. Live mail replaces it with the wall clock on connect.
-  now: DEMO_NOW,
+  // The seed's own reference instant, moved onto the real clock (`demoMailbox`), so the
+  // list's day sections and the reader's dates agree. Live mail replaces it on connect.
+  now: demo.now,
   // Preferences go through the constructor rather than `restoreState` because they are
   // part of the initial state: a store built with the demo seed and then told to use dark
   // mode must render dark on first paint, not flash light and correct a frame later.

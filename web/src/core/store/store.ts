@@ -485,6 +485,8 @@ export class WinnowStore {
 
   /** In-flight body fetches, so opening the same message twice asks once. */
   private bodyInFlight = new Map<number, Promise<void>>();
+  /** Bodies whose last fetch failed. Not an answer (opening again retries), but the reader stops saying "Loading". */
+  private bodyFailed = new Set<number>();
 
   /**
    * The binned senders, kept separately from the message list.
@@ -1056,6 +1058,7 @@ export class WinnowStore {
       // resident for a message that has since left is memory nobody is using.
       this.bodies = bodies;
       this.bodyChecked = checked;
+      this.bodyFailed = new Set();
 
       this.set({
         status: "ready",
@@ -1877,6 +1880,7 @@ export class WinnowStore {
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!backend || !email) return Promise.resolve();
 
+    this.bodyFailed.delete(id);
     const request = (async () => {
       try {
         const bodyHtml = await backend.fetchBody(email.gmailId);
@@ -1885,7 +1889,10 @@ export class WinnowStore {
       } catch {
         // A body that will not load is not a sync failure or an error banner: the message
         // still opens, showing the plain text it has. Left out of `bodyChecked` so opening
-        // it again can retry.
+        // it again can retry. Remembered as failed so the reader stops promising a
+        // formatted version that is not coming.
+        this.bodyFailed.add(id);
+        this.notify();
         return;
       } finally {
         this.bodyInFlight.delete(id);
@@ -1897,9 +1904,21 @@ export class WinnowStore {
     return request;
   }
 
-  /** True once a body has been fetched, or found not to exist. Drives the reader's wait. */
+  /**
+   * True once a body has been fetched, or found not to exist. Drives the reader's wait.
+   *
+   * "Loaded" also covers every case where no fetch is coming: no backend (the demo
+   * mailbox, whose messages carry their HTML already, or a signed-out store), a message
+   * that already holds its HTML, and a fetch that failed. Each of those used to leave
+   * "Loading the formatted version…" on screen forever.
+   */
   hasLoadedBody(id: number): boolean {
-    return this.bodyChecked.has(id);
+    if (this.bodyChecked.has(id)) return true;
+    if (!this.backend) return true;
+    if (this.bodyInFlight.has(id)) return false;
+    if (this.bodyFailed.has(id)) return true;
+    const email = this.state.all.find((candidate) => candidate.id === id);
+    return email?.bodyHtml !== undefined;
   }
 
   /** The body-bearing copy of a message, for the parts of the view that render one. */
@@ -1934,7 +1953,7 @@ export class WinnowStore {
    * backend, so every action is local and nothing can be sent or synced. Marking it
    * explicitly means "signed in" is never inferred from the presence of messages.
    */
-  markDemoMode(): void {
+  markDemoMode(now: number = DEMO_NOW): void {
     this.backend = undefined;
     this.pendingConnect = null;
     this.undoAction = null;
@@ -1954,10 +1973,9 @@ export class WinnowStore {
       error: null,
       notice: null,
       lastSyncedAt: null,
-      // The seed is built around this instant: leaving the wall clock in place would
-      // drop the entire demo into one "Earlier" section and hide the one thing the day
-      // grouping is for.
-      now: DEMO_NOW,
+      // The seed's reference instant (by default the fixed one; the app passes it moved
+      // onto the real clock). The live wall clock would put the seed in "Earlier".
+      now,
     });
   }
 

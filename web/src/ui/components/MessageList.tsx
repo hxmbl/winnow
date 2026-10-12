@@ -692,6 +692,34 @@ function MessageList({
     setScrollTop(target);
   }, [cursorIndex, threads.length, items, offsets, scroller]);
 
+  /**
+   * Carry keyboard focus along with the cursor, but only when it is already on a row.
+   *
+   * Click a row, press `j`, and the cursor and the open message move on while DOM focus
+   * stays on the clicked button — and a key press is exactly what makes a browser start
+   * drawing `focus-visible`, so the ring lit up on one row while another was open. Focus
+   * that is anywhere else (search, the reader, a dialog) is left alone: `j` must never
+   * pull the caret out of a text field. Deferred a frame because the target row may only
+   * mount once the scroll effect above has moved the window to it.
+   */
+  useEffect(() => {
+    if (cursorIndex < 0 || !scroller) return;
+    const rowIndex = rowIndexForCursor(items, cursorIndex);
+    const item = rowIndex === null ? undefined : items[rowIndex];
+    if (!item || item.kind === "header") return;
+    const id = String(item.row.representative.id);
+
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement) || !scroller.contains(active)) return;
+      if (!active.hasAttribute("data-message-id")) return;
+      if (active.getAttribute("data-message-id") === id) return;
+      const target = scroller.querySelector<HTMLElement>(`button[data-message-id="${id}"]`);
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [cursorIndex, items, scroller]);
+
   if (threads.length === 0) {
     return (
       <Empty

@@ -33,7 +33,7 @@ import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
 import { formatRelative } from "./core/mail/datetime";
 import { resolveImageConsent } from "./core/mail/imageConsent";
 import type { Draft } from "./core/model/email";
-import { DEMO_EMAILS } from "./core/data/demo";
+import { demoMailbox } from "./core/data/demo";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import { readOwnParams } from "./core/session/redirect";
 import { platform, type PlatformInfo } from "./platform";
@@ -831,8 +831,9 @@ export function App({ store }: Props) {
     message array.
   */
   const enterDemo = useCallback(() => {
-    store.replaceAll(DEMO_EMAILS);
-    store.markDemoMode();
+    const demo = demoMailbox();
+    store.replaceAll(demo.emails);
+    store.markDemoMode(demo.now);
   }, [store]);
 
   if (snapshot.status === "signed_out") {
