@@ -113,10 +113,13 @@ export type SuggestOptions = {
  * returns the same list.
  */
 export function suggestContacts(
-  index: ContactIndex,
+  index: ContactIndex | null,
   query: string,
   options: SuggestOptions = {},
 ): Suggestion[] {
+  // A composer can be open over a mailbox that has not been derived yet. Offering nobody
+  // is the honest answer; throwing would take the composer down over a missing cache.
+  if (!index) return [];
   const foldedQuery = foldText(query.trim());
   const excluded = new Set<string>();
   for (const address of options.exclude ?? []) {

@@ -1310,6 +1310,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           body={composer.draft.body}
           sending={composer.sending}
           error={composer.error}
+          contacts={view.contacts}
           onChange={(patch) =>
             setComposer((current) =>
               current
