@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  # dorny/paths-filter lists a PR's changed files through the API.
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -88,8 +90,75 @@ jobs:
       - name: Run tests
         run: npm run test
 
+  # Every push to master builds the Rust side; a PR only does when it touches it.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.filter.outputs.native }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            native:
+              - 'native/**'
+              - '.github/workflows/ci.yml'
+
+  smoke:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+
+      - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Chromium system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Smoke test the production build
+        run: npm run smoke
+
+  # Debug, unbundled: proves the Rust side compiles without paying for LTO and packaging.
+  # Runs on master too, so PRs inherit a warm debug cache.
   build:
-    name: Build
+    name: Build (debug)
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -111,24 +180,81 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+          # PR caches are only visible to that PR; master's are visible to every PR.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
       - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            file \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            patchelf \
-            pkg-config \
-            wget
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
+          version: 1.0
+
+      # Prebuilt binary instead of compiling the CLI from source on every run.
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2"
+        run: cargo binstall tauri-cli --version "^2" --no-confirm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Debug build
+        working-directory: native
+        run: cargo tauri build --debug --no-bundle
+
+  # The full release bundle (LTO, deb, AppImage) only where an artifact could matter.
+  release:
+    name: Release build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+          # PR caches are only visible to that PR; master's are visible to every PR.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Install Linux dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
+          version: 1.0
+
+      # Prebuilt binary instead of compiling the CLI from source on every run.
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install Tauri CLI
+        run: cargo binstall tauri-cli --version "^2" --no-confirm
 
       - name: Install dependencies
         run: npm ci
