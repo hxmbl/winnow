@@ -28,6 +28,7 @@
  */
 
 import { hashId } from "../model/ids";
+import { parseAddressList } from "../mail/html";
 import { DEMO_NEWSLETTER_HTML, DEMO_NEWSLETTER_TEXT } from "./demoNewsletter";
 import type { Email, EmailCategory, Mailbox } from "../model/email";
 import type { TrashRecord } from "../model/profile";
@@ -49,6 +50,21 @@ type Seed = {
   id: string;
   sender: string;
   name: string;
+  /**
+   * Who the message was addressed to, written the way a header is.
+   *
+   * Parsed by the same `parseAddressList` the Gmail mapper uses, rather than being a
+   * second shape the seed invents. `demo.test.ts` asserts that every address a seed
+   * claims to have actually parsed, so a typo here fails a test instead of quietly
+   * producing a contact nobody can be sent mail.
+   *
+   * Absent on almost every seed. Received mail discloses its recipients only when it
+   * chooses to, and the sender is the address the app already had; sent mail is the
+   * half worth writing down.
+   */
+  to?: string;
+  cc?: string;
+  bcc?: string;
   /** How long before `DEMO_NOW` this arrived. */
   at: number;
   subject: string;
@@ -1177,6 +1193,7 @@ Failure to comply within 24 hours will result in permanent closure of your accou
     id: "demo-sent-1",
     sender: "alex@northwind.example",
     name: "Alex Moreau",
+    to: "Dana Whitfield <dana@northwind.example>, Sam Okafor <sam@northwind.example>",
     at: 4 * DAY,
     subject: "Re: the migration plan",
     body: `
@@ -1200,6 +1217,8 @@ an external date attached to it and the migration does not.`),
     id: "demo-sent-2",
     sender: "alex@northwind.example",
     name: "Alex Moreau",
+    to: "Helena Ruiz <helena@quarrylane.example>",
+    cc: "\"Quarry Lane, lettings\" <office@quarrylane.example>",
     at: 9 * DAY,
     subject: "Notes from the Quarry Lane walkthrough",
     body: `
@@ -1226,6 +1245,9 @@ shown, because the stair run and the ramp appear to be on different drawings.`),
     id: "demo-sent-3",
     sender: "alex@northwind.example",
     name: "Alex Moreau",
+    to: "Priya Raman <priya@northwind.example>",
+    cc: "Marcus Feld <marcus@northwind.example>",
+    bcc: "ana@northwind.example",
     at: 16 * DAY,
     subject: "Re: index strategy",
     body: `
@@ -1248,6 +1270,7 @@ twice.`),
     id: "demo-sent-4",
     sender: "alex@northwind.example",
     name: "Alex Moreau",
+    to: "Tomás Lindqvist <tomas@fieldnotes.example>",
     at: 26 * DAY,
     subject: "Field notes, week 3",
     body: `
@@ -1344,6 +1367,9 @@ function toEmail(seed: Seed): Email {
     sender: seed.sender,
     address: seed.sender,
     name: seed.name || undefined,
+    to: parseAddressList(seed.to ?? ""),
+    cc: parseAddressList(seed.cc ?? ""),
+    bcc: parseAddressList(seed.bcc ?? ""),
     mailbox: mailboxForSeed(seed.id),
     receivedAt: ago(seed.at),
     subject: seed.subject,

@@ -6,7 +6,128 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { countRemoteReferences, remoteReferences } from "./html";
+import {
+  countRemoteReferences,
+  parseAddressHeader,
+  parseAddressList,
+  remoteReferences,
+  sanitizeDisplayName,
+} from "./html";
+
+describe("parseAddressHeader", () => {
+  it("reads a display name and an address", () => {
+    expect(parseAddressHeader("Ada Lovelace <ada@example.com>")).toEqual({
+      name: "Ada Lovelace",
+      address: "ada@example.com",
+    });
+  });
+
+  it("reads a quoted display name, including a quote inside it", () => {
+    expect(parseAddressHeader('"Ada, Countess" <ada@example.com>')).toEqual({
+      name: "Ada, Countess",
+      address: "ada@example.com",
+    });
+    expect(parseAddressHeader('"Ada \\"Countess\\"" <ada@example.com>')).toEqual({
+      name: 'Ada "Countess"',
+      address: "ada@example.com",
+    });
+  });
+
+  it("has no name for a bare address", () => {
+    expect(parseAddressHeader("ada@example.com")).toEqual({ address: "ada@example.com" });
+  });
+
+  it("refuses anything that is not an address", () => {
+    expect(parseAddressHeader("Ada Lovelace")).toBeNull();
+    expect(parseAddressHeader("")).toBeNull();
+    expect(parseAddressHeader("ada@localhost")).toBeNull();
+  });
+});
+
+describe("parseAddressList", () => {
+  it("reads one address", () => {
+    expect(parseAddressList("Ada Lovelace <ada@example.com>")).toEqual([
+      { name: "Ada Lovelace", address: "ada@example.com" },
+    ]);
+  });
+
+  it("reads a list, with and without names", () => {
+    expect(parseAddressList("ada@example.com, Grace <grace@example.com>")).toEqual([
+      { address: "ada@example.com" },
+      { name: "Grace", address: "grace@example.com" },
+    ]);
+  });
+
+  it("does not split on a comma inside a quoted name", () => {
+    // The reason this is a scanner and not `split(",")`. Two fragments come out of the
+    // naive version, neither of which parses, and the recipient list loses a person.
+    expect(parseAddressList('"Ng, Alex" <alex@example.com>, ada@example.com')).toEqual([
+      { name: "Ng, Alex", address: "alex@example.com" },
+      { address: "ada@example.com" },
+    ]);
+  });
+
+  it("does not split on a comma inside a comment, and drops the comment", () => {
+    expect(parseAddressList("ada@example.com (Ada, Countess), grace@example.com")).toEqual([
+      { address: "ada@example.com" },
+      { address: "grace@example.com" },
+    ]);
+  });
+
+  it("does not split inside angle brackets", () => {
+    expect(parseAddressList("<ada@example.com>")).toEqual([{ address: "ada@example.com" }]);
+  });
+
+  it("does not close a comment on an escaped bracket", () => {
+    // `\)` inside the comment is a literal paren, so the next address still parses.
+    expect(parseAddressList("ada@example.com (see \\) below), grace@example.com")).toEqual([
+      { address: "ada@example.com" },
+      { address: "grace@example.com" },
+    ]);
+  });
+
+  it("unwraps a group, naming it where the address has no name of its own", () => {
+    expect(
+      parseAddressList("Platform team: ada@example.com, <grace@example.com>;"),
+    ).toEqual([
+      { name: "Platform team", address: "ada@example.com" },
+      { address: "grace@example.com" },
+    ]);
+  });
+
+  it("keeps an address's own name over the group's", () => {
+    expect(parseAddressList("Platform team: Ada <ada@example.com>;")).toEqual([
+      { name: "Ada", address: "ada@example.com" },
+    ]);
+  });
+
+  it("skips what is not an address rather than yielding a blank one", () => {
+    expect(parseAddressList("Undisclosed recipients:;, ada@example.com")).toEqual([
+      { address: "ada@example.com" },
+    ]);
+    expect(parseAddressList("")).toEqual([]);
+    expect(parseAddressList("   ")).toEqual([]);
+  });
+
+  it("sanitises a display name the same way the reader's does", () => {
+    // A name is rendered in the recipient list, so it goes through the same strip as
+    // the sender's. `U+202E` is the oldest display-name spoofing trick there is: it
+    // renders a name as something other than what it is. `U+200B` is the zero-width
+    // space, which hides a difference rather than showing one.
+    expect(parseAddressList("A\u202Eda <ada@example.com>")[0].name).toBe("Ada");
+    expect(parseAddressList("A\u200Bda <ada@example.com>")[0].name).toBe("Ada");
+  });
+});
+
+describe("sanitizeDisplayName", () => {
+  it("keeps ordinary non-ASCII, which is a legitimate name", () => {
+    expect(sanitizeDisplayName("Tomás Lindqvist")).toBe("Tomás Lindqvist");
+  });
+
+  it("caps a name at the RFC 5322 length", () => {
+    expect(sanitizeDisplayName("a".repeat(200))).toHaveLength(128);
+  });
+});
 
 describe("countRemoteReferences", () => {
   it("counts a plain remote image", () => {

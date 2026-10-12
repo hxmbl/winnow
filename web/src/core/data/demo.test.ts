@@ -128,6 +128,43 @@ describe("the demo mailbox", () => {
       expect(email.sender).not.toMatch(/^(user|test|foo)\d*@/i);
     }
   });
+
+  it("resolves every address a seed claims to have", () => {
+    // The seed writes recipients the way a header does and lets `parseAddressList`
+    // read them, so a typo in a fixture is possible. It has to fail here rather than
+    // quietly produce a contact nobody can be sent mail — the composer would suggest an
+    // address the demo never had.
+    for (const email of DEMO_EMAILS) {
+      const claimed = [email.to, email.cc, email.bcc].filter((list) => (list ?? []).length > 0);
+      if (claimed.length === 0) continue;
+      for (const list of claimed) {
+        for (const contact of list!) {
+          expect(contact.address).toMatch(/^[^@\s]+@[^@\s]+\.[^@\s]+$/);
+          expect(contact.address).not.toBe(email.sender);
+        }
+      }
+    }
+  });
+
+  it("gives the sent mailbox the conversations the composer suggests from", () => {
+    // The recipient index is built from mail on both sides of a conversation. Sent mail
+    // is the only half that is normally visible, so a demo with no recipients on its sent
+    // mail would have an autocomplete with nothing in it.
+    const sent = DEMO_EMAILS.filter((email) => email.mailbox === "sent");
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.filter((email) => (email.to?.length ?? 0) > 0)).toHaveLength(sent.length);
+    expect(sent.some((email) => (email.cc?.length ?? 0) > 0)).toBe(true);
+    expect(sent.some((email) => (email.bcc?.length ?? 0) > 0)).toBe(true);
+  });
+
+  it("threads the user's own reply into the conversation it answers", () => {
+    // The migration thread used to have a hole in the middle: Dana, Sam, Dana, with
+    // nothing from the user in between, which read as a mailbox where the owner never
+    // replies rather than as a fixture that had not been written yet.
+    const thread = DEMO_EMAILS.filter((email) => email.threadId === "demo-thread-migration");
+    expect(thread.length).toBeGreaterThan(2);
+    expect(thread.some((email) => email.mailbox === "sent")).toBe(true);
+  });
 });
 
 describe("the rail over the demo", () => {
