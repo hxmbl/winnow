@@ -118,7 +118,7 @@ there is no sign-in wall — so the status line at the top of the mailbox carrie
 
 ## Tests
 
-683 unit tests over `web/src` — the classifier, the profile, the filters, the list
+1084 unit tests over `web/src` — the classifier, the profile, the filters, the list
 pipeline and Smart Score, the learning model and its tolerant snapshot reader, the
 store's derivation, its undo and its mutes, the demo seed's own contract, the Gmail wire
 types and sync engine, the request layer's single 401 retry, MIME assembly, PKCE, token
@@ -126,7 +126,7 @@ refresh and token storage, day bucketing, reply quoting, keybinds, the OAuth red
 parsing, the desktop IPC wire shapes, the palettes' contrast, the remote-reference count
 behind the reader's privacy note, and the rail's ordering. No DOM required, which is the
 payoff of the `core`/`ui` split.
-Three of those deserve naming.
+Four of those deserve naming.
 
 **`platform.test.ts` pins the names that cross the Rust/TypeScript boundary.** That is
 the one place in the codebase where a silent field-name mismatch produces no error at
@@ -168,6 +168,22 @@ for a date-sorted list, because a "Today" header is a claim about adjacency that
 chronological order can make. Sorted by score, the days interleaved and the list read
 `Today / This week / Today` — with each section keyed on its bucket name, so every
 repeat was a duplicate React key.
+
+`contacts/` is three pure modules and it is the one place where a plausible-looking
+implementation is wrong in a way no screenshot shows. Addresses are deduplicated on a
+*folded* key, so `Ada@Example.com` and `ada@example.com` are one row rather than two a
+recipient list will happily offer; one address on a message counts once however many of
+its header lines name it, because a To/Cc pair is one interaction and counting it twice
+lets a mailing list outrank a colleague on the strength of a single mail; and names carry
+their *own* timestamp, so a newer message that carries no name does not erase the name an
+older one supplied — with a single clock, a person stops being anybody in particular the
+moment they stop signing their mail. Received mail is discounted by Gmail's own category
+through the table the engagement profile already uses, rather than a second one: the
+profile ranks senders and this ranks recipients, and two answers to "how much is a
+message from this person worth" would drift. Recency decays against the newest message in
+the corpus rather than the wall clock, for the reason the list's importance nudge does the
+same thing — an inbox that re-ranked itself overnight would be impossible to reason
+about.
 
 The Rust side has its own tests for the parts worth testing: the loopback listener,
 the path sanitiser, the background scheduler, deep-link parsing. The listener's tests
@@ -243,6 +259,26 @@ to make it useless.
 
 **No gravatar.** Avatars are a colour hashed from the address. A third-party
 request per message is a latency cost and a privacy leak for decoration.
+
+**Sent is a mailbox, and it is why the composer's recipient list is worth building.**
+The sync engine used to exclude `in:sent` and discard SENT-only messages, on the entirely
+reasonable ground that a mail client shows other people's mail. That left three things it
+should not have: no way to read what you wrote, a hole in the middle of every thread in
+the demo where your own replies should be, and no source at all for "who do I write to" —
+the recipient index is built from both sides of a conversation, and sent mail is the half
+that is normally invisible. It is a folder now, filed after Inbox and before Archive,
+synced under a cap like the rest, and reachable from the `!` palette, which on a phone is
+the only navigation there is.
+
+**A recipient list that highlights nothing until you ask.** The combobox in the composer
+follows the ARIA pattern in the three places it is usually got wrong, and each of them is
+a way to send mail to the wrong person. Auto-selecting the first row means the next
+character replaces it and Enter sends a suggestion nobody chose. Swallowing Tab to accept
+one makes the rest of the composer unreachable by keyboard, so Tab only accepts *after* an
+arrow key has moved the highlight. And Escape is consumed only while the list is open, and
+stopped from propagating so neither the sheet's own handler nor the keybind router sees
+it — one Escape closes the list and leaves the draft, the next closes the composer, still
+through the discard confirmation.
 
 **Forwarding is a first-class verb.** `GmailClient` has had `markNotSpam` and a
 forward path since early on and nothing in the UI called either, so a message could
