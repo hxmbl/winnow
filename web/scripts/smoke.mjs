@@ -1270,9 +1270,12 @@ try {
   // message is opened.
   await page.keyboard.press("j");
   await page.waitForTimeout(200);
-  const demoHasRichView = await page.evaluate(() =>
-    [...document.querySelectorAll("button")].filter(b => b.textContent?.includes("Rich")).length,
-  );
+  // The forms live in the reader's ⋯ menu.
+  await page.locator('[data-reader] button[aria-label="More"]:visible').first().click();
+  const demoHasRichView = await page
+    .locator('[role="menu"] [role="menuitemradio"]', { hasText: "Rich" })
+    .count();
+  await page.keyboard.press("Escape");
   check("the demo reader offers a rich view for HTML messages", demoHasRichView > 0);
 
   /*
