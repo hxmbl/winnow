@@ -49,6 +49,7 @@ import {
 } from "../classify/pipeline";
 import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
+import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import { defaultWeights, type SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
 import type { SyncProgress } from "../gmail/sync";
@@ -310,6 +311,15 @@ export type MailboxView = {
   totalCount: number;
   /** Everything the app knows that is not in the current mailbox. */
   otherMailboxCount: number;
+  /**
+   * Everyone the mail in the store says the user has corresponded with.
+   *
+   * Part of the one derived pass because it is derived from `state.all` like everything
+   * else, and like everything else it is memoised — see `contactCache`. Without that the
+   * 60-second clock tick would rebuild the index over a 5,000-message mailbox, which is
+   * the same mistake `inboxAnalysis` exists to avoid.
+   */
+  contacts: ContactIndex;
 };
 
 /** Everything the store owns. Read this in React; never mutate it. */
@@ -602,6 +612,34 @@ export class WinnowStore {
     signals: SignalMap;
   } | null = null;
 
+  /**
+   * The contact index, memoised on the only two inputs that can change it.
+   *
+   * `all` is the whole story — the index is derived from the messages and is not itself
+   * persisted, so there is nothing to fall out of step with. The account address matters
+   * only as the authoritative answer to "which address is the user's own", which the
+   * signed-out demo does not have; signed in it is read from `state.account`.
+   *
+   * Keyed on identity rather than contents for the reason `inboxCache` is: a clock tick
+   * and a weight change both bump the version without touching a single message, and
+   * neither should cost a pass over the whole mailbox.
+   */
+  private contactCache: {
+    all: readonly Email[];
+    self: string | null;
+    index: ContactIndex;
+  } | null = null;
+
+  private contacts(): ContactIndex {
+    const all = this.state.all;
+    const self = this.state.account?.email ?? null;
+    const hit = this.contactCache;
+    if (hit && hit.all === all && hit.self === self) return hit.index;
+    const index = buildContactIndex(all, { selfAddress: self });
+    this.contactCache = { all, self, index };
+    return index;
+  }
+
   private inboxAnalysis(): { profile: UserProfile; signals: SignalMap } {
     const state = this.state;
     const { all, learning, preferences } = state;
@@ -736,6 +774,7 @@ export class WinnowStore {
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
       totalCount: mailboxEmails.length,
       otherMailboxCount: visible.length - mailboxEmails.length,
+      contacts: this.contacts(),
     };
   }
 
