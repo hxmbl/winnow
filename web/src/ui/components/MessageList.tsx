@@ -270,7 +270,7 @@ const Row = memo(function Row({
             </span>
             {/*
              * The judgements ride on the line that was already there, beside the
-             * timestamp, so they cost no height: every row is the same three lines.
+             * timestamp, so they cost no height: every row is the same two lines.
              */}
             <span className="flex shrink-0 items-baseline gap-2">
               {indicators.length > 0 && (
@@ -284,19 +284,23 @@ const Row = memo(function Row({
             </span>
           </span>
 
-          <span
-            className={`mt-px block truncate text-row ${
-              unread ? "font-semibold text-ink-body" : "font-medium text-ink-body"
-            }`}
-          >
-            {email.subject || "(no subject)"}
-          </span>
-
-          {email.body && (
-            <span className="mt-px block truncate text-preview text-ink-muted">
-              {email.body}
+          {/*
+            Subject and preview share the second line: two lines a row instead of three.
+            The preview is the part that gives way, dimmed, after the subject.
+          */}
+          <span className="mt-px block truncate text-row">
+            <span
+              className={unread ? "font-semibold text-ink-body" : "font-medium text-ink-body"}
+            >
+              {email.subject || "(no subject)"}
             </span>
-          )}
+            {email.body && (
+              <span className="text-preview text-ink-subtle">
+                {"  \u2014  "}
+                {email.body}
+              </span>
+            )}
+          </span>
 
           </span>
       </button>
@@ -316,7 +320,7 @@ const Row = memo(function Row({
         onClick={() => onToggleStar(email.id)}
         aria-label={email.starred ? "Unstar" : "Star"}
         aria-pressed={email.starred}
-        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-opacity hover:bg-sheen hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/row:opacity-100 aria-pressed:opacity-100 not-[[hover:hover]]:opacity-0"
+        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
       >
         {/*
           The star is a sprite rather than a lucide icon so the filled and outline states
@@ -352,11 +356,12 @@ const Row = memo(function Row({
  */
 function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
-    <div className="flex items-baseline gap-2 bg-surface px-4 pb-1.5 pt-4">
-      <span className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
-        {label}
-      </span>
-      <span className="text-micro tabular-nums text-ink-subtle">{count}</span>
+    <div className="flex items-center gap-1.5 bg-surface px-4 pb-1.5 pt-4 text-micro text-ink-subtle">
+      <span className="font-semibold uppercase leading-none tracking-[0.07em]">{label}</span>
+      {/* A drawn dot rather than a "·" glyph: the glyph sits on the font's own line
+          and drifts off the caps' centre; a box centred by flex does not. */}
+      <span aria-hidden="true" className="h-[3px] w-[3px] shrink-0 rounded-full bg-current" />
+      <span className="leading-none tabular-nums">{count}</span>
     </div>
   );
 }

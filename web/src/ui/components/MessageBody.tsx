@@ -21,14 +21,13 @@
  */
 
 import { useEffect, useMemo, useState, useRef } from "react";
-import { Code2, Eye, Server, Type } from "lucide-react";
+import { Server } from "lucide-react";
 import {
   emailDocument,
   inlineEmailCss,
   sanitizeMailHtml,
 } from "../../core/mail/sanitize";
 import {
-  renderProxyUrl,
   renderThroughProxy,
   type ProxiedRender,
 } from "../../core/mail/proxy";
@@ -211,28 +210,32 @@ function RichBody({
   }, [html]);
 
   return (
-    <div
-      ref={containerRef}
-      data-wn-email=""
-      onClick={(event) => {
-        const anchor = (event.target as HTMLElement).closest?.("a[href]");
-        if (!anchor || !event.currentTarget.contains(anchor)) return;
-        // A modified click is the user asking for the browser's own answer — a new
-        // tab, a download — so it is left alone rather than swallowed.
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        const href = anchor.getAttribute("href");
-        // A fragment stays in the document, and a message's own anchors were not given
-        // ids (a sender's `id` would collide with the app's), so there is nowhere for
-        // one to go.
-        if (!href || href.startsWith("#")) return;
-        event.preventDefault();
-        onOpenLink(href);
-      }}
-      className="selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline bg-white shadow-pane"
-      // The only place in the app where a sender's markup lands, and the reason the
-      // sanitiser exists at all.
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    // The card is a wrapper because the email baseline zeroes the container's own
+    // padding (it must, for the "as sent" document's body), which left the text flush
+    // against the card's edge.
+    <div className="selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline bg-white px-6 py-5">
+      <div
+        ref={containerRef}
+        data-wn-email=""
+        onClick={(event) => {
+          const anchor = (event.target as HTMLElement).closest?.("a[href]");
+          if (!anchor || !event.currentTarget.contains(anchor)) return;
+          // A modified click is the user asking for the browser's own answer — a new
+          // tab, a download — so it is left alone rather than swallowed.
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          const href = anchor.getAttribute("href");
+          // A fragment stays in the document, and a message's own anchors were not given
+          // ids (a sender's `id` would collide with the app's), so there is nowhere for
+          // one to go.
+          if (!href || href.startsWith("#")) return;
+          event.preventDefault();
+          onOpenLink(href);
+        }}
+        // The only place in the app where a sender's markup lands, and the reason the
+        // sanitiser exists at all.
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </div>
   );
 }
 
@@ -316,55 +319,6 @@ function Proxied({ email, document, fetched, blocked }: {
   );
 }
 
-/**
- * The control that picks between the forms.
- *
- * Two choices rather than four when the message has no HTML part. A switch whose "Rich"
- * option renders nothing is a control lying about the message.
- */
-function ViewSwitch({
-  view,
-  onChange,
-  hasHtml,
-}: {
-  view: BodyView;
-  onChange: (next: BodyView) => void;
-  hasHtml: boolean;
-}) {
-  const options: Array<{ id: BodyView; label: string; Icon: typeof Type }> = [
-    ...(hasHtml ? [{ id: "rich" as BodyView, label: "Rich", Icon: Eye }] : []),
-    ...(hasHtml && renderProxyUrl !== null
-      ? [{ id: "proxied" as BodyView, label: "Proxied", Icon: Server }]
-      : []),
-    { id: "plain", label: "Plain text", Icon: Type },
-    { id: "sent", label: "As sent", Icon: Code2 },
-  ];
-
-  return (
-    <div
-      role="group"
-      aria-label="How to show this message"
-      className="inline-flex items-center gap-0.5 rounded-full bg-sheen p-0.5"
-    >
-      {options.map(({ id, label, Icon }) => (
-        <button
-          key={id}
-          type="button"
-          aria-pressed={view === id}
-          onClick={() => onChange(id)}
-          title={`Show this message as ${label.toLowerCase()}`}
-          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-            view === id ? "bg-surface text-ink shadow-pane" : "text-ink-muted hover:text-ink"
-          }`}
-        >
-          <Icon size={12} strokeWidth={1.9} aria-hidden="true" />
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 type Props = {
   email: Email;
   /**
@@ -376,6 +330,8 @@ type Props = {
   inlineParts?: Record<string, string>;
   /** Open a link from the message in the system browser, a different origin. */
   onOpenLink: (url: string) => void;
+  /** Which form to show. Owned by the reader, whose menu picks it. */
+  view: BodyView;
 };
 
 /**
@@ -385,16 +341,8 @@ type Props = {
  * preference would need a fourth `Preferences` key, a migration and a Settings control,
  * for a thing most readers change once.
  */
-export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink }: Props) {
-  const [view, setView] = useState<BodyView>("rich");
-  const emailId = email.id;
+export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, view }: Props) {
   const bodyHtml = email.bodyHtml;
-
-  // Back to the default when the selection moves, so a message you read as text is not
-  // the reason the next one is.
-  useEffect(() => {
-    setView("rich");
-  }, [emailId]);
 
   const hasHtml = Boolean(bodyHtml);
   const sanitised = useSanitised(email, imagesAllowed, inlineParts);
@@ -426,18 +374,15 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink }: P
     !hasHtml && (view === "rich" || view === "proxied") ? "plain" : view;
 
   return (
-    <div className="mt-4">
+    <div className="mt-5">
       <EmailStyles />
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <ViewSwitch view={view} onChange={setView} hasHtml={hasHtml} />
-        {hasHtml && sanitised.html === "" && (
-          <p className="text-[12px] text-ink-subtle">
-            Nothing in this message could be rendered safely. The plain text above is
-            all of it.
-          </p>
-        )}
-      </div>
+      {hasHtml && sanitised.html === "" && (
+        <p className="mb-3 text-[12px] text-ink-subtle">
+          Nothing in this message could be rendered safely. Plain text, in the &hellip; menu,
+          is all of it.
+        </p>
+      )}
 
       {shown === "rich" && <RichBody html={sanitised.html} onOpenLink={onOpenLink} />}
       {shown === "plain" && <PlainText email={email} />}

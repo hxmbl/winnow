@@ -8,10 +8,11 @@
  * Important pill always agree.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   Ban,
+  Check,
   CornerUpLeft,
   Eye,
   EyeOff,
@@ -19,6 +20,7 @@ import {
   ImageOff,
   Mail,
   MailOpen,
+  MoreHorizontal,
   Paperclip,
   RotateCcw,
   Star,
@@ -36,7 +38,8 @@ import {
   type EmailSignals,
 } from "../../core/model/signals";
 import { filterIcon } from "../filterIcons";
-import { MessageBody } from "./MessageBody";
+import { MessageBody, type BodyView } from "./MessageBody";
+import { bodyViewOptions } from "../bodyViews";
 import { platform } from "../../platform";
 
 /**
@@ -117,11 +120,15 @@ const ICON_BUTTON =
 const QUIET_BUTTON =
   "rounded-full bg-sheen px-3 py-1.5 text-[12.5px] font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
-function Toolbar({ starred, unread, mailbox, actions }: {
+function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName }: {
   starred: boolean;
   unread: boolean;
   mailbox: Mailbox;
   actions: Actions;
+  view: BodyView;
+  onViewChange: (next: BodyView) => void;
+  hasHtml: boolean;
+  senderName: string;
 }) {
   // The label follows the action rather than the verb: "Restore" in the bin, because
   // that is what the button will do.
@@ -214,6 +221,117 @@ function Toolbar({ starred, unread, mailbox, actions }: {
       >
         <Trash2 size={15} strokeWidth={1.9} />
       </button>
+      <MoreMenu
+        view={view}
+        onViewChange={onViewChange}
+        hasHtml={hasHtml}
+        senderName={senderName}
+        onBlockSender={actions.onBlockSender}
+        buttonClass={ICON_BUTTON}
+      />
+    </div>
+  );
+}
+
+/**
+ * The toolbar's overflow: the controls a reader reaches for rarely.
+ *
+ * "Show as" was a segmented switch above every body and "Hide everything from…" a
+ * footer under every message; both were on screen for every message and used for almost
+ * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
+ * hands focus back to its button so the keyboard is not stranded.
+ */
+function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, buttonClass }: {
+  view: BodyView;
+  onViewChange: (next: BodyView) => void;
+  hasHtml: boolean;
+  senderName: string;
+  onBlockSender: () => void;
+  buttonClass: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // Escape closes the menu, not the reader behind it.
+      event.stopPropagation();
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+
+  const choose = (run: () => void) => {
+    setOpen(false);
+    run();
+    buttonRef.current?.focus();
+  };
+
+  const ITEM =
+    "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-none";
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label="More"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="More"
+        onClick={() => setOpen((was) => !was)}
+        className={buttonClass}
+      >
+        <MoreHorizontal size={15} strokeWidth={1.9} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="More actions"
+          className="absolute right-0 top-8 z-30 w-60 rounded-pane border border-hairline bg-surface p-1 shadow-pane"
+        >
+          <p className="px-2.5 pb-1 pt-1.5 text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
+            Show as
+          </p>
+          {bodyViewOptions(hasHtml).map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={view === id}
+              onClick={() => choose(() => onViewChange(id))}
+              className={ITEM}
+            >
+              <Icon size={13} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <span className="flex-1">{label}</span>
+              {view === id && <Check size={13} strokeWidth={2.2} aria-hidden="true" />}
+            </button>
+          ))}
+          <div className="my-1 h-px bg-divider" aria-hidden="true" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose(onBlockSender)}
+            title="Everything from this sender disappears from every folder. Bring it back in Settings."
+            className={`${ITEM} hover:bg-danger-wash hover:text-danger`}
+          >
+            <Ban size={13} strokeWidth={1.9} aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">Hide everything from {senderName}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -280,6 +398,13 @@ export function Reader({
    */
   const emailId = email?.id ?? null;
   const hasHtml = email?.bodyHtml !== undefined;
+
+  // The body's form, per message: back to the default when the selection moves, so a
+  // message you read as text is not the reason the next one is.
+  const [view, setView] = useState<BodyView>("rich");
+  useEffect(() => {
+    setView("rich");
+  }, [emailId]);
 
   useEffect(() => {
     if (emailId !== null && !hasHtml) onLoadBody();
@@ -375,6 +500,10 @@ export function Reader({
               unread={email.unread}
               mailbox={mailbox}
               actions={actions}
+              view={view}
+              onViewChange={setView}
+              hasHtml={Boolean(email.bodyHtml)}
+              senderName={displayName(email)}
             />
           </div>
 
@@ -471,6 +600,7 @@ export function Reader({
             email={email}
             imagesAllowed={imagesAllowed}
             onOpenLink={(url) => void platform.openExternal(url)}
+            view={view}
           />
 
           {/*
@@ -624,31 +754,6 @@ export function Reader({
             </div>
           )}
 
-          {/*
-            The sender-level action, as a footer.
-
-            It was a neutral outlined chip directly under the conversation list, so it
-            read as part of the conversation — a button about the *sender* sitting inside
-            a list of *messages*. A labelled footer, separated by its own rule, makes the
-            scope legible before the click rather than after.
-          */}
-          <footer className="mt-10 max-w-[68ch]">
-            <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
-              This sender
-            </h3>
-            <p className="mt-1.5 text-preview text-ink-muted">
-              Everything from {displayName(email)} disappears from every folder, and you can
-              bring it back in Settings.
-            </p>
-            <button
-              type="button"
-              onClick={actions.onBlockSender}
-              className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-sheen px-3 py-1.5 text-[12.5px] font-medium text-ink-body transition-colors hover:bg-danger-wash hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-            >
-              <Ban size={13} strokeWidth={1.9} aria-hidden="true" />
-              Hide everything from {displayName(email)}
-            </button>
-          </footer>
         </article>
       </div>
     </div>

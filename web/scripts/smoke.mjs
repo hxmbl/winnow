@@ -1270,9 +1270,12 @@ try {
   // message is opened.
   await page.keyboard.press("j");
   await page.waitForTimeout(200);
-  const demoHasRichView = await page.evaluate(() =>
-    [...document.querySelectorAll("button")].filter(b => b.textContent?.includes("Rich")).length,
-  );
+  // The forms live in the reader's ⋯ menu.
+  await page.locator('[data-reader] button[aria-label="More"]:visible').first().click();
+  const demoHasRichView = await page
+    .locator('[role="menu"] [role="menuitemradio"]', { hasText: "Rich" })
+    .count();
+  await page.keyboard.press("Escape");
   check("the demo reader offers a rich view for HTML messages", demoHasRichView > 0);
 
   /*
@@ -1329,13 +1332,20 @@ try {
   check("no event handler survives", rendered?.handlers === 0, `${rendered?.handlers} found`);
   check("no javascript: link survives", rendered?.jsLinks === 0, `${rendered?.jsLinks} found`);
 
-  // The other two forms, and the switch between them.
-  const forms = page.locator('[role="group"][aria-label="How to show this message"] button');
-  const labels = await forms.allTextContents();
+  // The other two forms, picked from the reader's ⋯ menu.
+  const moreButton = page.locator('[data-reader] button[aria-label="More"]:visible').first();
+  const forms = page.locator('[role="menu"] [role="menuitemradio"]');
+  const pickForm = async (index) => {
+    await moreButton.click();
+    await forms.nth(index).click();
+  };
+  await moreButton.click();
+  const labels = (await forms.allTextContents()).map((label) => label.trim());
   check("the body offers rich, plain and the original", labels.join("|") === "Rich|Plain text|As sent",
     labels.join("|"));
+  await page.keyboard.press("Escape");
 
-  await forms.nth(1).click();
+  await pickForm(1);
   await page.waitForTimeout(300);
   const plainShown = await page.evaluate(() => {
     const host = document.querySelector("[data-wn-email]");
@@ -1343,7 +1353,7 @@ try {
   });
   check("plain text is the extracted prose, with no markup", plainShown);
 
-  await forms.nth(2).click();
+  await pickForm(2);
   await page.waitForTimeout(600);
   const sent = await page.evaluate(() => {
     const frame = [...document.querySelectorAll("iframe")].find((f) => f.title === "Message as sent");
@@ -1363,7 +1373,7 @@ try {
   check("with no script and no remote reference in its document",
     sent?.noScript === true && sent?.noRemoteInHead === true, JSON.stringify(sent));
 
-  await forms.nth(0).click();
+  await pickForm(0);
   await page.waitForTimeout(300);
 
   // A link in a message must leave the app rather than navigate it.
@@ -1769,7 +1779,8 @@ try {
   );
 
   await openMessage();
-  const block = page.locator('button:has-text("Hide everything from")').first();
+  await page.locator('[data-reader] button[aria-label="More"]:visible').first().click();
+  const block = page.locator('[role="menu"] button:has-text("Hide everything from")').first();
   require("the reader offers to hide a sender", (await block.count()) > 0);
   const blockedName = ((await block.textContent()) ?? "").replace("Hide everything from ", "").trim();
   await block.click();

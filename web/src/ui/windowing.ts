@@ -15,8 +15,8 @@
  * animatable, or the scrollbar would jitter on every correction.
  */
 
-/** A row's typical height, from the layout: 18.2px lines, 32px avatar, 16px padding. */
-export const ESTIMATED_ROW_HEIGHT = 68;
+/** A row's typical height, from the layout: two 18.2px lines, 32px avatar, 16px padding. */
+export const ESTIMATED_ROW_HEIGHT = 53;
 
 /** A day header's height: `pt-4` + label line + `pb-1.5`. */
 export const ESTIMATED_HEADER_HEIGHT = 40;
