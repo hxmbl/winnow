@@ -1399,6 +1399,24 @@ export const DEMO_EMAILS: readonly Email[] = seeds
   .sort((a, b) => b.receivedAt - a.receivedAt);
 
 /**
+ * The demo mailbox as the app shows it: the same seed, moved so `DEMO_NOW` lands on
+ * the real clock.
+ *
+ * Frozen at `DEMO_NOW`, the list called a May 2026 message "Today" while the reader,
+ * which prints the absolute date, said "Sat, May 9" for the same row. Shifting every
+ * timestamp by the same amount keeps the seed's shape (gaps, order, none in the
+ * future) and makes both views true at once. `DEMO_EMAILS` and `DEMO_NOW` stay fixed
+ * for the tests, which need the same day sections on every machine.
+ */
+export function demoMailbox(now: number = Date.now()): { emails: Email[]; now: number } {
+  const shift = Math.max(0, now - DEMO_NOW);
+  return {
+    emails: DEMO_EMAILS.map((email) => ({ ...email, receivedAt: email.receivedAt + shift })),
+    now: DEMO_NOW + shift,
+  };
+}
+
+/**
  * Senders the user has binned, for the trash-bias half of the profile.
  *
  * The demo needs this: without it every sender's bias is zero, the profile

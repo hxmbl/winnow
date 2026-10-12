@@ -1600,6 +1600,42 @@ describe("body retention", () => {
     expect(calls.filter((c) => c.method === "fetchBody").length).toBe(1);
   });
 
+  it("stops promising a formatted version once a fetch has failed, and retries on reopen", async () => {
+    // A failed fetch used to leave "Loading the formatted version…" on screen forever.
+    const { backend, calls } = bigBackend(600);
+    let fail = true;
+    const flaky: MailBackend = {
+      ...backend,
+      async fetchBody(gmailId) {
+        calls.push({ method: "fetchBody", args: [gmailId] });
+        if (fail) throw new Error("offline");
+        return "<p>late</p>";
+      },
+    };
+    const store = new WinnowStore();
+    store.attach({ backend: flaky });
+    await store.connect(flaky, { email: "a@b.example" });
+    const target = oldestOf(store);
+
+    await store.loadBody(target.id);
+    expect(store.hasLoadedBody(target.id)).toBe(true);
+
+    fail = false;
+    const retry = store.loadBody(target.id);
+    expect(store.hasLoadedBody(target.id)).toBe(false);
+    await retry;
+    expect(store.hasLoadedBody(target.id)).toBe(true);
+    expect(calls.filter((c) => c.method === "fetchBody").length).toBe(2);
+  });
+
+  it("has nothing to wait for in the demo mailbox", () => {
+    // No backend means no fetch is coming; the demo messages carry their HTML already.
+    const store = new WinnowStore({ seed: DEMO_EMAILS });
+    store.markDemoMode();
+    const first = store.getSnapshot().all[0]!;
+    expect(store.hasLoadedBody(first.id)).toBe(true);
+  });
+
   it("attaching a body does not reclassify the inbox", async () => {
     // The reason bodies live beside `state.all` rather than on it: rebuilding the array
     // changes its identity, invalidating `inboxAnalysis` and reclassifying everything — a
