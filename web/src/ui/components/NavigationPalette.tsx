@@ -1,18 +1,21 @@
 /**
  * The mailbox palette, on `!`.
  *
- * A four-row overlay rather than a permanent sidebar: a mail client is a full-window
+ * A small overlay rather than a permanent sidebar: a mail client is a full-window
  * reading surface, and a folder rail spends 200px of it on destinations the user visits
  * deliberately rather than continuously. The palette costs nothing until summoned.
  *
  * Archive is deliberately absent — you go to Archive to look for something, you do not
- * flip to it while triaging, and a fifth row would dilute the four that matter.
+ * flip to it while triaging, and a sixth row would dilute the ones that matter. Sent is
+ * here despite being the same kind of destination, because it is the one folder this app
+ * has no other way into: it is what the composer's recipient suggestions are built from,
+ * so being unable to read it would make a derived feature unauditable.
  *
  * **It is a `menu`, not a `dialog`:** the rows are destinations with a roving selection,
  * and `aria-activedescendant` is what makes it announce which row is highlighted.
  */
 
-import { Inbox, Settings, Trash2, TriangleAlert } from "lucide-react";
+import { Inbox, Send, Settings, Trash2, TriangleAlert } from "lucide-react";
 import { NAVIGATION_ITEMS, type NavigationItem } from "../../core/model/signals";
 import { MAILBOX_LABEL, type Mailbox } from "../../core/model/email";
 import { Sheet } from "./Overlay";
@@ -21,6 +24,7 @@ const ICONS: Record<NavigationItem, typeof Inbox> = {
   inbox: Inbox,
   spam: TriangleAlert,
   trash: Trash2,
+  sent: Send,
   settings: Settings,
 };
 
@@ -48,8 +52,8 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
       role="menu"
       label="Switch mailbox"
       onClose={onClose}
-      // Without this the palette is announced as a menu with four items and no position,
-      // which is the entire thing a menu is supposed to convey.
+      // Without this the palette is announced as a menu with a handful of items and no
+      // position, which is the entire thing a menu is supposed to convey.
       activeDescendant={active ? `nav-row-${active.id}` : undefined}
       className="animate-sheet w-full max-w-[280px] overflow-hidden rounded-pane border border-hairline bg-chrome p-1.5 shadow-lift"
     >

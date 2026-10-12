@@ -18,6 +18,7 @@ import {
   toEmail,
 } from "./mapper";
 import { LABEL, type GmailMessage, type GmailPart } from "./dto";
+import type { Email } from "../model/email";
 
 /** base64url, the way Gmail sends it. */
 function b64(text: string): string {
@@ -60,6 +61,19 @@ describe("mailboxFor", () => {
   it("files an unlabelled message as archived", () => {
     expect(mailboxFor([])).toBe("archive");
     expect(mailboxFor([LABEL.starred, LABEL.important])).toBe("archive");
+  });
+
+  it("files mail the user wrote as sent", () => {
+    expect(mailboxFor([LABEL.sent])).toBe("sent");
+  });
+
+  it("prefers inbox over sent, because a message in both is one you sent to yourself", () => {
+    expect(mailboxFor([LABEL.sent, LABEL.inbox])).toBe("inbox");
+  });
+
+  it("still prefers trash and spam over sent", () => {
+    expect(mailboxFor([LABEL.sent, LABEL.spam])).toBe("spam");
+    expect(mailboxFor([LABEL.sent, LABEL.trash])).toBe("trash");
   });
 });
 
@@ -193,6 +207,47 @@ describe("toEmail — sender", () => {
     // message with no `From` must get a placeholder.
     const email = toEmail(message({ payload: part({ headers: [] }) }))!;
     expect(email.sender).toBe("unknown@unknown");
+  });
+});
+
+describe("toEmail — recipients", () => {
+  /** A message carrying the given recipient headers. */
+  function addressed(headers: Record<string, string>): Email {
+    return toEmail(
+      message({
+        payload: part({
+          headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+        }),
+      }),
+    )!;
+  }
+
+  it("reads To, Cc and Bcc, with their names", () => {
+    const email = addressed({
+      To: "Dana Whitfield <dana@example.com>, sam@example.com",
+      Cc: "Priya Raman <priya@example.com>",
+      Bcc: "ana@example.com",
+    });
+    expect(email.to).toEqual([
+      { name: "Dana Whitfield", address: "dana@example.com" },
+      { address: "sam@example.com" },
+    ]);
+    expect(email.cc).toEqual([{ name: "Priya Raman", address: "priya@example.com" }]);
+    expect(email.bcc).toEqual([{ address: "ana@example.com" }]);
+  });
+
+  it("distinguishes a header that is absent from one that is empty", () => {
+    // A received message discloses no Bcc; a cached row from before these fields existed
+    // knows nothing at all. Only the second is an absence, and the difference is what
+    // lets a reader say "nobody was copied" only where that is actually true.
+    expect(addressed({ To: "ada@example.com" }).bcc).toBeUndefined();
+    expect(addressed({ To: "ada@example.com", Bcc: "" }).bcc).toEqual([]);
+  });
+
+  it("drops what is not an address rather than indexing it", () => {
+    expect(addressed({ To: "Undisclosed recipients:;, ada@example.com" }).to).toEqual([
+      { address: "ada@example.com" },
+    ]);
   });
 });
 

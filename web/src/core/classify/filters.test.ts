@@ -39,8 +39,12 @@ function email(over: Partial<Email> = {}): Email {
   };
 }
 
-const profile = buildUserProfile(DEMO_EMAILS, DEMO_TRASH);
 const inbox = DEMO_EMAILS.filter((m) => m.mailbox === "inbox");
+// The profile is built over the inbox, not the whole mailbox — see `buildUserProfile`,
+// whose parameter is an inbox, and `store.inboxAnalysis`, which hands it one. Passing
+// `DEMO_EMAILS` was the same code with different inputs: harmless while every seed was
+// inbox mail, and wrong from the moment a Sent folder existed.
+const profile = buildUserProfile(inbox, DEMO_TRASH);
 const signals = classifyAll(inbox, profile);
 
 function sigFor(gmailId: string): EmailSignals {
@@ -231,7 +235,7 @@ describe("matchesBuiltin — unsafe", () => {
     // The one place comparing `matchesBuiltin("unsafe")` against `isUnsafe` is
     // worth doing: over the whole seed, where the junk fixtures actually live.
     // The expected ids are written out rather than computed, so the comparison
-    // has a fixed answer to agree with — 46 of the 52 demo messages are clean.
+    // has a fixed answer to agree with — 46 of the 57 demo messages are clean.
     const expected = [
       "demo-spam-1",
       "demo-security-2",
@@ -246,7 +250,7 @@ describe("matchesBuiltin — unsafe", () => {
         expected.includes(message.gmailId),
       );
     }
-    expect(DEMO_EMAILS).toHaveLength(53);
+    expect(DEMO_EMAILS).toHaveLength(57);
   });
 });
 
@@ -682,7 +686,11 @@ describe("countAllFilters", () => {
     // as urgent and is a first-time sender, so those two are one lower too.
     expect(counted.get("security")).toBe(2);
     expect(counted.get("urgent")).toBe(3);
-    expect(counted.get("new_senders")).toBe(26);
+    // 27, not the 26 it was when this fixture built its profile over the whole
+    // mailbox: `bookings@airline.example` has one inbox message and one archived
+    // one, so counting the archived copy as inbox volume made a genuine first-time
+    // sender look like a regular. See the note on `profile` above.
+    expect(counted.get("new_senders")).toBe(27);
     expect(counted.get("unsafe")).toBe(1);
   });
 
@@ -737,7 +745,7 @@ describe("countAllFilters", () => {
       ["starred", 1],
       ["unread", 6],
       ["attachments", 1],
-      ["new_senders", 26],
+      ["new_senders", 27],
       ["top_contacts", 11],
       ["quiet_contacts", 12],
       ["newsletters", 4],

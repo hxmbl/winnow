@@ -10,13 +10,14 @@ export type Millis = number;
 /** Gmail message ID. */
 export type GmailId = string;
 
-export type Mailbox = "inbox" | "archive" | "trash" | "spam";
+export type Mailbox = "inbox" | "archive" | "sent" | "trash" | "spam";
 
-export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "trash", "spam"];
+export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
 
 export const MAILBOX_LABEL: Record<Mailbox, string> = {
   inbox: "Inbox",
   archive: "Archive",
+  sent: "Sent",
   trash: "Trash",
   spam: "Spam",
 };
@@ -42,6 +43,20 @@ export const CATEGORY_MAP: Record<string, EmailCategory> = {
   CATEGORY_RESERVATIONS: "reservations",
   CATEGORY_RECEIPTS: "receipts",
   CATEGORY_NEWSLETTERS: "newsletter",
+};
+
+/**
+ * One address on a message, with the name it was addressed by.
+ *
+ * The same shape for every field that holds one. `name` is optional because a header
+ * frequently has no display name at all, and a contact with a name is worth more to a
+ * recipient list than one without.
+ */
+export type Contact = {
+  /** Bare address. */
+  address: string;
+  /** Header display name, if the message carried one. */
+  name?: string;
 };
 
 /** Attachment metadata (bytes fetched on demand). */
@@ -115,6 +130,21 @@ export type Email = {
   address?: string;
   /** Header display name. */
   name?: string;
+  /**
+   * Who the message was addressed to.
+   *
+   * Optional and absent on most cached messages: the fields are new, and the offline
+   * cache is full of rows written before they existed. Absence means "this message
+   * predates them", so every reader treats them as empty rather than as an error.
+   *
+   * On received mail `to` and `cc` are what the sender chose to disclose; `bcc` is
+   * normally empty, because a recipient is not told who else was copied. On sent mail
+   * all three are complete, which is the point — sent mail is the only place the other
+   * side of a conversation is visible.
+   */
+  to?: Contact[];
+  cc?: Contact[];
+  bcc?: Contact[];
   mailbox: Mailbox;
   receivedAt: Millis;
   subject: string;

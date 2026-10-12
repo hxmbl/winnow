@@ -16,22 +16,27 @@
 import {
   CATEGORY_MAP,
   type Attachment,
+  type Contact,
   type Email,
   type EmailCategory,
   type Mailbox,
 } from "../model/email";
 import { hashId } from "../model/ids";
 import { LABEL, base64UrlDecode, type GmailMessage, type GmailPart } from "./dto";
-import { parseAddressHeader, plainTextFromHtml } from "../mail/html";
+import { parseAddressHeader, parseAddressList, plainTextFromHtml } from "../mail/html";
 
 /** Which mailbox a set of labels files the message in. */
 export function mailboxFor(labelIds: readonly string[]): Mailbox {
-  // Order matters: trash beats spam beats inbox; a message can carry more than
+  // Order matters: trash beats spam beats inbox beats sent; a message can carry more than
   // one of these mid-move, and "where can the user get rid of it" is the
   // better question.
+  //
+  // Sent sits below inbox rather than beside it, because a message that is both is one
+  // you sent *to yourself* and it belongs where the rest of your mail is.
   if (labelIds.includes(LABEL.trash)) return "trash";
   if (labelIds.includes(LABEL.spam)) return "spam";
   if (labelIds.includes(LABEL.inbox)) return "inbox";
+  if (labelIds.includes(LABEL.sent)) return "sent";
   return "archive";
 }
 
@@ -158,6 +163,20 @@ function categoryFor(labelIds: readonly string[]): EmailCategory {
 }
 
 /**
+ * One recipient header, or `undefined` when the message has none.
+ *
+ * `undefined` and `[]` are different answers and both are kept: a message with no `Cc`
+ * header was not copied to anybody, and a message from an older cache has no idea.
+ * Callers read all three as "nobody", which is the only thing they can honestly claim
+ * about either.
+ */
+function recipients(payload: GmailPart | undefined, header: string): Contact[] | undefined {
+  const raw = headerValue(payload, header);
+  if (raw === undefined) return undefined;
+  return parseAddressList(raw);
+}
+
+/**
  * Map a Gmail message to an `Email`, or `null` when it is not something Winnow
  * shows.
  *
@@ -208,6 +227,13 @@ export function toEmail(message: GmailMessage): Email | null {
     sender,
     name: parsedFrom?.name,
     address: parsedFrom?.address,
+    // Recipients, because sent mail is the only place the other side of a
+    // conversation is visible and the composer's recipient list is built from it.
+    // Absent rather than empty when the headers are not there, which is the
+    // normal case for received mail that disclosed nothing.
+    to: recipients(payload, "To"),
+    cc: recipients(payload, "Cc"),
+    bcc: recipients(payload, "Bcc"),
     mailbox: mailboxFor(labelIds),
     receivedAt,
     subject: decodeMimeWord(headerValue(payload, "Subject") ?? ""),

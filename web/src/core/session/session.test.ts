@@ -114,6 +114,22 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/**
+ * Wait until the platform has been handed an authorize URL, and return it.
+ *
+ * The web flow never settles — `beginSignIn` hands the page to the browser and returns a
+ * promise that stays pending forever — so the URL is the only observable, and it is
+ * reached only after `createPkcePair` and a `platform.info()` round trip. Counting
+ * `setTimeout(0)` ticks to get there was a race: `crypto.subtle` is a task rather than a
+ * microtask, so under load two ticks were sometimes one too few and the assertion read
+ * `new URL(undefined)` and reported "Invalid URL" about a test that had passed.
+ */
+async function authorizeUrlFor(opened: string[]): Promise<string> {
+  for (let attempt = 0; attempt < 50 && opened.length === 0; attempt += 1) await flush();
+  if (opened.length === 0) throw new Error("sign-in never reached the platform");
+  return opened[0];
+}
+
 /** A minimal in-memory `sessionStorage`, since this suite runs in Node. */
 function installSessionStorage(): Map<string, string> {
   const backing = new Map<string, string>();
@@ -175,10 +191,9 @@ describe("the sign-in redirect URI", () => {
     // been built. The captured URL is the assertion, and it was captured before
     // any outcome could have been read.
     const inflight = session.signIn();
-    await flush();
-    await flush();
+    const authorizeUrl = await authorizeUrlFor(opened);
 
-    expect(redirectOf(opened[0])).toBe("https://app.example/auth/callback");
+    expect(redirectOf(authorizeUrl)).toBe("https://app.example/auth/callback");
 
     // And the promise must not have settled: nothing has happened yet, the
     // page has simply been handed to the browser.

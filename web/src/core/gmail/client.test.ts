@@ -109,6 +109,13 @@ describe("GmailClient — the verbs", () => {
     expect(JSON.parse(calls[0].init!.body!)).toEqual({ removeLabelIds: [LABEL.inbox] });
   });
 
+  it("refuses SENT and DRAFT before calling out, because Gmail rejects them with a 400", async () => {
+    const { fetchImpl, calls } = stubFetch([]);
+    await expect(client(fetchImpl).removeLabels("m1", [LABEL.inbox, LABEL.sent])).rejects.toBeInstanceOf(GmailError);
+    await expect(client(fetchImpl).addLabels("m1", [LABEL.draft])).rejects.toBeInstanceOf(GmailError);
+    expect(calls).toHaveLength(0);
+  });
+
   it("marks read by removing the unread label, and unread by adding it", async () => {
     const { fetchImpl, calls } = stubFetch([{ status: 204 }, { status: 204 }]);
     const gmail = client(fetchImpl);

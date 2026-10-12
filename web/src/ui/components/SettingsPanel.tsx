@@ -9,6 +9,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, RotateCcw } from "lucide-react";
 import { Sheet, SheetHeader } from "./Overlay";
+import { RecipientField } from "./RecipientField";
+import { isValidAddress } from "../../core/contacts/addresses";
+import type { ContactIndex } from "../../core/contacts/index";
 import {
   SIGNAL_KEYS,
   adjustment,
@@ -592,6 +595,13 @@ export type ComposerProps = {
   quoteBlock?: string;
   sending: boolean;
   error: string | null;
+  /**
+   * Everyone the mail in the store knows about, for the recipient suggestions.
+   *
+   * `null` while there is none — an empty mailbox, or the index not having been derived
+   * yet — and the field still works, it simply offers nobody.
+   */
+  contacts: ContactIndex | null;
   onChange: (patch: { to?: string[]; subject?: string; body?: string }) => void;
   onSend: () => void;
   /** Close, having said the word. No confirmation. */
@@ -607,6 +617,7 @@ export function Composer({
   body,
   sending,
   error,
+  contacts,
   onChange,
   onSend,
   onDiscard,
@@ -616,8 +627,11 @@ export function Composer({
   const toRef = useRef<HTMLInputElement>(null);
   /** `true` until the mount effect has placed the caret. */
   const placed = useRef(false);
-  /** A forward with no recipient cannot be sent; the button says so. */
-  const canSend = !sending && to.length > 0;
+  /**
+   * A forward with no recipient cannot be sent, and neither can one addressed to something
+   * undeliverable — so the button asks about the addresses rather than about their count.
+   */
+  const canSend = !sending && to.length > 0 && to.every((address) => isValidAddress(address));
 
   /*
     Focus and caret placement, once per *mount*.
@@ -678,25 +692,22 @@ export function Composer({
         }}
       >
       <div className="flex flex-col gap-3 px-5 py-4">
-        <div className="flex items-center gap-2 text-[12.5px]">
-          <span className="w-12 shrink-0 text-ink-subtle">To</span>
-          <input
-            ref={toRef}
-            type="text"
-            aria-label="To"
-            placeholder="name@example.com, another@example.com"
-            value={to.join(", ")}
-            onChange={(event) =>
-              onChange({
-                to: event.target.value
-                  .split(",")
-                  .map((address) => address.trim())
-                  .filter(Boolean),
-              })
-            }
-            className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-[var(--wn-inkBody)]"
-          />
-        </div>
+        {/*
+          Recipients.
+
+          The plain comma-separated input this replaces let you type an address and could
+          not tell you what it had. `RecipientField` turns each one into a chip, suggests
+          people from the mail already in the store, and marks an address that cannot be
+          delivered — which is the difference between a disabled Send button and a disabled
+          Send button you can understand.
+        */}
+        <RecipientField
+          id="winnow-composer-to"
+          recipients={to}
+          contacts={contacts}
+          inputRef={toRef}
+          onChange={(next) => onChange({ to: next })}
+        />
 
         <div className="flex items-center gap-2 text-[12.5px]">
           <span className="w-12 shrink-0 text-ink-subtle">Subject</span>
@@ -729,11 +740,19 @@ export function Composer({
           <button
             type="button"
             onClick={onSend}
-            // A forward with no recipient is unsendable, and a disabled Send is a
-            // truthful statement about that. `title` says why, because a greyed-out
-            // button with no explanation is its own small puzzle.
+            // A forward with no recipient is unsendable, and so is one addressed to
+            // something undeliverable. A disabled Send is a truthful statement about that,
+            // and `title` says why — a greyed-out button with no explanation is its own
+            // small puzzle, and the person who cannot work out why has to guess which of
+            // their recipients is wrong.
             disabled={!canSend}
-            title={to.length === 0 ? "Add at least one recipient" : "Send (⌘ or Ctrl + ⏎)"}
+            title={
+              to.length === 0
+                ? "Add at least one recipient"
+                : !canSend
+                  ? "Fix the recipient that is not an email address"
+                  : "Send (⌘ or Ctrl + ⏎)"
+            }
             className="inline-flex items-center gap-2 rounded-full bg-[var(--wn-inkBody)] px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {sending ? "Sending…" : "Send"}

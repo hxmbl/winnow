@@ -108,16 +108,137 @@ export function sanitizeDisplayName(name: string): string {
   );
 }
 
-/** Extract an address from a `Display Name <addr@example.com>` header. */
+/**
+ * Extract an address from a `Display Name <addr@example.com>` header.
+ *
+ * The name is taken as everything before the angle brackets rather than as "an optional
+ * pair of quotes around characters that are not quotes", because a quoted-string
+ * display name may itself contain a quote: `"Ada \"Countess\"" <ada@example.com>` is a
+ * legal `From`, and the simpler pattern does not match it — which sent the whole raw
+ * header out as the sender's address.
+ */
 export function parseAddressHeader(raw: string): { name?: string; address: string } | null {
-  const angled = raw.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
+  const angled = raw.match(/^\s*(.*?)<([^>]+)>\s*$/);
   if (angled) {
-    const name = sanitizeDisplayName(angled[1]);
+    const name = sanitizeDisplayName(unguess(angled[1]));
     return { name: name || undefined, address: angled[2].trim() };
   }
   const address = raw.trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) return null;
   return { address };
+}
+
+/**
+ * The contents of a quoted string, or the string itself.
+ *
+ * RFC 5322 §3.4.2 lets a quoted-pair stand for a character the grammar would otherwise
+ * reserve, so `\"` inside a display name is a quote and not a terminator.
+ */
+function unguess(raw: string): string {
+  const value = raw.trim();
+  if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"')) return value;
+  return value.slice(1, -1).replace(/\\(.)/g, "$1");
+}
+
+/**
+ * Every address in an RFC 5322 address list, in order.
+ *
+ * Not `split(",")`. A display name may be quoted and contain the separator —
+ * `"Ng, Alex" <alex@example.com>` is one address, and the naive split makes it
+ * two fragments, neither of which parses. So the scan tracks the three places a comma
+ * can be harmless: inside quotes, inside a comment, and inside angle brackets. Comments
+ * are dropped rather than kept, because a comment is not part of the address.
+ *
+ * Group syntax (`Team: a@example.com, b@example.com;`) is unwrapped, and the group's
+ * label becomes the display name of an address that has none — which is how a
+ * mail client renders it, and better than losing the name entirely.
+ */
+export function parseAddressList(raw: string): { name?: string; address: string }[] {
+  const out: { name?: string; address: string }[] = [];
+  for (const chunk of splitAddressList(raw)) {
+    const parsed = addressFromChunk(chunk);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+/**
+ * Cut an address list into one chunk per address.
+ *
+ * State is three booleans and a counter rather than a regular expression because the
+ * grammar is not regular: a quoted string can contain an escaped quote, and a comment
+ * can nest.
+ */
+function splitAddressList(raw: string): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  let quoted = false;
+  let angled = false;
+  let comment = 0;
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i];
+
+    if (comment > 0) {
+      // Backslash escapes inside a comment swallow the next character, so a `)` that
+      // is itself escaped does not close the comment.
+      if (char === "\\") i += 1;
+      else if (char === "(") comment += 1;
+      else if (char === ")") comment -= 1;
+      continue;
+    }
+
+    if (quoted) {
+      current += char;
+      if (char === "\\" && i + 1 < raw.length) {
+        current += raw[i + 1];
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      quoted = true;
+      current += char;
+      continue;
+    }
+    if (char === "(") {
+      comment = 1;
+      continue;
+    }
+    if (char === "<") angled = true;
+    else if (char === ">") angled = false;
+    else if (char === "," && !angled) {
+      chunks.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  chunks.push(current);
+  return chunks;
+}
+
+/** One chunk of a split list, unwrapping a group and dropping a stray `;`. */
+function addressFromChunk(chunk: string): { name?: string; address: string } | null {
+  const value = chunk.trim().replace(/;+\s*$/, "").trim();
+  if (value === "") return null;
+
+  // A group label is a colon before any angle bracket or quote. Requiring the address
+  // part to be there afterwards keeps a malformed group from swallowing the rest of the
+  // header, which is what `parseAddressHeader(null)` cannot protect us from.
+  const group = /^([^:<>"@]+):/.exec(value);
+  if (group) {
+    const label = sanitizeDisplayName(unguess(group[1]));
+    const parsed = parseAddressHeader(value.slice(group[0].length));
+    if (!parsed) return null;
+    return { address: parsed.address, name: parsed.name ?? (label || undefined) };
+  }
+
+  return parseAddressHeader(value);
 }
 
 /** A tag, and the attributes inside it. Matching real tags keeps quoted HTML in the text from counting. */

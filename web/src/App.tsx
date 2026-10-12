@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LogIn, RefreshCw, X } from "lucide-react";
-import { NO_CURSOR, WinnowStore, type Snapshot } from "./core/store/store";
+import { NO_CURSOR, WinnowStore, MAILBOX_ORDER, type Snapshot } from "./core/store/store";
 import { commandForKey, shouldSwallow, type KeyContext } from "./core/mail/keybinds";
 import {
   badgeFilters,
@@ -368,9 +368,13 @@ export function App({ store }: Props) {
     [view.emails],
   );
 
+  // `MAILBOX_ORDER` rather than a second list of the same names: the drawer's rows were
+  // written out here, so a mailbox added to the model and to the `!` palette was
+  // invisible in the drawer — which is how "Sent" could have shipped with no way to open
+  // it on a phone, where the drawer *is* the navigation.
   const mailboxes = useMemo(
     () =>
-      (["inbox", "archive", "trash", "spam"] as Mailbox[]).map((id) => ({
+      MAILBOX_ORDER.map((id) => ({
         id,
         label: MAILBOX_LABEL[id],
         unread: snapshot.all.filter((email) => email.mailbox === id && email.unread).length,
@@ -1306,6 +1310,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           body={composer.draft.body}
           sending={composer.sending}
           error={composer.error}
+          contacts={view.contacts}
           onChange={(patch) =>
             setComposer((current) =>
               current

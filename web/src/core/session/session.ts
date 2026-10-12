@@ -625,6 +625,8 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.inbox]);
             break;
           case "archive":
+            // Not SENT: Gmail sets that label itself and rejects it in a modify call
+            // with 400, which would fail every archive, not just archives of sent mail.
             await client.removeLabels(gmailId, [LABEL.trash, LABEL.spam, LABEL.inbox]);
             break;
           case "trash":
@@ -635,6 +637,15 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.spam]);
             await client.removeLabels(gmailId, [LABEL.inbox]);
             break;
+          case "sent":
+            // Unreachable: nothing in the product files mail into Sent, because the
+            // label is set by Gmail at the moment it sends. Said rather than left
+            // implicit, so adding a "file into Sent" action later finds this.
+            throw new GmailError(
+              "Mail cannot be filed into Sent — Gmail applies that label when it sends.",
+              400,
+              "unknown",
+            );
         }
       },
       async setRead(id, read) {

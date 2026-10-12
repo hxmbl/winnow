@@ -47,11 +47,16 @@ export interface CursorStore {
   clear(): Promise<void>;
 }
 
-/** The four views a full sync pages through, and how far each goes. */
+/** The five views a full sync pages through, and how far each goes. */
 const VIEWS: readonly { query: string; cap: number }[] = [
   // The inbox is the product; it is never truncated.
   { query: "in:inbox", cap: Number.POSITIVE_INFINITY },
-  // "Archived" means All Mail minus the folder-ish buckets: sent, drafts and spam.
+  // Sent mail, because the composer suggests people you have written to and a recipient
+  // list needs the other side of a conversation to have any. Capped like the rest: this
+  // is a contact source, not an export, and a 12,000-message sent folder would cost the
+  // cache far more than it adds.
+  { query: "in:sent", cap: 500 },
+  // "Archived" means All Mail minus the folder-ish buckets: drafts and spam.
   { query: "-in:inbox -in:trash -in:sent -in:draft -in:spam", cap: 500 },
   { query: "in:trash", cap: 500 },
   { query: "in:spam", cap: 500 },
@@ -371,14 +376,16 @@ export class GmailSyncEngine {
       return { kind: "failed" };
     }
 
-    // Mail the user wrote is not a tracked view. Spam *is* tracked, so a
-    // SPAM-labelled message is homed by `mailboxFor` rather than discarded.
+    // Mail the user wrote is a tracked view now — the composer's recipient suggestions
+    // are built from the other side of the conversations in it. Drafts are not: a draft
+    // is an unfinished thing, and half of them have no recipients at all.
     const labels = message.labelIds ?? [];
     const tracked =
       labels.includes(LABEL.inbox) ||
       labels.includes(LABEL.trash) ||
-      labels.includes(LABEL.spam);
-    if (!tracked && (labels.includes(LABEL.sent) || labels.includes(LABEL.draft))) {
+      labels.includes(LABEL.spam) ||
+      labels.includes(LABEL.sent);
+    if (!tracked && labels.includes(LABEL.draft)) {
       return { kind: "missing" };
     }
 

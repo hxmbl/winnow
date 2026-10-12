@@ -324,6 +324,20 @@ describe("optimistic actions and their rollback", () => {
     expect(store.getSnapshot().all.find((e) => e.id === target.id)!.mailbox).toBe("inbox");
   });
 
+  it("leaves mail the user wrote in Sent, because Gmail will not let it leave", () => {
+    // Gmail owns the SENT label and the API refuses to remove it, so an optimistic move
+    // out of Sent would snap back on the next sync, and the server call would fail.
+    const { backend, calls } = fakeBackend();
+    const store = demoStore();
+    store.attach({ backend });
+    const sent = store.getSnapshot().all.find((e) => e.mailbox === "sent");
+    if (!sent) throw new Error("the demo seed has no sent mail to archive");
+
+    store.archive(sent.id);
+    expect(store.getSnapshot().all.find((e) => e.id === sent.id)!.mailbox).toBe("sent");
+    expect(calls.some((c) => c.method === "moveToMailbox")).toBe(false);
+  });
+
   it("restores from the bin rather than archiving", async () => {
     const { backend } = fakeBackend();
     const store = demoStore();

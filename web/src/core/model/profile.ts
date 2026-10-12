@@ -39,8 +39,12 @@ export type TrashRecord = { sender: string; count?: number };
 /**
  * Engagement weight by Gmail category (discounted relative to primary).
  * Primary=1; others discounted to avoid newsletters outranking contacts.
+ *
+ * Exported because the contact index discounts the same way, and two answers to "how much
+ * is a message from this person worth" would drift — the profile ranks senders and the
+ * recipient list ranks recipients, and they must agree about who a contact is.
  */
-const CATEGORY_WEIGHT: Record<EmailCategory, number> = {
+export const CATEGORY_WEIGHT: Record<EmailCategory, number> = {
   primary: 1,
   social: 0.6,
   updates: 0.5,

@@ -1096,6 +1096,18 @@ try {
   // the conversation — so `f` then Escape demanded confirmation about text Winnow had
   // put there a second earlier, and the only way out was a second Escape. Confirmations
   // you are trained to dismiss are how the ones that matter stop working.
+  //
+  // The To field now opens its suggestions on focus, so the first Escape closes that
+  // list and the second closes the composer. The property under test is that *neither*
+  // asks, not how many keys it takes — and both halves are asserted separately, because
+  // a list that swallowed Escape entirely would pass the first and fail the second.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check(
+    "Escape over an open suggestion list closes the list, not the composer",
+    (await page.locator('[role="listbox"]').count()) === 0 &&
+      (await page.locator('[role="dialog"][aria-label="Forward"]').count()) > 0,
+  );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
   check(
@@ -1136,6 +1148,115 @@ try {
   );
   await answerDiscard(true);
   await page.waitForTimeout(200);
+
+  // ── Recipient autocomplete ───────────────────────────────────────────────────
+  //
+  // Sourced from the mail already in the store — senders, and the recipients on the
+  // user's own sent mail, which is why that folder exists at all. No network, no
+  // contacts API, nothing to consent to.
+  section("recipient autocomplete");
+
+  const toField = page.locator('input[aria-label="To"]');
+  const suggestions = page.locator('[role="listbox"] [role="option"]');
+  const chips = page.locator('[role="dialog"] button[aria-label^="Remove"]');
+  const sendButton = page.locator('[role="dialog"] button:has-text("Send")').first();
+
+  await page.keyboard.press("f");
+  await page.waitForSelector('input[aria-label="To"]', { timeout: 5_000 });
+  await page.waitForTimeout(300);
+
+  // The list opens on the field itself, before anything is typed. What somebody
+  // reaching for the To line before they have decided who it is for wants is the people
+  // they correspond with most.
+  check(
+    "the To field is a combobox and says it is open",
+    (await toField.getAttribute("aria-expanded")) === "true",
+    (await toField.getAttribute("aria-expanded")) ?? "",
+  );
+  const offered = await suggestions.count();
+  check("and offers people straight away", offered > 0 && offered <= 8, `${offered} rows`);
+
+  // The demo's own cast. "Helena Ruiz" is one correspondent, reached both as a sender
+  // and on a sent message, so this cannot be satisfied by an address that merely shares
+  // a prefix with somebody else.
+  await toField.type("helena");
+  await page.waitForTimeout(300);
+  check(
+    "a seeded sender is found by name",
+    (await suggestions.count()) === 1 &&
+      (await suggestions.first().innerText()).includes("Helena Ruiz"),
+    JSON.stringify((await suggestions.first().innerText().catch(() => "")).trim()),
+  );
+
+  // Selecting by keyboard, which is the whole claim: a recipient list that needs a
+  // mouse is not much use in an app whose shortcuts sheet opens with `j` and `k`.
+  check(
+    "nothing is highlighted until the user asks for it",
+    (await toField.getAttribute("aria-activedescendant")) === null,
+  );
+  await page.keyboard.press("ArrowDown");
+  const active = await toField.getAttribute("aria-activedescendant");
+  check("an arrow key highlights a row and names it", active !== null, active ?? "none");
+  check(
+    "and the row knows it is the active one",
+    (await suggestions.first().getAttribute("aria-selected")) === "true",
+  );
+
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  check("Enter turns it into a chip", (await chips.count()) === 1);
+  check(
+    "named from the index, so the chip is readable",
+    (await chips.first().getAttribute("aria-label")) === "Remove Helena Ruiz",
+    (await chips.first().getAttribute("aria-label")) ?? "",
+  );
+  check("and enables Send", !(await sendButton.isDisabled()));
+  check("with the typed text consumed", (await toField.inputValue()) === "");
+
+  // Somebody already on the message. Offering to send it to them again is offering the
+  // same mistake twice.
+  await toField.type("helena");
+  await page.waitForTimeout(300);
+  check("and is not offered a second time", (await suggestions.count()) === 0, `${await suggestions.count()} rows`);
+
+  // An address that cannot be delivered. The comma-separated input this replaced had no
+  // way to say so, and sent whatever was in it.
+  await toField.type("not an address,");
+  await page.waitForTimeout(300);
+  check(
+    "a committed chip can be invalid",
+    (await page.locator('[role="dialog"] [aria-invalid="true"]').count()) > 0,
+  );
+  check("Send is disabled while one is", await sendButton.isDisabled());
+  check(
+    "and says which, in words as well as colour",
+    (await page.locator("#winnow-composer-to-error").innerText()).includes("not an address"),
+  );
+
+  // Escape is the composer's most-used key, so the list must not swallow it twice.
+  await toField.click();
+  await page.waitForTimeout(200);
+  check("the list reopens on click", (await suggestions.count()) > 0);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  check("Escape dismisses the suggestions", (await suggestions.count()) === 0);
+  check(
+    "…without closing the composer or losing the draft",
+    (await page.locator('textarea[aria-label="Message"]').count()) > 0 && (await chips.count()) === 2,
+  );
+
+  // Backspace on an empty field is the token field's verb for "remove the last one".
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(250);
+  check("Backspace on an empty field removes the last chip", (await chips.count()) === 1);
+  check("and Send is enabled again once nothing invalid is left", !(await sendButton.isDisabled()));
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check(
+    "Escape with no list up still closes the composer",
+    (await page.locator('textarea[aria-label="Message"]').count()) === 0,
+  );
   await closeReader();
 
   // ── Remote content is a per-message decision ──────────────────────────────
@@ -1275,12 +1396,32 @@ try {
   // `aria-label`, and `text=` matches visible text only.
   await page.waitForSelector('[role="menu"]', { timeout: 5_000 });
   const paletteRows = await page.locator('[role="menu"] [role="menuitem"]').count();
-  check("the navigation palette opens", paletteRows === 4, `${paletteRows} rows`);
+  check("the navigation palette opens", paletteRows === 5, `${paletteRows} rows`);
+  // Sent is a folder now, and this palette is the only place it is reachable on a phone
+  // — so a row that is missing here is a mailbox that cannot be opened at all.
+  check(
+    "and it carries Sent",
+    (await page.locator('[role="menu"] [role="menuitem"]:has-text("Sent")').count()) === 1,
+  );
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(250);
   check("Enter in the palette switches mailbox", (await page.locator('[role="menu"]').count()) === 0);
+
+  // …and Sent is a mailbox with mail in it, not an empty row. This is also the only
+  // place the demo can show mail the user wrote.
+  await page.keyboard.press("!");
+  await page.waitForSelector('[role="menu"]', { timeout: 5_000 });
+  await page.getByRole("menuitem", { name: "Sent" }).click();
+  await page.waitForTimeout(300);
+  check("Sent opens", (await page.locator('[role="menu"]').count()) === 0);
+  check(
+    "and holds what the user wrote",
+    (await page.locator('[data-message-id]').count()) > 0,
+    `${await page.locator('[data-message-id]').count()} rows`,
+  );
+  await goTo("Inbox");
 
   // ── Mark all read is scoped to the mailbox on screen ───────────────────────
 
@@ -1817,6 +1958,65 @@ try {
     await touchMutes.first().getAttribute("aria-label"),
   );
   await touchContext.close();
+
+  /*
+   * The recipient field, on a phone.
+   *
+   * In its own context, because the thing being checked is that the whole interaction is
+   * reachable *by touch*: nothing here depends on `hover: hover`, and every assertion is
+   * about a tap. The desktop pass above proves the keyboard; this proves the finger.
+   */
+  const touchComposer = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const phone = await touchComposer.newPage();
+  phone.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  phone.on("pageerror", (error) => errors.push(String(error)));
+  await phone.goto(URL, { waitUntil: "networkidle" });
+  await phone.waitForSelector("[data-message-id]", { timeout: 10_000 });
+
+  await phone.locator("[data-message-id]").first().click();
+  await phone.waitForSelector("article h1", { timeout: 5_000 });
+  await phone.keyboard.press("f");
+  await phone.waitForSelector('input[aria-label="To"]', { timeout: 5_000 });
+
+  const phoneTo = phone.locator('input[aria-label="To"]');
+  const phoneSuggestions = phone.locator('[role="listbox"] [role="option"]');
+  await phoneTo.tap();
+  await phone.waitForTimeout(400);
+
+  check(
+    "tapping the field opens the suggestions on a phone",
+    (await phoneSuggestions.count()) > 0,
+    `${await phoneSuggestions.count()} rows`,
+  );
+  const rowBox = await phoneSuggestions.first().boundingBox();
+  check(
+    "a suggestion is big enough to tap",
+    (rowBox?.height ?? 0) >= 32 && (rowBox?.width ?? 0) > 0,
+    JSON.stringify(rowBox),
+  );
+  check(
+    "and fits the 390px screen",
+    (rowBox?.x ?? 0) >= 0 && (rowBox?.x ?? 0) + (rowBox?.width ?? 0) <= 390,
+    JSON.stringify(rowBox),
+  );
+
+  await phoneSuggestions.first().tap();
+  await phone.waitForTimeout(400);
+  const phoneChips = phone.locator('[role="dialog"] button[aria-label^="Remove"]');
+  check("tapping one adds a recipient", (await phoneChips.count()) === 1);
+  check(
+    "and Send becomes available",
+    !(await phone.locator('[role="dialog"] button:has-text("Send")').first().isDisabled()),
+  );
+  const chipBox = await phoneChips.first().boundingBox();
+  check(
+    "whose chip can be tapped back off",
+    (chipBox?.width ?? 0) >= 24 && (chipBox?.height ?? 0) >= 24,
+    JSON.stringify(chipBox),
+  );
+  await touchComposer.close();
 
   const back = page.locator('button[aria-label="Back to the list"]');
   check("there is a way back to the list", (await back.count()) > 0);

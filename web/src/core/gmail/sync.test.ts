@@ -193,10 +193,20 @@ describe("full sync", () => {
     expect(byId.get("d")).toBe("archive");
   });
 
-  it("drops mail the user wrote", async () => {
-    // Sent and drafts are not a tracked view. Leaving them in put a copy of
-    // every reply in the inbox.
-    const gmail = fakeGmail({ messages: [gmailMessage("s", [LABEL.sent])] });
+  it("keeps sent mail and drops drafts", async () => {
+    // Sent used to be dropped with drafts, on the reasonable ground that a mail client
+    // shows other people's mail. It is a folder now, and it is what the composer's
+    // recipient suggestions are built from — so it is tracked.
+    //
+    // Drafts are still dropped, and for the original reason: an unfinished thing is not
+    // mail, and half of them have no recipients at all.
+    const gmail = fakeGmail({
+      messages: [
+        gmailMessage("s", [LABEL.sent]),
+        gmailMessage("d", [LABEL.draft]),
+        gmailMessage("s2", [LABEL.sent, LABEL.inbox]),
+      ],
+    });
     const { cache, peek } = memoryCache();
     const engine = new GmailSyncEngine({
       client: gmail.client,
@@ -204,7 +214,16 @@ describe("full sync", () => {
       cursor: { read: async () => null, write: async () => {}, clear: async () => {} },
     });
     await engine.full();
-    expect(peek().map((e) => e.gmailId)).not.toContain("s");
+
+    const ids = peek().map((e) => e.gmailId);
+    expect(ids).toContain("s");
+    expect(ids).not.toContain("d");
+
+    // …and it is filed as sent, not archived. A message that is both SENT and INBOX is
+    // one you sent to yourself, and it belongs with the rest of your mail.
+    const byId = new Map(peek().map((e) => [e.gmailId, e.mailbox]));
+    expect(byId.get("s")).toBe("sent");
+    expect(byId.get("s2")).toBe("inbox");
   });
 
   it("deletes cached messages that no longer exist anywhere", async () => {
