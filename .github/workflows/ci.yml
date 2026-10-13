@@ -116,6 +116,11 @@ jobs:
     name: Smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Playwright's own image ships the browsers and their system libraries, so the job
+    # skips the download and the apt step. Its tag must match the locked `playwright`
+    # version (1.63.0) or the browser build will not be the one the library expects.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
     defaults:
       run:
         working-directory: web
@@ -135,21 +140,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
-
-      - name: Install Chromium
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-
-      - name: Install Chromium system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-
       - name: Smoke test the production build
         run: npm run smoke
 
@@ -158,7 +148,9 @@ jobs:
   build:
     name: Build (debug)
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.native == 'true'
+    # PRs that touch native code only. A push to master already compiles the same
+    # crate in the release job, so a debug build there was a second, redundant compile.
+    if: github.event_name == 'pull_request' && needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
