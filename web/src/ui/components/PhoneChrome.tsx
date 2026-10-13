@@ -8,14 +8,13 @@
  *
  * Flat on purpose, the same way the desktop chrome is: the bars are the canvas tone and
  * the list is the surface tone, so the boundary is a change in value with no rule, no
- * outline and no shadow. Elevation is a later pass.
- *
- * Every control here is at least 44px square, and nothing is revealed by hover.
+ * outline and no shadow. Every control is sized for a thumb, and nothing is revealed by
+ * hover.
  */
 
 import { Archive, Check, ChevronLeft, ChevronRight, Inbox, Menu, Search, Send, Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { AppLogo } from "../AppMark";
+import { AppMark } from "../AppMark";
 import { avatarColor, avatarTextColor } from "../avatarColor";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
@@ -23,6 +22,10 @@ import type { Mailbox } from "../../core/model/email";
 
 const ROUND_BUTTON =
   "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors active:bg-surface-active disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+
+/** The canvas-toned sheet both bottom bars sit on: this dock and the reader's. */
+export const DOCK_SURFACE =
+  "relative z-20 shrink-0 rounded-t-[22px] bg-canvas pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2";
 
 // ── Top bar ─────────────────────────────────────────────────────────────────
 
@@ -35,8 +38,6 @@ export type PhoneTopBarProps = {
   accountEmail: string | null;
   onOpenNavigation: () => void;
   navigationOpen: boolean;
-  /** Optional URL for a finished logo; the inline mark is used until there is one. */
-  logoSrc?: string;
   listTitle: string;
   position: number | null;
   total: number;
@@ -53,7 +54,6 @@ export function PhoneTopBar({
   accountEmail,
   onOpenNavigation,
   navigationOpen,
-  logoSrc,
   listTitle,
   position,
   total,
@@ -73,7 +73,7 @@ export function PhoneTopBar({
         {/* The mark. Not a button: on a phone the menu is the circle on the right, and
             two controls that open the same drawer would be one too many. */}
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface">
-          <AppLogo src={logoSrc} size={28} />
+          <AppMark size={28} />
           <span className="sr-only">Winnow</span>
         </span>
 
@@ -107,9 +107,9 @@ export function PhoneTopBar({
           aria-haspopup="dialog"
           aria-label="Open navigation"
           title={accountEmail ?? "Navigation"}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface text-ink-icon transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className={`${ROUND_BUTTON} bg-surface`}
         >
-          {initial && accountEmail ? (
+          {accountEmail ? (
             <span
               aria-hidden="true"
               className="flex h-8 w-8 items-center justify-center rounded-full text-[14px] font-semibold"
@@ -167,7 +167,7 @@ const TABS: readonly { id: Mailbox | "settings"; label: string; Icon: LucideIcon
 
 export type PhoneDockProps = {
   pills: PillItem[];
-  activeFilters: readonly FilterId[];
+  activeFilters: FilterId[];
   onToggleFilter: (id: FilterId) => void;
   onMute: (id: BuiltinSmartFilter) => void;
   onRestoreFilter: (id: BuiltinSmartFilter) => void;
@@ -199,14 +199,11 @@ export function PhoneDock({
       share a single canvas-toned sheet with rounded top corners, and the only thing
       between them is spacing.
     */
-    <div
-      data-phone-dock=""
-      className="relative z-20 shrink-0 rounded-t-[22px] bg-canvas pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2"
-    >
+    <div data-phone-dock="" className={DOCK_SURFACE}>
       {/* The streams and smart filters, just above the tabs where a thumb rests. */}
       <FilterStrip
         pills={pills}
-        activeFilters={activeFilters as FilterId[]}
+        activeFilters={activeFilters}
         onToggle={onToggleFilter}
         onMute={onMute}
         onRestore={onRestoreFilter}

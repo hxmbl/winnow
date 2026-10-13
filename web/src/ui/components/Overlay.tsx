@@ -316,7 +316,7 @@ export function SheetHeader({
   return (
     <div
       className={`sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-hairline bg-chrome ${
-        touch ? "px-3 pb-1.5 pl-5 pt-[max(0.375rem,env(safe-area-inset-top))]" : "px-5 py-3.5"
+        touch ? "pb-1.5 pl-5 pr-3 pt-[max(0.375rem,env(safe-area-inset-top))]" : "px-5 py-3.5"
       }`}
     >
       <h2 id={id} className="text-[15px] font-semibold text-ink">

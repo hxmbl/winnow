@@ -14,7 +14,7 @@ import { useEffect, useState } from "react";
  * two lines to fit, which is the honest definition of "a phone" for this layout: a narrow
  * desktop window gets the same thumb-first arrangement, and a tablet keeps the panes.
  */
-export const PHONE_QUERY = "(max-width: 639px)";
+const PHONE_QUERY = "(max-width: 639px)";
 
 function matches(): boolean {
   return globalThis.matchMedia?.(PHONE_QUERY).matches ?? false;

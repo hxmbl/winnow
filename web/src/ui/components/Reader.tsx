@@ -59,6 +59,7 @@ function firstLine(body: string): string {
 import { avatarColor, avatarTextColor } from "../avatarColor";
 import { formatBytes } from "../../core/gmail/mime";
 import type { Mailbox } from "../../core/model/email";
+import { DOCK_SURFACE } from "./PhoneChrome";
 
 /**
  * A smart filter that applies to the open message.
@@ -415,7 +416,7 @@ function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, has
   return (
     <div
       data-reader-dock=""
-      className="relative z-20 grid shrink-0 grid-cols-6 gap-0.5 rounded-t-[22px] bg-canvas px-2 pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2"
+      className={`${DOCK_SURFACE} grid grid-cols-6 gap-0.5 px-2`}
     >
       <button type="button" onClick={onClose} aria-label="Back to the list" className={BUTTON}>
         <ArrowLeft {...ICON} />
@@ -581,8 +582,8 @@ export function Reader({
     // lives outside `<article>`, so "which message is open" cannot be answered from
     // the article alone.
     <div data-reader="" className="flex min-h-0 flex-1 flex-col">
-      {/* Mobile-only back bar. On a wide screen the reader is a pane beside the
-          list, so closing it would be redundant. */}
+      {/* Back bar for a narrow window. On a wide screen the reader is a pane beside
+          the list, so closing it would be redundant; on a phone the dock has Back. */}
       {!phone && (
       <div className="flex items-center gap-1 px-3 py-2 lg:hidden">
         <button
