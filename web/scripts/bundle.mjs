@@ -141,22 +141,12 @@ if (platform === "darwin" && bundles.includes("dmg")) {
   }
 }
 
-/**
- * Where Cargo writes the bundles for these flags.
- *
- * `--target <triple>` moves the output under `target/<triple>/`, and `--debug`
- * swaps `release` for `debug`. Without this the check below looked in
- * `target/release/bundle` whatever was asked for, so a `--target
- * universal-apple-darwin` build — the release workflow's macOS build — succeeded
- * and was then reported as having produced nothing.
- */
-function bundleDir(forwarded) {
-  const at = forwarded.indexOf("--target");
-  const triple = at >= 0 ? forwarded[at + 1] : null;
-  const profile = forwarded.includes("--debug") ? "debug" : "release";
-  return triple
-    ? resolve(native, "src-tauri", "target", triple, profile, "bundle")
-    : resolve(native, "src-tauri", "target", profile, "bundle");
+/** Where Cargo writes the bundles: `--target` adds `<triple>/`, `--debug` swaps the profile. */
+function bundleDir(flags) {
+  const at = flags.indexOf("--target");
+  const triple = at >= 0 ? flags.slice(at + 1, at + 2) : [];
+  const profile = flags.includes("--debug") ? "debug" : "release";
+  return resolve(native, "src-tauri", "target", ...triple, profile, "bundle");
 }
 
 /** Whether `command` is on the PATH. */

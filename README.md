@@ -14,10 +14,9 @@ It runs in a browser and as a desktop app. Same program either way.
 
 - **Gmail and nothing else.** No IMAP, no Outlook, no Fastmail, no self-hosted
   server. It's the Gmail REST API and its labels all the way down.
-- **No signed installers.** There are downloads now — see [Download](#download)
-  — but nothing is code-signed or notarised, so macOS and Windows will both warn
-  you the first time. No `brew install`, no app store, no npm package, no
-  auto-update.
+- **No signed installers.** There are [downloads](#download), but nothing is
+  code-signed or notarised, so macOS and Windows both warn you the first time.
+  No `brew install`, no app store, no npm package, no auto-update.
 - **One account.** Not multi-account. Not "coming soon".
 - **The classifier is wrong sometimes.** It's a pile of rules ported from an old
   Swift app of mine, and some of them look like bugs because they are. I left
@@ -57,8 +56,7 @@ Take the newest one that isn't marked *Pre-release* unless you want the beta.
   distros; the `.deb` doesn't.
 
 Signing in to Gmail from a download shows Google's "Google hasn't verified this
-app" screen until the app has been through Google's verification. Your mail stays on
-your machine.
+app" screen until the app has been through Google's verification.
 
 ## Layout
 
@@ -161,18 +159,16 @@ cd web && node scripts/check-version.mjs     # prints it, or lists the disagreem
 git tag v0.2.0 && git push origin v0.2.0      # or v0.2.0-beta.1 for a pre-release
 ```
 
-`.github/workflows/release.yml` runs the secret scan, checks the tag against all
-three manifests, builds Linux, macOS (universal) and Windows, and attaches the
-bundles to a **draft** release for you to read and publish. A suffix after the
-version (`-beta.1`) marks it a pre-release; the manifests themselves stay plain
-`MAJOR.MINOR.PATCH`, because the Windows `.msi` refuses anything else. Windows
-is allowed to fail without holding up the other two.
+`.github/workflows/release.yml` runs the secret scan, checks the tag against the
+manifests, builds Linux, macOS (universal) and Windows, and attaches the bundles
+to a **draft** release for you to publish. A suffix (`-beta.1`) marks it a
+pre-release; the manifests stay plain `MAJOR.MINOR.PATCH`, because the Windows
+`.msi` refuses anything else. Windows may fail without holding up the other two.
 
 The build reads one repository secret, `VITE_GMAIL_CLIENT_ID` — the **Desktop
-app** client id. It deliberately sets `VITE_GMAIL_CLIENT_SECRET` to empty: Vite
-inlines every `VITE_*` variable into the bundle, so a secret set there would ship
-inside every installer. The job also greps the bundle for a `GOCSPX-` secret and
-fails if it finds one.
+app** client id — and pins `VITE_GMAIL_CLIENT_SECRET` empty: Vite inlines every
+`VITE_*` variable into the bundle, so a secret there would ship in every
+installer. It also fails if the bundle contains a `GOCSPX-` secret.
 
 ## The render proxy
 
