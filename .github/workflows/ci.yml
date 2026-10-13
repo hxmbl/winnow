@@ -78,6 +78,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Versions agree
+        # package.json, tauri.conf.json and Cargo.toml; release.yml also checks the tag.
+        run: node scripts/check-version.mjs
+
       - name: Type check
         run: npm run typecheck
 
@@ -262,6 +266,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Proves the release bundle still builds on every push to master. Shipping it is
+      # .github/workflows/release.yml's job: a `v*` tag builds Linux, macOS and Windows
+      # and attaches the bundles to a draft GitHub Release.
       - name: Production build
         run: npm run tauri:build
-        # TODO: Add releases and platform-specific builds

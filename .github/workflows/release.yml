@@ -1,0 +1,309 @@
+name: Release
+
+# Pushing a tag `v<MAJOR.MINOR.PATCH>` (optionally `-suffix`, e.g. `v0.2.0-beta.1`)
+# builds the desktop app for every platform and attaches the bundles to a *draft*
+# GitHub Release. Nothing is published until somebody presses Publish on the draft.
+#
+# Running it by hand (workflow_dispatch) builds the same bundles and keeps them as
+# workflow artifacts on the run, without touching Releases.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a release half-way through uploading its assets.
+  cancel-in-progress: false
+
+jobs:
+  # The same scan CI runs, first: nothing gets built, let alone attached to a
+  # release, from a tree that fails it.
+  minesweep:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install minesweep
+        run: |
+          set -euo pipefail
+          TAG="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/hxmbl/minesweep/releases/latest)"
+          TAG="${TAG##*/}"
+          VERSION="${TAG#v}"
+          case "$(uname -m)" in
+            x86_64) ARCH=x86_64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+            *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+          esac
+          FILE="minesweep_${VERSION}_$(uname -s)_${ARCH}.tar.gz"
+          BASE="https://github.com/hxmbl/minesweep/releases/download/${TAG}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$BASE/$FILE"
+          curl -fsSLO "$BASE/checksums.txt"
+          grep " ${FILE}\$" checksums.txt | sha256sum -c -
+          tar -xzf "$FILE" minesweep
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 minesweep "$RUNNER_TEMP/bin/minesweep"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          echo "Installed minesweep ${TAG}"
+
+      - name: Scan for secrets
+        # --config: an auto-discovered .minesweep.yml has its fail-on/policy keys ignored.
+        # Exit 1 = findings >= high, exit 2 = incomplete scan; both fail the job.
+        run: minesweep --config .minesweep.yml --fail-on high --annotations --no-pager .
+
+  # Decide what this run is, check the versions agree, and create the draft once,
+  # here, so three platform jobs are not racing to create the same release.
+  prepare:
+    name: Prepare release
+    needs: minesweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Check versions
+        id: meta
+        env:
+          # Only tested for presence here; the value is never printed.
+          HAS_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # Fails when the tag and package.json / tauri.conf.json / Cargo.toml disagree.
+            VERSION="$(node web/scripts/check-version.mjs "$GITHUB_REF_NAME")"
+            TAG="$GITHUB_REF_NAME"
+            PUBLISH=true
+            case "$TAG" in
+              *-*) PRERELEASE=true ;;
+              *) PRERELEASE=false ;;
+            esac
+          else
+            VERSION="$(node web/scripts/check-version.mjs)"
+            TAG=""
+            PUBLISH=false
+            PRERELEASE=false
+          fi
+
+          # A build without a client id runs, and cannot sign in to Gmail. That is
+          # fatal for a real release and a warning for a pre-release or a manual run.
+          if [ "$HAS_CLIENT_ID" != "true" ]; then
+            MESSAGE="The VITE_GMAIL_CLIENT_ID secret is not set, so these builds cannot sign in to Gmail (the demo mailbox still works)."
+            if [ "$PUBLISH" = "true" ] && [ "$PRERELEASE" = "false" ]; then
+              echo "::error::$MESSAGE Add it under Settings > Secrets and variables > Actions."
+              exit 1
+            fi
+            echo "::warning::$MESSAGE"
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "prerelease=$PRERELEASE"
+            echo "publish=$PUBLISH"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $VERSION, tag '${TAG:-none}', prerelease $PRERELEASE, publish $PUBLISH"
+
+      - name: Create draft release
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # A re-run finds the draft it made the first time and reuses it.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing it."
+            exit 0
+          fi
+
+          cat > "$RUNNER_TEMP/notes.md" <<'EOF'
+          ## Downloads
+
+          | Platform | File |
+          | --- | --- |
+          | Linux | `.AppImage` (any distro) or `.deb` (Debian, Ubuntu) |
+          | macOS | `.dmg`, universal (Apple silicon and Intel) |
+          | Windows | `.msi` or `-setup.exe`, when the Windows build succeeded |
+
+          These builds are **not code-signed**. On macOS, right-click the app and choose
+          **Open** the first time, or run `xattr -dr com.apple.quarantine /Applications/Winnow.app`.
+          On Windows, SmartScreen may say it protected your PC: choose **More info**, then
+          **Run anyway**. See the README for details.
+
+          EOF
+
+          ARGS=(--repo "$GITHUB_REPOSITORY" --draft --verify-tag
+                --title "Winnow $TAG" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes)
+          if [ "$PRERELEASE" = "true" ]; then ARGS+=(--prerelease); fi
+          gh release create "$TAG" "${ARGS[@]}"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    # Windows is optional: when it fails the job is marked failed but the run and
+    # the other platforms' uploads carry on.
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04 rather than latest: an AppImage only runs on a glibc at least as
+          # new as the one it was built against, so the oldest supported runner
+          # gives the widest reach.
+          - name: Linux
+            slug: linux
+            os: ubuntu-22.04
+            rust-targets: ""
+            build-args: ""
+            optional: false
+          - name: macOS
+            slug: macos
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            build-args: --target universal-apple-darwin
+            optional: false
+          - name: Windows
+            slug: windows
+            os: windows-latest
+            rust-targets: ""
+            build-args: ""
+            optional: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+          key: release-${{ matrix.slug }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        # Plain apt, not cache-apt-pkgs-action: that action restores files without
+        # running the packages' install scripts, and every native build failed from
+        # the commit that introduced it.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
+
+      - name: Install create-dmg
+        if: runner.os == 'macOS'
+        # web/scripts/bundle.mjs refuses to bundle a .dmg without it.
+        run: brew install create-dmg
+
+      # Prebuilt binary instead of compiling the CLI from source on every run.
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install Tauri CLI
+        run: cargo binstall tauri-cli --version "^2" --no-confirm
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build bundles
+        working-directory: web
+        env:
+          # A Desktop-app OAuth client id. Public by nature: it ships in the binary.
+          VITE_GMAIL_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID }}
+          # Pinned empty on purpose. Vite inlines every VITE_* variable into the web
+          # bundle, so a client secret set here would ship inside every installer.
+          # The desktop flow is PKCE over a loopback redirect and sends no secret
+          # (platform/desktop.ts returns undefined for it).
+          VITE_GMAIL_CLIENT_SECRET: ""
+          VITE_GMAIL_REDIRECT_URI: ""
+        # bundle.mjs picks the bundle kinds for the host (deb+appimage, app+dmg,
+        # msi+nsis) and fails if any of them is missing afterwards.
+        run: npm run tauri:build -- ${{ matrix.build-args }}
+
+      - name: Check no client secret shipped
+        # Google client secrets start GOCSPX-. Belt and braces for the line above.
+        run: |
+          if grep -rIl 'GOCSPX-' web/dist; then
+            echo "::error::The web bundle contains what looks like a Google client secret."
+            exit 1
+          fi
+
+      - name: Collect bundles
+        id: collect
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/bundles"
+          mkdir -p "$OUT"
+          find native/src-tauri/target -type f -path '*/release/bundle/*' \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' \
+               -o -name '*.msi' -o -name '*-setup.exe' \) \
+            -exec cp {} "$OUT/" \;
+          ls -la "$OUT"
+          if [ -z "$(ls -A "$OUT")" ]; then
+            echo "::error::No bundles found under native/src-tauri/target."
+            exit 1
+          fi
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winnow-${{ needs.prepare.outputs.version }}-${{ matrix.slug }}
+          path: ${{ steps.collect.outputs.dir }}
+          if-no-files-found: error
+
+      - name: Attach to draft release
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          DIR: ${{ steps.collect.outputs.dir }}
+        run: gh release upload "$TAG" "$DIR"/* --clobber --repo "$GITHUB_REPOSITORY"
