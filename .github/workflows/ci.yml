@@ -93,6 +93,9 @@ jobs:
   # Every push to master builds the Rust side; a PR only does when it touches it.
   changes:
     name: Detect changes
+    # Only PRs consult it. On a push, paths-filter diffs against the previous commit
+    # with git, which fails on the shallow, credential-less checkout (exit 128).
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -180,10 +183,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install Linux dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
-          version: 1.0
+        # Plain apt, not cache-apt-pkgs-action: that action restores files without
+        # running the packages' install scripts, and every native build failed from
+        # the commit that introduced it.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
@@ -234,10 +241,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install Linux dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
-          version: 1.0
+        # Plain apt, not cache-apt-pkgs-action: that action restores files without
+        # running the packages' install scripts, and every native build failed from
+        # the commit that introduced it.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
