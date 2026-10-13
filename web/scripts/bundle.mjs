@@ -141,6 +141,24 @@ if (platform === "darwin" && bundles.includes("dmg")) {
   }
 }
 
+/**
+ * Where Cargo writes the bundles for these flags.
+ *
+ * `--target <triple>` moves the output under `target/<triple>/`, and `--debug`
+ * swaps `release` for `debug`. Without this the check below looked in
+ * `target/release/bundle` whatever was asked for, so a `--target
+ * universal-apple-darwin` build — the release workflow's macOS build — succeeded
+ * and was then reported as having produced nothing.
+ */
+function bundleDir(forwarded) {
+  const at = forwarded.indexOf("--target");
+  const triple = at >= 0 ? forwarded[at + 1] : null;
+  const profile = forwarded.includes("--debug") ? "debug" : "release";
+  return triple
+    ? resolve(native, "src-tauri", "target", triple, profile, "bundle")
+    : resolve(native, "src-tauri", "target", profile, "bundle");
+}
+
 /** Whether `command` is on the PATH. */
 function has(command) {
   const probe = spawnSync(process.platform === "win32" ? "where" : "which", [command]);
@@ -178,7 +196,7 @@ child.on("exit", (code, signal) => {
   // The check this script exists for. Asserting success by looking for the output
   // rather than by trusting the exit code: "the tool said it succeeded" and "a
   // release exists where it should" are different facts.
-  const out = resolve(native, "src-tauri", "target", "release", "bundle");
+  const out = bundleDir(flags);
   if (!existsSync(out)) {
     console.error(
       `\nBuild reported success but produced no bundle at ${out}.\n` +
