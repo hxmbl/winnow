@@ -1,56 +1,38 @@
 /**
- * Check that every place the app's version is written agrees, and optionally that
- * a release tag names the same version.
+ * Check that every manifest holds the same version, and optionally that a release
+ * tag names it. Prints the version, or lists every disagreement and exits 1.
  *
- *   node scripts/check-version.mjs              # manifests agree with each other
- *   node scripts/check-version.mjs v0.2.0       # ...and with this tag
- *   node scripts/check-version.mjs v0.2.0-beta.1
+ *   node scripts/check-version.mjs                 # manifests agree
+ *   node scripts/check-version.mjs v0.2.0-beta.1   # ...and match this tag
  *
- * The version lives in four files — `web/package.json` (and its lockfile),
- * `native/src-tauri/tauri.conf.json` and `native/src-tauri/Cargo.toml` — and the
- * one the installers carry is `tauri.conf.json`'s. A release whose tag says one
- * thing and whose About box says another is a support question waiting to happen,
- * so the release workflow runs this before it builds anything.
- *
- * **Manifests hold a plain `MAJOR.MINOR.PATCH`; a pre-release lives only in the
- * tag.** `v0.2.0-beta.1` releases version `0.2.0` marked as a GitHub pre-release.
- * The reason is the Windows installer: WiX only accepts numeric versions, so a
- * `0.2.0-beta.1` in `tauri.conf.json` would fail the `.msi` build outright.
- *
- * Prints the version on success; exits 1 with every disagreement listed otherwise.
+ * Manifests hold a plain `MAJOR.MINOR.PATCH`; a pre-release suffix lives only in
+ * the tag, because WiX rejects non-numeric versions and the `.msi` build would fail.
  */
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repo = resolve(here, "..", "..");
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const PLAIN = /^\d+\.\d+\.\d+$/;
-const TAG = /^v(\d+\.\d+\.\d+)(?:-([0-9A-Za-z.-]+))?$/;
+const TAG = /^v(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$/;
 
-function readJson(path) {
-  return JSON.parse(readFileSync(resolve(repo, path), "utf8"));
-}
+const read = (path) => readFileSync(resolve(repo, path), "utf8");
+const readJson = (path) => JSON.parse(read(path));
 
 /** The `[package]` version of Cargo.toml, without pulling in a TOML parser. */
 function cargoVersion(path) {
-  const text = readFileSync(resolve(repo, path), "utf8");
-  const pkg = text.split(/^\[/m).find((section) => section.startsWith("package]"));
-  const match = pkg?.match(/^version\s*=\s*"([^"]+)"/m);
-  return match ? match[1] : null;
+  const pkg = read(path).split(/^\[/m).find((section) => section.startsWith("package]"));
+  return pkg?.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? null;
 }
 
-/** The version Cargo.lock recorded for the `winnow` crate that is *ours* (no `source`). */
+/** Cargo.lock's version for our own `winnow` crate (the one with no `source`). */
 function cargoLockVersion(path) {
-  const text = readFileSync(resolve(repo, path), "utf8");
-  for (const block of text.split(/^\[\[package\]\]$/m)) {
-    if (/^name = "winnow"$/m.test(block) && !/^source = /m.test(block)) {
-      return block.match(/^version = "([^"]+)"$/m)?.[1] ?? null;
-    }
-  }
-  return null;
+  const block = read(path)
+    .split(/^\[\[package\]\]$/m)
+    .find((b) => /^name = "winnow"$/m.test(b) && !/^source = /m.test(b));
+  return block?.match(/^version = "([^"]+)"$/m)?.[1] ?? null;
 }
 
 const lock = readJson("web/package-lock.json");
@@ -62,10 +44,10 @@ const found = {
   "native/src-tauri/Cargo.toml": cargoVersion("native/src-tauri/Cargo.toml"),
   "native/src-tauri/Cargo.lock": cargoLockVersion("native/src-tauri/Cargo.lock"),
 };
-
-const problems = [];
+// The installers carry tauri.conf.json's version.
 const expected = found["native/src-tauri/tauri.conf.json"];
 
+const problems = [];
 for (const [file, version] of Object.entries(found)) {
   if (!version) problems.push(`${file}: no version found`);
   else if (!PLAIN.test(version)) {
@@ -75,15 +57,14 @@ for (const [file, version] of Object.entries(found)) {
 
 const tag = process.argv[2];
 if (tag) {
-  const match = tag.replace(/^refs\/tags\//, "").match(TAG);
+  const match = tag.match(TAG);
   if (!match) problems.push(`tag ${tag} is not v<MAJOR.MINOR.PATCH>[-suffix]`);
   else if (match[1] !== expected) problems.push(`tag ${tag} names ${match[1]}, but the manifests say ${expected}`);
 }
 
 if (problems.length > 0) {
-  console.error("Versions disagree:\n");
-  for (const problem of problems) console.error(`  - ${problem}`);
-  console.error("\nSet the same plain version in every file above, then tag v<version>.");
+  console.error(`Versions disagree:\n\n${problems.map((p) => `  - ${p}`).join("\n")}\n`);
+  console.error("Set the same plain version in every file above, then tag v<version>.");
   process.exit(1);
 }
 

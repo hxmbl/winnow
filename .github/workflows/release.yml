@@ -1,11 +1,8 @@
 name: Release
 
-# Pushing a tag `v<MAJOR.MINOR.PATCH>` (optionally `-suffix`, e.g. `v0.2.0-beta.1`)
-# builds the desktop app for every platform and attaches the bundles to a *draft*
-# GitHub Release. Nothing is published until somebody presses Publish on the draft.
-#
-# Running it by hand (workflow_dispatch) builds the same bundles and keeps them as
-# workflow artifacts on the run, without touching Releases.
+# A `v<MAJOR.MINOR.PATCH>[-suffix]` tag builds every platform and attaches the
+# bundles to a draft GitHub Release; a suffix marks it a pre-release. A manual run
+# builds the same bundles as workflow artifacts and leaves Releases alone.
 on:
   push:
     tags: ["v*"]
@@ -20,8 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The same scan CI runs, first: nothing gets built, let alone attached to a
-  # release, from a tree that fails it.
+  # Same scan as CI: nothing is built from a tree that fails it.
   minesweep:
     name: Secret scan
     runs-on: ubuntu-latest
@@ -60,8 +56,7 @@ jobs:
         # Exit 1 = findings >= high, exit 2 = incomplete scan; both fail the job.
         run: minesweep --config .minesweep.yml --fail-on high --annotations --no-pager .
 
-  # Decide what this run is, check the versions agree, and create the draft once,
-  # here, so three platform jobs are not racing to create the same release.
+  # Creates the draft once, so the platform jobs don't race to create it.
   prepare:
     name: Prepare release
     needs: minesweep
@@ -72,7 +67,6 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
-      prerelease: ${{ steps.meta.outputs.prerelease }}
       publish: ${{ steps.meta.outputs.publish }}
     steps:
       - name: Checkout code
@@ -88,28 +82,20 @@ jobs:
       - name: Check versions
         id: meta
         env:
-          # Only tested for presence here; the value is never printed.
+          # Tests presence only; the value is never printed.
           HAS_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID != '' }}
         run: |
           set -euo pipefail
+          TAG="" PUBLISH=false PRERELEASE=false
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            # Fails when the tag and package.json / tauri.conf.json / Cargo.toml disagree.
-            VERSION="$(node web/scripts/check-version.mjs "$GITHUB_REF_NAME")"
-            TAG="$GITHUB_REF_NAME"
-            PUBLISH=true
-            case "$TAG" in
-              *-*) PRERELEASE=true ;;
-              *) PRERELEASE=false ;;
-            esac
-          else
-            VERSION="$(node web/scripts/check-version.mjs)"
-            TAG=""
-            PUBLISH=false
-            PRERELEASE=false
+            TAG="$GITHUB_REF_NAME" PUBLISH=true
+            case "$TAG" in *-*) PRERELEASE=true ;; esac
           fi
+          # Fails when the manifests disagree with each other or with the tag.
+          VERSION="$(node web/scripts/check-version.mjs "$TAG")"
 
-          # A build without a client id runs, and cannot sign in to Gmail. That is
-          # fatal for a real release and a warning for a pre-release or a manual run.
+          # Without a client id the build cannot sign in to Gmail: fatal for a
+          # real release, a warning otherwise.
           if [ "$HAS_CLIENT_ID" != "true" ]; then
             MESSAGE="The VITE_GMAIL_CLIENT_ID secret is not set, so these builds cannot sign in to Gmail (the demo mailbox still works)."
             if [ "$PUBLISH" = "true" ] && [ "$PRERELEASE" = "false" ]; then
@@ -119,13 +105,8 @@ jobs:
             echo "::warning::$MESSAGE"
           fi
 
-          {
-            echo "version=$VERSION"
-            echo "tag=$TAG"
-            echo "prerelease=$PRERELEASE"
-            echo "publish=$PUBLISH"
-          } >> "$GITHUB_OUTPUT"
-          echo "Version $VERSION, tag '${TAG:-none}', prerelease $PRERELEASE, publish $PUBLISH"
+          printf 'version=%s\ntag=%s\nprerelease=%s\npublish=%s\n' \
+            "$VERSION" "$TAG" "$PRERELEASE" "$PUBLISH" | tee -a "$GITHUB_OUTPUT"
 
       - name: Create draft release
         if: steps.meta.outputs.publish == 'true'
@@ -135,7 +116,7 @@ jobs:
           PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
           set -euo pipefail
-          # A re-run finds the draft it made the first time and reuses it.
+          # A re-run reuses the draft it made the first time.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "Release $TAG already exists; reusing it."
             exit 0
@@ -157,10 +138,9 @@ jobs:
 
           EOF
 
-          ARGS=(--repo "$GITHUB_REPOSITORY" --draft --verify-tag
-                --title "Winnow $TAG" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes)
-          if [ "$PRERELEASE" = "true" ]; then ARGS+=(--prerelease); fi
-          gh release create "$TAG" "${ARGS[@]}"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --prerelease="$PRERELEASE" --title "Winnow $TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
 
   build:
     name: Build (${{ matrix.name }})
@@ -169,34 +149,25 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
-    # Windows is optional: when it fails the job is marked failed but the run and
-    # the other platforms' uploads carry on.
-    continue-on-error: ${{ matrix.optional }}
+    # Windows is best-effort: its failure doesn't stop the other uploads.
+    continue-on-error: ${{ matrix.slug == 'windows' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # 22.04 rather than latest: an AppImage only runs on a glibc at least as
-          # new as the one it was built against, so the oldest supported runner
-          # gives the widest reach.
+          # 22.04, not latest: an AppImage only runs on a glibc at least as new
+          # as the one it was built against.
           - name: Linux
             slug: linux
             os: ubuntu-22.04
-            rust-targets: ""
-            build-args: ""
-            optional: false
           - name: macOS
             slug: macos
             os: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             build-args: --target universal-apple-darwin
-            optional: false
           - name: Windows
             slug: windows
             os: windows-latest
-            rust-targets: ""
-            build-args: ""
-            optional: true
     defaults:
       run:
         shell: bash
@@ -226,9 +197,6 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        # Plain apt, not cache-apt-pkgs-action: that action restores files without
-        # running the packages' install scripts, and every native build failed from
-        # the commit that introduced it.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -237,10 +205,9 @@ jobs:
 
       - name: Install create-dmg
         if: runner.os == 'macOS'
-        # web/scripts/bundle.mjs refuses to bundle a .dmg without it.
+        # bundle.mjs refuses to bundle a .dmg without it.
         run: brew install create-dmg
 
-      # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
         uses: taiki-e/install-action@v2
         with:
@@ -256,20 +223,16 @@ jobs:
       - name: Build bundles
         working-directory: web
         env:
-          # A Desktop-app OAuth client id. Public by nature: it ships in the binary.
+          # Desktop-app OAuth client id: public, it ships in the binary.
           VITE_GMAIL_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID }}
-          # Pinned empty on purpose. Vite inlines every VITE_* variable into the web
-          # bundle, so a client secret set here would ship inside every installer.
-          # The desktop flow is PKCE over a loopback redirect and sends no secret
-          # (platform/desktop.ts returns undefined for it).
+          # Pinned empty: Vite inlines every VITE_* variable into the bundle, so a
+          # secret here would ship in every installer. Desktop PKCE sends none.
           VITE_GMAIL_CLIENT_SECRET: ""
           VITE_GMAIL_REDIRECT_URI: ""
-        # bundle.mjs picks the bundle kinds for the host (deb+appimage, app+dmg,
-        # msi+nsis) and fails if any of them is missing afterwards.
         run: npm run tauri:build -- ${{ matrix.build-args }}
 
       - name: Check no client secret shipped
-        # Google client secrets start GOCSPX-. Belt and braces for the line above.
+        # Google client secrets start GOCSPX-.
         run: |
           if grep -rIl 'GOCSPX-' web/dist; then
             echo "::error::The web bundle contains what looks like a Google client secret."
@@ -277,27 +240,19 @@ jobs:
           fi
 
       - name: Collect bundles
-        id: collect
         run: |
-          set -euo pipefail
-          OUT="$RUNNER_TEMP/bundles"
-          mkdir -p "$OUT"
+          mkdir -p "$RUNNER_TEMP/bundles"
           find native/src-tauri/target -type f -path '*/release/bundle/*' \
             \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' \
                -o -name '*.msi' -o -name '*-setup.exe' \) \
-            -exec cp {} "$OUT/" \;
-          ls -la "$OUT"
-          if [ -z "$(ls -A "$OUT")" ]; then
-            echo "::error::No bundles found under native/src-tauri/target."
-            exit 1
-          fi
-          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+            -exec cp {} "$RUNNER_TEMP/bundles/" \;
+          ls -la "$RUNNER_TEMP/bundles"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: winnow-${{ needs.prepare.outputs.version }}-${{ matrix.slug }}
-          path: ${{ steps.collect.outputs.dir }}
+          path: ${{ runner.temp }}/bundles
           if-no-files-found: error
 
       - name: Attach to draft release
@@ -305,5 +260,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          DIR: ${{ steps.collect.outputs.dir }}
-        run: gh release upload "$TAG" "$DIR"/* --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/bundles/* --clobber --repo "$GITHUB_REPOSITORY"

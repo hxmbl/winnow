@@ -5,17 +5,16 @@
 
 Winnow is an email client for Gmail. It runs on your own computer, as a desktop
 app (macOS, Windows, Linux) or in your web browser, and talks to Google directly.
-This policy explains what Winnow does with your information, and in particular
-with the Google user data it gets when you connect your Gmail account.
+This policy explains what Winnow does with your information, in particular the
+Google user data it gets when you connect your Gmail account.
 
 ## The short version
 
 - Your mail goes between **your device and Google**, and nowhere else. Winnow has
-  no server of its own that receives, stores or reads your email, your contacts or
-  your Google sign-in tokens.
+  no server that receives, stores or reads your email, contacts or Google sign-in
+  tokens.
 - Everything Winnow keeps — a cache of your mail, the contacts it suggests, your
-  settings and what it has learned about your sorting — is kept **on your
-  device**.
+  settings and what it has learned about your sorting — stays **on your device**.
 - Nothing is sold, shared, used for advertising, or used to train AI or machine
   learning models. There are no analytics, tracking or crash reports.
 - You can disconnect Winnow at any time at
@@ -32,9 +31,8 @@ Contact:
 
 - Email: `<CONTACT_EMAIL>`
 - GitHub: [github.com/hxmbl/winnow/issues](https://github.com/hxmbl/winnow/issues)
-  — please don't put personal information or the contents of your mail in a
-  GitHub issue, because issues can be read by other people. Use email for
-  anything private.
+  — issues are public, so please don't put personal information or the contents
+  of your mail in one. Use email for anything private.
 
 Because Winnow runs entirely on your device, Hxmbl does not receive, see or hold
 your email, contacts, account details or tokens. The only personal data Hxmbl
@@ -43,8 +41,8 @@ itself receives is what you choose to send when you contact us (see section 6).
 ## 2. The Google user data Winnow accesses
 
 When you choose **Connect Gmail**, Google asks you to grant Winnow these
-permissions ("scopes"). Winnow asks for nothing else, and you can use Winnow's
-demo mailbox without connecting an account at all.
+permissions ("scopes"), and no others. You can use the demo mailbox without
+connecting an account at all.
 
 | Permission | Scope | What Winnow uses it for |
 | --- | --- | --- |
@@ -71,8 +69,8 @@ the app:
   background on the desktop app while its window is hidden;
 - saving an attachment to a place on your computer that you choose.
 
-All of this happens in the app on your device. No person reads your data, and
-Winnow does not use it for any other purpose.
+All of this happens on your device. No person reads your data, and Winnow does
+not use it for any other purpose.
 
 **Limited Use.** Winnow's use and transfer to any other app of information
 received from Google APIs will adhere to the
@@ -93,8 +91,8 @@ including the Limited Use requirements.
 
 Winnow does not add its own encryption to the mail cache; it is protected by your
 operating system account and any disk encryption you use (such as FileVault,
-BitLocker or LUKS). Anyone who can use your computer while you are signed in to it
-may be able to read it.
+BitLocker or LUKS). Anyone who can use your computer while you are signed in may
+be able to read it.
 
 **Network connections Winnow makes.** All of them use HTTPS.
 
@@ -102,20 +100,19 @@ may be able to read it.
   refresh your session; `gmail.googleapis.com` / `www.googleapis.com` and
   `people.googleapis.com` for your mail and contacts. Google's own
   [privacy policy](https://policies.google.com/privacy) covers what Google does.
-- **The servers of people who email you, only if you allow it.** Remote images in
-  an email are blocked by default. If you choose to load images for a message,
-  your device fetches them from wherever the sender put them, which tells that
-  server your IP address and that the message was opened — as any email client
-  would. This is decided one message at a time.
+- **The servers of people who email you, only if you allow it.** Remote images
+  are blocked by default. If you load images for a message, your device fetches
+  them from wherever the sender put them, which tells that server your IP address
+  and that the message was opened — as with any email client. This is decided one
+  message at a time.
 - **The render proxy, only in builds configured to use one.** Winnow's source
   includes an optional "render proxy" that fetches a message's images on your
   behalf so senders cannot see your IP address. The downloadable releases are
-  **not** configured to use one, so they never contact it. If you build or use a
-  copy of Winnow that is configured with a proxy and choose the "Proxied" view,
-  the proxy receives that message's HTML body, fetches the images it refers to,
-  and keeps the images (not the message) in memory for up to fifteen minutes. It
-  does not log requests or store message contents. Whoever runs that proxy is
-  responsible for it.
+  **not** configured with one and never contact it. In a copy that is, choosing
+  the "Proxied" view sends that message's HTML body to the proxy, which fetches
+  the images it refers to and keeps the images (not the message) in memory for up
+  to fifteen minutes. It does not log requests or store message contents. Whoever
+  runs that proxy is responsible for it.
 - **GitHub**, when you download Winnow from the Releases page. GitHub's
   [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)
   applies to that download.
@@ -136,9 +133,9 @@ anyone. In particular, Winnow does not:
   learning model (Winnow's sorting rules and the weights it learns from you stay
   on your device and serve only you).
 
-The only time your data leaves your device is when Winnow sends it to Google to do
-what you asked (for example, sending an email), or when you choose to load a
-message's images (section 4).
+Your data leaves your device only when Winnow sends it to Google to do what you
+asked (for example, sending an email), or when you choose to load a message's
+images (section 4).
 
 If Winnow were ever to change hands, your data would still not be transferred,
 because Hxmbl does not hold it.
@@ -162,9 +159,9 @@ States under GitHub's own privacy statement.
 - **Replying to you when you contact us** — our legitimate interest in supporting
   Winnow and responding to you (Article 6(1)(f)).
 
-Your mail inevitably contains information about other people — the people who
-write to you and whom you write to. Winnow processes it only on your device, only
-to show you your own mail, and never shares it.
+Your mail inevitably contains information about other people — those who write
+to you and whom you write to. Winnow processes it only on your device, only to
+show you your own mail, and never shares it.
 
 ## 8. How long data is kept
 
@@ -198,8 +195,8 @@ message is held by GitHub, Inc. in the United States.
 - There is no Winnow server holding user data, so there is no central store to be
   breached.
 
-No software is perfectly secure. If you find a security problem, please report it
-privately to `<CONTACT_EMAIL>` rather than in a public issue.
+No software is perfectly secure. Please report security problems privately to
+`<CONTACT_EMAIL>`, not in a public issue.
 
 ## 11. Your rights
 
@@ -235,7 +232,7 @@ name `app.winnow.desktop` and can be removed there too.
 ## 13. Complaints
 
 If you are unhappy with how your data has been handled, please contact us first at
-`<CONTACT_EMAIL>` and we will try to put it right. We will acknowledge a complaint
+`<CONTACT_EMAIL>` and we will try to put it right. We will acknowledge complaints
 within 30 days.
 
 You also have the right to complain to the UK's data protection regulator, the
