@@ -108,6 +108,25 @@ VITE_GMAIL_CLIENT_ID=…apps.googleusercontent.com
 # VITE_GMAIL_REDIRECT_URI=https://your.host/auth/callback
 ```
 
+**Scopes.** Add all three to the OAuth consent screen in Google Cloud Console
+(Google Auth Platform → Data access, or "OAuth consent screen → Scopes" in the
+older console):
+
+| Scope | Asked for | Why |
+| --- | --- | --- |
+| `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, send |
+| `https://www.googleapis.com/auth/contacts.readonly` | later, opt-in | saved contacts in recipient suggestions |
+| `https://www.googleapis.com/auth/contacts.other.readonly` | later, opt-in | "other contacts" (people you've written to) |
+
+Sign-in only ever asks for `gmail.modify`. The two contact scopes are requested
+through incremental consent (`include_granted_scopes=true`) when someone chooses
+**Improve suggestions from Google contacts** — in Settings on both builds, and
+under the composer's To field on the desktop (the web build would have to
+navigate away from the draft to ask). The People API has to be enabled for the
+project too, next to the Gmail API. Both contact scopes are *sensitive*, not
+restricted: fine for a test-mode app with listed test users, but a published app
+needs Google's verification for them.
+
 Two things that bit me:
 
 - **No secret ever goes out on the desktop, and PKCE is the whole security story
@@ -139,7 +158,7 @@ VITE_RENDER_PROXY=http://127.0.0.1:8787 npm run build
 
 ## Tests
 
-1085 of them, none needing a DOM. 1048 over `web/src`, 37 for the proxy.
+1163 of them, none needing a DOM. 1126 over `web/src`, 37 for the proxy.
 
 Most are ordinary unit tests of ordinary pure functions. Four are worth naming,
 because each exists only because a real bug got out and nothing else would have
@@ -194,6 +213,12 @@ reliably implement, so on desktop the question couldn't be asked at all.
   after it, forever.
 - **No gravatar.** A third-party request per message is a latency cost and a
   privacy leak, for decoration.
+- **Google contacts are a prior, not a ranking.** A saved contact adds a fixed
+  bonus on top of what the mail says, an "other contact" a smaller one. Saved
+  beats other with the same history, and either can surface someone the mail
+  never mentions, but somebody you actually write to every week still outranks a
+  name you saved once in 2019. Synced with People API sync tokens; an expired
+  token means a quiet full re-list, not an error.
 - **Sent is a mailbox.** It's also the only source for "who do I write to". The
   recipient list is built from both halves of a conversation and sent mail is
   normally the invisible half.
