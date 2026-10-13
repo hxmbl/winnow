@@ -303,6 +303,11 @@ export type CompletedWebRedirect = {
   contactsMessage?: string;
 };
 
+/** The refusal for a contacts consent approved for a different Google account. */
+function wrongAccountMessage(actual: string, expected: string): string {
+  return `Google contacts were approved for ${actual}, but Winnow is signed in as ${expected}. Choose ${expected} on Google's screen.`;
+}
+
 /** Google's refusal, worded for what was being asked. */
 function describeOAuthError(error: string, purpose?: "contacts"): string {
   if (purpose === "contacts" && error === "access_denied") {
@@ -316,7 +321,6 @@ export class GmailSession {
   readonly tokens: TokenManager;
   readonly client: GmailClient;
   readonly sync: GmailSyncEngine;
-  readonly people: PeopleClient;
   readonly contacts: GoogleContactsSync;
 
   constructor(
@@ -346,13 +350,11 @@ export class GmailSession {
 
     this.sync = new GmailSyncEngine({ client: this.client, cache, cursor: cache });
 
-    // The same token manager and the same one-refresh-after-401 rule, but its own
-    // quota bucket: the People API is metered separately from Gmail.
-    this.people = new PeopleClient(
-      () => this.tokens.validAccessToken(),
-      { onUnauthorized: () => this.tokens.forceRefresh() },
-    );
-    this.contacts = new GoogleContactsSync({ client: this.people, store: contactsStore });
+    // The same tokens and one-refresh-after-401 rule; its own quota bucket.
+    const people = new PeopleClient(() => this.tokens.validAccessToken(), {
+      onUnauthorized: () => this.tokens.forceRefresh(),
+    });
+    this.contacts = new GoogleContactsSync({ client: people, store: contactsStore });
   }
 
   /** Whether the stored grant includes the contact scopes. Read from the token, not asked. */
@@ -391,13 +393,12 @@ export class GmailSession {
    * named, so the consent screen shows exactly what is being added. `login_hint` points
    * Google at the account that is already signed in.
    *
-   * Through `platform.beginSignIn` like the sign-in itself, so the desktop gets its
-   * loopback listener and keychain, and the web navigates away and finishes in
-   * `completeWebRedirect` on the way back.
+   * Same platform flow as sign-in: loopback on the desktop; on the web the page
+   * navigates away and `completeWebRedirect` finishes it.
    *
-   * On the desktop the result is checked: if the user picked a *different* Google
-   * account on the consent screen, the previous tokens are put back and the attempt is
-   * refused — adopting them would silently switch the mailbox to another person's.
+   * If the user picked a *different* Google account on the consent screen, the previous
+   * tokens are put back and the attempt refused — adopting them would silently switch
+   * the mailbox to another person's.
    */
   async grantContacts(): Promise<ContactsAccess> {
     const before = await this.tokens.current();
@@ -415,11 +416,7 @@ export class GmailSession {
     const actual = (await this.client.profile()).emailAddress;
     if (actual.toLowerCase() !== expected.toLowerCase()) {
       await this.tokens.adopt(before);
-      throw new GmailError(
-        `Google contacts were approved for ${actual}, but Winnow is signed in as ${expected}. Choose ${expected} on Google's screen.`,
-        0,
-        "declined",
-      );
+      throw new GmailError(wrongAccountMessage(actual, expected), 0, "declined");
     }
     return this.contactsAccess();
   }
@@ -704,7 +701,7 @@ export class GmailSession {
         email: expected,
         view: shared,
         contacts: "declined",
-        contactsMessage: `Google contacts were approved for ${profile.emailAddress}, but Winnow is signed in as ${expected}. Choose ${expected} on Google's screen.`,
+        contactsMessage: wrongAccountMessage(profile.emailAddress, expected),
       };
     }
     return { email: profile.emailAddress, view: shared, contacts: await this.contactsAccess() };

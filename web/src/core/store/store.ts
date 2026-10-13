@@ -680,12 +680,6 @@ export class WinnowStore {
     this.set({ googleContacts: contacts.slice(), contactsAccess: access });
   }
 
-  /** Change the access state alone, e.g. while a session is being restored. */
-  setContactsAccess(access: ContactsAccessState): void {
-    if (this.state.contactsAccess === access) return;
-    this.set({ contactsAccess: access });
-  }
-
   private inboxAnalysis(): { profile: UserProfile; signals: SignalMap } {
     const state = this.state;
     const { all, learning, preferences } = state;

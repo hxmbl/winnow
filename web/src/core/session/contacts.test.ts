@@ -99,6 +99,15 @@ function memoryContacts() {
   return { store, saved: () => saved };
 }
 
+function sessionFor(
+  kind: "desktop" | "web",
+  tokens: TokenStore,
+  options: { outcome?: "code" | "access_denied"; contacts?: GoogleContactsStore } = {},
+): { session: GmailSession; opened: string[] } {
+  const { platform, opened } = platformFor(kind, tokens, options.outcome);
+  return { session: new GmailSession(platform, cache, options.contacts ?? memoryContacts().store), opened };
+}
+
 /** What Google says, adjustable per test. */
 type Google = {
   /** The `scope` the token endpoint grants. */
@@ -161,21 +170,13 @@ afterEach(() => {
 
 describe("contactsAccess", () => {
   it("reads the grant off the stored token", async () => {
-    const none = new GmailSession(platformFor("desktop", memoryTokens(null).store).platform, cache, memoryContacts().store);
+    const none = sessionFor("desktop", memoryTokens(null).store).session;
     expect(await none.contactsAccess()).toBe("unavailable");
 
-    const gmailOnly = new GmailSession(
-      platformFor("desktop", memoryTokens(signedIn()).store).platform,
-      cache,
-      memoryContacts().store,
-    );
+    const gmailOnly = sessionFor("desktop", memoryTokens(signedIn()).store).session;
     expect(await gmailOnly.contactsAccess()).toBe("not_granted");
 
-    const both = new GmailSession(
-      platformFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store).platform,
-      cache,
-      memoryContacts().store,
-    );
+    const both = sessionFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store).session;
     expect(await both.contactsAccess()).toBe("granted");
   });
 });
@@ -184,8 +185,7 @@ describe("the sign-in asks for mail only", () => {
   it("never names a contact scope or include_granted_scopes at first sign-in", async () => {
     google.grantedScope = GMAIL_SCOPE;
     const tokens = memoryTokens(null);
-    const { platform, opened } = platformFor("desktop", tokens.store);
-    const session = new GmailSession(platform, cache, memoryContacts().store);
+    const { session, opened } = sessionFor("desktop", tokens.store);
 
     await session.signIn();
 
@@ -199,8 +199,7 @@ describe("the sign-in asks for mail only", () => {
 describe("grantContacts — desktop", () => {
   it("asks for both contact scopes on top of the existing grant, for the signed-in account", async () => {
     const tokens = memoryTokens(signedIn());
-    const { platform, opened } = platformFor("desktop", tokens.store);
-    const session = new GmailSession(platform, cache, memoryContacts().store);
+    const { session, opened } = sessionFor("desktop", tokens.store);
 
     expect(await session.grantContacts()).toBe("granted");
 
@@ -218,7 +217,7 @@ describe("grantContacts — desktop", () => {
     google.profiles = ["me@example.com", "someone.else@example.com"];
     const before = signedIn();
     const tokens = memoryTokens(before);
-    const session = new GmailSession(platformFor("desktop", tokens.store).platform, cache, memoryContacts().store);
+    const session = sessionFor("desktop", tokens.store).session;
 
     const error = await session.grantContacts().catch((caught: unknown) => caught);
 
@@ -230,11 +229,7 @@ describe("grantContacts — desktop", () => {
   it("says the contacts were not connected when the user declines, and changes nothing", async () => {
     const before = signedIn();
     const tokens = memoryTokens(before);
-    const session = new GmailSession(
-      platformFor("desktop", tokens.store, "access_denied").platform,
-      cache,
-      memoryContacts().store,
-    );
+    const session = sessionFor("desktop", tokens.store, { outcome: "access_denied" }).session;
 
     const error = await session.grantContacts().catch((caught: unknown) => caught);
 
@@ -245,27 +240,19 @@ describe("grantContacts — desktop", () => {
 
   it("reports a half grant as not granted", async () => {
     google.grantedScope = `${GMAIL_SCOPE} ${CONTACTS_SCOPE}`;
-    const session = new GmailSession(
-      platformFor("desktop", memoryTokens(signedIn()).store).platform,
-      cache,
-      memoryContacts().store,
-    );
+    const session = sessionFor("desktop", memoryTokens(signedIn()).store).session;
     expect(await session.grantContacts()).toBe("not_granted");
   });
 
   it("needs a session to add to", async () => {
-    const session = new GmailSession(platformFor("desktop", memoryTokens(null).store).platform, cache, memoryContacts().store);
+    const session = sessionFor("desktop", memoryTokens(null).store).session;
     await expect(session.grantContacts()).rejects.toMatchObject({ kind: "reauth_required" });
   });
 });
 
 describe("refreshContacts", () => {
   it("does not touch the People API without the grant", async () => {
-    const session = new GmailSession(
-      platformFor("desktop", memoryTokens(signedIn()).store).platform,
-      cache,
-      memoryContacts().store,
-    );
+    const session = sessionFor("desktop", memoryTokens(signedIn()).store).session;
     expect(await session.refreshContacts()).toBeNull();
     expect(google.requests.some((url) => url.includes("people.googleapis.com"))).toBe(false);
   });
@@ -280,11 +267,7 @@ describe("refreshContacts", () => {
       }),
     };
     const contacts = memoryContacts();
-    const session = new GmailSession(
-      platformFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store).platform,
-      cache,
-      contacts.store,
-    );
+    const session = sessionFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store, { contacts: contacts.store }).session;
 
     const rows = await session.refreshContacts();
 
@@ -307,11 +290,7 @@ describe("refreshContacts", () => {
       syncedAt: 1,
     });
     google.people = { status: 403, body: '{"error":{"details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}' };
-    const session = new GmailSession(
-      platformFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store).platform,
-      cache,
-      contacts.store,
-    );
+    const session = sessionFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store, { contacts: contacts.store }).session;
 
     expect(await session.refreshContacts()).toBeNull();
     expect(contacts.saved()).toBeNull();
@@ -320,11 +299,7 @@ describe("refreshContacts", () => {
   it("is erased on sign-out with the mail", async () => {
     const contacts = memoryContacts();
     await contacts.store.write({ version: 1, saved: { people: {} }, other: { people: {} }, syncedAt: 1 });
-    const session = new GmailSession(
-      platformFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store).platform,
-      cache,
-      contacts.store,
-    );
+    const session = sessionFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store, { contacts: contacts.store }).session;
     await session.signOut();
     expect(contacts.saved()).toBeNull();
   });
@@ -360,8 +335,7 @@ describe("grantContacts — web, finished by the redirect back", () => {
 
   it("navigates to Google with the same incremental-consent request", async () => {
     installBrowser("");
-    const { platform, opened } = platformFor("web", memoryTokens(signedIn()).store);
-    const session = new GmailSession(platform, cache, memoryContacts().store);
+    const { session, opened } = sessionFor("web", memoryTokens(signedIn()).store);
     void session.grantContacts();
     for (let i = 0; i < 50 && opened.length === 0; i += 1) await new Promise((r) => setTimeout(r, 0));
     const query = new URL(opened[0]).searchParams;
@@ -379,11 +353,7 @@ describe("grantContacts — web, finished by the redirect back", () => {
       purpose: "contacts",
       expectEmail: "me@example.com",
     });
-    const session = new GmailSession(
-      platformFor("web", memoryTokens(signedIn()).store).platform,
-      cache,
-      memoryContacts().store,
-    );
+    const session = sessionFor("web", memoryTokens(signedIn()).store).session;
     const completed = await session.completeWebRedirect();
     expect(completed).toMatchObject({ email: "me@example.com", contacts: "granted" });
     expect(replaced).toEqual(["/"]);
@@ -394,7 +364,7 @@ describe("grantContacts — web, finished by the redirect back", () => {
     rememberPendingAuth({ state: "st-2", verifier: "v", redirectUri: "https://app.example/auth/callback", purpose: "contacts" });
     const before = signedIn();
     const tokens = memoryTokens(before);
-    const session = new GmailSession(platformFor("web", tokens.store).platform, cache, memoryContacts().store);
+    const session = sessionFor("web", tokens.store).session;
 
     const completed = await session.completeWebRedirect();
 
@@ -407,11 +377,7 @@ describe("grantContacts — web, finished by the redirect back", () => {
   it("still throws for a declined sign-in", async () => {
     installBrowser("?error=access_denied&state=st-3");
     rememberPendingAuth({ state: "st-3", verifier: "v", redirectUri: "https://app.example/auth/callback" });
-    const session = new GmailSession(
-      platformFor("web", memoryTokens(null).store).platform,
-      cache,
-      memoryContacts().store,
-    );
+    const session = sessionFor("web", memoryTokens(null).store).session;
     await expect(session.completeWebRedirect()).rejects.toMatchObject({ kind: "declined" });
   });
 
@@ -427,7 +393,7 @@ describe("grantContacts — web, finished by the redirect back", () => {
     });
     const before = signedIn();
     const tokens = memoryTokens(before);
-    const session = new GmailSession(platformFor("web", tokens.store).platform, cache, memoryContacts().store);
+    const session = sessionFor("web", tokens.store).session;
 
     const completed = await session.completeWebRedirect();
 

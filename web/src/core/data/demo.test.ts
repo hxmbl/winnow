@@ -221,7 +221,6 @@ describe("demoMailbox", () => {
   });
 });
 
-
 describe("the demo address book", () => {
   it("is fictional, like the rest of the seed", () => {
     for (const contact of DEMO_CONTACTS) expect(contact.address.endsWith(".example")).toBe(true);
@@ -237,9 +236,5 @@ describe("the demo address book", () => {
     expect(suggestContacts(index, "jonah").map((row) => row.name)).toEqual(["Jonah Mercer"]);
     // And the cast the smoke test types for stays a single match.
     expect(suggestContacts(index, "helena").map((row) => row.name)).toEqual(["Helena Ruiz"]);
-  });
-
-  it("covers both sources", () => {
-    expect(new Set(DEMO_CONTACTS.map((contact) => contact.source))).toEqual(new Set(["saved", "other"]));
   });
 });

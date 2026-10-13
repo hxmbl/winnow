@@ -1730,11 +1730,4 @@ describe("Google contacts in the contact index", () => {
     expect(store.getSnapshot().contactsAccess).toBe("demo");
     expect(store.getSnapshot().googleContacts).toEqual(google);
   });
-
-  it("changes access alone without touching the list", () => {
-    const store = new WinnowStore({ seed: DEMO_EMAILS });
-    store.setContactsAccess("not_granted");
-    expect(store.getSnapshot().contactsAccess).toBe("not_granted");
-    expect(store.getSnapshot().googleContacts).toEqual([]);
-  });
 });

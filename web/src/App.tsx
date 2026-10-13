@@ -73,6 +73,9 @@ let sessionRestoreStarted = false;
  */
 const CONTACTS_REFRESH_MS = 15 * 60_000;
 
+const HALF_GRANT_MESSAGE =
+  "Google did not grant both contact permissions. Tick both boxes on Google's screen to use them.";
+
 /**
  * The composer's state, including what it is for.
  *
@@ -242,8 +245,8 @@ export function App({ store }: Props) {
       const access = await bridge.grantContacts();
       if (access === "granted") await syncGoogleContacts(true);
       else {
-        store.setContactsAccess(access);
-        setContactsError("Google did not grant both contact permissions. Tick both boxes on Google's screen to use them.");
+        store.setGoogleContacts([], access);
+        setContactsError(HALF_GRANT_MESSAGE);
       }
     } catch (error) {
       setContactsError(error instanceof Error ? error.message : "Google contacts were not connected.");
@@ -251,6 +254,7 @@ export function App({ store }: Props) {
       setContactsBusy(false);
     }
   }, [store, syncGoogleContacts]);
+  const onImproveSuggestions = useCallback(() => void improveSuggestions(), [improveSuggestions]);
 
   const [restoringSession, setRestoringSession] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
@@ -388,7 +392,7 @@ export function App({ store }: Props) {
           if (completed.contacts === "declined") {
             store.setNotice(completed.contactsMessage ?? "Google contacts were not connected.");
           } else if (completed.contacts === "not_granted") {
-            store.setNotice("Google did not grant both contact permissions. Tick both boxes on Google's screen to use them.");
+            store.setNotice(HALF_GRANT_MESSAGE);
           }
           void syncGoogleContacts(completed.contacts === "granted");
           return;
@@ -1383,9 +1387,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           contactsAccess={snapshot.contactsAccess}
           contactsBusy={contactsBusy}
           contactsError={contactsError}
-          onImproveSuggestions={() => {
-            void improveSuggestions();
-          }}
+          onImproveSuggestions={onImproveSuggestions}
           onClose={() => store.setOverlay("none")}
         />
       )}
@@ -1410,9 +1412,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
               ? {
                   busy: contactsBusy,
                   error: contactsError,
-                  onClick: () => {
-                    void improveSuggestions();
-                  },
+                  onClick: onImproveSuggestions,
                 }
               : null
           }

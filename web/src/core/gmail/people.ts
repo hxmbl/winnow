@@ -60,42 +60,26 @@ export function hasContactScopes(scope: string | undefined | null): boolean {
 export const PEOPLE_PAGE_SIZE = 1000;
 
 /**
- * Read requests a minute, per user.
+ * Read requests a minute, per user, and the burst allowed.
  *
- * Google's default per-user read quota for the People API is 90 a minute; pacing at 60
- * with a burst of 20 leaves room for the other tab or the other device the same user
- * has open. A large address book is one or two requests a listing anyway — the pacing
+ * Google's default per-user read quota is 90 a minute; 60 leaves room for another tab
+ * or device. A large address book is one or two requests a listing anyway — the pacing
  * matters for the retry loop, not the happy path.
  */
-export const PEOPLE_REQUESTS_PER_MINUTE = 60;
-export const PEOPLE_BURST = 20;
+const PEOPLE_REQUESTS_PER_MINUTE = 60;
+const PEOPLE_BURST = 20;
 
 // ── Wire types ──────────────────────────────────────────────────────────────
 
-export type PeopleFieldMetadata = { primary?: boolean };
+type FieldMetadata = { primary?: boolean };
 
 export type PeoplePerson = {
   /** `people/c123` for a saved contact, `otherContacts/c456` for an other contact. */
   resourceName: string;
-  etag?: string;
   /** On an incremental listing, `deleted: true` is how a removal is reported. */
   metadata?: { deleted?: boolean };
-  names?: { displayName?: string; metadata?: PeopleFieldMetadata }[];
-  emailAddresses?: { value?: string; metadata?: PeopleFieldMetadata }[];
-};
-
-export type ConnectionsResponse = {
-  connections?: PeoplePerson[];
-  nextPageToken?: string;
-  nextSyncToken?: string;
-  totalPeople?: number;
-};
-
-export type OtherContactsResponse = {
-  otherContacts?: PeoplePerson[];
-  nextPageToken?: string;
-  nextSyncToken?: string;
-  totalSize?: number;
+  names?: { displayName?: string; metadata?: FieldMetadata }[];
+  emailAddresses?: { value?: string; metadata?: FieldMetadata }[];
 };
 
 /** Which listing, by the name the rest of the app uses for it. */
@@ -106,6 +90,24 @@ export type PeoplePage = {
   people: PeoplePerson[];
   nextPageToken?: string;
   nextSyncToken?: string;
+};
+
+type ListOptions = { pageToken?: string; syncToken?: string };
+
+type ListResponse = {
+  connections?: PeoplePerson[];
+  otherContacts?: PeoplePerson[];
+  nextPageToken?: string;
+  nextSyncToken?: string;
+};
+
+/**
+ * Where each listing lives. The two differ only in path, in what the field list is
+ * called, and in the key the page's people arrive under.
+ */
+const LISTINGS: Record<PeopleSource, { path: string; fieldsParam: string; key: "connections" | "otherContacts" }> = {
+  saved: { path: "/people/me/connections", fieldsParam: "personFields", key: "connections" },
+  other: { path: "/otherContacts", fieldsParam: "readMask", key: "otherContacts" },
 };
 
 // ── Errors ──────────────────────────────────────────────────────────────────
@@ -161,7 +163,7 @@ export function isScopeMissing(status: number, body: string): boolean {
 
 // ── The client ──────────────────────────────────────────────────────────────
 
-export type PeopleClientOptions = {
+type PeopleClientOptions = {
   fetchImpl?: FetchLike;
   /** One forced refresh after a 401, exactly as `GmailClient` does. */
   onUnauthorized?: () => Promise<string | null>;
@@ -240,48 +242,26 @@ export class PeopleClient {
   }
 
   /**
-   * One page of saved contacts.
+   * One page of either listing.
    *
    * `requestSyncToken` on every page, because Google only hands the token back on the
-   * last one and a listing that forgot to ask would have to start over next time. A
-   * paged incremental listing repeats the same `syncToken` on every page, which is what
-   * the API requires.
+   * last one. A paged incremental listing repeats the same `syncToken` on every page,
+   * which is what the API requires.
    */
-  async connections(options: { pageToken?: string; syncToken?: string } = {}): Promise<PeoplePage> {
+  async list(source: PeopleSource, options: ListOptions = {}): Promise<PeoplePage> {
+    const listing = LISTINGS[source];
     const params = new URLSearchParams({
-      personFields: "names,emailAddresses",
+      [listing.fieldsParam]: "names,emailAddresses",
       pageSize: String(PEOPLE_PAGE_SIZE),
       requestSyncToken: "true",
     });
     if (options.pageToken) params.set("pageToken", options.pageToken);
     if (options.syncToken) params.set("syncToken", options.syncToken);
-    const body = await this.get<ConnectionsResponse>(`/people/me/connections?${params}`);
+    const body = await this.get<ListResponse>(`${listing.path}?${params}`);
     return {
-      people: body.connections ?? [],
+      people: body[listing.key] ?? [],
       nextPageToken: body.nextPageToken,
       nextSyncToken: body.nextSyncToken,
     };
-  }
-
-  /** One page of other contacts. Same paging and sync-token rules as `connections`. */
-  async otherContacts(options: { pageToken?: string; syncToken?: string } = {}): Promise<PeoplePage> {
-    const params = new URLSearchParams({
-      readMask: "names,emailAddresses",
-      pageSize: String(PEOPLE_PAGE_SIZE),
-      requestSyncToken: "true",
-    });
-    if (options.pageToken) params.set("pageToken", options.pageToken);
-    if (options.syncToken) params.set("syncToken", options.syncToken);
-    const body = await this.get<OtherContactsResponse>(`/otherContacts?${params}`);
-    return {
-      people: body.otherContacts ?? [],
-      nextPageToken: body.nextPageToken,
-      nextSyncToken: body.nextSyncToken,
-    };
-  }
-
-  /** Either listing, by source. */
-  list(source: PeopleSource, options: { pageToken?: string; syncToken?: string } = {}): Promise<PeoplePage> {
-    return source === "saved" ? this.connections(options) : this.otherContacts(options);
   }
 }

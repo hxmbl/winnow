@@ -7,11 +7,6 @@ import type { Platform } from "../../platform/types";
 import type { MailBackend, WinnowStore } from "../store/store";
 import type { GoogleContact } from "../contacts/google";
 
-/** A finished web sign-in, plus the link target and, for the contacts opt-in, its outcome. */
-export type CompletedRedirect = CompletedWebRedirect;
-
-export type { ContactsAccess };
-
 export type SessionBridge = {
   /** Whether a session already exists, even a stale one. */
   hasSession(): Promise<boolean>;
@@ -20,7 +15,7 @@ export type SessionBridge = {
   /** Run the OAuth flow to completion. Throws a `GmailError` on any failure. */
   signIn(): Promise<{ email: string }>;
   /** Finish a sign-in delivered via redirect. Returns null if no redirect. */
-  completeWebRedirect(): Promise<CompletedRedirect | null>;
+  completeWebRedirect(): Promise<CompletedWebRedirect | null>;
   /** The store-facing backend. */
   backend(): MailBackend;
   /** Download one attachment's bytes. */

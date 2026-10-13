@@ -101,7 +101,7 @@ describe("PeopleClient — the listings", () => {
         }),
       },
     ]);
-    const page = await client(fetchImpl).connections();
+    const page = await client(fetchImpl).list("saved");
     expect(calls[0].url.startsWith(`${PEOPLE_API}/people/me/connections?`)).toBe(true);
     const query = params(calls[0].url);
     expect(query.get("personFields")).toBe("names,emailAddresses");
@@ -119,7 +119,7 @@ describe("PeopleClient — the listings", () => {
         body: JSON.stringify({ otherContacts: [{ resourceName: "otherContacts/c9" }], nextSyncToken: "s1" }),
       },
     ]);
-    const page = await client(fetchImpl).otherContacts();
+    const page = await client(fetchImpl).list("other");
     expect(calls[0].url.startsWith(`${PEOPLE_API}/otherContacts?`)).toBe(true);
     const query = params(calls[0].url);
     expect(query.get("readMask")).toBe("names,emailAddresses");
@@ -143,7 +143,7 @@ describe("PeopleClient — the listings", () => {
 
   it("returns an empty page for an empty body rather than undefined", async () => {
     const { fetchImpl } = stubFetch([{ status: 200, body: "{}" }]);
-    expect(await client(fetchImpl).connections()).toEqual({
+    expect(await client(fetchImpl).list("saved")).toEqual({
       people: [],
       nextPageToken: undefined,
       nextSyncToken: undefined,
@@ -161,12 +161,12 @@ describe("PeopleClient — refusals", () => {
       },
     });
     const { fetchImpl } = stubFetch([{ status: 400, body }]);
-    await expect(client(fetchImpl).connections({ syncToken: "old" })).rejects.toBeInstanceOf(ExpiredSyncToken);
+    await expect(client(fetchImpl).list("saved", { syncToken: "old" })).rejects.toBeInstanceOf(ExpiredSyncToken);
   });
 
   it("reads a bare 410 GONE as an expired token too", async () => {
     const { fetchImpl } = stubFetch([{ status: 410, body: "" }]);
-    await expect(client(fetchImpl).otherContacts({ syncToken: "old" })).rejects.toBeInstanceOf(ExpiredSyncToken);
+    await expect(client(fetchImpl).list("other", { syncToken: "old" })).rejects.toBeInstanceOf(ExpiredSyncToken);
   });
 
   it("turns an insufficient-scope 403 into PeopleScopeMissing", async () => {
@@ -174,18 +174,18 @@ describe("PeopleClient — refusals", () => {
       error: { code: 403, status: "PERMISSION_DENIED", details: [{ reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT" }] },
     });
     const { fetchImpl } = stubFetch([{ status: 403, body }]);
-    await expect(client(fetchImpl).connections()).rejects.toBeInstanceOf(PeopleScopeMissing);
+    await expect(client(fetchImpl).list("saved")).rejects.toBeInstanceOf(PeopleScopeMissing);
   });
 
   it("passes any other failure through as an HTTP error", async () => {
     const { fetchImpl } = stubFetch([{ status: 500, body: "boom" }]);
-    await expect(client(fetchImpl).connections()).rejects.toBeInstanceOf(GmailHttpError);
+    await expect(client(fetchImpl).list("saved")).rejects.toBeInstanceOf(GmailHttpError);
   });
 
   it("refuses to call out with no session", async () => {
     const { fetchImpl, calls } = stubFetch([]);
     const anonymous = new PeopleClient(async () => null, { fetchImpl, bucket: freeBucket() });
-    await expect(anonymous.connections()).rejects.toBeInstanceOf(GmailError);
+    await expect(anonymous.list("saved")).rejects.toBeInstanceOf(GmailError);
     expect(calls).toHaveLength(0);
   });
 
@@ -205,7 +205,7 @@ describe("PeopleClient — retries and pacing", () => {
       { status: 429, body: "" },
       { status: 200, body: '{"connections":[]}' },
     ]);
-    await client(fetchImpl, { sleeps }).connections();
+    await client(fetchImpl, { sleeps }).list("saved");
     expect(calls).toHaveLength(2);
     expect(sleeps).toHaveLength(1);
     expect(sleeps[0]).toBeGreaterThanOrEqual(1000);
@@ -217,11 +217,11 @@ describe("PeopleClient — retries and pacing", () => {
       { status: 403, body: quota },
       { status: 200, body: "{}" },
     ]);
-    await client(fetchImpl).otherContacts();
+    await client(fetchImpl).list("other");
     expect(calls).toHaveLength(2);
 
     const denied = stubFetch([{ status: 403, body: "insufficient authentication scopes" }]);
-    await expect(client(denied.fetchImpl).otherContacts()).rejects.toBeInstanceOf(PeopleScopeMissing);
+    await expect(client(denied.fetchImpl).list("other")).rejects.toBeInstanceOf(PeopleScopeMissing);
     expect(denied.calls).toHaveLength(1);
   });
 
@@ -236,7 +236,7 @@ describe("PeopleClient — retries and pacing", () => {
         refreshed += 1;
         return "token-2";
       },
-    }).connections();
+    }).list("saved");
     expect(refreshed).toBe(1);
     expect(calls[1].headers?.Authorization).toBe("Bearer token-2");
   });
@@ -244,7 +244,7 @@ describe("PeopleClient — retries and pacing", () => {
   it("says the session is gone when the refresh produces nothing", async () => {
     const { fetchImpl } = stubFetch([{ status: 401, body: "" }]);
     const error = await client(fetchImpl, { onUnauthorized: async () => null })
-      .connections()
+      .list("saved")
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GmailError);
     expect((error as GmailError).needsReauth).toBe(true);
@@ -261,8 +261,8 @@ describe("PeopleClient — retries and pacing", () => {
     };
     const { fetchImpl } = stubFetch([{ status: 200 }, { status: 200 }]);
     const people = new PeopleClient(async () => "t", { fetchImpl, bucket });
-    await people.connections();
-    await people.otherContacts();
+    await people.list("saved");
+    await people.list("other");
     expect(taken).toEqual([1, 1]);
   });
 });

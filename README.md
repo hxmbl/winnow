@@ -158,7 +158,7 @@ VITE_RENDER_PROXY=http://127.0.0.1:8787 npm run build
 
 ## Tests
 
-1163 of them, none needing a DOM. 1126 over `web/src`, 37 for the proxy.
+1159 of them, none needing a DOM. 1122 over `web/src`, 37 for the proxy.
 
 Most are ordinary unit tests of ordinary pure functions. Four are worth naming,
 because each exists only because a real bug got out and nothing else would have

@@ -91,11 +91,8 @@ export type ContactEntry = {
   lastSeen: number;
   /** Frequency weighted by recency, plus the address-book prior. The ranking number. */
   score: number;
-  /**
-   * Where Google's address book has them, if it does. `saved` wins when an address is
-   * in both listings.
-   */
-  source?: "saved" | "other";
+  /** Where Google's address book has them, if it does. `saved` wins over `other`. */
+  source?: GoogleContact["source"];
 };
 
 /**
@@ -138,7 +135,7 @@ type Draft = {
   received: number;
   sent: number;
   lastSeen: number;
-  source?: "saved" | "other";
+  source?: GoogleContact["source"];
   /**
    * The address book's name, held apart from the mail's: a saved contact's name is what
    * the user chose to call them and wins over any header, while an other contact's name
@@ -210,8 +207,7 @@ export function buildContactIndex(
         namedAt: Number.NEGATIVE_INFINITY,
         received: 0,
         sent: 0,
-        // Never seen in mail. Zero rather than the reference, so the recency factor
-        // has nothing to decay — the score is the prior alone.
+        // Never seen in mail, so the score is the prior alone.
         lastSeen: 0,
         source: contact.source,
         bookName: contact.name,
@@ -308,9 +304,7 @@ function merge(
  * decays no matter how many others sit beside it.
  */
 function rankScore(draft: Draft, reference: number): number {
-  const mail = draft.sent + draft.received > 0
-    ? (draft.sent * SENT_WEIGHT + draft.received) * recency(draft.lastSeen, reference)
-    : 0;
+  const mail = (draft.sent * SENT_WEIGHT + draft.received) * recency(draft.lastSeen, reference);
   return mail + (draft.source ? SOURCE_PRIOR[draft.source] : 0);
 }
 

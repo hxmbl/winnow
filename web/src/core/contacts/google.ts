@@ -38,10 +38,10 @@ export type GoogleContact = {
 };
 
 /** One person as stored: the parts the index reads, and nothing else. */
-export type StoredPerson = { name?: string; emails: string[] };
+type StoredPerson = { name?: string; emails: string[] };
 
 /** One listing's local copy and the cursor that continues it. */
-export type ListingState = {
+type ListingState = {
   /** Absent until a full listing has completed, which forces a full listing next time. */
   syncToken?: string;
   /** Keyed by `resourceName`, because that is how a change or a deletion names its target. */
@@ -224,7 +224,7 @@ export function flattenSnapshot(snapshot: GoogleContactsSnapshot): GoogleContact
 /** How many pages one listing is allowed before the refresh gives up on it. */
 export const MAX_PAGES = 50;
 
-export type GoogleContactsSyncOptions = {
+type GoogleContactsSyncOptions = {
   client: Pick<PeopleClient, "list">;
   store: GoogleContactsStore;
   now?: () => number;
@@ -329,9 +329,8 @@ export class GoogleContactsSync {
       if (!result.nextPageToken) return { pages, nextSyncToken: result.nextSyncToken };
       pageToken = result.nextPageToken;
     }
-    // Fifty thousand people is past any address book the composer can usefully rank.
-    // Keep what arrived, but no token: the next refresh starts over rather than
-    // continuing from a listing that never finished.
-    return { pages, nextSyncToken: undefined };
+    // Past any address book the composer can usefully rank. Keep what arrived, but no
+    // token: the next refresh starts over rather than continue an unfinished listing.
+    return { pages };
   }
 }
