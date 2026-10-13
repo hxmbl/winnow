@@ -21,7 +21,7 @@ import {
 } from "../../core/classify/weights";
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
-import type { ImagePolicy } from "../../core/store/store";
+import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
 
@@ -140,6 +140,12 @@ export type SettingsProps = {
   onRestoreFilter: (id: BuiltinSmartFilter) => void;
   /** True when the build is a desktop shell, so the OS-only rows make sense. */
   isDesktop: boolean;
+  /** Where Google contacts stand. The row only shows for a signed-in account. */
+  contactsAccess: ContactsAccessState;
+  contactsBusy: boolean;
+  contactsError: string | null;
+  /** Start the incremental-consent flow for the two contact scopes. */
+  onImproveSuggestions: () => void;
   onClose: () => void;
 };
 
@@ -364,6 +370,45 @@ export function Settings(props: SettingsProps) {
                 <option value={3600}>Every hour</option>
               </select>
             </Row>
+          )}
+        </Section>
+      )}
+
+      {/*
+        Google contacts, as an opt-in rather than a sign-in permission: Winnow asks for
+        mail at sign-in and nothing else, and this is where the user can choose to add
+        their address book later. Hidden in the demo (whose address book is seeded) and
+        while signed out (there is no account to ask for).
+      */}
+      {(props.contactsAccess === "not_granted" || props.contactsAccess === "granted") && (
+        <Section title="Recipient suggestions">
+          <Row
+            label="Improve suggestions from Google contacts"
+            hint={
+              props.contactsAccess === "granted"
+                ? "Your saved contacts and the people Google remembers you writing to are suggested alongside the people in your mail."
+                : "Adds your saved contacts and the people Google remembers you writing to. Read-only; Google asks you to approve it."
+            }
+          >
+            {props.contactsAccess === "granted" ? (
+              <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-muted">
+                <Check size={13} aria-hidden="true" /> Connected
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={props.onImproveSuggestions}
+                disabled={props.contactsBusy}
+                className="rounded-full border border-hairline px-3 py-1 text-[12px] font-semibold text-ink-body transition-colors hover:bg-surface-active disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                {props.contactsBusy ? "Waiting for Google…" : "Connect"}
+              </button>
+            )}
+          </Row>
+          {props.contactsError && (
+            <p role="alert" className="text-[12px] font-medium text-danger">
+              {props.contactsError}
+            </p>
           )}
         </Section>
       )}
@@ -602,6 +647,12 @@ export type ComposerProps = {
    * yet — and the field still works, it simply offers nobody.
    */
   contacts: ContactIndex | null;
+  /**
+   * The Google contacts opt-in, offered under the To field — or `null` where it is not
+   * (already granted, the demo, or the web build, where asking would navigate away from
+   * the draft).
+   */
+  improveSuggestions?: { busy: boolean; error: string | null; onClick: () => void } | null;
   onChange: (patch: { to?: string[]; subject?: string; body?: string }) => void;
   onSend: () => void;
   /** Close, having said the word. No confirmation. */
@@ -618,6 +669,7 @@ export function Composer({
   sending,
   error,
   contacts,
+  improveSuggestions,
   onChange,
   onSend,
   onDiscard,
@@ -708,6 +760,26 @@ export function Composer({
           inputRef={toRef}
           onChange={(next) => onChange({ to: next })}
         />
+
+        {improveSuggestions && (
+          <div className="-mt-1 flex flex-col gap-1 pl-14 text-[12px]">
+            <button
+              type="button"
+              onClick={improveSuggestions.onClick}
+              disabled={improveSuggestions.busy}
+              className="self-start text-ink-subtle underline-offset-2 transition-colors hover:text-ink-body hover:underline disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              {improveSuggestions.busy
+                ? "Waiting for Google…"
+                : "Improve suggestions from Google contacts"}
+            </button>
+            {improveSuggestions.error && (
+              <p role="alert" className="font-medium text-danger">
+                {improveSuggestions.error}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-2 text-[12.5px]">
           <span className="w-12 shrink-0 text-ink-subtle">Subject</span>

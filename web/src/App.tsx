@@ -66,6 +66,14 @@ type Props = {
 let sessionRestoreStarted = false;
 
 /**
+ * How stale Google contacts may get before opening the composer refreshes them.
+ *
+ * Fifteen minutes: an incremental refresh is one cheap request per listing, but the
+ * composer opens far more often than anyone adds a contact.
+ */
+const CONTACTS_REFRESH_MS = 15 * 60_000;
+
+/**
  * The composer's state, including what it is for.
  *
  * `mode` drives the title and the body-field behaviour: a forward has no recipient until
@@ -182,6 +190,68 @@ export function App({ store }: Props) {
   }, [store]);
 
   const sessionRef = useRef<SessionBridge | null>(null);
+
+  // ── Google contacts ──────────────────────────────────────────────────────
+
+  /**
+   * Bring the store's copy of Google's address book up to date.
+   *
+   * The stored copy is adopted first, so suggestions include it the moment a session
+   * connects, and the network refresh follows only when the last one is older than
+   * `CONTACTS_REFRESH_MS` (or `force` says so). A failed refresh keeps the stored copy:
+   * stale suggestions are still suggestions, and an error banner over the composer for a
+   * convenience feature would be out of proportion.
+   *
+   * With no grant the store is told so, which is what makes the opt-in appear.
+   */
+  const syncGoogleContacts = useCallback(async (force = false): Promise<void> => {
+    const bridge = sessionRef.current;
+    if (!bridge || !store.getSnapshot().account) return;
+    try {
+      const access = await bridge.contactsAccess();
+      if (access !== "granted") {
+        store.setGoogleContacts([], access);
+        return;
+      }
+      store.setGoogleContacts(await bridge.cachedContacts(), "granted");
+      const last = await bridge.contactsSyncedAt();
+      if (!force && last !== null && Date.now() - last < CONTACTS_REFRESH_MS) return;
+      const fresh = await bridge.refreshContacts();
+      if (fresh) store.setGoogleContacts(fresh, "granted");
+      else store.setGoogleContacts([], await bridge.contactsAccess());
+    } catch (error) {
+      console.warn("winnow: could not refresh Google contacts:", error);
+    }
+  }, [store]);
+
+  /**
+   * The opt-in: "Improve suggestions from Google contacts".
+   *
+   * Incremental consent through the same platform flow as sign-in. On the desktop this
+   * resolves when the user comes back from the browser; on the web it navigates away and
+   * the outcome arrives through `completeWebRedirect` on reload.
+   */
+  const [contactsBusy, setContactsBusy] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const improveSuggestions = useCallback(async (): Promise<void> => {
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    setContactsError(null);
+    setContactsBusy(true);
+    try {
+      const access = await bridge.grantContacts();
+      if (access === "granted") await syncGoogleContacts(true);
+      else {
+        store.setContactsAccess(access);
+        setContactsError("Google did not grant both contact permissions. Tick both boxes on Google's screen to use them.");
+      }
+    } catch (error) {
+      setContactsError(error instanceof Error ? error.message : "Google contacts were not connected.");
+    } finally {
+      setContactsBusy(false);
+    }
+  }, [store, syncGoogleContacts]);
+
   const [restoringSession, setRestoringSession] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   /** Set from the URL on mount, and applied once a session exists. */
@@ -214,10 +284,11 @@ export function App({ store }: Props) {
     try {
       const account = await bridge.signIn();
       await store.connect(bridge.backend(), { email: account.email });
+      void syncGoogleContacts();
     } finally {
       setSigningIn(false);
     }
-  }, [store]);
+  }, [store, syncGoogleContacts]);
 
   /**
    * Sign out for real.
@@ -313,11 +384,19 @@ export function App({ store }: Props) {
         if (completed) {
           await store.connect(bridge.backend(), { email: completed.email });
           applySharedLink(completed.view);
+          // Back from the contacts opt-in rather than a sign-in: say how it went.
+          if (completed.contacts === "declined") {
+            store.setNotice(completed.contactsMessage ?? "Google contacts were not connected.");
+          } else if (completed.contacts === "not_granted") {
+            store.setNotice("Google did not grant both contact permissions. Tick both boxes on Google's screen to use them.");
+          }
+          void syncGoogleContacts(completed.contacts === "granted");
           return;
         }
 
         if (await bridge.hasSession()) {
           await store.connect(bridge.backend(), { email: await bridge.accountEmail() });
+          void syncGoogleContacts();
         }
 
         /**
@@ -338,7 +417,7 @@ export function App({ store }: Props) {
         setRestoringSession(false);
       }
     })();
-  }, [store, applySharedLink]);
+  }, [store, applySharedLink, syncGoogleContacts]);
 
   // ── Derived view ─────────────────────────────────────────────────────────
 
@@ -481,7 +560,8 @@ export function App({ store }: Props) {
       selfAddress: snap.account?.email,
     });
     setComposer({ draft, sending: false, error: null, mode: "reply" });
-  }, []);
+    void syncGoogleContacts();
+  }, [syncGoogleContacts]);
 
   /**
    * Open the composer on a forward.
@@ -496,7 +576,8 @@ export function App({ store }: Props) {
     if (!snap.view.selected) return;
     const draft = buildForward(snap.view.selected, snap.view.conversation, []);
     setComposer({ draft, sending: false, error: null, mode: "forward" });
-  }, []);
+    void syncGoogleContacts();
+  }, [syncGoogleContacts]);
 
   const sendReply = useCallback(async () => {
     if (!composer) return;
@@ -1299,6 +1380,12 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           mutedFilters={snapshot.mutedFilters}
           onRestoreFilter={store.restoreFilter.bind(store)}
           isDesktop={info?.kind === "desktop"}
+          contactsAccess={snapshot.contactsAccess}
+          contactsBusy={contactsBusy}
+          contactsError={contactsError}
+          onImproveSuggestions={() => {
+            void improveSuggestions();
+          }}
           onClose={() => store.setOverlay("none")}
         />
       )}
@@ -1312,6 +1399,23 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           sending={composer.sending}
           error={composer.error}
           contacts={view.contacts}
+          /*
+            The opt-in, offered where it is wanted — but only on the desktop. The desktop
+            asks Google in the system browser and comes straight back to this draft; the
+            web build has to navigate the page away, which would throw the draft out, so
+            there the same action lives in Settings instead.
+          */
+          improveSuggestions={
+            snapshot.contactsAccess === "not_granted" && info?.nativeOAuth
+              ? {
+                  busy: contactsBusy,
+                  error: contactsError,
+                  onClick: () => {
+                    void improveSuggestions();
+                  },
+                }
+              : null
+          }
           onChange={(patch) =>
             setComposer((current) =>
               current

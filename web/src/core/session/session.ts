@@ -36,6 +36,13 @@ import type { PlatformInfo } from "../../platform/types";
 import { TokenManager } from "../gmail/tokens";
 import { GmailClient } from "../gmail/client";
 import { GmailSyncEngine, type MailboxCache, type CursorStore } from "../gmail/sync";
+import { CONTACT_SCOPES, PeopleClient, PeopleScopeMissing, hasContactScopes } from "../gmail/people";
+import {
+  GoogleContactsSync,
+  localContactsStore,
+  type GoogleContact,
+  type GoogleContactsStore,
+} from "../contacts/google";
 import { buildMime } from "../gmail/mime";
 import { base64UrlDecode } from "../gmail/dto";
 import type { Email, GmailId, Mailbox } from "../model/email";
@@ -273,16 +280,50 @@ export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorSto
   } as MailboxCache & CursorStore & { cursorClear(): Promise<void>; flush(): Promise<void> };
 }
 
+/**
+ * Where the user stands on Google contacts.
+ *
+ *   - `unavailable` — no session to ask with (signed out).
+ *   - `not_granted` — signed in, but the contact scopes are not on the token. The opt-in
+ *     is offered.
+ *   - `granted` — both scopes are on the token; suggestions include the address book.
+ */
+export type ContactsAccess = "unavailable" | "not_granted" | "granted";
+
+/** A finished web redirect, with what it was for when it was not a plain sign-in. */
+export type CompletedWebRedirect = {
+  email: string;
+  view?: Record<string, string>;
+  /**
+   * Set when the redirect was the contacts opt-in: the access it ended with, or
+   * `declined` — the user said no, or approved for another account.
+   */
+  contacts?: ContactsAccess | "declined";
+  /** Why it was declined, in words, when it was. */
+  contactsMessage?: string;
+};
+
+/** Google's refusal, worded for what was being asked. */
+function describeOAuthError(error: string, purpose?: "contacts"): string {
+  if (purpose === "contacts" && error === "access_denied") {
+    return "Google contacts were not connected. Suggestions keep coming from your mail.";
+  }
+  return describeAuthError(error);
+}
+
 /** The session: a token manager, a client, a sync engine, and a backend. */
 export class GmailSession {
   readonly tokens: TokenManager;
   readonly client: GmailClient;
   readonly sync: GmailSyncEngine;
+  readonly people: PeopleClient;
+  readonly contacts: GoogleContactsSync;
 
   constructor(
     private readonly platform: Platform,
     /** Kept on the instance: the backend needs it to resolve a numeric id. */
     private readonly cache: MailboxCache & CursorStore,
+    contactsStore: GoogleContactsStore = localContactsStore(),
   ) {
     this.tokens = new TokenManager({
       store: platform.tokenStore(),
@@ -304,6 +345,83 @@ export class GmailSession {
     );
 
     this.sync = new GmailSyncEngine({ client: this.client, cache, cursor: cache });
+
+    // The same token manager and the same one-refresh-after-401 rule, but its own
+    // quota bucket: the People API is metered separately from Gmail.
+    this.people = new PeopleClient(
+      () => this.tokens.validAccessToken(),
+      { onUnauthorized: () => this.tokens.forceRefresh() },
+    );
+    this.contacts = new GoogleContactsSync({ client: this.people, store: contactsStore });
+  }
+
+  /** Whether the stored grant includes the contact scopes. Read from the token, not asked. */
+  async contactsAccess(): Promise<ContactsAccess> {
+    const current = await this.tokens.current();
+    if (!current) return "unavailable";
+    return hasContactScopes(current.scope) ? "granted" : "not_granted";
+  }
+
+  /**
+   * Refresh Google contacts, if the grant allows it.
+   *
+   * Returns the merged list, or `null` when there is no grant — including a grant that
+   * was revoked at Google since the token was issued, in which case the local copy is
+   * erased: the user took the permission back, and keeping what it let us read would be
+   * ignoring them.
+   */
+  async refreshContacts(): Promise<GoogleContact[] | null> {
+    if ((await this.contactsAccess()) !== "granted") return null;
+    try {
+      return await this.contacts.refresh();
+    } catch (error) {
+      if (error instanceof PeopleScopeMissing) {
+        await this.contacts.clear();
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Ask Google for the two contact scopes, on top of the existing grant.
+   *
+   * Incremental consent: `include_granted_scopes=true` makes the new token carry Gmail
+   * access too, so nothing already working is lost, and only the contact scopes are
+   * named, so the consent screen shows exactly what is being added. `login_hint` points
+   * Google at the account that is already signed in.
+   *
+   * Through `platform.beginSignIn` like the sign-in itself, so the desktop gets its
+   * loopback listener and keychain, and the web navigates away and finishes in
+   * `completeWebRedirect` on the way back.
+   *
+   * On the desktop the result is checked: if the user picked a *different* Google
+   * account on the consent screen, the previous tokens are put back and the attempt is
+   * refused — adopting them would silently switch the mailbox to another person's.
+   */
+  async grantContacts(): Promise<ContactsAccess> {
+    const before = await this.tokens.current();
+    if (!before) {
+      throw new GmailError("Sign in to Gmail before connecting Google contacts.", 401, "reauth_required");
+    }
+    const expected = (await this.client.profile()).emailAddress;
+
+    await this.authorize(
+      CONTACT_SCOPES.join(" "),
+      { include_granted_scopes: "true", login_hint: expected },
+      { purpose: "contacts", expectEmail: expected },
+    );
+
+    const actual = (await this.client.profile()).emailAddress;
+    if (actual.toLowerCase() !== expected.toLowerCase()) {
+      await this.tokens.adopt(before);
+      throw new GmailError(
+        `Google contacts were approved for ${actual}, but Winnow is signed in as ${expected}. Choose ${expected} on Google's screen.`,
+        0,
+        "declined",
+      );
+    }
+    return this.contactsAccess();
   }
 
   /** Whether a session exists — enough to skip the sign-in screen. */
@@ -339,6 +457,26 @@ export class GmailSession {
    * "something went wrong".
    */
   async signIn(): Promise<{ email: string }> {
+    await this.authorize(GMAIL_SCOPE);
+
+    const profile = await this.client.profile();
+    return { email: profile.emailAddress };
+  }
+
+  /**
+   * One authorize round trip, ending in an adopted token set.
+   *
+   * Shared by the sign-in (`GMAIL_SCOPE`) and the contacts opt-in (the contact scopes,
+   * with `include_granted_scopes`), because everything about the trip is the same: PKCE,
+   * the platform's redirect delivery, the state check before any exchange. On the web
+   * this never returns — the page navigates to Google — and the code is exchanged by
+   * `completeWebRedirect` when it comes back.
+   */
+  private async authorize(
+    scope: string,
+    extra: Record<string, string> = {},
+    intent: { purpose?: "contacts"; expectEmail?: string } = {},
+  ): Promise<void> {
     const clientId = clientIdFromEnv();
     if (!clientId) {
       throw new GmailError(
@@ -353,16 +491,16 @@ export class GmailSession {
 
     const authorizeUrl = buildAuthorizeUrl(GOOGLE_AUTH_URL, {
       clientId,
-      scope: GMAIL_SCOPE,
+      scope,
       redirectUri,
       challenge: pkce.challenge,
       state: pkce.state,
-    });
+    }, extra);
 
     // The web build is about to unload this page, taking every local with it.
     // Stashing the verifier is the only way the redirect back can exchange the
     // code; the desktop build does not need it and does not pay for it.
-    rememberPendingAuth({ state: pkce.state, verifier: pkce.verifier, redirectUri });
+    rememberPendingAuth({ state: pkce.state, verifier: pkce.verifier, redirectUri, ...intent });
 
     const outcome = await this.platform.beginSignIn({
       authorizeUrl,
@@ -394,7 +532,7 @@ export class GmailSession {
 
     if (outcome.kind === "error") {
       forgetPendingAuth(pkce.state);
-      throw new GmailError(describeAuthError(outcome.error), 0, "declined");
+      throw new GmailError(describeOAuthError(outcome.error, intent.purpose), 0, "declined");
     }
 
     if (!stateMatches(pkce.state, outcome.state)) {
@@ -425,9 +563,6 @@ export class GmailSession {
       // instead — see `LOOPBACK_REDIRECT_URI` and `desktop.ts`'s `redirectUriIn`.
       redirectUri: outcome.redirectUri ?? redirectUri,
     });
-
-    const profile = await this.client.profile();
-    return { email: profile.emailAddress };
   }
 
   /**
@@ -481,7 +616,7 @@ export class GmailSession {
    * Returns `null` when there is no redirect in the URL, which is the ordinary
    * boot case: the app just loads and shows the inbox or the sign-in screen.
    */
-  async completeWebRedirect(): Promise<{ email: string; view?: Record<string, string> } | null> {
+  async completeWebRedirect(): Promise<CompletedWebRedirect | null> {
     const location = globalThis.location;
     if (!location) return null;
     const redirect = parseRedirect(location.search);
@@ -503,7 +638,19 @@ export class GmailSession {
     if (redirect.kind === "error") {
       // A decline still carries the state we issued, so the stash can be dropped
       // rather than left to expire.
-      if (redirect.state) forgetPendingAuth(redirect.state);
+      const declined = redirect.state ? takePendingAuth(redirect.state) : null;
+      if (declined?.purpose === "contacts" && (await this.tokens.hasSession())) {
+        // Declining the contacts opt-in is not a failed sign-in: the Gmail session is
+        // untouched, so the app comes back exactly as it was, minus the code in the URL.
+        this.scrubAddressBar();
+        const profile = await this.client.profile();
+        return {
+          email: profile.emailAddress,
+          view: shared,
+          contacts: "declined",
+          contactsMessage: describeOAuthError(redirect.error, "contacts"),
+        };
+      }
       throw new GmailError(describeAuthError(redirect.error), 0, "declined");
     }
 
@@ -534,26 +681,53 @@ export class GmailSession {
       );
     }
 
+    // Kept so a contacts opt-in approved for the wrong account can be undone.
+    const before = pending.purpose === "contacts" ? await this.tokens.current() : null;
+
     await this.tokens.exchangeCode({
       code: redirect.code,
       verifier: pending.verifier,
       redirectUri: pending.redirectUri,
     });
 
-    // Leave no trace of the code in the address bar: it is a single-use secret
-    // and there is no reason for it to survive in a link someone might copy.
-    // `replaceState` rather than assigning, so the back button does not return
-    // the user to a URL containing a spent code.
-    const rest = stripRedirect(location.search);
-    globalThis.history?.replaceState(null, "", `${location.pathname}${rest}${location.hash}`);
+    this.scrubAddressBar();
 
     const profile = await this.client.profile();
-    return { email: profile.emailAddress, view: shared };
+    if (pending.purpose !== "contacts") return { email: profile.emailAddress, view: shared };
+
+    const expected = pending.expectEmail;
+    if (expected && before && profile.emailAddress.toLowerCase() !== expected.toLowerCase()) {
+      // The same refusal as the desktop's `grantContacts`: another account's token would
+      // silently switch the mailbox to someone else's.
+      await this.tokens.adopt(before);
+      return {
+        email: expected,
+        view: shared,
+        contacts: "declined",
+        contactsMessage: `Google contacts were approved for ${profile.emailAddress}, but Winnow is signed in as ${expected}. Choose ${expected} on Google's screen.`,
+      };
+    }
+    return { email: profile.emailAddress, view: shared, contacts: await this.contactsAccess() };
+  }
+
+  /**
+   * Leave no trace of the code in the address bar: it is a single-use secret and there
+   * is no reason for it to survive in a link someone might copy. `replaceState` rather
+   * than assigning, so the back button does not return the user to a URL containing a
+   * spent code.
+   */
+  private scrubAddressBar(): void {
+    const location = globalThis.location;
+    if (!location) return;
+    const rest = stripRedirect(location.search);
+    globalThis.history?.replaceState(null, "", `${location.pathname}${rest}${location.hash}`);
   }
 
   /** Forget the session. The cache is wiped too: it is the user's mail. */
   async signOut(): Promise<void> {
     await this.tokens.clear();
+    // The address book is the user's data in the same sense the mail is.
+    await this.contacts.clear().catch(() => undefined);
     // Any half-finished web sign-in goes too. A verifier left in
     // `sessionStorage` after the user explicitly signed out would let a later
     // redirect complete an exchange they did not ask for.
