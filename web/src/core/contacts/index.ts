@@ -19,11 +19,18 @@
  *   - **The user is not in their own address book.** Derived from the account when there
  *     is one, and inferred from the sender of sent mail when there is not — which is what
  *     makes it work in the demo, where `state.account` is `null`.
+ *
+ * Google's own address book, when the user has opted in to it (`google.ts`), is merged
+ * into the same rows: a saved contact or an "other contact" adds a fixed prior to
+ * whatever the mail says, so the address book can surface someone the store has never
+ * seen and break a tie between two people the mail rates the same — but it never
+ * flattens the mail's own frequency, which still decides most of the order.
  */
 
 import { domainPart, foldText, localPart, normalizeAddress } from "./addresses";
 import { CATEGORY_WEIGHT } from "../model/profile";
 import type { Email } from "../model/email";
+import type { GoogleContact } from "./google";
 
 /**
  * How much a message you wrote is worth against one you received.
@@ -49,6 +56,27 @@ export const RECENCY_HALF_LIFE_DAYS = 45;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * What being in Google's address book is worth, added to the mail-derived score.
+ *
+ * Additive and undecayed, because the address book has no dates: a saved contact is a
+ * standing statement, not an interaction. The sizes are set against the mail's own
+ * scale — a message you sent this week is worth `SENT_WEIGHT * SENT_WEIGHT = 4`, an
+ * ordinary received one about 1:
+ *
+ *   - **saved: 3** — a contact the user deliberately kept is worth most of a fresh
+ *     sent message, so with equal mail history a saved contact always ranks above an
+ *     other contact and above a mail-only stranger, and with no mail at all they still
+ *     appear above anyone you have only heard from once.
+ *   - **other: 1** — Google's memory of someone you wrote to, possibly from another
+ *     device or from before the sync window. About one received message: enough to
+ *     surface them, never enough to outrank people the store shows you talk to.
+ *
+ * The gap is what keeps saved above other; the smallness of both is what keeps mail
+ * frequency counting.
+ */
+export const SOURCE_PRIOR = { saved: 3, other: 1 } as const;
+
 /** One person, as far as the mail in the store says. */
 export type ContactEntry = {
   /** The address as it was last written, which is the form a draft should carry. */
@@ -61,8 +89,13 @@ export type ContactEntry = {
   sent: number;
   /** Newest moment, in the message's own timestamp, at which they appeared. */
   lastSeen: number;
-  /** Frequency weighted by recency. The ranking number. */
+  /** Frequency weighted by recency, plus the address-book prior. The ranking number. */
   score: number;
+  /**
+   * Where Google's address book has them, if it does. `saved` wins when an address is
+   * in both listings.
+   */
+  source?: "saved" | "other";
 };
 
 /**
@@ -90,6 +123,8 @@ export type ContactIndex = {
 export type BuildContactIndexOptions = {
   /** The signed-in address, when the store knows one. */
   selfAddress?: string | null;
+  /** Google's address book, merged into the mail's rows. Empty without the opt-in. */
+  googleContacts?: readonly GoogleContact[];
 };
 
 /** A row while it is being built, before recency has been folded in. */
@@ -103,6 +138,13 @@ type Draft = {
   received: number;
   sent: number;
   lastSeen: number;
+  source?: "saved" | "other";
+  /**
+   * The address book's name, held apart from the mail's: a saved contact's name is what
+   * the user chose to call them and wins over any header, while an other contact's name
+   * is only a fallback for an address the mail never named.
+   */
+  bookName?: string;
 };
 
 /**
@@ -158,6 +200,33 @@ export function buildContactIndex(
     }
   }
 
+  for (const contact of options.googleContacts ?? []) {
+    const key = normalizeAddress(contact.address);
+    if (key === "" || self.has(key)) continue;
+    const existing = rows.get(key);
+    if (!existing) {
+      rows.set(key, {
+        address: contact.address.trim(),
+        namedAt: Number.NEGATIVE_INFINITY,
+        received: 0,
+        sent: 0,
+        // Never seen in mail. Zero rather than the reference, so the recency factor
+        // has nothing to decay — the score is the prior alone.
+        lastSeen: 0,
+        source: contact.source,
+        bookName: contact.name,
+      });
+      continue;
+    }
+    // Saved beats other when the same address arrives from both.
+    if (existing.source !== "saved") {
+      existing.source = contact.source;
+      if (contact.name) existing.bookName = contact.name;
+    } else if (!existing.bookName && contact.name) {
+      existing.bookName = contact.name;
+    }
+  }
+
   const reference = emails.reduce((newest, email) => Math.max(newest, email.receivedAt), 0);
 
   const entries: ContactEntry[] = [];
@@ -167,12 +236,13 @@ export function buildContactIndex(
     if (self.has(key)) continue;
     const entry: ContactEntry = {
       address: draft.address,
-      name: draft.name,
+      name: displayName(draft),
       received: draft.received,
       sent: draft.sent,
       lastSeen: draft.lastSeen,
       score: rankScore(draft, reference),
     };
+    if (draft.source) entry.source = draft.source;
     entries.push(entry);
     byAddress.set(key, entry);
   }
@@ -238,7 +308,19 @@ function merge(
  * decays no matter how many others sit beside it.
  */
 function rankScore(draft: Draft, reference: number): number {
-  return (draft.sent * SENT_WEIGHT + draft.received) * recency(draft.lastSeen, reference);
+  const mail = draft.sent + draft.received > 0
+    ? (draft.sent * SENT_WEIGHT + draft.received) * recency(draft.lastSeen, reference)
+    : 0;
+  return mail + (draft.source ? SOURCE_PRIOR[draft.source] : 0);
+}
+
+/**
+ * The name to show: a saved contact's own name first, then the newest name the mail
+ * carried, then an other contact's name.
+ */
+function displayName(draft: Draft): string | undefined {
+  if (draft.source === "saved" && draft.bookName) return draft.bookName;
+  return draft.name ?? draft.bookName;
 }
 
 /** Exponential decay against the corpus's own newest message. Exported for its tests. */

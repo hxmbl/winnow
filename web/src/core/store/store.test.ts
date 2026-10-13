@@ -1675,3 +1675,66 @@ describe("body retention", () => {
     expect(calls.filter((c) => c.method === "fetchBody")).toHaveLength(0);
   });
 });
+
+describe("Google contacts in the contact index", () => {
+  const google = [
+    { address: "jonah@example.com", name: "Jonah Mercer", source: "saved" as const },
+    { address: "lena@example.com", source: "other" as const },
+  ];
+
+  it("starts the demo with its seeded address book, offline", () => {
+    const store = new WinnowStore({ seed: DEMO_EMAILS, seedContacts: google });
+    const snap = store.getSnapshot();
+    expect(snap.contactsAccess).toBe("demo");
+    expect(snap.view.contacts.byAddress.get("jonah@example.com")?.source).toBe("saved");
+  });
+
+  it("merges an adopted address book and rebuilds the index only when it changes", () => {
+    const store = new WinnowStore({ seed: DEMO_EMAILS });
+    const before = store.getSnapshot().view.contacts;
+    expect(before.byAddress.has("jonah@example.com")).toBe(false);
+
+    store.setGoogleContacts(google, "granted");
+    const after = store.getSnapshot().view.contacts;
+    expect(after).not.toBe(before);
+    expect(after.byAddress.get("jonah@example.com")?.name).toBe("Jonah Mercer");
+    expect(store.getSnapshot().contactsAccess).toBe("granted");
+
+    // An unrelated change keeps the memoised index.
+    store.setSearchQuery("x");
+    expect(store.getSnapshot().view.contacts).toBe(after);
+  });
+
+  it("drops the demo's address book when a real account connects", async () => {
+    const store = new WinnowStore({ seed: DEMO_EMAILS, seedContacts: google });
+    const { backend } = fakeBackend();
+    await store.connect(backend, { email: "user@example.com" });
+    const snap = store.getSnapshot();
+    expect(snap.googleContacts).toEqual([]);
+    expect(snap.contactsAccess).toBe("unavailable");
+    expect(snap.view.contacts.byAddress.has("jonah@example.com")).toBe(false);
+  });
+
+  it("forgets the account's address book on sign-out, and the demo brings its own back", async () => {
+    const store = new WinnowStore({ seed: DEMO_EMAILS, seedContacts: google });
+    const { backend } = fakeBackend();
+    await store.connect(backend, { email: "user@example.com" });
+    store.setGoogleContacts([{ address: "real@example.com", source: "saved" }], "granted");
+
+    await store.signOut();
+    expect(store.getSnapshot().googleContacts).toEqual([]);
+    expect(store.getSnapshot().contactsAccess).toBe("unavailable");
+
+    store.replaceAll(DEMO_EMAILS);
+    store.markDemoMode();
+    expect(store.getSnapshot().contactsAccess).toBe("demo");
+    expect(store.getSnapshot().googleContacts).toEqual(google);
+  });
+
+  it("changes access alone without touching the list", () => {
+    const store = new WinnowStore({ seed: DEMO_EMAILS });
+    store.setContactsAccess("not_granted");
+    expect(store.getSnapshot().contactsAccess).toBe("not_granted");
+    expect(store.getSnapshot().googleContacts).toEqual([]);
+  });
+});

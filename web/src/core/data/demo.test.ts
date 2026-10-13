@@ -1,7 +1,9 @@
 
 
 import { describe, expect, it } from "vitest";
-import { DEMO_EMAILS, DEMO_EXPECTATIONS, DEMO_NOW, DEMO_TRASH, demoMailbox } from "./demo";
+import { DEMO_CONTACTS, DEMO_EMAILS, DEMO_EXPECTATIONS, DEMO_NOW, DEMO_TRASH, demoMailbox } from "./demo";
+import { buildContactIndex } from "../contacts/index";
+import { suggestContacts } from "../contacts/suggest";
 import { classifyEmail, contentBag, type SignalMap } from "../classify/classify";
 import { matchesBuiltin, rankFilters } from "../classify/filters";
 import { buildUserProfile, type UserProfile } from "../model/profile";
@@ -216,5 +218,28 @@ describe("demoMailbox", () => {
     const demo = demoMailbox(DEMO_NOW - 1000);
     expect(demo.now).toBe(DEMO_NOW);
     expect(demo.emails[0]!.receivedAt).toBe(DEMO_EMAILS[0]!.receivedAt);
+  });
+});
+
+
+describe("the demo address book", () => {
+  it("is fictional, like the rest of the seed", () => {
+    for (const contact of DEMO_CONTACTS) expect(contact.address.endsWith(".example")).toBe(true);
+  });
+
+  it("does not contain the demo user", () => {
+    const self = new Set(DEMO_EMAILS.filter((email) => email.mailbox === "sent").map((email) => email.sender));
+    for (const contact of DEMO_CONTACTS) expect(self.has(contact.address)).toBe(false);
+  });
+
+  it("merges with the mail: a saved contact the mail never mentions is offered by name", () => {
+    const index = buildContactIndex(DEMO_EMAILS, { googleContacts: DEMO_CONTACTS });
+    expect(suggestContacts(index, "jonah").map((row) => row.name)).toEqual(["Jonah Mercer"]);
+    // And the cast the smoke test types for stays a single match.
+    expect(suggestContacts(index, "helena").map((row) => row.name)).toEqual(["Helena Ruiz"]);
+  });
+
+  it("covers both sources", () => {
+    expect(new Set(DEMO_CONTACTS.map((contact) => contact.source))).toEqual(new Set(["saved", "other"]));
   });
 });

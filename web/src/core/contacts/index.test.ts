@@ -7,7 +7,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildContactIndex, matchKey, recency, SENT_WEIGHT } from "./index";
+import { buildContactIndex, matchKey, recency, SENT_WEIGHT, SOURCE_PRIOR } from "./index";
+import { suggestContacts } from "./suggest";
+import type { GoogleContact } from "./google";
 import type { Contact } from "../model/email";
 import type { Email } from "../model/email";
 
@@ -305,5 +307,108 @@ describe("matchKey", () => {
   it("has no words for a contact with no name", () => {
     const index = buildContactIndex([mail({ sender: "ada@example.com" })]);
     expect(matchKey(index.entries[0]).words).toEqual([]);
+  });
+});
+
+describe("buildContactIndex — Google contacts", () => {
+  const saved = (address: string, name?: string): GoogleContact => ({ address, name, source: "saved" });
+  const other = (address: string, name?: string): GoogleContact => ({ address, name, source: "other" });
+
+  it("adds people the mail has never mentioned, scored by their prior alone", () => {
+    const index = buildContactIndex([mail({ sender: "ada@example.com" })], {
+      googleContacts: [saved("jonah@example.com", "Jonah Mercer"), other("lena@example.com")],
+    });
+    const jonah = index.byAddress.get("jonah@example.com");
+    expect(jonah?.name).toBe("Jonah Mercer");
+    expect(jonah?.source).toBe("saved");
+    expect(jonah?.score).toBe(SOURCE_PRIOR.saved);
+    expect(index.byAddress.get("lena@example.com")?.score).toBe(SOURCE_PRIOR.other);
+  });
+
+  it("ranks a saved contact above an other contact with the same mail history", () => {
+    const emails = [
+      mail({ sender: "grace@example.com", receivedAt: NOW - DAY }),
+      mail({ sender: "linus@example.com", receivedAt: NOW - DAY }),
+    ];
+    const index = buildContactIndex(emails, {
+      googleContacts: [other("grace@example.com"), saved("linus@example.com")],
+    });
+    expect(index.entries.map((entry) => entry.address)).toEqual(["linus@example.com", "grace@example.com"]);
+  });
+
+  it("ranks saved above other above nobody when there is no mail at all", () => {
+    const index = buildContactIndex([], {
+      googleContacts: [other("b@example.com"), saved("c@example.com")],
+    });
+    expect(index.entries.map((entry) => entry.address)).toEqual(["c@example.com", "b@example.com"]);
+  });
+
+  it("still lets mail frequency count: a busy correspondent outranks a silent saved contact", () => {
+    const busy = Array.from({ length: 4 }, (_, i) =>
+      mail({ mailbox: "sent", sender: "me@example.com", to: [contact("pat@example.com")], receivedAt: NOW - i * DAY }),
+    );
+    const index = buildContactIndex(busy, { googleContacts: [saved("quiet@example.com")] });
+    expect(index.entries[0].address).toBe("pat@example.com");
+    expect(index.entries[1].address).toBe("quiet@example.com");
+  });
+
+  it("adds the prior on top of the mail score rather than replacing it", () => {
+    const emails = [mail({ sender: "ada@example.com", receivedAt: NOW })];
+    const plain = buildContactIndex(emails).byAddress.get("ada@example.com")!;
+    const merged = buildContactIndex(emails, { googleContacts: [saved("Ada@Example.com")] }).byAddress.get("ada@example.com")!;
+    expect(merged.score).toBeCloseTo(plain.score + SOURCE_PRIOR.saved, 10);
+    expect(merged.received).toBe(plain.received);
+    // One row, matched case-insensitively.
+    expect(buildContactIndex(emails, { googleContacts: [saved("Ada@Example.com")] }).entries).toHaveLength(1);
+  });
+
+  it("prefers a saved contact's name to the mail's, and the mail's to an other contact's", () => {
+    const emails = [
+      mail({ sender: "ada@example.com", name: "ada (work)" }),
+      mail({ sender: "grace@example.com", name: "Grace H." }),
+      mail({ sender: "linus@example.com" }),
+    ];
+    const index = buildContactIndex(emails, {
+      googleContacts: [
+        saved("ada@example.com", "Ada Lovelace"),
+        other("grace@example.com", "grace"),
+        other("linus@example.com", "Linus Torvalds"),
+      ],
+    });
+    expect(index.byAddress.get("ada@example.com")?.name).toBe("Ada Lovelace");
+    expect(index.byAddress.get("grace@example.com")?.name).toBe("Grace H.");
+    expect(index.byAddress.get("linus@example.com")?.name).toBe("Linus Torvalds");
+  });
+
+  it("takes saved over other when an address is in both listings", () => {
+    const index = buildContactIndex([], {
+      googleContacts: [other("ada@example.com", "ada"), saved("ada@example.com", "Ada Lovelace")],
+    });
+    expect(index.entries).toHaveLength(1);
+    expect(index.entries[0].source).toBe("saved");
+    expect(index.entries[0].name).toBe("Ada Lovelace");
+  });
+
+  it("never lists the user, even when Google does", () => {
+    const index = buildContactIndex([], {
+      selfAddress: "me@example.com",
+      googleContacts: [saved("Me@Example.com", "Me"), other("me@example.com")],
+    });
+    expect(index.entries).toHaveLength(0);
+  });
+
+  it("makes a Google-only contact findable by name in the composer", () => {
+    const index = buildContactIndex([mail({ sender: "ada@example.com", name: "Ada" })], {
+      googleContacts: [saved("jonah.mercer@example.com", "Jonah Mercer")],
+    });
+    expect(suggestContacts(index, "mercer").map((row) => row.address)).toEqual(["jonah.mercer@example.com"]);
+  });
+
+  it("leaves a mail-only index exactly as it was", () => {
+    const emails = [mail({ sender: "ada@example.com" }), mail({ sender: "grace@example.com", receivedAt: NOW - DAY })];
+    const before = buildContactIndex(emails);
+    const after = buildContactIndex(emails, { googleContacts: [] });
+    expect(after.entries).toEqual(before.entries);
+    expect(after.entries.every((entry) => entry.source === undefined)).toBe(true);
   });
 });

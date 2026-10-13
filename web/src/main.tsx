@@ -19,7 +19,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { WinnowStore } from "./core/store/store";
-import { DEMO_TRASH, demoMailbox } from "./core/data/demo";
+import { DEMO_CONTACTS, DEMO_TRASH, demoMailbox } from "./core/data/demo";
 import { desktopPlatformExtras, isTauri, platform } from "./platform";
 import { BUILTIN_FILTERS, filterKey, parseFilterKey } from "./core/model/signals";
 import { MAILBOX_ORDER } from "./core/store/store";
@@ -176,6 +176,8 @@ const demo = demoMailbox();
 const store = new WinnowStore({
   seed: demo.emails,
   seedTrash: DEMO_TRASH,
+  // The demo address book, so the composer shows Google contacts merged in with no network.
+  seedContacts: DEMO_CONTACTS,
   // The seed's own reference instant, moved onto the real clock (`demoMailbox`), so the
   // list's day sections and the reader's dates agree. Live mail replaces it on connect.
   now: demo.now,
