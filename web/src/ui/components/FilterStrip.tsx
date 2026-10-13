@@ -40,6 +40,11 @@ type Props = {
    * proved fragile; `position: sticky; left: 0` cannot be mis-sized.
    */
   leading?: React.ReactNode;
+  /**
+   * Touch sizing, for the phone dock: 40px pills and a larger hide control, so the rail
+   * that carries the product can be worked with a thumb.
+   */
+  touch?: boolean;
   className?: string;
 };
 
@@ -51,8 +56,10 @@ export const FilterStrip = memo(function FilterStrip({
   onRestore,
   onClear,
   leading,
+  touch = false,
   className = "",
 }: Props) {
+  const pillSize = touch ? "h-10 pl-4 pr-3.5" : "h-7 pl-3 pr-2.5";
   const hasActive = activeFilters.length > 0;
   const activeKeys = new Set(activeFilters.map(filterKey));
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -91,7 +98,7 @@ export const FilterStrip = memo(function FilterStrip({
     <div className={`relative min-w-0 ${className}`}>
       <div
         ref={scrollerRef}
-        className="no-scrollbar flex items-center gap-1.5 overflow-x-auto"
+        className={`no-scrollbar flex items-center overflow-x-auto ${touch ? "gap-2 py-1.5 pr-1.5" : "gap-1.5"}`}
       >
         {/*
           The mark, pinned. `z-10` so it paints above the pills travelling behind it;
@@ -112,7 +119,7 @@ export const FilterStrip = memo(function FilterStrip({
           <button
             type="button"
             onClick={onClear}
-            className="h-7 shrink-0 rounded-full bg-sheen px-3 text-ui font-semibold text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={`${touch ? "h-10 px-4" : "h-7 px-3"} shrink-0 rounded-full bg-sheen text-ui font-semibold text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             All
           </button>
@@ -123,7 +130,9 @@ export const FilterStrip = memo(function FilterStrip({
         const on = activeKeys.has(key);
         // No digit for a muted pill: a shortcut to a bucket that is not filterable
         // would do nothing.
-        const digit = muted ? null : digitFor(index);
+        // Nor on the phone dock: there is no number row to press, and a hover that sticks
+        // after a tap would otherwise reveal the keycap on the pill just touched.
+        const digit = muted || touch ? null : digitFor(index);
         const isMuted = muted === true;
 
         return (
@@ -141,7 +150,7 @@ export const FilterStrip = memo(function FilterStrip({
                   ? `${label}, hidden — ${count} ${count === 1 ? "message" : "messages"}`
                   : `${label}, ${count} ${count === 1 ? "message" : "messages"}`
               }
-              className={`flex h-7 items-center gap-1.5 rounded-full pl-3 pr-2.5 text-ui font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
+              className={`flex ${pillSize} items-center gap-1.5 rounded-full text-ui font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
                 isMuted
                   ? "text-ink-subtle line-through opacity-60"
                   : on
@@ -208,7 +217,7 @@ export const FilterStrip = memo(function FilterStrip({
                     ? `Show ${label} in the inbox again`
                     : `Hide ${label} from the inbox and tell Winnow it is over-firing`
                 }
-                className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-veil text-[10px] leading-none text-ink-muted opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100"
+                className={`absolute inline-flex items-center justify-center rounded-full bg-veil leading-none ${touch ? "-right-1.5 -top-1.5 h-6 w-6 text-[13px]" : "-right-1 -top-1 h-4 w-4 text-[10px]"} text-ink-muted opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100`}
               >
                 {isMuted ? "↺" : "×"}
               </button>

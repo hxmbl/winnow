@@ -320,7 +320,7 @@ const Row = memo(function Row({
         onClick={() => onToggleStar(email.id)}
         aria-label={email.starred ? "Unstar" : "Star"}
         aria-pressed={email.starred}
-        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle [@media(hover:none)]:-m-2.5 [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
       >
         {/*
           The star is a sprite rather than a lucide icon so the filled and outline states

@@ -49,3 +49,17 @@ export function AppMark({ size = 36 }: { size?: number }) {
     </svg>
   );
 }
+
+/**
+ * The logo slot.
+ *
+ * The phone top bar's leading circle holds this. With no `src` it is the inline mark
+ * above, so it follows the theme; pass a URL once there is a finished raster or SVG logo
+ * and it swaps in with no layout change, because the slot owns the size, not the art.
+ */
+export function AppLogo({ src, size = 28, alt = "Winnow" }: { src?: string; size?: number; alt?: string }) {
+  if (src) {
+    return <img src={src} width={size} height={size} alt={alt} className="shrink-0" draggable={false} />;
+  }
+  return <AppMark size={size} />;
+}

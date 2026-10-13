@@ -57,7 +57,7 @@ type Props = {
    * which is about *place* and belongs against the edge it emerges from — a panel floating
    * in the middle of the window says "dialog".
    */
-  placement?: "center" | "left";
+  placement?: "center" | "left" | "fill";
   className?: string;
   children: React.ReactNode;
 };
@@ -80,6 +80,8 @@ const FOCUSABLE =
 const SURFACE_ENTER = {
   center: "animate-sheet",
   left: "animate-drawer",
+  // The phone composer: the whole window, so it rises like a sheet.
+  fill: "animate-sheet",
 } as const;
 
 export function Sheet({
@@ -184,7 +186,11 @@ export function Sheet({
             // pretending to be a sidebar. No vertical padding either, so its top and
             // bottom edges are the window's own.
             "items-stretch justify-start"
-          : "items-center justify-center p-4"
+          : placement === "fill"
+            ? // The whole screen, top-aligned, so a panel shorter than the window (the
+              // part the on-screen keyboard leaves) sits at the top rather than centred.
+              "items-start justify-stretch"
+            : "items-center justify-center p-4"
       } bg-scrim`}
       // A click handler on a div, which is only acceptable because this div is
       // genuinely a backdrop and genuinely dismissable — and it is *optional*, which is
@@ -298,14 +304,21 @@ export function SheetHeader({
   title,
   id,
   onClose,
+  touch = false,
 }: {
   title: string;
   /** Wired to the panel's `aria-labelledby` when the panel has no `aria-label`. */
   id?: string;
   onClose: () => void;
+  /** A 44px close target and room for the status bar, for the phone layout. */
+  touch?: boolean;
 }) {
   return (
-    <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-hairline bg-chrome px-5 py-3.5">
+    <div
+      className={`sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-hairline bg-chrome ${
+        touch ? "px-3 pb-1.5 pl-5 pt-[max(0.375rem,env(safe-area-inset-top))]" : "px-5 py-3.5"
+      }`}
+    >
       <h2 id={id} className="text-[15px] font-semibold text-ink">
         {title}
       </h2>
@@ -313,7 +326,7 @@ export function SheetHeader({
         type="button"
         onClick={onClose}
         aria-label={`Close ${title}`}
-        className="flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className={`flex ${touch ? "h-11 w-11" : "h-7 w-7"} items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
       >
         <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
           <path d="M6 6l12 12M18 6L6 18" />

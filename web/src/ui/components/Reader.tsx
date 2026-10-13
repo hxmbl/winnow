@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
+  ArrowLeft,
   Ban,
   Check,
   CornerUpLeft,
@@ -241,13 +242,20 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
  * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
  * hands focus back to its button so the keyboard is not stranded.
  */
-function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, buttonClass }: {
+function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, buttonClass, phone, buttonContent }: {
   view: BodyView;
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
   senderName: string;
   onBlockSender: () => void;
   buttonClass: string;
+  /**
+   * The phone reader's version: the menu opens *upward* from the action bar, its rows
+   * are touch height, and it leads with star and read, which the bar has no room for.
+   */
+  phone?: { starred: boolean; unread: boolean; onStar: () => void; onRead: () => void };
+  /** What the trigger shows. The icon alone unless the phone bar labels it. */
+  buttonContent?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -279,8 +287,10 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, butt
     buttonRef.current?.focus();
   };
 
-  const ITEM =
-    "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-none";
+  const ITEM = phone
+    ? "flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-[14px] font-medium text-ink-body transition-colors active:bg-sheen focus-visible:bg-sheen focus-visible:outline-none"
+    : "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-none";
+  const iconSize = phone ? 16 : 13;
 
   return (
     <div ref={rootRef} className="relative">
@@ -294,14 +304,49 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, butt
         onClick={() => setOpen((was) => !was)}
         className={buttonClass}
       >
-        <MoreHorizontal size={15} strokeWidth={1.9} />
+        {buttonContent ?? <MoreHorizontal size={15} strokeWidth={1.9} />}
       </button>
       {open && (
         <div
           role="menu"
           aria-label="More actions"
-          className="absolute right-0 top-8 z-30 w-60 rounded-pane border border-hairline bg-surface p-1 shadow-pane"
+          className={
+            phone
+              ? // Flat, and the tone of the bar it rises from rather than of the message
+                // card under it: a tonal step, no border and no shadow.
+                "absolute bottom-full right-0 z-30 mb-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-pane bg-canvas p-1.5"
+              : "absolute right-0 top-8 z-30 w-60 rounded-pane border border-hairline bg-surface p-1 shadow-pane"
+          }
         >
+          {phone && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                aria-pressed={phone.starred}
+                onClick={() => choose(phone.onStar)}
+                className={ITEM}
+              >
+                <Star
+                  size={iconSize}
+                  strokeWidth={1.9}
+                  aria-hidden="true"
+                  fill={phone.starred ? "currentColor" : "none"}
+                  className={phone.starred ? "text-[var(--wn-badge-starred)]" : "text-ink-muted"}
+                />
+                <span className="flex-1">{phone.starred ? "Unstar" : "Star"}</span>
+              </button>
+              <button type="button" role="menuitem" onClick={() => choose(phone.onRead)} className={ITEM}>
+                {phone.unread ? (
+                  <Mail size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+                ) : (
+                  <MailOpen size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+                )}
+                <span className="flex-1">{phone.unread ? "Mark read" : "Mark unread"}</span>
+              </button>
+              <div className="my-1 h-px bg-divider" aria-hidden="true" />
+            </>
+          )}
           <p className="px-2.5 pb-1 pt-1.5 text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
             Show as
           </p>
@@ -314,9 +359,9 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, butt
               onClick={() => choose(() => onViewChange(id))}
               className={ITEM}
             >
-              <Icon size={13} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <Icon size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
               <span className="flex-1">{label}</span>
-              {view === id && <Check size={13} strokeWidth={2.2} aria-hidden="true" />}
+              {view === id && <Check size={iconSize} strokeWidth={2.2} aria-hidden="true" />}
             </button>
           ))}
           <div className="my-1 h-px bg-divider" aria-hidden="true" />
@@ -327,11 +372,93 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, butt
             title="Everything from this sender disappears from every folder. Bring it back in Settings."
             className={`${ITEM} hover:bg-danger-wash hover:text-danger`}
           >
-            <Ban size={13} strokeWidth={1.9} aria-hidden="true" />
+            <Ban size={iconSize} strokeWidth={1.9} aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate">Hide everything from {senderName}</span>
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The phone reader's action bar.
+ *
+ * The same verbs as the toolbar, moved to the bottom edge where a thumb already is, each
+ * with its label under its icon like the tabs it replaces. Back leads, because leaving is
+ * the most common thing to do with a message on a phone. Star and read go into More: six
+ * targets of 48px is what a 390px screen holds without shrinking any of them.
+ */
+function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName, onClose }: {
+  starred: boolean;
+  unread: boolean;
+  mailbox: Mailbox;
+  actions: Actions;
+  view: BodyView;
+  onViewChange: (next: BodyView) => void;
+  hasHtml: boolean;
+  senderName: string;
+  onClose: () => void;
+}) {
+  const inSpam = mailbox === "spam";
+  const archiveLabel =
+    mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : "Restore";
+  const archiveShort = mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Inbox" : "Restore";
+  const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
+  const trashShort = mailbox === "trash" ? "Delete" : "Trash";
+
+  const BUTTON =
+    "flex min-h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-pane px-0.5 py-1.5 text-ink-muted transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  const LABEL = "max-w-full truncate text-tiny font-medium";
+  const ICON = { size: 20, strokeWidth: 1.8, "aria-hidden": true } as const;
+
+  return (
+    <div
+      data-reader-dock=""
+      className="relative z-20 grid shrink-0 grid-cols-6 gap-0.5 rounded-t-[22px] bg-canvas px-2 pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2"
+    >
+      <button type="button" onClick={onClose} aria-label="Back to the list" className={BUTTON}>
+        <ArrowLeft {...ICON} />
+        <span className={LABEL}>Back</span>
+      </button>
+      <button type="button" onClick={actions.onReply} aria-label="Reply to all" className={BUTTON}>
+        <CornerUpLeft {...ICON} />
+        <span className={LABEL}>Reply</span>
+      </button>
+      <button type="button" onClick={actions.onForward} aria-label="Forward" className={BUTTON}>
+        <Forward {...ICON} />
+        <span className={LABEL}>Forward</span>
+      </button>
+      {inSpam ? (
+        <button type="button" onClick={actions.onNotSpam} aria-label="Not spam — move to inbox" className={BUTTON}>
+          <Undo2 {...ICON} />
+          <span className={LABEL}>Not spam</span>
+        </button>
+      ) : (
+        <button type="button" onClick={actions.onArchive} aria-label={archiveLabel} className={BUTTON}>
+          {mailbox === "inbox" ? <Archive {...ICON} /> : <RotateCcw {...ICON} />}
+          <span className={LABEL}>{archiveShort}</span>
+        </button>
+      )}
+      <button type="button" onClick={actions.onTrash} aria-label={trashLabel} className={BUTTON}>
+        <Trash2 {...ICON} />
+        <span className={LABEL}>{trashShort}</span>
+      </button>
+      <MoreMenu
+        view={view}
+        onViewChange={onViewChange}
+        hasHtml={hasHtml}
+        senderName={senderName}
+        onBlockSender={actions.onBlockSender}
+        buttonClass={BUTTON}
+        phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead }}
+        buttonContent={
+          <>
+            <MoreHorizontal {...ICON} />
+            <span className={LABEL}>More</span>
+          </>
+        }
+      />
     </div>
   );
 }
@@ -371,6 +498,11 @@ type Props = {
   bodyPending: boolean;
   /** Ask for the HTML body of the open message. */
   onLoadBody: () => void;
+  /**
+   * The phone layout: the actions and the way back move to a bar at the bottom edge, and
+   * the header keeps only who and when.
+   */
+  phone?: boolean;
 };
 
 export function Reader({
@@ -387,6 +519,7 @@ export function Reader({
   scrollStep,
   bodyPending,
   onLoadBody,
+  phone = false,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -450,6 +583,7 @@ export function Reader({
     <div data-reader="" className="flex min-h-0 flex-1 flex-col">
       {/* Mobile-only back bar. On a wide screen the reader is a pane beside the
           list, so closing it would be redundant. */}
+      {!phone && (
       <div className="flex items-center gap-1 px-3 py-2 lg:hidden">
         <button
           type="button"
@@ -461,6 +595,7 @@ export function Reader({
         </button>
         <span className="text-ui font-semibold text-ink-muted">Message</span>
       </div>
+      )}
 
       {/*
         The header.
@@ -469,7 +604,7 @@ export function Reader({
         layout does not otherwise have, so the separation is the padding below and the
         change in type size.
       */}
-      <div className="flex items-start gap-3 px-5 pb-4 pt-4">
+      <div className={`flex items-start gap-3 px-5 pb-4 ${phone ? "pt-[max(1rem,env(safe-area-inset-top))]" : "pt-4"}`}>
         <span
           aria-hidden="true"
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold"
@@ -495,7 +630,7 @@ export function Reader({
                 {displayAddress(email)}
               </p>
             </div>
-            <Toolbar
+            {!phone && <Toolbar
               starred={email.starred}
               unread={email.unread}
               mailbox={mailbox}
@@ -504,7 +639,7 @@ export function Reader({
               onViewChange={setView}
               hasHtml={Boolean(email.bodyHtml)}
               senderName={displayName(email)}
-            />
+            />}
           </div>
 
           <p className="mt-1 text-[12.5px] text-ink-subtle">
@@ -756,6 +891,20 @@ export function Reader({
 
         </article>
       </div>
+
+      {phone && (
+        <ReaderDock
+          starred={email.starred}
+          unread={email.unread}
+          mailbox={mailbox}
+          actions={actions}
+          view={view}
+          onViewChange={setView}
+          hasHtml={Boolean(email.bodyHtml)}
+          senderName={displayName(email)}
+          onClose={onClose}
+        />
+      )}
     </div>
   );
 }

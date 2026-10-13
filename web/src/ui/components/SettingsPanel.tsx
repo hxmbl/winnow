@@ -608,6 +608,12 @@ export type ComposerProps = {
   onDiscard: () => void;
   /** Close from Escape, the X, or the backdrop. May confirm. */
   onClose: () => void;
+  /**
+   * The phone layout: the composer takes the whole screen above the on-screen keyboard
+   * (`--wn-keyboard`, see `useKeyboardInset`), and Send and Discard sit in a bar at its
+   * bottom edge — which, with the keyboard up, is directly above it.
+   */
+  phone?: boolean;
 };
 
 export function Composer({
@@ -622,6 +628,7 @@ export function Composer({
   onSend,
   onDiscard,
   onClose,
+  phone = false,
 }: ComposerProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLInputElement>(null);
@@ -657,6 +664,20 @@ export function Composer({
   }, [mode]);
 
   const title = mode === "reply" ? "Reply" : "Forward";
+  /*
+    What will actually happen to the quoted text: it is *dropped* when you leave it alone
+    and kept when you edit it, so both sentences say what the recipient will see.
+  */
+  const hint =
+    mode === "reply"
+      ? "Winnow adds your text above the quote, and drops the quote if you leave it untouched."
+      : "The whole conversation is quoted below, without the reply markers.";
+  const sendTitle =
+    to.length === 0
+      ? "Add at least one recipient"
+      : !canSend
+        ? "Fix the recipient that is not an email address"
+        : "Send (⌘ or Ctrl + ⏎)";
 
   return (
     <Sheet
@@ -668,11 +689,16 @@ export function Composer({
       // close button still work, and both go through `onClose`, which *may* confirm.
       dismissOnBackdrop={false}
       initialFocus={mode === "forward" ? toRef : bodyRef}
-      className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+      placement={phone ? "fill" : "center"}
+      className={
+        phone
+          ? "flex h-[calc(100dvh-var(--wn-keyboard,0px))] w-full flex-col overflow-hidden bg-chrome"
+          : "flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+      }
     >
-      <SheetHeader title={title} onClose={onClose} />
+      <SheetHeader title={title} onClose={onClose} touch={phone} />
       <div
-        className="thin-scroll min-h-0 flex-1 overflow-y-auto"
+        className={`thin-scroll min-h-0 flex-1 overflow-y-auto ${phone ? "flex flex-col" : ""}`}
         onKeyDown={(event) => {
           /*
             Send from the keyboard.
@@ -691,7 +717,7 @@ export function Composer({
           }
         }}
       >
-      <div className="flex flex-col gap-3 px-5 py-4">
+      <div className={phone ? "flex flex-1 flex-col gap-3 px-4 py-3" : "flex flex-col gap-3 px-5 py-4"}>
         {/*
           Recipients.
 
@@ -716,7 +742,7 @@ export function Composer({
             aria-label="Subject"
             value={subject}
             onChange={(event) => onChange({ subject: event.target.value })}
-            className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus-visible:border-[var(--wn-inkBody)]"
+            className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus-visible:border-[var(--wn-inkBody)] max-sm:min-h-10 max-sm:text-[16px]"
           />
         </div>
 
@@ -725,9 +751,12 @@ export function Composer({
           aria-label="Message"
           value={body}
           onChange={(event) => onChange({ body: event.target.value })}
-          rows={16}
+          rows={phone ? 8 : 16}
           spellCheck
-          className="selectable thin-scroll w-full resize-y rounded-md border border-hairline bg-surface p-3 text-[13.5px] leading-[1.7] text-ink-body outline-none focus-visible:border-[var(--wn-inkBody)]"
+          className={`selectable thin-scroll w-full rounded-md border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-none focus-visible:border-[var(--wn-inkBody)] ${
+            // 16px on a phone: iOS zooms into any focused field smaller than that.
+            phone ? "min-h-[10rem] flex-1 resize-none text-[16px]" : "resize-y text-[13.5px]"
+          }`}
         />
 
         {error && (
@@ -736,6 +765,7 @@ export function Composer({
           </p>
         )}
 
+        {!phone && (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -746,13 +776,7 @@ export function Composer({
             // small puzzle, and the person who cannot work out why has to guess which of
             // their recipients is wrong.
             disabled={!canSend}
-            title={
-              to.length === 0
-                ? "Add at least one recipient"
-                : !canSend
-                  ? "Fix the recipient that is not an email address"
-                  : "Send (⌘ or Ctrl + ⏎)"
-            }
+            title={sendTitle}
             className="inline-flex items-center gap-2 rounded-full bg-[var(--wn-inkBody)] px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {sending ? "Sending…" : "Send"}
@@ -772,19 +796,41 @@ export function Composer({
           >
             Discard
           </button>
-          {/*
-            What will actually happen to the quoted text: it is *dropped* when you leave
-            it alone and kept when you edit it, so both sentences say what the recipient
-            will see.
-          */}
           <span className="ml-auto max-w-[19rem] text-right text-[11.5px] leading-snug text-ink-subtle">
-            {mode === "reply"
-              ? "Winnow adds your text above the quote, and drops the quote if you leave it untouched."
-              : "The whole conversation is quoted below, without the reply markers."}
+            {hint}
           </span>
         </div>
+        )}
+        {phone && (
+          <p className="text-[12px] leading-snug text-ink-subtle">{hint}</p>
+        )}
       </div>
       </div>
+      {/*
+        The phone's action bar: outside the scroller, so it stays put at the bottom of the
+        sheet — directly above the keyboard when it is up. Discard on the left and Send
+        under the right thumb, both 44px tall.
+      */}
+      {phone && (
+        <div className="flex shrink-0 items-center gap-2 bg-canvas px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
+          <button
+            type="button"
+            onClick={onDiscard}
+            className="h-11 rounded-full bg-sheen px-5 text-[14px] font-semibold text-ink-body transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={!canSend}
+            title={sendTitle}
+            className="h-11 flex-1 rounded-full bg-[var(--wn-inkBody)] px-5 text-[14px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            {sending ? "Sending…" : "Send"}
+          </button>
+        </div>
+      )}
     </Sheet>
   );
 }
