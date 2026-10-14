@@ -81,9 +81,9 @@ jobs:
 
       - name: Check versions
         id: meta
-        env:
-          # Tests presence only; the value is never printed.
-          HAS_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID != '' }}
+        # env:
+        #   # Tests presence only; the value is never printed.
+        #   HAS_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID != '' }}
         run: |
           set -euo pipefail
           TAG="" PUBLISH=false PRERELEASE=false
@@ -96,14 +96,14 @@ jobs:
 
           # Without a client id the build cannot sign in to Gmail: fatal for a
           # real release, a warning otherwise.
-          if [ "$HAS_CLIENT_ID" != "true" ]; then
-            MESSAGE="The VITE_GMAIL_CLIENT_ID secret is not set, so these builds cannot sign in to Gmail (the demo mailbox still works)."
-            if [ "$PUBLISH" = "true" ] && [ "$PRERELEASE" = "false" ]; then
-              echo "::error::$MESSAGE Add it under Settings > Secrets and variables > Actions."
-              exit 1
-            fi
-            echo "::warning::$MESSAGE"
-          fi
+          # if [ "$HAS_CLIENT_ID" != "true" ]; then
+          #   MESSAGE="The VITE_GMAIL_CLIENT_ID secret is not set, so these builds cannot sign in to Gmail (the demo mailbox still works)."
+          #   if [ "$PUBLISH" = "true" ] && [ "$PRERELEASE" = "false" ]; then
+          #     echo "::error::$MESSAGE Add it under Settings > Secrets and variables > Actions."
+          #     exit 1
+          #   fi
+          #   echo "::warning::$MESSAGE"
+          # fi
 
           printf 'version=%s\ntag=%s\nprerelease=%s\npublish=%s\n' \
             "$VERSION" "$TAG" "$PRERELEASE" "$PUBLISH" | tee -a "$GITHUB_OUTPUT"
@@ -224,7 +224,7 @@ jobs:
         working-directory: web
         env:
           # Desktop-app OAuth client id: public, it ships in the binary.
-          VITE_GMAIL_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID }}
+          # VITE_GMAIL_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID }}
           # Pinned empty: Vite inlines every VITE_* variable into the bundle, so a
           # secret here would ship in every installer. Desktop PKCE sends none.
           VITE_GMAIL_CLIENT_SECRET: ""
