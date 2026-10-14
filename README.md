@@ -14,10 +14,9 @@ It runs in a browser and as a desktop app. Same program either way.
 
 - **Gmail and nothing else.** No IMAP, no Outlook, no Fastmail, no self-hosted
   server. It's the Gmail REST API and its labels all the way down.
-- **No release.** No `brew install`, no `.dmg` page, no npm package, no
-  installer. CI builds a bundle so I know the Rust compiles, then throws it away.
-  There's a `# TODO: Add releases` at the bottom of `.github/workflows/ci.yml`.
-  Clone it.
+- **No signed installers.** There are [downloads](#download), but nothing is
+  code-signed or notarised, so macOS and Windows both warn you the first time.
+  No `brew install`, no app store, no npm package, no auto-update.
 - **One account.** Not multi-account. Not "coming soon".
 - **The classifier is wrong sometimes.** It's a pile of rules ported from an old
   Swift app of mine, and some of them look like bugs because they are. I left
@@ -27,6 +26,37 @@ It runs in a browser and as a desktop app. Same program either way.
   checkout. Don't go looking for it here.
 - **No sign-in wall.** The demo mailbox is seeded on boot and is the default, not
   a fallback. "Connect Gmail" is a button, not a gate.
+
+## Download
+
+Every release is on the [Releases page](https://github.com/hxmbl/winnow/releases).
+Take the newest one that isn't marked *Pre-release* unless you want the beta.
+
+| Platform | File |
+| --- | --- |
+| Linux | `Winnow_<version>_amd64.AppImage` (any distro: `chmod +x`, run it) or `Winnow_<version>_amd64.deb` (`sudo apt install ./Winnow_…deb`) |
+| macOS | `Winnow_<version>_universal.dmg`, Apple silicon and Intel, macOS 10.15+ |
+| Windows | `Winnow_<version>_x64_en-US.msi` or `Winnow_<version>_x64-setup.exe`, when that release has them — the Windows build is best-effort |
+
+**None of it is signed**, which costs money I haven't spent yet. So:
+
+- **macOS** says Winnow "can't be opened because Apple cannot check it for
+  malicious software" (or, on newer versions, that it's damaged). Drag it to
+  Applications, then **right-click → Open** and confirm, once. If that's not
+  offered (macOS 15 moved it to **System Settings → Privacy & Security → Open
+  Anyway**), or you'd rather use a terminal:
+
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/Winnow.app
+  ```
+
+- **Windows** SmartScreen says "Windows protected your PC". Click **More info**,
+  then **Run anyway**.
+- **Linux** doesn't care. The AppImage needs FUSE 2 (`libfuse2`) on some
+  distros; the `.deb` doesn't.
+
+Signing in to Gmail from a download shows Google's "Google hasn't verified this
+app" screen until the app has been through Google's verification.
 
 ## Layout
 
@@ -120,6 +150,26 @@ Two things that bit me:
   mode otherwise is a sign-in that hangs for five minutes and then blames your
   network.
 
+### Cutting a release
+
+```sh
+# the same plain version in web/package.json, native/src-tauri/tauri.conf.json
+# and native/src-tauri/Cargo.toml (then `cargo check` to update Cargo.lock)
+cd web && node scripts/check-version.mjs     # prints it, or lists the disagreements
+git tag v0.2.0 && git push origin v0.2.0      # or v0.2.0-beta.1 for a pre-release
+```
+
+`.github/workflows/release.yml` runs the secret scan, checks the tag against the
+manifests, builds Linux, macOS (universal) and Windows, and attaches the bundles
+to a **draft** release for you to publish. A suffix (`-beta.1`) marks it a
+pre-release; the manifests stay plain `MAJOR.MINOR.PATCH`, because the Windows
+`.msi` refuses anything else. Windows may fail without holding up the other two.
+
+The build reads one repository secret, `VITE_GMAIL_CLIENT_ID` — the **Desktop
+app** client id — and pins `VITE_GMAIL_CLIENT_SECRET` empty: Vite inlines every
+`VITE_*` variable into the bundle, so a secret there would ship in every
+installer. It also fails if the bundle contains a `GOCSPX-` secret.
+
 ## The render proxy
 
 `proxy/` fetches a message's images and hands back a self-contained document, so
@@ -209,6 +259,13 @@ being true, and whoever does that will have to redraw it.
 
 If this ever grows a `platform/` interface with three implementations, something
 went wrong.
+
+## Privacy
+
+Your mail goes between
+your computer and Google and nowhere else, there are no analytics, no ads and no
+AI training, and you can cut Winnow off at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ## License
 

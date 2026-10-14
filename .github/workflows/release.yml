@@ -1,0 +1,263 @@
+name: Release
+
+# A `v<MAJOR.MINOR.PATCH>[-suffix]` tag builds every platform and attaches the
+# bundles to a draft GitHub Release; a suffix marks it a pre-release. A manual run
+# builds the same bundles as workflow artifacts and leaves Releases alone.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a release half-way through uploading its assets.
+  cancel-in-progress: false
+
+jobs:
+  # Same scan as CI: nothing is built from a tree that fails it.
+  minesweep:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install minesweep
+        run: |
+          set -euo pipefail
+          TAG="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/hxmbl/minesweep/releases/latest)"
+          TAG="${TAG##*/}"
+          VERSION="${TAG#v}"
+          case "$(uname -m)" in
+            x86_64) ARCH=x86_64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+            *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+          esac
+          FILE="minesweep_${VERSION}_$(uname -s)_${ARCH}.tar.gz"
+          BASE="https://github.com/hxmbl/minesweep/releases/download/${TAG}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$BASE/$FILE"
+          curl -fsSLO "$BASE/checksums.txt"
+          grep " ${FILE}\$" checksums.txt | sha256sum -c -
+          tar -xzf "$FILE" minesweep
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 minesweep "$RUNNER_TEMP/bin/minesweep"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          echo "Installed minesweep ${TAG}"
+
+      - name: Scan for secrets
+        # --config: an auto-discovered .minesweep.yml has its fail-on/policy keys ignored.
+        # Exit 1 = findings >= high, exit 2 = incomplete scan; both fail the job.
+        run: minesweep --config .minesweep.yml --fail-on high --annotations --no-pager .
+
+  # Creates the draft once, so the platform jobs don't race to create it.
+  prepare:
+    name: Prepare release
+    needs: minesweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Check versions
+        id: meta
+        # env:
+        #   # Tests presence only; the value is never printed.
+        #   HAS_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID != '' }}
+        run: |
+          set -euo pipefail
+          TAG="" PUBLISH=false PRERELEASE=false
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME" PUBLISH=true
+            case "$TAG" in *-*) PRERELEASE=true ;; esac
+          fi
+          # Fails when the manifests disagree with each other or with the tag.
+          VERSION="$(node web/scripts/check-version.mjs "$TAG")"
+
+          # Without a client id the build cannot sign in to Gmail: fatal for a
+          # real release, a warning otherwise.
+          # if [ "$HAS_CLIENT_ID" != "true" ]; then
+          #   MESSAGE="The VITE_GMAIL_CLIENT_ID secret is not set, so these builds cannot sign in to Gmail (the demo mailbox still works)."
+          #   if [ "$PUBLISH" = "true" ] && [ "$PRERELEASE" = "false" ]; then
+          #     echo "::error::$MESSAGE Add it under Settings > Secrets and variables > Actions."
+          #     exit 1
+          #   fi
+          #   echo "::warning::$MESSAGE"
+          # fi
+
+          printf 'version=%s\ntag=%s\nprerelease=%s\npublish=%s\n' \
+            "$VERSION" "$TAG" "$PRERELEASE" "$PUBLISH" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # A re-run reuses the draft it made the first time.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing it."
+            exit 0
+          fi
+
+          cat > "$RUNNER_TEMP/notes.md" <<'EOF'
+          ## Downloads
+
+          | Platform | File |
+          | --- | --- |
+          | Linux | `.AppImage` (any distro) or `.deb` (Debian, Ubuntu) |
+          | macOS | `.dmg`, universal (Apple silicon and Intel) |
+          | Windows | `.msi` or `-setup.exe`, when the Windows build succeeded |
+
+          These builds are **not code-signed**. On macOS, right-click the app and choose
+          **Open** the first time, or run `xattr -dr com.apple.quarantine /Applications/Winnow.app`.
+          On Windows, SmartScreen may say it protected your PC: choose **More info**, then
+          **Run anyway**. See the README for details.
+
+          EOF
+
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --prerelease="$PRERELEASE" --title "Winnow $TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    # Windows is best-effort: its failure doesn't stop the other uploads.
+    continue-on-error: ${{ matrix.slug == 'windows' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04, not latest: an AppImage only runs on a glibc at least as new
+          # as the one it was built against.
+          - name: Linux
+            slug: linux
+            os: ubuntu-22.04
+          - name: macOS
+            slug: macos
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            build-args: --target universal-apple-darwin
+          - name: Windows
+            slug: windows
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+          key: release-${{ matrix.slug }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
+
+      - name: Install create-dmg
+        if: runner.os == 'macOS'
+        # bundle.mjs refuses to bundle a .dmg without it.
+        run: brew install create-dmg
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install Tauri CLI
+        run: cargo binstall tauri-cli --version "^2" --no-confirm
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build bundles
+        working-directory: web
+        env:
+          # Desktop-app OAuth client id: public, it ships in the binary.
+          # VITE_GMAIL_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID }}
+          # Pinned empty: Vite inlines every VITE_* variable into the bundle, so a
+          # secret here would ship in every installer. Desktop PKCE sends none.
+          VITE_GMAIL_CLIENT_SECRET: ""
+          VITE_GMAIL_REDIRECT_URI: ""
+        run: npm run tauri:build -- ${{ matrix.build-args }}
+
+      - name: Check no client secret shipped
+        # Google client secrets start GOCSPX-.
+        run: |
+          if grep -rIl 'GOCSPX-' web/dist; then
+            echo "::error::The web bundle contains what looks like a Google client secret."
+            exit 1
+          fi
+
+      - name: Collect bundles
+        run: |
+          mkdir -p "$RUNNER_TEMP/bundles"
+          find native/src-tauri/target -type f -path '*/release/bundle/*' \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' \
+               -o -name '*.msi' -o -name '*-setup.exe' \) \
+            -exec cp {} "$RUNNER_TEMP/bundles/" \;
+          ls -la "$RUNNER_TEMP/bundles"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winnow-${{ needs.prepare.outputs.version }}-${{ matrix.slug }}
+          path: ${{ runner.temp }}/bundles
+          if-no-files-found: error
+
+      - name: Attach to draft release
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/bundles/* --clobber --repo "$GITHUB_REPOSITORY"

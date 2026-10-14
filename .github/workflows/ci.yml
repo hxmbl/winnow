@@ -78,6 +78,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check versions
+        run: node scripts/check-version.mjs
+
       - name: Type check
         run: npm run typecheck
 
@@ -262,6 +265,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Proves the bundle builds; release.yml ships it on a `v*` tag.
       - name: Production build
         run: npm run tauri:build
-        # TODO: Add releases and platform-specific builds

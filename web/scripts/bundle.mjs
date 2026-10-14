@@ -141,6 +141,14 @@ if (platform === "darwin" && bundles.includes("dmg")) {
   }
 }
 
+/** Where Cargo writes the bundles: `--target` adds `<triple>/`, `--debug` swaps the profile. */
+function bundleDir(flags) {
+  const at = flags.indexOf("--target");
+  const triple = at >= 0 ? flags.slice(at + 1, at + 2) : [];
+  const profile = flags.includes("--debug") ? "debug" : "release";
+  return resolve(native, "src-tauri", "target", ...triple, profile, "bundle");
+}
+
 /** Whether `command` is on the PATH. */
 function has(command) {
   const probe = spawnSync(process.platform === "win32" ? "where" : "which", [command]);
@@ -178,7 +186,7 @@ child.on("exit", (code, signal) => {
   // The check this script exists for. Asserting success by looking for the output
   // rather than by trusting the exit code: "the tool said it succeeded" and "a
   // release exists where it should" are different facts.
-  const out = resolve(native, "src-tauri", "target", "release", "bundle");
+  const out = bundleDir(flags);
   if (!existsSync(out)) {
     console.error(
       `\nBuild reported success but produced no bundle at ${out}.\n` +
