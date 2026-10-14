@@ -25,7 +25,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { localCache } from "./session";
+import { cursorOf, localCache, requestPersistentStorage } from "./session";
 import { DEMO_EMAILS } from "../data/demo";
 import type { Email } from "../model/email";
 
@@ -189,5 +189,60 @@ describe("scale: cache semantics", () => {
     await cache.flush();
 
     expect((await cache.all()).length).toBe(40);
+  });
+});
+describe("metadata-first cache semantics", () => {
+  it("never lets a metadata-only copy overwrite a body the cache already holds", async () => {
+    install(fakeStorage());
+    const cache = localCache("keep-body");
+    const [loaded] = synth(1);
+    await cache.upsert([loaded]);
+    await cache.upsert([{ ...loaded, body: "snippet only", bodyHtml: undefined, bodyLoaded: false, starred: true }]);
+    const [row] = await cache.all();
+    expect(row.body).toBe(loaded.body);
+    expect(row.bodyHtml).toBe(loaded.bodyHtml);
+    expect(row.bodyLoaded).toBe(true);
+    // The label change still lands.
+    expect(row.starred).toBe(true);
+  });
+
+  it("cursorOf clears the cursor, not the messages", async () => {
+    install(fakeStorage());
+    const cache = localCache("cursor-split");
+    await cache.upsert(synth(3));
+    await cache.write("H9");
+    await cursorOf(cache).clear();
+    expect(await cache.read()).toBeNull();
+    expect(await cache.all()).toHaveLength(3);
+  });
+});
+
+describe("requestPersistentStorage", () => {
+  it("asks navigator.storage.persist when it exists", async () => {
+    let asked = 0;
+    const granted = await requestPersistentStorage({
+      storage: {
+        persist: async () => {
+          asked += 1;
+          return true;
+        },
+      },
+    });
+    expect(asked).toBe(1);
+    expect(granted).toBe(true);
+  });
+
+  it("answers false, without throwing, when the API is missing or refuses", async () => {
+    expect(await requestPersistentStorage({})).toBe(false);
+    expect(await requestPersistentStorage(undefined)).toBe(false);
+    expect(
+      await requestPersistentStorage({
+        storage: {
+          persist: async () => {
+            throw new Error("denied");
+          },
+        },
+      }),
+    ).toBe(false);
   });
 });

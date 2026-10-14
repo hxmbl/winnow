@@ -51,8 +51,8 @@ import {
 } from "../contacts/google";
 import { buildMime } from "../gmail/mime";
 import { base64UrlDecode } from "../gmail/dto";
-import type { Email, GmailId, Mailbox } from "../model/email";
-import { mailboxFor } from "../gmail/mapper";
+import { keepLoadedBody, withLoadedBody, type Email, type GmailId, type Mailbox } from "../model/email";
+import { loadedBodyOf, mailboxFor } from "../gmail/mapper";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
 
@@ -129,7 +129,9 @@ function quote(value: string): string {
  * the offline cache is survivable; being told you have it and not having it is not,
  * so `flush()` reports the failure and the sync engine surfaces it.
  */
-export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorStore & { flush(): Promise<void> } {
+export function localCache(
+  key = "winnow.gmail.cache",
+): MailboxCache & CursorStore & { flush(): Promise<void>; cursorClear(): Promise<void> } {
   /**
    * The mirror, keyed by Gmail id.
    *
@@ -204,7 +206,10 @@ export function localCache(key = "winnow.gmail.cache"): MailboxCache & CursorSto
     },
     async upsert(emails) {
       const rows = readAll();
-      for (const email of emails) rows.set(email.gmailId, email);
+      // A metadata-only copy never overwrites a body already held: Gmail does not
+      // change a message's content, and the reader may have loaded this one while the
+      // sync that is now writing its metadata was still running.
+      for (const email of emails) rows.set(email.gmailId, keepLoadedBody(email, rows.get(email.gmailId)));
       scheduleFlush();
     },
     async remove(gmailIds) {
@@ -321,6 +326,49 @@ function describeOAuthError(error: string, purpose?: "contacts"): string {
   return describeAuthError(error);
 }
 
+/**
+ * The cursor half of a combined cache.
+ *
+ * `localCache` is both a `MailboxCache` and a `CursorStore`, and the two interfaces
+ * both have a `clear` — the intersection keeps the *cache's* (wipe the messages), and
+ * the cursor's lives on as `cursorClear`. Handing the combined object to the engine as
+ * its cursor meant every full sync began by wiping the message cache: a rebuild threw
+ * away the copies "failed" is supposed to keep, the bodies metadata-first sync keeps,
+ * and the mailbox on screen while the inbox re-filled. This adapter routes `clear` to
+ * the cursor. A store without `cursorClear` gets an empty cursor written instead, which
+ * `sync()` reads as "no cursor".
+ */
+export function cursorOf(store: CursorStore & { cursorClear?: () => Promise<void> }): CursorStore {
+  return {
+    read: () => store.read(),
+    write: (historyId) => store.write(historyId),
+    clear: async () => {
+      if (typeof store.cursorClear === "function") return store.cursorClear();
+      if (typeof store.write === "function") return store.write("");
+    },
+  };
+}
+
+/**
+ * Ask the browser to keep this origin's storage (`navigator.storage.persist()`).
+ *
+ * `true` when granted. Best-effort and never throws: an engine without the API, or
+ * one that refuses, is the same answer — and either way the write is retried after.
+ * Note that persistence protects storage from eviction; it does not raise the
+ * ~5MB `localStorage` ceiling, which metadata-first sync is what keeps us under.
+ */
+export async function requestPersistentStorage(
+  nav: { storage?: { persist?: () => Promise<boolean> } } | undefined = globalThis.navigator,
+): Promise<boolean> {
+  try {
+    const persist = nav?.storage?.persist;
+    if (!persist) return false;
+    return await persist.call(nav!.storage);
+  } catch {
+    return false;
+  }
+}
+
 /** The session: a token manager, a client, a sync engine, and a backend. */
 export class GmailSession {
   readonly tokens: TokenManager;
@@ -353,7 +401,7 @@ export class GmailSession {
       },
     );
 
-    this.sync = new GmailSyncEngine({ client: this.client, cache, cursor: cache });
+    this.sync = new GmailSyncEngine({ client: this.client, cache, cursor: cursorOf(cache) });
 
     // The same tokens and one-refresh-after-401 rule; its own quota bucket.
     const people = new PeopleClient(() => this.tokens.validAccessToken(), {
@@ -775,6 +823,9 @@ export class GmailSession {
     // tidiness: it is the difference between "signed out" and "signed out, but
     // the next person at this keyboard can read your inbox".
     await this.cache.clear();
+    // And the cursor with it: a cursor left over an empty cache makes the next
+    // sign-in sync incrementally — changes only — into an empty mailbox.
+    await cursorOf(this.cache).clear().catch(() => undefined);
   }
 
   /** A `MailBackend` the store can drive. */
@@ -791,6 +842,7 @@ export class GmailSession {
      * reason.
      */
     const loadCache = (): Promise<Email[]> => cache.all();
+    const platform = this.platform;
 
     /** The gmail id for a numeric id — the API speaks ids, the UI does not. */
     const gmailIdFor = async (id: number): Promise<string> => {
@@ -813,7 +865,10 @@ export class GmailSession {
         // number on the status line is the engine's own count of messages it has
         // actually downloaded — not an estimate, and not a guess at what a
         // percentage would have been.
-        const result = await engine.sync({ onProgress: options?.onProgress });
+        const result = await engine.sync({
+          onProgress: options?.onProgress,
+          onPartial: options?.onPartial,
+        });
         return {
           emails: result.emails,
           failed: result.failed,
@@ -914,6 +969,29 @@ export class GmailSession {
         // HTML body for a recent window precisely so this is rare — see
         // `BODY_RETENTION`.
         return client.messageBodyHtml(gmailId);
+      },
+
+      async loadMessage(gmailId) {
+        // The lazy half of metadata-first sync: one `format=full` request, decoded the
+        // same way a full sync would have, and written into the offline cache so the
+        // message reads offline from now on.
+        const loaded = loadedBodyOf(await client.message(gmailId, "full"));
+        const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
+        if (cached) await cache.upsert([withLoadedBody(cached, loaded)]);
+        return loaded;
+      },
+
+      async persistCache() {
+        // Web: ask for persistent storage first. Desktop: the webview's storage is the
+        // app's own, so there is nothing to ask for — just retry the write.
+        const kind = await platform.info().then((info) => info.kind, () => "web" as const);
+        if (kind === "web") await requestPersistentStorage();
+        try {
+          await cache.flush?.();
+          return true;
+        } catch {
+          return false;
+        }
       },
     };
   }
