@@ -2272,7 +2272,7 @@ try {
   check("on the desktop the open message's row is still marked current", (await openRow.count()) === 1);
   check(
     "and still drawn selected",
-    (await page.locator("[data-row-count] .bg-surface-selected").count()) === 1,
+    (await page.locator("[data-row-count] [data-row-id].bg-surface-selected").count()) === 1,
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
@@ -2680,7 +2680,7 @@ try {
     tapPage.evaluate(() => ({
       reader: document.querySelectorAll("article h1").length,
       current: document.querySelectorAll("[data-row-count] [aria-current]").length,
-      selectedRows: document.querySelectorAll("[data-row-count] .bg-surface-selected").length,
+      selectedRows: document.querySelectorAll("[data-row-count] [data-row-id].bg-surface-selected").length,
       placeholder: document.body.textContent?.includes("Nothing selected") ?? false,
       scrollTop: Math.round(document.querySelector("[data-row-count]")?.scrollTop ?? -1),
       position: document.querySelector("[data-position]")?.textContent?.trim() ?? null,
@@ -2799,6 +2799,308 @@ try {
     (await page.locator('[role="alert"]').count()) === 0 && (await rowTotal()) > 0,
     `${await rowTotal()} rows`,
   );
+
+  // ── Avatars, sender menu, multi-select, context menu, mark-unread, scroll ─
+
+  section("avatars and selection");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const d = await ctx.newPage();
+    const dErrors = [];
+    d.on("pageerror", (error) => dErrors.push(String(error)));
+    d.on("console", (message) => message.type() === "error" && dErrors.push(message.text()));
+    await d.goto(URL, { waitUntil: "networkidle" });
+    await d.waitForSelector("[data-row-count] [data-row-id]");
+    const rows = d.locator("[data-row-count] [data-row-id]");
+    const rowButton = (i) => rows.nth(i).locator("button[data-message-id]");
+    const current = () => d.locator('[data-row-count] button[data-message-id][aria-current="true"]').count();
+    const checkedCount = () => d.locator("[data-row-count] [data-row-id][data-checked]").count();
+
+    check(
+      "every row has an avatar button",
+      (await d.locator("[data-row-count] [data-row-control='avatar']").count()) === (await rows.count()),
+    );
+    check("the demo shows quiet monograms, not photos", (await d.locator("[data-row-count] [data-avatar='monogram']").count()) > 0);
+
+    // Weight is unread and only unread.
+    const weights = await d.evaluate(() => {
+      const out = { read: new Set(), unread: new Set() };
+      for (const row of document.querySelectorAll("[data-row-count] [data-row-id]")) {
+        const button = row.querySelector("button[data-message-id]");
+        const unread = /, unread,/.test(button.getAttribute("aria-label"));
+        for (const sel of ["[data-row-sender]", "[data-row-subject]"]) {
+          out[unread ? "unread" : "read"].add(getComputedStyle(row.querySelector(sel)).fontWeight);
+        }
+      }
+      return { read: [...out.read], unread: [...out.unread] };
+    });
+    check("read rows are regular weight throughout", weights.read.length === 1 && weights.read[0] === "400", JSON.stringify(weights));
+    check("unread rows are bold", weights.unread.every((w) => Number(w) >= 600), JSON.stringify(weights));
+
+    // The sender menu, from the list.
+    const avatar = rows.nth(2).locator("[data-row-control='avatar']");
+    await avatar.click();
+    await d.waitForTimeout(150);
+    check("clicking an avatar opens the sender menu", (await d.locator("[data-menu='sender']").count()) === 1);
+    check("and does not open the message", (await current()) === 0);
+    const senderItems = await d.locator("[data-menu='sender'] [role='menuitem']").allTextContents();
+    check(
+      "the sender menu offers all mail, copy, contacts, mute and block",
+      ["All mail from this sender", "Copy address", "Mute sender", "Block sender"].every((t) => senderItems.includes(t)),
+      senderItems.join(" | "),
+    );
+    check("focus moves into the menu", await d.evaluate(() => document.activeElement?.getAttribute("role") === "menuitem"));
+    await d.keyboard.press("ArrowDown");
+    check(
+      "arrow keys move through it",
+      (await d.evaluate(() => document.activeElement?.getAttribute("data-menu-item"))) === "sender-copy",
+    );
+    await d.keyboard.press("j"); // swallowed by the menu, not routed to the list
+    check("shortcuts do not leak out of an open menu", (await current()) === 0);
+    await d.keyboard.press("Escape");
+    await d.waitForTimeout(100);
+    check("Escape closes it", (await d.locator("[data-menu='sender']").count()) === 0);
+    check(
+      "and focus returns to the avatar",
+      await d.evaluate(() => document.activeElement?.getAttribute("data-row-control") === "avatar"),
+    );
+    await d.keyboard.press("Enter");
+    await d.waitForTimeout(100);
+    check("the avatar opens its menu from the keyboard", (await d.locator("[data-menu='sender']").count()) === 1);
+    await d.keyboard.press("Escape");
+
+    // Unsubscribe only where List-Unsubscribe exists.
+    const unsubscribeFor = async (query) => {
+      await d.locator("input[type='search']").first().fill(query);
+      await d.waitForTimeout(300);
+      await d.locator("[data-row-count] [data-row-control='avatar']").first().click();
+      await d.waitForTimeout(100);
+      const has = (await d.locator("[data-menu='sender'] [data-menu-item='sender-unsubscribe']").count()) === 1;
+      await d.keyboard.press("Escape");
+      await d.locator("input[type='search']").first().fill("");
+      await d.waitForTimeout(200);
+      return has;
+    };
+    check("a newsletter with List-Unsubscribe offers Unsubscribe", await unsubscribeFor("engineering"));
+    check("a person's mail does not", !(await unsubscribeFor("migration")));
+
+    // All mail from this sender.
+    const senderName = (await rows.nth(0).locator("[data-row-sender]").textContent()).trim();
+    await rows.nth(0).locator("[data-row-control='avatar']").click();
+    await d.locator("[data-menu-item='sender-all']").click();
+    await d.waitForTimeout(250);
+    const names = await d.locator("[data-row-count] [data-row-sender]").allTextContents();
+    check("All mail from this sender narrows the list to them", names.length > 0 && names.every((n) => n.trim() === senderName), names.join(" | "));
+    await d.keyboard.press("Escape"); // clear the filter
+    await d.waitForTimeout(200);
+
+    // Drag select.
+    const a = await rows.nth(1).boundingBox();
+    const b = await rows.nth(4).boundingBox();
+    await d.mouse.move(a.x + 300, a.y + a.height / 2);
+    await d.mouse.down();
+    await d.mouse.move(a.x + 300, a.y + a.height / 2 + 12, { steps: 3 });
+    await d.mouse.move(b.x + 300, b.y + b.height / 2, { steps: 8 });
+    await d.mouse.up();
+    await d.waitForTimeout(150);
+    check("a drag selects every row it passes over", (await checkedCount()) === 4, `${await checkedCount()}`);
+    check("without opening any of them", (await current()) === 0);
+    check("the batch bar shows the count", (await d.locator("[data-selection-bar='desktop'] [data-selection-count='4']").count()) === 1);
+    check(
+      "no text is selected by the drag",
+      (await d.evaluate(() => window.getSelection()?.toString() ?? "")) === "",
+    );
+
+    // The context menu acts on the whole selection.
+    const c = await rows.nth(2).boundingBox();
+    await d.mouse.click(c.x + 400, c.y + c.height / 2, { button: "right" });
+    await d.waitForTimeout(150);
+    const multiItems = await d.locator("[data-menu='row'] > [role='menuitem']").evaluateAll((els) => els.map((e) => e.dataset.menuItem));
+    check("right-clicking a selected row opens a menu for the selection", (await d.locator("[data-menu='row']").count()) === 1);
+    check("which hides single-message items", !multiItems.includes("reply") && !multiItems.includes("find-from"), multiItems.join(","));
+    check(
+      "and counts what it acts on",
+      ((await d.locator("[data-menu-item='archive']").textContent()) ?? "").includes("4"),
+    );
+    await d.keyboard.press("Escape");
+    await d.keyboard.press("Escape");
+    await d.waitForTimeout(100);
+    check("Escape clears the selection", (await checkedCount()) === 0 && (await d.locator("[data-selection-bar]").count()) === 0);
+
+    // A plain click still opens.
+    await rowButton(1).click();
+    await d.waitForTimeout(150);
+    check("a simple click still opens the message", (await current()) === 1);
+
+    // Ctrl-click toggles, shift-click ranges.
+    await rowButton(5).click({ modifiers: ["Control"] });
+    await rowButton(8).click({ modifiers: ["Shift"] });
+    await d.waitForTimeout(100);
+    check("ctrl-click toggles and shift-click selects the range", (await checkedCount()) === 4, `${await checkedCount()}`);
+
+    // Batch mark read, then archive.
+    const total = Number(await d.locator("[data-row-count]").getAttribute("data-row-count"));
+    await d.locator("[data-selection-bar='desktop'] button", { hasText: /Mark (read|unread)/ }).click();
+    await d.waitForTimeout(100);
+    await d.locator("[data-selection-bar='desktop'] button", { hasText: "Archive" }).click();
+    await d.waitForTimeout(250);
+    // Each selected row's message is archived, as `e` would; a thread row whose other
+    // messages are still in the inbox stays, now showing the next one, so the count can
+    // drop by fewer than four.
+    const remaining = Number(await d.locator("[data-row-count]").getAttribute("data-row-count"));
+    check(
+      "the batch bar archives the selection and clears it",
+      remaining < total && remaining >= total - 4 && (await checkedCount()) === 0,
+      `${total} → ${remaining}`,
+    );
+
+    // The single-row context menu, by mouse and by keyboard, inside the viewport.
+    const last = await rows.nth(Math.min(12, (await rows.count()) - 1)).boundingBox();
+    await d.mouse.click(860, Math.min(895, last.y + last.height / 2), { button: "right" });
+    await d.waitForTimeout(150);
+    const box = await d.locator("[data-menu='row']").boundingBox();
+    check("the row menu opens on right-click", box !== null);
+    check(
+      "and stays inside the viewport",
+      box && box.x >= 0 && box.y >= 0 && box.x + box.width <= 1440 && box.y + box.height <= 900,
+      JSON.stringify(box),
+    );
+    const singleItems = await d.locator("[data-menu='row'] > [role='menuitem']").evaluateAll((els) => els.map((e) => e.dataset.menuItem));
+    check("a single row's menu has reply, find and open-in-Gmail", ["reply", "reply-all", "forward", "find-from", "open-gmail"].every((i) => singleItems.includes(i)), singleItems.join(","));
+    await d.locator("[data-menu-item='move']").hover();
+    await d.waitForTimeout(100);
+    check("Move to opens its submenu", (await d.locator("[data-menu='row-sub']").count()) === 1);
+    await d.keyboard.press("Escape");
+    await d.keyboard.press("Escape");
+    await rowButton(3).focus();
+    await d.keyboard.press("Shift+F10");
+    await d.waitForTimeout(150);
+    check("Shift+F10 on a focused row opens its menu", (await d.locator("[data-menu='row']").count()) === 1);
+    await d.keyboard.press("ArrowDown");
+    check("arrow keys navigate it", (await d.evaluate(() => document.activeElement?.getAttribute("data-menu-item"))) === "reply-all");
+    await d.keyboard.press("Escape");
+    await d.waitForTimeout(100);
+    check(
+      "Escape closes it and returns focus to the row",
+      (await d.locator("[data-menu='row']").count()) === 0 &&
+        (await d.evaluate(() => document.activeElement?.hasAttribute("data-message-id"))),
+    );
+
+    // Marking the open message unread moves on.
+    const readIndex = await d.evaluate(() => {
+      const buttons = [...document.querySelectorAll("[data-row-count] button[data-message-id]")];
+      return buttons.findIndex((b, i) => i < buttons.length - 1 && !/, unread,/.test(b.getAttribute("aria-label")));
+    });
+    const readId = await rowButton(readIndex).getAttribute("data-message-id");
+    const nextId = await rowButton(readIndex + 1).getAttribute("data-message-id");
+    await rowButton(readIndex).click();
+    await d.waitForTimeout(100);
+    await d.keyboard.press("u");
+    await d.waitForTimeout(200);
+    const openNow = await d.locator('[data-row-count] button[aria-current="true"]').getAttribute("data-message-id");
+    const nowUnread = /, unread,/.test(await d.locator(`[data-row-count] button[data-message-id="${readId}"]`).getAttribute("aria-label"));
+    check("marking the open message unread advances to the next one", openNow === nextId, `${openNow} vs ${nextId}`);
+    check("and it stays unread", nowUnread);
+
+    // Scrolling away from the open message is not undone.
+    await rowButton(1).click();
+    await d.waitForTimeout(100);
+    const scroller = d.locator("[data-row-count]");
+    await d.mouse.move(400, 500);
+    await d.mouse.wheel(0, 2400);
+    await d.waitForTimeout(400);
+    const scrolled = await scroller.evaluate((el) => el.scrollTop);
+    await d.mouse.move(420, 520);
+    await d.mouse.move(400, 300);
+    await d.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await d.waitForTimeout(1500);
+    const after = await scroller.evaluate((el) => el.scrollTop);
+    check("scrolling away from the open message stays put", scrolled > 1000 && Math.abs(after - scrolled) < 4, `${scrolled} → ${after}`);
+    await d.keyboard.press("j");
+    await d.waitForTimeout(300);
+    const revealed = await scroller.evaluate((el) => el.scrollTop);
+    check("but j brings the next row back into view", revealed < scrolled - 500, `${scrolled} → ${revealed}`);
+
+    check("no console errors on the desktop pass", dErrors.length === 0, dErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
+
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const p = await ctx.newPage();
+    const pErrors = [];
+    p.on("pageerror", (error) => pErrors.push(String(error)));
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-row-count] [data-row-id]");
+    const rows = p.locator("[data-row-count] [data-row-id]");
+    const cdp = await ctx.newCDPSession(p);
+    const longPress = async (i) => {
+      const r = await rows.nth(i).boundingBox();
+      const point = { x: r.x + 200, y: r.y + r.height / 2 };
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+      await p.waitForTimeout(650);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await p.waitForTimeout(150);
+    };
+    const tap = async (i) => {
+      const r = await rows.nth(i).boundingBox();
+      await p.touchscreen.tap(r.x + 200, r.y + r.height / 2);
+      await p.waitForTimeout(150);
+    };
+    const count = () => p.locator("[data-row-count] [data-row-id][data-checked]").count();
+
+    check("phone rows have avatars", (await p.locator("[data-row-count] [data-row-control='avatar']").count()) > 0);
+    await longPress(1);
+    check("a long-press enters select mode with that row", (await count()) === 1 && (await p.locator("[data-row-count][data-select-mode]").count()) === 1);
+    check("without opening the message", (await p.locator("[data-reader]").count()) === 0);
+    check("and without selecting text", (await p.evaluate(() => window.getSelection()?.toString() ?? "")) === "");
+    check("the top bar becomes the selection bar", (await p.locator("[data-selection-bar='phone'] [data-selection-count='1']").count()) === 1 && (await p.locator("[data-phone-topbar]").count()) === 0);
+    await tap(3);
+    check("a tap in select mode adds a row", (await count()) === 2);
+    await tap(3);
+    check("and a second tap removes it", (await count()) === 1);
+    await p.locator("[data-selection-bar='phone'] button[aria-label='Clear selection']").tap();
+    await p.waitForTimeout(150);
+    check("Cancel leaves select mode", (await count()) === 0 && (await p.locator("[data-phone-topbar]").count()) === 1);
+    await tap(2);
+    check("outside select mode a tap opens the reader", (await p.locator("[data-reader]").count()) === 1);
+    check("with no single-row selection state", (await p.locator("[data-row-count] [data-row-id].bg-surface-selected").count()) === 0);
+
+    // Mark unread from the phone reader returns to the list.
+    const readIndex = await p.evaluate(() =>
+      [...document.querySelectorAll("[data-row-count] button[data-message-id]")].findIndex(
+        (b) => !/, unread,/.test(b.getAttribute("aria-label")),
+      ),
+    );
+    await p.locator("[data-reader-dock] button[aria-label='Back to the list']").tap();
+    await p.waitForTimeout(150);
+    const readId = await rows.nth(readIndex).getAttribute("data-row-id");
+    await tap(readIndex);
+    await p.locator("[data-reader-dock] button[aria-label='More']").tap();
+    await p.waitForTimeout(100);
+    await p.getByRole("menuitem", { name: "Mark unread" }).tap();
+    await p.waitForTimeout(200);
+    check("marking unread on a phone returns to the list", (await p.locator("[data-reader]").count()) === 0);
+    check(
+      "and the message stays unread",
+      /, unread,/.test(await p.locator(`[data-row-count] button[data-message-id="${readId}"]`).getAttribute("aria-label")),
+    );
+
+    // Scrolling away is not undone on the phone either.
+    const scroller = p.locator("[data-row-count]");
+    await scroller.evaluate((el) => (el.scrollTop = el.scrollHeight));
+    await p.waitForTimeout(300);
+    const phoneScrolled = await scroller.evaluate((el) => el.scrollTop);
+    await p.waitForTimeout(1500);
+    const phoneAfter = await scroller.evaluate((el) => el.scrollTop);
+    check(
+      "the phone list stays where it was scrolled",
+      phoneScrolled > 600 && Math.abs(phoneAfter - phoneScrolled) < 4,
+      `${phoneScrolled} → ${phoneAfter}`,
+    );
+    check("no console errors on the phone pass", pErrors.length === 0, pErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
 
   // ── Console ────────────────────────────────────────────────────────────────
 
