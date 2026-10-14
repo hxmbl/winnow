@@ -1970,6 +1970,148 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
 
+  // ── The rail against the search field ─────────────────────────────────────
+
+  section("rail edges");
+
+  /*
+    The rail is ~3,700px of tabs in a third of that, so at every desktop width one tab
+    meets its end — and with the reader open it was "Unread" at 1440px, sliced mid-word
+    beside the search box, which read as the search field covering it. What is claimed
+    here, across the common widths with and without a message open: the rail stops short
+    of the search field, nothing of it reaches under the field, and wherever it overflows
+    the end is a wide fade with a step button over it, so the tab meeting the edge
+    dissolves rather than being cut.
+  */
+  const RAIL_WIDTHS = [1024, 1280, 1366, 1440, 1536, 1680, 1920];
+  const EDGE_MIN = 48;
+  const railReport = [];
+  for (const width of RAIL_WIDTHS) {
+    for (const reading of [false, true]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(150);
+      if (reading) await openMessage();
+      else if ((await page.locator("article h1").count()) > 0) await page.keyboard.press("Escape");
+      await page.locator("header [data-rail-scroller]").evaluate((element) => (element.scrollLeft = 0));
+      await page.waitForTimeout(150);
+      const shape = await page.evaluate(() => {
+        const scroller = document.querySelector("header [data-rail-scroller]");
+        const search = document.querySelector("#winnow-search")?.closest("label");
+        if (!scroller || !search) return null;
+        const rail = scroller.getBoundingClientRect();
+        const field = search.getBoundingClientRect();
+        const tabs = [...scroller.querySelectorAll("[data-rail-item]")].map((item) => item.getBoundingClientRect());
+        const edge = document.querySelector('header [data-rail-edge="end"]')?.getBoundingClientRect() ?? null;
+        // What actually paints at the search field's left edge, mid-height: it must be
+        // the field (or something inside it), never a tab.
+        const probe = document.elementFromPoint(field.left + 2, field.top + field.height / 2);
+        return {
+          gap: Math.round(field.left - rail.right),
+          underField: tabs.filter((t) => t.right > field.left + 0.5 && t.left < field.right && rail.right > field.left).length,
+          probeIsField: Boolean(probe && search.contains(probe)),
+          overflows: scroller.scrollWidth > scroller.clientWidth + 1,
+          edge: edge && { left: Math.round(edge.left), right: Math.round(edge.right), width: Math.round(edge.width) },
+          railRight: Math.round(rail.right),
+        };
+      });
+      railReport.push({ width, reading, shape });
+    }
+  }
+  const railOk = (predicate) => railReport.every(({ shape }) => shape !== null && predicate(shape));
+  const railDetail = (pick) =>
+    railReport.map(({ width, reading, shape }) => `${width}${reading ? "r" : ""}:${shape ? pick(shape) : "?"}`).join(" ");
+  check(
+    "the rail stops short of the search field at every desktop width, reader open or not",
+    railOk((shape) => shape.gap >= 8),
+    railDetail((shape) => shape.gap),
+  );
+  check(
+    "and no tab reaches under the field",
+    railOk((shape) => shape.underField === 0 && shape.probeIsField),
+    railDetail((shape) => `${shape.underField}/${shape.probeIsField}`),
+  );
+  check(
+    "wherever the rail overflows, its end is a fade with a step button rather than a cut",
+    railOk((shape) => !shape.overflows || (shape.edge !== null && shape.edge.width >= EDGE_MIN && Math.abs(shape.edge.right - shape.railRight) <= 1)),
+    railDetail((shape) => (shape.edge ? shape.edge.width : shape.overflows ? "missing" : "fits")),
+  );
+
+  // Back to the case that was reported: 1440px with a message open.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(150);
+  if ((await page.locator("article h1").count()) === 0) await openMessage();
+  const railScroller = page.locator("header [data-rail-scroller]");
+  await railScroller.evaluate((element) => (element.scrollLeft = 0));
+  await page.waitForTimeout(100);
+
+  /*
+    The keyboard still reaches every tab, and a tab it lands on is never left under the
+    fade. The step buttons are out of the tab order on purpose, so Tab goes straight from
+    tab to tab; this walks past the edge and checks the focused tab is fully in the clear.
+  */
+  await page.locator("header [data-rail-scroller] button[aria-pressed]").first().focus();
+  let clearOfFade = true;
+  let walkedPastEdge = false;
+  const focusTrail = [];
+  for (let i = 0; i < 24; i += 1) {
+    await page.keyboard.press("Tab");
+    const spot = await page.evaluate(() => {
+      const scroller = document.querySelector("header [data-rail-scroller]");
+      const active = document.activeElement;
+      if (!scroller || !active || !scroller.contains(active)) return null;
+      const rail = scroller.getBoundingClientRect();
+      const r = active.getBoundingClientRect();
+      return { fromEnd: Math.round(rail.right - r.right), scrolled: scroller.scrollLeft > 0 };
+    });
+    if (!spot) break;
+    focusTrail.push(spot.fromEnd);
+    if (spot.scrolled) walkedPastEdge = true;
+    if (spot.fromEnd < EDGE_MIN) clearOfFade = false;
+  }
+  check(
+    "Tab walks the rail past its edge, scrolling as it goes",
+    walkedPastEdge,
+    `${focusTrail.length} stops`,
+  );
+  check(
+    "and every focused tab is fully clear of the fade",
+    clearOfFade,
+    focusTrail.join(","),
+  );
+  check(
+    "the step buttons stay out of the tab order",
+    (await page.locator('header [data-rail-edge] button:not([tabindex="-1"])').count()) === 0,
+  );
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+
+  await railScroller.evaluate((element) => (element.scrollLeft = 0));
+  await page.waitForTimeout(150);
+  const beforeStep = await railScroller.evaluate((element) => element.scrollLeft);
+  await page.locator('header button[aria-label="Scroll filters right"]').click();
+  await page.waitForTimeout(700);
+  const afterStep = await railScroller.evaluate((element) => element.scrollLeft);
+  check("the step button moves the rail on", afterStep > beforeStep + 100, `${beforeStep} → ${afterStep}`);
+  check(
+    "and a back button appears once there is something behind",
+    (await page.locator('header button[aria-label="Scroll filters left"]').count()) === 1,
+  );
+  await page.locator('header button[aria-label="Scroll filters left"]').click();
+  await page.waitForTimeout(700);
+  check(
+    "which steps back",
+    (await railScroller.evaluate((element) => element.scrollLeft)) < afterStep,
+  );
+
+  // The desktop keeps its selection exactly as it was: the open row is marked.
+  const openRow = page.locator('[data-row-count] button[data-message-id][aria-current="true"]');
+  check("on the desktop the open message's row is still marked current", (await openRow.count()) === 1);
+  check(
+    "and still drawn selected",
+    (await page.locator("[data-row-count] .bg-surface-selected").count()) === 1,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
   // ── The phone layout ───────────────────────────────────────────────────────
 
   section("mobile");

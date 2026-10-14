@@ -122,7 +122,7 @@ export function Masthead({
         and position go underneath it. The mark stays `sticky` inside the scroller
         either way.
       */}
-      <div className="flex min-h-14 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
+      <div className="flex min-h-14 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-4 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
         {/*
           The rail, with the mark pinned inside it.
 

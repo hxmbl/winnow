@@ -16,9 +16,10 @@
  * corner where it covered the neighbouring pill.
  */
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { filterKey, type BuiltinSmartFilter, type FilterId } from "../../core/model/signals";
-import { digitFor, type PillItem } from "../rail";
+import { digitFor, scrollToReveal, stepRail, type PillItem, type RailGeometry } from "../rail";
 
 export type { PillItem } from "../rail";
 
@@ -45,6 +46,19 @@ type Props = {
   className?: string;
 };
 
+/**
+ * How much of the rail's end the fade and the step button take, on the desktop.
+ *
+ * The rail is far longer than any window (twenty-odd tabs, ~3,700px), so at every width
+ * one tab meets the end of it. With a 24px fade that tab read as *cut off by the search
+ * box* — a word sliced mid-letter beside an unrelated control. The wider fade dissolves
+ * it instead, and the step button sitting on the solid part says "there is more" in the
+ * one way a mouse can act on: a mouse wheel scrolls vertically, the rail does not.
+ */
+const EDGE = 56;
+/** The step button's own width, which is the solid part of `EDGE`. */
+const STEP = 28;
+
 export const FilterStrip = memo(function FilterStrip({
   pills,
   activeFilters,
@@ -62,9 +76,13 @@ export const FilterStrip = memo(function FilterStrip({
   const activeKeys = new Set(activeFilters.map(filterKey));
   const scrollerRef = useRef<HTMLDivElement>(null);
 
+  const leadingRef = useRef<HTMLDivElement>(null);
+
   // The edge fade is only drawn when there is actually more to scroll to, so a short
   // rail does not get a mysterious gradient over its last pill.
   const [overflow, setOverflow] = useState({ start: false, end: false });
+  // Where the start control sits: just after the pinned mark, which it must not cover.
+  const [leadingWidth, setLeadingWidth] = useState(0);
 
   useEffect(() => {
     const element = scrollerRef.current;
@@ -78,6 +96,7 @@ export const FilterStrip = memo(function FilterStrip({
         // scroller report `scrollWidth > clientWidth` forever.
         end: scrollLeft + clientWidth < scrollWidth - 1,
       });
+      setLeadingWidth(leadingRef.current?.offsetWidth ?? 0);
     };
 
     update();
@@ -92,10 +111,76 @@ export const FilterStrip = memo(function FilterStrip({
     };
   }, [pills.length]);
 
+  /** The rail as numbers, for the pure helpers in `rail.ts`. */
+  const geometry = useCallback((): RailGeometry | null => {
+    const element = scrollerRef.current;
+    if (!element) return null;
+    const tabs = [...element.querySelectorAll<HTMLElement>("[data-rail-item]")].map(
+      (item) => [item.offsetLeft, item.offsetLeft + item.offsetWidth] as const,
+    );
+    const lead = leadingRef.current?.offsetWidth ?? 0;
+    return {
+      tabs,
+      scrollLeft: element.scrollLeft,
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      // On touch the fades are a hint over a swipe, not controls, so they are narrow and
+      // nothing needs to be kept out from under them beyond the mark.
+      startInset: lead + (touch ? 0 : STEP + 4),
+      endInset: touch ? 24 : EDGE,
+    };
+  }, [touch]);
+
+  /**
+   * Keep a focused tab clear of the fades and the step buttons.
+   *
+   * The browser scrolls a focused element into view on its own, but only just: at the end
+   * of the rail that leaves it under the fade, legible to nobody. This runs after that
+   * and finishes the job.
+   */
+  const onFocus = useCallback(
+    (event: React.FocusEvent<HTMLDivElement>) => {
+      const item = (event.target as HTMLElement).closest<HTMLElement>("[data-rail-item]");
+      const element = scrollerRef.current;
+      const shape = geometry();
+      if (!item || !element || !shape) return;
+      const next = scrollToReveal(shape, [item.offsetLeft, item.offsetLeft + item.offsetWidth]);
+      if (next !== null) element.scrollLeft = next;
+    },
+    [geometry],
+  );
+
+  const step = useCallback(
+    (direction: 1 | -1) => {
+      const element = scrollerRef.current;
+      const shape = geometry();
+      if (!element || !shape) return;
+      const reduce = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      element.scrollTo({ left: stepRail(shape, direction), behavior: reduce ? "auto" : "smooth" });
+    },
+    [geometry],
+  );
+
+  /**
+   * A mouse wheel moves the rail sideways.
+   *
+   * Nothing else in the masthead scrolls, so a vertical wheel over the rail has no other
+   * meaning — and without this a mouse with no tilt wheel could only reach the tabs past
+   * the edge through the step buttons.
+   */
+  const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const element = scrollerRef.current;
+    if (!element || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    element.scrollLeft += event.deltaY;
+  }, []);
+
   return (
     <div className={`relative min-w-0 ${className}`}>
       <div
         ref={scrollerRef}
+        data-rail-scroller=""
+        onFocus={onFocus}
+        onWheel={touch ? undefined : onWheel}
         className={`no-scrollbar flex items-center overflow-x-auto ${touch ? "gap-1 pr-1.5" : "gap-0.5"}`}
       >
         {/*
@@ -104,7 +189,7 @@ export const FilterStrip = memo(function FilterStrip({
           `-left-3` so it covers the page padding too, with no seam at the window edge.
         */}
         {leading !== undefined && (
-          <div className="sticky left-0 z-10 flex shrink-0 items-center pr-2">
+          <div ref={leadingRef} className="sticky left-0 z-10 flex shrink-0 items-center pr-2">
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-y-0 -left-3 right-0 bg-gradient-to-r from-canvas via-canvas to-transparent"
@@ -116,6 +201,7 @@ export const FilterStrip = memo(function FilterStrip({
         {hasActive && (
           <button
             type="button"
+            data-rail-item=""
             onClick={onClear}
             className={`${touch ? "h-11 px-3.5" : "h-7 px-2.5"} shrink-0 rounded-ctl text-ui font-semibold text-ink-body transition-colors duration-150 hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
@@ -135,6 +221,7 @@ export const FilterStrip = memo(function FilterStrip({
         return (
           <div
             key={key}
+            data-rail-item=""
             className={`group/pill relative flex shrink-0 items-center rounded-ctl transition-colors duration-150 ${
               isMuted ? "" : "hover:bg-sheen"
             }`}
@@ -224,18 +311,77 @@ export const FilterStrip = memo(function FilterStrip({
 
       {/* Fades, drawn over the scroll container. `pointer-events-none` because a
           gradient that eats clicks at the edge would make the last pill unclickable,
-          which is the single worst possible bug in a filter rail. */}
-      {overflow.start && (
+          which is the single worst possible bug in a filter rail. On the phone dock that
+          is all there is: the rail is swiped. */}
+      {touch && overflow.start && (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-canvas to-transparent"
         />
       )}
-      {overflow.end && (
+      {touch && overflow.end && (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-canvas to-transparent"
         />
+      )}
+
+      {/*
+        On the desktop each end that has more past it gets a wide fade and, on its solid
+        part, a step button. The fade is still `pointer-events-none`; only the button
+        takes clicks, and what it covers is by definition not legible enough to click.
+
+        The buttons are out of the tab order (`tabIndex={-1}`): a keyboard reaches every
+        tab directly, and `onFocus` above scrolls each one clear as it arrives, so a stop
+        on "scroll right" between the last visible tab and the search field would be a
+        detour. They keep a label for anyone who meets them with a pointer and a reader.
+      */}
+      {!touch && overflow.start && (
+        <div
+          data-rail-edge="start"
+          className="pointer-events-none absolute inset-y-0 left-0 flex items-center"
+          // From the very left, under the mark: the mark's own veil fades to clear at its
+          // right edge, and a tab passing beneath showed through that tail. This is solid
+          // until the button's far side and only then fades, so between the mark and the
+          // button there is nothing. The mark itself paints above it (`z-10`).
+          style={{
+            width: leadingWidth + EDGE,
+            paddingLeft: leadingWidth,
+            background: `linear-gradient(to right, var(--wn-canvas) ${leadingWidth + STEP}px, transparent)`,
+          }}
+        >
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Scroll filters left"
+            title="More filters"
+            onClick={() => step(-1)}
+            className="pointer-events-auto relative flex h-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink"
+            style={{ width: STEP }}
+          >
+            <ChevronLeft size={16} strokeWidth={1.9} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+      {!touch && overflow.end && (
+        <div
+          data-rail-edge="end"
+          className="pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end"
+          style={{ width: EDGE }}
+        >
+          <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-l from-canvas from-50% to-transparent" />
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Scroll filters right"
+            title="More filters"
+            onClick={() => step(1)}
+            className="pointer-events-auto relative flex h-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink"
+            style={{ width: STEP }}
+          >
+            <ChevronRight size={16} strokeWidth={1.9} aria-hidden="true" />
+          </button>
+        </div>
       )}
     </div>
   );
