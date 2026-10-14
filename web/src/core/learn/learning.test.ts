@@ -80,10 +80,9 @@ function moved(model: LearningModel, before: LearningSnapshot): SignalKey[] {
 }
 
 describe("a fresh model", () => {
-  it("starts at the shipped weights, learning on, with no history", () => {
+  it("starts at the shipped weights, with no history", () => {
     const model = LearningModel.initial();
     expect(model.weights).toEqual(STANDARD_WEIGHTS);
-    expect(model.adaptive).toBe(true);
     expect(model.events).toHaveLength(0);
   });
 
@@ -106,21 +105,17 @@ describe("immutability", () => {
 
     const after = original
       .recordStar(email({ id: 4 }), SECURITY, true, 1_000)
-      .rejectFilter("newsletters", null, null, 1_001)
-      .setWeight("security", 30)
-      .setAdaptive(false);
+      .rejectFilter("newsletters", null, null, 1_001);
 
     expect(after).not.toBe(original);
     expect(after.weights).not.toBe(original.weights);
     expect(original.weights).toEqual(before.weights);
-    expect(original.adaptive).toBe(true);
     expect(original.events).toHaveLength(0);
     expect(original.toSnapshot()).toEqual(before);
 
     // And the copy really did take the edits, so the assertions above cannot pass
     // by nothing having happened.
-    expect(after.weights.security).toBe(30);
-    expect(after.adaptive).toBe(false);
+    expect(after.weights.security).toBe(original.weights.security + LEARNING_STEP);
     expect(after.events).toHaveLength(2);
   });
 
@@ -238,17 +233,6 @@ describe("starring", () => {
     // its behalf would be the model guessing at the user's reason.
     expect(moved(after, before)).toEqual(["spamSensitivity"]);
     expect(after.events).toHaveLength(1);
-  });
-
-  it("logs the event but moves no weights when learning is off", () => {
-    // Turning learning off is a pause, not an amnesia: the user still gets the
-    // history that explains the ranking in front of them.
-    const model = LearningModel.initial().setAdaptive(false);
-    const before = model.toSnapshot();
-    const after = model.recordStar(email(), SECURITY, true, 1_000);
-    expect(after.weights).toEqual(before.weights);
-    expect(after.events).toHaveLength(1);
-    expect(after.events[0].action).toBe("starred");
   });
 
   it("never moves the star boost, so a star cannot feed its own signal", () => {
@@ -448,13 +432,6 @@ describe("muting a bucket", () => {
     expect(after.events[0].rejectedFilter).toBe("unsafe");
   });
 
-  it("moves no weights when learning is off, and still logs", () => {
-    const model = LearningModel.initial().setAdaptive(false);
-    const before = model.toSnapshot();
-    const after = model.rejectFilter("urgent", null, null, 1_000);
-    expect(after.weights).toEqual(before.weights);
-    expect(after.events).toHaveLength(1);
-  });
 });
 
 describe("nudging stops at the ends of the range", () => {
@@ -554,73 +531,18 @@ describe("the event log", () => {
   });
 });
 
-describe("setting a weight by hand", () => {
-  it("rounds and clamps into the signal's own range", () => {
-    // The panel renders the value straight onto a slider, so a fractional or
-    // out-of-range number puts a thumb somewhere the control cannot represent.
-    const meta = signalMeta("spamSensitivity");
-    const model = LearningModel.initial();
-    expect(model.setWeight("spamSensitivity", 20.6).weights.spamSensitivity).toBe(21);
-    expect(model.setWeight("spamSensitivity", 9_999).weights.spamSensitivity).toBe(meta.max);
-    expect(model.setWeight("spamSensitivity", -50).weights.spamSensitivity).toBe(meta.min);
-  });
-
-  it("returns the same model when the rounded value is the current one", () => {
-    // A slider tick that lands on the value already set must not trigger a
-    // reclassify. The docstring promises identity here, so it is asserted rather
-    // than inferred from an unchanged number.
-    const model = LearningModel.initial();
-    expect(model.setWeight("security", 16.4)).toBe(model);
-    expect(model.setWeight("security", 16)).toBe(model);
-    expect(model.setWeight("security", 17)).not.toBe(model);
-  });
-
-  it("leaves the other weights, the events and the flag alone", () => {
-    const model = LearningModel.initial().recordStar(email(), SECURITY, true, 1_000);
-    const after = model.setWeight("urgency", 25);
-    expect(after.weights.security).toBe(model.weights.security);
-    expect(after.weights.urgency).toBe(25);
-    expect(after.events).toHaveLength(1);
-    expect(after.adaptive).toBe(true);
-  });
-
-  it("still applies when automatic learning is off", () => {
-    // Turning learning off is about the loop, not about the user's own hand.
-    const model = LearningModel.initial().setAdaptive(false);
-    expect(model.setWeight("security", 30).weights.security).toBe(30);
-  });
-});
-
-describe("turning learning off and on", () => {
-  it("returns the same model when nothing changed", () => {
-    const model = LearningModel.initial();
-    expect(model.setAdaptive(true)).toBe(model);
-    const off = model.setAdaptive(false);
-    expect(off).not.toBe(model);
-    expect(off.setAdaptive(false)).toBe(off);
-  });
-
-  it("keeps the events and the weights across the switch", () => {
-    const model = LearningModel.initial().recordStar(email(), SECURITY, true, 1_000);
-    const off = model.setAdaptive(false);
-    expect(off.events).toHaveLength(1);
-    expect(off.weights).toEqual(model.weights);
-    expect(off.setAdaptive(true).weights).toEqual(model.weights);
-  });
-});
-
 describe("resetting the adjustments", () => {
   it("returns the weights to factory and keeps the log", () => {
     // "The event log is kept: it is the audit trail." Resetting the tuning does
     // not delete the history that explains how the tuning happened.
     const model = LearningModel.initial()
-      .setWeight("security", 30)
+      .rejectFilter("newsletters", null, null, 500)
       .recordStar(email(), ACTION_NEEDED, true, 1_000);
+    expect(model.weights).not.toEqual(defaultWeights());
     const reset = model.resetAdjustments();
     expect(reset.weights).toEqual(defaultWeights());
-    expect(reset.events).toHaveLength(1);
-    expect(reset.events[0].id).toBe("1000-1-s");
-    expect(reset.adaptive).toBe(true);
+    expect(reset.events).toHaveLength(2);
+    expect(reset.events[1].id).toBe("1000-1-s");
   });
 
   it("hands back a new weights object rather than the shared default", () => {
@@ -655,7 +577,6 @@ describe("reading a persisted snapshot", () => {
         model = LearningModel.fromSnapshot(input);
       }, `${label} threw`).not.toThrow();
       expect(model!.weights, label).toEqual(defaultWeights());
-      expect(model!.adaptive, label).toBe(true);
       expect(model!.events, label).toEqual([]);
     }
   });
@@ -700,14 +621,14 @@ describe("reading a persisted snapshot", () => {
     );
   });
 
-  it("honours `adaptive: false`, and falls back to on for anything else", () => {
-    // Reading `undefined` as *off* would silently stop the learning loop the user
-    // never turned off, so only a real boolean counts.
-    expect(LearningModel.fromSnapshot({ adaptive: false }).adaptive).toBe(false);
-    expect(LearningModel.fromSnapshot({}).adaptive).toBe(true);
-    expect(LearningModel.fromSnapshot({ adaptive: undefined }).adaptive).toBe(true);
-    expect(LearningModel.fromSnapshot({ adaptive: "yes" }).adaptive).toBe(true);
-    expect(LearningModel.fromSnapshot({ adaptive: 0 }).adaptive).toBe(true);
+  it("learns again from a snapshot saved with the old switch off", () => {
+    // The "Learn from stars" switch is gone and learning is always on. A snapshot
+    // written while it was off must not leave the loop silently stopped with no
+    // control left to restart it, and the flag is not written back.
+    const model = LearningModel.fromSnapshot({ adaptive: false, weights: {}, events: [] });
+    const after = model.recordStar(email(), SECURITY, true, 1_000);
+    expect(after.weights.security).toBe(model.weights.security + LEARNING_STEP);
+    expect("adaptive" in after.toSnapshot()).toBe(false);
   });
 
   it("keeps only the events the panel can render", () => {
@@ -781,16 +702,13 @@ describe("reading a persisted snapshot", () => {
     // `fromSnapshot` is what reads it back after a reload. Anything lost in this
     // hop is lost for good, so it is done through JSON rather than by identity.
     const model = LearningModel.initial()
-      .setWeight("security", 30)
       .recordStar(email({ id: 1 }), ACTION_NEEDED, true, 1_000)
       .recordStar(email({ id: 2 }), NEWSLETTER, false, 2_000)
-      .rejectFilter("urgent", email({ id: 3 }), SECURITY, 3_000)
-      .setAdaptive(false);
+      .rejectFilter("urgent", email({ id: 3 }), SECURITY, 3_000);
     const snapshot: LearningSnapshot = JSON.parse(JSON.stringify(model.toSnapshot()));
     const restored = LearningModel.fromSnapshot(snapshot);
 
     expect(restored.weights).toEqual(model.weights);
-    expect(restored.adaptive).toBe(false);
     expect(restored.events.map((event) => event.id)).toEqual(
       model.events.map((event) => event.id),
     );

@@ -12,13 +12,6 @@ import { Sheet, SheetHeader } from "./Overlay";
 import { RecipientField } from "./RecipientField";
 import { isValidAddress } from "../../core/contacts/addresses";
 import type { ContactIndex } from "../../core/contacts/index";
-import {
-  SIGNAL_KEYS,
-  adjustment,
-  isPenalty,
-  type SignalKey,
-  type SignalWeights,
-} from "../../core/classify/weights";
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
@@ -232,11 +225,8 @@ export type SettingsProps = {
   onBackgroundSync: (value: boolean) => void;
   backgroundSyncInterval: number;
   onBackgroundSyncInterval: (value: number) => void;
-  weights: SignalWeights;
-  onWeight: (key: SignalKey, value: number) => void;
-  adaptive: boolean;
-  onAdaptive: (value: boolean) => void;
-  onResetWeights: () => void;
+  /** "Reset sorting": back to the shipped weights. Learning itself is always on. */
+  onResetSorting: () => void;
   /**
    * The feedback log, **newest first** (`LearningModel.history`). `events` is
    * oldest-first, so slicing that would show the beginning of the log rather than
@@ -268,72 +258,17 @@ export type SettingsProps = {
   onClose: () => void;
 };
 
-/** One weight, with its drift from the default. */
-function WeightSlider({
-  meta,
-  weights,
-  value,
-  onChange,
-}: {
-  meta: (typeof SIGNAL_KEYS)[number];
-  weights: SignalWeights;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  // Signed, and computed through the shared helper so the panel and the learning
-  // loop cannot disagree about what drift means.
-  const drift = adjustment(weights, meta.key);
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-baseline justify-between gap-3">
-        <label htmlFor={`weight-${meta.key}`} className="text-ui font-medium text-ink-body">
-          {meta.label}
-        </label>
-        <span className="flex items-baseline gap-1.5 text-meta tabular-nums">
-          <span className="font-semibold text-ink">{value}</span>
-          {/*
-            The default is only worth saying when the value has moved off it: printed
-            unconditionally it read as `22  default 22` — two numbers with no
-            indication that they were the same one. With a drift, it answers "where
-            did this come from".
-          */}
-          {drift !== 0 && (
-            <>
-              <span className="text-ink-subtle">from {meta.defaultValue}</span>
-              <span
-                className={`font-semibold ${drift > 0 ? "text-success" : "text-ink-muted"}`}
-                title="How far your feedback has moved this from the default"
-              >
-                {drift > 0 ? `+${drift}` : drift}
-              </span>
-            </>
-          )}
-        </span>
-      </div>
-      <input
-        id={`weight-${meta.key}`}
-        type="range"
-        min={meta.min}
-        max={meta.max}
-        step={1}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        aria-describedby={`weight-help-${meta.key}`}
-        aria-valuetext={`${value} points, ${meta.label.toLowerCase()}`}
-        // `appearance-none` switches `accent-color` off, so the fill is drawn via
-        // `--wn-range-fill` — the one thing a range cannot express on its own.
-        style={{ "--wn-range-fill": `${((value - meta.min) / (meta.max - meta.min)) * 100}%` } as React.CSSProperties}
-        className="wn-range h-1.5 w-full cursor-pointer appearance-none rounded-full"
-      />
-      <p id={`weight-help-${meta.key}`} className="text-meta text-ink-subtle">
-        {meta.explanation}
-      </p>
-    </div>
-  );
-}
-
 export function Settings(props: SettingsProps) {
   const [showHistory, setShowHistory] = useState(false);
+  /** The inline confirmation for "Reset sorting": idle, asking, or just done. */
+  const [resetStep, setResetStep] = useState<"idle" | "confirm" | "done">("idle");
+  const confirmResetRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (resetStep === "confirm") confirmResetRef.current?.focus();
+    if (resetStep !== "done") return;
+    const timer = window.setTimeout(() => setResetStep("idle"), 2_500);
+    return () => window.clearTimeout(timer);
+  }, [resetStep]);
 
   return (
     <Sheet
@@ -553,91 +488,65 @@ export function Settings(props: SettingsProps) {
       )}
 
       <Section title="How Winnow sorts">
-        <Row
-          label="Learn from what I star"
-          hint="Starring a message nudges the signals it carries. Off means only the sliders below change anything."
-        >
-          <Toggle
-            checked={props.adaptive}
-            onChange={props.onAdaptive}
-            label="Learn from stars"
-          />
-        </Row>
+        <p data-sorting-note="" className="text-ui text-ink-body">
+          Winnow learns from your stars and hides as you use it.
+        </p>
 
         {/*
-          The sliders, in a titled sub-block.
-
-          They were directly inside the section's own `flex flex-col gap-3`, which put
-          ten sliders in the same visual group as the two toggles above them — so the
-          eye read the toggles as the eleventh and twelfth sliders.
+          One reset, confirmed inline: the weights are the sum of everything learned so
+          far, and a single stray click must not throw that away. The log is kept either
+          way (it is the audit trail), so the reset says only what it resets.
         */}
-        <div className="mt-1 flex flex-col gap-4 border-t border-hairline-soft pt-4">
-          <p className="-mt-1 text-meta text-ink-subtle">
-            Weights start at these values and move as you star, unstar and hide
-            buckets. Adjusting one by hand is always allowed.
-          </p>
-
-          {/*
-            Ten identical rows in one column is a form dump: the eye has to read all
-            ten labels to find the one it wants. Splitting on the one distinction that
-            already exists in the model — `isPenalty`, the same function the learning
-            loop uses — halves the search space.
-
-            The order inside each group is `SIGNAL_KEYS`'s, by how much the weight
-            matters.
-          */}
-          {([
-            {
-              title: "Signals that raise importance",
-              note: "Points added to a message's score.",
-              keys: SIGNAL_KEYS.filter((meta) => !isPenalty(meta.key)),
-            },
-            {
-              title: "Signals that lower it",
-              note: "Points taken back off.",
-              keys: SIGNAL_KEYS.filter((meta) => isPenalty(meta.key)),
-            },
-          ]).map((group) =>
-            group.keys.length === 0 ? null : (
-              <fieldset key={group.title} className="flex flex-col gap-4">
-                <legend className="sr-only">{group.title}</legend>
-                <div className="-mb-2 flex items-baseline gap-2">
-                  <h4 className="text-meta font-semibold text-ink-body">{group.title}</h4>
-                  <p className="text-meta text-ink-subtle">{group.note}</p>
-                </div>
-                {group.keys.map((meta) => (
-                  <WeightSlider
-                    key={meta.key}
-                    meta={meta}
-                    weights={props.weights}
-                    value={props.weights[meta.key]}
-                    onChange={(value) => props.onWeight(meta.key, value)}
-                  />
-                ))}
-              </fieldset>
-            ),
+        <div data-sorting-reset={resetStep} className="flex flex-wrap items-center gap-2">
+          {resetStep === "confirm" ? (
+            <div role="group" aria-label="Reset sorting?" className="flex flex-wrap items-center gap-2">
+              <span className="text-meta font-medium text-ink-body">
+                Forget what Winnow has learned and go back to the default sorting?
+              </span>
+              <button
+                ref={confirmResetRef}
+                type="button"
+                onClick={() => {
+                  props.onResetSorting();
+                  setResetStep("done");
+                }}
+                className="rounded-ctl bg-danger px-3 py-1.5 text-meta font-semibold text-surface transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setResetStep("idle")}
+                className="rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setResetStep("confirm")}
+              className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              <RotateCcw size={13} strokeWidth={2} aria-hidden="true" />
+              Reset sorting
+            </button>
           )}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={props.onResetWeights}
-            className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            <RotateCcw size={13} strokeWidth={2} aria-hidden="true" />
-            Reset to defaults
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowHistory((value) => !value)}
-            aria-expanded={showHistory}
-            aria-controls="winnow-learning-history"
-            className="rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            {showHistory ? "Hide" : "Show"} what I&apos;ve learned
-            {props.events.length > 0 && ` (${props.events.length})`}
-          </button>
+          {resetStep !== "confirm" && (
+            <button
+              type="button"
+              onClick={() => setShowHistory((value) => !value)}
+              aria-expanded={showHistory}
+              aria-controls="winnow-learning-history"
+              className="rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              {showHistory ? "Hide" : "Show"} what I&apos;ve learned
+              {props.events.length > 0 && ` (${props.events.length})`}
+            </button>
+          )}
+          <span role="status" aria-live="polite" className="text-meta font-medium text-success">
+            {resetStep === "done" ? "Sorting reset" : ""}
+          </span>
         </div>
 
         {showHistory && (

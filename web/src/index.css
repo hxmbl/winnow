@@ -116,36 +116,6 @@ body {
     display: none;
   }
 
-  .wn-range {
-    background: linear-gradient(
-      to right,
-      var(--wn-inkBody) var(--wn-range-fill, 0%),
-      var(--wn-surfaceActive) var(--wn-range-fill, 0%)
-    );
-  }
-
-  .wn-range::-webkit-slider-thumb {
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-    background: var(--wn-inkBody);
-    border: 2px solid var(--wn-chrome);
-  }
-
-  .wn-range::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border: 2px solid var(--wn-chrome);
-    border-radius: 999px;
-    background: var(--wn-inkBody);
-  }
-
-  .wn-range:focus-visible {
-    outline: 2px solid var(--wn-focusRing);
-    outline-offset: 4px;
-  }
-
   .scroll-shadow {
     background-image:
       linear-gradient(var(--wn-chrome) 30%, rgb(0 0 0 / 0)),

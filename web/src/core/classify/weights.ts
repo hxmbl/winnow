@@ -1,17 +1,17 @@
 /**
- * Tunable signal weights — the numbers the user moves and the learning loop nudges.
+ * Tunable signal weights — the numbers the learning loop nudges.
  *
  * Two properties are load-bearing:
  *
- *   - **Clamped ranges.** `SIGNAL_KEYS` owns the range so `setWeight` cannot skip
- *     the clamp; a runaway loop must not invert or explode a signal's influence.
+ *   - **Clamped ranges.** `SIGNAL_KEYS` owns the range so the learning loop cannot
+ *     skip the clamp; a runaway loop must not invert or explode a signal's influence.
  *   - **Integer values.** Matching the Swift pipeline's per-step truncation keeps
  *     scores comparable and stops rounding accumulating across a dozen additions.
  *
  * Ported from `legacy/swift-native/Sources/winnow/Learning/SignalWeights.swift`.
  */
 
-/** Every weight the app exposes, with the metadata the settings UI renders. */
+/** Every weight the app exposes, with its range, default and description. */
 export type SignalKey =
   | "starBoost"
   | "security"
@@ -146,16 +146,6 @@ export const STANDARD_WEIGHTS: SignalWeights = defaultWeights();
 export function clampWeight(key: SignalKey, value: number): number {
   const meta = signalMeta(key);
   return Math.min(Math.max(Math.round(value), meta.min), meta.max);
-}
-
-/**
- * How far a weight has drifted from its default, for the "learned" badges.
- *
- * Signed on purpose: it answers "is this tuned above or below where Winnow shipped
- * it", and a bare absolute value would hide which way.
- */
-export function adjustment(weights: SignalWeights, key: SignalKey): number {
-  return weights[key] - signalMeta(key).defaultValue;
 }
 
 /**

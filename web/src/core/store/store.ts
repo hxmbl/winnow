@@ -60,7 +60,7 @@ import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
 import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
-import { defaultWeights, type SignalWeights } from "../classify/weights";
+import type { SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
 import type { SyncProgress, SyncStage } from "../gmail/sync";
 import {
@@ -2185,14 +2185,7 @@ export class WinnowStore {
     this.scheduleReclassify();
   }
 
-  setSignalWeight(key: keyof ReturnType<typeof defaultWeights>, value: number): void {
-    this.setLearning(this.state.learning.setWeight(key, value));
-  }
-
-  setAdaptiveLearning(on: boolean): void {
-    this.setLearning(this.state.learning.setAdaptive(on));
-  }
-
+  /** "Reset sorting": back to the shipped weights. The feedback log is kept. */
   resetLearning(): void {
     this.setLearning(this.state.learning.resetAdjustments());
   }

@@ -1142,10 +1142,58 @@ try {
   await page.waitForTimeout(200);
   check("Escape closes it", (await page.locator('[role="dialog"]').count()) === 0);
 
+  // ── Settings: How Winnow sorts ─────────────────────────────────────────────
+  //
+  // No sliders and no "Learn from stars" switch any more: one line, and a Reset sorting
+  // button behind an inline confirmation. Seeded with a tuned weight (written to storage
+  // and reloaded, which is how a real install would carry one) so the reset has
+  // something to undo, and a legacy `adaptive: false` to prove it is not honoured.
+  await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem("winnow.learning.v1") ?? "{}");
+    localStorage.setItem(
+      "winnow.learning.v1",
+      JSON.stringify({ ...raw, adaptive: false, weights: { ...(raw.weights ?? {}), security: 30 } }),
+    );
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("[data-message-id]", { timeout: 10_000 });
   await page.keyboard.press(",");
   await page.waitForSelector("text=How Winnow sorts", { timeout: 5_000 });
   const sliders = await page.locator('input[type="range"]').count();
-  check("settings opens and shows the weight sliders", sliders >= 8, `${sliders} sliders`);
+  check("settings has no weight sliders", sliders === 0, `${sliders} sliders`);
+  check(
+    "and no Learn from stars switch",
+    (await page.locator('[role="switch"][aria-label="Learn from stars"]').count()) === 0,
+  );
+  check(
+    "it says Winnow learns from stars and hides",
+    ((await page.locator("[data-sorting-note]").textContent()) ?? "").includes("learns from your stars and hides"),
+  );
+  const learnedSecurity = () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("winnow.learning.v1") ?? "{}").weights?.security);
+  const resetButton = page.getByRole("button", { name: "Reset sorting" });
+  await resetButton.click();
+  await page.waitForTimeout(100);
+  check(
+    "Reset sorting asks first, inline, and changes nothing yet",
+    (await page.locator('[data-sorting-reset="confirm"] [role="group"][aria-label="Reset sorting?"]').count()) === 1 &&
+      (await learnedSecurity()) === 30,
+    String(await learnedSecurity()),
+  );
+  await page.locator('[data-sorting-reset="confirm"]').getByRole("button", { name: "Cancel" }).click();
+  await page.waitForTimeout(100);
+  check("Cancel backs out", (await resetButton.count()) === 1 && (await learnedSecurity()) === 30);
+  await resetButton.click();
+  await page.locator('[data-sorting-reset="confirm"]').getByRole("button", { name: "Reset", exact: true }).click();
+  await page.waitForTimeout(300);
+  const afterReset = await page.evaluate(() => JSON.parse(localStorage.getItem("winnow.learning.v1") ?? "{}"));
+  check(
+    "confirming restores the default weights and says so",
+    afterReset.weights?.security === 16 &&
+      ((await page.locator('[data-sorting-reset] [role="status"]').textContent()) ?? "").includes("Sorting reset"),
+    JSON.stringify(afterReset.weights),
+  );
+  check("and the old learning switch is not written back", !("adaptive" in afterReset), Object.keys(afterReset).join(","));
 
   // A modal that does not trap focus lets Tab walk out of it into the page behind,
   // which is both unusable and invisible. Real key presses, not synthetic events, so

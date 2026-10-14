@@ -70,10 +70,13 @@ export type FeedbackEvent = {
   at: number;
 };
 
+/**
+ * What is persisted. Learning is always on: earlier builds also stored an `adaptive`
+ * flag (a "Learn from stars" switch); it is ignored on load, so a snapshot written
+ * with it off comes back learning again, and it is no longer written.
+ */
 export type LearningSnapshot = {
   weights: SignalWeights;
-  /** Whether star feedback moves weights automatically. */
-  adaptive: boolean;
   events: FeedbackEvent[];
 };
 
@@ -151,17 +154,15 @@ function isWellFormedEvent(event: unknown): event is FeedbackEvent {
  */
 export class LearningModel {
   readonly weights: SignalWeights;
-  readonly adaptive: boolean;
   readonly events: readonly FeedbackEvent[];
 
   private constructor(snapshot: LearningSnapshot) {
     this.weights = snapshot.weights;
-    this.adaptive = snapshot.adaptive;
     this.events = snapshot.events;
   }
 
   static initial(): LearningModel {
-    return new LearningModel({ weights: STANDARD_WEIGHTS, adaptive: true, events: [] });
+    return new LearningModel({ weights: STANDARD_WEIGHTS, events: [] });
   }
 
   /**
@@ -169,10 +170,10 @@ export class LearningModel {
    *
    * Tolerant, because the input is `localStorage`: anything can be in there. Weights
    * merge over the defaults (a weight added since the snapshot was written is present
-   * at its default; a non-finite one is dropped) and are clamped, since the sliders
-   * render an out-of-range value as a thumb at the far end. `adaptive` falls back to
-   * on, so reading `undefined` cannot silently stop the loop. Events are filtered to
-   * well-formed entries the panel can render.
+   * at its default; a non-finite one is dropped) and are clamped, so a value from an older build with
+   * a wider range cannot push a signal past its stop. A legacy `adaptive` flag is
+   * ignored (learning is always on now). Events are filtered to well-formed entries the
+   * panel can render.
    *
    * Nothing here throws. A corrupt snapshot costs the user their tuning; a thrown
    * error costs them the app.
@@ -196,15 +197,11 @@ export class LearningModel {
       ? snapshot.events.filter(isWellFormedEvent).slice(-MAX_EVENTS)
       : [];
 
-    return new LearningModel({
-      weights,
-      adaptive: typeof snapshot.adaptive === "boolean" ? snapshot.adaptive : true,
-      events,
-    });
+    return new LearningModel({ weights, events });
   }
 
   toSnapshot(): LearningSnapshot {
-    return { weights: this.weights, adaptive: this.adaptive, events: [...this.events] };
+    return { weights: this.weights, events: [...this.events] };
   }
 
   /**
@@ -248,38 +245,34 @@ export class LearningModel {
       at: now,
     };
 
-    let weights = this.weights;
-    if (this.adaptive) {
-      const deltas = touched.map((key) => ({
-        key,
-        // A boosting signal rises when the user starred a message carrying it;
-        // a penalty signal *falls*, because the mail was worth reading despite
-        // the label it was given.
-        delta: LEARNING_STEP * ((isPenalty(key) === starred) ? -1 : 1),
-      }));
+    const deltas = touched.map((key) => ({
+      key,
+      // A boosting signal rises when the user starred a message carrying it;
+      // a penalty signal *falls*, because the mail was worth reading despite
+      // the label it was given.
+      delta: LEARNING_STEP * ((isPenalty(key) === starred) ? -1 : 1),
+    }));
 
-      /**
-       * Starring something the classifier called unsafe is the clearest possible
-       * statement that the spam call was wrong.
-       *
-       * Outside the `touched.length > 0` gate: a spam lure carries none of the
-       * touchable signals, which is what makes it read as spam, so the correction
-       * users are most explicit about would otherwise teach nothing. It fires in
-       * both directions on purpose, so a star followed by an unstar cancels.
-       */
-      if (signals.spamLikelihood >= SPAM_CONTRADICTION) {
-        deltas.push({
-          key: "spamSensitivity",
-          delta: LEARNING_STEP * (starred ? -1 : 1),
-        });
-      }
-
-      weights = applyDeltas(weights, deltas).weights;
+    /**
+     * Starring something the classifier called unsafe is the clearest possible
+     * statement that the spam call was wrong.
+     *
+     * Outside the `touched.length > 0` gate: a spam lure carries none of the
+     * touchable signals, which is what makes it read as spam, so the correction
+     * users are most explicit about would otherwise teach nothing. It fires in
+     * both directions on purpose, so a star followed by an unstar cancels.
+     */
+    if (signals.spamLikelihood >= SPAM_CONTRADICTION) {
+      deltas.push({
+        key: "spamSensitivity",
+        delta: LEARNING_STEP * (starred ? -1 : 1),
+      });
     }
+
+    const weights = applyDeltas(this.weights, deltas).weights;
 
     return new LearningModel({
       weights,
-      adaptive: this.adaptive,
       events: this.push(this.events, event),
     });
   }
@@ -312,7 +305,7 @@ export class LearningModel {
     };
 
     let weights = this.weights;
-    if (this.adaptive && keys.length > 0) {
+    if (keys.length > 0) {
       weights = applyDeltas(
         weights,
         keys.map((key) => ({ key, delta: isPenalty(key) ? LEARNING_STEP : -LEARNING_STEP })),
@@ -321,32 +314,7 @@ export class LearningModel {
 
     return new LearningModel({
       weights,
-      adaptive: this.adaptive,
       events: this.push(this.events, event),
-    });
-  }
-
-  /** Turn automatic learning on or off. Manual weight edits work either way. */
-  setAdaptive(adaptive: boolean): LearningModel {
-    if (adaptive === this.adaptive) return this;
-    return new LearningModel({ weights: this.weights, adaptive, events: [...this.events] });
-  }
-
-  /**
-   * One weight, set by hand from the settings panel.
-   *
-   * Rounds and clamps into the signal's range, and returns the same instance
-   * when nothing changed, so a slider tick that lands on the same value does
-   * not trigger a reclassify.
-   */
-  setWeight(key: SignalKey, value: number): LearningModel {
-    const meta = signalMeta(key);
-    const clamped = Math.min(Math.max(Math.round(value), meta.min), meta.max);
-    if (clamped === this.weights[key]) return this;
-    return new LearningModel({
-      weights: { ...this.weights, [key]: clamped },
-      adaptive: this.adaptive,
-      events: [...this.events],
     });
   }
 
@@ -354,7 +322,6 @@ export class LearningModel {
   resetAdjustments(): LearningModel {
     return new LearningModel({
       weights: defaultWeights(),
-      adaptive: this.adaptive,
       events: [...this.events],
     });
   }

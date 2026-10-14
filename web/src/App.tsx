@@ -1913,11 +1913,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onBackgroundSyncInterval={(backgroundSyncInterval) =>
             store.setPreferences({ backgroundSyncInterval })
           }
-          weights={snapshot.learning.weights}
-          onWeight={store.setSignalWeight.bind(store)}
-          adaptive={snapshot.learning.adaptive}
-          onAdaptive={store.setAdaptiveLearning.bind(store)}
-          onResetWeights={store.resetLearning.bind(store)}
+          onResetSorting={store.resetLearning.bind(store)}
           events={snapshot.learning.history}
           blockedSenders={preferences.blockedSenders}
           onUnblock={store.unblockSender.bind(store)}

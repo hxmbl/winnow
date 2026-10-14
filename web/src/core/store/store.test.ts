@@ -14,6 +14,7 @@ import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 import { builtinFilter, isUnsafe, senderFilter } from "../model/signals";
 import type { Email, Mailbox } from "../model/email";
 import { LearningModel } from "../learn/learning";
+import { defaultWeights } from "../classify/weights";
 
 /** A backend that records calls and can be made to fail on demand. */
 function fakeBackend() {
@@ -454,17 +455,15 @@ describe("the derived view", () => {
   });
 
   it("re-derives when only the cheap fields move", () => {
-    // The learning weights are written to state *before* the debounced reclassify, and
-    // the settings panel reads them synchronously as a slider is dragged, so a snapshot's
-    // cheap fields must never go stale behind a memoised view.
+    // The learning weights are written to state *before* the debounced reclassify, so a
+    // snapshot's cheap fields must never go stale behind a memoised view.
     const store = demoStore();
-    const before = store.getSnapshot().learning.weights.security;
+    const before = store.getSnapshot().learning.weights.newsletterPenalty;
 
-    store.setSignalWeight("security", 33);
+    store.dismissFilter("newsletters");
 
     const after = store.getSnapshot();
-    expect(after.learning.weights.security).toBe(33);
-    expect(after.learning.weights.security).not.toBe(before);
+    expect(after.learning.weights.newsletterPenalty).toBeGreaterThan(before);
   });
 
   it("keeps the view in step with the mutes, which are instance state", () => {
@@ -1146,42 +1145,15 @@ describe("learning from stars", () => {
     expect(store.getSnapshot().learning.weights.newsletterPenalty).toBeGreaterThan(before);
   });
 
-  it("stops learning when turned off, but still logs the event", () => {
-    const store = demoStore();
-    store.setAdaptiveLearning(false);
-    const before = store.getSnapshot().learning.weights.security;
-    const events = store.getSnapshot().learning.events.length;
-
-    const security = store.view.emails.find((e) => store.view.signals.get(e.id)?.security)!;
-    store.toggleStar(security.id);
-
-    expect(store.getSnapshot().learning.weights.security).toBe(before);
-    // The log is the audit trail; it does not depend on whether weights moved.
-    expect(store.getSnapshot().learning.events.length).toBe(events + 1);
-  });
-
-  it("still applies a manual weight edit when learning is off", () => {
-    const store = demoStore();
-    store.setAdaptiveLearning(false);
-    store.setSignalWeight("security", 30);
-    expect(store.getSnapshot().learning.weights.security).toBe(30);
-  });
-
-  it("clamps a manual edit into range", () => {
-    // A slider dragged past its stop must not invert the signal.
-    const store = demoStore();
-    store.setSignalWeight("spamSensitivity", 9_999);
-    expect(store.getSnapshot().learning.weights.spamSensitivity).toBe(80);
-    store.setSignalWeight("spamSensitivity", -50);
-    expect(store.getSnapshot().learning.weights.spamSensitivity).toBe(0);
-  });
-
   it("resets to the factory weights but keeps the history", () => {
     const store = demoStore();
-    store.setSignalWeight("security", 30);
+    store.dismissFilter("newsletters");
+    expect(store.getSnapshot().learning.weights.newsletterPenalty).not.toBe(
+      defaultWeights().newsletterPenalty,
+    );
     const events = store.getSnapshot().learning.events.length;
     store.resetLearning();
-    expect(store.getSnapshot().learning.weights.security).toBe(16);
+    expect(store.getSnapshot().learning.weights).toEqual(defaultWeights());
     expect(store.getSnapshot().learning.events.length).toBe(events);
   });
 });
@@ -1229,7 +1201,6 @@ describe("persistence", () => {
 
     for (const input of junk) {
       const model = LearningModel.fromSnapshot(input);
-      expect(model.adaptive).toBe(true);
       expect(model.weights.security).toBe(16);
       // Only the well-formed events survive, and none carries an action the UI has no
       // wording for.
@@ -1320,11 +1291,12 @@ describe("sign out", () => {
 
   it("keeps the learning and the preferences", async () => {
     const store = demoStore();
-    store.setSignalWeight("security", 30);
+    store.dismissFilter("newsletters");
+    const learned = store.getSnapshot().learning.weights.newsletterPenalty;
     store.blockSender("someone@example.com");
     await store.signOut();
     const state = store.getSnapshot();
-    expect(state.learning.weights.security).toBe(30);
+    expect(state.learning.weights.newsletterPenalty).toBe(learned);
     expect(state.preferences.blockedSenders).toContain("someone@example.com");
   });
 
