@@ -171,7 +171,7 @@ export function Masthead({
               composes `box-shadow` out of custom properties and silently resolves to
               `none` on some elements; see the note in `index.css`.
             */
-            className="flex h-8 w-[11rem] items-center gap-2 rounded-ctl bg-surface px-3 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)] xl:w-[13rem]"
+            className="flex h-8 w-[11rem] items-center gap-2 rounded-ctl border border-edge bg-surface px-3 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)] xl:w-[13rem]"
           >
             <Search size={14} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
             <input

@@ -59,6 +59,8 @@ export default {
         divider: "var(--wn-divider)",
         "control-border": "var(--wn-controlBorder)",
         "focus-ring": "var(--wn-focusRing)",
+        // Transparent except on OLED, where it is the only thing separating black planes.
+        edge: "var(--wn-edge)",
 
         // The accent. One colour, four jobs: unread, selection, focus and the primary
         // action. Anything else that wants colour is asking for the wrong thing.

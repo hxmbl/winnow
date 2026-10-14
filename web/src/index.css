@@ -51,10 +51,48 @@ body,
   overflow: hidden;
 }
 
+/*
+ * The backdrop before `applyTheme` has run.
+ *
+ * `public/theme-boot.js` puts the stored mode on `<html>` as `data-theme` before first
+ * paint; these rules give each mode its canvas and ink until the palette's own `--wn-*`
+ * properties land a moment later. With no `data-theme` at all (script blocked), the OS
+ * preference decides. `theme.test.ts` holds these values to the palettes in `theme.ts`.
+ */
+:root {
+  --wn-boot-canvas: #edecf4;
+  --wn-boot-ink: #18162b;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --wn-boot-canvas: #070612;
+  --wn-boot-ink: #edebfa;
+  color-scheme: dark;
+}
+
+:root[data-theme="oled"] {
+  --wn-boot-canvas: #000000;
+  --wn-boot-ink: #edebfa;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --wn-boot-canvas: #070612;
+    --wn-boot-ink: #edebfa;
+    color-scheme: dark;
+  }
+}
+
+html {
+  background: var(--wn-canvas, var(--wn-boot-canvas));
+}
+
 body {
   margin: 0;
-  background: var(--wn-canvas, #edecf4);
-  color: var(--wn-ink, #18162b);
+  background: var(--wn-canvas, var(--wn-boot-canvas));
+  color: var(--wn-ink, var(--wn-boot-ink));
   font-family: theme("fontFamily.sans");
   font-size: 14px;
   font-optical-sizing: auto;

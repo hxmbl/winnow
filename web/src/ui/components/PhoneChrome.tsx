@@ -25,7 +25,7 @@ const ROUND_BUTTON =
 
 /** The canvas-toned sheet both bottom bars sit on: this dock and the reader's. */
 export const DOCK_SURFACE =
-  "relative z-20 shrink-0 rounded-t-pane bg-canvas pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2";
+  "relative z-20 shrink-0 rounded-t-pane border-t border-edge bg-canvas pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2";
 
 // ── Top bar ─────────────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ export function PhoneTopBar({
 
         <label
           htmlFor="winnow-search"
-          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-ctl bg-surface px-4 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-ctl border border-edge bg-surface px-4 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
         >
           <Search size={16} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
           <input
