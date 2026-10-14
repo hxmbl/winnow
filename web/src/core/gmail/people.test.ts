@@ -104,7 +104,7 @@ describe("PeopleClient — the listings", () => {
     const page = await client(fetchImpl).list("saved");
     expect(calls[0].url.startsWith(`${PEOPLE_API}/people/me/connections?`)).toBe(true);
     const query = params(calls[0].url);
-    expect(query.get("personFields")).toBe("names,emailAddresses");
+    expect(query.get("personFields")).toBe("names,emailAddresses,photos");
     expect(query.get("pageSize")).toBe(String(PEOPLE_PAGE_SIZE));
     expect(query.get("requestSyncToken")).toBe("true");
     expect(query.has("syncToken")).toBe(false);
@@ -122,7 +122,7 @@ describe("PeopleClient — the listings", () => {
     const page = await client(fetchImpl).list("other");
     expect(calls[0].url.startsWith(`${PEOPLE_API}/otherContacts?`)).toBe(true);
     const query = params(calls[0].url);
-    expect(query.get("readMask")).toBe("names,emailAddresses");
+    expect(query.get("readMask")).toBe("names,emailAddresses,photos");
     expect(query.has("personFields")).toBe(false);
     expect(query.get("requestSyncToken")).toBe("true");
     expect(page.people).toHaveLength(1);

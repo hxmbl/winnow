@@ -29,6 +29,7 @@
 
 import { hashId } from "../model/ids";
 import { parseAddressList } from "../mail/html";
+import { parseListUnsubscribe } from "../mail/unsubscribe";
 import { DEMO_NEWSLETTER_HTML, DEMO_NEWSLETTER_TEXT } from "./demoNewsletter";
 import type { Email, EmailCategory, Mailbox } from "../model/email";
 import type { TrashRecord } from "../model/profile";
@@ -86,6 +87,8 @@ type Seed = {
   attachments?: { filename: string; mimeType: string; size: number }[];
   /** The bucket this message exists to demonstrate. Asserted by the tests. */
   demonstrates?: string;
+  /** A `List-Unsubscribe` header, as a newsletter would send it. */
+  listUnsubscribe?: string;
 };
 
 /** A long body, so the "Long reads" threshold is reachable in the demo. */
@@ -161,6 +164,7 @@ const seeds: readonly Seed[] = [
   // consent flow.
   {
     id: "demo-newsletter-3",
+    listUnsubscribe: "<https://hark.example/unsubscribe>",
     sender: "noreply@email.hark.example",
     name: "Hark",
     at: 4 * DAY,
@@ -762,6 +766,7 @@ No rush to reply, I know you have a thing on at the moment.`),
   // ── Newsletters ───────────────────────────────────────────────────────────
   {
     id: "demo-newsletter-1",
+    listUnsubscribe: "<https://engineering.example/unsubscribe?u=demo>, <mailto:leave@engineering.example?subject=unsubscribe>",
     sender: "digest@engineering.example",
     name: "Engineering Digest",
     at: 18 * HOUR,
@@ -783,6 +788,7 @@ Also in this issue: the twelve links we read, and one genuinely good talk about 
   },
   {
     id: "demo-newsletter-2",
+    listUnsubscribe: "<mailto:unsubscribe@weekly.example>",
     sender: "news@weekly.example",
     name: "The Weekly",
     at: 5 * DAY,
@@ -1383,6 +1389,7 @@ function toEmail(seed: Seed): Email {
     starred: seed.starred ?? false,
     unread: seed.unread ?? false,
     urgent: seed.urgent ?? false,
+    unsubscribe: parseListUnsubscribe(seed.listUnsubscribe, seed.listUnsubscribe ? "List-Unsubscribe=One-Click" : undefined),
     attachments: (seed.attachments ?? []).map((attachment, index) => ({
       id: `${seed.id}-att-${index}`,
       partId: String(index + 1),

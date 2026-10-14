@@ -71,6 +71,8 @@ export const METADATA_HEADERS: readonly string[] = [
   "Subject",
   "Date",
   "List-Unsubscribe",
+  // RFC 8058 one-click: read with List-Unsubscribe into `Email.unsubscribe`.
+  "List-Unsubscribe-Post",
   "List-Id",
   "Message-ID",
   "References",

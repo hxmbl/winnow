@@ -511,3 +511,28 @@ describe("toEmail — format=metadata", () => {
     expect(loadedBodyOf(message)).toEqual({ body: "the body", bodyHtml: undefined, attachments: [] });
   });
 });
+
+describe("toEmail — List-Unsubscribe", () => {
+  it("carries the unsubscribe link when the header is there", () => {
+    const email = toEmail(
+      message({
+        payload: part({
+          headers: [
+            { name: "From", value: "List <news@list.example>" },
+            { name: "list-unsubscribe", value: "<https://list.example/u>, <mailto:u@list.example>" },
+            { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
+          ],
+        }),
+      }),
+    )!;
+    expect(email.unsubscribe).toEqual({
+      url: "https://list.example/u",
+      mailto: "mailto:u@list.example",
+      oneClick: true,
+    });
+  });
+
+  it("has none without the header", () => {
+    expect(toEmail(message())!.unsubscribe).toBeUndefined();
+  });
+});

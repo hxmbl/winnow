@@ -56,6 +56,12 @@ export function hasContactScopes(scope: string | undefined | null): boolean {
   return CONTACT_SCOPES.every((wanted) => granted.has(wanted));
 }
 
+/**
+ * The fields asked of both listings. `photos` is allowed by `otherContacts.list`'s
+ * `readMask` as well as by `connections.list`, and needs no scope beyond the two above.
+ */
+export const PERSON_FIELDS = "names,emailAddresses,photos";
+
 /** The People API's maximum page size for both listings. */
 export const PEOPLE_PAGE_SIZE = 1000;
 
@@ -80,6 +86,12 @@ export type PeoplePerson = {
   metadata?: { deleted?: boolean };
   names?: { displayName?: string; metadata?: FieldMetadata }[];
   emailAddresses?: { value?: string; metadata?: FieldMetadata }[];
+  /**
+   * Profile photos. Read under the same two contact scopes as names and addresses — no
+   * extra grant. `default: true` marks Google's generated letter placeholder, which the
+   * app skips in favour of its own quieter monogram.
+   */
+  photos?: { url?: string; default?: boolean; metadata?: FieldMetadata }[];
 };
 
 /** Which listing, by the name the rest of the app uses for it. */
@@ -251,7 +263,7 @@ export class PeopleClient {
   async list(source: PeopleSource, options: ListOptions = {}): Promise<PeoplePage> {
     const listing = LISTINGS[source];
     const params = new URLSearchParams({
-      [listing.fieldsParam]: "names,emailAddresses",
+      [listing.fieldsParam]: PERSON_FIELDS,
       pageSize: String(PEOPLE_PAGE_SIZE),
       requestSyncToken: "true",
     });

@@ -4,6 +4,8 @@
  * gmail/mapper.ts converts between them.
  */
 
+import type { Unsubscribe } from "../mail/unsubscribe";
+
 /** Unix milliseconds (app-wide). */
 export type Millis = number;
 
@@ -184,6 +186,12 @@ export type Email = {
    * body (and the real attachment list) arrives.
    */
   attachmentHint?: boolean;
+  /**
+   * How to leave the mailing list, from `List-Unsubscribe`. Absent when the message
+   * carried no usable header — and then the app offers no unsubscribe at all, rather
+   * than guessing from a link in the body.
+   */
+  unsubscribe?: Unsubscribe;
 };
 
 /** True when `body`/`bodyHtml`/`attachments` hold the whole message, not a metadata stand-in. */

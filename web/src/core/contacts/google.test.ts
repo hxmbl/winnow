@@ -13,6 +13,7 @@ import {
   emptySnapshot,
   flattenSnapshot,
   reviveSnapshot,
+  safePhotoUrl,
   toStoredPerson,
   type GoogleContactsSnapshot,
   type GoogleContactsStore,
@@ -161,15 +162,15 @@ describe("flattenSnapshot", () => {
 describe("reviveSnapshot", () => {
   it("round-trips a snapshot and refuses anything else", () => {
     const snapshot: GoogleContactsSnapshot = {
-      version: 1,
+      version: 2,
       saved: { syncToken: "s", people: { "people/c1": { name: "Ada", emails: ["ada@example.com"] } } },
       other: { people: {} },
       syncedAt: 5,
     };
     expect(reviveSnapshot(JSON.parse(JSON.stringify(snapshot)))).toEqual(snapshot);
-    expect(reviveSnapshot({ version: 2 })).toBeNull();
+    expect(reviveSnapshot({ version: 3 })).toBeNull();
     expect(reviveSnapshot("nope")).toBeNull();
-    expect(reviveSnapshot({ version: 1, saved: {}, other: { people: {} } })).toBeNull();
+    expect(reviveSnapshot({ version: 2, saved: {}, other: { people: {} } })).toBeNull();
   });
 });
 
@@ -204,7 +205,7 @@ describe("GoogleContactsSync — full, then incremental", () => {
 
   it("asks only for changes next time, and applies deletions", async () => {
     const memory = memoryStore({
-      version: 1,
+      version: 2,
       saved: {
         syncToken: "saved-1",
         people: {
@@ -259,7 +260,7 @@ describe("GoogleContactsSync — full, then incremental", () => {
 describe("GoogleContactsSync — an expired sync token", () => {
   it("falls back to a full listing that replaces the stale copy", async () => {
     const memory = memoryStore({
-      version: 1,
+      version: 2,
       saved: {
         syncToken: "too-old",
         people: {
@@ -305,7 +306,7 @@ describe("GoogleContactsSync — an expired sync token", () => {
 describe("GoogleContactsSync — failures", () => {
   it("leaves the previous copy and token alone when a page fails partway", async () => {
     const before: GoogleContactsSnapshot = {
-      version: 1,
+      version: 2,
       saved: { syncToken: "s1", people: { "people/c1": { name: "Ada", emails: ["ada@example.com"] } } },
       other: { syncToken: "o1", people: {} },
       syncedAt: 1,
@@ -378,5 +379,49 @@ describe("GoogleContactsSync — bookkeeping", () => {
     await sync.clear();
     expect(await sync.cached()).toEqual([]);
     expect(memory.saved()).toBeNull();
+  });
+});
+
+describe("contact photos", () => {
+  it("keeps a real https photo and skips Google's default placeholder", () => {
+    expect(
+      toStoredPerson({
+        resourceName: "people/c1",
+        emailAddresses: [{ value: "ada@example.com" }],
+        photos: [
+          { url: "https://lh3.googleusercontent.com/default", default: true },
+          { url: "https://lh3.googleusercontent.com/ada", metadata: { primary: true } },
+        ],
+      }),
+    ).toEqual({ name: undefined, emails: ["ada@example.com"], photo: "https://lh3.googleusercontent.com/ada" });
+    expect(
+      toStoredPerson({
+        resourceName: "people/c2",
+        emailAddresses: [{ value: "bo@example.com" }],
+        photos: [{ url: "https://lh3.googleusercontent.com/default", default: true }],
+      })?.photo,
+    ).toBeUndefined();
+  });
+
+  it("refuses a photo that is not https", () => {
+    expect(safePhotoUrl("http://example.com/a.png")).toBeUndefined();
+    expect(safePhotoUrl("javascript:alert(1)")).toBeUndefined();
+    expect(safePhotoUrl(4)).toBeUndefined();
+    expect(safePhotoUrl("https://lh3.googleusercontent.com/a")).toBe("https://lh3.googleusercontent.com/a");
+  });
+
+  it("flattens with the photo, borrowing an other-contact photo for a saved contact without one", () => {
+    const rows = flattenSnapshot({
+      ...emptySnapshot(),
+      saved: { people: { "people/c1": { name: "Ada", emails: ["ada@example.com"] } } },
+      other: { people: { "otherContacts/c1": { emails: ["ada@example.com"], photo: "https://lh3.googleusercontent.com/ada" } } },
+    });
+    expect(rows).toEqual([
+      { address: "ada@example.com", name: "Ada", source: "saved", photo: "https://lh3.googleusercontent.com/ada" },
+    ]);
+  });
+
+  it("reads a version-1 snapshot as nothing, so the next refresh fetches photos in full", () => {
+    expect(reviveSnapshot({ version: 1, saved: { people: {} }, other: { people: {} }, syncedAt: 1 })).toBeNull();
   });
 });

@@ -35,10 +35,12 @@ export type GoogleContact = {
   name?: string;
   /** Saved contacts rank above other contacts. See `SOURCE_PRIOR` in `index.ts`. */
   source: PeopleSource;
+  /** The contact's own profile photo (https), when Google has a real one. */
+  photo?: string;
 };
 
 /** One person as stored: the parts the index reads, and nothing else. */
-type StoredPerson = { name?: string; emails: string[] };
+type StoredPerson = { name?: string; emails: string[]; photo?: string };
 
 /** One listing's local copy and the cursor that continues it. */
 type ListingState = {
@@ -49,7 +51,12 @@ type ListingState = {
 };
 
 export type GoogleContactsSnapshot = {
-  version: 1;
+  /**
+   * 2 since photos joined the field mask. A version-1 snapshot is read as nothing, so
+   * the next refresh lists both address books in full — a sync token minted for the
+   * old mask would otherwise never deliver photos for people who did not change.
+   */
+  version: 2;
   saved: ListingState;
   other: ListingState;
   /** When the last refresh finished, for deciding whether another is worth it. */
@@ -57,7 +64,7 @@ export type GoogleContactsSnapshot = {
 };
 
 export function emptySnapshot(): GoogleContactsSnapshot {
-  return { version: 1, saved: { people: {} }, other: { people: {} }, syncedAt: null };
+  return { version: 2, saved: { people: {} }, other: { people: {} }, syncedAt: null };
 }
 
 /** Where the snapshot lives. `localStorage` on both hosts, like the mail cache. */
@@ -106,7 +113,7 @@ export function localContactsStore(key = "winnow.google.contacts.v1"): GoogleCon
 export function reviveSnapshot(raw: unknown): GoogleContactsSnapshot | null {
   if (!raw || typeof raw !== "object") return null;
   const source = raw as Partial<GoogleContactsSnapshot>;
-  if (source.version !== 1) return null;
+  if (source.version !== 2) return null;
   const listing = (value: unknown): ListingState | null => {
     if (!value || typeof value !== "object") return null;
     const state = value as Partial<ListingState>;
@@ -115,7 +122,11 @@ export function reviveSnapshot(raw: unknown): GoogleContactsSnapshot | null {
     for (const [resourceName, person] of Object.entries(state.people)) {
       if (!person || !Array.isArray(person.emails)) continue;
       const emails = person.emails.filter((email): email is string => typeof email === "string");
-      people[resourceName] = { name: typeof person.name === "string" ? person.name : undefined, emails };
+      people[resourceName] = {
+        name: typeof person.name === "string" ? person.name : undefined,
+        emails,
+        photo: safePhotoUrl(person.photo),
+      };
     }
     return { syncToken: typeof state.syncToken === "string" ? state.syncToken : undefined, people };
   };
@@ -123,7 +134,7 @@ export function reviveSnapshot(raw: unknown): GoogleContactsSnapshot | null {
   const other = listing(source.other);
   if (!saved || !other) return null;
   return {
-    version: 1,
+    version: 2,
     saved,
     other,
     syncedAt: typeof source.syncedAt === "number" ? source.syncedAt : null,
@@ -157,7 +168,26 @@ export function toStoredPerson(person: PeoplePerson): StoredPerson | null {
     emails.push(value);
   }
   if (emails.length === 0) return null;
-  return { name, emails };
+  const photos = (person.photos ?? []).filter((photo) => !photo.default);
+  const photo = safePhotoUrl(
+    (photos.find((p) => p.metadata?.primary) ?? photos[0])?.url,
+  );
+  return photo ? { name, emails, photo } : { name, emails };
+}
+
+/**
+ * A photo URL the list may load: https only, nothing else. Google serves contact photos
+ * from `*.googleusercontent.com`; anything that is not https is dropped rather than
+ * handed to an `<img>`.
+ */
+export function safePhotoUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -210,9 +240,11 @@ export function flattenSnapshot(snapshot: GoogleContactsSnapshot): GoogleContact
         const existing = out.get(key);
         if (existing && (existing.source === "saved" || source === "other")) {
           if (!existing.name && person.name) existing.name = person.name;
+          if (!existing.photo && person.photo) existing.photo = person.photo;
           continue;
         }
-        out.set(key, { address, name: person.name ?? existing?.name, source });
+        const photo = person.photo ?? existing?.photo;
+        out.set(key, { address, name: person.name ?? existing?.name, source, ...(photo ? { photo } : {}) });
       }
     }
   };

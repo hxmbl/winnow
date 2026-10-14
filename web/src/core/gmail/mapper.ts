@@ -25,6 +25,7 @@ import {
 import { hashId } from "../model/ids";
 import { LABEL, base64UrlDecode, type GmailMessage, type GmailPart } from "./dto";
 import { decodeEntities, parseAddressHeader, parseAddressList, plainTextFromHtml } from "../mail/html";
+import { parseListUnsubscribe } from "../mail/unsubscribe";
 
 /** Which mailbox a set of labels files the message in. */
 export function mailboxFor(labelIds: readonly string[]): Mailbox {
@@ -263,6 +264,10 @@ export function toEmail(
       : {}),
     ...(message.sizeEstimate !== undefined ? { sizeEstimate: message.sizeEstimate } : {}),
     ...(bulk ? { bulk: true } : {}),
+    unsubscribe: parseListUnsubscribe(
+      headerValue(payload, "List-Unsubscribe"),
+      headerValue(payload, "List-Unsubscribe-Post"),
+    ),
   };
 }
 
