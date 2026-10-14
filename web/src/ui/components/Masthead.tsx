@@ -60,6 +60,34 @@ export type MastheadProps = {
   onMarkAllRead: () => void;
 };
 
+/**
+ * Where you are in the list: "12 of 39" once the cursor is on something, and just the
+ * total before. It used to be "— / 39" — a dash standing in for a number, then a slash
+ * that read like a fraction. `data-position` is for the smoke test, which asserts that
+ * an untouched list does not claim a row.
+ */
+export function PositionReadout({
+  position,
+  total,
+  className = "",
+}: {
+  position: number | null;
+  total: number;
+  className?: string;
+}) {
+  return (
+    <span data-position="" className={`text-ui tabular-nums text-ink-muted ${className}`}>
+      {position === null || total === 0 ? (
+        <span className="font-medium text-ink">{total}</span>
+      ) : (
+        <>
+          <span className="font-medium text-ink">{position}</span> of {total}
+        </>
+      )}
+    </span>
+  );
+}
+
 export function Masthead({
   searchQuery,
   onSearchChange,
@@ -118,7 +146,7 @@ export function Masthead({
               aria-haspopup="dialog"
               aria-label="Open navigation"
               title="Navigation"
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="flex h-9 w-9 items-center justify-center rounded-ctl transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <AppMark />
             </button>
@@ -143,7 +171,7 @@ export function Masthead({
               composes `box-shadow` out of custom properties and silently resolves to
               `none` on some elements; see the note in `index.css`.
             */
-            className="flex h-8 w-[11rem] items-center gap-2 rounded-full bg-surface px-3 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)] xl:w-[13rem]"
+            className="flex h-8 w-[11rem] items-center gap-2 rounded-ctl bg-surface px-3 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)] xl:w-[13rem]"
           >
             <Search size={14} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
             <input
@@ -166,21 +194,18 @@ export function Masthead({
           */}
           <div className="flex items-center gap-0.5">
             <span
-              className="mr-1 hidden max-w-[9rem] truncate text-ui font-medium text-ink-muted xl:inline"
+              className="mr-2 hidden max-w-[9rem] truncate text-ui font-medium text-ink-muted xl:inline"
               title={listTitle}
             >
               {listTitle}
             </span>
-            <span className="text-ui font-semibold tabular-nums text-ink">
-              {position ?? "—"}
-            </span>
-            <span className="text-ui tabular-nums text-ink-subtle">/ {total}</span>
+            <PositionReadout position={position} total={total} />
             <button
               type="button"
               onClick={onPrev}
               aria-label="Previous message"
               disabled={cursorIndex <= 0}
-              className="ml-1 flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronLeft size={17} />
             </button>
@@ -189,7 +214,7 @@ export function Masthead({
               onClick={onNext}
               aria-label="Next message"
               disabled={total === 0 || cursorIndex >= total - 1}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronRight size={17} />
             </button>
@@ -205,7 +230,7 @@ export function Masthead({
                   : "Mark all read"
               }
               disabled={total === 0}
-              className="ml-1 flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <Check size={15} strokeWidth={2} />
             </button>

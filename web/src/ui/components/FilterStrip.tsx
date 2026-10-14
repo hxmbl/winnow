@@ -7,20 +7,17 @@
  *
  * Pills are ordered by the store, not here — the rail is ranked by how much mail each
  * bucket holds, so a component that re-sorted its own children would fight the store
- * on every render. Selected state is illumination, not a second fill: each pill already
- * carries a wash of its own accent, and what is left on "on" is a `sheen` — a
- * low-alpha wash of the palette's own ink — so it reads as the row lifting toward the
- * light rather than as a different object being placed on top of it. Each pill shows
- * its count and its keyboard digit, because the shortcut has to be discoverable
- * somewhere.
+ * on every render.
  *
- * The accent colours survive as a tint; the label says which bucket this is, so the
- * rail reads as one quiet row rather than as a row of sweets.
+ * They are text tabs now, not filled pills. A row of twenty tinted capsules was the
+ * loudest thing in a window that is mostly for reading; a tab is a word and a count,
+ * and the one that is on gets ink, weight and a short accent rule under it. The hide
+ * control sits *inside* the tab, after the count, instead of as a badge perched on the
+ * corner where it covered the neighbouring pill.
  */
 
 import { memo, useEffect, useRef, useState } from "react";
 import { filterKey, type BuiltinSmartFilter, type FilterId } from "../../core/model/signals";
-import { pillBackground } from "../filterColors";
 import { digitFor, type PillItem } from "../rail";
 
 export type { PillItem } from "../rail";
@@ -59,7 +56,8 @@ export const FilterStrip = memo(function FilterStrip({
   touch = false,
   className = "",
 }: Props) {
-  const pillSize = touch ? "h-10 pl-4 pr-3.5" : "h-7 pl-3 pr-2.5";
+  // 44px on touch: the dock's tabs are thumb targets like everything else there.
+  const tabHeight = touch ? "h-11" : "h-7";
   const hasActive = activeFilters.length > 0;
   const activeKeys = new Set(activeFilters.map(filterKey));
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -98,7 +96,7 @@ export const FilterStrip = memo(function FilterStrip({
     <div className={`relative min-w-0 ${className}`}>
       <div
         ref={scrollerRef}
-        className={`no-scrollbar flex items-center overflow-x-auto ${touch ? "gap-2 py-1.5 pr-1.5" : "gap-1.5"}`}
+        className={`no-scrollbar flex items-center overflow-x-auto ${touch ? "gap-1 pr-1.5" : "gap-0.5"}`}
       >
         {/*
           The mark, pinned. `z-10` so it paints above the pills travelling behind it;
@@ -119,24 +117,28 @@ export const FilterStrip = memo(function FilterStrip({
           <button
             type="button"
             onClick={onClear}
-            className={`${touch ? "h-10 px-4" : "h-7 px-3"} shrink-0 rounded-full bg-sheen text-ui font-semibold text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+            className={`${touch ? "h-11 px-3.5" : "h-7 px-2.5"} shrink-0 rounded-ctl text-ui font-semibold text-ink-body transition-colors duration-150 hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             All
           </button>
         )}
 
-      {pills.map(({ id, label, colors, count, muted }, index) => {
+      {pills.map(({ id, label, count, muted }, index) => {
         const key = filterKey(id);
         const on = activeKeys.has(key);
         // No digit for a muted pill: a shortcut to a bucket that is not filterable
-        // would do nothing.
-        // Nor on the phone dock: there is no number row to press, and a hover that sticks
-        // after a tap would otherwise reveal the keycap on the pill just touched.
+        // would do nothing. Nor on the phone dock: there is no number row to press.
         const digit = muted || touch ? null : digitFor(index);
         const isMuted = muted === true;
+        const hideable = id.kind === "builtin" && id.id !== "unsafe";
 
         return (
-          <div key={key} className="group/pill relative shrink-0">
+          <div
+            key={key}
+            className={`group/pill relative flex shrink-0 items-center rounded-ctl transition-colors duration-150 ${
+              isMuted ? "" : "hover:bg-sheen"
+            }`}
+          >
             <button
               type="button"
               aria-pressed={on}
@@ -144,52 +146,43 @@ export const FilterStrip = memo(function FilterStrip({
               // describes a state the app will not enter.
               disabled={isMuted}
               onClick={() => onToggle(id)}
-              // The count is in the accessible name, not just the visible badge.
+              // The count is in the accessible name, not just the visible number.
               aria-label={
                 isMuted
                   ? `${label}, hidden — ${count} ${count === 1 ? "message" : "messages"}`
                   : `${label}, ${count} ${count === 1 ? "message" : "messages"}`
               }
-              className={`flex ${pillSize} items-center gap-1.5 rounded-full text-ui font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
+              // The digit shortcut, where it can be found without a keycap crowding the
+              // tab: the tooltip, the shortcut sheet, and `aria-keyshortcuts`.
+              title={digit ? `${label} (${digit})` : undefined}
+              aria-keyshortcuts={digit ?? undefined}
+              className={`relative flex ${tabHeight} items-center gap-1.5 rounded-ctl text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
+                hideable ? (touch ? "pl-3.5 pr-1" : "pl-2 pr-0.5") : touch ? "px-3.5" : "px-2"
+              } ${
                 isMuted
                   ? "text-ink-subtle line-through opacity-60"
                   : on
                     ? "font-semibold text-ink"
-                    : "text-ink-muted hover:text-ink-body"
+                    : "font-medium text-ink-muted group-hover/pill:text-ink-body"
               }`}
-              style={{
-                // A muted pill gets no fill rather than a dimmed one: a tinted empty
-                // pill still reads as an enabled control that is merely quiet.
-                background: isMuted ? "transparent" : pillBackground(colors, on),
-              }}
             >
               {label}
-              {/* Not a badge: a second shape inside the pill competes with the pill's
-                  own edge at this size. `tabular-nums` so a count changing from 9 to
-                  10 does not shift the label, and it sits right after the label so the
-                  pair reads as one unit — "Important 26". */}
-              <span className="text-[11.5px] font-semibold tabular-nums text-ink-muted">
+              {/* `tabular-nums` so a count changing from 9 to 10 does not shift the label. */}
+              <span className={`text-meta tabular-nums ${on ? "text-ink-muted" : "text-ink-subtle"}`}>
                 {count}
               </span>
               {/*
-                The shortcut, drawn as a key rather than as plain adjacent text: a
-                number next to a count made every pill read as one number ("Important
-                26 1"), where the second digit is a keyboard shortcut. The keycap
-                separates the two roles and ties the pill to the shortcut sheet's chip.
-
-                `bg-surface` solid, and *not* `bg-surface/60`. Tailwind's `/opacity`
-                on a custom-property colour produces `rgb(var(--wn-surface) / 0.6)`,
-                which is not a colour, so the fill silently disappears.
-
-                `font-mono` because a digit that is a *key* should look like a key.
+                On: a short rule in the accent under the label and count. Drawn rather
+                than an `underline` so it sits at the foot of the tab instead of hugging
+                the baseline, and is the same 2px on every tab.
               */}
-              {digit && (
-                <kbd
+              {on && (
+                <span
                   aria-hidden="true"
-                  className="ml-0.5 hidden min-w-[1.05rem] rounded bg-sheen px-1 py-px text-center font-mono text-[10.5px] font-semibold leading-[1.35] text-ink-muted group-hover/pill:inline lg:inline"
-                >
-                  {digit}
-                </kbd>
+                  className={`pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-accent ${
+                    touch ? `left-3.5 ${hideable ? "right-1" : "right-3.5"}` : `left-2 ${hideable ? "right-0.5" : "right-2"}`
+                  }`}
+                />
               )}
             </button>
 
@@ -198,12 +191,12 @@ export const FilterStrip = memo(function FilterStrip({
               bucket on a live pill, bring it back on a muted one — so a mute is not a
               one-way door. `unsafe` has neither, as it is not hidden by default.
 
-              `opacity-0` rather than `hidden`: `display: none` takes the control out
-              of the tab order, where `focus-visible` cannot rescue it.
-              `[@media(hover:none)]` still shows it outright on touch, so no device is
-              left with a transparent tappable target.
+              Inside the tab, after the count. `opacity-0` rather than `hidden`:
+              `display: none` takes the control out of the tab order, where
+              `focus-visible` cannot rescue it — and the space stays reserved, so hovering
+              never shifts the rail. `[@media(hover:none)]` shows it outright on touch.
             */}
-            {id.kind === "builtin" && id.id !== "unsafe" && (
+            {hideable && (
               <button
                 type="button"
                 onClick={() => (isMuted ? onRestore(id.id) : onMute(id.id))}
@@ -217,7 +210,9 @@ export const FilterStrip = memo(function FilterStrip({
                     ? `Show ${label} in the inbox again`
                     : `Hide ${label} from the inbox and tell Winnow it is over-firing`
                 }
-                className={`absolute inline-flex items-center justify-center rounded-full bg-veil leading-none ${touch ? "-right-1.5 -top-1.5 h-6 w-6 text-[13px]" : "-right-1 -top-1 h-4 w-4 text-[10px]"} text-ink-muted opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100`}
+                className={`inline-flex shrink-0 items-center justify-center rounded-ctl leading-none text-ink-subtle opacity-0 transition-opacity duration-150 hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100 ${
+                  touch ? "mr-1 h-11 w-8 text-read" : "mr-0.5 h-6 w-4 text-ui"
+                }`}
               >
                 {isMuted ? "↺" : "×"}
               </button>

@@ -89,7 +89,7 @@ function useSanitised(
  */
 function PlainText({ email }: { email: Email }) {
   return (
-    <div className="selectable max-w-[68ch] whitespace-pre-wrap text-body text-ink-body">
+    <div className="selectable max-w-[68ch] whitespace-pre-wrap font-serif text-read text-ink-body">
       {email.body}
     </div>
   );
@@ -150,7 +150,7 @@ function RichBody({
       const button = document.createElement("button");
       button.type = "button";
       button.className =
-        "flex h-7 w-7 items-center justify-center rounded bg-white text-ink-muted shadow-sm transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+        "flex h-7 w-7 items-center justify-center rounded-ctl bg-white text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
       button.setAttribute("aria-label", "Copy code");
       button.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 
@@ -300,7 +300,7 @@ function Proxied({ email, document, fetched, blocked }: {
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-        <p className="flex items-center gap-2 text-[12px] font-medium text-ink-muted">
+        <p className="flex items-center gap-2 text-meta font-medium text-ink-muted">
           <Server size={13} strokeWidth={1.9} aria-hidden="true" />
           {fetched} {fetched === 1 ? "image" : "images"} fetched by Winnow&rsquo;s server,
           not by your browser
@@ -378,7 +378,7 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
       <EmailStyles />
 
       {hasHtml && sanitised.html === "" && (
-        <p className="mb-3 text-[12px] text-ink-subtle">
+        <p className="mb-3 text-meta text-ink-subtle">
           Nothing in this message could be rendered safely. Plain text, in the &hellip; menu,
           is all of it.
         </p>
@@ -389,12 +389,12 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
       {shown === "sent" && <AsSent email={email} imagesAllowed={imagesAllowed} />}
       {shown === "proxied" &&
         (proxied === undefined ? (
-          <p className="text-[12px] text-ink-subtle" role="status" aria-live="polite">
+          <p className="text-meta text-ink-subtle" role="status" aria-live="polite">
             Asking the render proxy…
           </p>
         ) : proxied === null ? (
           <div>
-            <p className="mb-2 text-[12px] text-ink-subtle">
+            <p className="mb-2 text-meta text-ink-subtle">
               The render proxy is not answering, so this message is being rendered here
               instead.
             </p>

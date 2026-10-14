@@ -397,9 +397,13 @@ try {
   // which reads as an empty mailbox — and "0 of 0" on a narrowed list.
   const position = await page.locator("header").getByText(/^(—|\d+)\s*\/?\s*(of\s*)?\d+$/).count();
   check("the position cluster is not claiming row 0", position > 0);
+  // It used to be "— / 39": a dash for "no row", then a slash that read as a fraction.
+  // An untouched list now shows the total and nothing else; "3 of 39" once it moves.
+  const readout = ((await page.locator("header [data-position]").first().textContent()) ?? "").trim();
   check(
-    "an untouched list shows a dash rather than a row number",
-    (await page.locator("header").getByText("—", { exact: false }).count()) > 0,
+    "an untouched list shows the total rather than a row number",
+    /^\d+$/.test(readout) && Number(readout) === (await rowTotal()),
+    JSON.stringify(readout),
   );
 
   // ── Sign-in is reachable from the demo ─────────────────────────────────────
@@ -412,6 +416,18 @@ try {
   check(
     "and says the demo is a sample, not a synced account",
     (await page.locator("text=Demo mailbox").count()) > 0,
+  );
+
+  // ── The triage line ────────────────────────────────────────────────────────
+
+  // The inbox opens with a sentence about what needs you, built from the classifier's
+  // own signals. The demo seed has unread asks in it, so the sentence must count
+  // something rather than fall back to "Nothing needs you right now".
+  const attention = ((await page.locator("[data-attention]").first().textContent()) ?? "").trim();
+  check(
+    "the inbox leads with what needs attention, as a sentence",
+    /^\d+ waiting on you\b/.test(attention),
+    JSON.stringify(attention),
   );
 
   // ── Filtering ──────────────────────────────────────────────────────────────
@@ -754,29 +770,33 @@ try {
   );
 
   /**
-   * The same vocabulary in the list.
+   * The same vocabulary in the list, said once.
    *
-   * The row drew a coloured dot and the reader drew a chip, from two different
-   * predicates — so a message could be "Urgent" in one and unremarkable in the other,
-   * in the same window. Both now read `ui/filterIcons`, so the assertion is that the
-   * row carries the *explanation* rather than a colour.
+   * Rows used to carry a cluster of glyphs — bookmark, bolt, shield — on most messages.
+   * A row now says at most one thing, as a word (unsafe, urgent or security, else "New"),
+   * from the same `ui/filterIcons` explanations the reader uses, so hovering it still
+   * says *why*.
    */
   const rowFilters = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll("[data-message-id]")].slice(0, 8);
+    const rows = [...document.querySelectorAll("[data-message-id]")].slice(0, 12);
     return rows.map((row) => ({
-      glyphs: row.querySelectorAll("span[title] > svg").length,
-      titles: [...row.querySelectorAll("span[title]")].map((s) => s.getAttribute("title")),
+      glyphs: row.querySelectorAll("svg").length,
+      labels: [...row.querySelectorAll("span[title]")].map((s) => ({
+        text: (s.textContent ?? "").trim(),
+        title: s.getAttribute("title"),
+      })),
     }));
   });
   check(
-    "list rows carry the same semantic icons",
-    rowFilters.some((row) => row.glyphs > 0),
-    JSON.stringify(rowFilters.filter((r) => r.glyphs > 0).slice(0, 3)),
+    "list rows carry one signal at most, as a word rather than an icon cluster",
+    rowFilters.every((row) => row.glyphs === 0 && row.labels.length <= 1) &&
+      rowFilters.some((row) => row.labels.length === 1),
+    JSON.stringify(rowFilters.filter((r) => r.labels.length > 0).slice(0, 3)),
   );
   check(
-    "and every row glyph explains itself on hover",
-    rowFilters.every((row) => row.titles.every((t) => (t ?? "").length > 8)),
-    JSON.stringify(rowFilters.flatMap((r) => r.titles).slice(0, 4)),
+    "and every row signal explains itself on hover",
+    rowFilters.every((row) => row.labels.every((l) => (l.title ?? "").length > l.text.length + 8)),
+    JSON.stringify(rowFilters.flatMap((r) => r.labels).slice(0, 4)),
   );
 
   // ── The reader holds its message when the filters change ──────────────────
@@ -824,7 +844,7 @@ try {
   // The list collapses a thread to one row, so without this the rest of the exchange
   // is unreachable from the reader — and a message that was archived is not in the
   // list at all, so it was unreachable anywhere.
-  const convoHeading = page.locator('article h3:has-text("in this conversation")');
+  const convoHeading = page.locator('article h3:has-text("earlier message")');
   check("a thread shows the rest of the exchange", (await convoHeading.count()) > 0);
 
   // The three "Re: the migration plan" messages share a subject, so the subject
@@ -832,7 +852,7 @@ try {
   // row's text is the right thing: it names the sender and relative time, so a
   // different sender or a different timestamp proves the reader moved.
   const convoButtons = page.locator(
-    'article h3:has-text("in this conversation") + ul > li > button',
+    'article h3:has-text("earlier message") + ul > li > button',
   );
   const convoCount = await convoButtons.count();
   check("and each earlier message is a real button", convoCount >= 2, `${convoCount} entries`);
@@ -1848,7 +1868,7 @@ try {
   require("the phone top bar replaces the masthead", (await topBar.count()) === 1);
   check("and the masthead is gone rather than hidden", (await page.locator("header").count()) === 1);
 
-  const logoBox = await box(topBar.locator("span.rounded-full").first());
+  const logoBox = await box(topBar.locator("[data-phone-mark]").first());
   const accountBox = await box(topBar.locator('button[aria-label="Open navigation"]'));
   check(
     "the mark sits top-left and the account/menu circle top-right",

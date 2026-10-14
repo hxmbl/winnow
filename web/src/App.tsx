@@ -31,6 +31,7 @@ import {
 import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
 import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
 import { formatRelative } from "./core/mail/datetime";
+import { attentionSentence } from "./core/classify/attention";
 import { resolveImageConsent } from "./core/mail/imageConsent";
 import type { Draft } from "./core/model/email";
 import { demoMailbox } from "./core/data/demo";
@@ -605,7 +606,7 @@ export function App({ store }: Props) {
       setComposer({
         ...composer,
         sending: false,
-        error: error instanceof Error ? error.message : "The reply could not be sent.",
+        error: error instanceof Error ? error.message : "Couldn't send that reply.",
       });
     }
   }, [composer]);
@@ -721,7 +722,7 @@ export function App({ store }: Props) {
       s.setError(null);
     } catch (error) {
       s.setError(
-        error instanceof Error ? error.message : "That attachment could not be downloaded.",
+        error instanceof Error ? error.message : "Couldn't download that attachment.",
       );
     }
   }, []);
@@ -956,22 +957,22 @@ export function App({ store }: Props) {
     return (
       <div className="flex h-dvh items-center justify-center bg-canvas px-6">
         <div className="max-w-[36rem] text-center">
-          <h1 className="text-subject font-semibold text-ink">Could not reach Gmail</h1>
-          <p className="mt-2 text-[13.5px] text-ink-muted">{snapshot.error}</p>
+          <h1 className="font-serif text-title font-semibold text-ink">Couldn&rsquo;t reach Gmail</h1>
+          <p className="mt-2 text-ui text-ink-muted">{snapshot.error}</p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
               onClick={() => {
                 void store.retryConnection();
               }}
-              className="rounded-full bg-[var(--wn-inkBody)] px-4 py-2 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl bg-accent px-4 py-2 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               Try again
             </button>
             <button
               type="button"
               onClick={enterDemo}
-              className="rounded-full border border-control-border px-4 py-2 text-[13px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl border border-control-border px-4 py-2 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               Use the demo inbox
             </button>
@@ -1050,7 +1051,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
       {snapshot.error && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-[12.5px] font-medium text-ink-body"
+          className="flex items-center justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-meta font-medium text-ink-body"
         >
           <span className="min-w-0 truncate">{snapshot.error}</span>
           <button
@@ -1071,7 +1072,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
         alarming, dismissible banner of an error.
       */}
       {snapshot.notice && (
-        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-[12.5px] font-medium text-ink-body">
+        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body">
           <span className="min-w-0 truncate">{snapshot.notice}</span>
           <button
             type="button"
@@ -1098,13 +1099,16 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
       {snapshot.undo && (
         <div
           role="status"
-          className="flex items-center justify-center gap-3 px-4 py-1.5 text-[12.5px]"
+          // Re-keyed per action, so the strip arrives with the same short rise every time
+          // something is archived or trashed rather than only the first time.
+          key={snapshot.undo.label}
+          className="flex animate-appear items-center justify-center gap-3 px-4 py-1.5 text-meta"
         >
           <span className="min-w-0 truncate text-ink-muted">{snapshot.undo.label}</span>
           <button
             type="button"
             onClick={store.undoLast.bind(store)}
-            className="shrink-0 rounded-full bg-sheen px-2.5 py-0.5 font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 rounded-ctl bg-sheen px-2.5 py-0.5 font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Undo
           </button>
@@ -1112,7 +1116,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             type="button"
             onClick={store.dismissUndo.bind(store)}
             aria-label="Dismiss"
-            className="shrink-0 rounded-full p-1 text-ink-subtle transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 rounded-ctl p-1 text-ink-subtle transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <X size={12} strokeWidth={2.2} aria-hidden="true" />
           </button>
@@ -1151,50 +1155,63 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             account is a button here rather than in a settings panel, because the app boots
             into the demo and never shows the sign-in screen on first run.
           */}
-          {snapshot.account === null ? (
-            <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-1">
-              <p className="min-w-0 truncate text-[11.5px] text-ink-subtle">
-                Demo mailbox — nothing leaves this device
+          {/*
+            The triage line, then the status line under it.
+
+            The first line is Winnow's one signature: what in the inbox needs you, as a
+            sentence ("3 waiting on you and 2 deliveries today"), derived from the
+            classifier's own signals. Only in the inbox — it is a claim about the inbox,
+            and over Sent or the bin it would be answering a question nobody asked.
+          */}
+          <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-3">
+            <div className="min-w-0">
+              {snapshot.mailbox === "inbox" && (
+                <p data-attention="" className="text-ui font-medium text-ink sm:truncate">
+                  {attentionSentence(view.attention)}
+                </p>
+              )}
+              <p className="text-meta text-ink-subtle sm:truncate">
+                {snapshot.account === null
+                  ? "Demo mailbox. Nothing leaves this device."
+                  : snapshot.lastSyncedAt
+                    ? `Synced ${formatRelative(snapshot.lastSyncedAt, Date.now())}`
+                    : "Not synced yet"}
               </p>
+            </div>
+            {snapshot.account === null ? (
               <button
                 type="button"
                 onClick={() => {
                   void connectFromDemo();
                 }}
                 disabled={signingIn}
-                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 max-sm:min-h-9 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                // The demo's one primary action, so it is the one filled control in view.
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
-                <LogIn size={11} strokeWidth={2.2} aria-hidden="true" />
+                <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
                 {signingIn ? "Waiting for Google…" : "Connect Gmail"}
               </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-1">
-              <p className="min-w-0 truncate text-[11.5px] text-ink-subtle">
-                {snapshot.lastSyncedAt
-                  ? `Synced ${formatRelative(snapshot.lastSyncedAt, Date.now())}`
-                  : "Not synced yet"}
-              </p>
+            ) : (
               <button
                 type="button"
                 onClick={() => {
                   void store.refresh();
                 }}
                 disabled={snapshot.syncing}
-                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 max-sm:min-h-9 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <RefreshCw
-                  size={11}
+                  size={12}
                   strokeWidth={2.2}
                   className={snapshot.syncing ? "animate-spin" : ""}
                   aria-hidden="true"
                 />
                 {snapshot.syncing ? "Syncing…" : "Sync now"}
               </button>
-            </div>
-          )}
+            )}
+          </div>
           {connectError && (
-            <div role="alert" className="px-4 pb-2 text-[11.5px] font-medium text-danger">
+            <div role="alert" className="px-4 pb-2 text-meta font-medium text-danger">
               <ErrorText text={connectError} />
             </div>
           )}

@@ -14,12 +14,10 @@ import {
   type BuiltinSmartFilter,
   type FilterId,
 } from "../core/model/signals";
-import { FILTER_PILLS, senderPillColors, type PillColors } from "./filterColors";
 
 export type PillItem = {
   id: FilterId;
   label: string;
-  colors: PillColors;
   /**
    * How many messages this bucket holds in the *inbox*, not "in the current view".
    *
@@ -67,7 +65,6 @@ export function buildPills(
     .map((id) => ({
       id: { kind: "builtin", id },
       label: FILTER_LABELS[id],
-      colors: FILTER_PILLS[id],
       count: counts.get(id) ?? 0,
       muted: false,
     }));
@@ -77,7 +74,6 @@ export function buildPills(
     .map((id) => ({
       id: { kind: "builtin", id },
       label: FILTER_LABELS[id],
-      colors: FILTER_PILLS[id],
       count: counts.get(id) ?? 0,
       muted: true,
     }));
@@ -93,7 +89,6 @@ export function buildPills(
   const senders: PillItem[] = topSenders.map((sender) => ({
     id: { kind: "sender", sender },
     label: `From ${sender}`,
-    colors: senderPillColors(sender),
     count: senderCounts.get(sender) ?? 0,
   }));
 
@@ -108,7 +103,6 @@ export function buildPills(
     senders.push({
       id: filter,
       label: `From ${filter.sender}`,
-      colors: senderPillColors(filter.sender),
       count: senderCounts.get(filter.sender) ?? 0,
       muted: false,
     });

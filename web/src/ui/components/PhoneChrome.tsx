@@ -15,17 +15,17 @@
 import { Archive, Check, ChevronLeft, ChevronRight, Inbox, Menu, Search, Send, Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
-import { avatarColor, avatarTextColor } from "../avatarColor";
 import { FilterStrip, type PillItem } from "./FilterStrip";
+import { PositionReadout } from "./Masthead";
 import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 
 const ROUND_BUTTON =
-  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors active:bg-surface-active disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors active:bg-surface-active disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 /** The canvas-toned sheet both bottom bars sit on: this dock and the reader's. */
 export const DOCK_SURFACE =
-  "relative z-20 shrink-0 rounded-t-[22px] bg-canvas pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2";
+  "relative z-20 shrink-0 rounded-t-pane bg-canvas pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2";
 
 // ── Top bar ─────────────────────────────────────────────────────────────────
 
@@ -72,14 +72,14 @@ export function PhoneTopBar({
       <div className="flex items-center gap-2">
         {/* The mark. Not a button: on a phone the menu is the circle on the right, and
             two controls that open the same drawer would be one too many. */}
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface">
+        <span data-phone-mark="" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl bg-surface">
           <AppMark size={28} />
           <span className="sr-only">Winnow</span>
         </span>
 
         <label
           htmlFor="winnow-search"
-          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full bg-surface px-4 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-ctl bg-surface px-4 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
         >
           <Search size={16} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
           <input
@@ -91,7 +91,7 @@ export function PhoneTopBar({
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder="Search"
             // 16px: iOS zooms the page into any focused field smaller than that.
-            className="min-w-0 flex-1 bg-transparent text-[16px] font-medium text-ink outline-none placeholder:text-ink-placeholder"
+            className="min-w-0 flex-1 bg-transparent text-read font-medium text-ink outline-none placeholder:text-ink-placeholder"
           />
         </label>
 
@@ -112,8 +112,7 @@ export function PhoneTopBar({
           {accountEmail ? (
             <span
               aria-hidden="true"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-[14px] font-semibold"
-              style={{ background: avatarColor(accountEmail), color: avatarTextColor(accountEmail) }}
+              className="flex h-8 w-8 items-center justify-center rounded-ctl bg-surface-active text-ui font-semibold text-ink-body"
             >
               {initial}
             </span>
@@ -128,12 +127,10 @@ export function PhoneTopBar({
         masthead carries, at touch size; the title is a `span[title]` there too.
       */}
       <div className="flex items-center gap-1 pb-1 pl-2 pt-1.5">
-        <span className="min-w-0 truncate text-[15px] font-semibold text-ink" title={listTitle}>
+        <span className="min-w-0 truncate text-read font-semibold text-ink" title={listTitle}>
           {listTitle}
         </span>
-        <span className="ml-1.5 shrink-0 text-ui tabular-nums text-ink-subtle">
-          <span className="font-semibold text-ink-muted">{position ?? "—"}</span> / {total}
-        </span>
+        <PositionReadout position={position} total={total} className="ml-2 shrink-0" />
         <span className="flex-1" />
         <button type="button" onClick={onPrev} aria-label="Previous message" disabled={cursorIndex <= 0} className={ROUND_BUTTON}>
           <ChevronLeft size={19} />
@@ -232,13 +229,13 @@ export function PhoneDock({
                 {count > 0 && (
                   <span
                     aria-hidden="true"
-                    className="absolute -right-3 -top-1.5 min-w-[1.1rem] rounded-full bg-surface px-1 text-center text-[10.5px] font-semibold leading-[1.45] tabular-nums text-ink-body"
+                    className="absolute -right-3 -top-1.5 min-w-[1.1rem] rounded-ctl bg-surface px-1 text-center text-meta font-semibold leading-[1.45] tabular-nums text-ink-body"
                   >
                     {count > 99 ? "99+" : count}
                   </span>
                 )}
               </span>
-              <span className={`text-tiny ${current ? "font-semibold" : "font-medium"}`}>{label}</span>
+              <span className={`text-meta ${current ? "font-semibold" : "font-medium"}`}>{label}</span>
             </button>
           );
         })}

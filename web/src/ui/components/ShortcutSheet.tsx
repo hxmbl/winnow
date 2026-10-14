@@ -17,8 +17,8 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
       className="thin-scroll max-h-[85vh] w-full max-w-[380px] overflow-y-auto rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-[15px] font-semibold text-ink">Keyboard shortcuts</h2>
-        <span className="text-[11.5px] text-ink-subtle">Esc to close</span>
+        <h2 className="text-read font-semibold text-ink">Keyboard shortcuts</h2>
+        <span className="text-meta text-ink-subtle">Esc to close</span>
       </div>
 
       <dl className="mt-4 flex flex-col gap-1.5">
@@ -28,11 +28,11 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
             className="flex items-baseline justify-between gap-4"
           >
             <dt>
-              <kbd className="rounded border border-hairline bg-surface-sunken px-1.5 py-0.5 font-mono text-[11.5px] font-semibold text-ink-body">
+              <kbd className="rounded-ctl border border-hairline bg-surface-sunken px-1.5 py-0.5 font-mono text-meta font-semibold text-ink-body">
                 {binding.keys}
               </kbd>
             </dt>
-            <dd className="flex-1 text-right text-[12.5px] text-ink-muted">
+            <dd className="flex-1 text-right text-meta text-ink-muted">
               {binding.help}
             </dd>
           </div>

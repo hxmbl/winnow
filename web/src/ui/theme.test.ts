@@ -18,6 +18,9 @@
  *   3. **No token colour is combined with Tailwind's `/opacity`.** Every token is a CSS
  *      custom property, so the modifier emits `rgb(var(--wn-surface) / 0.6)`, which is
  *      not a colour, and the class renders nothing.
+ *   4. **The accent works as text, as a ring and as a fill**, in both schemes.
+ *   5. **The design system stays small**: four type sizes, two radii, no shadows and no
+ *      letter-spaced capitals, asserted over the component sources.
  *
  * No DOM required, which is the payoff of the `core`/`ui` split: this is the same
  * arithmetic the browser would do, run as a unit test.
@@ -31,7 +34,6 @@ import {
   relativeLuminance,
   resolveScheme,
 } from "./theme";
-import { avatarColor, avatarRamp, avatarTextColor } from "./avatarColor";
 
 /** WCAG AA for text this size. Every piece of muted text in the app is 11–13px. */
 const AA_TEXT = 4.5;
@@ -50,6 +52,7 @@ const SURFACE_TOKENS = [
   "surfaceSunken",
   "surfaceHover",
   "surfaceActive",
+  "surfaceSelected",
   "chrome",
 ] as const;
 
@@ -128,55 +131,43 @@ describe("text contrast", () => {
   }
 });
 
-describe("avatars", () => {
-  /**
-   * The monogram is text, so it is held to the text bar — and it is the one place in the
-   * app where a foreground and a background are computed at runtime from a hash, which is
-   * exactly the combination that produces a colour nobody has ever looked at. Every step,
-   * not a sample: six steps is the whole ramp.
-   */
-  
+describe("the accent", () => {
+  /** WCAG's bar for a focus indicator and other non-text marks. */
+  const AA_NON_TEXT = 3;
 
-  it("every ramp step clears AA for its monogram", () => {
-    for (const fill of avatarRamp()) {
-      // `avatarTextColor` is a pure function of the *sender*, so walk the ramp by
-      // finding a domain that hashes to each step rather than guessing addresses.
-      const sender = senderForRampStep(avatarRamp().indexOf(fill));
-      expect(avatarColor(sender), "ramp walk missed a step").toBe(fill);
-      expect(
-        contrastRatio(avatarTextColor(sender), fill),
-        `${avatarTextColor(sender)} on ${fill}`,
-      ).toBeGreaterThanOrEqual(AA_TEXT);
+  for (const name of SCHEMES) {
+    it(`${name}: reads as text on every surface`, () => {
+      const { accent } = paletteFor(name).color;
+      for (const backdrop of opaqueSurfaces(name)) {
+        expect(contrastRatio(accent, backdrop), `${name}: accent on ${backdrop}`).toBeGreaterThanOrEqual(
+          AA_TEXT,
+        );
+      }
+    });
+
+    it(`${name}: the focus ring is visible on every surface`, () => {
+      const { focusRing } = paletteFor(name).color;
+      expect(focusRing.startsWith("#"), "the ring must be opaque to be measured").toBe(true);
+      for (const backdrop of opaqueSurfaces(name)) {
+        expect(contrastRatio(focusRing, backdrop)).toBeGreaterThanOrEqual(AA_NON_TEXT);
+      }
+    });
+
+    it(`${name}: a primary button's label is readable on the accent`, () => {
+      const { accent, onAccent } = paletteFor(name).color;
+      expect(contrastRatio(onAccent, accent)).toBeGreaterThanOrEqual(AA_TEXT);
+    });
+  }
+
+  it("is not the generic blue or purple", () => {
+    for (const name of SCHEMES) {
+      const hex = paletteFor(name).color.accent;
+      const n = Number.parseInt(hex.slice(1), 16);
+      const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      expect(b, `${name}: ${hex} leans blue`).toBeLessThan(Math.max(r, g));
     }
   });
-
-  it("a sender's avatar is stable", () => {
-    expect(avatarColor("ada@northwind.example")).toBe(avatarColor("ada@northwind.example"));
-  });
-
-  it("two people at one company share a colour, and two companies do not collide", () => {
-    expect(avatarColor("ada@northwind.example")).toBe(avatarColor("grace@northwind.example"));
-    expect(avatarColor("ada@northwind.example")).not.toBe(avatarColor("dana@quarrylane.example"));
-  });
 });
-
-/**
- * An address that lands on a given ramp step.
- *
- * Written out rather than hardcoded because the ramp is hashed by domain, so a
- * hand-picked list of example addresses would silently stop covering every step the
- * moment the ramp or the hash changed — and the test would still pass, testing four of
- * six colours.
- */
-function senderForRampStep(index: number): string {
-  // The hash runs over the *domain*, so the local part is fixed and the domain
-  // varies. Six steps out of six, so a few hundred candidates is plenty.
-  for (let candidate = 0; candidate < 10_000; candidate += 1) {
-    const sender = `probe@host${candidate}.test`;
-    if (avatarColor(sender) === avatarRamp()[index]) return sender;
-  }
-  throw new Error(`no domain hashes to ramp step ${index}`);
-}
 
 describe("scheme resolution", () => {
   it("follows the OS when the preference is system", () => {
@@ -247,5 +238,54 @@ describe("Tailwind colour tokens", () => {
       [...new Set(offenders)],
       "token colours are CSS variables; `/opacity` silently drops the declaration",
     ).toEqual([]);
+  });
+});
+
+describe("the design system stays small", () => {
+  /**
+   * Class-name rules over every component, comments stripped.
+   *
+   * The scale and the radii are overridden in `tailwind.config.js`, so `text-sm` or
+   * `rounded-lg` would compile to *nothing* rather than to a near miss — quiet, like the
+   * opacity bug above. These are the patterns that used to be everywhere.
+   */
+  const srcDir = new URL("../", import.meta.url);
+  const files = [new URL("App.tsx", srcDir)];
+  const walk = (dir: URL): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const child = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dir);
+      if (entry.isDirectory()) walk(child);
+      else if (entry.name.endsWith(".tsx")) files.push(child);
+    }
+  };
+  walk(srcDir);
+  const sources = files
+    .map((url) => readFileSync(url, "utf8"))
+    .map((source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""))
+    .join("\n");
+
+  const offenders = (pattern: RegExp): string[] => [
+    ...new Set([...sources.matchAll(pattern)].map((match) => match[0])),
+  ];
+
+  it("uses only the four type sizes", () => {
+    expect(offenders(/\btext-\[\d+(?:\.\d+)?px\]/g)).toEqual([]);
+    expect(offenders(/\btext-(?:xs|sm|base|lg|[2-9]?xl)\b/g)).toEqual([]);
+  });
+
+  it("uses only the two radii", () => {
+    expect(offenders(/\brounded(?:-[trblse]{1,2})?-(?:sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g)).toEqual([]);
+    // A bare `rounded` has no value in the overridden scale, so it renders square.
+    expect(offenders(/\brounded(?=["'`\s])/g)).toEqual([]);
+  });
+
+  it("draws no shadows", () => {
+    expect(offenders(/\bshadow-(?:sm|md|lg|xl|2xl|inner)\b/g)).toEqual([]);
+    expect(offenders(/\bdrop-shadow\b/g)).toEqual([]);
+  });
+
+  it("has no letter-spaced capitals", () => {
+    expect(offenders(/\buppercase\b/g)).toEqual([]);
+    expect(offenders(/\btracking-(?:wide|wider|widest|\[[^\]]+\])/g)).toEqual([]);
   });
 });
