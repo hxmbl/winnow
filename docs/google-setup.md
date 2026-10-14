@@ -42,7 +42,7 @@ consent screen**).
    | Scope | When Winnow asks | What for |
    | --- | --- | --- |
    | `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, archive and send your mail |
-   | `https://www.googleapis.com/auth/contacts.readonly` | only if you opt in, later | your saved contacts, in recipient suggestions |
+   | `https://www.googleapis.com/auth/contacts.readonly` | only if you opt in, later | your saved contacts, in recipient suggestions (and their photos in sender avatars) |
    | `https://www.googleapis.com/auth/contacts.other.readonly` | only if you opt in, later | "other contacts" (people you've written to), in recipient suggestions |
 
    Sign-in asks for `gmail.modify` and nothing else. The two contact scopes are only
