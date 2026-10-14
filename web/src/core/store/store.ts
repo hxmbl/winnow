@@ -18,6 +18,7 @@
  * Ported from `legacy/swift-native/Sources/winnow/Store/WinnowStore.swift`.
  */
 
+import { summarizeAttention, type AttentionSummary } from "../classify/attention";
 import { MAILBOX_LABEL, type Email, type Mailbox } from "../model/email";
 import {
   BUILTIN_FILTERS,
@@ -324,6 +325,11 @@ export type MailboxView = {
   inboxCounts: ReadonlyMap<BuiltinSmartFilter, number>;
   /** Messages per sender, over the inbox, for the sender pills. */
   inboxSenderCounts: ReadonlyMap<string, number>;
+  /**
+   * What in the inbox needs attention, for the triage line. Over the inbox for the same
+   * reason as `inboxCounts`: it is a claim about your mail, not about the current filter.
+   */
+  attention: AttentionSummary;
   selected: Email | null;
   conversation: Email[];
   unreadCount: number;
@@ -768,6 +774,8 @@ export class WinnowStore {
     // claim about the user's mail, not the current result set.
     const inboxCounts = countAllFilters(inboxForProfile, inboxSignals, profile);
 
+    const attention = summarizeAttention(inboxForProfile, inboxSignals, state.now);
+
     const inboxSenderCounts = new Map<string, number>();
     for (const email of inboxForProfile) {
       inboxSenderCounts.set(email.sender, (inboxSenderCounts.get(email.sender) ?? 0) + 1);
@@ -809,6 +817,7 @@ export class WinnowStore {
       rail: railWithActive,
       inboxCounts,
       inboxSenderCounts,
+      attention,
       selected,
       conversation,
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
@@ -1866,7 +1875,7 @@ export class WinnowStore {
       await this.backend.sendReply(draft, inReplyTo);
       this.set({ error: null });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The reply could not be sent.";
+      const message = error instanceof Error ? error.message : "Couldn't send that reply.";
       // Also surfaced app-wide, because this one *is* the app's problem rather than the
       // composer's: a network failure while sending is not the user's doing and will
       // recur on the next message.
