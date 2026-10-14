@@ -21,7 +21,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LogIn, RefreshCw, X } from "lucide-react";
-import { NO_CURSOR, WinnowStore, MAILBOX_ORDER, type Snapshot } from "./core/store/store";
+import {
+  NO_CURSOR,
+  STORAGE_PROMPT,
+  STORAGE_SAVE_FAILED,
+  WinnowStore,
+  MAILBOX_ORDER,
+  type Snapshot,
+} from "./core/store/store";
 import { commandForKey, shouldSwallow, type KeyContext } from "./core/mail/keybinds";
 import {
   badgeFilters,
@@ -1217,6 +1224,53 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/*
+        The offline-storage question.
+
+        A prompt, not a notice: the last sync could not write the offline cache, and the
+        answer decides what happens — "Save" asks for persistent storage and retries the
+        write, "Not now" keeps re-downloading on launch for the rest of this session.
+      */}
+      {snapshot.storagePrompt !== null && (
+        <div
+          role={snapshot.storagePrompt === "failed" ? "status" : "alertdialog"}
+          aria-label="Save this mailbox offline"
+          className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body"
+        >
+          <span className="min-w-0">
+            {snapshot.storagePrompt === "failed" ? STORAGE_SAVE_FAILED : STORAGE_PROMPT}
+          </span>
+          {snapshot.storagePrompt === "failed" ? (
+            <button
+              type="button"
+              onClick={store.dismissStoragePrompt.bind(store)}
+              className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              Dismiss
+            </button>
+          ) : (
+            <span className="flex shrink-0 items-center gap-3">
+              <button
+                type="button"
+                disabled={snapshot.storagePrompt === "saving"}
+                onClick={() => void store.saveMailboxOffline()}
+                className="font-semibold text-ink hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
+              >
+                {snapshot.storagePrompt === "saving" ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                disabled={snapshot.storagePrompt === "saving"}
+                onClick={store.declineMailboxStorage.bind(store)}
+                className="font-semibold text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
+              >
+                Not now
+              </button>
+            </span>
+          )}
         </div>
       )}
 

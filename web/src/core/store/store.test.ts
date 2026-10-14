@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   NO_CURSOR,
+  PREFETCH_UNREAD_TOP_N,
+  STORAGE_PROMPT,
+  STORAGE_SAVE_FAILED,
   WinnowStore,
   syncFailureSummary,
   syncNotice,
@@ -1463,19 +1466,19 @@ describe("syncNotice", () => {
     expect(syncNotice({ truncated: true })).toMatch(/more than Winnow will walk/);
   });
 
-  it("reports a cache that could not be written", () => {
-    // The flag is worthless if it never reaches the user, and it reaches them through this
-    // string. Before, the `QuotaExceededError` was discarded inside the cache and the app
-    // reported a healthy sync while the offline copy of a large mailbox was never written.
-    expect(syncNotice({ truncated: false, cacheUnpersisted: true })).toMatch(
+  it("no longer carries the cache failure — that is a question now, not a note", () => {
+    // The flag reaches the user through `storagePrompt` (see the "offline storage
+    // prompt" suite), so the passive note must not repeat it.
+    expect(syncNotice({ truncated: false, cacheUnpersisted: true })).toBeNull();
+    expect(syncNotice({ truncated: false, cacheUnpersisted: true }) ?? "").not.toMatch(
       /too large to save offline/,
     );
   });
 
-  it("carries both when both happened", () => {
+  it("keeps the truncated note separate from the storage question", () => {
     const notice = syncNotice({ truncated: true, cacheUnpersisted: true });
     expect(notice).toMatch(/more than Winnow will walk/);
-    expect(notice).toMatch(/too large to save offline/);
+    expect(notice).not.toMatch(/save/i);
   });
 
   it("stays quiet when a cache that was never flushed reports nothing", () => {
@@ -1755,5 +1758,244 @@ describe("Google contacts in the contact index", () => {
     store.markDemoMode();
     expect(store.getSnapshot().contactsAccess).toBe("demo");
     expect(store.getSnapshot().googleContacts).toEqual(google);
+  });
+});
+
+describe("offline storage prompt", () => {
+  /** A backend whose sync never persists the cache, and whose `persistCache` answers `saves`. */
+  function unpersistedBackend(saves: boolean[]) {
+    const calls: string[] = [];
+    const backend: MailBackend = {
+      async sync() {
+        return { emails: [...DEMO_EMAILS], failed: 0, truncated: true, cacheUnpersisted: true };
+      },
+      async toggleStar() {},
+      async moveToMailbox() {},
+      async setRead() {},
+      async deletePermanently() {},
+      async sendReply() {},
+      async fetchBody() {
+        return undefined;
+      },
+      async fetchAttachment() {
+        return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
+      },
+      async persistCache() {
+        calls.push("persistCache");
+        return saves.shift() ?? false;
+      },
+    };
+    return { backend, calls };
+  }
+
+  it("asks the owner's exact question, separately from the truncated note", async () => {
+    const store = demoStore();
+    await store.connect(unpersistedBackend([]).backend, { email: "user@example.com" });
+    const snapshot = store.getSnapshot();
+    expect(snapshot.storagePrompt).toBe("ask");
+    expect(STORAGE_PROMPT).toBe(
+      "This is a large mailbox, Winnow requires them to be saved, are you sure you would like to save this?",
+    );
+    expect(snapshot.notice).toMatch(/more than Winnow will walk/);
+    expect(snapshot.notice).not.toContain(STORAGE_PROMPT);
+  });
+
+  it("Save: asks the backend to persist and clears the question when it lands", async () => {
+    const store = demoStore();
+    const { backend, calls } = unpersistedBackend([true]);
+    await store.connect(backend, { email: "user@example.com" });
+
+    const saving = store.saveMailboxOffline();
+    expect(store.getSnapshot().storagePrompt).toBe("saving");
+    await saving;
+
+    expect(calls).toEqual(["persistCache"]);
+    expect(store.getSnapshot().storagePrompt).toBeNull();
+  });
+
+  it("Save: shows a short failure line when the write still fails, and it can be dismissed", async () => {
+    const store = demoStore();
+    const { backend } = unpersistedBackend([false]);
+    await store.connect(backend, { email: "user@example.com" });
+
+    await store.saveMailboxOffline();
+    expect(store.getSnapshot().storagePrompt).toBe("failed");
+    expect(STORAGE_SAVE_FAILED.length).toBeLessThan(90);
+
+    store.dismissStoragePrompt();
+    expect(store.getSnapshot().storagePrompt).toBeNull();
+  });
+
+  it("Save: a backend that throws counts as a failed save, not a crash", async () => {
+    const store = demoStore();
+    const { backend } = unpersistedBackend([]);
+    backend.persistCache = async () => {
+      throw new Error("quota");
+    };
+    await store.connect(backend, { email: "user@example.com" });
+    await store.saveMailboxOffline();
+    expect(store.getSnapshot().storagePrompt).toBe("failed");
+  });
+
+  it("Not now: dismisses for the session, so the next sync does not ask again", async () => {
+    const store = demoStore();
+    const { backend, calls } = unpersistedBackend([]);
+    await store.connect(backend, { email: "user@example.com" });
+    expect(store.getSnapshot().storagePrompt).toBe("ask");
+
+    store.declineMailboxStorage();
+    expect(store.getSnapshot().storagePrompt).toBeNull();
+
+    await store.refresh();
+    expect(store.getSnapshot().storagePrompt).toBeNull();
+    // And nothing was written: "Not now" keeps the re-download behaviour.
+    expect(calls).toEqual([]);
+  });
+
+  it("goes away on its own once a sync persists the cache", async () => {
+    const store = demoStore();
+    const { backend } = unpersistedBackend([]);
+    await store.connect(backend, { email: "user@example.com" });
+    backend.sync = async () => ({ emails: [...DEMO_EMAILS], failed: 0, truncated: false });
+    await store.refresh();
+    expect(store.getSnapshot().storagePrompt).toBeNull();
+  });
+});
+
+describe("metadata-first bodies", () => {
+  /** Live-looking messages with no body loaded: the shape a metadata sync produces. */
+  function metadataOnly(count: number): Email[] {
+    return Array.from({ length: count }, (_, i) => ({
+      id: 10_000 + i,
+      gmailId: `m${i}`,
+      threadId: `t${i}`,
+      sender: `person${i}@mail.test`,
+      mailbox: "inbox" as const,
+      receivedAt: 1_000_000 - i * 1000,
+      subject: `Subject ${i}`,
+      body: `snippet ${i}`,
+      category: "primary" as const,
+      starred: false,
+      unread: i % 2 === 0,
+      attachments: [],
+      urgent: false,
+      bodyLoaded: false,
+    }));
+  }
+
+  function lazyBackend(emails: Email[], options: { partial?: boolean } = {}) {
+    const loads: string[] = [];
+    const pending = new Map<string, () => void>();
+    const backend: MailBackend = {
+      async sync(sync) {
+        if (options.partial) sync?.onPartial?.(emails.slice(0, 3));
+        return { emails: [...emails], failed: 0, truncated: false };
+      },
+      async toggleStar() {},
+      async moveToMailbox() {},
+      async setRead() {},
+      async deletePermanently() {},
+      async sendReply() {},
+      async fetchBody() {
+        throw new Error("a metadata-only message must load through loadMessage");
+      },
+      async fetchAttachment() {
+        return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
+      },
+      async loadMessage(gmailId) {
+        if (!loads.includes(gmailId)) loads.push(gmailId);
+        return {
+          body: `the whole body of ${gmailId}`,
+          bodyHtml: `<p>${gmailId}</p>`,
+          attachments: [
+            { id: `att-${gmailId}`, partId: "1", filename: "a.pdf", mimeType: "application/pdf", size: 1, inline: false },
+          ],
+        };
+      },
+    };
+    return { backend, loads, pending };
+  }
+
+  it("treats a metadata-only message as not loaded, then loads the whole body on open", async () => {
+    const emails = metadataOnly(6);
+    const store = new WinnowStore();
+    const { backend, loads } = lazyBackend(emails);
+    await store.connect(backend, { email: "user@example.com" });
+    loads.length = 0;
+
+    const target = emails[1];
+    expect(store.hasLoadedBody(target.id)).toBe(false);
+    await store.loadBody(target.id);
+
+    expect(loads[0]).toBe("m1");
+    expect(store.hasLoadedBody(target.id)).toBe(true);
+    const loaded = store.getSnapshot().all.find((email) => email.id === target.id)!;
+    expect(loaded.bodyLoaded).toBe(true);
+    expect(loaded.body).toBe("the whole body of m1");
+    expect(loaded.attachments).toHaveLength(1);
+  });
+
+  it("prefetches unread inbox mail after a sync, at low priority", async () => {
+    const emails = metadataOnly(PREFETCH_UNREAD_TOP_N + 10);
+    const store = new WinnowStore();
+    const { backend, loads } = lazyBackend(emails);
+    await store.connect(backend, { email: "user@example.com" });
+    await vi.waitFor(() => expect(loads.length).toBe(PREFETCH_UNREAD_TOP_N / 2));
+    // Only unread, and only within the top N.
+    for (const id of loads) {
+      const index = Number(id.slice(1));
+      expect(index % 2).toBe(0);
+      expect(index).toBeLessThan(PREFETCH_UNREAD_TOP_N);
+    }
+  });
+
+  it("an opened message overtakes the queued prefetch", async () => {
+    const emails = metadataOnly(40);
+    const store = new WinnowStore();
+    const { backend, loads } = lazyBackend(emails);
+    // Hold every load until released, so the queue's order is observable.
+    const gates: (() => void)[] = [];
+    const inner = backend.loadMessage!;
+    backend.loadMessage = async (gmailId) => {
+      loads.push(gmailId);
+      await new Promise<void>((resolve) => gates.push(resolve));
+      return inner(gmailId);
+    };
+    await store.connect(backend, { email: "user@example.com" });
+    // Two prefetches are on the wire (the concurrency cap); the rest are queued.
+    await vi.waitFor(() => expect(loads).toHaveLength(2));
+
+    const opened = emails[39];
+    const open = store.loadBody(opened.id);
+    gates.shift()!();
+    await vi.waitFor(() => expect(loads).toHaveLength(3));
+    // The next request out is the opened message, ahead of every queued prefetch.
+    expect(loads[2]).toBe("m39");
+    while (gates.length > 0 || !store.hasLoadedBody(opened.id)) {
+      gates.shift()?.();
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await open;
+    loads.splice(0); // the rest of the prefetch drains on its own
+  });
+
+  it("puts the inbox on screen from a partial sync, before the sync finishes", async () => {
+    const emails = metadataOnly(10);
+    const store = new WinnowStore();
+    let seenDuringSync: number | null = null;
+    let statusDuringSync: string | null = null;
+    const { backend } = lazyBackend(emails);
+    backend.sync = async (sync) => {
+      sync?.onPartial?.(emails.slice(0, 3));
+      seenDuringSync = store.getSnapshot().all.length;
+      statusDuringSync = store.getSnapshot().status;
+      return { emails: [...emails], failed: 0, truncated: false };
+    };
+    await store.connect(backend, { email: "user@example.com" });
+    expect(seenDuringSync).toBe(3);
+    // A first sign-in stops saying "loading" the moment there is something to show.
+    expect(statusDuringSync).toBe("ready");
+    expect(store.getSnapshot().all).toHaveLength(10);
   });
 });

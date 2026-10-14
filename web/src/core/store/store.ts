@@ -19,7 +19,14 @@
  */
 
 import { summarizeAttention, type AttentionSummary } from "../classify/attention";
-import { MAILBOX_LABEL, type Email, type Mailbox } from "../model/email";
+import {
+  MAILBOX_LABEL,
+  isBodyLoaded,
+  withLoadedBody,
+  type Email,
+  type LoadedBody,
+  type Mailbox,
+} from "../model/email";
 import {
   BUILTIN_FILTERS,
   catalogIndex,
@@ -61,6 +68,7 @@ import {
   type AccentTheme,
   type Appearance,
 } from "../model/appearance";
+import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
 
 /** The five mailboxes, in the order the sidebar shows them. */
 export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
@@ -101,6 +109,41 @@ const CLOCK_INTERVAL_MS = 60_000;
 const BODY_RETENTION = 500;
 
 /**
+ * Background body prefetch: how many of the newest inbox messages are scanned for
+ * unread mail whose body has not been loaded yet. Unread mail is what gets opened
+ * next, and its body is also what the classifier reads best.
+ */
+export const PREFETCH_UNREAD_TOP_N = 50;
+
+/** How many rows either side of an opened message have their body prefetched. */
+export const PREFETCH_NEIGHBOURS = 2;
+
+/**
+ * Bodies in flight at once. Small on purpose: prefetch shares the quota bucket with
+ * sync, and an opened message (high priority) must never wait behind more than this.
+ */
+const BODY_CONCURRENCY = 2;
+
+/** How long background-loaded bodies wait to be applied together, so a burst reclassifies once. */
+const BODY_APPLY_DELAY_MS = 400;
+
+/** The question asked when the offline cache could not be written. Wording is the owner's. */
+export const STORAGE_PROMPT =
+  "This is a large mailbox, Winnow requires them to be saved, are you sure you would like to save this?";
+
+/** Shown when "Save" was tried and the cache still would not write. */
+export const STORAGE_SAVE_FAILED =
+  "Still couldn't save this mailbox offline. It will re-download next launch.";
+
+/**
+ * Where the offline-storage question stands.
+ *
+ * `ask` — the last sync could not persist the cache and the user has not answered.
+ * `saving` — "Save" is in progress. `failed` — it was tried and did not work.
+ */
+export type StoragePrompt = "ask" | "saving" | "failed";
+
+/**
  * Split a synced mailbox into its messages and its resident HTML bodies.
  *
  * The bodies are held *beside* `state.all` rather than inside it: attaching one to a
@@ -122,9 +165,10 @@ function partitionBodies(emails: readonly Email[]): {
   let changed = false;
 
   for (const email of byRecency.slice(0, BODY_RETENTION)) {
-    // Every message in the window counts as settled, not just the ones with HTML: the
-    // sync already walked them all, so recording that stops the reader asking again
-    // for a plain-text message it opens.
+    // Every loaded message in the window counts as settled, not just the ones with
+    // HTML: recording that stops the reader asking again for a plain-text message it
+    // opens. A metadata-only row is not settled — its body has never been fetched.
+    if (!isBodyLoaded(email)) continue;
     checked.add(email.id);
     if (email.bodyHtml !== undefined) bodies.set(email.id, email.bodyHtml);
   }
@@ -293,6 +337,14 @@ export type StoreState = {
   /** Ids that arrived in the last sync, for the "new" marker. */
   recentIds: ReadonlySet<number>;
   /**
+   * The offline-cache question, or `null` when there is nothing to ask.
+   *
+   * A prompt rather than a passive notice, because the answer changes what happens:
+   * "Save" asks the platform for persistent storage and retries the write, "Not now"
+   * keeps the re-download-next-launch behaviour for the rest of the session.
+   */
+  storagePrompt: StoragePrompt | null;
+  /**
    * The reference instant the list's day sections are computed against.
    *
    * A property rather than a `Date.now()` at the point of use: the demo mailbox is
@@ -373,7 +425,14 @@ export interface MailBackend {
    * downloads thousands of messages and a callback that re-rendered per message would
    * make the app unusable during the one operation it is least able to hide.
    */
-  sync(options?: { onProgress?: (progress: SyncProgress) => void }): Promise<SyncOutcome>;
+  sync(options?: {
+    onProgress?: (progress: SyncProgress) => void;
+    /**
+     * The mailbox so far, while the sync is still running — the inbox first, as soon as
+     * it has a screenful. Optional: a backend that cannot publish early simply doesn't.
+     */
+    onPartial?: (emails: Email[]) => void;
+  }): Promise<SyncOutcome>;
   toggleStar(id: number, starred: boolean): Promise<void>;
   moveToMailbox(id: number, mailbox: Mailbox): Promise<void>;
   setRead(id: number, read: boolean): Promise<void>;
@@ -401,6 +460,22 @@ export interface MailBackend {
    * none, and the reader falls back to the body it already has.
    */
   fetchBody(gmailId: string): Promise<string | undefined>;
+  /**
+   * The whole body of a metadata-only message — plain text, HTML and attachments —
+   * written into the offline cache as well as returned.
+   *
+   * Optional so a backend that only ever syncs whole messages (and the test doubles
+   * written before metadata-first sync) need not implement it; without it the store
+   * falls back to `fetchBody`.
+   */
+  loadMessage?(gmailId: string): Promise<LoadedBody>;
+  /**
+   * Try again to write the offline cache, after asking the platform to keep it.
+   *
+   * On the web this requests persistent storage first (`navigator.storage.persist()`);
+   * on the desktop it just retries. `true` when the cache landed.
+   */
+  persistCache?(): Promise<boolean>;
 }
 
 /** What one sync produced. */
@@ -527,6 +602,16 @@ export class WinnowStore {
   /** Bodies whose last fetch failed. Not an answer (opening again retries), but the reader stops saying "Loading". */
   private bodyFailed = new Set<number>();
 
+  /** Body fetches, opened-message first. See `BODY_CONCURRENCY`. */
+  private bodyQueue = new TaskQueue(BODY_CONCURRENCY);
+
+  /** Background-loaded bodies waiting to be applied to `state.all` in one pass. */
+  private pendingBodies = new Map<number, LoadedBody>();
+  private bodyApplyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** "Not now" on the storage question, for the rest of this session. */
+  private storageDeclined = false;
+
   /**
    * The binned senders, kept separately from the message list.
    *
@@ -585,6 +670,7 @@ export class WinnowStore {
       lastSyncedAt: null,
       truncated: false,
       recentIds: new Set(),
+      storagePrompt: null,
       now: options.now ?? Date.now(),
     };
   }
@@ -1088,6 +1174,7 @@ export class WinnowStore {
 
     try {
       const result = await backend.sync({
+        onPartial: (emails) => this.applyPartial(emails, initial),
         onProgress: (progress) => {
           // Progress arrives on the engine's schedule, so it is written to state
           // *without* notifying: a first sync of two thousand messages would otherwise
@@ -1117,7 +1204,8 @@ export class WinnowStore {
 
       const { emails, bodies, checked } = partitionBodies(result.emails);
       // Replaced wholesale rather than merged: a sync is a fresh reading, and a body
-      // resident for a message that has since left is memory nobody is using.
+      // resident for a message that has since left is memory nobody is using. Bodies
+      // loaded *during* the sync are in the cache, so they are in `result.emails` too.
       this.bodies = bodies;
       this.bodyChecked = checked;
       this.bodyFailed = new Set();
@@ -1132,11 +1220,19 @@ export class WinnowStore {
         recentIds: recent,
         truncated: result.truncated,
         notice: syncNotice(result),
+        storagePrompt: result.cacheUnpersisted
+          ? this.storageDeclined
+            ? null
+            : this.state.storagePrompt === "failed"
+              ? "failed"
+              : "ask"
+          : null,
         error: result.failed > 0 ? syncFailureSummary(result.failed) : null,
       });
 
       if (!initial) await this.notifyIfNew(recent);
       await this.applyPlatform();
+      this.prefetchInbox();
     } catch (error) {
       this.set({
         status: "error",
@@ -1146,6 +1242,59 @@ export class WinnowStore {
       });
       throw error;
     }
+  }
+
+  /**
+   * Show the mailbox a sync has so far, while it carries on.
+   *
+   * The inbox-first half of the sync: the engine publishes the inbox as soon as it has
+   * a screenful, and this puts it on screen — leaving `syncing` set so the status line
+   * still says the rest is coming. A first sign-in leaves `loading` here, which is the
+   * whole point. Bodies already resident are kept (a partial is a subset of the truth,
+   * not a replacement for it), and nothing is announced as new until the sync is done.
+   */
+  private applyPartial(emails: Email[], initial: boolean): void {
+    if (!this.backend || !this.state.syncing) return;
+    const partition = partitionBodies(emails);
+    for (const [id, html] of partition.bodies) this.bodies.set(id, html);
+    for (const id of partition.checked) this.bodyChecked.add(id);
+    this.set({
+      all: partition.emails,
+      ...(initial && this.state.status === "loading" ? { status: "ready" as const } : {}),
+    });
+  }
+
+  // ── Offline storage ───────────────────────────────────────────────────────
+
+  /**
+   * "Save": ask for persistent storage and write the cache again.
+   *
+   * On success the question goes away; on failure it becomes a one-line failure the
+   * user can dismiss. Either way nothing about the mailbox in memory changes.
+   */
+  async saveMailboxOffline(): Promise<void> {
+    if (this.state.storagePrompt === "saving") return;
+    const backend = this.backend;
+    this.set({ storagePrompt: "saving" });
+    let saved = false;
+    try {
+      saved = (await backend?.persistCache?.()) ?? false;
+    } catch {
+      saved = false;
+    }
+    this.set({ storagePrompt: saved ? null : "failed" });
+  }
+
+  /** "Not now": stop asking for this session, and keep re-downloading on launch. */
+  declineMailboxStorage(): void {
+    this.storageDeclined = true;
+    if (this.state.storagePrompt !== null) this.set({ storagePrompt: null });
+  }
+
+  /** Dismiss the failure line left by a "Save" that did not work. */
+  dismissStoragePrompt(): void {
+    if (this.state.storagePrompt === null) return;
+    this.set({ storagePrompt: null });
   }
 
   /**
@@ -1941,22 +2090,38 @@ export class WinnowStore {
    * - **`state.all` is not touched.** The body goes into `bodies` and the view is
    *   re-derived, leaving the classification memo intact — see `partitionBodies`.
    */
-  loadBody(id: number): Promise<void> {
+  loadBody(id: number, priority: Priority = "high"): Promise<void> {
     const existing = this.bodyInFlight.get(id);
     if (existing) return existing;
-    if (this.bodyChecked.has(id)) return Promise.resolve();
+    if (this.bodyChecked.has(id)) {
+      if (priority === "high") this.prefetchAround(id);
+      return Promise.resolve();
+    }
 
     const backend = this.backend;
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!backend || !email) return Promise.resolve();
 
+    // A metadata-only row needs its whole body, not just its HTML: the plain text is a
+    // snippet stand-in and the attachment list is empty until it lands.
+    const whole = !isBodyLoaded(email) && backend.loadMessage !== undefined;
+
     this.bodyFailed.delete(id);
     const request = (async () => {
       try {
-        const bodyHtml = await backend.fetchBody(email.gmailId);
-        this.bodyChecked.add(id);
-        if (bodyHtml !== undefined) this.bodies.set(id, bodyHtml);
-      } catch {
+        if (whole) {
+          const loaded = await this.bodyQueue.push(() => backend.loadMessage!(email.gmailId), priority);
+          this.bodyChecked.add(id);
+          if (loaded.bodyHtml !== undefined) this.bodies.set(id, loaded.bodyHtml);
+          this.applyLoadedBody(id, loaded, priority === "high");
+        } else {
+          const bodyHtml = await this.bodyQueue.push(() => backend.fetchBody(email.gmailId), priority);
+          this.bodyChecked.add(id);
+          if (bodyHtml !== undefined) this.bodies.set(id, bodyHtml);
+        }
+      } catch (error) {
+        // A dropped prefetch (sign-out, demo) is not a failure of anything.
+        if (error instanceof TaskCancelled) return;
         // A body that will not load is not a sync failure or an error banner: the message
         // still opens, showing the plain text it has. Left out of `bodyChecked` so opening
         // it again can retry. Remembered as failed so the reader stops promising a
@@ -1971,7 +2136,110 @@ export class WinnowStore {
     })();
 
     this.bodyInFlight.set(id, request);
+    if (priority === "high") this.prefetchAround(id);
     return request;
+  }
+
+  /**
+   * Put a loaded body into `state.all`.
+   *
+   * Unlike the HTML side-map this does change `all` — the plain text is what the
+   * classifier and search read, so a body that stayed out of `all` would leave the
+   * message classified on its snippet forever. The opened message is applied at once
+   * (the reader is waiting on it); background bodies are gathered for
+   * `BODY_APPLY_DELAY_MS` and applied together, so a prefetch burst costs one
+   * reclassification rather than one per message.
+   */
+  private applyLoadedBody(id: number, loaded: LoadedBody, now: boolean): void {
+    this.pendingBodies.set(id, loaded);
+    if (now) {
+      this.flushLoadedBodies();
+      return;
+    }
+    if (this.bodyApplyTimer !== null) return;
+    this.bodyApplyTimer = setTimeout(() => {
+      this.bodyApplyTimer = null;
+      this.flushLoadedBodies();
+    }, BODY_APPLY_DELAY_MS);
+  }
+
+  private flushLoadedBodies(): void {
+    if (this.bodyApplyTimer !== null) {
+      clearTimeout(this.bodyApplyTimer);
+      this.bodyApplyTimer = null;
+    }
+    if (this.pendingBodies.size === 0) return;
+    const pending = this.pendingBodies;
+    this.pendingBodies = new Map();
+    let changed = false;
+    const all = this.state.all.map((email) => {
+      const loaded = pending.get(email.id);
+      if (!loaded) return email;
+      changed = true;
+      // `bodyHtml` stays in the side-map; see `partitionBodies`.
+      return { ...withLoadedBody(email, loaded), bodyHtml: undefined };
+    });
+    if (changed) this.set({ all });
+  }
+
+  /**
+   * Queue background body loads, lowest priority, for messages that need one.
+   *
+   * Anything already loaded, settled, in flight or failed this session is skipped, so
+   * calling this freely (after every sync, on every open) costs nothing extra.
+   */
+  prefetchBodies(ids: readonly number[]): void {
+    if (!this.backend?.loadMessage) return;
+    const byId = new Map(this.state.all.map((email) => [email.id, email]));
+    for (const id of ids) {
+      const email = byId.get(id);
+      if (!email || isBodyLoaded(email)) continue;
+      if (this.bodyChecked.has(id) || this.bodyInFlight.has(id) || this.bodyFailed.has(id)) continue;
+      void this.loadBody(id, "low");
+    }
+  }
+
+  /** Forget queued body work: the account it was for is gone. */
+  private dropBodyWork(): void {
+    this.bodyQueue.clear();
+    this.pendingBodies.clear();
+    if (this.bodyApplyTimer !== null) clearTimeout(this.bodyApplyTimer);
+    this.bodyApplyTimer = null;
+  }
+
+  /** After a sync: unread mail among the newest `PREFETCH_UNREAD_TOP_N` in the inbox. */
+  private prefetchInbox(): void {
+    const top = this.state.all
+      .filter((email) => email.mailbox === "inbox")
+      .sort((a, b) => b.receivedAt - a.receivedAt)
+      .slice(0, PREFETCH_UNREAD_TOP_N)
+      .filter((email) => email.unread);
+    this.prefetchBodies(top.map((email) => email.id));
+  }
+
+  /**
+   * After an open: the rows either side in the list, and the rest of the conversation —
+   * the next things `j`/`k` or a click in the reader will want.
+   */
+  private prefetchAround(id: number): void {
+    if (!this.backend?.loadMessage) return;
+    const view = this.view;
+    const rows = view.threads.map((row) => row.representative.id);
+    const at = rows.indexOf(id);
+    const ids: number[] = [];
+    if (at >= 0) {
+      for (let step = 1; step <= PREFETCH_NEIGHBOURS; step += 1) {
+        if (rows[at + step] !== undefined) ids.push(rows[at + step]);
+        if (rows[at - step] !== undefined) ids.push(rows[at - step]);
+      }
+    }
+    const opened = this.state.all.find((email) => email.id === id);
+    if (opened?.threadId) {
+      for (const email of this.state.all) {
+        if (email.threadId === opened.threadId && email.id !== id) ids.push(email.id);
+      }
+    }
+    this.prefetchBodies(ids);
   }
 
   /**
@@ -2032,6 +2300,7 @@ export class WinnowStore {
     this.backend = undefined;
     this.pendingConnect = null;
     this.undoAction = null;
+    this.dropBodyWork();
     this.set({
       status: "ready",
       account: null,
@@ -2049,6 +2318,7 @@ export class WinnowStore {
       truncated: false,
       error: null,
       notice: null,
+      storagePrompt: null,
       lastSyncedAt: null,
       // The seed's reference instant (by default the fixed one; the app passes it moved
       // onto the real clock). The live wall clock would put the seed in "Earlier".
@@ -2075,6 +2345,7 @@ export class WinnowStore {
     this.backend = undefined;
     this.pendingConnect = null;
     this.undoAction = null;
+    this.dropBodyWork();
 
     // Park the background ticker *before* dropping the backend: on the desktop it is a
     // Rust thread that would otherwise keep firing every minute, calling `refresh` with
@@ -2105,6 +2376,7 @@ export class WinnowStore {
       truncated: false,
       error: null,
       notice: null,
+      storagePrompt: null,
       recentIds: new Set(),
       lastSyncedAt: null,
       ...keep,
@@ -2139,19 +2411,16 @@ export function syncFailureSummary(count: number): string {
  * dismissible and alarming, and "only some of your archive is here" is a permanent
  * property of the account, not something retry resolves.
  *
- * The cache notice is here for the same reason, and because silence was the
- * alternative that was tried: a mailbox too large for the origin's storage quota used
- * to discard the `QuotaExceededError` and carry on, so the app reported a healthy sync
- * while the offline cache had not been written once.
+ * A cache that could not be persisted used to be a note here too. It is now a
+ * question (`storagePrompt`), because the user's answer changes what happens next.
  */
 export function syncNotice(result: { truncated: boolean; cacheUnpersisted?: boolean }): string | null {
   const notes: string[] = [];
   if (result.truncated) {
     notes.push("Some mailboxes hold more than Winnow will walk, so older messages are not listed.");
   }
-  if (result.cacheUnpersisted) {
-    notes.push("This mailbox is too large to save offline, so it will re-download next launch.");
-  }
+  // `cacheUnpersisted` is not a note any more: it is a question with two answers, and
+  // lives in `storagePrompt` (see `STORAGE_PROMPT`).
   return notes.length > 0 ? notes.join(" ") : null;
 }
 
