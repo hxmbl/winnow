@@ -1015,10 +1015,11 @@ export class WinnowStore {
 
     const pinned = PERMANENT_FILTERS.filter((id) => !removed.has(id));
 
-    // An active bucket keeps its place: the categories are a sidebar list now, all on
-    // screen, and a row that jumped to the top when clicked would move away from the
-    // pointer and repoint the digit shortcuts. Only an active bucket the ranking left
-    // out is added, after the ranked ones and in catalog order, so it can be turned off.
+    // An active bucket keeps its place in the rail rather than being hoisted to the
+    // front: a tab that jumped when clicked would move away from the pointer and
+    // repoint the digit shortcuts. (The rail scrolls a newly active tab into the clear
+    // itself.) Only an active bucket the ranking left out is added, after the ranked
+    // ones and in catalog order, so it can be turned off.
     const placed = new Set([...pinned, ...ranked]);
     const extra = activeBuiltins
       .filter((id) => !placed.has(id))

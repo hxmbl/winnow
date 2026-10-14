@@ -1,15 +1,17 @@
 /**
- * The desktop list's header: search across the full width of the list column, then
- * where you are in the list.
+ * The desktop list's header: search across the full width of the list column with
+ * where you are in the list beside it, then the filter rail on its own row.
  *
- * Navigation is not here any more. The category tabs that used to run along the top of
- * the window, with their chevrons and fade, became the floating sidebar (`MailNav.tsx`),
- * and the logo with them. Search and the position cluster stay: both are about the
- * *list*, they were never navigation.
+ * The smart filters are the rail (`FilterStrip`), not sidebar rows: text tabs with
+ * their counts, ranked by the store, fading into a step chevron at either edge. It has
+ * the list column's full width to itself, so the search field can never sit over its
+ * last tab. Folders and the account are the floating sidebar's (`MailNav.tsx`).
  */
 
 import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { shortcutFor } from "../../core/mail/keybinds";
+import { FilterStrip, type PillItem } from "./FilterStrip";
+import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
 
 export type MastheadProps = {
   searchQuery: string;
@@ -21,6 +23,12 @@ export type MastheadProps = {
    * exact element. If the two diverge, `/` silently does nothing.
    */
   searchRef: React.RefObject<HTMLInputElement | null>;
+  pills: PillItem[];
+  activeFilters: readonly FilterId[];
+  onToggleFilter: (id: FilterId) => void;
+  onMute: (id: BuiltinSmartFilter) => void;
+  onRestoreFilter: (id: BuiltinSmartFilter) => void;
+  onClearFilters: () => void;
   position: number | null;
   total: number;
   /** "Inbox", "From ada@example.com", or "Filtered". Answerable: 40 of what? */
@@ -73,6 +81,12 @@ export function Masthead({
   searchQuery,
   onSearchChange,
   searchRef,
+  pills,
+  activeFilters,
+  onToggleFilter,
+  onMute,
+  onRestoreFilter,
+  onClearFilters,
   position,
   total,
   listTitle,
@@ -165,6 +179,21 @@ export function Masthead({
           </div>
         </div>
       </div>
+
+      {/*
+        The rail, on its own row under search. Inset to the list's own padding; the
+        fades and step chevrons dissolve into the list's surface.
+      */}
+      <FilterStrip
+        pills={pills}
+        activeFilters={activeFilters as FilterId[]}
+        onToggle={onToggleFilter}
+        onMute={onMute}
+        onRestore={onRestoreFilter}
+        onClear={onClearFilters}
+        tone="surface"
+        className="mx-2.5 pb-1"
+      />
     </header>
   );
 }

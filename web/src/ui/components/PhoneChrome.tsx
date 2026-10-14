@@ -1,11 +1,11 @@
 /**
  * The phone layout's chrome: a top bar and a bottom dock.
  *
- * Below `sm` the masthead is replaced rather than squeezed. The four places a thumb goes
- * most (Inbox, Sent, Archive, Settings) are the dock at the bottom of the screen; the top
- * keeps the mark, search, and the menu button, which opens the overflow menu
- * (`MailNav.tsx`) with every category and folder. There is no swipeable category row
- * above the dock any more: the categories live in that menu.
+ * Below `sm` the masthead is replaced rather than squeezed. Everything a thumb does often
+ * — narrowing by a smart filter, switching mailbox, opening Settings — is at the bottom
+ * of the screen: the swipeable filter chips sit just above the four tabs (Inbox, Sent,
+ * Archive, Settings). The top keeps the mark, search, and the menu button, which opens
+ * the overflow menu (`MailNav.tsx`) with every folder and the account.
  *
  * Flat on purpose, the same way the desktop chrome is: the bars are the canvas tone and
  * the list is the surface tone, so the boundary is a change in value with no rule, no
@@ -16,7 +16,9 @@
 import { Archive, Check, ChevronLeft, ChevronRight, Inbox, Menu, Search, Send, Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
+import { FilterStrip, type PillItem } from "./FilterStrip";
 import { PositionReadout } from "./Masthead";
+import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 
 const ROUND_BUTTON =
@@ -95,9 +97,9 @@ export function PhoneTopBar({
         </label>
 
         {/*
-          The menu: the overflow sheet it opens holds Inbox, every category with its
-          count, every folder (Trash and Spam included, which the dock has no room for),
-          the account and Settings. Signed in, it wears the account's initial.
+          The menu: the overflow sheet it opens holds Inbox, every folder (Trash and Spam
+          included, which the dock has no room for), the account and Settings. The smart
+          filters are not in it: they are the chip row above the dock. Signed in, it wears the account's initial.
         */}
         <button
           type="button"
@@ -162,6 +164,12 @@ const TABS: readonly { id: Mailbox | "settings"; label: string; Icon: LucideIcon
 ];
 
 export type PhoneDockProps = {
+  pills: PillItem[];
+  activeFilters: FilterId[];
+  onToggleFilter: (id: FilterId) => void;
+  onMute: (id: BuiltinSmartFilter) => void;
+  onRestoreFilter: (id: BuiltinSmartFilter) => void;
+  onClearFilters: () => void;
   mailbox: Mailbox;
   /** Unread per mailbox, for the tab's accessible name and its quiet count. */
   unread: Partial<Record<Mailbox, number>>;
@@ -171,6 +179,12 @@ export type PhoneDockProps = {
 };
 
 export function PhoneDock({
+  pills,
+  activeFilters,
+  onToggleFilter,
+  onMute,
+  onRestoreFilter,
+  onClearFilters,
   mailbox,
   unread,
   onSelectMailbox,
@@ -178,9 +192,25 @@ export function PhoneDock({
   onOpenSettings,
 }: PhoneDockProps) {
   return (
-    // One canvas-toned sheet with rounded top corners, holding the four tabs.
+    /*
+      One surface. The filter chips and the tabs are not two bars stacked on each other:
+      they share a single canvas-toned sheet with rounded top corners, and the only thing
+      between them is spacing.
+    */
     <div data-phone-dock="" className={DOCK_SURFACE}>
-      <nav aria-label="Primary" className="grid grid-cols-4 gap-1 px-2">
+      {/* The smart filters, just above the tabs where a thumb rests. */}
+      <FilterStrip
+        pills={pills}
+        activeFilters={activeFilters}
+        onToggle={onToggleFilter}
+        onMute={onMute}
+        onRestore={onRestoreFilter}
+        onClear={onClearFilters}
+        touch
+        className="px-3"
+      />
+
+      <nav aria-label="Primary" className="mt-1.5 grid grid-cols-4 gap-1 px-2">
         {TABS.map(({ id, label, Icon }) => {
           const current = id === "settings" ? settingsOpen : !settingsOpen && mailbox === id;
           const count = id === "settings" ? 0 : (unread[id] ?? 0);

@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildPills, digitFor } from "./rail";
+import { buildPills, digitFor, scrollToReveal, stepRail, type RailGeometry } from "./rail";
 import { builtinFilter, senderFilter, type BuiltinSmartFilter } from "../core/model/signals";
 
 const RAIL: BuiltinSmartFilter[] = ["important", "needs_action", "unsafe"];
@@ -108,5 +108,66 @@ describe("digitFor", () => {
     // shortcut that does not exist.
     expect(digitFor(9)).toBeNull();
     expect(digitFor(20)).toBeNull();
+  });
+});
+describe("rail scrolling", () => {
+  // Five 100px tabs with 10px gaps after a 44px mark, in a 300px rail whose last 48px
+  // are the fade and the step button.
+  const tabs = [0, 1, 2, 3, 4].map((i) => [44 + i * 110, 44 + i * 110 + 100] as const);
+  const base: RailGeometry = {
+    tabs,
+    scrollLeft: 0,
+    clientWidth: 300,
+    scrollWidth: 44 + 5 * 110 - 10,
+    startInset: 44,
+    endInset: 48,
+  };
+
+  it("leaves a tab that is already in the clear alone", () => {
+    expect(scrollToReveal(base, tabs[0])).toBeNull();
+  });
+
+  it("brings a tab under the end fade fully clear of it", () => {
+    // Tab 2 spans 264–364; the clear area ends at 300 - 48 = 252.
+    const next = scrollToReveal(base, tabs[2]);
+    expect(next).toBe(364 - 300 + 48);
+    expect(tabs[2][1]).toBeLessThanOrEqual(next! + base.clientWidth - base.endInset);
+  });
+
+  it("brings a tab hidden behind the mark out from under it", () => {
+    const scrolled = { ...base, scrollLeft: 200 };
+    const next = scrollToReveal(scrolled, tabs[1]);
+    expect(next).toBe(154 - 44);
+    expect(tabs[1][0]).toBeGreaterThanOrEqual(next! + base.startInset);
+  });
+
+  it("never scrolls past either end", () => {
+    expect(scrollToReveal({ ...base, scrollLeft: 50 }, tabs[0])).toBe(0);
+    const max = base.scrollWidth - base.clientWidth;
+    expect(scrollToReveal(base, tabs[4])).toBe(max);
+  });
+
+  it("steps forward so the cut-off tab becomes the first one after the mark", () => {
+    // Tab 1 (154–254) pokes 2px into the fade, so it is the one cut off.
+    expect(stepRail(base, 1)).toBe(154 - 44);
+  });
+
+  it("steps back so the tab cut off at the start becomes the last before the fade", () => {
+    const max = base.scrollWidth - base.clientWidth;
+    const atEnd = { ...base, scrollLeft: max };
+    const back = stepRail(atEnd, -1);
+    expect(back).toBeLessThan(max);
+    expect(back).toBeGreaterThanOrEqual(0);
+  });
+
+  it("pages by the clear width when one tab is wider than the rail", () => {
+    const wide: RailGeometry = { ...base, tabs: [[44, 1000]], scrollWidth: 1000 };
+    expect(stepRail(wide, 1)).toBe(300 - 44 - 48);
+  });
+
+  it("stays inside the scroll range", () => {
+    const max = base.scrollWidth - base.clientWidth;
+    expect(stepRail({ ...base, scrollLeft: max }, 1)).toBe(max);
+    expect(stepRail(base, -1)).toBe(0);
   });
 });

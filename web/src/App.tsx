@@ -604,15 +604,15 @@ export function App({ store }: Props) {
 
   /**
    * The sidebar and the overflow menu: the same destinations, one model. The Inbox
-   * count is the unfiltered inbox list's own number of conversations.
+   * count is the unfiltered inbox list's own number of conversations. The smart filters
+   * are not here; they are the rail (`FilterStrip`).
    */
   const navProps: NavProps = {
     inboxCount: view.inboxThreadCount,
     inboxUnread: mailboxes.find((mailbox) => mailbox.id === "inbox")?.unread ?? 0,
     mailbox: snapshot.mailbox,
     folders: mailboxes.filter((mailbox) => mailbox.id !== "inbox"),
-    pills,
-    activeFilters: snapshot.activeFilters,
+    filtering: snapshot.activeFilters.length > 0,
     onInbox: () => {
       store.setOverlay("none");
       store.setMailbox("inbox");
@@ -622,9 +622,6 @@ export function App({ store }: Props) {
       store.setOverlay("none");
       store.setMailbox(mailbox);
     },
-    onToggleFilter: store.toggleFilter.bind(store),
-    onMute: store.dismissFilter.bind(store),
-    onRestore: store.restoreFilter.bind(store),
     accountEmail: snapshot.account?.email ?? null,
     signingIn,
     onConnect: () => {
@@ -1418,8 +1415,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
     <div className={`flex h-dvh flex-col overflow-hidden bg-canvas text-ink ${phone ? "" : "pl-64"}`}>
       {/*
         The chrome. On a phone, the top bar (search and the menu button). On the desktop,
-        the floating sidebar with every destination; search and where-you-are head the
-        list column (see `Masthead` below), and the email actions live in the reader.
+        the floating sidebar with every destination; search, where-you-are and the filter
+        rail head the list column (see `Masthead` below), and the email actions live in
+        the reader.
       */}
       {phone ? (
         // On a phone the reader takes the whole screen, its own way back included, so
@@ -1454,7 +1452,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           />
         )
       ) : (
-        <Sidebar {...navProps} />      )}
+        <Sidebar {...navProps} />
+      )}
 
       <p role="status" aria-live="polite" className="sr-only" data-code-announcement="">
         {codeAnnouncement}
@@ -1633,6 +1632,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               searchQuery={snapshot.searchQuery}
               onSearchChange={store.setSearchQuery.bind(store)}
               searchRef={searchRef}
+              pills={pills}
+              activeFilters={snapshot.activeFilters}
+              onToggleFilter={store.toggleFilter.bind(store)}
+              onMute={store.dismissFilter.bind(store)}
+              onRestoreFilter={store.restoreFilter.bind(store)}
+              onClearFilters={store.clearFilters.bind(store)}
               position={position}
               total={view.threads.length}
               listTitle={store.listTitle()}
@@ -1877,11 +1882,17 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       </main>
 
       {/*
-        The phone's dock: the four tabs on one surface at the bottom edge. The categories
-        are in the overflow menu. Not while reading — the reader brings its own action bar.
+        The phone's dock: the smart filter chips above the four tabs, on one surface at
+        the bottom edge. Not while reading — the reader brings its own action bar.
       */}
       {phone && !selected && (
         <PhoneDock
+          pills={pills}
+          activeFilters={snapshot.activeFilters}
+          onToggleFilter={store.toggleFilter.bind(store)}
+          onMute={store.dismissFilter.bind(store)}
+          onRestoreFilter={store.restoreFilter.bind(store)}
+          onClearFilters={store.clearFilters.bind(store)}
           mailbox={snapshot.mailbox}
           unread={paletteUnread}
           onSelectMailbox={(mailbox) => {
