@@ -40,6 +40,8 @@ import { platform, type PlatformInfo } from "./platform";
 import { useStore } from "./ui/useStore";
 import { applyTheme, resolveScheme } from "./ui/theme";
 import { Masthead } from "./ui/components/Masthead";
+import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
+import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { NavDrawer } from "./ui/components/NavDrawer";
 import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
@@ -131,6 +133,14 @@ export function App({ store }: Props) {
   const searchRef = useRef<HTMLInputElement>(null);
   const [scrollStep, setScrollStep] = useState(0);
   const [composer, setComposer] = useState<ComposerState | null>(null);
+
+  /**
+   * The phone arrangement: a top bar and a bottom dock instead of the masthead, and the
+   * reader's actions at the bottom edge. Same store, same handlers, same components —
+   * only where they sit changes. See `usePhoneLayout`.
+   */
+  const phone = usePhoneLayout();
+  useKeyboardInset(phone && composer !== null);
 
   // ── Theme ────────────────────────────────────────────────────────────────
   const [systemDark, setSystemDark] = useState(
@@ -988,6 +998,27 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
         mailbox menu is what the logo opens; the email actions live in the reader, where
         the open message is.
       */}
+      {phone ? (
+        // On a phone the reader takes the whole screen, its own way back included, so
+        // the list's bar steps aside while a message is open.
+        !selected && (
+          <PhoneTopBar
+            searchQuery={snapshot.searchQuery}
+            onSearchChange={store.setSearchQuery.bind(store)}
+            searchRef={searchRef}
+            accountEmail={snapshot.account?.email ?? null}
+            onOpenNavigation={() => setDrawerOpen(true)}
+            navigationOpen={drawerOpen}
+            listTitle={store.listTitle()}
+            position={position}
+            total={view.threads.length}
+            cursorIndex={snapshot.cursorIndex}
+            onPrev={() => store.moveCursor(-1)}
+            onNext={() => store.moveCursor(1)}
+            onMarkAllRead={store.markAllRead.bind(store)}
+          />
+        )
+      ) : (
       <Masthead
         searchQuery={snapshot.searchQuery}
         onSearchChange={store.setSearchQuery.bind(store)}
@@ -1008,6 +1039,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
         onNext={() => store.moveCursor(1)}
         onMarkAllRead={store.markAllRead.bind(store)}
       />
+      )}
 
       {announcement && (
         <p aria-live="polite" aria-atomic="true" className="sr-only">
@@ -1130,7 +1162,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
                   void connectFromDemo();
                 }}
                 disabled={signingIn}
-                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 max-sm:min-h-9 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <LogIn size={11} strokeWidth={2.2} aria-hidden="true" />
                 {signingIn ? "Waiting for Google…" : "Connect Gmail"}
@@ -1149,7 +1181,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
                   void store.refresh();
                 }}
                 disabled={snapshot.syncing}
-                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 max-sm:min-h-9 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <RefreshCw
                   size={11}
@@ -1232,6 +1264,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             // back. See `BODY_RETENTION` in the store.
             bodyPending={selected !== null && !store.hasLoadedBody(selected.id)}
             onLoadBody={loadSelectedBody}
+            phone={phone}
             actions={{
               onStar: act((s, snap) => {
                 if (snap.view.selected) s.toggleStar(snap.view.selected.id);
@@ -1296,6 +1329,29 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           />
         </div>
       </main>
+
+      {/*
+        The phone's dock: streams and smart filters above the four tabs, on one surface at
+        the bottom edge. Not while reading — the reader brings its own action bar.
+      */}
+      {phone && !selected && (
+        <PhoneDock
+          pills={pills}
+          activeFilters={snapshot.activeFilters}
+          onToggleFilter={store.toggleFilter.bind(store)}
+          onMute={store.dismissFilter.bind(store)}
+          onRestoreFilter={store.restoreFilter.bind(store)}
+          onClearFilters={store.clearFilters.bind(store)}
+          mailbox={snapshot.mailbox}
+          unread={paletteUnread}
+          onSelectMailbox={(mailbox) => {
+            store.setOverlay("none");
+            store.setMailbox(mailbox);
+          }}
+          settingsOpen={snapshot.overlay === "settings"}
+          onOpenSettings={() => store.setOverlay("settings")}
+        />
+      )}
 
       {snapshot.overlay === "shortcuts" && (
         <ShortcutSheet onClose={() => store.setOverlay("none")} />
@@ -1436,6 +1492,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
                 : current,
             )
           }
+          phone={phone}
           onSend={() => {
             void sendReply();
           }}

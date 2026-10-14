@@ -258,7 +258,7 @@ export function RecipientField({
             }}
             // `min-w-[7rem]` so the field does not collapse to nothing once chips fill the
             // row, and `grow` so there is always somewhere to type.
-            className="min-w-[7rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-[13px] text-ink outline-none placeholder:text-ink-placeholder"
+            className="min-w-[7rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-[13px] text-ink outline-none placeholder:text-ink-placeholder max-sm:text-[16px]"
           />
         </div>
 

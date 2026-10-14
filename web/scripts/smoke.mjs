@@ -101,7 +101,11 @@ async function openServer() {
 // ── The run ─────────────────────────────────────────────────────────────────
 
 const stopServer = await openServer();
-const browser = await chromium.launch();
+// `WINNOW_CHROMIUM` points at a system Chromium, for machines where Playwright's own
+// download is not available (linux-arm64 sandboxes, for one). CI uses the bundled one.
+const browser = await chromium.launch(
+  process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM } : {},
+);
 let failed = false;
 
 try {
@@ -1823,55 +1827,184 @@ try {
 
   section("mobile");
 
+  /*
+    The phone layout.
+
+    Below 640px the masthead is replaced, not squeezed: a top bar (the mark, search, and
+    the account/menu circle), the list, and one dock at the bottom edge holding the
+    streams and smart filters above four tabs. The reader brings its own action bar to the
+    same edge. What is claimed here is the ergonomics — that the controls a thumb uses
+    most are at the bottom, that every one is a real touch target, and that nothing the
+    desktop could do is unreachable.
+  */
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(400);
-  await openMessage();
-  await page.waitForTimeout(400);
 
-  const headerBox = await page.locator("header").first().boundingBox();
+  const MIN_TARGET = 44;
+  const box = (locator) => locator.first().boundingBox();
+  const topBar = page.locator("[data-phone-topbar]");
+  const dock = page.locator("[data-phone-dock]");
+
+  require("the phone top bar replaces the masthead", (await topBar.count()) === 1);
+  check("and the masthead is gone rather than hidden", (await page.locator("header").count()) === 1);
+
+  const logoBox = await box(topBar.locator("span.rounded-full").first());
+  const accountBox = await box(topBar.locator('button[aria-label="Open navigation"]'));
   check(
-    "the masthead survives an open reader on a phone",
-    Boolean(headerBox) && headerBox.y >= 0 && headerBox.height > 20,
-    JSON.stringify(headerBox),
+    "the mark sits top-left and the account/menu circle top-right",
+    Boolean(logoBox && accountBox) && logoBox.x < 40 && accountBox.x + accountBox.width > 350,
+    JSON.stringify({ logoBox, accountBox }),
+  );
+  check(
+    "both circles are touch-sized",
+    Boolean(logoBox && accountBox) &&
+      Math.min(logoBox.width, logoBox.height, accountBox.width, accountBox.height) >= MIN_TARGET,
+    JSON.stringify({ logoBox, accountBox }),
   );
 
   const searchBox = await page.locator("#winnow-search").boundingBox();
   check(
-    "search is still on screen, not collapsed to nothing",
-    Boolean(searchBox) && searchBox.width > 40,
+    "search is on screen, not collapsed to nothing",
+    Boolean(searchBox) && searchBox.width > 120,
     JSON.stringify(searchBox),
   );
-
   const overflow = await page.evaluate(() => {
-    const row = document.querySelector("header > div");
-    if (!row) return null;
-    // How far the toolbar's content extends past its own box, in CSS pixels.
-    return Math.round(row.scrollWidth - row.clientWidth);
+    const row = document.querySelector("[data-phone-topbar] > div");
+    return row ? Math.round(row.scrollWidth - row.clientWidth) : null;
   });
+  check("the top bar does not need a sideways scroll", overflow !== null && overflow <= 1, `${overflow}px past`);
+
+  const dockBox = await box(dock);
   check(
-    "the toolbar does not need a sideways scroll to reach the search",
-    overflow !== null && overflow <= 1,
-    `${overflow}px past`,
+    "the dock sits on the bottom edge",
+    Boolean(dockBox) && Math.abs(dockBox.y + dockBox.height - 844) <= 1,
+    JSON.stringify(dockBox),
   );
+
+  const tabs = dock.locator('nav[aria-label="Primary"] button');
+  const tabLabels = (await tabs.allTextContents()).map((t) => t.replace(/\d+/g, "").trim());
+  check(
+    "four tabs: Inbox, Sent, Archive, Settings",
+    JSON.stringify(tabLabels) === JSON.stringify(["Inbox", "Sent", "Archive", "Settings"]),
+    JSON.stringify(tabLabels),
+  );
+  const tabBoxes = await Promise.all((await tabs.all()).map((tab) => tab.boundingBox()));
+  check(
+    "every tab is a full touch target",
+    tabBoxes.every((b) => b && b.width >= MIN_TARGET && b.height >= MIN_TARGET),
+    JSON.stringify(tabBoxes.map((b) => b && [Math.round(b.width), Math.round(b.height)])),
+  );
+
+  const dockChips = dock.locator("button[aria-pressed]");
+  const chipBox = await box(dockChips);
+  check(
+    "the streams and smart filters sit in the dock, above the tabs",
+    (await dockChips.count()) > 3 && Boolean(chipBox) && chipBox.y < tabBoxes[0].y && chipBox.height >= 40,
+    JSON.stringify(chipBox),
+  );
+  check(
+    "and none of them are left in the top bar",
+    (await topBar.locator("button[aria-pressed]").count()) === 0,
+  );
+
+  // A chip filters the list, from the dock.
+  const beforeChip = await rowTotal();
+  const firstLive = dock.locator("button[aria-pressed]:not([disabled])").first();
+  await firstLive.click();
+  await page.waitForTimeout(300);
+  check(
+    "a chip in the dock narrows the list",
+    (await firstLive.getAttribute("aria-pressed")) === "true" && (await rowTotal()) < beforeChip,
+    `${beforeChip} → ${await rowTotal()}`,
+  );
+  await dock.locator("button", { hasText: /^All$/ }).click();
+  await page.waitForTimeout(300);
+  check("and All clears it", (await rowTotal()) === beforeChip, `${await rowTotal()} rows`);
+
+  // The tabs switch mailbox and open Settings.
+  await tabs.filter({ hasText: "Sent" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "the Sent tab opens Sent",
+    (await listTitle())?.trim() === "Sent" &&
+      (await tabs.filter({ hasText: "Sent" }).getAttribute("aria-current")) === "page",
+    await listTitle(),
+  );
+  await tabs.filter({ hasText: "Settings" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "the Settings tab opens Settings",
+    (await page.locator('[role="dialog"][aria-label="Settings"]').count()) === 1,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  await tabs.filter({ hasText: "Inbox" }).click();
+  await page.waitForTimeout(300);
+  check("and the Inbox tab comes back", (await listTitle())?.trim() === "Inbox", await listTitle());
+
+  // Trash and Spam have no tab; the account circle's drawer still reaches them.
+  await openDrawer();
+  check(
+    "the drawer still lists every mailbox",
+    (await mailbox("Trash").count()) === 1 && (await mailbox("Spam").count()) === 1,
+  );
+  await closeDrawer();
+
+  // ── The reader, on a phone ──
+  await openMessage();
+  await page.waitForTimeout(400);
+
+  check("the list's bars step aside for the reader", (await topBar.count()) === 0 && (await dock.count()) === 0);
+
+  const readerDock = page.locator("[data-reader-dock]");
+  const readerDockBox = await box(readerDock);
+  check(
+    "the reader's actions sit on the bottom edge",
+    Boolean(readerDockBox) && Math.abs(readerDockBox.y + readerDockBox.height - 844) <= 1,
+    JSON.stringify(readerDockBox),
+  );
+  const readerButtons = await Promise.all(
+    (await readerDock.locator("button").all()).map(async (b) => ({
+      label: await b.getAttribute("aria-label"),
+      box: await b.boundingBox(),
+    })),
+  );
+  check(
+    "back, reply, forward, archive, trash and more, each a full touch target",
+    readerButtons.length === 6 &&
+      readerButtons[0].label === "Back to the list" &&
+      readerButtons.every(({ box: b }) => b && b.width >= MIN_TARGET && b.height >= MIN_TARGET),
+    JSON.stringify(readerButtons.map(({ label, box: b }) => [label, b && Math.round(b.width), b && Math.round(b.height)])),
+  );
+
+  // Star and read moved into More on the phone, so prove they are still there.
+  await readerDock.locator('button[aria-label="More"]').click();
+  await page.waitForTimeout(200);
+  const moreMenu = page.locator('[role="menu"][aria-label="More actions"]');
+  const moreBox = await box(moreMenu);
+  check(
+    "More opens upward, with star and read in it",
+    Boolean(moreBox) &&
+      moreBox.y + moreBox.height <= (readerDockBox?.y ?? 0) + 1 &&
+      (await moreMenu.getByRole("menuitem", { name: /^(Star|Unstar)$/ }).count()) === 1 &&
+      (await moreMenu.getByRole("menuitem", { name: /^Mark (read|unread)$/ }).count()) === 1,
+    JSON.stringify(moreBox),
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
 
   /*
     The reader has to *fit*.
 
     Its pane is a flex child, and without `min-w-0` its base size is its content —
     which is `max-w-[68ch]` of body text, 733px. On a 390px phone that overflowed the
-    line, `body { overflow: hidden }` clipped it, and the message was unreadable: every
-    line ran off the right edge with no way to reach the rest, and the six action buttons
-    went with it. So a phone could read half a message and do nothing with it.
+    line, `body { overflow: hidden }` clipped it, and the message was unreadable.
   */
   const readerFits = await page.evaluate(() => {
     const article = document.querySelector("article");
     if (!article) return null;
-    const box = article.getBoundingClientRect();
-    return {
-      width: Math.round(box.width),
-      viewport: window.innerWidth,
-      past: Math.round(box.right - window.innerWidth),
-    };
+    const rect = article.getBoundingClientRect();
+    return { width: Math.round(rect.width), viewport: window.innerWidth, past: Math.round(rect.right - window.innerWidth) };
   });
   check(
     "the message fits the phone rather than running off it",
@@ -1880,20 +2013,14 @@ try {
   );
 
   /*
-    Every labelled control, wherever it is — not a fixed list of verbs, because the
-    toolbar's buttons are per-mailbox (Trash offers restore and delete-permanently,
-    Spam offers "Not spam") and this step runs after the trash and block-sender steps.
-    What matters is the claim itself: at this width nothing is off-screen, so every
-    control in the app can be reached.
+    Every labelled control, wherever it is: at this width nothing outside a deliberate
+    horizontal scroller may be off-screen, so every control in the app can be reached.
   */
   const reachable = await page.evaluate(() => {
-    // A pill past the end of the rail is not off-screen, it is *scrollable to* — the
-    // rail is a deliberate horizontal scroller with a fade at its edge. So what is
-    // being claimed is that nothing outside such a scroller is out of reach.
     const scrollable = (el) => {
       for (let node = el; node && node !== document.body; node = node.parentElement) {
-        const overflow = getComputedStyle(node).overflowX;
-        if (overflow === "auto" || overflow === "scroll") return true;
+        const overflowX = getComputedStyle(node).overflowX;
+        if (overflowX === "auto" || overflowX === "scroll") return true;
       }
       return false;
     };
@@ -1909,43 +2036,20 @@ try {
       .map((b) => b.getAttribute("aria-label"));
     return { total: buttons.length, offscreen };
   });
-  /*
-    `>= 8`, not `> 10`. The scan is a sanity check that it found something worth
-    scanning, and the count fell because the old chrome is gone: its five action
-    buttons, two icon buttons and four mailbox tabs no longer sit outside a scroll
-    container. What is being claimed is the second half — that nothing reachable is
-    off-screen — and that is unchanged.
-  */
   check(
     "and no control anywhere in the app is off-screen",
-    reachable.total >= 8 && reachable.offscreen.length === 0,
+    reachable.total >= 6 && reachable.offscreen.length === 0,
     `${reachable.total} buttons, off-screen: ${reachable.offscreen.join(", ") || "none"}`,
   );
 
-  /*
-    The sender's name is the one line in the reader that must never be ellipsised.
-
-    Six 28px icons and a `shrink-0` toolbar sit beside it, so side by side the name is
-    what gives way: it read "Dana Whitfi…" on a phone and "Dana at North…" at 1100px.
-    The reader header is the wrong place to be stingy — it is the first thing you read
-    and the thing you are checking the list row against. Measured as `scrollWidth` so a
-    name that fits by luck at one width and not at the next still fails.
-  */
+  // The sender's name is the one line in the reader that must never be ellipsised.
   const senderName = await page.evaluate(() => {
-    // The reader's own root, so the pane's `h2` is found rather than some other
-    // heading on the page. `data-reader`, not a class: the pane is a tonal step
-    // off the list rather than a card on the canvas, so there is no background
-    // class on it to hook.
-    const reader = document.querySelector("[data-reader]");
-    const heading = reader?.querySelector("h2");
+    const heading = document.querySelector("[data-reader]")?.querySelector("h2");
     if (!heading) return null;
-    return {
-      text: heading.textContent?.trim() ?? "",
-      clipped: heading.scrollWidth > heading.clientWidth + 1,
-    };
+    return { text: heading.textContent?.trim() ?? "", clipped: heading.scrollWidth > heading.clientWidth + 1 };
   });
   check(
-    "the sender's name is not truncated to make room for the toolbar",
+    "the sender's name is not truncated",
     senderName !== null && !senderName.clipped,
     JSON.stringify(senderName),
   );
@@ -1955,11 +2059,8 @@ try {
 
     Chromium reports `hover: hover` for this page however narrow the viewport is, so
     nothing above can tell whether a control that only appears on hover exists at all
-    on a phone. It did not: the rail's per-pill *hide* control was `hidden` and revealed
-    on `group-hover`, so on a real phone a bucket Winnow kept over-firing could not be
-    silenced from anywhere — Settings lists what has already been hidden, and the palette
-    is a list of places to go, not of things to change. Hence a second context with
-    `hasTouch`, which is what makes `(hover: none)` match.
+    on a phone. The rail's per-pill *hide* control once did not. Hence a second context
+    with `hasTouch`, which is what makes `(hover: none)` match.
   */
   const touchContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const touchPage = await touchContext.newPage();
@@ -1981,14 +2082,23 @@ try {
     await touchMutes.first().isVisible(),
     await touchMutes.first().getAttribute("aria-label"),
   );
+  const starTarget = await touchPage
+    .locator('main button[aria-label="Star"], main button[aria-label="Unstar"]')
+    .first()
+    .boundingBox();
+  check(
+    "a row's star is a full touch target on a touch device",
+    Boolean(starTarget) && starTarget.width >= MIN_TARGET && starTarget.height >= MIN_TARGET,
+    JSON.stringify(starTarget),
+  );
   await touchContext.close();
 
   /*
-   * The recipient field, on a phone.
+   * The composer and the recipient field, on a phone.
    *
    * In its own context, because the thing being checked is that the whole interaction is
    * reachable *by touch*: nothing here depends on `hover: hover`, and every assertion is
-   * about a tap. The desktop pass above proves the keyboard; this proves the finger.
+   * about a tap.
    */
   const touchComposer = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const phone = await touchComposer.newPage();
@@ -1999,10 +2109,34 @@ try {
   await phone.goto(URL, { waitUntil: "networkidle" });
   await phone.waitForSelector("[data-message-id]", { timeout: 10_000 });
 
-  await phone.locator("[data-message-id]").first().click();
+  await phone.locator("[data-message-id]").first().tap();
   await phone.waitForSelector("article h1", { timeout: 5_000 });
-  await phone.keyboard.press("f");
+  await phone.locator('[data-reader-dock] button[aria-label="Forward"]').tap();
   await phone.waitForSelector('input[aria-label="To"]', { timeout: 5_000 });
+  // Past the sheet's 160ms rise, which scales it by a hair while it runs.
+  await phone.waitForTimeout(400);
+
+  const composerBox = await phone.locator('[role="dialog"][aria-label="Forward"]').boundingBox();
+  check(
+    "the composer takes the whole phone screen",
+    Boolean(composerBox) && composerBox.width >= 389 && composerBox.height >= 840,
+    JSON.stringify(composerBox),
+  );
+  const phoneSend = phone.locator('[role="dialog"] button', { hasText: /^Send$/ });
+  const sendBox = await phoneSend.boundingBox();
+  check(
+    "and Send sits at its bottom edge, a full touch target",
+    Boolean(sendBox) && sendBox.height >= MIN_TARGET && sendBox.y + sendBox.height >= 844 - 16,
+    JSON.stringify(sendBox),
+  );
+  check(
+    "its fields are 16px, so iOS does not zoom into them",
+    await phone.evaluate(() =>
+      [...document.querySelectorAll('[role="dialog"] input, [role="dialog"] textarea')]
+        .filter((el) => el.getBoundingClientRect().width > 0)
+        .every((el) => parseFloat(getComputedStyle(el).fontSize) >= 16),
+    ),
+  );
 
   const phoneTo = phone.locator('input[aria-label="To"]');
   const phoneSuggestions = phone.locator('[role="listbox"] [role="option"]');
@@ -2030,15 +2164,12 @@ try {
   await phone.waitForTimeout(400);
   const phoneChips = phone.locator('[role="dialog"] button[aria-label^="Remove"]');
   check("tapping one adds a recipient", (await phoneChips.count()) === 1);
-  check(
-    "and Send becomes available",
-    !(await phone.locator('[role="dialog"] button:has-text("Send")').first().isDisabled()),
-  );
-  const chipBox = await phoneChips.first().boundingBox();
+  check("and Send becomes available", !(await phoneSend.isDisabled()));
+  const recipientChipBox = await phoneChips.first().boundingBox();
   check(
     "whose chip can be tapped back off",
-    (chipBox?.width ?? 0) >= 24 && (chipBox?.height ?? 0) >= 24,
-    JSON.stringify(chipBox),
+    (recipientChipBox?.width ?? 0) >= 24 && (recipientChipBox?.height ?? 0) >= 24,
+    JSON.stringify(recipientChipBox),
   );
   await touchComposer.close();
 
@@ -2046,7 +2177,14 @@ try {
   check("there is a way back to the list", (await back.count()) > 0);
   await back.first().click();
   await page.waitForTimeout(300);
-  check("and it works", (await page.locator("text=Nothing selected").count()) > 0);
+  check(
+    "and it works, bringing the dock back",
+    (await page.locator("text=Nothing selected").count()) > 0 && (await dock.count()) === 1,
+  );
+
+  // The rest is not about the phone, and the desktop masthead is where its helpers look.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(300);
 
   // ── A shared link ──────────────────────────────────────────────────────────
 
