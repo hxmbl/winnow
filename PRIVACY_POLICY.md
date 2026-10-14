@@ -29,7 +29,7 @@ that Hxmbl decides how and why personal data is processed by Winnow.
 
 Contact:
 
-- Email: `<CONTACT_EMAIL>`
+- Email: `180758703+hxmbl@users.noreply.github.com`
 - GitHub: [github.com/hxmbl/winnow/issues](https://github.com/hxmbl/winnow/issues)
   — issues are public, so please don't put personal information or the contents
   of your mail in one. Use email for anything private.
@@ -196,7 +196,7 @@ message is held by GitHub, Inc. in the United States.
   breached.
 
 No software is perfectly secure. Please report security problems privately to
-`<CONTACT_EMAIL>`, not in a public issue.
+`180758703+hxmbl@users.noreply.github.com`, not in a public issue.
 
 ## 11. Your rights
 
@@ -214,7 +214,7 @@ Because your mail and contacts are held on your device and in your Google
 account, not by Hxmbl, you can exercise most of these rights directly: view
 everything in the app or in Gmail, delete it by signing out or uninstalling, and
 export it with [Google Takeout](https://takeout.google.com). For anything else —
-including the data we hold if you have contacted us — write to `<CONTACT_EMAIL>`.
+including the data we hold if you have contacted us — write to `180758703+hxmbl@users.noreply.github.com`.
 We will respond within one month.
 
 ## 12. Revoking Winnow's access
@@ -232,7 +232,7 @@ name `app.winnow.desktop` and can be removed there too.
 ## 13. Complaints
 
 If you are unhappy with how your data has been handled, please contact us first at
-`<CONTACT_EMAIL>` and we will try to put it right. We will acknowledge complaints
+`180758703+hxmbl@users.noreply.github.com` and we will try to put it right. We will acknowledge complaints
 within 30 days.
 
 You also have the right to complain to the UK's data protection regulator, the
