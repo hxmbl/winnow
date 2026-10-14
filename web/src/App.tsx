@@ -78,6 +78,12 @@ import {
 import { mailtoAddress } from "./core/mail/unsubscribe";
 import { copyText } from "./ui/clipboard";
 import { CodeBar } from "./ui/components/CodeCopy";
+import { Avatar } from "./ui/components/Avatar";
+import { SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
+import { contactPhotoMap } from "./core/avatars/photos";
+import { BrandLogoCache } from "./core/avatars/logoCache";
+import { dohResolver } from "./core/avatars/bimi";
+import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -149,6 +155,13 @@ function isUntouchedDraft(draft: Draft): boolean {
 export function App({ store }: Props) {
   const snapshot = useStore(store);
   const { view, preferences } = snapshot;
+  /**
+   * Brand logos (BIMI), behind "Show brand logos". One cache for the app's lifetime,
+   * cleared on sign-out and when the setting is turned off.
+   */
+  const [logoCache] = useState(
+    () => new BrandLogoCache({ resolve: dohResolver((input, init) => fetch(input, init)) }),
+  );
 
   // ── Refs the keyboard handler reads ─────────────────────────────────────
   // The handler is registered once and reads through these, because
@@ -429,6 +442,8 @@ export function App({ store }: Props) {
    * screen after someone pressed "sign out" is worse than leaving a token behind.
    */
   const signOut = useCallback(async () => {
+    // Brand logos are cached per sender domain: a list of who mails this account.
+    logoCache.clear();
     const bridge = sessionRef.current;
     try {
       if (bridge) {
@@ -443,7 +458,7 @@ export function App({ store }: Props) {
       );
     }
     await store.signOut();
-  }, [store]);
+  }, [store, logoCache]);
 
   /**
    * Sign in from the demo mailbox.
@@ -771,14 +786,25 @@ export function App({ store }: Props) {
     setMenu(null);
   }, [snapshot.mailbox]);
 
-  /** Contact photos by lowercased address, from the user's Google contacts. */
-  const photos = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const contact of snapshot.googleContacts) {
-      if (contact.photo) map.set(contact.address.toLowerCase(), contact.photo);
-    }
-    return map;
-  }, [snapshot.googleContacts]);
+  /** Contact photos by lowercased address, from the user's Google contacts, avatar-sized. */
+  const photos = useMemo(() => contactPhotoMap(snapshot.googleContacts), [snapshot.googleContacts]);
+
+  // Signed out by any route (the button, an expired session): who mailed that account
+  // is the account's data. Turning the setting off forgets the lookups too.
+  useEffect(() => {
+    if (snapshot.status === "signed_out" || !preferences.brandLogos) logoCache.clear();
+  }, [snapshot.status, preferences.brandLogos, logoCache]);
+
+  // The demo answers brand logos from bundled images and never touches the network.
+  const isDemo = snapshot.contactsAccess === "demo";
+  const brandLogos = preferences.brandLogos;
+  const senderPictures = useMemo<SenderPictures>(
+    () => ({
+      photos,
+      logos: brandLogos ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
+    }),
+    [photos, brandLogos, isDemo, logoCache],
+  );
 
   const runBatch = useCallback((fn: (s: WinnowStore, ids: number[]) => void, keep = false) => {
     const ids = orderedSelection(
@@ -1412,6 +1438,7 @@ const listSelectedId = phone ? null : snapshot.selectedId;
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   return (
+    <SenderPicturesContext.Provider value={senderPictures}>
     <div className={`flex h-dvh flex-col overflow-hidden bg-canvas text-ink ${phone ? "" : "pl-64"}`}>
       {/*
         The chrome. On a phone, the top bar (search and the menu button). On the desktop,
@@ -1935,6 +1962,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           canLoadRemoteContent
           imagePolicy={preferences.imagePolicy}
           onImagePolicy={(imagePolicy) => store.setPreferences({ imagePolicy })}
+          brandLogos={preferences.brandLogos}
+          onBrandLogos={(value) => store.setPreferences({ brandLogos: value })}
           notificationsEnabled={preferences.notificationsEnabled}
           onNotifications={(notificationsEnabled) => {
             store.setPreferences({ notificationsEnabled });
@@ -2023,6 +2052,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             <Menu
               testId="sender"
               label={`Sender options for ${name}`}
+              header={
+                <>
+                  <Avatar name={name} address={email.sender} size={36} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-ui font-semibold text-ink">{name}</span>
+                    <span className="block truncate text-meta text-ink-muted">{email.sender}</span>
+                  </span>
+                </>
+              }
               anchor={menu.anchor}
               returnFocus={menu.trigger}
               onClose={close}
@@ -2190,5 +2228,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
       )}
     </div>
+    </SenderPicturesContext.Provider>
   );
 }

@@ -20,7 +20,7 @@
  * `j` or `e` while a menu is open (App also checks `menuOpen` before routing).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { anchorFromElement, placeMenu, type MenuAnchor, type MenuEntry } from "../menuPlacement";
 
@@ -42,14 +42,17 @@ type Props = {
   onBack?: () => void;
   /** Set on the root; a submenu inherits the root's data attribute. */
   testId?: string;
+  /** A non-interactive header above the items: the sender menu's avatar and address. */
+  header?: ReactNode;
 };
 
-export function Menu({ items, anchor, label, onClose, returnFocus, side = "below", onBack, testId }: Props) {
+export function Menu({ items, anchor, label, onClose, returnFocus, side = "below", onBack, testId, header }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const [openSub, setOpenSub] = useState<{ id: string; anchor: MenuAnchor } | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const isRoot = onBack === undefined;
+  const hasHeader = header !== undefined;
 
   const enabled = items.filter(
     (entry): entry is Extract<MenuEntry, { kind: "item" }> => entry.kind === "item" && !entry.disabled,
@@ -62,7 +65,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
     setPosition(
       placeMenu(anchor, { width: rect.width, height: rect.height }, { width: window.innerWidth, height: window.innerHeight }, side),
     );
-  }, [anchor, side, items.length]);
+  }, [anchor, side, items.length, hasHeader]);
 
   // Focus the first item once placed.
   useEffect(() => {
@@ -196,6 +199,14 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
       }}
       className="z-50 flex min-w-[220px] max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body [@media(hover:none)]:min-w-[240px]"
     >
+      {header && (
+        <>
+          <div role="presentation" data-menu-header="" className="flex min-w-0 items-center gap-2.5 px-2.5 py-2">
+            {header}
+          </div>
+          <div role="separator" className="my-1 h-px bg-hairline" />
+        </>
+      )}
       {items.map((entry) => {
         if (entry.kind === "divider") {
           return <div key={entry.id} role="separator" className="my-1 h-px bg-hairline" />;

@@ -191,7 +191,7 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
           props.touch ? "min-h-12 py-1" : "py-1"
         }`}
       >
-        <Avatar name={props.accountEmail ? name : "You"} address={props.accountEmail ?? "you@winnow.demo"} />
+        <Avatar lookup={false} name={props.accountEmail ? name : "You"} address={props.accountEmail ?? "you@winnow.demo"} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-ui font-medium text-ink">{name}</span>
           <span className="block truncate text-meta text-ink-subtle">{detail}</span>

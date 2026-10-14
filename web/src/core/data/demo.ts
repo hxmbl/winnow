@@ -1438,16 +1438,32 @@ export function demoMailbox(now: number = Date.now()): { emails: Email[]; now: n
  * own address is deliberately absent — the index would drop it anyway.
  *
  * Every address is on `.example`, like the rest of the seed.
+ *
+ * Dana and Ana carry photos, so the demo shows contact pictures in their avatars. The
+ * pictures are illustrations bundled under `public/demo-avatars/` — relative URLs, so the
+ * demo makes no network request beyond its own origin.
  */
 export const DEMO_CONTACTS: readonly GoogleContact[] = [
-  { address: "dana@northwind.example", name: "Dana Whitfield", source: "saved" },
+  { address: "dana@northwind.example", name: "Dana Whitfield", source: "saved", photo: "./demo-avatars/dana.svg" },
   { address: "helena@quarrylane.example", name: "Helena Ruiz", source: "saved" },
   { address: "jonah.mercer@quarrylane.example", name: "Jonah Mercer", source: "saved" },
   { address: "rosa@fieldnotes.example", name: "Rosa Lindqvist", source: "saved" },
-  { address: "ana@northwind.example", name: "Ana Ferreira", source: "other" },
+  { address: "ana@northwind.example", name: "Ana Ferreira", source: "other", photo: "./demo-avatars/ana.svg" },
   { address: "lena.park@studio.example", name: "Lena Park", source: "other" },
   { address: "theo@printshop.example", source: "other" },
 ];
+
+/**
+ * The demo's brand logos, by sender domain: what a BIMI lookup would have found, as
+ * bundled images. Shown only when "Show brand logos" is on, exactly like the real thing,
+ * and never looked up over the network.
+ */
+export const DEMO_BRAND_LOGOS: Readonly<Record<string, string>> = {
+  "shop.example": "./demo-avatars/shop.svg",
+  "airline.example": "./demo-avatars/airline.svg",
+  "utility.example": "./demo-avatars/utility.svg",
+  "producthunt.example": "./demo-avatars/producthunt.svg",
+};
 
 /**
  * Senders the user has binned, for the trash-bias half of the profile.

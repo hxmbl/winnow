@@ -3109,7 +3109,7 @@ try {
       "every row has an avatar button",
       (await d.locator("[data-row-count] [data-row-control='avatar']").count()) === (await rows.count()),
     );
-    check("the demo shows quiet monograms, not photos", (await d.locator("[data-row-count] [data-avatar='monogram']").count()) > 0);
+    check("the demo shows quiet monograms for senders without a picture", (await d.locator("[data-row-count] [data-avatar='monogram']").count()) > 0);
 
     // Weight is unread and only unread.
     const weights = await d.evaluate(() => {
@@ -3462,6 +3462,136 @@ try {
     check("but the reader still offers the code", (await bar.count()) === 1);
     check("no console errors on the codes pass", cErrors.length === 0, cErrors.slice(0, 3).join(" | "));
     await ctx.close();
+  }
+
+  // ── Sender pictures ───────────────────────────────────────────────────────
+  //
+  // Contact photos (Dana and Ana carry bundled demo photos), brand logos behind their
+  // setting (bundled demo logos for Northline and Product Hunt), the monogram for
+  // everyone else, and the monogram again when a picture fails to load.
+
+  section("sender pictures");
+  {
+    const origin = new globalThis.URL(URL).origin;
+    const avatarFor = (pg, senderName) =>
+      pg
+        .locator("[data-row-count] [data-row-id]")
+        .filter({ has: pg.locator("[data-row-sender]", { hasText: senderName }) })
+        .first()
+        .locator("[data-row-control='avatar'] [data-avatar]");
+    const search = async (pg, query) => {
+      await pg.locator("input[type='search']").first().fill(query);
+      await pg.waitForTimeout(300);
+    };
+    const imageLoaded = (locator) =>
+      locator.locator("img").evaluate((img) => img.complete && img.naturalWidth > 0).catch(() => false);
+
+    // Default settings: contact photos yes, brand logos no.
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const sp = await ctx.newPage();
+    const spErrors = [];
+    const offOrigin = [];
+    sp.on("pageerror", (error) => spErrors.push(String(error)));
+    sp.on("console", (message) => message.type() === "error" && spErrors.push(message.text()));
+    sp.on("request", (request) => {
+      if (!request.url().startsWith(origin) && !request.url().startsWith("data:")) offOrigin.push(request.url());
+    });
+    await sp.goto(URL, { waitUntil: "networkidle" });
+    await sp.waitForSelector("[data-row-count] [data-row-id]");
+
+    await search(sp, "dana@northwind");
+    const dana = avatarFor(sp, "Dana Whitfield");
+    await dana.locator("img").waitFor({ timeout: 3_000 }).catch(() => undefined);
+    check("a demo contact with a photo shows an image avatar", (await dana.getAttribute("data-avatar")) === "photo");
+    check("and the image actually loaded", await imageLoaded(dana));
+    check("an image avatar is an <img>, never inline SVG", (await dana.locator("svg").count()) === 0);
+
+    // The reader header and the sender menu use the same picture.
+    await sp.locator("[data-row-count] button[data-message-id]").first().click();
+    await sp.waitForSelector("article h1", { timeout: 5_000 });
+    check(
+      "the reader header shows the sender's photo",
+      (await sp.locator("[data-reader-avatar] [data-avatar='photo'] img").count()) === 1,
+    );
+    await sp.locator("[data-reader-avatar]").click();
+    await sp.waitForTimeout(150);
+    check(
+      "the sender menu opens with the sender's picture and address",
+      (await sp.locator("[data-menu='sender'] [data-menu-header] [data-avatar='photo'] img").count()) === 1 &&
+        ((await sp.locator("[data-menu='sender'] [data-menu-header]").textContent()) ?? "").includes("dana@northwind.example"),
+      (await sp.locator("[data-menu='sender'] [data-menu-header]").textContent()) ?? "",
+    );
+    await sp.keyboard.press("Escape");
+    await sp.keyboard.press("Escape");
+
+    await search(sp, "Marcus");
+    check("a sender without a picture shows the monogram", (await avatarFor(sp, "Marcus").getAttribute("data-avatar")) === "monogram");
+    await search(sp, "deals@shop");
+    check(
+      "brand logos are off by default: a brand sender gets the monogram",
+      (await avatarFor(sp, "Northline").getAttribute("data-avatar")) === "monogram",
+    );
+    check("Settings offers Show brand logos, off", await sp.evaluate(() => {
+      const raw = localStorage.getItem("winnow.preferences.v1");
+      return !raw || JSON.parse(raw).brandLogos !== true;
+    }));
+    check("no console errors on the pictures pass", spErrors.length === 0, spErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+
+    // Brand logos on: the demo answers from bundled logos, with no lookup off the origin.
+    const onCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await onCtx.addInitScript(() => {
+      if (!sessionStorage.getItem("seeded-logos")) {
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ brandLogos: true }));
+        sessionStorage.setItem("seeded-logos", "1");
+      }
+    });
+    const on = await onCtx.newPage();
+    on.on("request", (request) => {
+      if (!request.url().startsWith(origin) && !request.url().startsWith("data:")) offOrigin.push(request.url());
+    });
+    await on.goto(URL, { waitUntil: "networkidle" });
+    await on.waitForSelector("[data-row-count] [data-row-id]");
+    await search(on, "deals@shop");
+    const northline = avatarFor(on, "Northline");
+    await northline.locator("img").waitFor({ timeout: 3_000 }).catch(() => undefined);
+    check("with Show brand logos on, a brand sender shows its logo", (await northline.getAttribute("data-avatar")) === "photo");
+    check("and the logo loaded", await imageLoaded(northline));
+    await search(on, "Marcus");
+    check("a person with no picture still gets the monogram", (await avatarFor(on, "Marcus").getAttribute("data-avatar")) === "monogram");
+    await on.locator("input[type='search']").first().fill("");
+    await on.keyboard.press("Escape");
+    // The toggle itself: off again from Settings.
+    await on.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await on.keyboard.press(",");
+    await on.waitForTimeout(300);
+    const toggle = on.locator('[aria-label="Show brand logos"]');
+    check("Settings has a Show brand logos switch", (await toggle.count()) === 1);
+    if ((await toggle.count()) === 1) {
+      check("which is on", (await toggle.getAttribute("aria-checked")) === "true");
+      await toggle.click();
+      await on.waitForTimeout(150);
+      check("and turns off", (await toggle.getAttribute("aria-checked")) === "false");
+    }
+    check("the demo makes no request off its own origin for pictures", offOrigin.length === 0, offOrigin.slice(0, 3).join(" | "));
+    await onCtx.close();
+
+    // A broken picture falls back to the monogram. Console errors are expected here (the
+    // 404 is the point), so this context does not collect them.
+    const brokenCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await brokenCtx.route("**/demo-avatars/dana.svg", (route) => route.fulfill({ status: 404, body: "" }));
+    const br = await brokenCtx.newPage();
+    await br.goto(URL, { waitUntil: "networkidle" });
+    await br.waitForSelector("[data-row-count] [data-row-id]");
+    await search(br, "dana@northwind");
+    await br.waitForTimeout(400);
+    const broken = avatarFor(br, "Dana Whitfield");
+    check(
+      "a picture that fails to load falls back to the monogram",
+      (await broken.getAttribute("data-avatar")) === "monogram" && ((await broken.textContent()) ?? "").trim() === "D",
+      `${await broken.getAttribute("data-avatar")} ${(await broken.textContent()) ?? ""}`,
+    );
+    await brokenCtx.close();
   }
 
   // ── Console ────────────────────────────────────────────────────────────────

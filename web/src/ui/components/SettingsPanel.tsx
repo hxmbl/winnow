@@ -224,6 +224,9 @@ export type SettingsProps = {
   /** The standing answer about remote images. See `IMAGE_POLICY_CHOICES`. */
   imagePolicy: ImagePolicy;
   onImagePolicy: (value: ImagePolicy) => void;
+  /** Brand logos from BIMI in avatars. Off by default; see `Preferences.brandLogos`. */
+  brandLogos: boolean;
+  onBrandLogos: (value: boolean) => void;
   notificationsEnabled: boolean;
   onNotifications: (value: boolean) => void;
   /** Null on the web, where there is no background thread to hand. */
@@ -378,6 +381,13 @@ export function Settings(props: SettingsProps) {
               </button>
             ))}
           </div>
+        </Row>
+
+        <Row
+          label="Show brand logos"
+          hint="Shows a company's logo beside its mail, from the logo it publishes for email (BIMI). Turning this on sends each sender's domain to Cloudflare's DNS resolver and loads the logo from the sender's own site."
+        >
+          <Toggle checked={props.brandLogos} onChange={props.onBrandLogos} label="Show brand logos" />
         </Row>
 
         <Row
