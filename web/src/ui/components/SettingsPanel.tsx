@@ -245,6 +245,9 @@ export type SettingsProps = {
   events: readonly FeedbackEvent[];
   blockedSenders: readonly string[];
   onUnblock: (sender: string) => void;
+  /** Senders muted from the sender menu: listed, but silent. */
+  mutedSenders: readonly string[];
+  onUnmute: (sender: string) => void;
   /** Buckets the user has silenced, so a mute can be undone from here too. */
   mutedFilters: readonly BuiltinSmartFilter[];
   onRestoreFilter: (id: BuiltinSmartFilter) => void;
@@ -697,6 +700,26 @@ export function Settings(props: SettingsProps) {
               >
                 <Check size={12} strokeWidth={2.4} aria-hidden="true" />
                 Unhide
+              </button>
+            </Row>
+          ))}
+        </Section>
+      )}
+
+      {props.mutedSenders.length > 0 && (
+        <Section title={`Muted senders (${props.mutedSenders.length})`}>
+          <p className="-mt-1 text-meta text-ink-subtle">
+            Still in your inbox, but they never notify and are not counted on the badge.
+          </p>
+          {props.mutedSenders.map((sender) => (
+            <Row key={sender} label={sender}>
+              <button
+                type="button"
+                onClick={() => props.onUnmute(sender)}
+                className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <Check size={12} strokeWidth={2.4} aria-hidden="true" />
+                Unmute
               </button>
             </Row>
           ))}

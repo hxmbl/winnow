@@ -32,7 +32,8 @@ import {
 import { formatFullTime, formatRelative } from "../../core/mail/datetime";
 import { shortcutHint } from "../../core/mail/keybinds";
 import { countRemoteReferences } from "../../core/mail/html";
-import { displayAddress, displayName, monogram, type Email } from "../../core/model/email";
+import { displayAddress, displayName, type Email } from "../../core/model/email";
+import { Avatar } from "./Avatar";
 import {
   badgeFilters,
   type BuiltinSmartFilter,
@@ -503,6 +504,10 @@ type Props = {
    * the header keeps only who and when.
    */
   phone?: boolean;
+  /** The sender's contact photo, when known. */
+  senderPhoto?: string;
+  /** Open the sender menu from the header's avatar. */
+  onSenderMenu?: (trigger: HTMLElement) => void;
 };
 
 export function Reader({
@@ -520,6 +525,8 @@ export function Reader({
   bodyPending,
   onLoadBody,
   phone = false,
+  senderPhoto,
+  onSenderMenu,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -605,13 +612,21 @@ export function Reader({
         change in type size.
       */}
       <div className={`flex items-start gap-3 px-5 pb-4 ${phone ? "pt-[max(1rem,env(safe-area-inset-top))]" : "pt-4"}`}>
-        {/* A neutral initial: an anchor for the eye, not a colour per sender. */}
-        <span
-          aria-hidden="true"
-          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl bg-surface-active text-ui font-semibold text-ink-muted"
+        {/*
+          The sender's avatar — their photo, or the list's quiet monogram — and the door
+          to the sender menu, as it is in the list. A button of its own; the name beside
+          it stays selectable text.
+        */}
+        <button
+          type="button"
+          data-reader-avatar=""
+          aria-label={`Sender options for ${displayName(email)}`}
+          aria-haspopup="menu"
+          onClick={(event) => onSenderMenu?.(event.currentTarget)}
+          className="mt-0.5 shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          {monogram(email)}
-        </span>
+          <Avatar name={displayName(email)} address={email.sender} photo={senderPhoto} size={36} />
+        </button>
 
         <div className="min-w-0 flex-1">
           {/* The sender is the h2 and the subject the h1 — inverted from the usual
@@ -864,11 +879,19 @@ export function Reader({
                         onClick={() => actions.onOpenMessage(message.id)}
                         className="flex w-full items-baseline gap-2 rounded-ctl px-2 py-1.5 text-left text-ui transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                       >
-                        <span className="shrink-0 font-medium text-ink-muted">
+                        {/* Weight only for unread, as in the list. */}
+                        <span
+                          data-thread-sender=""
+                          className={`shrink-0 ${message.unread ? "font-semibold text-ink" : "font-normal text-ink-muted"}`}
+                        >
                           {displayName(message)}
                         </span>
                         <span className="min-w-0 flex-1 truncate text-ink-body">
-                          {lead && <span className="mr-2 font-medium text-ink">{lead}</span>}
+                          {lead && (
+                            <span className={`mr-2 ${message.unread ? "font-semibold text-ink" : "font-normal text-ink"}`}>
+                              {lead}
+                            </span>
+                          )}
                           {preview || message.subject || "(no body)"}
                         </span>
                         {/*

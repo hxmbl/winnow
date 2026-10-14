@@ -65,6 +65,52 @@ import { SignInScreen } from "./ui/SignInScreen";
 import { GoogleSetup, SETUP_GUIDE_URL } from "./ui/components/GoogleSetup";
 import { describeFailure } from "./core/session/errors";
 import { maskClientId, type OAuthClientCredentials } from "./core/session/credentials";
+import { Menu } from "./ui/components/Menu";
+import { anchorFromElement, type MenuAnchor } from "./ui/menuPlacement";
+import { SelectionBar } from "./ui/components/SelectionBar";
+import { buildRowMenu, buildSenderMenu } from "./ui/menus";
+import {
+  EMPTY_SELECTION,
+  orderedSelection,
+  pruneSelection,
+  type Selection,
+} from "./ui/selection";
+import { mailtoAddress } from "./core/mail/unsubscribe";
+
+/** Which popover menu is open, and what it acts on. */
+type OpenMenu = {
+  kind: "sender" | "row";
+  /** The message whose sender or row was clicked. */
+  id: number;
+  /** For a row menu: the messages it acts on (the selection, or just `id`). */
+  ids: number[];
+  anchor: MenuAnchor;
+  /** Gets focus back when the menu closes by Escape or a choice. */
+  trigger: HTMLElement | null;
+};
+
+/** Copy text, falling back to a hidden textarea where the async clipboard is refused. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.append(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
 
 type Props = {
   /** The one piece of global state. Everything else is derived from it. */
@@ -168,6 +214,19 @@ export function App({ store }: Props) {
     paused: !preferences.backgroundSync,
     now: Math.max(snapshot.now, snapshot.lastSyncedAt ?? 0),
   });
+
+  /**
+   * The multi-row selection (drag on the desktop, long-press on a phone). Kept here
+   * rather than in the store: it is a gesture's state, never persisted, and the store's
+   * single `selectedId` keeps meaning "the open message".
+   */
+  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+
+  const [menu, setMenu] = useState<OpenMenu | null>(null);
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
 
   /**
    * The phone arrangement: a top bar and a bottom dock instead of the masthead, and the
@@ -680,6 +739,54 @@ export function App({ store }: Props) {
   const toggleReadRef = useRef(toggleReadFor);
   toggleReadRef.current = toggleReadFor;
 
+  // ── Multi-select and the two menus ─────────────────────────────────────────
+
+  /** Rows in list order, for ranges and for running a batch top to bottom. */
+  const rowOrder = useMemo(() => view.threads.map((row) => row.representative.id), [view.threads]);
+
+  // A row that leaves the list (filed, filtered out, synced away) leaves the selection.
+  useEffect(() => {
+    setSelection((current) => pruneSelection(current, rowOrder));
+  }, [rowOrder]);
+
+  // A selection belongs to one mailbox.
+  useEffect(() => {
+    setSelection(EMPTY_SELECTION);
+    setMenu(null);
+  }, [snapshot.mailbox]);
+
+  /** Contact photos by lowercased address, from the user's Google contacts. */
+  const photos = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const contact of snapshot.googleContacts) {
+      if (contact.photo) map.set(contact.address.toLowerCase(), contact.photo);
+    }
+    return map;
+  }, [snapshot.googleContacts]);
+
+  const runBatch = useCallback((fn: (s: WinnowStore, ids: number[]) => void, keep = false) => {
+    const ids = orderedSelection(
+      selectionRef.current,
+      snapshotRef.current.view.threads.map((row) => row.representative.id),
+    );
+    if (ids.length === 0) return;
+    fn(storeRef.current, ids);
+    if (!keep) setSelection(EMPTY_SELECTION);
+  }, []);
+
+  const openSenderMenu = useCallback((id: number, trigger: HTMLElement) => {
+    setMenu({ kind: "sender", id, ids: [id], anchor: anchorFromElement(trigger), trigger });
+  }, []);
+
+  const openRowMenu = useCallback((id: number, anchor: MenuAnchor, trigger: HTMLElement) => {
+    const batch = selectionRef.current;
+    const ids =
+      batch.has(id) && batch.size > 1
+        ? orderedSelection(batch, snapshotRef.current.view.threads.map((row) => row.representative.id))
+        : [id];
+    setMenu({ kind: "row", id, ids, anchor, trigger });
+  }, []);
+
   const handleSelectRow = useCallback((messageId: number) => {
     const s = storeRef.current;
     const index = snapshotRef.current.view.threads.findIndex(
@@ -726,6 +833,31 @@ export function App({ store }: Props) {
     setComposer({ draft, sending: false, error: null, mode: "forward" });
     void syncGoogleContacts();
   }, [syncGoogleContacts]);
+
+  /**
+   * Reply, reply all or forward a row from its context menu: open it, then compose.
+   *
+   * Read through the store rather than `snapshotRef`, because the row was opened a line
+   * earlier and the snapshot has not re-rendered yet.
+   */
+  const composeFor = useCallback(
+    (id: number, mode: "reply" | "replyAll" | "forward") => {
+      const s = storeRef.current;
+      s.focusMessage(id);
+      const view = s.view;
+      if (!view.selected) return;
+      const draft =
+        mode === "forward"
+          ? buildForward(view.selected, view.conversation, [])
+          : buildReply(view.selected, view.conversation, {
+              replyAll: mode === "replyAll",
+              selfAddress: s.getSnapshot().account?.email,
+            });
+      setComposer({ draft, sending: false, error: null, mode: mode === "forward" ? "forward" : "reply" });
+      void syncGoogleContacts();
+    },
+    [syncGoogleContacts],
+  );
 
   const sendReply = useCallback(async () => {
     if (!composer) return;
@@ -891,6 +1023,23 @@ export function App({ store }: Props) {
       const snap = snapshotRef.current;
       const open = composerRef.current;
       const rail = pillsRef.current;
+      const batch = selectionRef.current;
+
+      // An open menu owns the keyboard; its own handler has already acted.
+      if (menuRef.current) return;
+
+      // Escape ends a multi-selection before it means anything else.
+      if (
+        event.key === "Escape" &&
+        batch.size > 0 &&
+        open === null &&
+        snap.overlay === "none" &&
+        !event.ctrlKey && !event.metaKey && !event.altKey
+      ) {
+        event.preventDefault();
+        setSelection(EMPTY_SELECTION);
+        return;
+      }
 
       /*
         A `select` is not one of `INPUT`/`TEXTAREA`/`contentEditable`, so it falls through
@@ -922,7 +1071,8 @@ export function App({ store }: Props) {
         overlayVisible: snap.overlay === "shortcuts" || snap.overlay === "settings",
         navigationVisible: snap.overlay === "navigation",
         filtersActive: snap.activeFilters.length > 0,
-        hasActionTarget: snap.view.selected !== null || snap.cursorIndex !== NO_CURSOR,
+        hasActionTarget:
+          snap.view.selected !== null || snap.cursorIndex !== NO_CURSOR || batch.size > 0,
         // The rail as the *pills* see it, not the store's ranked bucket list: sender
         // pills take digits too, and the muted pills at the end do not. Counting the
         // store's list would make `7` address a pill that is not there.
@@ -947,6 +1097,16 @@ export function App({ store }: Props) {
 
       event.preventDefault();
       const selectedId = snap.view.selected?.id;
+
+      // With rows selected, the message verbs act on all of them.
+      if (batch.size > 0 && (command.type === "archive" || command.type === "trash" || command.type === "toggleRead")) {
+        const ids = orderedSelection(batch, snap.view.threads.map((row) => row.representative.id));
+        if (command.type === "archive") s.archiveMany(ids);
+        else if (command.type === "trash") s.trashMany(ids);
+        else s.setReadMany(ids, snap.all.some((email) => batch.has(email.id) && email.unread));
+        if (command.type !== "toggleRead") setSelection(EMPTY_SELECTION);
+        return;
+      }
 
       switch (command.type) {
         case "moveSelection":
@@ -1197,7 +1357,19 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       {phone ? (
         // On a phone the reader takes the whole screen, its own way back included, so
         // the list's bar steps aside while a message is open.
-        !selected && (
+        !selected && selection.size > 0 ? (
+          <SelectionBar
+            phone
+            count={selection.size}
+            mailbox={snapshot.mailbox}
+            anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
+            onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
+            onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
+            onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
+            onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+            onClear={() => setSelection(EMPTY_SELECTION)}
+          />
+        ) : !selected && (
           <PhoneTopBar
             searchQuery={snapshot.searchQuery}
             onSearchChange={store.setSearchQuery.bind(store)}
@@ -1405,6 +1577,19 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             classifier's own signals. Only in the inbox — it is a claim about the inbox,
             and over Sent or the bin it would be answering a question nobody asked.
           */}
+          {!phone && selection.size > 0 ? (
+            <SelectionBar
+              phone={false}
+              count={selection.size}
+              mailbox={snapshot.mailbox}
+              anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
+              onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
+              onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
+              onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
+              onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+              onClear={() => setSelection(EMPTY_SELECTION)}
+            />
+          ) : (
           <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-3">
             <div className="min-w-0">
               {snapshot.mailbox === "inbox" && (
@@ -1458,6 +1643,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               </button>
             )}
           </div>
+          )}
           {connectError && (
             <div role="alert" className="px-4 pb-2 text-meta font-medium text-danger">
               <ErrorText text={connectError} />
@@ -1485,6 +1671,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // exact failure the empty state's own copy was written to avoid.
             canSync={snapshot.account !== null}
             now={snapshot.now}
+            photos={photos}
+            selection={selection}
+            onSelectionChange={setSelection}
+            touchSelect={phone}
+            onAvatar={openSenderMenu}
+            onRowMenu={phone ? undefined : openRowMenu}
             className="min-w-0"
           />
         </div>
@@ -1537,6 +1729,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               bodyPending={selected !== null && !store.hasLoadedBody(selected.id)}
               onLoadBody={loadSelectedBody}
               phone={phone}
+              senderPhoto={selected ? photos.get(selected.sender.toLowerCase()) : undefined}
+              onSenderMenu={(trigger) => {
+                if (selected) openSenderMenu(selected.id, trigger);
+              }}
               actions={{
                 onStar: act((s, snap) => {
                   if (snap.view.selected) s.toggleStar(snap.view.selected.id);
@@ -1715,6 +1911,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           events={snapshot.learning.history}
           blockedSenders={preferences.blockedSenders}
           onUnblock={store.unblockSender.bind(store)}
+          mutedSenders={preferences.mutedSenders}
+          onUnmute={store.unmuteSender.bind(store)}
           mutedFilters={snapshot.mutedFilters}
           onRestoreFilter={store.restoreFilter.bind(store)}
           isDesktop={info?.kind === "desktop"}
@@ -1733,6 +1931,146 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       )}
 
       {googleSetup}
+      {/*
+        The sender menu (avatar) and the row context menu. One at a time, fixed to the
+        viewport, built from `ui/menus` so what each contains is unit-tested.
+      */}
+      {menu && (() => {
+        const email = snapshot.all.find((candidate) => candidate.id === menu.id);
+        if (!email) return null;
+        const close = () => setMenu(null);
+        const notice = (text: string) => store.setNotice(text);
+        const name = displayName(email);
+        const muted = store.isSenderMuted(email.sender);
+        const leaveReaderIfFrom = (sender: string) => {
+          const open = snapshotRef.current.view.selected;
+          if (open && open.sender.toLowerCase() === sender.toLowerCase()) {
+            store.closeReader({ dropCursor: phoneRef.current });
+          }
+        };
+        const toggleMute = () => {
+          if (muted) {
+            store.unmuteSender(email.sender);
+            notice(`Unmuted ${email.sender}.`);
+          } else {
+            store.muteSender(email.sender);
+            notice(`Muted ${email.sender}: their mail stays here but won't notify or count as unread on the badge.`);
+          }
+        };
+        const showAll = () => {
+          setSelection(EMPTY_SELECTION);
+          store.showSender(email.sender);
+        };
+
+        if (menu.kind === "sender") {
+          const savedContact = snapshot.googleContacts.some(
+            (contact) => contact.source === "saved" && contact.address.toLowerCase() === email.sender.toLowerCase(),
+          );
+          return (
+            <Menu
+              testId="sender"
+              label={`Sender options for ${name}`}
+              anchor={menu.anchor}
+              returnFocus={menu.trigger}
+              onClose={close}
+              items={buildSenderMenu({
+                name,
+                address: email.sender,
+                muted,
+                savedContact,
+                canUnsubscribe: email.unsubscribe !== undefined,
+                actions: {
+                  showAll,
+                  toggleMute,
+                  block: () => {
+                    store.blockSender(email.sender);
+                    leaveReaderIfFrom(email.sender);
+                    notice(`Blocked ${email.sender}: their mail is hidden in Winnow. Unhide it in Settings.`);
+                  },
+                  addToContacts: () => {
+                    // Winnow's contact grant is read-only, so the contact is created in
+                    // Google Contacts itself, with the address on the clipboard to paste.
+                    void copyText(email.sender).then((copied) => {
+                      notice(
+                        copied
+                          ? `Copied ${email.sender}. Paste it into the new contact in Google Contacts.`
+                          : `Add ${email.sender} in Google Contacts.`,
+                      );
+                    });
+                    void platform.openExternal("https://contacts.google.com/new");
+                  },
+                  unsubscribe: () => {
+                    const unsubscribe = email.unsubscribe;
+                    if (!unsubscribe) return;
+                    if (unsubscribe.url) {
+                      void platform.openExternal(unsubscribe.url);
+                      notice(`Opened ${name}'s unsubscribe page in your browser.`);
+                    } else if (unsubscribe.mailto) {
+                      const address = mailtoAddress(unsubscribe.mailto);
+                      void copyText(address).then((copied) => {
+                        notice(
+                          `${name} unsubscribes by email: send a message to ${address}${copied ? " (copied)" : ""}.`,
+                        );
+                      });
+                    }
+                  },
+                  copyAddress: () => {
+                    void copyText(email.sender).then((copied) => {
+                      notice(copied ? `Copied ${email.sender}.` : `Couldn't copy ${email.sender}.`);
+                    });
+                  },
+                },
+              })}
+            />
+          );
+        }
+
+        const targets = snapshot.all.filter((candidate) => menu.ids.includes(candidate.id));
+        const single = menu.ids.length === 1;
+        const runOn = (fn: (s: WinnowStore, ids: number[]) => void) => {
+          fn(store, menu.ids);
+          if (!single) setSelection(EMPTY_SELECTION);
+        };
+        return (
+          <Menu
+            testId="row"
+            label={single ? `Actions for ${name}: ${email.subject || "no subject"}` : `Actions for ${menu.ids.length} messages`}
+            anchor={menu.anchor}
+            returnFocus={menu.trigger}
+            onClose={close}
+            items={buildRowMenu({
+              count: menu.ids.length,
+              mailbox: snapshot.mailbox,
+              anyUnread: targets.some((candidate) => candidate.unread),
+              sender: single ? { name, address: email.sender, muted } : undefined,
+              subject: single ? email.subject : undefined,
+              actions: {
+                reply: () => composeFor(email.id, "reply"),
+                replyAll: () => composeFor(email.id, "replyAll"),
+                forward: () => composeFor(email.id, "forward"),
+                archive: () => runOn((s, ids) => s.archiveMany(ids)),
+                trash: () => runOn((s, ids) => s.trashMany(ids)),
+                setRead: (read) => {
+                  if (single && !read) toggleReadFor(email.id);
+                  else store.setReadMany(menu.ids, read);
+                },
+                move: (target) => runOn((s, ids) => s.moveMany(ids, target)),
+                toggleMuteSender: toggleMute,
+                findFrom: showAll,
+                findSubject: () => {
+                  setSelection(EMPTY_SELECTION);
+                  store.searchSubject(email.subject);
+                },
+                openInGmail: () => {
+                  void platform.openExternal(
+                    `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(email.gmailId)}`,
+                  );
+                },
+              },
+            })}
+          />
+        );
+      })()}
 
       {composer && (
         <Composer

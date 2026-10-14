@@ -11,6 +11,18 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check } from "lucide-react";
+import { Avatar } from "./Avatar";
+import { anchorFromElement, type MenuAnchor } from "../menuPlacement";
+import {
+  DRAG_THRESHOLD,
+  LONG_PRESS_MS,
+  LongPress,
+  dragSelection,
+  shiftSelection,
+  toggleId,
+  type Selection,
+} from "../selection";
 import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
 import { displayName } from "../../core/model/email";
 import {
@@ -102,8 +114,16 @@ type RowProps = {
   unread: boolean;
   /** True for a message that arrived in the last sync. */
   fresh: boolean;
+  /** Part of the multi-row selection. */
+  checked: boolean;
+  /** Phone select mode: the avatar is a checkbox and a tap toggles. */
+  selectMode: boolean;
+  /** The sender's contact photo, when known. */
+  photo: string | undefined;
   onSelect: (id: number) => void;
   onToggleStar: (id: number) => void;
+  onAvatar: (id: number, trigger: HTMLElement) => void;
+  onToggleChecked: (id: number) => void;
 };
 
 /**
@@ -150,6 +170,7 @@ function rowAccessibleName({
   unread,
   fresh,
   messageCount,
+  checked,
 }: {
   email: ThreadRow["representative"];
   time: string;
@@ -157,6 +178,7 @@ function rowAccessibleName({
   unread: boolean;
   fresh: boolean;
   messageCount: number;
+  checked?: boolean;
 }): string {
   const parts = [displayName(email)];
   if (messageCount > 1) parts.push(`${messageCount} messages`);
@@ -169,6 +191,7 @@ function rowAccessibleName({
     parts.push(indicators.map((id) => FILTER_LABELS[id].toLowerCase()).join(", "));
   }
   parts.push(time);
+  if (checked) parts.push("selected");
   return parts.join(", ");
 }
 
@@ -179,26 +202,88 @@ const Row = memo(function Row({
   selected,
   unread,
   fresh,
+  checked,
+  selectMode,
+  photo,
   onSelect,
   onToggleStar,
+  onAvatar,
+  onToggleChecked,
 }: RowProps) {
   const email = row.representative;
   const indicators = rowIndicators(email, signals);
   const time = formatRowTime(email.receivedAt, bucket);
+  const name = displayName(email);
 
   const signal = rowSignal(indicators, fresh);
 
   return (
     <div
-      className={`group/row relative flex w-full items-start gap-2 rounded-ctl px-3 py-1.5 text-left transition-colors duration-150 ${
+      data-row-id={email.id}
+      data-checked={checked ? "" : undefined}
+      className={`group/row relative flex w-full items-start gap-2 rounded-ctl px-3 py-1.5 text-left transition-colors duration-150 [-webkit-touch-callout:none] ${
         /*
          * Selection is the accent, washed into the surface: the one place in the list the
          * accent appears besides the unread dot, so the two are never confused with any
-         * other state.
+         * other state. A row in the multi-selection gets the same wash; the check in the
+         * avatar slot is what tells it from the open message.
          */
-        selected ? "bg-surface-selected" : "hover:bg-surface-hover"
+        selected || checked ? "bg-surface-selected" : "hover:bg-surface-hover"
       }`}
     >
+      {/*
+        The unread mark, in a gutter of its own so read and unread rows line up. Outside
+        every button, so it is never a click target of its own.
+      */}
+      <span
+        aria-hidden="true"
+        className={`mt-[14px] h-2 w-2 shrink-0 rounded-full transition-colors duration-150 ${
+          unread ? "bg-accent" : "bg-transparent"
+        }`}
+      />
+
+      {/*
+        The avatar is its own button — a sibling of the row button, never inside it —
+        and opens the sender menu rather than the message. In phone select mode it is
+        the row's checkbox instead.
+      */}
+      <button
+        type="button"
+        data-row-control="avatar"
+        aria-label={
+          selectMode
+            ? checked
+              ? `Deselect message from ${name}`
+              : `Select message from ${name}`
+            : `Sender options for ${name}`
+        }
+        aria-haspopup={selectMode ? undefined : "menu"}
+        aria-pressed={selectMode ? checked : undefined}
+        onClick={(event) => {
+          if (selectMode) onToggleChecked(email.id);
+          else onAvatar(email.id, event.currentTarget);
+        }}
+        className="mt-0.5 shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        {checked ? (
+          <span
+            aria-hidden="true"
+            data-avatar="check"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-on-accent"
+          >
+            <Check size={16} strokeWidth={2.6} />
+          </span>
+        ) : selectMode ? (
+          <span
+            aria-hidden="true"
+            data-avatar="unchecked"
+            className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-control-border"
+          />
+        ) : (
+          <Avatar name={name} address={email.sender} photo={photo} />
+        )}
+      </button>
+
       {/*
         The row is a `<button>`, and the star is its *sibling* — putting the star inside
         the row button is invalid HTML and breaks keyboard navigation.
@@ -218,34 +303,27 @@ const Row = memo(function Row({
           unread,
           fresh,
           messageCount: row.messageCount,
+          checked,
         })}
         onClick={() => onSelect(email.id)}
-        className="flex min-w-0 flex-1 items-start gap-2.5 rounded-ctl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex min-w-0 flex-1 items-start rounded-ctl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        {/*
-          The unread mark, in a gutter of its own so read and unread rows line up. The
-          accent and nothing else: no avatar, no colour per sender. Unread is also the
-          only thing that makes a row bold, so it survives without colour.
-        */}
-        <span
-          aria-hidden="true"
-          className={`mt-[7px] h-2 w-2 shrink-0 rounded-full transition-colors duration-150 ${
-            unread ? "bg-accent" : "bg-transparent"
-          }`}
-        />
-
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
             <span className="flex min-w-0 items-baseline gap-1.5">
+              {/*
+                Weight means unread, and only unread. A read row is regular weight
+                throughout; its hierarchy is carried by colour (ink-body for the sender
+                and subject, ink-subtle for the preview and count).
+              */}
               <span
-                className={`truncate text-ui ${
-                  unread ? "font-semibold text-ink" : "font-medium text-ink-body"
-                }`}
+                data-row-sender=""
+                className={`truncate text-ui ${unread ? "font-semibold text-ink" : "font-normal text-ink-body"}`}
               >
-                {displayName(email)}
+                {name}
               </span>
               {row.messageCount > 1 && (
-                <span className="shrink-0 text-meta tabular-nums text-ink-subtle">
+                <span className="shrink-0 text-meta font-normal tabular-nums text-ink-subtle">
                   {row.messageCount}
                 </span>
               )}
@@ -269,7 +347,10 @@ const Row = memo(function Row({
             is set apart by colour and a gap, and it is the part that gives way.
           */}
           <span className="block truncate text-ui">
-            <span className={unread ? "font-semibold text-ink" : "text-ink-body"}>
+            <span
+              data-row-subject=""
+              className={unread ? "font-semibold text-ink" : "font-normal text-ink-body"}
+            >
               {email.subject || "(no subject)"}
             </span>
             {email.body && <span className="ml-2 text-ink-subtle">{email.body}</span>}
@@ -331,7 +412,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   // the loudest thing in a list that is meant to be read quietly. Inset to the sender
   // column, so the label sits over the names rather than over the unread gutter.
   return (
-    <div className="flex items-baseline gap-2 bg-surface pb-1 pl-[30px] pr-3 pt-4 text-meta">
+    <div className="flex items-baseline gap-2 bg-surface pb-1 pl-[68px] pr-3 pt-4 text-meta">
       <span className="font-semibold text-ink-muted">{label}</span>
       <span className="tabular-nums text-ink-subtle">{count}</span>
     </div>
@@ -454,6 +535,20 @@ type Props = {
   canSync: boolean;
   /** Reference instant for the day sections. */
   now: number;
+  /** Lowercased sender address → contact photo URL. */
+  photos: ReadonlyMap<string, string>;
+  /** The multi-row selection. */
+  selection: Selection;
+  onSelectionChange: (next: Selection) => void;
+  /**
+   * The phone layout: long-press selects, and once anything is selected a tap toggles.
+   * Off on the desktop, where a drag selects and a click always opens.
+   */
+  touchSelect: boolean;
+  /** Open the sender menu for a row's avatar. */
+  onAvatar: (id: number, trigger: HTMLElement) => void;
+  /** Open the row context menu (desktop only); `trigger` gets focus back. */
+  onRowMenu?: (id: number, anchor: MenuAnchor, trigger: HTMLElement) => void;
   className?: string;
 };
 
@@ -474,6 +569,12 @@ function MessageList({
   onSync,
   canSync,
   now,
+  photos,
+  selection,
+  onSelectionChange,
+  touchSelect,
+  onAvatar,
+  onRowMenu,
   className = "",
 }: Props) {
 
@@ -727,6 +828,239 @@ function MessageList({
     return () => cancelAnimationFrame(frame);
   }, [cursorIndex, items, scroller]);
 
+  // ── Selection gestures ─────────────────────────────────────────────────────
+
+  /** Row ids in list order, for ranges. */
+  const order = useMemo(
+    () => items.flatMap((item) => (item.kind === "row" ? [item.row.representative.id] : [])),
+    [items],
+  );
+
+  // The gesture handlers read the latest values through refs, so they can be attached
+  // once and never rebuilt mid-drag.
+  const live = useRef({ order, selection, onSelectionChange, touchSelect, onRowMenu });
+  live.current = { order, selection, onSelectionChange, touchSelect, onRowMenu };
+
+  const selectMode = touchSelect && selection.size > 0;
+
+  /** The row a shift-click ranges from: the last row clicked or toggled. */
+  const anchorRef = useRef<number | null>(null);
+  /** Set when a gesture already handled the press, so its trailing click is eaten. */
+  const suppressClick = useRef(false);
+  const lastPointerType = useRef<string>("mouse");
+  const longPress = useRef(new LongPress());
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keyMenuAt = useRef(0);
+  const drag = useRef<{
+    pointerId: number;
+    anchor: number;
+    x: number;
+    y: number;
+    base: Selection;
+    active: boolean;
+    lastX: number;
+    lastY: number;
+    frame: number | null;
+  } | null>(null);
+
+  const rowIdAt = (target: EventTarget | null): number | null => {
+    const element = target instanceof Element ? target.closest<HTMLElement>("[data-row-id]") : null;
+    const id = element ? Number(element.dataset.rowId) : NaN;
+    return Number.isFinite(id) ? id : null;
+  };
+
+  const onToggleChecked = useCallback((id: number) => {
+    const { selection: current, onSelectionChange: change } = live.current;
+    anchorRef.current = id;
+    change(toggleId(current, id));
+  }, []);
+
+  const clearLongPress = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  };
+
+  /** Extend a drag to the row under the pointer, scrolling the list near its edges. */
+  const dragTo = (x: number, y: number) => {
+    const state = drag.current;
+    if (!state || !scroller) return;
+    state.lastX = x;
+    state.lastY = y;
+    const box = scroller.getBoundingClientRect();
+    const probeY = Math.max(box.top + 1, Math.min(box.bottom - 1, y));
+    const under = document.elementFromPoint(Math.max(box.left + 1, Math.min(box.right - 1, x)), probeY);
+    const id = rowIdAt(under);
+    if (id !== null) {
+      live.current.onSelectionChange(dragSelection(state.base, live.current.order, state.anchor, id));
+    }
+    // Edge scrolling, so a drag can reach rows that are not mounted yet.
+    const edge = 28;
+    const speed = y < box.top + edge ? -(box.top + edge - y) : y > box.bottom - edge ? y - (box.bottom - edge) : 0;
+    if (speed !== 0 && state.frame === null) {
+      state.frame = requestAnimationFrame(() => {
+        if (!drag.current) return;
+        drag.current.frame = null;
+        scroller.scrollTop += Math.max(-24, Math.min(24, speed / 2));
+        dragTo(drag.current.lastX, drag.current.lastY);
+      });
+    }
+  };
+
+  const onPointerDown = (event: React.PointerEvent) => {
+    lastPointerType.current = event.pointerType;
+    if ((event.target as Element).closest("[data-row-control]")) return;
+    const id = rowIdAt(event.target);
+    if (id === null) return;
+
+    if (event.pointerType === "mouse") {
+      if (event.button !== 0 || event.shiftKey || live.current.touchSelect) return;
+      const additive = event.metaKey || event.ctrlKey;
+      drag.current = {
+        pointerId: event.pointerId,
+        anchor: id,
+        x: event.clientX,
+        y: event.clientY,
+        base: additive ? live.current.selection : new Set<number>(),
+        active: false,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        frame: null,
+      };
+      return;
+    }
+
+    if (!live.current.touchSelect) return;
+    longPress.current.down(id, event.clientX, event.clientY, performance.now());
+    clearLongPress();
+    longPressTimer.current = setTimeout(() => {
+      const fired = longPress.current.tick(performance.now());
+      if (fired === null) return;
+      const { selection: current, onSelectionChange: change } = live.current;
+      anchorRef.current = fired;
+      change(current.size === 0 ? new Set([fired]) : toggleId(current, fired));
+      navigator.vibrate?.(8);
+    }, LONG_PRESS_MS);
+  };
+
+  const onPointerMove = (event: React.PointerEvent) => {
+    const state = drag.current;
+    if (state && state.pointerId === event.pointerId) {
+      if ((event.buttons & 1) === 0) {
+        drag.current = null;
+        return;
+      }
+      if (!state.active) {
+        if (Math.hypot(event.clientX - state.x, event.clientY - state.y) < DRAG_THRESHOLD) return;
+        state.active = true;
+        scroller?.setPointerCapture?.(event.pointerId);
+        window.getSelection()?.removeAllRanges();
+      }
+      event.preventDefault();
+      dragTo(event.clientX, event.clientY);
+      return;
+    }
+    if (event.pointerType !== "mouse" && !longPress.current.move(event.clientX, event.clientY)) clearLongPress();
+  };
+
+  const endPointer = (event: React.PointerEvent) => {
+    const state = drag.current;
+    if (state && state.pointerId === event.pointerId) {
+      if (state.active) {
+        suppressClick.current = true;
+        anchorRef.current = state.anchor;
+        if (scroller?.hasPointerCapture?.(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+      }
+      if (state.frame !== null) cancelAnimationFrame(state.frame);
+      drag.current = null;
+      return;
+    }
+    clearLongPress();
+    if (longPress.current.up()) suppressClick.current = event.type === "pointerup";
+  };
+
+  /**
+   * Clicks, decided before the row's own handler sees them.
+   *
+   * Captured on the scroller so a gesture can veto the open: a drag or a long-press ends
+   * with a click the browser still delivers, and select mode turns a tap into a toggle.
+   */
+  const onClickCapture = (event: React.MouseEvent) => {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const target = event.target as Element;
+    if (target.closest("[data-row-control]")) return;
+    const id = rowIdAt(target);
+    if (id === null) return;
+    const { selection: current, onSelectionChange: change, order: rows, touchSelect: touch } = live.current;
+
+    if (touch) {
+      if (current.size > 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        anchorRef.current = id;
+        change(toggleId(current, id));
+      }
+      return;
+    }
+
+    if (event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      change(shiftSelection(current, rows, anchorRef.current, id, event.metaKey || event.ctrlKey));
+      return;
+    }
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      anchorRef.current = id;
+      change(toggleId(current, id));
+      return;
+    }
+    // A plain click opens the message (the row's own handler) and ends a selection.
+    anchorRef.current = id;
+    if (current.size > 0) change(new Set());
+  };
+
+  const openRowMenu = (id: number, anchor: MenuAnchor | null) => {
+    const handler = live.current.onRowMenu;
+    if (!handler || !scroller) return;
+    const button = scroller.querySelector<HTMLElement>(`button[data-message-id="${id}"]`);
+    if (!button) return;
+    handler(id, anchor ?? anchorFromElement(button), button);
+  };
+
+  const onContextMenu = (event: React.MouseEvent) => {
+    const id = rowIdAt(event.target);
+    if (id === null) return;
+    // Never the browser's menu over a row: on a phone a long-press is select mode, and
+    // on the desktop the row has its own menu.
+    event.preventDefault();
+    if (live.current.touchSelect || lastPointerType.current !== "mouse" && event.button !== 2) {
+      if (live.current.touchSelect) return;
+    }
+    if (performance.now() - keyMenuAt.current < 400) return;
+    // A keyboard-opened `contextmenu` reports (0, 0) or no button; anchor it to the row.
+    const fromKeyboard = event.button !== 2 || (event.clientX === 0 && event.clientY === 0);
+    openRowMenu(id, fromKeyboard ? null : { kind: "point", x: event.clientX, y: event.clientY });
+  };
+
+  const onKeyDownList = (event: React.KeyboardEvent) => {
+    if (!(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) return;
+    if (live.current.touchSelect) return;
+    const id = rowIdAt(event.target);
+    if (id === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    keyMenuAt.current = performance.now();
+    openRowMenu(id, null);
+  };
+
+  useEffect(() => () => clearLongPress(), []);
+
   if (threads.length === 0) {
     return (
       <Empty
@@ -749,6 +1083,14 @@ function MessageList({
         // size of the window. The smoke test asserts against it: `[data-message-id]` is only
         // the mounted window, so counting those elements measures the viewport.
         data-row-count={rowCount}
+        data-select-mode={selectMode ? "" : undefined}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPointer}
+        onPointerCancel={endPointer}
+        onClickCapture={onClickCapture}
+        onContextMenu={onContextMenu}
+        onKeyDown={onKeyDownList}
         className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4"
       >
       {/*
@@ -812,8 +1154,13 @@ function MessageList({
                       selected={email.id === selectedId}
                       unread={unreadIds.has(email.id)}
                       fresh={freshIds.has(email.id)}
+                      checked={selection.has(email.id)}
+                      selectMode={selectMode}
+                      photo={photos.get(email.sender.toLowerCase())}
                       onSelect={onSelect}
                       onToggleStar={onToggleStar}
+                      onAvatar={onAvatar}
+                      onToggleChecked={onToggleChecked}
                     />
                   </div>
                 );
