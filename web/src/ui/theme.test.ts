@@ -19,9 +19,10 @@
  *      custom property, so the modifier emits `rgb(var(--wn-surface) / 0.6)`, which is
  *      not a colour, and the class renders nothing.
  *   4. **The accent works as text, as a ring and as a fill**, in both schemes, and is a
- *      muted plum rather than a stock violet. The neutrals carry a faint violet tint, the
- *      selected row is the accent washed into the surface, and danger stays a readable
- *      red well clear of the accent.
+ *      deliberate space violet — a saturated, indigo-leaning blue-violet — rather than a
+ *      stock Tailwind violet or indigo. The neutrals carry a blue-violet cast, the selected
+ *      row is the accent washed into the surface, and danger stays a readable red well
+ *      clear of the accent.
  *   5. **The design system stays small**: four type sizes, two radii, no shadows and no
  *      letter-spaced capitals, asserted over the component sources.
  *
@@ -194,14 +195,15 @@ describe("the accent", () => {
   }
 
   /**
-   * A purple with character, not the framework default.
+   * A space violet, not the framework default.
    *
-   * Tailwind's violet/indigo/purple 400–700 are what every generated interface reaches
-   * for. The accent has to sit on the plum side of violet (hue 285–330), stay muted
-   * (HSL saturation at most 0.55, where those defaults run 0.7–0.9) and keep a visible
-   * distance from each of them.
+   * The accent is a cosmic blue-violet: a hue on the indigo side of violet (245–265°),
+   * vivid rather than muted (HSL saturation 0.6 or more), so it glows on the night-sky dark
+   * theme and reads as a colour in light. That range is exactly where Tailwind's violet and
+   * indigo live, so the accent also has to keep a visible distance from every stock
+   * violet/indigo/purple/fuchsia 400–700 — the generic-button purples.
    */
-  it("is a muted plum, not a stock violet or indigo", () => {
+  it("is a vivid space violet, not a stock violet or indigo", () => {
     const STOCK = [
       "#A78BFA", "#8B5CF6", "#7C3AED", "#6D28D9", // violet 400–700
       "#818CF8", "#6366F1", "#4F46E5", "#4338CA", // indigo 400–700
@@ -211,32 +213,41 @@ describe("the accent", () => {
     for (const name of SCHEMES) {
       const hex = paletteFor(name).color.accent;
       const { hue, saturation } = hsl(hex);
-      expect(hue, `${name}: ${hex} hue`).toBeGreaterThanOrEqual(285);
-      expect(hue, `${name}: ${hex} hue`).toBeLessThanOrEqual(330);
-      expect(saturation, `${name}: ${hex} is too saturated`).toBeLessThanOrEqual(0.55);
+      expect(hue, `${name}: ${hex} hue`).toBeGreaterThanOrEqual(245);
+      expect(hue, `${name}: ${hex} hue`).toBeLessThanOrEqual(265);
+      expect(saturation, `${name}: ${hex} is too muted`).toBeGreaterThanOrEqual(0.6);
       for (const stock of STOCK) {
-        expect(rgbDistance(hex, stock), `${name}: ${hex} is too close to ${stock}`).toBeGreaterThan(48);
+        expect(rgbDistance(hex, stock), `${name}: ${hex} is too close to ${stock}`).toBeGreaterThan(28);
       }
     }
+  });
+
+  it("is the same hue in both schemes", () => {
+    const light = hsl(paletteFor("light").color.accent).hue;
+    const dark = hsl(paletteFor("dark").color.accent).hue;
+    expect(hueGap(light, dark)).toBeLessThanOrEqual(8);
   });
 });
 
 describe("the neutrals", () => {
-  /** Backdrops and inks that carry the violet tint. Status colours and the accent are excluded. */
+  /** Backdrops and inks that carry the blue-violet cast. Status colours and the accent are excluded. */
   const NEUTRALS = [...SURFACE_TOKENS.filter((token) => token !== "surfaceSelected"), "ink", "inkBody", "inkMuted", "inkSubtle", "inkIcon"];
 
   for (const name of SCHEMES) {
-    it(`${name}: are cool violet-greys, barely tinted`, () => {
+    it(`${name}: are cool blue-violet greys, tinted but not coloured`, () => {
       const { color } = paletteFor(name);
       for (const token of NEUTRALS) {
         const hex = color[token];
         const [r, g, b] = channels(hex);
-        // Blue over green and red over green: a violet lean, not blue-grey and not beige.
+        // Blue over red over green: a blue-violet lean, not blue-grey, not teal and not beige.
         expect(b, `${name}: ${token} ${hex} is not violet-leaning`).toBeGreaterThan(g);
         expect(r, `${name}: ${token} ${hex} leans teal`).toBeGreaterThanOrEqual(g);
         expect(b, `${name}: ${token} ${hex} is warm`).toBeGreaterThan(r);
-        // A tint, not a colour.
-        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${hex} is too saturated`).toBeLessThanOrEqual(24);
+        // A cast, not a colour: the dark theme's indigo-blacks lean harder than the light
+        // greys, but every neutral stays far short of the accent's own saturation.
+        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${hex} is too saturated`).toBeLessThanOrEqual(36);
+        // And on the accent's side of the wheel, so page and accent read as one family.
+        expect(hueGap(hsl(hex).hue, hsl(color.accent).hue), `${name}: ${token} ${hex} drifts from the accent`).toBeLessThanOrEqual(20);
       }
     });
 
@@ -269,7 +280,7 @@ describe("danger", () => {
       const { danger, accent } = paletteFor(name).color;
       const hue = hsl(danger).hue;
       expect(hueGap(hue, 0), `${name}: ${danger} is not a red`).toBeLessThanOrEqual(20);
-      expect(hueGap(hue, hsl(accent).hue), `${name}: ${danger} sits too close to ${accent}`).toBeGreaterThanOrEqual(40);
+      expect(hueGap(hue, hsl(accent).hue), `${name}: ${danger} sits too close to ${accent}`).toBeGreaterThanOrEqual(90);
     });
   }
 });
