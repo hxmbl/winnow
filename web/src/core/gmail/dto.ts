@@ -115,6 +115,8 @@ export type GmailMessage = {
   labelIds?: string[];
   snippet?: string;
   internalDate?: string;
+  /** Estimated size in bytes, reported in every format. */
+  sizeEstimate?: number;
   payload?: GmailPart;
 };
 

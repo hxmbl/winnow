@@ -16,6 +16,7 @@ import {
   messageIdHeader,
   parseDateHeader,
   toEmail,
+  loadedBodyOf,
 } from "./mapper";
 import { LABEL, type GmailMessage, type GmailPart } from "./dto";
 import type { Email } from "../model/email";
@@ -450,5 +451,63 @@ describe("toEmail — the rest", () => {
 
   it("homes the message by its labels", () => {
     expect(toEmail(message({ labelIds: [LABEL.spam] }))!.mailbox).toBe("spam");
+  });
+});
+
+describe("toEmail — format=metadata", () => {
+  const metadata = {
+    id: "meta1",
+    threadId: "t1",
+    labelIds: ["INBOX", "UNREAD"],
+    snippet: "Can we move Thursday&#39;s call? It&amp;s urgent",
+    internalDate: "1760000000000",
+    sizeEstimate: 48_213,
+    payload: {
+      mimeType: "multipart/mixed",
+      headers: [
+        { name: "From", value: "Ada <ada@mail.test>" },
+        { name: "To", value: "me@mail.test" },
+        { name: "Subject", value: "Thursday" },
+        { name: "List-Unsubscribe", value: "<mailto:u@list.test>" },
+        { name: "Message-ID", value: "<abc@mail.test>" },
+      ],
+    },
+  };
+
+  it("uses the decoded snippet as a stand-in body and marks it unloaded", () => {
+    const email = toEmail(metadata, { format: "metadata" })!;
+    expect(email.body).toBe("Can we move Thursday's call? It&s urgent");
+    expect(email.bodyLoaded).toBe(false);
+    expect(email.bodyHtml).toBeUndefined();
+    expect(email.attachments).toEqual([]);
+  });
+
+  it("keeps every header the list and classifier read", () => {
+    const email = toEmail(metadata, { format: "metadata" })!;
+    expect(email.sender).toBe("ada@mail.test");
+    expect(email.name).toBe("Ada");
+    expect(email.subject).toBe("Thursday");
+    expect(email.to).toEqual([{ address: "me@mail.test" }]);
+    expect(email.messageId).toBe("<abc@mail.test>");
+    expect(email.unread).toBe(true);
+    expect(email.sizeEstimate).toBe(48_213);
+    expect(email.bulk).toBe(true);
+    // multipart/mixed is how mail with attachments is built.
+    expect(email.attachmentHint).toBe(true);
+  });
+
+  it("leaves a full message marked loaded (absent), as every older cache row is", () => {
+    const full = toEmail({ ...metadata, payload: { mimeType: "text/plain", headers: metadata.payload.headers, body: { data: btoa("hi"), size: 2 } } })!;
+    expect(full.bodyLoaded).toBeUndefined();
+    expect(full.attachmentHint).toBeUndefined();
+    expect(full.body).toBe("hi");
+  });
+
+  it("loadedBodyOf returns the same body a full sync would have stored", () => {
+    const message = {
+      ...metadata,
+      payload: { mimeType: "text/plain", headers: metadata.payload.headers, body: { data: btoa("the body"), size: 8 } },
+    };
+    expect(loadedBodyOf(message)).toEqual({ body: "the body", bodyHtml: undefined, attachments: [] });
   });
 });

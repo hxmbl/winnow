@@ -15,6 +15,7 @@
 
 import {
   CATEGORY_MAP,
+  type LoadedBody,
   type Attachment,
   type Contact,
   type Email,
@@ -23,7 +24,7 @@ import {
 } from "../model/email";
 import { hashId } from "../model/ids";
 import { LABEL, base64UrlDecode, type GmailMessage, type GmailPart } from "./dto";
-import { parseAddressHeader, parseAddressList, plainTextFromHtml } from "../mail/html";
+import { decodeEntities, parseAddressHeader, parseAddressList, plainTextFromHtml } from "../mail/html";
 
 /** Which mailbox a set of labels files the message in. */
 export function mailboxFor(labelIds: readonly string[]): Mailbox {
@@ -182,9 +183,13 @@ function recipients(payload: GmailPart | undefined, header: string): Contact[] |
  *
  * `null` means drop it — e.g., an outbox or draft stub with no body.
  */
-export function toEmail(message: GmailMessage): Email | null {
+export function toEmail(
+  message: GmailMessage,
+  options: { format?: "full" | "metadata" } = {},
+): Email | null {
   const labelIds = message.labelIds ?? [];
   const payload = message.payload;
+  const metadata = options.format === "metadata";
 
   // Gmail returns a stub for anything the user has not actually sent or
   // received. It has labels and nothing else.
@@ -196,7 +201,10 @@ export function toEmail(message: GmailMessage): Email | null {
   const html = htmlPart(payload);
 
   let body = "";
-  if (plain) body = decodeBody(plain.body!.data!);
+  // A metadata response has no leaves to read, so its body is the snippet — which
+  // Gmail HTML-escapes (`&#39;`), unlike a decoded part.
+  if (metadata) body = decodeEntities(snippetFor(message));
+  else if (plain) body = decodeBody(plain.body!.data!);
   else if (html) body = plainTextFromHtml(decodeBody(html.body!.data!));
   else body = snippetFor(message);
 
@@ -217,7 +225,10 @@ export function toEmail(message: GmailMessage): Email | null {
     ? Number(message.internalDate)
     : parseDateHeader(headerValue(payload, "Date"), fallbackDate);
 
-  const bodyHtml = html ? decodeBody(html.body!.data!) : undefined;
+  const bodyHtml = !metadata && html ? decodeBody(html.body!.data!) : undefined;
+  const bulk =
+    headerValue(payload, "List-Unsubscribe") !== undefined ||
+    headerValue(payload, "List-Id") !== undefined;
 
   return {
     id: hashId(message.id),
@@ -242,9 +253,28 @@ export function toEmail(message: GmailMessage): Email | null {
     category: categoryFor(labelIds),
     starred: labelIds.includes(LABEL.starred),
     unread: labelIds.includes(LABEL.unread),
-    attachments: collectAttachments(payload),
+    attachments: metadata ? [] : collectAttachments(payload),
     urgent: false,
+    ...(metadata
+      ? {
+          bodyLoaded: false,
+          ...(payload?.mimeType?.toLowerCase() === "multipart/mixed" ? { attachmentHint: true } : {}),
+        }
+      : {}),
+    ...(message.sizeEstimate !== undefined ? { sizeEstimate: message.sizeEstimate } : {}),
+    ...(bulk ? { bulk: true } : {}),
   };
+}
+
+/**
+ * The body half of a `format=full` message — what lazy loading adds to a row that was
+ * synced as metadata. Same decoding as `toEmail`, so a loaded body is byte-for-byte
+ * what a full sync would have stored.
+ */
+export function loadedBodyOf(message: GmailMessage): LoadedBody {
+  const email = toEmail(message);
+  if (!email) return { body: message.snippet ?? "", attachments: [] };
+  return { body: email.body, bodyHtml: email.bodyHtml, attachments: email.attachments };
 }
 
 /**

@@ -160,7 +160,77 @@ export type Email = {
   spamScore?: number;
   /** Person/Gmail marked urgent (bypasses keyword test). */
   urgent: boolean;
+  /**
+   * Whether `body`, `bodyHtml` and `attachments` are the real thing.
+   *
+   * `false` means the message was synced as metadata only: `body` is Gmail's snippet,
+   * `bodyHtml` is absent and `attachments` is empty until the reader (or the
+   * background prefetch) loads it. Absent means loaded — the demo seed and every cache
+   * written before metadata-first sync carry whole messages. Read it through
+   * `isBodyLoaded` so the two "loaded" spellings cannot drift apart.
+   */
+  bodyLoaded?: boolean;
+  /** Gmail's size estimate, in bytes. Present on synced mail. */
+  sizeEstimate?: number;
+  /**
+   * The message carried `List-Unsubscribe` or `List-Id` — bulk mail by its own
+   * declaration. Read by the classifier, which otherwise finds "unsubscribe" in the
+   * footer of a body a metadata sync does not have.
+   */
+  bulk?: boolean;
+  /**
+   * A metadata-only message whose top-level MIME type is `multipart/mixed`, which is
+   * how mail with attachments is built. A hint for the Attachments bucket until the
+   * body (and the real attachment list) arrives.
+   */
+  attachmentHint?: boolean;
 };
+
+/** True when `body`/`bodyHtml`/`attachments` hold the whole message, not a metadata stand-in. */
+export function isBodyLoaded(email: Pick<Email, "bodyLoaded">): boolean {
+  return email.bodyLoaded !== false;
+}
+
+/**
+ * What loading a body adds to a metadata-only message. The reader's lazy load and the
+ * background prefetch both produce one; the store and the cache both apply it.
+ */
+export type LoadedBody = {
+  body: string;
+  bodyHtml?: string;
+  attachments: Attachment[];
+};
+
+/**
+ * A freshly synced copy, keeping the body the cached copy already had.
+ *
+ * Gmail never changes a message's content after delivery — only its labels — so a
+ * body loaded once is good forever, and a metadata re-fetch (a label change, a full
+ * rebuild) must not throw it away. That is what keeps opened mail readable offline.
+ */
+export function keepLoadedBody(fresh: Email, cached: Email | undefined): Email {
+  if (!cached || isBodyLoaded(fresh) || !isBodyLoaded(cached)) return fresh;
+  return {
+    ...fresh,
+    body: cached.body,
+    bodyHtml: cached.bodyHtml,
+    attachments: cached.attachments,
+    bodyLoaded: true,
+    attachmentHint: undefined,
+  };
+}
+
+/** A metadata-only message with its body applied. */
+export function withLoadedBody(email: Email, loaded: LoadedBody): Email {
+  return {
+    ...email,
+    body: loaded.body,
+    bodyHtml: loaded.bodyHtml,
+    attachments: loaded.attachments,
+    bodyLoaded: true,
+    attachmentHint: undefined,
+  };
+}
 
 export function displayName(email: Email): string {
   const name = email.name?.trim();

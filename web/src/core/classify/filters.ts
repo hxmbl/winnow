@@ -93,7 +93,9 @@ export function matchesBuiltin(
       return email.unread && safe;
 
     case "attachments":
-      return email.attachments.length > 0 && safe;
+      // `attachmentHint` stands in until a metadata-only message's body (and its real
+      // attachment list) has been loaded.
+      return (email.attachments.length > 0 || email.attachmentHint === true) && safe;
 
     case "long_reads":
       // Substantive weekend reading: long, and nothing urgent, risky or

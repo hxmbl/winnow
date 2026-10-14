@@ -8,7 +8,7 @@
  * Ported from `legacy/swift-native/Sources/winnow/Classification/Classifier.swift`.
  */
 
-import type { Email } from "../model/email";
+import { isBodyLoaded, type Email } from "../model/email";
 import type { EmailSignals } from "../model/signals";
 import { trashBiasFor, type UserProfile } from "../model/profile";
 import { STANDARD_WEIGHTS, type SignalWeights } from "./weights";
@@ -129,7 +129,10 @@ export function classifyEmail(
   // Gmail has no security category — it files account notices under "updates"
   // alongside shipping and calendar mail — so this is keyword-driven only.
   const security = securityKeywords.any(text);
-  const newsletterHits = newsletterKeywords.count(text);
+  // A `List-Unsubscribe`/`List-Id` header is the sender declaring bulk mail, and counts
+  // as one hit: it is the same evidence as the "unsubscribe" footer, which a
+  // metadata-only message does not have the body to show.
+  const newsletterHits = newsletterKeywords.count(text) + (email.bulk ? 1 : 0);
   // Gmail's own label is trusted outright; wording needs corroboration.
   const newsletter = email.category === "newsletter" || newsletterHits >= 2;
 
@@ -163,7 +166,9 @@ export function classifyEmail(
     !newsletter &&
     !promotional;
 
-  const longRead = bodyWordCount(email.body) >= LONG_READ_WORDS;
+  // Not knowable from a snippet: a metadata-only message is not a long read until its
+  // body arrives (the store prefetches unread inbox mail, so the ones that matter do).
+  const longRead = isBodyLoaded(email) && bodyWordCount(email.body) >= LONG_READ_WORDS;
 
   // ── Spam likelihood ──
   let spamLikelihood = 0;

@@ -1031,3 +1031,27 @@ describe("the demo mailbox", () => {
     expect(signals.importanceScore).toBeGreaterThanOrEqual(56);
   });
 });
+describe("classifyEmail — metadata-only messages", () => {
+  const PROFILE = buildUserProfile([], []);
+
+  it("counts a List-Unsubscribe/List-Id header as one newsletter hit", () => {
+    // One keyword alone is not enough; the header corroborates it.
+    const oneWord = email({ subject: "Our newsletter", body: "snippet" });
+    expect(classifyEmail(oneWord, PROFILE).newsletter).toBe(false);
+    expect(classifyEmail({ ...oneWord, bulk: true }, PROFILE).newsletter).toBe(true);
+  });
+
+  it("is not a long read until its body has loaded", () => {
+    const long = Array.from({ length: 400 }, () => "word").join(" ");
+    expect(classifyEmail(email({ body: long }), PROFILE).longRead).toBe(true);
+    expect(classifyEmail(email({ body: long, bodyLoaded: false }), PROFILE).longRead).toBe(false);
+  });
+
+  it("classifies a loaded message exactly as before (no header, no change)", () => {
+    for (const message of DEMO_EMAILS.slice(0, 20)) {
+      const before = classifyEmail(message, PROFILE);
+      const after = classifyEmail({ ...message, bodyLoaded: true }, PROFILE);
+      expect(after).toEqual(before);
+    }
+  });
+});
