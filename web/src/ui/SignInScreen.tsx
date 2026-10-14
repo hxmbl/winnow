@@ -27,9 +27,11 @@ type Props = {
   /** True when a session already exists and is being restored. */
   restoring: boolean;
   hasDemo: boolean;
+  /** No OAuth client stored yet: the button opens the Google account setup first. */
+  needsSetup?: boolean;
 };
 
-export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo }: Props) {
+export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSetup = false }: Props) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<AuthFailure | null>(null);
 
@@ -73,8 +75,14 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo }: Props)
               className="mt-8 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--wn-inkBody)] px-4 py-2.5 text-[13.5px] font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <LogIn size={15} strokeWidth={2} aria-hidden="true" />
-              {busy ? "Waiting for Google…" : "Continue with Google"}
+              {busy ? "Waiting for Google…" : needsSetup ? "Set up Google sign-in" : "Continue with Google"}
             </button>
+            {needsSetup && (
+              <p className="mt-2 text-center text-[12px] text-ink-subtle">
+                Winnow uses a Google client from your own Cloud project. The setup takes about
+                ten minutes the first time.
+              </p>
+            )}
 
             {failure && (
               <div

@@ -414,6 +414,171 @@ try {
     (await page.locator("text=Demo mailbox").count()) > 0,
   );
 
+  // ── Google account setup ───────────────────────────────────────────────────
+
+  section("google account setup");
+
+  // The stubbed token endpoint answers 400 and 401 on purpose below, and Chromium logs
+  // every failed load as a console error. Those two are expected; anything else that
+  // this section produces still fails the console check at the end.
+  const errorsBeforeSetup = errors.length;
+
+  // Winnow ships no Google client, so "Connect Gmail" with nothing stored has to open
+  // the setup sheet rather than fail with a configuration error.
+  await connect.first().click();
+  const setup = page.locator('[role="dialog"][aria-label="Google account"]');
+  await setup.waitFor({ timeout: 5_000 });
+  check("Connect Gmail opens the Google account setup when no client is stored", (await setup.count()) === 1);
+  check(
+    "focus starts in the client ID field",
+    await page.evaluate(() => document.activeElement?.getAttribute("name") === "clientId"),
+  );
+  check(
+    "the web build asks for a Web application client",
+    (await setup.getByText("Web application", { exact: true }).count()) > 0,
+  );
+  check(
+    "and shows the exact redirect URI to register",
+    (await setup.locator("code").first().textContent())?.trim() === URL,
+    await setup.locator("code").first().textContent(),
+  );
+  check(
+    "the setup guide is one click away",
+    (await setup.getByRole("button", { name: "Open the setup guide" }).count()) === 1,
+  );
+
+  const idInput = setup.locator('input[name="clientId"]');
+  const secretInput = setup.locator('input[name="clientSecret"]');
+  check(
+    "both fields have labels",
+    (await setup.getByLabel("Client ID").count()) === 1 && (await setup.getByLabel(/Client secret/).count()) === 1,
+  );
+
+  /** The text of the error a field's aria-describedby points at, or null. */
+  const fieldError = (input) =>
+    input.evaluate((el) => {
+      if (el.getAttribute("aria-invalid") !== "true") return null;
+      const ids = (el.getAttribute("aria-describedby") ?? "").split(/\s+/);
+      return ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" | ");
+    });
+
+  // Submitting empty flags both fields and puts focus on the first.
+  await setup.getByRole("button", { name: "Save and connect" }).click();
+  await page.waitForTimeout(150);
+  const emptyIdError = await fieldError(idInput);
+  check("an empty client ID is flagged inline and tied to its field", /Enter the client ID/.test(emptyIdError ?? ""), emptyIdError ?? "no error");
+  check("so is the missing secret a web client needs", /needs its client secret/.test((await fieldError(secretInput)) ?? ""));
+  check(
+    "focus moves to the first field with a problem",
+    await page.evaluate(() => document.activeElement?.getAttribute("name") === "clientId"),
+  );
+
+  await idInput.fill("1234567890-abc123def");
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(100);
+  check(
+    "a client ID without the Google suffix says what it should end in",
+    /\.apps\.googleusercontent\.com/.test((await fieldError(idInput)) ?? ""),
+  );
+
+  const VALID_ID = "1234567890-abc123def.apps.googleusercontent.com";
+  await idInput.fill(VALID_ID);
+  await secretInput.fill("smoke-test-secret");
+  await page.waitForTimeout(100);
+  check("a well-formed pair clears the errors", (await fieldError(idInput)) === null && (await fieldError(secretInput)) === null);
+
+  // "Test connection" talks to Google's token endpoint only; here that endpoint is
+  // stubbed to answer the way it does for a known client and a made-up code.
+  const tokenRequests = [];
+  await page.route("https://oauth2.googleapis.com/token", async (route) => {
+    tokenRequests.push(route.request().postData() ?? "");
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({ error: "invalid_grant", error_description: "Malformed auth code." }),
+    });
+  });
+  await setup.getByRole("button", { name: "Test connection" }).click();
+  await setup.getByText("Google recognised this client").waitFor({ timeout: 5_000 }).catch(() => undefined);
+  check("Test connection reports a recognised client", (await setup.getByText("Google recognised this client").count()) === 1);
+  check(
+    "and sent the client to Google's token endpoint only",
+    tokenRequests.length === 1 && tokenRequests[0].includes(encodeURIComponent(VALID_ID)),
+    `${tokenRequests.length} requests`,
+  );
+  check("nothing is stored until it is saved", (await page.evaluate(() => localStorage.getItem("winnow.google.oauthClient"))) === null);
+
+  // A rejected client lands on the field Google blamed.
+  await page.unroute("https://oauth2.googleapis.com/token");
+  await page.route("https://oauth2.googleapis.com/token", (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({ error: "invalid_client", error_description: "The OAuth client was not found." }),
+    }),
+  );
+  await setup.getByRole("button", { name: "Test connection" }).click();
+  await page.waitForTimeout(400);
+  check("an unknown client is reported on the client ID field", /doesn't know this client ID/.test((await fieldError(idInput)) ?? ""));
+  await page.unroute("https://oauth2.googleapis.com/token");
+
+  // Escape leaves without saving.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  check("Escape closes the setup sheet", (await setup.count()) === 0);
+  check("and the demo is still there", (await rowTotal()) > 0);
+
+  // Save and connect: stored locally, then off to Google with the user's client id.
+  const authorizeRequests = [];
+  await page.route("https://accounts.google.com/**", async (route) => {
+    authorizeRequests.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: "text/html", body: "<title>Google</title>" });
+  });
+  await connect.first().click();
+  await setup.waitFor({ timeout: 5_000 });
+  await idInput.fill(VALID_ID);
+  await secretInput.fill("smoke-test-secret");
+  await page.keyboard.press("Enter");
+  await page.waitForURL(/accounts\.google\.com/, { timeout: 5_000 }).catch(() => undefined);
+  const authorize = authorizeRequests[0] ? new globalThis.URL(authorizeRequests[0]) : null;
+  check(
+    "Enter saves and starts sign-in with the user's own client id",
+    authorize?.searchParams.get("client_id") === VALID_ID,
+    authorizeRequests[0] ?? "no authorize request",
+  );
+  check("with the app's own address as the redirect URI", authorize?.searchParams.get("redirect_uri") === URL);
+  check("and never puts the secret in the authorize URL", !(authorizeRequests[0] ?? "").includes("smoke-test-secret"));
+
+  // Back to the app before dropping the stub, so the fake page's own follow-up
+  // requests (a favicon) never reach the real network.
+  await page.goto(URL, { waitUntil: "networkidle" });
+  await page.unroute("https://accounts.google.com/**");
+  await page.waitForTimeout(400);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("winnow.google.oauthClient") ?? "null"));
+  check("the client is kept in this browser's storage", saved?.clientId === VALID_ID && saved?.clientSecret === "smoke-test-secret");
+
+  // Settings → Google account shows it, and can remove it.
+  await page.keyboard.press(",");
+  await page.waitForSelector("text=Your Google OAuth client", { timeout: 5_000 });
+  check("Settings has a Google account section", (await page.getByText("Your Google OAuth client").count()) === 1);
+  check("which shows the client, shortened", (await page.getByText(/123456….*\.apps\.googleusercontent\.com/).count()) > 0);
+  await page.locator('[role="dialog"][aria-label="Settings"]').getByRole("button", { name: "Change" }).click();
+  await setup.waitFor({ timeout: 5_000 });
+  check("Change opens the setup sheet with the saved id", (await idInput.inputValue()) === VALID_ID);
+  await setup.getByRole("button", { name: "Remove…" }).click();
+  await setup.getByRole("button", { name: "Remove", exact: true }).click();
+  await page.waitForTimeout(300);
+  check("Remove forgets the client", (await page.evaluate(() => localStorage.getItem("winnow.google.oauthClient"))) === null);
+  check("and leaves the demo usable", (await idInput.inputValue()) === "");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  check("the demo mailbox is untouched", (await rowTotal()) > 0 && (await setup.count()) === 0);
+
+  const setupErrors = errors.splice(errorsBeforeSetup);
+  errors.push(...setupErrors.filter((text) => !/status of 40[01] \((Bad Request|Unauthorized)\)/.test(text)));
+
   // ── Filtering ──────────────────────────────────────────────────────────────
 
   section("filters");
@@ -1936,6 +2101,28 @@ try {
     "the Settings tab opens Settings",
     (await page.locator('[role="dialog"][aria-label="Settings"]').count()) === 1,
   );
+  // Google account setup, on a phone: the whole screen, with touch-sized fields.
+  await page.locator('[role="dialog"][aria-label="Settings"]').getByRole("button", { name: "Set up" }).click();
+  const phoneSetup = page.locator('[role="dialog"][aria-label="Google account"]');
+  await phoneSetup.waitFor({ timeout: 5_000 }).catch(() => undefined);
+  // Measured after the sheet's entrance animation, which scales it a hair.
+  await page.waitForTimeout(400);
+  const phoneSetupBox = await phoneSetup.boundingBox();
+  check(
+    "Settings → Google account opens the setup full-width on a phone",
+    Boolean(phoneSetupBox) && Math.round(phoneSetupBox.width) === 390,
+    JSON.stringify(phoneSetupBox),
+  );
+  const fieldBoxes = await Promise.all(
+    ["clientId", "clientSecret"].map((name) => phoneSetup.locator(`input[name="${name}"]`).boundingBox()),
+  );
+  check(
+    "and its fields are full touch targets",
+    fieldBoxes.every((b) => b && b.height >= MIN_TARGET),
+    JSON.stringify(fieldBoxes.map((b) => b && Math.round(b.height))),
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   await tabs.filter({ hasText: "Inbox" }).click();
