@@ -4,21 +4,34 @@
  * Two strategies:
  *
  * - **Full sync** — first sign-in, or a cursor Gmail no longer retains. Pages
- *   four views (`in:inbox`, everything else, `in:trash`, `in:spam`), fetches
+ *   five views (`in:inbox`, sent, everything else, `in:trash`, `in:spam`), fetches
  *   each message, and files it by its labels.
  * - **Incremental sync** — every refresh after that. Reads `history.list` since
- *   the stored cursor and re-fetches each touched message *whole*.
+ *   the stored cursor and re-fetches each touched message.
+ *
+ * Both fetch **metadata only** (labels, the headers in `METADATA_HEADERS`, snippet,
+ * size), through a bounded pool of `FETCH_CONCURRENCY` requests. Bodies are loaded
+ * lazily — the reader asks for the one it opens and the store prefetches a few around
+ * it — and a body already in the cache is kept across re-fetches (`keepLoadedBody`),
+ * since Gmail never changes a message's content after delivery.
+ *
+ * The inbox is walked first and published as soon as it has something to show
+ * (`onPartial`), then periodically while it fills; the other views follow in the
+ * background. The quota bucket in `client.ts` is still the real ceiling — 20 units per
+ * `messages.get` against 6,000 a minute — so on a big mailbox what the user feels is
+ * the inbox appearing in seconds, not the whole sync finishing sooner.
  *
  * Decisions: re-fetch, never apply the diff (cannot drift). Cursor only advances
  * on a clean run (avoids skipping failed messages). A 404 from history means full
  * rebuild (cursor expired).
  */
 
-import type { Email, Mailbox } from "../model/email";
-import type { GmailClient } from "./client";
+import { keepLoadedBody, type Email } from "../model/email";
+import type { GmailClient, MessageFormat } from "./client";
 import { MAX_PAGE_SIZE } from "./client";
 import { GmailHttpError, LABEL, type GmailMessage } from "./dto";
 import { mailboxFor, toEmail } from "./mapper";
+import { mapPool } from "./pool";
 
 /** Where the cache keeps its messages. */
 export interface MailboxCache {
@@ -68,6 +81,24 @@ const MAX_PAGES = 200;
 /** Cache writes are batched: 25 per round-trip is the sweet spot on IndexedDB. */
 const BATCH_SIZE = 25;
 
+/**
+ * How many message fetches are in flight at once.
+ *
+ * Eight hides the round trip (one request per ~100ms of latency becomes eight) while
+ * staying far below the point where Gmail starts answering concurrent requests from
+ * one user with 429s. The quota bucket paces them regardless.
+ */
+export const FETCH_CONCURRENCY = 8;
+
+/** How many inbox messages make a first screen worth showing. */
+export const FIRST_PAINT = 25;
+
+/** How often a filling inbox is re-published, at most. */
+export const PARTIAL_INTERVAL_MS = 750;
+
+/** Which half of a full sync a progress event belongs to. */
+export type SyncStage = "inbox" | "other";
+
 export type SyncProgress = {
   phase: "idle" | "full" | "incremental" | "sending";
   /** 0–1, or `null` when the total is not yet known. */
@@ -76,6 +107,24 @@ export type SyncProgress = {
   fetched: number;
   /** How many could not be downloaded. Non-zero means the view is incomplete. */
   failed: number;
+  /** Full sync only: the inbox, or the views behind it. */
+  stage?: SyncStage;
+  /** Messages the run knows it has to fetch so far, when known. */
+  total?: number;
+};
+
+/**
+ * The mailbox so far, mid-sync. Called with the cache's current contents, newest first.
+ *
+ * The inbox-first contract: the first call comes as soon as the inbox has
+ * `FIRST_PAINT` messages (or is complete), so the list can render while the rest of the
+ * sync carries on.
+ */
+export type PartialListener = (emails: Email[]) => void;
+
+export type SyncCallbacks = {
+  onProgress?: (progress: SyncProgress) => void;
+  onPartial?: PartialListener;
 };
 
 export type SyncResult = {
@@ -104,7 +153,11 @@ export type SyncOptions = {
   now?: () => number;
   /** Injected in tests to avoid a real sleep between pages. */
   sleep?: (ms: number) => Promise<void>;
+  /** Message fetches in flight at once. Defaults to `FETCH_CONCURRENCY`; 1 is the old serial engine. */
+  concurrency?: number;
 };
+
+type FetchOutcome = { kind: "success"; email: Email } | { kind: "missing" } | { kind: "failed" };
 
 export class GmailSyncEngine {
   constructor(private readonly options: SyncOptions) {}
@@ -116,46 +169,72 @@ export class GmailSyncEngine {
   /**
    * Refresh, choosing the strategy from whether a cursor exists.
    *
-   * `onProgress` is accepted per-call because the reporter is the caller's; both
+   * The callbacks are accepted per-call because the reporter is the caller's; both
    * strategies are given the caller's reporter.
    */
-  async sync(options: { onProgress?: (progress: SyncProgress) => void } = {}): Promise<SyncResult> {
+  async sync(options: SyncCallbacks = {}): Promise<SyncResult> {
     const cursor = await this.options.cursor.read();
     const reporter = options.onProgress ?? this.options.onProgress;
-    return cursor ? this.incremental(reporter) : this.full(reporter);
+    return cursor ? this.incremental(reporter, options.onPartial) : this.full(reporter, options.onPartial);
   }
 
   /** Discard the cursor and rebuild every view. */
-  async rebuild(options: { onProgress?: (progress: SyncProgress) => void } = {}): Promise<SyncResult> {
+  async rebuild(options: SyncCallbacks = {}): Promise<SyncResult> {
     await this.options.cursor.clear();
-    return this.full(options.onProgress ?? this.options.onProgress);
+    return this.full(options.onProgress ?? this.options.onProgress, options.onPartial);
+  }
+
+  private get concurrency(): number {
+    return this.options.concurrency ?? FETCH_CONCURRENCY;
   }
 
   /**
    * Page every view, fetch every message, and replace the cache.
    *
    * Replaces rather than merges: `seen` is the complete truth about what exists,
-   * so anything else in the cache was deleted server-side and must go.
+   * so anything else in the cache was deleted server-side and must go. Bodies the
+   * cache already holds survive (`keepLoadedBody`).
    */
-  async full(onProgress?: (progress: SyncProgress) => void): Promise<SyncResult> {
+  async full(onProgress?: (progress: SyncProgress) => void, onPartial?: PartialListener): Promise<SyncResult> {
     const started = this.now();
     await this.options.cursor.clear();
     const report = (progress: SyncProgress): void => {
       (onProgress ?? this.options.onProgress)?.(progress);
     };
-    report({ phase: "full", fraction: 0, fetched: 0, failed: 0 });
+    report({ phase: "full", fraction: 0, fetched: 0, failed: 0, stage: "inbox" });
 
     // Taken before the pages, so anything that arrives while paging is picked up
     // by the next incremental sync rather than being missed.
     const profile = await this.options.client.profile();
 
+    // What the cache holds now, so a re-fetched message keeps a body it already has.
+    const previous = new Map((await this.options.cache.all()).map((email) => [email.gmailId, email]));
+
     const seen = new Set<string>();
     const fetched = new Set<string>();
-    const byMailbox = new Map<Mailbox, Email[]>();
     let failed = 0;
     let truncated = false;
+    let total = 0;
+    let batch: Email[] = [];
 
-    for (const view of VIEWS) {
+    const flushBatch = async (): Promise<void> => {
+      if (batch.length === 0) return;
+      const rows = batch;
+      batch = [];
+      await this.options.cache.upsert(rows);
+    };
+
+    // Inbox-first publishing. `lastPartial` is null until the first screen has gone out.
+    let lastPartial: number | null = null;
+    const publish = async (): Promise<void> => {
+      if (!onPartial) return;
+      await flushBatch();
+      lastPartial = this.now();
+      onPartial(await this.options.cache.all());
+    };
+
+    for (const [index, view] of VIEWS.entries()) {
+      const stage: SyncStage = index === 0 ? "inbox" : "other";
       const stubs: { id: string; threadId?: string }[] = [];
       let pageToken: string | undefined;
       let collected = 0;
@@ -189,56 +268,76 @@ export class GmailSyncEngine {
         }
       } while (pageToken);
 
-      let batch: Email[] = [];
+      // Once per id per view, and not again once a view has it. A message that failed
+      // in an earlier view is tried again here, as the serial engine did.
+      const ids = [...new Set(stubs.map((stub) => stub.id))].filter((id) => !fetched.has(id));
+      total += ids.length;
+      let inboxFetched = 0;
 
-      for (const stub of stubs) {
-        if (fetched.has(stub.id)) continue;
-        const outcome = await this.fetchOne(stub.id);
-        if (outcome.kind === "success") {
-          fetched.add(stub.id);
-          seen.add(stub.id);
-          const bucket = byMailbox.get(outcome.email.mailbox) ?? [];
-          bucket.push(outcome.email);
-          byMailbox.set(outcome.email.mailbox, bucket);
-          batch.push(outcome.email);
-          if (batch.length >= BATCH_SIZE) {
-            await this.options.cache.upsert(batch);
-            batch = [];
+      await mapPool(
+        ids,
+        this.concurrency,
+        (id) => this.fetchOne(id, previous.get(id)),
+        async (outcome, id) => {
+          if (outcome.kind === "success") {
+            fetched.add(id);
+            seen.add(id);
+            batch.push(outcome.email);
+            if (batch.length >= BATCH_SIZE) await flushBatch();
+            if (stage === "inbox") inboxFetched += 1;
+            report({
+              phase: "full",
+              fraction: total > 0 ? seen.size / total : null,
+              fetched: seen.size,
+              failed,
+              stage,
+              total,
+            });
+            if (stage === "inbox" && onPartial) {
+              const due =
+                lastPartial === null
+                  ? inboxFetched >= FIRST_PAINT
+                  : this.now() - lastPartial >= PARTIAL_INTERVAL_MS;
+              if (due) await publish();
+            }
+          } else if (outcome.kind === "failed") {
+            // Marked as seen even though it failed: the cache already holds a
+            // copy from a previous sync, and dropping it here would delete mail
+            // the user can still read.
+            seen.add(id);
+            failed += 1;
           }
-          report({
-            phase: "full",
-            fraction: null,
-            fetched: seen.size,
-            failed,
-          });
-        } else if (outcome.kind === "failed") {
-          // Marked as seen even though it failed: the cache already holds a
-          // copy from a previous sync, and dropping it here would delete mail
-          // the user can still read.
-          seen.add(stub.id);
-          failed += 1;
-        }
-        // `missing` is deliberately *not* seen: the message is gone, and the
-        // cache must forget it.
-      }
+          // `missing` is deliberately *not* seen: the message is gone, and the
+          // cache must forget it.
+        },
+      );
 
-      if (batch.length > 0) await this.options.cache.upsert(batch);
+      await flushBatch();
+      // The inbox is complete: show all of it now, whatever the throttle says, and
+      // again after each background view so its mailbox fills in too.
+      await publish();
     }
 
     // Anything a view could not walk needs an individual fetch, or it would
     // fall out of `seen` and be deleted as if it had been removed.
     if (truncated) {
-      for (const id of await this.options.cache.gmailIds()) {
-        if (fetched.has(id)) continue;
-        const outcome = await this.fetchOne(id);
-        if (outcome.kind === "success") {
-          seen.add(id);
-          await this.options.cache.upsert([outcome.email]);
-        } else if (outcome.kind === "failed") {
-          seen.add(id);
-          failed += 1;
-        }
-      }
+      const leftovers = (await this.options.cache.gmailIds()).filter((id) => !fetched.has(id));
+      await mapPool(
+        leftovers,
+        this.concurrency,
+        (id) => this.fetchOne(id, previous.get(id)),
+        async (outcome, id) => {
+          if (outcome.kind === "success") {
+            seen.add(id);
+            batch.push(outcome.email);
+            if (batch.length >= BATCH_SIZE) await flushBatch();
+          } else if (outcome.kind === "failed") {
+            seen.add(id);
+            failed += 1;
+          }
+        },
+      );
+      await flushBatch();
     }
 
     await this.options.cache.keepOnly([...seen]);
@@ -253,27 +352,36 @@ export class GmailSyncEngine {
     if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(profile.historyId);
 
     const emails = await this.options.cache.all();
-    report({ phase: "idle", fraction: 1, fetched: seen.size, failed });
+    report({ phase: "idle", fraction: 1, fetched: seen.size, failed, total });
 
     return { emails, failed, truncated, cacheUnpersisted, durationMs: this.now() - started };
   }
 
-  /** Apply everything that changed since the stored cursor. */
-  async incremental(onProgress?: (progress: SyncProgress) => void): Promise<SyncResult> {
+  /**
+   * Apply everything that changed since the stored cursor.
+   *
+   * Every page is read first and the touched ids are collected across all of them,
+   * so a message starred, read and archived in three records is fetched once, not
+   * three times — then the fetches go through the pool like a full sync's.
+   */
+  async incremental(
+    onProgress?: (progress: SyncProgress) => void,
+    onPartial?: PartialListener,
+  ): Promise<SyncResult> {
     const started = this.now();
     const startHistoryId = await this.options.cursor.read();
-    if (!startHistoryId) return this.full(onProgress);
+    if (!startHistoryId) return this.full(onProgress, onPartial);
 
     const report = (progress: SyncProgress): void => {
       (onProgress ?? this.options.onProgress)?.(progress);
     };
     report({ phase: "incremental", fraction: 0, fetched: 0, failed: 0 });
 
-    let failed = 0;
-    let fetched = 0;
     let pageToken: string | undefined;
     let latestHistoryId = startHistoryId;
     let page = 0;
+    const deleted = new Set<string>();
+    const touched = new Set<string>();
 
     try {
       do {
@@ -281,29 +389,64 @@ export class GmailSyncEngine {
         if (page > MAX_PAGES) break;
 
         const response = await this.options.client.history(startHistoryId, pageToken);
-        for (const record of response.history ?? []) {
-          failed += await this.applyRecord(record);
-          fetched += 1;
-        }
+        for (const record of response.history ?? []) collectRecord(record, deleted, touched);
         pageToken = response.nextPageToken;
         if (response.historyId) latestHistoryId = response.historyId;
-        report({ phase: "incremental", fraction: null, fetched, failed });
       } while (pageToken);
     } catch (error) {
       // The cursor is older than Google retains. The only correct response is
       // a full rebuild; carrying on would silently skip everything since.
       if (error instanceof GmailHttpError && error.status === 404) {
-        return this.full(onProgress);
+        return this.full(onProgress, onPartial);
       }
       throw error;
     }
+
+    // Gmail ids are never reused, so a deleted message is gone for good — there is
+    // nothing a later record could have done to it worth a fetch.
+    for (const id of deleted) touched.delete(id);
+    if (deleted.size > 0) await this.options.cache.remove([...deleted]);
+
+    const previous = touched.size > 0
+      ? new Map((await this.options.cache.all()).map((email) => [email.gmailId, email]))
+      : new Map<string, Email>();
+
+    let failed = 0;
+    let fetched = 0;
+    const total = touched.size;
+    let batch: Email[] = [];
+    const gone: string[] = [];
+
+    await mapPool(
+      [...touched],
+      this.concurrency,
+      (id) => this.fetchOne(id, previous.get(id)),
+      async (outcome, id) => {
+        if (outcome.kind === "success") {
+          fetched += 1;
+          batch.push(outcome.email);
+          if (batch.length >= BATCH_SIZE) {
+            const rows = batch;
+            batch = [];
+            await this.options.cache.upsert(rows);
+          }
+        } else if (outcome.kind === "missing") {
+          gone.push(id);
+        } else {
+          failed += 1;
+        }
+        report({ phase: "incremental", fraction: total > 0 ? (fetched + failed + gone.length) / total : null, fetched, failed, total });
+      },
+    );
+    if (batch.length > 0) await this.options.cache.upsert(batch);
+    if (gone.length > 0) await this.options.cache.remove(gone);
 
     const cacheUnpersisted = !(await this.flushCache());
 
     if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(latestHistoryId);
 
     const emails = await this.options.cache.all();
-    report({ phase: "idle", fraction: 1, fetched, failed });
+    report({ phase: "idle", fraction: 1, fetched, failed, total });
 
     return { emails, failed, truncated: false, cacheUnpersisted, durationMs: this.now() - started };
   }
@@ -325,52 +468,20 @@ export class GmailSyncEngine {
   }
 
   /**
-   * Apply one history record.
-   *
-   * Every touched message is re-fetched whole rather than having its labels
-   * patched, so the resulting state is always derived from what the server says.
-   * Returns how many fetches failed.
-   */
-  private async applyRecord(record: {
-    messagesDeleted?: { id: string }[];
-    messagesAdded?: { message: { id: string } }[];
-    labelsAdded?: { message: { id: string } }[];
-    labelsRemoved?: { message: { id: string } }[];
-  }): Promise<number> {
-    const deleted: string[] = [];
-    const touched = new Set<string>();
-
-    for (const entry of record.messagesDeleted ?? []) deleted.push(entry.id);
-    for (const entry of record.messagesAdded ?? []) touched.add(entry.message.id);
-    for (const entry of record.labelsAdded ?? []) touched.add(entry.message.id);
-    for (const entry of record.labelsRemoved ?? []) touched.add(entry.message.id);
-
-    if (deleted.length > 0) await this.options.cache.remove(deleted);
-
-    let failed = 0;
-    for (const id of touched) {
-      const outcome = await this.fetchOne(id);
-      if (outcome.kind === "success") await this.options.cache.upsert([outcome.email]);
-      else if (outcome.kind === "missing") await this.options.cache.remove([id]);
-      else failed += 1;
-    }
-    return failed;
-  }
-
-  /**
-   * Fetch one message.
+   * Fetch one message's metadata.
    *
    * `missing` and `failed` are kept apart on purpose. Missing means the server
    * says it does not exist, so the cache must forget it. Failed means we could
    * not find out, so the cached copy has to stand — treating a network blip as
    * a deletion loses mail.
+   *
+   * `cached` is the copy already held, whose body (if loaded) the fresh copy keeps.
    */
-  private async fetchOne(
-    id: string,
-  ): Promise<{ kind: "success"; email: Email } | { kind: "missing" } | { kind: "failed" }> {
+  private async fetchOne(id: string, cached?: Email): Promise<FetchOutcome> {
+    const format: MessageFormat = "metadata";
     let message: GmailMessage;
     try {
-      message = await this.options.client.message(id);
+      message = await this.options.client.message(id, format);
     } catch (error) {
       if (error instanceof GmailHttpError && error.status === 404) return { kind: "missing" };
       return { kind: "failed" };
@@ -389,11 +500,28 @@ export class GmailSyncEngine {
       return { kind: "missing" };
     }
 
-    const email = toEmail(message);
+    const email = toEmail(message, { format });
     if (!email) return { kind: "missing" };
 
     // `mailboxFor` reads the labels, so a message that arrived in the archived
     // view with an INBOX label mid-move still lands correctly.
-    return { kind: "success", email: { ...email, mailbox: mailboxFor(labels) } };
+    return { kind: "success", email: keepLoadedBody({ ...email, mailbox: mailboxFor(labels) }, cached) };
   }
+}
+
+/** Fold one history record into the run's deleted and touched sets. */
+function collectRecord(
+  record: {
+    messagesDeleted?: { id: string }[];
+    messagesAdded?: { message: { id: string } }[];
+    labelsAdded?: { message: { id: string } }[];
+    labelsRemoved?: { message: { id: string } }[];
+  },
+  deleted: Set<string>,
+  touched: Set<string>,
+): void {
+  for (const entry of record.messagesDeleted ?? []) deleted.add(entry.id);
+  for (const entry of record.messagesAdded ?? []) touched.add(entry.message.id);
+  for (const entry of record.labelsAdded ?? []) touched.add(entry.message.id);
+  for (const entry of record.labelsRemoved ?? []) touched.add(entry.message.id);
 }
