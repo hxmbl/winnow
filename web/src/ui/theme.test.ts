@@ -581,6 +581,18 @@ describe("the design system stays small", () => {
 
   it("has no letter-spaced capitals", () => {
     expect(offenders(/\buppercase\b/g)).toEqual([]);
-    expect(offenders(/\btracking-(?:wide|wider|widest|\[[^\]]+\])/g)).toEqual([]);
+    // Positive tracking only: the subject's slight negative tracking (-0.01em) tightens
+    // a 24px heading, it does not space anything out.
+    expect(offenders(/\btracking-(?:wide|wider|widest|\[(?!-)[^\]]+\])/g)).toEqual([]);
+  });
+
+  it("sets everything in IBM Plex Sans: no serif left", () => {
+    expect(offenders(/\bfont-serif\b/g)).toEqual([]);
+    expect(readFileSync(new URL("../index.css", import.meta.url), "utf8")).not.toMatch(/Source Serif/);
+  });
+
+  it("sets the reader's subject in semibold at the title size, tracked slightly tight", () => {
+    const reader = readFileSync(new URL("components/Reader.tsx", import.meta.url), "utf8");
+    expect(reader).toMatch(/<h1 className="[^"]*\btext-title\b[^"]*\bfont-semibold\b[^"]*\btracking-\[-0\.01em\][^"]*"/);
   });
 });

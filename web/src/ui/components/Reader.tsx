@@ -731,7 +731,7 @@ export function Reader({
             </div>
           )}
 
-          <h1 className="max-w-[42ch] font-serif text-title font-semibold text-ink">
+          <h1 className="max-w-[42ch] text-title font-semibold tracking-[-0.01em] text-ink">
             {email.subject || "(no subject)"}
           </h1>
 

@@ -879,6 +879,15 @@ try {
   section("reader");
 
   await openMessage();
+  const subjectFont = await page.locator("article h1").first().evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { family: style.fontFamily, weight: style.fontWeight, size: style.fontSize, tracking: style.letterSpacing };
+  });
+  check(
+    "the reader's subject is IBM Plex Sans semibold 24px, slightly tight",
+    subjectFont.family.startsWith('"IBM Plex Sans"') && subjectFont.weight === "600" && subjectFont.size === "24px" && subjectFont.tracking === "-0.24px",
+    JSON.stringify(subjectFont),
+  );
   const subject = await page.locator("article h1").first().textContent();
   check("clicking a row opens the reader", Boolean(subject?.trim()), subject ?? "");
 

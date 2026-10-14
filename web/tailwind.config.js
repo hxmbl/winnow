@@ -112,12 +112,10 @@ export default {
           "Arial",
           "sans-serif",
         ],
-        // Source Serif 4 for the things that are *read*: the subject and a plain-text
-        // body. It has an optical-size axis, so the same file draws the 24px subject
-        // with display contrast and the 16px body with text contrast. Quoted inside the
-        // string: an unquoted family name containing "4" is invalid CSS, and the browser
-        // drops the whole declaration.
-        serif: ['"Source Serif 4"', "ui-serif", "Georgia", "Cambria", "Times New Roman", "serif"],
+        // One family for everything, the subject and plain-text bodies included: the
+        // reader used to set those in Source Serif 4, and the owner found the serif
+        // subject out of place beside the Plex interface (2026-10). No `serif` key, so
+        // `font-serif` cannot creep back in.
         // For message bodies and addresses, where digits should line up.
         mono: [
           "ui-monospace",

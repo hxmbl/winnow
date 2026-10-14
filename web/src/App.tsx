@@ -1309,7 +1309,7 @@ export function App({ store }: Props) {
     return (
       <div className="flex h-dvh items-center justify-center bg-canvas px-6">
         <div className="max-w-[36rem] text-center">
-          <h1 className="font-serif text-title font-semibold text-ink">Couldn&rsquo;t reach Gmail</h1>
+          <h1 className="text-title font-semibold tracking-[-0.01em] text-ink">Couldn&rsquo;t reach Gmail</h1>
           <p className="mt-2 text-ui text-ink-muted">{snapshot.error}</p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <button

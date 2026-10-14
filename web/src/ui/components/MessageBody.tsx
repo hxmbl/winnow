@@ -89,7 +89,7 @@ function useSanitised(
  */
 function PlainText({ email }: { email: Email }) {
   return (
-    <div className="selectable max-w-[68ch] whitespace-pre-wrap font-serif text-read text-ink-body">
+    <div className="selectable max-w-[68ch] whitespace-pre-wrap text-read text-ink-body">
       {email.body}
     </div>
   );
