@@ -2,7 +2,7 @@
  * The desktop list's header: search across the full width of the list column with
  * where you are in the list beside it, then the filter rail on its own row.
  *
- * The smart filters are the rail (`FilterStrip`), not sidebar rows: text tabs with
+ * The smart filters are the rail (`FilterStrip`), not sidebar rows: coloured pills with
  * their counts, ranked by the store, fading into a step chevron at either edge. It has
  * the list column's full width to itself, so the search field can never sit over its
  * last tab. Folders and the account are the floating sidebar's (`MailNav.tsx`).

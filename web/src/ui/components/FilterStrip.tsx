@@ -9,11 +9,11 @@
  * bucket holds, so a component that re-sorted its own children would fight the store
  * on every render.
  *
- * They are text tabs now, not filled pills. A row of twenty tinted capsules was the
- * loudest thing in a window that is mostly for reading; a tab is a word and a count,
- * and the one that is on gets ink, weight and a short accent rule under it. The hide
- * control sits *inside* the tab, after the count, instead of as a badge perched on the
- * corner where it covered the neighbouring pill.
+ * Each pill is a rounded capsule with its own colour (`filterColors.ts`), drawn as a
+ * soft tint so a row of twenty reads as one quiet line rather than a shelf of sweets;
+ * the one that is on gets a stronger tint, a ring in its hue and a heavier label. Muted
+ * pills carry no colour. The hide control sits *inside* the pill, after the count,
+ * instead of as a badge perched on the corner where it covered the neighbouring pill.
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
@@ -39,7 +39,7 @@ type Props = {
    */
   leading?: React.ReactNode;
   /**
-   * Touch sizing, for the phone dock: 40px pills and a larger hide control, so the rail
+   * Touch sizing, for the phone dock: 44px pills and a larger hide control, so the rail
    * that carries the product can be worked with a thumb.
    */
   touch?: boolean;
@@ -214,7 +214,7 @@ export const FilterStrip = memo(function FilterStrip({
         data-rail-scroller=""
         onFocus={onFocus}
         onWheel={touch ? undefined : onWheel}
-        className={`no-scrollbar flex items-center overflow-x-auto ${touch ? "gap-1 pr-1.5" : "gap-0.5"}`}
+        className={`no-scrollbar flex items-center overflow-x-auto ${touch ? "gap-1.5 pr-1.5" : "gap-1"}`}
       >
         {/*
           The mark, pinned. `z-10` so it paints above the pills travelling behind it;
@@ -237,13 +237,13 @@ export const FilterStrip = memo(function FilterStrip({
             type="button"
             data-rail-item=""
             onClick={onClear}
-            className={`${touch ? "h-11 px-3.5" : "h-7 px-2.5"} shrink-0 rounded-ctl text-ui font-semibold text-ink-body transition-colors duration-150 hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+            className={`${touch ? "h-11 px-3.5" : "h-7 px-2.5"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             All
           </button>
         )}
 
-      {pills.map(({ id, label, count, muted }, index) => {
+      {pills.map(({ id, label, hue, count, muted }, index) => {
         const key = filterKey(id);
         const on = activeKeys.has(key);
         // No digit for a muted pill: a shortcut to a bucket that is not filterable
@@ -257,9 +257,11 @@ export const FilterStrip = memo(function FilterStrip({
             key={key}
             data-rail-item=""
             data-rail-key={key}
-            className={`group/pill relative flex shrink-0 items-center rounded-ctl transition-colors duration-150 ${
-              isMuted ? "" : "hover:bg-sheen"
-            }`}
+            data-on={on ? "" : undefined}
+            data-muted={isMuted ? "" : undefined}
+            // The pill's identity only; the mode's recipe turns it into a fill.
+            style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}
+            className="wn-pill group/pill relative flex shrink-0 items-center rounded-full transition-colors duration-150"
           >
             <button
               type="button"
@@ -278,34 +280,23 @@ export const FilterStrip = memo(function FilterStrip({
               // tab: the tooltip, the shortcut sheet, and `aria-keyshortcuts`.
               title={digit ? `${label} (${digit})` : undefined}
               aria-keyshortcuts={digit ?? undefined}
-              className={`relative flex ${tabHeight} items-center gap-1.5 rounded-ctl text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
-                hideable ? (touch ? "pl-3.5 pr-1" : "pl-2 pr-0.5") : touch ? "px-3.5" : "px-2"
-              } ${
-                isMuted
-                  ? "text-ink-subtle line-through opacity-60"
-                  : on
-                    ? "font-semibold text-ink"
-                    : "font-medium text-ink-muted group-hover/pill:text-ink-body"
-              }`}
+              className={`relative flex ${tabHeight} items-center gap-1.5 rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
+                hideable ? (touch ? "pl-3.5 pr-0.5" : "pl-2.5 pr-0.5") : touch ? "px-3.5" : "px-2.5"
+              } ${isMuted ? "text-ink-subtle line-through opacity-60" : ""}`}
             >
-              {label}
-              {/* `tabular-nums` so a count changing from 9 to 10 does not shift the label. */}
-              <span className={`text-meta tabular-nums ${on ? "text-ink-muted" : "text-ink-subtle"}`}>
-                {count}
-              </span>
               {/*
-                On: a short rule in the accent under the label and count. Drawn rather
-                than an `underline` so it sits at the foot of the tab instead of hugging
-                the baseline, and is the same 2px on every tab.
+                The label at both weights in one grid cell, the semibold copy invisible:
+                the cell is always as wide as the bolder one, so switching a pill on
+                thickens its text without nudging every pill after it along the rail.
               */}
-              {on && (
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-accent ${
-                    touch ? `left-3.5 ${hideable ? "right-1" : "right-3.5"}` : `left-2 ${hideable ? "right-0.5" : "right-2"}`
-                  }`}
-                />
-              )}
+              <span className="grid">
+                <span aria-hidden="true" className="invisible col-start-1 row-start-1 font-semibold">
+                  {label}
+                </span>
+                <span className={`col-start-1 row-start-1 ${on ? "font-semibold" : "font-medium"}`}>{label}</span>
+              </span>
+              {/* `tabular-nums` so a count changing from 9 to 10 does not shift the label. */}
+              <span className={`text-meta tabular-nums ${isMuted ? "" : "wn-pill-count"}`}>{count}</span>
             </button>
 
             {/*
@@ -313,8 +304,8 @@ export const FilterStrip = memo(function FilterStrip({
               bucket on a live pill, bring it back on a muted one — so a mute is not a
               one-way door. `unsafe` has neither, as it is not hidden by default.
 
-              Inside the tab, after the count. `opacity-0` rather than `hidden`:
-              `display: none` takes the control out of the tab order, where
+              Inside the pill, after the count, in the pill's own ink. `opacity-0` rather
+              than `hidden`: `display: none` takes the control out of the tab order, where
               `focus-visible` cannot rescue it — and the space stays reserved, so hovering
               never shifts the rail. `[@media(hover:none)]` shows it outright on touch.
             */}
@@ -332,9 +323,9 @@ export const FilterStrip = memo(function FilterStrip({
                     ? `Show ${label} in the inbox again`
                     : `Hide ${label} from the inbox and tell Winnow it is over-firing`
                 }
-                className={`inline-flex shrink-0 items-center justify-center rounded-ctl leading-none text-ink-subtle opacity-0 transition-opacity duration-150 hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100 ${
-                  touch ? "mr-1 h-11 w-8 text-read" : "mr-0.5 h-6 w-4 text-ui"
-                }`}
+                className={`inline-flex shrink-0 items-center justify-center rounded-full leading-none opacity-0 transition-opacity duration-150 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100 ${
+                  isMuted ? "text-ink-subtle hover:text-ink" : "hover:bg-sheen"
+                } ${touch ? "mr-1 h-11 w-8 text-read" : "mr-0.5 h-6 w-5 text-ui"}`}
               >
                 {isMuted ? "↺" : "×"}
               </button>

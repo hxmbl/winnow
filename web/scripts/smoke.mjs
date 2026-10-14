@@ -344,6 +344,86 @@ try {
     threeOn && (await page.locator("header [data-rail-scroller] button[aria-pressed='true']").count()) === 0,
   );
 
+  // ── The rail's colours ─────────────────────────────────────────────────────
+  //
+  // Every pill is its own colour, as a soft tint: a non-transparent fill, no two the
+  // same along the rail, and the one that is on clearly stronger than it was at rest.
+  // The label is held to AA on its own tint, composited over the plane under the rail,
+  // which is the arithmetic `theme.test.ts` does, run against what the browser painted.
+  const pillPaint = () =>
+    page.evaluate(() => {
+      const parse = (value) => {
+        const parts = value.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0, 0];
+        return [parts[0], parts[1], parts[2], value.startsWith("rgba") || parts.length > 3 ? parts[3] : 1];
+      };
+      const over = ([r, g, b, a], [br, bg, bb]) => [r * a + br * (1 - a), g * a + bg * (1 - a), b * a + bb * (1 - a)];
+      const lum = (rgb) => {
+        const [r, g, b] = rgb.map((c) => {
+          const v = Math.round(c) / 255;
+          return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const ratio = (a, b) => {
+        const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+        return (x + 0.05) / (y + 0.05);
+      };
+      const base = parse(getComputedStyle(document.documentElement).getPropertyValue("--wn-surface").trim().replace(/^#(..)(..)(..)$/, (_, r, g, b) => `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`));
+      return [...document.querySelectorAll("header [data-rail-scroller] [data-rail-item][data-rail-key]")]
+        .filter((item) => !item.hasAttribute("data-muted"))
+        .map((item) => {
+          const fill = parse(getComputedStyle(item).backgroundColor);
+          const label = item.querySelector("button[aria-pressed] span.grid > span:last-child");
+          const ink = parse(getComputedStyle(label).color);
+          return {
+            key: item.dataset.railKey,
+            on: item.hasAttribute("data-on"),
+            fill: getComputedStyle(item).backgroundColor,
+            alpha: fill[3],
+            radius: parseFloat(getComputedStyle(item).borderTopLeftRadius),
+            height: item.getBoundingClientRect().height,
+            contrast: Math.round(ratio(ink, over(fill, base)) * 100) / 100,
+          };
+        });
+    });
+  const restPaint = await pillPaint();
+  // Sender pills share a colour per domain, on purpose; the buckets are all distinct.
+  const buckets = restPaint.filter((pill) => !pill.key.startsWith("sender:"));
+  check(
+    "every pill has a tint of its own: non-transparent, and no two buckets alike",
+    restPaint.length > 5 &&
+      restPaint.every((pill) => pill.alpha > 0) &&
+      new Set(buckets.map((pill) => pill.fill)).size === buckets.length,
+    `${new Set(restPaint.map((pill) => pill.fill)).size} fills over ${restPaint.length} pills, ${buckets.length} buckets`,
+  );
+  check(
+    "the pills are rounded capsules, not text tabs",
+    restPaint.every((pill) => pill.radius >= pill.height / 2 - 1),
+    restPaint.slice(0, 3).map((pill) => `${pill.radius}/${pill.height}`).join(" "),
+  );
+  check(
+    "each label clears AA on its own tint",
+    restPaint.every((pill) => pill.contrast >= 4.5),
+    `min ${Math.min(...restPaint.map((pill) => pill.contrast))}`,
+  );
+  const firstWidth = await pills().nth(0).evaluate((node) => node.closest("[data-rail-item]").getBoundingClientRect().width);
+  await page.keyboard.press("1");
+  await page.waitForTimeout(250);
+  const onPaint = await pillPaint();
+  const before = restPaint.find((pill) => pill.key === onPaint.find((p) => p.on)?.key);
+  const after = onPaint.find((pill) => pill.on);
+  check(
+    "an active pill is painted stronger than it was at rest",
+    Boolean(before && after) && after.fill !== before.fill && after.alpha > before.alpha && after.contrast >= 4.5,
+    `${before?.fill} → ${after?.fill} (${after?.contrast}:1)`,
+  );
+  check(
+    "and switching it on does not resize it",
+    Math.abs((await pills().nth(0).evaluate((node) => node.closest("[data-rail-item]").getBoundingClientRect().width)) - firstWidth) < 0.5,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+
   // ── The floating sidebar ───────────────────────────────────────────────────
   //
   // Folders and the account, not the smart filters (those are the rail). 8px from the

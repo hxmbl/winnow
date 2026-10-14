@@ -41,11 +41,15 @@ import {
   ACCENTS,
   MODES,
   contrastRatio,
+  PALETTES,
   paletteFor,
+  pillFill,
   relativeLuminance,
   resolveScheme,
   type ThemeName,
 } from "./theme";
+import { FILTER_HUES, senderHue, type PillHue } from "./filterColors";
+import { BUILTIN_FILTERS } from "../core/model/signals";
 import {
   ACCENT_THEMES,
   APPEARANCES,
@@ -614,5 +618,76 @@ describe("the design system stays small", () => {
   it("sets the reader's subject in semibold at the title size, tracked slightly tight", () => {
     const reader = readFileSync(new URL("components/Reader.tsx", import.meta.url), "utf8");
     expect(reader).toMatch(/<h1 className="[^"]*\btext-title\b[^"]*\bfont-semibold\b[^"]*\btracking-\[-0\.01em\][^"]*"/);
+  });
+});
+
+describe("filter pill colours", () => {
+  /**
+   * Every pill's label and count, on its own tint, in every mode — resting, on, and
+   * hovered — over both planes the rail sits on (the list surface on the desktop, the
+   * canvas in the phone dock). The fill is translucent, so each is composited first,
+   * exactly as `.wn-pill` paints it.
+   */
+  const SENDERS = ["ada@example.com", "news@shop.test", "x@bank.test", "a@b.c", "nobody"];
+  const HUES: [string, PillHue][] = [
+    ...BUILTIN_FILTERS.map((id) => [id, FILTER_HUES[id]] as [string, PillHue]),
+    ...SENDERS.map((sender) => [`sender ${sender}`, senderHue(sender)] as [string, PillHue]),
+    // Every hue a sender can land on, so an address not listed above is covered too.
+    ...Array.from({ length: 12 }, (_, step) => [`sender step ${step}`, { h: step * 30 + 15, s: 20 }] as [string, PillHue]),
+  ];
+
+  for (const mode of MODES) {
+    const { color, pill } = PALETTES[mode];
+    for (const base of ["canvas", "surface"] as const) {
+      for (const [name, hue] of HUES) {
+        it(`${mode}: ${name} on ${base} clears AA, resting, on and hovered`, () => {
+          for (const on of [false, true]) {
+            for (const hover of [false, true]) {
+              const fill = pillFill(hue, mode, color[base], { on, hover });
+              const label = color[on ? pill.inkOn : pill.ink];
+              expect(contrastRatio(label, fill), `label ${label} on ${fill}`).toBeGreaterThanOrEqual(AA_TEXT);
+              expect(contrastRatio(color[pill.count], fill), `count on ${fill}`).toBeGreaterThanOrEqual(AA_TEXT);
+            }
+          }
+        });
+      }
+    }
+
+    it(`${mode}: an on pill is clearly stronger than a resting one`, () => {
+      expect(pill.on).toBeGreaterThanOrEqual(pill.rest * 2);
+      for (const id of BUILTIN_FILTERS) {
+        const rest = pillFill(FILTER_HUES[id], mode, color.surface, { on: false });
+        const on = pillFill(FILTER_HUES[id], mode, color.surface, { on: true });
+        expect(rgbDistance(rest, on), id).toBeGreaterThan(12);
+        // And even a resting pill is visibly a pill, not the plane it sits on.
+        expect(rgbDistance(rest, color.surface), id).toBeGreaterThan(4);
+      }
+    });
+
+    it(`${mode}: no two builtin pills share a colour`, () => {
+      const fills = BUILTIN_FILTERS.map((id) => pillFill(FILTER_HUES[id], mode, color.surface, { on: true }));
+      expect(new Set(fills).size).toBe(BUILTIN_FILTERS.length);
+    });
+  }
+
+  it("the pill inks are text tokens of their palette", () => {
+    for (const mode of MODES) {
+      const { pill } = PALETTES[mode];
+      for (const token of [pill.ink, pill.inkOn, pill.count]) expect(INK_TOKENS).toContain(token);
+    }
+  });
+
+  it("gives every bucket a colour, and a sender the same colour every time", () => {
+    for (const id of BUILTIN_FILTERS) expect(FILTER_HUES[id], id).toBeDefined();
+    expect(senderHue("ada@example.com")).toEqual(senderHue("grace@example.com"));
+    expect(senderHue("ada@example.com")).toEqual(senderHue("ADA@Example.com"));
+  });
+
+  it("index.css paints the pill from the recipe theme.ts publishes", () => {
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    for (const variable of ["--wn-pill-l", "--wn-pill-sat", "--wn-pill-rest", "--wn-pill-on", "--wn-pill-ink", "--wn-pill-inkOn", "--wn-pill-count"]) {
+      expect(css).toContain(`var(${variable})`);
+    }
+    expect(css).toMatch(/\.wn-pill\[data-muted\]\s*\{[^}]*background-color:\s*transparent/);
   });
 });

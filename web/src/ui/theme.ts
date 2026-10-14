@@ -59,6 +59,41 @@ type Palette = {
   badge: Record<string, string>;
   /** The two shadows in the system: `pane` and `lift`. Both `none` while the design is flat. */
   elevation: Record<string, string>;
+  /** How this mode colours the filter rail's pills. See `PillRecipe`. */
+  pill: PillRecipe;
+};
+
+/**
+ * How a mode turns a pill's identity hue (`filterColors.ts`) into its fill.
+ *
+ * Published as `--wn-pill-*` and combined in `.wn-pill` (`index.css`):
+ * `hsl(h, s × saturation, lightness)` at `rest` alpha, `on` alpha when the pill is on,
+ * with a 1px inset ring at `ring` alpha. The fill is translucent so a pill sits on
+ * either plane the rail lives on (the list surface on the desktop, the canvas in the
+ * phone dock); `pillFill` below is the same arithmetic, so `theme.test.ts` can hold
+ * every label and count to WCAG AA on every hue, plane, state and hover.
+ *
+ * The inks are the palette's own text tokens, picked per mode: light keeps its body ink
+ * on a resting pill, the dark modes use full ink throughout because a dark tint leaves
+ * less room under the text.
+ */
+export type PillRecipe = {
+  /** HSL lightness of the hue, in percent. */
+  lightness: number;
+  /** How much of a hue's saturation this mode keeps, 0–1. */
+  saturation: number;
+  /** Fill alpha at rest. */
+  rest: number;
+  /** Fill alpha when on: clearly stronger than `rest`. */
+  on: number;
+  /** Alpha of the 1px inset ring an "on" pill gets. */
+  ring: number;
+  /** Label ink on a resting pill, as a `color` token name. */
+  ink: string;
+  /** Label ink on an "on" pill. */
+  inkOn: string;
+  /** The count's ink. */
+  count: string;
 };
 
 /**
@@ -179,6 +214,8 @@ const LIGHT: Palette = {
     pane: "none",
     lift: "none",
   },
+
+  pill: { lightness: 48, saturation: 1, rest: 0.14, on: 0.34, ring: 0.5, ink: "inkBody", inkOn: "ink", count: "inkBody" },
 };
 
 /**
@@ -270,6 +307,12 @@ const DARK: Palette = {
     pane: "none",
     lift: "none",
   },
+
+  /**
+   * Darker and less saturated than light's: a bright yellow at light's alphas lifts the
+   * dark plane so far that #E3E3E3 text on it misses AA.
+   */
+  pill: { lightness: 55, saturation: 0.7, rest: 0.16, on: 0.34, ring: 0.55, ink: "ink", inkOn: "ink", count: "ink" },
 };
 
 /**
@@ -309,6 +352,7 @@ const OLED: Palette = {
   },
   badge: DARK.badge,
   elevation: DARK.elevation,
+  pill: DARK.pill,
 };
 
 /** The three modes a palette is drawn for. `system` resolves to one of the first two. */
@@ -438,6 +482,15 @@ export function applyTheme(
   for (const [key, value] of Object.entries(palette.elevation)) {
     root.style.setProperty(`--wn-elev-${key}`, value);
   }
+  const { pill } = palette;
+  root.style.setProperty("--wn-pill-l", `${pill.lightness}%`);
+  root.style.setProperty("--wn-pill-sat", String(pill.saturation));
+  root.style.setProperty("--wn-pill-rest", String(pill.rest));
+  root.style.setProperty("--wn-pill-on", String(pill.on));
+  root.style.setProperty("--wn-pill-ring", String(pill.ring));
+  root.style.setProperty("--wn-pill-ink", palette.color[pill.ink]);
+  root.style.setProperty("--wn-pill-inkOn", palette.color[pill.inkOn]);
+  root.style.setProperty("--wn-pill-count", palette.color[pill.count]);
   // Drives native form controls, scrollbars, and the OS `color-scheme`, so a dark
   // app does not flash white before first paint. OLED is a dark scheme to the browser.
   root.style.colorScheme = scheme === "light" ? "light" : "dark";
@@ -454,4 +507,53 @@ export function applyTheme(
 export function resolveScheme(preference: Appearance, systemPrefersDark: boolean): ThemeName {
   if (preference === "system") return systemPrefersDark ? "dark" : "light";
   return preference;
+}
+
+/** HSL (degrees, percent, percent) → `[r, g, b]`, 0–255 unrounded, as CSS computes it. */
+export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const sat = s / 100;
+  const light = l / 100;
+  const a = sat * Math.min(light, 1 - light);
+  const channel = (n: number): number => {
+    const k = (n + h / 30) % 12;
+    return 255 * (light - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)));
+  };
+  return [channel(0), channel(8), channel(4)];
+}
+
+function parseColor(value: string): [number, number, number, number] {
+  if (value.startsWith("#")) {
+    const n = Number.parseInt(value.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1];
+  }
+  const parts = value.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0];
+  return [parts[0], parts[1], parts[2], parts[3] ?? 1];
+}
+
+function toHex([r, g, b]: readonly number[]): string {
+  return `#${[r, g, b].map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Paint `top` (any `#hex` or `rgba()` token) over an opaque `#hex`. */
+export function composite(top: string, base: string): string {
+  const [r, g, b, a] = parseColor(top);
+  const [br, bg, bb] = parseColor(base);
+  return toHex([r * a + br * (1 - a), g * a + bg * (1 - a), b * a + bb * (1 - a)]);
+}
+
+/**
+ * A pill's fill, painted over `base`, as an opaque `#hex`: the same arithmetic as
+ * `.wn-pill` in `index.css`, for the contrast tests. `hover` adds the mode's sheen.
+ */
+export function pillFill(
+  hue: { h: number; s: number },
+  scheme: ThemeName,
+  base: string,
+  state: { on: boolean; hover?: boolean },
+): string {
+  const { pill, color } = PALETTES[scheme];
+  const [r, g, b] = hslToRgb(hue.h, hue.s * pill.saturation, pill.lightness);
+  const alpha = state.on ? pill.on : pill.rest;
+  const tinted = composite(`rgba(${r}, ${g}, ${b}, ${alpha})`, base);
+  return state.hover ? composite(color.sheen, tinted) : tinted;
 }

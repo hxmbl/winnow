@@ -219,3 +219,36 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * A filter pill's colour.
+ *
+ * The pill sets only its identity, `--pill-h` and `--pill-s` (from `filterColors.ts`);
+ * the mode supplies the rest through `--wn-pill-*` (`PillRecipe` in `theme.ts`), so one
+ * rule colours every pill in every mode and the component never knows which is live.
+ * `pillFill` in `theme.ts` repeats this arithmetic for the contrast tests — change one,
+ * change both.
+ *
+ * Hover lays the mode's sheen over the tint rather than replacing it. A muted pill has
+ * no colour at all: it is not a filter you can turn on, so it must not look like one.
+ */
+.wn-pill {
+  --pill-tone: var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-l);
+  background-color: hsl(var(--pill-tone) / var(--wn-pill-rest));
+  color: var(--wn-pill-ink);
+}
+.wn-pill[data-on] {
+  background-color: hsl(var(--pill-tone) / var(--wn-pill-on));
+  box-shadow: inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring));
+  color: var(--wn-pill-inkOn);
+}
+.wn-pill:not([data-muted]):hover {
+  background-image: linear-gradient(var(--wn-sheen), var(--wn-sheen));
+}
+.wn-pill[data-muted] {
+  background-color: transparent;
+  box-shadow: none;
+}
+.wn-pill-count {
+  color: var(--wn-pill-count);
+}

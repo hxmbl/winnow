@@ -171,3 +171,31 @@ describe("rail scrolling", () => {
     expect(stepRail(base, -1)).toBe(0);
   });
 });
+
+describe("pill colours", () => {
+  it("gives every pill a colour: buckets their own, senders one from their domain", () => {
+    const pills = buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, [], ["needs_action"]);
+    for (const pill of pills) {
+      expect(pill.hue.h).toBeGreaterThanOrEqual(0);
+      expect(pill.hue.h).toBeLessThan(360);
+      expect(pill.hue.s).toBeGreaterThan(0);
+    }
+    const hues = pills.filter((pill) => pill.id.kind === "builtin").map((pill) => `${pill.hue.h}/${pill.hue.s}`);
+    expect(new Set(hues).size).toBe(hues.length);
+    // Same domain, same colour; and quieter than any bucket's.
+    const senders = pills.filter((pill) => pill.id.kind === "sender");
+    expect(new Set(senders.map((pill) => pill.hue.h)).size).toBe(1);
+    for (const sender of senders) expect(sender.hue.s).toBeLessThanOrEqual(24);
+  });
+
+  it("keeps a muted bucket's colour, for when it is restored", () => {
+    const pills = buildPills(RAIL, COUNTS, [], new Map(), [], ["needs_action"]);
+    const muted = pills.find((pill) => pill.muted);
+    expect(muted?.hue).toEqual(pills.find((pill) => pill.id.kind === "builtin" && pill.id.id === "needs_action")?.hue);
+  });
+
+  it("an appended active sender gets its colour too", () => {
+    const pills = buildPills(RAIL, COUNTS, [], SENDER_COUNTS, [senderFilter("zed@other.test")]);
+    expect(pills.find((pill) => pill.id.kind === "sender")?.hue.s).toBeGreaterThan(0);
+  });
+});
