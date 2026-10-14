@@ -1,25 +1,15 @@
 /**
- * The masthead.
+ * The desktop list's header: search across the full width of the list column, then
+ * where you are in the list.
  *
- * One row, and nothing in it is a separate object. The logo, the rail, and the
- * position cluster share a single surface with no rules under any of them — the
- * hierarchy between "what am I looking at" and "what am I looking at *filtered by*"
- * is spacing and weight, which is the argument this design is making.
- *
- * The rail runs the full width and the filters pass underneath the logo, which
- * carries a soft veil fading to the right so they emerge from behind it rather than
- * being cut off by it.
- *
- * The mailbox menu is not here — it is what the logo opens. Neither are the email
- * actions; those belong to the message in the reader. Search and the position cluster
- * stay: both are about the *list*, they were never navigation.
+ * Navigation is not here any more. The category tabs that used to run along the top of
+ * the window, with their chevrons and fade, became the floating sidebar (`MailNav.tsx`),
+ * and the logo with them. Search and the position cluster stay: both are about the
+ * *list*, they were never navigation.
  */
 
 import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { shortcutFor } from "../../core/mail/keybinds";
-import { AppMark } from "../AppMark";
-import { FilterStrip, type PillItem } from "./FilterStrip";
-import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
 
 export type MastheadProps = {
   searchQuery: string;
@@ -31,15 +21,6 @@ export type MastheadProps = {
    * exact element. If the two diverge, `/` silently does nothing.
    */
   searchRef: React.RefObject<HTMLInputElement | null>;
-  pills: PillItem[];
-  activeFilters: readonly FilterId[];
-  onToggleFilter: (id: FilterId) => void;
-  onMute: (id: BuiltinSmartFilter) => void;
-  onRestoreFilter: (id: BuiltinSmartFilter) => void;
-  onClearFilters: () => void;
-  /** Open the navigation drawer. This is what the logo is for. */
-  onOpenNavigation: () => void;
-  navigationOpen: boolean;
   position: number | null;
   total: number;
   /** "Inbox", "From ada@example.com", or "Filtered". Answerable: 40 of what? */
@@ -92,14 +73,6 @@ export function Masthead({
   searchQuery,
   onSearchChange,
   searchRef,
-  pills,
-  activeFilters,
-  onToggleFilter,
-  onMute,
-  onRestoreFilter,
-  onClearFilters,
-  onOpenNavigation,
-  navigationOpen,
   position,
   total,
   listTitle,
@@ -109,57 +82,12 @@ export function Masthead({
   onMarkAllRead,
 }: MastheadProps) {
   return (
-    // No `border-b`, no `bg-chrome`: the header is the same surface as the mailbox
-    // below it, separated by nothing but the change in what the two contain.
-    <header className="relative z-30 shrink-0">
-      {/*
-        Wraps below `sm`, and the rail keeps the first line when it does.
-
-        A single row needs the rail, the search field and the position cluster to fit
-        side by side, and the cluster alone measures 319px — against a 390px phone.
-        The rail would get *zero* width there, silently removing the product from the
-        smallest screen. So on a phone the rail takes the first line in full and search
-        and position go underneath it. The mark stays `sticky` inside the scroller
-        either way.
-      */}
-      <div className="flex min-h-14 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-4 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
-        {/*
-          The rail, with the mark pinned inside it.
-
-          Three flex children and no absolute positioning anywhere: the rail takes what
-          is left over, and the search cluster is `ml-auto`. The interaction that
-          matters — the filters passing underneath the mark — belongs to the rail, and
-          `FilterStrip` does it with `position: sticky` on the mark inside the scroller.
-        */}
-        <FilterStrip
-          pills={pills}
-          activeFilters={activeFilters as FilterId[]}
-          onToggle={onToggleFilter}
-          onMute={onMute}
-          onRestore={onRestoreFilter}
-          onClear={onClearFilters}
-          leading={
-            <button
-              type="button"
-              onClick={onOpenNavigation}
-              aria-expanded={navigationOpen}
-              aria-haspopup="dialog"
-              aria-label="Open navigation"
-              title="Navigation"
-              className="flex h-9 w-9 items-center justify-center rounded-ctl transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-            >
-              <AppMark />
-            </button>
-          }
-          className="order-1 w-full min-w-0 sm:w-auto sm:flex-1"
-        />
-        <span className="sr-only">Winnow</span>
-
-        {/*
-          Search and where-you-are, `ml-auto` so the rail takes the remainder rather
-          than a hand-measured share of it.
-        */}
-        <div className="order-2 ml-auto flex shrink-0 items-center gap-2">
+    // No `border-b`, no `bg-chrome`: the header is the same surface as the list below
+    // it, separated by nothing but the change in what the two contain.
+    <header data-masthead="" className="relative z-20 shrink-0">
+      <div className="flex h-14 min-w-0 items-center gap-3 px-4">
+        {/* Search takes the width; where-you-are keeps its own. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <label
             htmlFor="winnow-search"
             /*
@@ -171,7 +99,7 @@ export function Masthead({
               composes `box-shadow` out of custom properties and silently resolves to
               `none` on some elements; see the note in `index.css`.
             */
-            className="flex h-8 w-[11rem] items-center gap-2 rounded-ctl border border-edge bg-surface px-3 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)] xl:w-[13rem]"
+            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-ctl border border-edge bg-canvas px-3 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
           >
             <Search size={14} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
             <input
@@ -192,7 +120,7 @@ export function Masthead({
             The list's own name is dropped below `xl` — it is the longest and least
             load-bearing string here, and "3/38" says the same as "Inbox — 3/38".
           */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex shrink-0 items-center gap-0.5">
             <span
               className="mr-2 hidden max-w-[9rem] truncate text-ui font-medium text-ink-muted xl:inline"
               title={listTitle}

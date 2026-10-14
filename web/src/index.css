@@ -138,6 +138,57 @@ body {
 }
 
 /*
+ * The desktop sidebar's glass (`MailNav.tsx`).
+ *
+ * A progressive blur from the sidebar's root, its left edge, outward: three stacked
+ * `backdrop-filter` layers at 2, 6 and 14px, each masked by a left-to-right gradient so
+ * the strong blur lives at the left and only the faint one reaches the right. Over them,
+ * the surface at about three-quarters opacity. Where `color-mix` is missing the tint is
+ * the opaque surface, which only loses the translucency.
+ */
+.wn-sidebar-blur {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wn-sidebar-blur-1 {
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+
+.wn-sidebar-blur-2 {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 30%, transparent 80%);
+  mask-image: linear-gradient(to right, #000 0%, #000 30%, transparent 80%);
+}
+
+.wn-sidebar-blur-3 {
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  -webkit-mask-image: linear-gradient(to right, #000 0%, transparent 45%);
+  mask-image: linear-gradient(to right, #000 0%, transparent 45%);
+}
+
+.wn-sidebar-tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--wn-surface);
+}
+
+@supports (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-sidebar-tint {
+    background: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--wn-surface) 80%, transparent),
+      color-mix(in srgb, var(--wn-surface) 72%, transparent)
+    );
+  }
+}
+
+/*
  * The focus ring: the accent, drawn as an outline.
  *
  * An outline rather than Tailwind's `ring` because `ring-2` composes `box-shadow` out of

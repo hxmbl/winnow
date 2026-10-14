@@ -40,6 +40,7 @@ import {
   NEUTRAL_SIGNALS,
   navigationIndexFor,
   clampIndex,
+  isUnsafe,
   type BuiltinSmartFilter,
   type EmailSignals,
   type FilterId,
@@ -422,6 +423,11 @@ export type MailboxView = {
   inboxCounts: ReadonlyMap<BuiltinSmartFilter, number>;
   /** Messages per sender, over the inbox, for the sender pills. */
   inboxSenderCounts: ReadonlyMap<string, number>;
+  /**
+   * Conversations the unfiltered inbox list shows, for the sidebar's Inbox count: the
+   * same rows (unsafe mail is held back from the list, so it is not counted here).
+   */
+  inboxThreadCount: number;
   /**
    * What in the inbox needs attention, for the triage line. Over the inbox for the same
    * reason as `inboxCounts`: it is a claim about your mail, not about the current filter.
@@ -918,6 +924,15 @@ export class WinnowStore {
 
     const attention = summarizeAttention(inboxForProfile, inboxSignals, state.now);
 
+    const inboxThreadCount = new Set(
+      inboxForProfile
+        .filter((email) => {
+          const signal = inboxSignals.get(email.id);
+          return !signal || !isUnsafe(signal);
+        })
+        .map((email) => email.threadId ?? email.gmailId),
+    ).size;
+
     const inboxSenderCounts = new Map<string, number>();
     for (const email of inboxForProfile) {
       inboxSenderCounts.set(email.sender, (inboxSenderCounts.get(email.sender) ?? 0) + 1);
@@ -959,6 +974,7 @@ export class WinnowStore {
       rail: railWithActive,
       inboxCounts,
       inboxSenderCounts,
+      inboxThreadCount,
       attention,
       selected,
       conversation,
@@ -999,19 +1015,18 @@ export class WinnowStore {
 
     const pinned = PERMANENT_FILTERS.filter((id) => !removed.has(id));
 
-    // Catalog order is the fallback for an active bucket out of the ranking, so the pill
-    // lands predictably rather than at random.
-    const hoisted = activeBuiltins.filter((id) => !pinned.includes(id));
-    const hoistedOrdered = [
-      ...hoisted.filter((id) => ranked.includes(id)),
-      ...hoisted.filter((id) => !ranked.includes(id)).sort((a, b) => catalogIndex(a) - catalogIndex(b)),
-    ];
-
-    const hoistedSet = new Set([...pinned, ...hoistedOrdered]);
-    const rest = ranked.filter((id) => !hoistedSet.has(id));
+    // An active bucket keeps its place: the categories are a sidebar list now, all on
+    // screen, and a row that jumped to the top when clicked would move away from the
+    // pointer and repoint the digit shortcuts. Only an active bucket the ranking left
+    // out is added, after the ranked ones and in catalog order, so it can be turned off.
+    const placed = new Set([...pinned, ...ranked]);
+    const extra = activeBuiltins
+      .filter((id) => !placed.has(id))
+      .sort((a, b) => catalogIndex(a) - catalogIndex(b));
+    const rest = ranked.filter((id) => !pinned.includes(id));
     const muted = BUILTIN_FILTERS.filter((id) => removed.has(id));
 
-    return [...pinned, ...hoistedOrdered, ...rest, ...muted];
+    return [...pinned, ...rest, ...extra, ...muted];
   }
 
   /**

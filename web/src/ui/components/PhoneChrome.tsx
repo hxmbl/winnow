@@ -1,10 +1,11 @@
 /**
  * The phone layout's chrome: a top bar and a bottom dock.
  *
- * Below `sm` the masthead is replaced rather than squeezed. Everything a thumb does often
- * — switching mailbox, narrowing by a stream, opening Settings — moves to the bottom of
- * the screen, and the top keeps what is read rather than tapped: the mark, search, and
- * the account.
+ * Below `sm` the masthead is replaced rather than squeezed. The four places a thumb goes
+ * most (Inbox, Sent, Archive, Settings) are the dock at the bottom of the screen; the top
+ * keeps the mark, search, and the menu button, which opens the overflow menu
+ * (`MailNav.tsx`) with every category and folder. There is no swipeable category row
+ * above the dock any more: the categories live in that menu.
  *
  * Flat on purpose, the same way the desktop chrome is: the bars are the canvas tone and
  * the list is the surface tone, so the boundary is a change in value with no rule, no
@@ -15,9 +16,7 @@
 import { Archive, Check, ChevronLeft, ChevronRight, Inbox, Menu, Search, Send, Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
-import { FilterStrip, type PillItem } from "./FilterStrip";
 import { PositionReadout } from "./Masthead";
-import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 
 const ROUND_BUTTON =
@@ -96,17 +95,17 @@ export function PhoneTopBar({
         </label>
 
         {/*
-          The account, which is also the menu: the drawer it opens holds the account,
-          sign-in and sign-out, every mailbox (Trash and Spam included, which the dock has
-          no room for) and Sync. In the demo there is no account, so it is a menu glyph.
+          The menu: the overflow sheet it opens holds Inbox, every category with its
+          count, every folder (Trash and Spam included, which the dock has no room for),
+          the account and Settings. Signed in, it wears the account's initial.
         */}
         <button
           type="button"
           onClick={onOpenNavigation}
           aria-expanded={navigationOpen}
           aria-haspopup="dialog"
-          aria-label="Open navigation"
-          title={accountEmail ?? "Navigation"}
+          aria-label="Open menu"
+          title={accountEmail ?? "Menu"}
           className={`${ROUND_BUTTON} bg-surface`}
         >
           {accountEmail ? (
@@ -154,7 +153,7 @@ export function PhoneTopBar({
 
 // ── Dock ────────────────────────────────────────────────────────────────────
 
-/** The four tabs. Trash and Spam stay in the drawer. */
+/** The four tabs. Trash and Spam are in the overflow menu. */
 const TABS: readonly { id: Mailbox | "settings"; label: string; Icon: LucideIcon }[] = [
   { id: "inbox", label: "Inbox", Icon: Inbox },
   { id: "sent", label: "Sent", Icon: Send },
@@ -163,12 +162,6 @@ const TABS: readonly { id: Mailbox | "settings"; label: string; Icon: LucideIcon
 ];
 
 export type PhoneDockProps = {
-  pills: PillItem[];
-  activeFilters: FilterId[];
-  onToggleFilter: (id: FilterId) => void;
-  onMute: (id: BuiltinSmartFilter) => void;
-  onRestoreFilter: (id: BuiltinSmartFilter) => void;
-  onClearFilters: () => void;
   mailbox: Mailbox;
   /** Unread per mailbox, for the tab's accessible name and its quiet count. */
   unread: Partial<Record<Mailbox, number>>;
@@ -178,12 +171,6 @@ export type PhoneDockProps = {
 };
 
 export function PhoneDock({
-  pills,
-  activeFilters,
-  onToggleFilter,
-  onMute,
-  onRestoreFilter,
-  onClearFilters,
   mailbox,
   unread,
   onSelectMailbox,
@@ -191,25 +178,9 @@ export function PhoneDock({
   onOpenSettings,
 }: PhoneDockProps) {
   return (
-    /*
-      One surface. The streams and the tabs are not two bars stacked on each other: they
-      share a single canvas-toned sheet with rounded top corners, and the only thing
-      between them is spacing.
-    */
+    // One canvas-toned sheet with rounded top corners, holding the four tabs.
     <div data-phone-dock="" className={DOCK_SURFACE}>
-      {/* The streams and smart filters, just above the tabs where a thumb rests. */}
-      <FilterStrip
-        pills={pills}
-        activeFilters={activeFilters}
-        onToggle={onToggleFilter}
-        onMute={onMute}
-        onRestore={onRestoreFilter}
-        onClear={onClearFilters}
-        touch
-        className="px-3"
-      />
-
-      <nav aria-label="Primary" className="mt-1.5 grid grid-cols-4 gap-1 px-2">
+      <nav aria-label="Primary" className="grid grid-cols-4 gap-1 px-2">
         {TABS.map(({ id, label, Icon }) => {
           const current = id === "settings" ? settingsOpen : !settingsOpen && mailbox === id;
           const count = id === "settings" ? 0 : (unread[id] ?? 0);

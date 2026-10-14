@@ -171,45 +171,34 @@ try {
     const raw = await locator.getAttribute("data-row-count");
     return raw === null ? 0 : Number(raw);
   };
-  // Scoped to the live rail. It was rendered twice — inline at `lg` and again on its
-  // own row below it — and counting both would have doubled every number here; there is
-  // one copy now, and the `:visible` guard documents that it is a layout assumption
-  // rather than a structural one.
-  const pills = () => page.locator("header button[aria-pressed]:visible");
+  // The categories: the desktop sidebar's, or the phone overflow menu's while it is open.
+  // A category is current (`aria-current="true"`) while its filter is on.
+  const pills = () => page.locator("[data-mail-nav] button[data-nav-category]:visible");
+  const isOn = async (locator) => (await locator.getAttribute("aria-current")) === "true";
   /**
-   * The mailbox menu, which the logo opens.
-   *
-   * Mailboxes used to be four always-visible pills, so every assertion about them
-   * went straight at `header nav`. They are now a drawer behind the mark, which means
-   * the navigation has to be *opened* before it can be asserted on — and that opening
-   * it is itself a thing worth asserting.
+   * The navigation: always on screen on the desktop (the sidebar), behind the menu
+   * button on a phone (the overflow menu, a `dialog` named "Menu").
    */
-  const drawer = () => page.locator('[role="dialog"][aria-label="Navigation"]');
-  /**
-   * Open the drawer, and be idempotent about it.
-   *
-   * Two things it has to survive. It may already be open — several callers read a
-   * mailbox count and then switch, and clicking the mark behind its own panel does
-   * nothing. And a sheet that closed on the previous line can still have its
-   * `role="presentation"` backdrop mounted for a frame, which swallows the click and
-   * reports the mark as unclickable.
-   */
+  const overflowMenu = () => page.locator('[role="dialog"][aria-label="Menu"]');
+  const drawer = () => page.locator("[data-mail-nav]:visible");
   const openDrawer = async () => {
     if ((await drawer().count()) > 0) return;
     await page
       .waitForFunction(() => !document.querySelector('[role="presentation"]'), null, { timeout: 5_000 })
       .catch(() => undefined);
-    await page.locator('button[aria-label="Open navigation"]').click();
-    await drawer().waitFor({ state: "visible", timeout: 5_000 });
+    await page.locator('button[aria-label="Open menu"]').click();
+    await overflowMenu().waitFor({ state: "visible", timeout: 5_000 });
   };
   const closeDrawer = async () => {
+    if ((await overflowMenu().count()) === 0) return;
     await page.keyboard.press("Escape");
-    await drawer().waitFor({ state: "detached", timeout: 5_000 });
+    await overflowMenu().waitFor({ state: "detached", timeout: 5_000 });
   };
   const mailbox = (name) =>
-    page.locator('[role="dialog"][aria-label="Navigation"] nav[aria-label="Mailboxes"] button', {
-      hasText: name,
-    }).first();
+    page
+      .locator('[data-mail-nav]:visible button[data-nav-folder], [data-mail-nav]:visible button[data-nav="inbox"]')
+      .filter({ hasText: new RegExp(`^${name}`) })
+      .first();
   const storage = () =>
     page.evaluate(() => Object.fromEntries(Object.entries(globalThis.localStorage)));
 
@@ -224,25 +213,16 @@ try {
   const goTo = async (name) => {
     await openDrawer();
     await mailbox(name).click();
-    await drawer().waitFor({ state: "detached", timeout: 5_000 });
+    await overflowMenu().waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(250);
   };
-  /**
-   * The unread count on a mailbox row, or `0` when it has none.
-   *
-   * The counts live in the drawer now, so this opens it, reads, and closes. The old
-   * version read a `span` out of an always-visible tab and returned `"0"` for a mailbox
-   * that was simply not on screen — which is indistinguishable from a real zero, and
-   * made the mark-all-read scoping checks assert against a number that was never read.
-   */
+  /** The unread count on a mailbox row, or `0` when it has none (`data-unread`). */
   const unreadBadge = async (name) => {
     await openDrawer();
     const row = mailbox(name);
     await row.waitFor({ state: "visible", timeout: 5_000 });
     const text = await row.getAttribute("data-unread");
     await closeDrawer();
-    // Absent means zero: a mailbox with nothing unread shows no count at all, which
-    // is the same thing to a reader as "0".
     return text ?? "0";
   };
   const listTitle = () => page.locator("header span[title]").first().textContent();
@@ -278,120 +258,116 @@ try {
   );
 
   const pillCount = await pills().count();
-  require("the filter rail is populated", pillCount > 5, `${pillCount} pills`);
-  check("the filter rail is ranked", true, `${pillCount} pills`);
+  require("the sidebar lists the categories", pillCount > 5, `${pillCount} categories`);
 
   const title = await listTitle();
   check("the list says what it is showing", Boolean(title?.trim()), title ?? "");
 
-  // The rail is the product. It used to share a row with the mailbox nav, the search
-  // box, five action buttons, two icon buttons and the position cluster, and every one
-  // of those was `shrink-0`, so the rail — the only elastic child — absorbed the whole
-  // shortfall and showed three pills at 1440px.
+  // ── The floating sidebar ───────────────────────────────────────────────────
   //
-  // It is now in the masthead, absolutely positioned across the whole row and inset by
-  // the logo on the left and the search cluster on the right, so the filters pass
-  // *underneath* the mark. Asserted as a ratio rather than a pixel count, because the
-  // number of pills depends on the mailbox; what matters is that most of them are
-  // reachable without scrolling, and that the rail has not been squeezed out of
-  // existence by the two things it now shares a row with.
-  const rail = await page.evaluate(() => {
-    // Not `header .no-scrollbar.overflow-x-auto` — there is no other one now, but the
-    // rail is defined by holding pressed-state pills rather than by its class list.
-    const scrollers = [...document.querySelectorAll("header div.no-scrollbar")].filter((element) =>
-      element.querySelector("button[aria-pressed]"),
-    );
-    if (scrollers.length !== 1) return { copies: scrollers.length };
-    const scroller = scrollers[0];
-    const pills = [...scroller.querySelectorAll("button[aria-pressed]")];
-    const box = scroller.getBoundingClientRect();
-    const visible = pills.filter((pill) => {
-      const rect = pill.getBoundingClientRect();
-      return rect.right > box.left + 1 && rect.left < box.right - 1;
-    });
+  // It replaced the top category rail. 8px from the left and top, 12px radius, a
+  // hairline and no shadow, translucent over a progressive blur, and only as tall as
+  // what it holds: it must not be stretched to the bottom of the window.
+  const sidebar = page.locator("[data-sidebar]");
+  check("the sidebar is rendered exactly once", (await sidebar.count()) === 1);
+  check("and the top rail is gone, chevrons and fade included",
+    (await page.locator("[data-rail-scroller], [data-rail-edge], button[aria-label^='Scroll filters']").count()) === 0);
+  const sideShape = await page.evaluate(() => {
+    const side = document.querySelector("[data-sidebar]");
+    const style = getComputedStyle(side);
+    const rect = side.getBoundingClientRect();
+    const layer = (n) => getComputedStyle(side.querySelector(`.wn-sidebar-blur-${n}`)).backdropFilter;
+    const tint = getComputedStyle(side.querySelector(".wn-sidebar-tint")).backgroundImage;
+    const search = document.querySelector("#winnow-search").closest("label").getBoundingClientRect();
+    const list = document.querySelector("[data-row-count]").getBoundingClientRect();
     return {
-      copies: scrollers.length,
-      total: pills.length,
-      visible: visible.length,
-      width: box.width,
+      left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+      radius: style.borderTopLeftRadius, shadow: style.boxShadow, border: style.borderTopWidth,
+      blurs: [layer(1), layer(2), layer(3)],
+      mask: getComputedStyle(side.querySelector(".wn-sidebar-blur-3")).maskImage,
+      tint,
+      searchLeft: search.left, searchWidth: search.width, listLeft: list.left, listWidth: list.width,
+      contentHeight: side.scrollHeight,
     };
   });
-  check("the rail is rendered exactly once", rail?.copies === 1, `${rail?.copies} copies`);
-  check("it has real width to work with", (rail?.width ?? 0) > 900, `${rail?.width}px`);
-  /**
-   * Six, not eight.
-   *
-   * The rail used to have a row to itself and showed a dozen pills. It now shares the
-   * masthead row with the search field and the position cluster — which is the whole
-   * point of the redesign — and those two take ~360px of a 1440px window, so the rail
-   * sees ~1015px and shows seven of its twenty-seven pills without scrolling.
-   *
-   * The trade is deliberate and it is recorded here rather than engineered away: one row
-   * with seven visible filters beats three stacked rows with twelve, because the thing
-   * being removed was the stack. The digit shortcut is on every pill and the rail
-   * scrolls, so nothing is unreachable — it just takes a scroll rather than a glance.
-   */
   check(
-    "so a useful run of it is reachable without scrolling",
-    (rail?.visible ?? 0) >= Math.min(6, rail?.total ?? 0),
-    `${rail?.visible} of ${rail?.total} pills in ${rail?.width}px`,
+    "it floats 8px from the left and top edges with a 12px radius, a hairline and no shadow",
+    sideShape.left === 8 && sideShape.top === 8 && sideShape.radius === "12px" && sideShape.shadow === "none" && sideShape.border === "1px",
+    JSON.stringify(sideShape),
   );
+  check(
+    "its blur is 2/6/14px, masked from the left edge outward, under a translucent tint",
+    JSON.stringify(sideShape.blurs) === JSON.stringify(["blur(2px)", "blur(6px)", "blur(14px)"]) &&
+      /linear-gradient/.test(sideShape.mask) && /rgba?\(.*0\.\d+\)|color\(srgb.* \/ 0\.\d+\)/.test(sideShape.tint),
+    JSON.stringify({ blurs: sideShape.blurs, mask: sideShape.mask, tint: sideShape.tint }),
+  );
+  check(
+    "the list and its search clear the sidebar, and search takes the list column's width",
+    sideShape.searchLeft >= sideShape.left + sideShape.width + 8 && sideShape.listLeft >= sideShape.left + sideShape.width &&
+      sideShape.searchWidth > sideShape.listWidth * 0.6,
+    JSON.stringify(sideShape),
+  );
+  // Only as tall as its contents: in a tall window it stops well short of the bottom.
+  await page.setViewportSize({ width: 1440, height: 1600 });
+  await page.waitForTimeout(200);
+  const tall = await page.evaluate(() => {
+    const rect = document.querySelector("[data-sidebar]").getBoundingClientRect();
+    return { bottom: Math.round(rect.bottom), window: innerHeight };
+  });
+  check("in a tall window the sidebar ends at its contents, not the window's bottom",
+    tall.bottom < tall.window - 40, JSON.stringify(tall));
+  await page.setViewportSize({ width: 1440, height: 520 });
+  await page.waitForTimeout(200);
+  const short = await page.evaluate(() => {
+    const side = document.querySelector("[data-sidebar]");
+    const scroll = side.querySelector("[data-sidebar-scroll]");
+    const footer = side.querySelector("[data-nav-account]").getBoundingClientRect();
+    return {
+      bottom: Math.round(side.getBoundingClientRect().bottom),
+      window: innerHeight,
+      scrolls: scroll.scrollHeight > scroll.clientHeight,
+      footerInside: footer.bottom <= side.getBoundingClientRect().bottom + 0.5,
+    };
+  });
+  check("in a short window it stays inside the window and scrolls inside itself, footer in view",
+    short.bottom <= short.window - 8 && short.scrolls && short.footerInside, JSON.stringify(short));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(200);
 
-  /**
-   * The filters pass *under* the logo rather than the logo moving out of their way.
-   *
-   * This is the masthead's one novel behaviour and it is invisible in a screenshot of
-   * the resting state, because at rest the first pill clears the mark anyway. Scrolling
-   * the rail is what makes it observable: a pill has to end up underneath the mark, and
-   * the mark has to still be there, and still be the logo.
-   */
-  const underTheLogo = await page.evaluate(async () => {
-    const scroller = [...document.querySelectorAll("header div.no-scrollbar")].find((element) =>
-      element.querySelector("button[aria-pressed]"),
-    );
-    const logo = document.querySelector('button[aria-label="Open navigation"]');
-    if (!scroller || !logo) return null;
-    const logoBox = logo.getBoundingClientRect();
-    scroller.scrollLeft = 260;
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const pills = [...scroller.querySelectorAll("button[aria-pressed]")];
-    // A pill whose box reaches under the mark while the mark is still in place.
-    const crossing = pills.filter((pill) => {
-      const r = pill.getBoundingClientRect();
-      return r.left < logoBox.right && r.right > logoBox.left;
-    });
-    return {
-      scrolled: scroller.scrollLeft,
-      crossing: crossing.length,
-      logoStillThere: Boolean(document.querySelector('button[aria-label="Open navigation"] svg')),
-      pillUnderneath: crossing.some((pill) => {
-        const r = pill.getBoundingClientRect();
-        return r.left < logoBox.left + logoBox.width / 2;
-      }),
-    };
-  });
+  const sideText = await sidebar.evaluate((side) => ({
+    brand: side.textContent.includes("Winnow"),
+    sections: [...side.querySelectorAll("h3")].map((h) => h.textContent.trim()),
+    folders: [...side.querySelectorAll("[data-nav-folder]")].map((b) => b.getAttribute("data-nav-folder")),
+    account: side.querySelector("[data-nav-account]")?.textContent ?? "",
+    gear: Boolean(side.querySelector('[data-nav-account] button[aria-label="Settings"]')),
+    inboxCurrent: side.querySelector('button[data-nav="inbox"]')?.getAttribute("aria-current"),
+    digits: [...side.querySelectorAll("[data-nav-category]")].slice(0, 9).map((b) => b.getAttribute("aria-keyshortcuts")),
+    nav: Boolean(side.querySelector("nav")),
+  }));
   check(
-    "scrolling the filters carries them under the logo",
-    underTheLogo !== null && underTheLogo.scrolled > 0 && underTheLogo.crossing > 0,
-    JSON.stringify(underTheLogo),
+    "top to bottom: Winnow, Inbox, Categories, Mail (Sent, Archive, Trash…), the demo account and a gear",
+    sideText.brand && JSON.stringify(sideText.sections) === JSON.stringify(["Categories", "Mail"]) &&
+      ["sent", "archive", "trash"].every((id) => sideText.folders.includes(id)) &&
+      sideText.account.includes("Demo account") && sideText.gear && sideText.nav,
+    JSON.stringify(sideText),
   );
+  check("Inbox is the current page, in a nav list", sideText.inboxCurrent === "page", JSON.stringify(sideText));
   check(
-    "and the logo does not move to get out of the way",
-    underTheLogo?.logoStillThere === true,
-    JSON.stringify(underTheLogo),
+    "the first nine categories carry their digit shortcuts",
+    JSON.stringify(sideText.digits) === JSON.stringify(["1", "2", "3", "4", "5", "6", "7", "8", "9"]),
+    JSON.stringify(sideText.digits),
   );
-  check(
-    "and a pill really does end up beneath it",
-    underTheLogo?.pillUnderneath === true,
-    JSON.stringify(underTheLogo),
+  await page.keyboard.press("2");
+  await page.waitForTimeout(250);
+  check("pressing 2 turns the second category on, and Inbox is no longer current",
+    (await isOn(pills().nth(1))) && (await sidebar.locator('button[data-nav="inbox"]').getAttribute("aria-current")) === null);
+  await page.keyboard.press("2");
+  await page.waitForTimeout(250);
+  check("and pressing it again turns it off", !(await isOn(pills().nth(1))));
+  const sidebarInboxCount = Number(
+    ((await sidebar.locator('button[data-nav="inbox"]').textContent()) ?? "").replace(/\D/g, ""),
   );
-  await page.evaluate(() => {
-    const scroller = [...document.querySelectorAll("header div.no-scrollbar")].find((element) =>
-      element.querySelector("button[aria-pressed]"),
-    );
-    if (scroller) scroller.scrollLeft = 0;
-  });
-  await page.waitForTimeout(150);
+  check("the Inbox count is the list's own", sidebarInboxCount === (await rowTotal()), `${sidebarInboxCount} vs ${await rowTotal()}`);
 
   // The position cluster said "0 of 38" before the keyboard had ever been touched,
   // which reads as an empty mailbox — and "0 of 0" on a narrowed list.
@@ -612,17 +588,11 @@ try {
     pressedLabel === pillLabel,
     `${pillLabel} → ${pressedLabel}`,
   );
-  check(
-    "and the pill reports itself pressed",
-    (await pills().first().getAttribute("aria-pressed")) === "true",
-  );
+  check("and the category reports itself current", await isOn(pills().first()));
 
   await pills().first().click();
   await page.waitForTimeout(200);
-  check(
-    "clicking it again clears the filter",
-    (await pills().first().getAttribute("aria-pressed")) === "false",
-  );
+  check("clicking it again clears the filter", !(await isOn(pills().first())));
 
   // ── Search ─────────────────────────────────────────────────────────────────
 
@@ -1001,11 +971,8 @@ try {
       "and does not close it either",
       (await page.locator("article h1").count()) > 0,
     );
-    // Cleared through the rail's own "All" rather than by clicking the pill again:
-    // an active pill is hoisted to the front of the rail, so the second `Deliveries`
-    // lookup can land on a different element than the first.
-    const all = page.locator('header button:has-text("All")').first();
-    if ((await all.count()) > 0) await all.click();
+    // Cleared by clicking the same category again: it keeps its place in the sidebar.
+    await excludingPill.click();
     await page.waitForTimeout(300);
   }
 
@@ -1785,7 +1752,7 @@ try {
   // with a duplicated control. Asserted as an exact count so a third one cannot join
   // them.
   const archiveInSpam = page.locator(
-    'button[aria-label="Archive"], button[aria-label="Restore"], button[aria-label="Move to inbox"]',
+    'button[aria-label="Archive"]:not([data-nav-folder]), button[aria-label="Restore"]:not([data-nav-folder]), button[aria-label="Move to inbox"]:not([data-nav-folder])',
   );
   check(
     "the spam folder offers exactly one way back to the inbox",
@@ -1824,97 +1791,56 @@ try {
 
   await goTo("Inbox");
   await page.waitForTimeout(300);
-  const newsletters = page.locator('header button[aria-label^="Newsletters,"]:visible').first();
-  require("the demo has a Newsletters bucket to mute", (await newsletters.count()) > 0);
-
-  await newsletters.hover();
-  await page.waitForTimeout(200);
-  const hideAgain = page.locator('header button[aria-label^="Hide Newsletters"]:visible').first();
-  await hideAgain.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(200);
-  await hideAgain.click({ force: true });
+  // Hiding and restoring live behind the Categories heading's Edit mode now.
+  const side = page.locator("[data-sidebar]");
+  const editButton = side.locator("button[data-nav-edit]");
+  const newsletters = side.locator('button[data-nav-category="newsletters"]');
+  require("the demo has a Newsletters category to hide", (await newsletters.count()) > 0);
+  check("outside Edit mode there is no hide control", (await side.locator("[data-nav-hide]").count()) === 0);
+  await editButton.click();
+  await page.waitForTimeout(150);
+  check("Edit shows a hide control per category", (await side.locator("[data-nav-hide]").count()) > 3);
+  await side.locator('[data-nav-hide="newsletters"]').click();
   await page.waitForTimeout(400);
 
-  /*
-    The mute says what it did, and offers the way back.
-
-    A mute *is* reversible — the pill stays in the rail with a ↺, and Settings lists it
-    — but the muted pill is sorted to the *end* of the rail, because a muted pill is not
-    filterable and leaving it in place would repoint every digit shortcut after it. So the
-    control the user clicked leaves a 27-pill strip they have probably not scrolled, and
-    the whole visible effect of the click was that something disappeared. A browser is
-    the only place that can see that.
-  */
   const muteNotice = page.locator('[role="status"]:has-text("Hid Newsletters from the inbox")');
-  check("muting says what it hid", (await muteNotice.count()) > 0);
+  check("hiding says what it hid", (await muteNotice.count()) > 0);
   check("and offers an undo", (await muteNotice.getByRole("button", { name: /undo/i }).count()) > 0);
 
-  const muted = page.locator('header button[aria-label^="Newsletters, hidden"]:visible').first();
-  check("a muted bucket stays on the rail, struck through", (await muted.count()) > 0);
-  check("and cannot be switched on as a filter", await muted.isDisabled());
-
-  // The restore control is revealed on hover of the pill's group, so it is counted
-  // *after* hovering — before that it is `display: none` and a count of zero would say
-  // nothing about whether the control exists.
-  await muted.locator("xpath=..").hover();
-  await page.waitForTimeout(250);
-  const restore = page.locator('header button[aria-label^="Show Newsletters"]:visible').first();
-  check("the muted pill offers a restore control", (await restore.count()) > 0);
-  /*
-   * Scrolled into view first, and this is not incidental tidiness.
-   *
-   * A muted bucket is moved to the *end* of the rail, so its restore control sits at
-   * the far right of a horizontally scrolling strip — measured at x=3025 on a 1440px
-   * window. `force: true` skips Playwright's actionability checks, which includes
-   * scrolling the target into view, so the click was dispatched at a coordinate
-   * outside the viewport and hit nothing. The count assertions after it then reported
-   * a still-muted bucket as though the restore had failed.
-   */
-  await restore.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(200);
-  await restore.click({ force: true });
+  check("a hidden category leaves the live list", (await newsletters.count()) === 0);
+  check("and is listed under Hidden, struck through, in Edit mode",
+    (await side.locator('[data-nav-hidden="newsletters"].line-through').count()) === 1);
+  const restore = side.locator('[data-nav-restore="newsletters"]');
+  check("with a control to show it again", (await restore.count()) === 1);
+  await restore.click();
   await page.waitForTimeout(500);
-  check(
-    "restoring brings the bucket back",
-    (await page.locator('header button[aria-label^="Show Newsletters"]:visible').count()) === 0,
-  );
-  check(
-    "and its pill is live again",
-    (await page.locator('header button[aria-label^="Newsletters,"]:visible:not([disabled])').count()) > 0,
-  );
+  check("restoring brings the category back", (await newsletters.count()) === 1 && (await restore.count()) === 0);
   check(
     "and the strip's offer goes away with it, rather than leaving an Undo that does nothing",
     (await page.locator('[role="status"]:has-text("Hid Newsletters")').count()) === 0,
   );
 
   // And the other way back: taking the strip's own Undo restores the bucket.
-  await newsletters.hover();
-  await page.waitForTimeout(200);
-  await page.locator('header button[aria-label^="Hide Newsletters"]:visible').first().click();
+  await side.locator('[data-nav-hide="newsletters"]').click();
   await page.waitForTimeout(400);
   await page
     .locator('[role="status"]:has-text("Hid Newsletters from the inbox")')
     .getByRole("button", { name: /undo/i })
     .click();
   await page.waitForTimeout(400);
-  check(
-    "the strip's undo restores the bucket too",
-    (await page.locator('header button[aria-label^="Newsletters,"]:visible:not([disabled])').count()) > 0,
-  );
+  check("the strip's undo restores the bucket too", (await newsletters.count()) === 1);
 
   // Mute a *second* bucket and leave it muted, so Settings has something to list. The
   // section is conditional on `mutedFilters.length > 0` — which is right, since an
   // empty section is noise — but it means this check has to be made with a mute in
   // place rather than after restoring everything.
-  const receipts = page.locator('header button[aria-label^="Receipts,"]:visible').first();
+  const receipts = side.locator('[data-nav-hide="receipts"]');
   if (await receipts.count()) {
-    await receipts.hover();
-    await page.waitForTimeout(200);
-    await page.locator('header button[aria-label^="Hide Receipts"]:visible').first().click();
+    await receipts.click();
     await page.waitForTimeout(400);
     check(
       "a second bucket can be muted too",
-      (await page.locator('header button[aria-label^="Receipts, hidden"]:visible').count()) > 0,
+      (await side.locator('[data-nav-hidden="receipts"]').count()) > 0,
     );
 
     await page.keyboard.press(",");
@@ -1938,15 +1864,7 @@ try {
 
     // Undone from the rail, so the persistence checks below are not perturbed by a
     // second active filter.
-    const restoreReceipts = page
-      .locator('header button[aria-label^="Receipts, hidden"]:visible')
-      .first();
-    await restoreReceipts.locator("xpath=..").hover();
-    await page.waitForTimeout(250);
-    await page
-      .locator('header button[aria-label^="Show Receipts"]:visible')
-      .first()
-      .click({ force: true });
+    await side.locator('[data-nav-restore="receipts"]').click();
     await page.waitForTimeout(400);
   } else {
     // No second bucket to mute: assert the section is *absent* when nothing is muted,
@@ -1962,6 +1880,9 @@ try {
     await page.keyboard.press("Escape");
     await page.waitForTimeout(250);
   }
+  // Leave Edit mode, so the rest of the run sees the sidebar at rest.
+  await editButton.click();
+  await page.waitForTimeout(150);
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
@@ -2223,137 +2144,36 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
 
-  // ── The rail against the search field ─────────────────────────────────────
+  // ── The sidebar across desktop widths ─────────────────────────────────────
 
-  section("rail edges");
+  section("sidebar widths");
 
-  /*
-    The rail is ~3,700px of tabs in a third of that, so at every desktop width one tab
-    meets its end — and with the reader open it was "Unread" at 1440px, sliced mid-word
-    beside the search box, which read as the search field covering it. What is claimed
-    here, across the common widths with and without a message open: the rail stops short
-    of the search field, nothing of it reaches under the field, and wherever it overflows
-    the end is a wide fade with a step button over it, so the tab meeting the edge
-    dissolves rather than being cut.
-  */
-  const RAIL_WIDTHS = [1024, 1280, 1366, 1440, 1536, 1680, 1920];
-  const EDGE_MIN = 48;
-  const railReport = [];
-  for (const width of RAIL_WIDTHS) {
+  // The list, its search field and the reader all clear the floating sidebar at every
+  // common desktop width, with and without a message open.
+  const SIDEBAR_WIDTHS = [1024, 1280, 1440, 1920];
+  const overlaps = [];
+  for (const width of SIDEBAR_WIDTHS) {
     for (const reading of [false, true]) {
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(150);
       if (reading) await openMessage();
       else if ((await page.locator("article h1").count()) > 0) await page.keyboard.press("Escape");
-      await page.locator("header [data-rail-scroller]").evaluate((element) => (element.scrollLeft = 0));
       await page.waitForTimeout(150);
       const shape = await page.evaluate(() => {
-        const scroller = document.querySelector("header [data-rail-scroller]");
-        const search = document.querySelector("#winnow-search")?.closest("label");
-        if (!scroller || !search) return null;
-        const rail = scroller.getBoundingClientRect();
-        const field = search.getBoundingClientRect();
-        const tabs = [...scroller.querySelectorAll("[data-rail-item]")].map((item) => item.getBoundingClientRect());
-        const edge = document.querySelector('header [data-rail-edge="end"]')?.getBoundingClientRect() ?? null;
-        // What actually paints at the search field's left edge, mid-height: it must be
-        // the field (or something inside it), never a tab.
-        const probe = document.elementFromPoint(field.left + 2, field.top + field.height / 2);
-        return {
-          gap: Math.round(field.left - rail.right),
-          underField: tabs.filter((t) => t.right > field.left + 0.5 && t.left < field.right && rail.right > field.left).length,
-          probeIsField: Boolean(probe && search.contains(probe)),
-          overflows: scroller.scrollWidth > scroller.clientWidth + 1,
-          edge: edge && { left: Math.round(edge.left), right: Math.round(edge.right), width: Math.round(edge.width) },
-          railRight: Math.round(rail.right),
-        };
+        const side = document.querySelector("[data-sidebar]").getBoundingClientRect();
+        const boxes = ["#winnow-search", "[data-row-count]", "[data-reader]"]
+          .map((selector) => document.querySelector(selector))
+          .filter((element) => element && element.getClientRects().length > 0)
+          .map((element) => (element.closest("label") ?? element).getBoundingClientRect());
+        return { right: side.right, lefts: boxes.map((box) => Math.round(box.left)) };
       });
-      railReport.push({ width, reading, shape });
+      if (shape.lefts.some((left) => left < shape.right)) overlaps.push({ width, reading, ...shape });
     }
   }
-  const railOk = (predicate) => railReport.every(({ shape }) => shape !== null && predicate(shape));
-  const railDetail = (pick) =>
-    railReport.map(({ width, reading, shape }) => `${width}${reading ? "r" : ""}:${shape ? pick(shape) : "?"}`).join(" ");
-  check(
-    "the rail stops short of the search field at every desktop width, reader open or not",
-    railOk((shape) => shape.gap >= 8),
-    railDetail((shape) => shape.gap),
-  );
-  check(
-    "and no tab reaches under the field",
-    railOk((shape) => shape.underField === 0 && shape.probeIsField),
-    railDetail((shape) => `${shape.underField}/${shape.probeIsField}`),
-  );
-  check(
-    "wherever the rail overflows, its end is a fade with a step button rather than a cut",
-    railOk((shape) => !shape.overflows || (shape.edge !== null && shape.edge.width >= EDGE_MIN && Math.abs(shape.edge.right - shape.railRight) <= 1)),
-    railDetail((shape) => (shape.edge ? shape.edge.width : shape.overflows ? "missing" : "fits")),
-  );
-
-  // Back to the case that was reported: 1440px with a message open.
+  check("nothing sits under the sidebar at any desktop width, reading or not", overlaps.length === 0, JSON.stringify(overlaps));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(150);
   if ((await page.locator("article h1").count()) === 0) await openMessage();
-  const railScroller = page.locator("header [data-rail-scroller]");
-  await railScroller.evaluate((element) => (element.scrollLeft = 0));
-  await page.waitForTimeout(100);
-
-  /*
-    The keyboard still reaches every tab, and a tab it lands on is never left under the
-    fade. The step buttons are out of the tab order on purpose, so Tab goes straight from
-    tab to tab; this walks past the edge and checks the focused tab is fully in the clear.
-  */
-  await page.locator("header [data-rail-scroller] button[aria-pressed]").first().focus();
-  let clearOfFade = true;
-  let walkedPastEdge = false;
-  const focusTrail = [];
-  for (let i = 0; i < 24; i += 1) {
-    await page.keyboard.press("Tab");
-    const spot = await page.evaluate(() => {
-      const scroller = document.querySelector("header [data-rail-scroller]");
-      const active = document.activeElement;
-      if (!scroller || !active || !scroller.contains(active)) return null;
-      const rail = scroller.getBoundingClientRect();
-      const r = active.getBoundingClientRect();
-      return { fromEnd: Math.round(rail.right - r.right), scrolled: scroller.scrollLeft > 0 };
-    });
-    if (!spot) break;
-    focusTrail.push(spot.fromEnd);
-    if (spot.scrolled) walkedPastEdge = true;
-    if (spot.fromEnd < EDGE_MIN) clearOfFade = false;
-  }
-  check(
-    "Tab walks the rail past its edge, scrolling as it goes",
-    walkedPastEdge,
-    `${focusTrail.length} stops`,
-  );
-  check(
-    "and every focused tab is fully clear of the fade",
-    clearOfFade,
-    focusTrail.join(","),
-  );
-  check(
-    "the step buttons stay out of the tab order",
-    (await page.locator('header [data-rail-edge] button:not([tabindex="-1"])').count()) === 0,
-  );
-  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
-
-  await railScroller.evaluate((element) => (element.scrollLeft = 0));
-  await page.waitForTimeout(150);
-  const beforeStep = await railScroller.evaluate((element) => element.scrollLeft);
-  await page.locator('header button[aria-label="Scroll filters right"]').click();
-  await page.waitForTimeout(700);
-  const afterStep = await railScroller.evaluate((element) => element.scrollLeft);
-  check("the step button moves the rail on", afterStep > beforeStep + 100, `${beforeStep} → ${afterStep}`);
-  check(
-    "and a back button appears once there is something behind",
-    (await page.locator('header button[aria-label="Scroll filters left"]').count()) === 1,
-  );
-  await page.locator('header button[aria-label="Scroll filters left"]').click();
-  await page.waitForTimeout(700);
-  check(
-    "which steps back",
-    (await railScroller.evaluate((element) => element.scrollLeft)) < afterStep,
-  );
 
   // The desktop keeps its selection exactly as it was: the open row is marked.
   const openRow = page.locator('[data-row-count] button[data-message-id][aria-current="true"]');
@@ -2373,8 +2193,8 @@ try {
     The phone layout.
 
     Below 640px the masthead is replaced, not squeezed: a top bar (the mark, search, and
-    the account/menu circle), the list, and one dock at the bottom edge holding the
-    streams and smart filters above four tabs. The reader brings its own action bar to the
+    the menu button), the list, and one dock at the bottom edge holding four tabs. The
+    categories are in the Linear-style overflow menu the menu button opens. The reader brings its own action bar to the
     same edge. What is claimed here is the ergonomics — that the controls a thumb uses
     most are at the bottom, that every one is a real touch target, and that nothing the
     desktop could do is unreachable.
@@ -2391,7 +2211,7 @@ try {
   check("and the masthead is gone rather than hidden", (await page.locator("header").count()) === 1);
 
   const logoBox = await box(topBar.locator("[data-phone-mark]").first());
-  const accountBox = await box(topBar.locator('button[aria-label="Open navigation"]'));
+  const accountBox = await box(topBar.locator('button[aria-label="Open menu"]'));
   check(
     "the mark sits top-left and the account/menu circle top-right",
     Boolean(logoBox && accountBox) && logoBox.x < 40 && accountBox.x + accountBox.width > 350,
@@ -2437,31 +2257,54 @@ try {
     JSON.stringify(tabBoxes.map((b) => b && [Math.round(b.width), Math.round(b.height)])),
   );
 
-  const dockChips = dock.locator("button[aria-pressed]");
-  const chipBox = await box(dockChips);
   check(
-    "the streams and smart filters sit in the dock, above the tabs",
-    (await dockChips.count()) > 3 && Boolean(chipBox) && chipBox.y < tabBoxes[0].y && chipBox.height >= 40,
-    JSON.stringify(chipBox),
+    "no swipeable category row above the dock any more",
+    (await dock.locator("[data-rail-scroller], button[aria-pressed]").count()) === 0 &&
+      (await dockBox) !== null && (await box(dock.locator('nav[aria-label="Primary"]'))).y - dockBox.y < 20,
   );
-  check(
-    "and none of them are left in the top bar",
-    (await topBar.locator("button[aria-pressed]").count()) === 0,
-  );
+  check("and no sidebar on a phone", (await page.locator("[data-sidebar]").count()) === 0);
 
-  // A chip filters the list, from the dock.
+  // The overflow menu, from the top bar's menu button.
+  await openDrawer();
+  const menu = overflowMenu();
+  const menuShape = await menu.evaluate((panel) => ({
+    filter: Boolean(panel.querySelector("#winnow-nav-filter")),
+    inbox: Boolean(panel.querySelector('button[data-nav="inbox"]')),
+    categories: panel.querySelectorAll("[data-nav-category]").length,
+    counted: [...panel.querySelectorAll("[data-nav-category]")].every((b) => /\d/.test(b.textContent)),
+    folders: [...panel.querySelectorAll("[data-nav-folder]")].map((b) => b.getAttribute("data-nav-folder")),
+    account: panel.querySelector("[data-nav-account]")?.textContent ?? "",
+    settings: Boolean(panel.querySelector('[data-nav-account] button[aria-label="Settings"]')),
+  }));
+  check(
+    "the menu button opens one sheet: a quick filter, Inbox, the categories with counts, Mail, the account and Settings",
+    menuShape.filter && menuShape.inbox && menuShape.categories > 5 && menuShape.counted &&
+      ["sent", "archive", "trash", "spam"].every((id) => menuShape.folders.includes(id)) &&
+      menuShape.account.includes("Demo account") && menuShape.settings,
+    JSON.stringify(menuShape),
+  );
+  const menuTargets = await menu.locator("button[data-nav-category], button[data-nav-folder]").evaluateAll((nodes) =>
+    nodes.slice(0, 12).map((node) => Math.round(node.getBoundingClientRect().height)),
+  );
+  check("its rows are touch-sized", menuTargets.every((h) => h >= MIN_TARGET), JSON.stringify(menuTargets));
+  await page.fill("#winnow-nav-filter", "deliv");
+  await page.waitForTimeout(150);
+  const filtered = await menu.locator("button[data-nav-category], button[data-nav-folder]").allTextContents();
+  check("the quick filter narrows it", filtered.length === 1 && filtered[0].startsWith("Deliveries"), JSON.stringify(filtered));
   const beforeChip = await rowTotal();
-  const firstLive = dock.locator("button[aria-pressed]:not([disabled])").first();
-  await firstLive.click();
+  await menu.locator("button[data-nav-category]").first().click();
   await page.waitForTimeout(300);
   check(
-    "a chip in the dock narrows the list",
-    (await firstLive.getAttribute("aria-pressed")) === "true" && (await rowTotal()) < beforeChip,
+    "choosing a category filters the list and closes the menu",
+    (await overflowMenu().count()) === 0 && (await rowTotal()) < beforeChip,
     `${beforeChip} → ${await rowTotal()}`,
   );
-  await dock.locator("button", { hasText: /^All$/ }).click();
+  await openDrawer();
+  check("and the menu marks it current",
+    (await overflowMenu().locator('button[data-nav-category="shipping"][aria-current="true"], button[data-nav-category][aria-current="true"]').count()) === 1);
+  await overflowMenu().locator('button[data-nav="inbox"]').click();
   await page.waitForTimeout(300);
-  check("and All clears it", (await rowTotal()) === beforeChip, `${await rowTotal()} rows`);
+  check("and Inbox clears it", (await rowTotal()) === beforeChip, `${await rowTotal()} rows`);
 
   // The tabs switch mailbox and open Settings.
   await tabs.filter({ hasText: "Sent" }).click();
@@ -2506,10 +2349,10 @@ try {
   await page.waitForTimeout(300);
   check("and the Inbox tab comes back", (await listTitle())?.trim() === "Inbox", await listTitle());
 
-  // Trash and Spam have no tab; the account circle's drawer still reaches them.
+  // Trash and Spam have no tab; the overflow menu still reaches them.
   await openDrawer();
   check(
-    "the drawer still lists every mailbox",
+    "the overflow menu still lists every mailbox",
     (await mailbox("Trash").count()) === 1 && (await mailbox("Spam").count()) === 1,
   );
   await closeDrawer();
@@ -2635,9 +2478,16 @@ try {
   await touchPage.goto(URL, { waitUntil: "networkidle" });
   await touchPage.waitForSelector("[data-message-id]", { timeout: 10_000 });
 
-  const touchMutes = touchPage.locator('button[aria-label^="Hide "], button[aria-label^="Show "]');
+  // Hiding a category lives behind the phone menu's Edit mode, which must be reachable
+  // and visible by touch alone.
+  await touchPage.locator('button[aria-label="Open menu"]').tap();
+  const touchMenu = touchPage.locator('[role="dialog"][aria-label="Menu"]');
+  await touchMenu.waitFor({ state: "visible", timeout: 5_000 });
+  await touchMenu.locator("button[data-nav-edit]").tap();
+  await touchPage.waitForTimeout(200);
+  const touchMutes = touchMenu.locator('button[aria-label^="Hide "], button[aria-label^="Show "]');
   check(
-    "the rail's hide control exists on a device with no hover",
+    "the menu's hide control exists on a device with no hover",
     (await touchMutes.count()) > 5,
     `${await touchMutes.count()} controls`,
   );
@@ -2646,6 +2496,8 @@ try {
     await touchMutes.first().isVisible(),
     await touchMutes.first().getAttribute("aria-label"),
   );
+  await touchPage.keyboard.press("Escape");
+  await touchPage.waitForTimeout(300);
   const starTarget = await touchPage
     .locator('main button[aria-label="Star"], main button[aria-label="Unstar"]')
     .first()

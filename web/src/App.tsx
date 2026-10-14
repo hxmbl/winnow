@@ -52,7 +52,7 @@ import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
-import { NavDrawer } from "./ui/components/NavDrawer";
+import { OverflowMenu, Sidebar, type NavProps } from "./ui/components/MailNav";
 import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
 import { Reader } from "./ui/components/Reader";
@@ -593,14 +593,54 @@ export function App({ store }: Props) {
   );
 
   /**
-   * Whether the navigation drawer is open.
+   * Whether the phone's overflow menu is open.
    *
-   * Local state rather than a store `overlay`, because the drawer is not one of the three
+   * Local state rather than a store `overlay`, because the menu is not one of the three
    * things the keyboard router dismisses and must not inherit their `Escape` handling:
    * the `Sheet` inside it handles its own, and two Escape handlers on one keypress is how
    * a sheet closes the reader *and* itself.
    */
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  /**
+   * The sidebar and the overflow menu: the same destinations, one model. The Inbox
+   * count is the unfiltered inbox list's own number of conversations.
+   */
+  const navProps: NavProps = {
+    inboxCount: view.inboxThreadCount,
+    inboxUnread: mailboxes.find((mailbox) => mailbox.id === "inbox")?.unread ?? 0,
+    mailbox: snapshot.mailbox,
+    folders: mailboxes.filter((mailbox) => mailbox.id !== "inbox"),
+    pills,
+    activeFilters: snapshot.activeFilters,
+    onInbox: () => {
+      store.setOverlay("none");
+      store.setMailbox("inbox");
+      store.clearFilters();
+    },
+    onSelectMailbox: (mailbox) => {
+      store.setOverlay("none");
+      store.setMailbox(mailbox);
+    },
+    onToggleFilter: store.toggleFilter.bind(store),
+    onMute: store.dismissFilter.bind(store),
+    onRestore: store.restoreFilter.bind(store),
+    accountEmail: snapshot.account?.email ?? null,
+    signingIn,
+    onConnect: () => {
+      void connectFromDemo();
+    },
+    onSignOut: () => {
+      void signOut();
+    },
+    syncing: sync.busy,
+    syncLabel: sync.button,
+    onRefresh: () => {
+      void store.refresh();
+    },
+    settingsOpen: snapshot.overlay === "settings",
+    onOpenSettings: () => store.setOverlay("settings"),
+  };
 
   const paletteUnread = useMemo(
     () =>
@@ -1375,11 +1415,11 @@ const listSelectedId = phone ? null : snapshot.selectedId;
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
+    <div className={`flex h-dvh flex-col overflow-hidden bg-canvas text-ink ${phone ? "" : "pl-64"}`}>
       {/*
-        The masthead: logo, smart filters, search and where-you-are, on one surface. The
-        mailbox menu is what the logo opens; the email actions live in the reader, where
-        the open message is.
+        The chrome. On a phone, the top bar (search and the menu button). On the desktop,
+        the floating sidebar with every destination; search and where-you-are head the
+        list column (see `Masthead` below), and the email actions live in the reader.
       */}
       {phone ? (
         // On a phone the reader takes the whole screen, its own way back included, so
@@ -1414,27 +1454,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           />
         )
       ) : (
-      <Masthead
-        searchQuery={snapshot.searchQuery}
-        onSearchChange={store.setSearchQuery.bind(store)}
-        searchRef={searchRef}
-        pills={pills}
-        activeFilters={snapshot.activeFilters}
-        onToggleFilter={store.toggleFilter.bind(store)}
-        onMute={store.dismissFilter.bind(store)}
-        onRestoreFilter={store.restoreFilter.bind(store)}
-        onClearFilters={store.clearFilters.bind(store)}
-        onOpenNavigation={() => setDrawerOpen(true)}
-        navigationOpen={drawerOpen}
-        position={position}
-        total={view.threads.length}
-        listTitle={store.listTitle()}
-        cursorIndex={snapshot.cursorIndex}
-        onPrev={() => store.moveCursor(-1)}
-        onNext={() => store.moveCursor(1)}
-        onMarkAllRead={store.markAllRead.bind(store)}
-      />
-      )}
+        <Sidebar {...navProps} />      )}
 
       <p role="status" aria-live="polite" className="sr-only" data-code-announcement="">
         {codeAnnouncement}
@@ -1608,6 +1628,20 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             classifier's own signals. Only in the inbox — it is a claim about the inbox,
             and over Sent or the bin it would be answering a question nobody asked.
           */}
+          {!phone && (
+            <Masthead
+              searchQuery={snapshot.searchQuery}
+              onSearchChange={store.setSearchQuery.bind(store)}
+              searchRef={searchRef}
+              position={position}
+              total={view.threads.length}
+              listTitle={store.listTitle()}
+              cursorIndex={snapshot.cursorIndex}
+              onPrev={() => store.moveCursor(-1)}
+              onNext={() => store.moveCursor(1)}
+              onMarkAllRead={store.markAllRead.bind(store)}
+            />
+          )}
           {!phone && selection.size > 0 ? (
             <SelectionBar
               phone={false}
@@ -1843,17 +1877,11 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       </main>
 
       {/*
-        The phone's dock: streams and smart filters above the four tabs, on one surface at
-        the bottom edge. Not while reading — the reader brings its own action bar.
+        The phone's dock: the four tabs on one surface at the bottom edge. The categories
+        are in the overflow menu. Not while reading — the reader brings its own action bar.
       */}
       {phone && !selected && (
         <PhoneDock
-          pills={pills}
-          activeFilters={snapshot.activeFilters}
-          onToggleFilter={store.toggleFilter.bind(store)}
-          onMute={store.dismissFilter.bind(store)}
-          onRestoreFilter={store.restoreFilter.bind(store)}
-          onClearFilters={store.clearFilters.bind(store)}
           mailbox={snapshot.mailbox}
           unread={paletteUnread}
           onSelectMailbox={(mailbox) => {
@@ -1869,32 +1897,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         <ShortcutSheet onClose={() => store.setOverlay("none")} />
       )}
 
-      {drawerOpen && (
-        <NavDrawer
-          mailboxes={mailboxes}
-          activeMailbox={snapshot.mailbox}
-          onSelectMailbox={store.setMailbox.bind(store)}
-          accountEmail={snapshot.account?.email ?? null}
-          onSignOut={() => {
-            void signOut();
-          }}
-          onSignIn={() => {
-            void connectFromDemo();
-          }}
-          signingIn={signingIn}
-          syncing={sync.busy}
-          syncLabel={sync.button}
-          syncLine={sync.line}
-          onRefresh={() => {
-            void store.refresh();
-          }}
-          onSettings={() => {
-            setDrawerOpen(false);
-            store.setOverlay("settings");
-          }}
-          onClose={() => setDrawerOpen(false)}
-        />
-      )}
+      {phone && drawerOpen && <OverflowMenu {...navProps} onClose={() => setDrawerOpen(false)} />}
 
       {snapshot.overlay === "navigation" && (
         <NavigationPalette
