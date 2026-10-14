@@ -3042,6 +3042,79 @@ try {
     await ctx.close();
   }
 
+  // ── One-time codes ─────────────────────────────────────────────────────────
+
+  /*
+   * The row's Copy chip is time-boxed (five minutes from arrival) and the reader's bar
+   * is not, so this runs on a faked clock: the demo's Okta code is two minutes old at
+   * boot, and fast-forwarding past the window must take the chip away while the reader
+   * keeps offering the code.
+   */
+  section("one-time codes");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new globalThis.URL(URL).origin }).catch(() => undefined);
+    const cPage = await ctx.newPage();
+    const cErrors = [];
+    cPage.on("pageerror", (error) => cErrors.push(String(error)));
+    cPage.on("console", (message) => {
+      if (message.type() === "error") cErrors.push(message.text());
+    });
+    await cPage.clock.install({ time: Date.now() });
+    await cPage.goto(URL, { waitUntil: "networkidle" });
+    await cPage.waitForSelector("[data-message-id]", { timeout: 10_000 });
+
+    const chip = cPage.locator('main button[data-code-chip="418902"]');
+    check("a fresh code shows a Copy chip on its row", (await chip.count()) === 1, `${await chip.count()} chips`);
+    check(
+      "and the chip names the code, grouped for reading",
+      ((await chip.first().textContent()) ?? "").includes("Copy 418 902"),
+      (await chip.first().textContent()) ?? "",
+    );
+    check("with an accessible name that is the code itself", (await chip.first().getAttribute("aria-label")) === "Copy code 418902");
+    const rowsBefore = await cPage.locator("article h1").count();
+    await chip.first().click();
+    // The clipboard write is a promise; the confirmation follows it. The clock is
+    // frozen, so the "Copied" state cannot time out while this waits.
+    const copiedShown = await chip
+      .filter({ hasText: "Copied" })
+      .first()
+      .waitFor({ timeout: 3_000 })
+      .then(() => true, () => false);
+    check("clicking the chip says it copied", copiedShown, (await chip.first().textContent()) ?? "");
+    check("without opening the message", (await cPage.locator("article h1").count()) === rowsBefore);
+    const clipboard = await cPage.evaluate(() => navigator.clipboard.readText()).catch(() => null);
+    check("and the code is what lands on the clipboard", clipboard === null || clipboard === "418902", String(clipboard));
+
+    // Open it: the reader's bar sits at the top with the code and its own Copy.
+    await cPage.locator('[data-message-id]:has-text("Your verification code")').first().click();
+    await cPage.waitForSelector("article h1", { timeout: 5_000 });
+    const bar = cPage.locator('[data-code-bar="418902"]');
+    check("the reader shows a code bar for a message with a code", (await bar.count()) === 1);
+    check("which shows the code, grouped", ((await bar.textContent()) ?? "").includes("418 902"));
+    check("and carries its own Copy button", (await bar.locator('button[aria-label$="code 418902"]').count()) === 1);
+    const barBox = await bar.boundingBox();
+    const headingBox = await cPage.locator("article h1").boundingBox();
+    check(
+      "above the subject",
+      Boolean(barBox && headingBox) && barBox.y + barBox.height <= headingBox.y + 1,
+      JSON.stringify({ barBox, headingBox }),
+    );
+
+    // Past five minutes from arrival (two at boot, so four more is past it), with the
+    // store's one-minute tick in between.
+    await cPage.clock.runFor(4 * 60_000 + 61_000);
+    await cPage.waitForTimeout(100);
+    check(
+      "after five minutes the row's chip is gone",
+      (await cPage.locator('main button[data-code-chip]').count()) === 0,
+      `${await cPage.locator('main button[data-code-chip]').count()} chips`,
+    );
+    check("but the reader still offers the code", (await bar.count()) === 1);
+    check("no console errors on the codes pass", cErrors.length === 0, cErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");
