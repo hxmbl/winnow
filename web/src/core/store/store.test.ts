@@ -783,6 +783,32 @@ describe("mark-all-read and its undo", () => {  function storeWithUnread() {
 });
 
 describe("the cursor", () => {
+  it("keeps the cursor when the reader closes, for the desktop", () => {
+    // On the desktop `j` carries on from where the reader was closed.
+    const store = demoStore();
+    store.openRow(3);
+    store.closeReader();
+    expect(store.getSnapshot().selectedId).toBeNull();
+    expect(store.getSnapshot().cursorIndex).toBe(3);
+  });
+
+  it("drops the cursor with the reader when asked, for the phone", () => {
+    // A phone's Back returns to a list with no current row: nothing highlighted, no
+    // "4 of 39", and nothing a later reconcile could reopen on its own.
+    const store = demoStore();
+    store.openRow(3);
+    store.closeReader({ dropCursor: true });
+    expect(store.getSnapshot().selectedId).toBeNull();
+    expect(store.getSnapshot().cursorIndex).toBe(NO_CURSOR);
+  });
+
+  it("selects nothing on its own when it loads", () => {
+    // The phone must never open the reader by itself.
+    const store = demoStore();
+    expect(store.getSnapshot().selectedId).toBeNull();
+    expect(store.getSnapshot().cursorIndex).toBe(NO_CURSOR);
+  });
+
   it("starts at the top on the first move", () => {
     const store = demoStore();
     store.moveCursor(1);

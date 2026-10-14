@@ -18,6 +18,12 @@
       href="/relayDark.svg"
       media="(prefers-color-scheme: dark)"
     />
+    <!--
+      The stored theme, applied before first paint. A classic blocking script from
+      'self' — the desktop CSP forbids inline script — so `index.css` can paint the
+      right backdrop before the bundle has loaded. See the file for why.
+    -->
+    <script src="/theme-boot.js"></script>
     <title>Winnow</title>
   </head>
   <body>

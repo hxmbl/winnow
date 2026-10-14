@@ -12,14 +12,13 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
-import { displayName, monogram } from "../../core/model/email";
+import { displayName } from "../../core/model/email";
 import {
   rowIndicators,
   FILTER_LABELS,
   type BuiltinSmartFilter,
   type EmailSignals,
 } from "../../core/model/signals";
-import { avatarColor, avatarTextColor } from "../avatarColor";
 import { filterIcon } from "../filterIcons";
 import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
@@ -108,38 +107,29 @@ type RowProps = {
 };
 
 /**
- * What Winnow thinks of a row, as icons.
+ * What Winnow thinks of a row, as one word.
  *
- * **This is the change from coloured dots, and it is the whole point of it.** Six 6px
- * dots in eleven categorical hues cannot be read at a glance, disappear in dark mode,
- * and mean nothing to a reader with a colour vision deficiency.
+ * It used to be a glyph per judgement — bookmark, bolt, shield — and most rows carried
+ * two or three of them, which is a cluster of tiny icons you have to decode rather than
+ * a signal. Now a row says at most one thing, and only when it is worth interrupting the
+ * scan for: unsafe, urgent, or security, in that order. "Important" is not shown here; it
+ * fired on most of the inbox, so as a label it said nothing, and it is what the rail and
+ * the triage line are for. A message that arrived in the last sync says "New" when it
+ * has nothing more pressing to say.
  *
- * A glyph is a word somebody already owns — a star means important, a bolt urgent, a
- * shield security — in any app, in any language, without a legend. The bucket's accent
- * does not survive at all: a glyph still tinted per bucket is still carrying the colour,
- * only more quietly, which puts the eleven-hue key back. The indicator takes the row's
- * muted ink instead.
- *
- * The `title` is the reason, from `ui/filterIcons`, which makes hovering explanatory
- * rather than merely decorative.
- *
- * The same icons and explanations are used by the reader's filter row, so a bucket cannot
- * mean one thing in a list and another in the message.
+ * Every judgement still reaches a screen reader through the row's accessible name, and
+ * the reader still lists them all with their reasons.
  */
-function RowIndicators({ ids }: { ids: readonly BuiltinSmartFilter[] }) {
-  return (
-    <>
-      {ids.map((id) => {
-        const { Icon, title } = filterIcon(id);
-        return (
-          <span key={id} title={title} className="inline-flex shrink-0 text-ink-muted">
-            <Icon size={12.5} strokeWidth={2} aria-hidden="true" />
-            <span className="sr-only">{title}</span>
-          </span>
-        );
-      })}
-    </>
-  );
+const ROW_SIGNAL_ORDER: readonly BuiltinSmartFilter[] = ["unsafe", "urgent", "security"];
+
+function rowSignal(
+  indicators: readonly BuiltinSmartFilter[],
+  fresh: boolean,
+): { label: string; title: string; danger: boolean } | null {
+  const id = ROW_SIGNAL_ORDER.find((candidate) => indicators.includes(candidate));
+  if (id) return { label: FILTER_LABELS[id], title: filterIcon(id).title, danger: id === "unsafe" };
+  if (fresh) return { label: "New", title: "Arrived in the last sync", danger: false };
+  return null;
 }
 
 /**
@@ -196,16 +186,17 @@ const Row = memo(function Row({
   const indicators = rowIndicators(email, signals);
   const time = formatRowTime(email.receivedAt, bucket);
 
+  const signal = rowSignal(indicators, fresh);
+
   return (
     <div
-      className={`group/row relative flex w-full items-start gap-3 rounded-md px-2.5 py-2 text-left transition-colors ${
+      className={`group/row relative flex w-full items-start gap-2 rounded-ctl px-3 py-1.5 text-left transition-colors duration-150 ${
         /*
-         * Selection as `sheen` rather than `surfaceActive`. An opaque step lighter than
-         * the list is a third plane, and the surface already has two. `sheen` is a wash
-         * of the palette's own ink, so it darkens on a light scheme and lightens on a
-         * dark one, which an opaque hex cannot do.
+         * Selection is the accent, washed into the surface: the one place in the list the
+         * accent appears besides the unread dot, so the two are never confused with any
+         * other state.
          */
-        selected ? "bg-sheen" : "hover:bg-surface-hover"
+        selected ? "bg-surface-selected" : "hover:bg-surface-hover"
       }`}
     >
       {/*
@@ -229,80 +220,61 @@ const Row = memo(function Row({
           messageCount: row.messageCount,
         })}
         onClick={() => onSelect(email.id)}
-        className="flex min-w-0 flex-1 items-start gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex min-w-0 flex-1 items-start gap-2.5 rounded-ctl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
+        {/*
+          The unread mark, in a gutter of its own so read and unread rows line up. The
+          accent and nothing else: no avatar, no colour per sender. Unread is also the
+          only thing that makes a row bold, so it survives without colour.
+        */}
         <span
           aria-hidden="true"
-          className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold"
-          style={{
-            background: avatarColor(email.sender),
-            color: avatarTextColor(email.sender),
-          }}
-        >
-          {monogram(email)}
-        </span>
+          className={`mt-[7px] h-2 w-2 shrink-0 rounded-full transition-colors duration-150 ${
+            unread ? "bg-accent" : "bg-transparent"
+          }`}
+        />
 
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
-            <span className="flex min-w-0 items-center gap-1.5">
-              {/* Unread is a weight, not a dot: weight is how print has always
-                  signalled it, and it survives a screenshot. */}
+            <span className="flex min-w-0 items-baseline gap-1.5">
               <span
-                className={`truncate text-row ${
-                  unread ? "font-bold text-ink" : "font-semibold text-ink"
+                className={`truncate text-ui ${
+                  unread ? "font-semibold text-ink" : "font-medium text-ink-body"
                 }`}
               >
                 {displayName(email)}
               </span>
               {row.messageCount > 1 && (
-                <span className="shrink-0 rounded-full bg-surface-sunken px-1.5 text-[11px] font-semibold tabular-nums text-ink-muted">
+                <span className="shrink-0 text-meta tabular-nums text-ink-subtle">
                   {row.messageCount}
                 </span>
               )}
-              {fresh && (
-                // `aria-hidden` because the row's own name now carries "new" — and
-                // `aria-label` on a role-less `<span>` is not reliably exposed anyway.
-                <span
-                  aria-hidden="true"
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-success"
-                />
-              )}
             </span>
-            {/*
-             * The judgements ride on the line that was already there, beside the
-             * timestamp, so they cost no height: every row is the same two lines.
-             */}
             <span className="flex shrink-0 items-baseline gap-2">
-              {indicators.length > 0 && (
-                <span className="flex items-baseline gap-1.5">
-                  <RowIndicators ids={indicators} />
+              {signal && (
+                <span
+                  title={signal.title}
+                  aria-hidden="true"
+                  className={`text-meta font-medium ${signal.danger ? "text-danger" : "text-ink-muted"}`}
+                >
+                  {signal.label}
                 </span>
               )}
-              <span className="text-tiny tabular-nums leading-snug text-ink-subtle">
-                {time}
-              </span>
+              <span className="text-meta tabular-nums text-ink-subtle">{time}</span>
             </span>
           </span>
 
           {/*
-            Subject and preview share the second line: two lines a row instead of three.
-            The preview is the part that gives way, dimmed, after the subject.
+            Subject and preview share the second line. No dash between them: the preview
+            is set apart by colour and a gap, and it is the part that gives way.
           */}
-          <span className="mt-px block truncate text-row">
-            <span
-              className={unread ? "font-semibold text-ink-body" : "font-medium text-ink-body"}
-            >
+          <span className="block truncate text-ui">
+            <span className={unread ? "font-semibold text-ink" : "text-ink-body"}>
               {email.subject || "(no subject)"}
             </span>
-            {email.body && (
-              <span className="text-preview text-ink-subtle">
-                {"  \u2014  "}
-                {email.body}
-              </span>
-            )}
+            {email.body && <span className="ml-2 text-ink-subtle">{email.body}</span>}
           </span>
-
-          </span>
+        </span>
       </button>
 
       {/*
@@ -320,7 +292,7 @@ const Row = memo(function Row({
         onClick={() => onToggleStar(email.id)}
         aria-label={email.starred ? "Unstar" : "Star"}
         aria-pressed={email.starred}
-        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle [@media(hover:none)]:-m-2.5 [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle [@media(hover:none)]:-m-2.5 [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
       >
         {/*
           The star is a sprite rather than a lucide icon so the filled and outline states
@@ -355,13 +327,13 @@ const Row = memo(function Row({
  * background is opaque.
  */
 function SectionHeader({ label, count }: { label: string; count: number }) {
+  // Sentence case and a plain count: the old letter-spaced capitals with a bullet were
+  // the loudest thing in a list that is meant to be read quietly. Inset to the sender
+  // column, so the label sits over the names rather than over the unread gutter.
   return (
-    <div className="flex items-center gap-1.5 bg-surface px-4 pb-1.5 pt-4 text-micro text-ink-subtle">
-      <span className="font-semibold uppercase leading-none tracking-[0.07em]">{label}</span>
-      {/* A drawn dot rather than a "·" glyph: the glyph sits on the font's own line
-          and drifts off the caps' centre; a box centred by flex does not. */}
-      <span aria-hidden="true" className="h-[3px] w-[3px] shrink-0 rounded-full bg-current" />
-      <span className="leading-none tabular-nums">{count}</span>
+    <div className="flex items-baseline gap-2 bg-surface pb-1 pl-[30px] pr-3 pt-4 text-meta">
+      <span className="font-semibold text-ink-muted">{label}</span>
+      <span className="tabular-nums text-ink-subtle">{count}</span>
     </div>
   );
 }
@@ -409,17 +381,17 @@ function Empty({
         };
       case "hidden":
         return {
-          body: "Everything here is in a bucket you have hidden.",
+          body: "Everything here is in a bucket you’ve hidden.",
           action: { label: "Show everything", run: onClearFilters },
         };
       case "noSignal":
         return {
-          body: "Winnow is holding every message here back as likely junk.",
+          body: "All of this looks like junk, so Winnow is holding it back.",
           action: { label: "Show the hidden mail", run: onClearFilters },
         };
       case "mailbox":
         return {
-          body: "There is nothing in this mailbox yet.",
+          body: "Nothing here yet.",
           action: canSync
             ? { label: "Check for new mail", run: onSync }
             : null,
@@ -433,12 +405,12 @@ function Empty({
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
       {remedy ? (
         <>
-          <p className="max-w-[26rem] text-[13.5px] text-ink-muted">{remedy.body}</p>
+          <p className="max-w-[26rem] text-ui text-ink-body">{remedy.body}</p>
           {remedy.action && (
             <button
               type="button"
               onClick={remedy.action.run}
-              className="rounded-full border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               {remedy.action.label}
             </button>
@@ -448,7 +420,7 @@ function Empty({
         // `emptyReason` is null only when the list is non-empty, so this branch is
         // unreachable — but an empty screen with no explanation is worse than a wrong
         // one, so it says something.
-        <p className="text-[13.5px] text-ink-muted">Nothing to show.</p>
+        <p className="text-ui text-ink-muted">Nothing to show.</p>
       )}
     </div>
   );
@@ -605,10 +577,33 @@ function MessageList({
   useEffect(() => {
     if (!scroller) return;
 
-    const readViewport = (): void => setViewportHeight(scroller.clientHeight);
+    /*
+     * The scroll position survives the list being hidden.
+     *
+     * Below `lg` an open message hides the list with `display: none`, and Chromium drops a
+     * hidden scroller's offset — so Back on a phone used to land at the top of the inbox,
+     * or wherever the cursor effect dragged it. The last offset seen while the list was
+     * actually on screen is kept here and put back when it reappears.
+     */
+    let kept = scroller.scrollTop;
+    let shown = scroller.clientHeight > 0;
+
+    const readViewport = (): void => {
+      const height = scroller.clientHeight;
+      if (height > 0 && !shown && kept > 0 && Math.abs(scroller.scrollTop - kept) > 1) {
+        scroller.scrollTop = kept;
+        setScrollTop(scroller.scrollTop);
+      }
+      shown = height > 0;
+      setViewportHeight(height);
+    };
     readViewport();
 
-    const onScroll = (): void => setScrollTop(scroller.scrollTop);
+    const onScroll = (): void => {
+      // A scroll event on a hidden list is the browser zeroing it, not the user.
+      if (scroller.clientHeight > 0) kept = scroller.scrollTop;
+      setScrollTop(scroller.scrollTop);
+    };
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
     const observer =
@@ -836,7 +831,7 @@ function MessageList({
         below; it must not swallow a click meant for the row underneath.
       */}
       {stickyHeader && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-surface px-1.5">
           <SectionHeader label={stickyHeader.label} count={stickyHeader.count} />
         </div>
       )}

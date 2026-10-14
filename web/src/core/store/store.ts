@@ -18,6 +18,7 @@
  * Ported from `legacy/swift-native/Sources/winnow/Store/WinnowStore.swift`.
  */
 
+import { summarizeAttention, type AttentionSummary } from "../classify/attention";
 import { MAILBOX_LABEL, type Email, type Mailbox } from "../model/email";
 import {
   BUILTIN_FILTERS,
@@ -54,6 +55,12 @@ import type { GoogleContact } from "../contacts/google";
 import { defaultWeights, type SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
 import type { SyncProgress } from "../gmail/sync";
+import {
+  DEFAULT_ACCENT_THEME,
+  DEFAULT_APPEARANCE,
+  type AccentTheme,
+  type Appearance,
+} from "../model/appearance";
 
 /** The five mailboxes, in the order the sidebar shows them. */
 export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
@@ -153,7 +160,10 @@ export type Preferences = {
    */
   imagePolicy: ImagePolicy;
   notificationsEnabled: boolean;
-  appearance: "system" | "light" | "dark";
+  /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
+  appearance: Appearance;
+  /** The accent theme, applied across every mode. */
+  accent: AccentTheme;
   /** Keep syncing while the window is closed. Desktop only. */
   backgroundSync: boolean;
   /** How often, in seconds. */
@@ -165,7 +175,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sortBy: DEFAULT_SORT,
   imagePolicy: "ask",
   notificationsEnabled: false,
-  appearance: "system",
+  appearance: DEFAULT_APPEARANCE,
+  accent: DEFAULT_ACCENT_THEME,
   backgroundSync: true,
   backgroundSyncInterval: 300,
   blockedSenders: [],
@@ -324,6 +335,11 @@ export type MailboxView = {
   inboxCounts: ReadonlyMap<BuiltinSmartFilter, number>;
   /** Messages per sender, over the inbox, for the sender pills. */
   inboxSenderCounts: ReadonlyMap<string, number>;
+  /**
+   * What in the inbox needs attention, for the triage line. Over the inbox for the same
+   * reason as `inboxCounts`: it is a claim about your mail, not about the current filter.
+   */
+  attention: AttentionSummary;
   selected: Email | null;
   conversation: Email[];
   unreadCount: number;
@@ -768,6 +784,8 @@ export class WinnowStore {
     // claim about the user's mail, not the current result set.
     const inboxCounts = countAllFilters(inboxForProfile, inboxSignals, profile);
 
+    const attention = summarizeAttention(inboxForProfile, inboxSignals, state.now);
+
     const inboxSenderCounts = new Map<string, number>();
     for (const email of inboxForProfile) {
       inboxSenderCounts.set(email.sender, (inboxSenderCounts.get(email.sender) ?? 0) + 1);
@@ -809,6 +827,7 @@ export class WinnowStore {
       rail: railWithActive,
       inboxCounts,
       inboxSenderCounts,
+      attention,
       selected,
       conversation,
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
@@ -1205,8 +1224,16 @@ export class WinnowStore {
     if (row) this.set({ selectedId: row.representative.id });
   }
 
-  closeReader(): void {
-    this.set({ selectedId: null });
+  /**
+   * Close the reader.
+   *
+   * `dropCursor` is for the phone, where the list and the reader are never on screen
+   * together: Back returns to a list with no current row, so the cursor goes with the
+   * message rather than lingering as "4 of 39" over a list nobody is moving through. The
+   * desktop keeps it, because there the cursor is where `j` carries on from.
+   */
+  closeReader({ dropCursor = false }: { dropCursor?: boolean } = {}): void {
+    this.set(dropCursor ? { selectedId: null, cursorIndex: NO_CURSOR } : { selectedId: null });
   }
 
   /**
@@ -1866,7 +1893,7 @@ export class WinnowStore {
       await this.backend.sendReply(draft, inReplyTo);
       this.set({ error: null });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The reply could not be sent.";
+      const message = error instanceof Error ? error.message : "Couldn't send that reply.";
       // Also surfaced app-wide, because this one *is* the app's problem rather than the
       // composer's: a network failure while sending is not the user's doing and will
       // recur on the next message.

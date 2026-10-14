@@ -56,7 +56,6 @@ function firstLine(body: string): string {
   }
   return "";
 }
-import { avatarColor, avatarTextColor } from "../avatarColor";
 import { formatBytes } from "../../core/gmail/mime";
 import type { Mailbox } from "../../core/model/email";
 import { DOCK_SURFACE } from "./PhoneChrome";
@@ -73,10 +72,10 @@ function FilterTag({ id }: { id: BuiltinSmartFilter }) {
     <span
       // `data-filter-tag` so tests can find these by what they *are*, not by `title`.
       data-filter-tag={id}
-      className="inline-flex items-center gap-1.5 rounded-full bg-sheen py-1 pl-1.5 pr-2.5 text-[11.5px] font-medium text-ink-body"
+      className="inline-flex items-center gap-1 text-meta font-medium text-ink-muted"
       title={title}
     >
-      <Icon size={12} strokeWidth={2} className="shrink-0 text-ink-muted" aria-hidden="true" />
+      <Icon size={12} strokeWidth={2} className="shrink-0 text-ink-subtle" aria-hidden="true" />
       {label}
       <span className="sr-only"> — {title}</span>
     </span>
@@ -111,7 +110,7 @@ type Actions = {
 };
 
 const ICON_BUTTON =
-  "flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 /**
  * A quiet text button, for the places in this pane that are not the toolbar.
@@ -120,7 +119,7 @@ const ICON_BUTTON =
  * of boxes. At rest they are almost invisible; the fill is the hover.
  */
 const QUIET_BUTTON =
-  "rounded-full bg-sheen px-3 py-1.5 text-[12.5px] font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl bg-sheen px-3 py-1.5 text-meta font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName }: {
   starred: boolean;
@@ -144,7 +143,7 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
   // row reads. A literal here was missed when the list row moved onto
   // `--wn-badge-starred`, and a hard-coded gold goes near-invisible in dark mode.
   const ICON_BUTTON =
-    "flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+    "flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
   return (
     // `shrink-0` and, below `sm`, the whole row is a column — see the header.
@@ -289,8 +288,8 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, butt
   };
 
   const ITEM = phone
-    ? "flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-[14px] font-medium text-ink-body transition-colors active:bg-sheen focus-visible:bg-sheen focus-visible:outline-none"
-    : "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-none";
+    ? "flex min-h-11 w-full items-center gap-2.5 rounded-ctl px-3 text-left text-ui font-medium text-ink-body transition-colors active:bg-sheen focus-visible:bg-sheen focus-visible:outline-none"
+    : "flex w-full items-center gap-2 rounded-ctl px-2.5 py-1.5 text-left text-meta font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-none";
   const iconSize = phone ? 16 : 13;
 
   return (
@@ -348,7 +347,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, butt
               <div className="my-1 h-px bg-divider" aria-hidden="true" />
             </>
           )}
-          <p className="px-2.5 pb-1 pt-1.5 text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
+          <p className="px-2.5 pb-1 pt-1.5 text-meta font-semibold text-ink-subtle">
             Show as
           </p>
           {bodyViewOptions(hasHtml).map(({ id, label, Icon }) => (
@@ -410,7 +409,7 @@ function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, has
 
   const BUTTON =
     "flex min-h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-pane px-0.5 py-1.5 text-ink-muted transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
-  const LABEL = "max-w-full truncate text-tiny font-medium";
+  const LABEL = "max-w-full truncate text-meta font-medium";
   const ICON = { size: 20, strokeWidth: 1.8, "aria-hidden": true } as const;
 
   return (
@@ -555,11 +554,11 @@ export function Reader({
   if (!email) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-        <MailOpen size={28} strokeWidth={1.4} className="text-ink-subtle" aria-hidden="true" />
-        <p className="text-[13.5px] font-medium text-ink-muted">Nothing selected</p>
-        <p className="max-w-[24rem] text-preview text-ink-subtle">
-          Pick a message from the list, or press <kbd className="font-mono">j</kbd> to move
-          through it.
+        <MailOpen size={24} strokeWidth={1.5} className="text-ink-subtle" aria-hidden="true" />
+        <p className="text-ui font-medium text-ink-body">Nothing selected</p>
+        <p className="max-w-[24rem] text-meta text-ink-subtle">
+          Pick something from the list, or press{" "}
+          <kbd className="rounded-ctl bg-sheen px-1 font-mono text-ink-muted">j</kbd>.
         </p>
       </div>
     );
@@ -606,10 +605,10 @@ export function Reader({
         change in type size.
       */}
       <div className={`flex items-start gap-3 px-5 pb-4 ${phone ? "pt-[max(1rem,env(safe-area-inset-top))]" : "pt-4"}`}>
+        {/* A neutral initial: an anchor for the eye, not a colour per sender. */}
         <span
           aria-hidden="true"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold"
-          style={{ background: avatarColor(email.sender), color: avatarTextColor(email.sender) }}
+          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl bg-surface-active text-ui font-semibold text-ink-muted"
         >
           {monogram(email)}
         </span>
@@ -624,10 +623,10 @@ export function Reader({
               way, and it ellipsised to make room for controls you reach for later. */}
           <div className="flex flex-col gap-2.5 min-[1200px]:flex-row min-[1200px]:items-start min-[1200px]:justify-between min-[1200px]:gap-3">
             <div className="min-w-0">
-              <h2 className="truncate text-[15px] font-semibold leading-snug text-ink">
+              <h2 className="truncate text-ui font-semibold text-ink">
                 {displayName(email)}
               </h2>
-              <p className="selectable truncate text-[12.5px] text-ink-muted">
+              <p className="selectable truncate text-meta text-ink-subtle">
                 {displayAddress(email)}
               </p>
             </div>
@@ -643,7 +642,7 @@ export function Reader({
             />}
           </div>
 
-          <p className="mt-1 text-[12.5px] text-ink-subtle">
+          <p className="mt-1 text-meta text-ink-subtle">
             <time dateTime={new Date(email.receivedAt).toISOString()}>
               {formatFullTime(email.receivedAt)}
             </time>
@@ -651,7 +650,7 @@ export function Reader({
           </p>
 
           {filters.length > 0 && (
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
               {filters.map((id) => (
                 <FilterTag key={id} id={id} />
               ))}
@@ -674,11 +673,11 @@ export function Reader({
           */}
           {offerImages && (
             <div className="mb-5 max-w-[68ch] rounded-pane bg-sheen px-4 py-3.5">
-              <p className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+              <p className="flex items-center gap-2 text-ui font-semibold text-ink">
                 <ImageOff size={14} strokeWidth={1.9} className="text-ink-muted" aria-hidden="true" />
                 Images are off
               </p>
-              <p className="mt-1 text-preview leading-relaxed text-ink-muted">
+              <p className="mt-1 text-meta leading-relaxed text-ink-muted">
                 This message points at {blocked} thing{blocked === 1 ? "" : "s"} on the
                 internet, and Winnow has not fetched {blocked === 1 ? "it" : "them"}. Loading
                 {blocked === 1 ? " it" : " them"} tells the sender you opened the message, and
@@ -709,7 +708,7 @@ export function Reader({
                 <button
                   type="button"
                   onClick={actions.onShowOriginal}
-                  className="rounded-full px-3 py-1.5 text-[12.5px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="rounded-ctl px-3 py-1.5 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   Open the original
                 </button>
@@ -717,7 +716,7 @@ export function Reader({
             </div>
           )}
 
-          <h1 className="max-w-[42ch] text-subject font-semibold leading-tight text-ink">
+          <h1 className="max-w-[42ch] font-serif text-title font-semibold text-ink">
             {email.subject || "(no subject)"}
           </h1>
 
@@ -747,11 +746,11 @@ export function Reader({
           */}
           {bodyPending && (
             <p
-              className="mt-3 text-[12px] text-ink-subtle"
+              className="mt-3 text-meta text-ink-subtle"
               role="status"
               aria-live="polite"
             >
-              Loading the formatted version…
+              Getting the formatted version…
             </p>
           )}
 
@@ -764,7 +763,7 @@ export function Reader({
           */}
           {email.bodyHtml && blocked > 0 && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="flex items-center gap-2 text-[12px] font-medium text-ink-muted">
+              <p className="flex items-center gap-2 text-meta font-medium text-ink-muted">
                 {imagesAllowed ? (
                   <Eye size={13} strokeWidth={1.9} aria-hidden="true" />
                 ) : (
@@ -776,7 +775,7 @@ export function Reader({
               <button
                 type="button"
                 onClick={actions.onShowOriginal}
-                className="text-[12px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 Open the original
               </button>
@@ -792,7 +791,7 @@ export function Reader({
             the message.
           */}
           {email.bodyHtml && blocked > 0 && !imagesAllowed && !askAboutImages && (
-            <p className="mt-6 max-w-[68ch] text-[12px] text-ink-subtle">
+            <p className="mt-6 max-w-[68ch] text-meta text-ink-subtle">
               This message&rsquo;s {blocked === 1 ? "image was" : "images were"} not loaded.
               Winnow will not ask again.
             </p>
@@ -800,7 +799,7 @@ export function Reader({
 
           {email.attachments.length > 0 && (
             <div className="mt-6 max-w-[68ch]">
-              <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
+              <h3 className="text-meta font-semibold text-ink-muted">
                 {email.attachments.length}{" "}
                 {email.attachments.length === 1 ? "attachment" : "attachments"}
               </h3>
@@ -810,13 +809,13 @@ export function Reader({
                     <button
                       type="button"
                       onClick={() => actions.onSaveAttachment({ ...attachment, index })}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      className="flex w-full items-center gap-2.5 rounded-ctl px-3 py-2 text-left transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                     >
                       <Paperclip size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                      <span className="min-w-0 flex-1 truncate text-ui font-medium text-ink">
                         {attachment.filename}
                       </span>
-                      <span className="shrink-0 text-[12px] tabular-nums text-ink-subtle">
+                      <span className="shrink-0 text-meta tabular-nums text-ink-subtle">
                         {formatBytes(attachment.size)}
                       </span>
                     </button>
@@ -843,13 +842,12 @@ export function Reader({
 
             A `border-t` here draws a line across the full measure every time the reader
             moves to a message with a different number of replies. They are separated by
-            32–40px and an uppercase micro label instead.
+            32–40px and a quiet label instead.
           */}
           {others.length > 0 && (
             <div className="mt-10 max-w-[68ch]">
-              <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
-                {others.length} earlier {others.length === 1 ? "message" : "messages"} in this
-                conversation
+              <h3 className="text-meta font-semibold text-ink-muted">
+                {others.length === 1 ? "1 earlier message" : `${others.length} earlier messages`}
               </h3>
               <ul className="mt-2 flex flex-col gap-0.5">
                 {others.map((message) => {
@@ -858,19 +856,19 @@ export function Reader({
                   // body — a stub, or a message that was entirely a quote — falls back
                   // to the subject rather than to an empty row.
                   const preview = firstLine(message.body);
-                  const lead = subject && subject !== email.subject.trim() ? `${subject} — ` : "";
+                  const lead = subject && subject !== email.subject.trim() ? subject : "";
                   return (
                     <li key={message.gmailId}>
                       <button
                         type="button"
                         onClick={() => actions.onOpenMessage(message.id)}
-                        className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                        className="flex w-full items-baseline gap-2 rounded-ctl px-2 py-1.5 text-left text-ui transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                       >
-                        <span className="shrink-0 font-semibold text-ink-muted">
+                        <span className="shrink-0 font-medium text-ink-muted">
                           {displayName(message)}
                         </span>
                         <span className="min-w-0 flex-1 truncate text-ink-body">
-                          {lead}
+                          {lead && <span className="mr-2 font-medium text-ink">{lead}</span>}
                           {preview || message.subject || "(no body)"}
                         </span>
                         {/*
@@ -879,7 +877,7 @@ export function Reader({
                           days" for something that arrived three days ago. `now` rather
                           than `Date.now()` so the demo's fixed instant still governs.
                         */}
-                        <span className="shrink-0 tabular-nums text-ink-subtle">
+                        <span className="shrink-0 text-meta tabular-nums text-ink-subtle">
                           {formatRelative(message.receivedAt, now)}
                         </span>
                       </button>

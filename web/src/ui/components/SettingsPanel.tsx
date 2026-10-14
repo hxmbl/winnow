@@ -22,6 +22,7 @@ import {
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
+import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
 
@@ -68,7 +69,7 @@ function describeEvent(event: FeedbackEvent): string {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="border-b border-hairline-soft px-5 py-4 last:border-b-0">
-      <h3 className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-subtle">
+      <h3 className="text-meta font-semibold text-ink-subtle">
         {title}
       </h3>
       <div className="mt-3 flex flex-col gap-3">{children}</div>
@@ -89,10 +90,115 @@ function Row({
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="min-w-0">
-        <p className="text-[13px] font-medium text-ink-body">{label}</p>
-        {hint && <p className="text-[12px] text-ink-subtle">{hint}</p>}
+        <p className="text-ui font-medium text-ink-body">{label}</p>
+        {hint && <p className="text-meta text-ink-subtle">{hint}</p>}
       </div>
       <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+/** What the mode picker calls each mode. */
+const APPEARANCE_LABELS: Record<Appearance, string> = {
+  system: "System",
+  light: "Light",
+  dark: "Dark",
+  oled: "OLED",
+};
+
+/** One accent theme as the picker shows it: its name and a swatch in the current mode. */
+export type AccentChoice = { id: AccentTheme; label: string; swatch: string };
+
+/**
+ * A labelled group of radios, laid out as a row of equal cells.
+ *
+ * A real radio group to assistive technology and to the keyboard: one tab stop (the
+ * checked option), arrow keys move the choice and the focus together, Home and End jump
+ * to the ends — the behaviour a screen-reader user expects from `role="radiogroup"`.
+ * The label is a visible heading the group points at, not an `aria-label` only a screen
+ * reader would hear.
+ */
+function RadioCards<T extends string>({
+  id,
+  label,
+  hint,
+  options,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  options: readonly { value: T; label: string; swatch?: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const move = (index: number) => {
+    const next = (index + options.length) % options.length;
+    onChange(options[next].value);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <div>
+        <p id={`${id}-label`} className="text-ui font-medium text-ink-body">
+          {label}
+        </p>
+        {hint && (
+          <p id={`${id}-hint`} className="text-meta text-ink-subtle">
+            {hint}
+          </p>
+        )}
+      </div>
+      <div
+        role="radiogroup"
+        aria-labelledby={`${id}-label`}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        data-picker={id}
+        className="grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      >
+        {options.map((option, index) => {
+          const checked = option.value === value;
+          return (
+            <button
+              key={option.value}
+              ref={(element) => {
+                refs.current[index] = element;
+              }}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              tabIndex={checked ? 0 : -1}
+              data-value={option.value}
+              onClick={() => onChange(option.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowDown") move(index + 1);
+                else if (event.key === "ArrowLeft" || event.key === "ArrowUp") move(index - 1);
+                else if (event.key === "Home") move(0);
+                else if (event.key === "End") move(options.length - 1);
+                else return;
+                event.preventDefault();
+              }}
+              className={`flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-ctl border px-2 py-1.5 text-meta transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
+                checked
+                  ? "border-accent bg-surface-selected font-semibold text-ink"
+                  : "border-hairline font-medium text-ink-muted hover:bg-surface-hover hover:text-ink-body"
+              }`}
+            >
+              {option.swatch && (
+                <span
+                  aria-hidden="true"
+                  className="h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: option.swatch }}
+                />
+              )}
+              <span className="truncate">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -102,8 +208,12 @@ function Row({
 export type SettingsProps = {
   sortBy: SortBy;
   onSortBy: (sort: SortBy) => void;
-  appearance: "system" | "light" | "dark";
-  onAppearance: (value: "system" | "light" | "dark") => void;
+  appearance: Appearance;
+  onAppearance: (value: Appearance) => void;
+  /** The accent theme in force, and the choices with a swatch drawn in the current mode. */
+  accentTheme: AccentTheme;
+  accentChoices: readonly AccentChoice[];
+  onAccentTheme: (value: AccentTheme) => void;
   /**
    * Whether the reader can render a message's own markup at all.
    *
@@ -167,10 +277,10 @@ function WeightSlider({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between gap-3">
-        <label htmlFor={`weight-${meta.key}`} className="text-[13px] font-medium text-ink-body">
+        <label htmlFor={`weight-${meta.key}`} className="text-ui font-medium text-ink-body">
           {meta.label}
         </label>
-        <span className="flex items-baseline gap-1.5 text-[12px] tabular-nums">
+        <span className="flex items-baseline gap-1.5 text-meta tabular-nums">
           <span className="font-semibold text-ink">{value}</span>
           {/*
             The default is only worth saying when the value has moved off it: printed
@@ -206,7 +316,7 @@ function WeightSlider({
         style={{ "--wn-range-fill": `${((value - meta.min) / (meta.max - meta.min)) * 100}%` } as React.CSSProperties}
         className="wn-range h-1.5 w-full cursor-pointer appearance-none rounded-full"
       />
-      <p id={`weight-help-${meta.key}`} className="text-[12px] text-ink-subtle">
+      <p id={`weight-help-${meta.key}`} className="text-meta text-ink-subtle">
         {meta.explanation}
       </p>
     </div>
@@ -238,14 +348,14 @@ export function Settings(props: SettingsProps) {
       <div className="scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto">
         <Section title="Reading">
         <Row label="Sort messages by">
-          <div className="flex gap-1 rounded-full border border-hairline p-0.5">
+          <div className="flex gap-1 rounded-ctl border border-hairline p-0.5">
             {SORT_OPTIONS.map((option) => (
               <button
                 key={option.id}
                 type="button"
                 onClick={() => props.onSortBy(option.id)}
                 aria-pressed={props.sortBy === option.id}
-                className={`rounded-full px-2.5 py-1 text-[12px] font-semibold transition-colors ${
+                className={`rounded-ctl px-2.5 py-1 text-meta font-semibold transition-colors ${
                   props.sortBy === option.id
                     ? "bg-surface-active text-ink"
                     : "text-ink-muted hover:text-ink-body"
@@ -275,7 +385,7 @@ export function Settings(props: SettingsProps) {
           <div
             role="radiogroup"
             aria-label="Remote images"
-            className="flex items-center gap-0.5 rounded-full bg-sheen p-0.5"
+            className="flex items-center gap-0.5 rounded-ctl bg-sheen p-0.5"
           >
             {IMAGE_POLICY_CHOICES.map((choice) => (
               <button
@@ -285,7 +395,7 @@ export function Settings(props: SettingsProps) {
                 aria-checked={props.imagePolicy === choice.value}
                 disabled={!props.canLoadRemoteContent && choice.value !== "never"}
                 onClick={() => props.onImagePolicy(choice.value)}
-                className={`rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 ${
+                className={`rounded-ctl px-2.5 py-1 text-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 ${
                   props.imagePolicy === choice.value
                     ? "bg-surface text-ink shadow-pane"
                     : "text-ink-muted hover:text-ink-body"
@@ -317,29 +427,26 @@ export function Settings(props: SettingsProps) {
         light and dark.
       */}
       <Section title="Appearance">
-        <Row label="Theme">
-          <div
-            role="group"
-            aria-label="Theme"
-            className="flex gap-1 rounded-full border border-hairline p-0.5"
-          >
-            {(["system", "light", "dark"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => props.onAppearance(option)}
-                aria-pressed={props.appearance === option}
-                className={`rounded-full px-2.5 py-1 text-[12px] font-semibold capitalize transition-colors ${
-                  props.appearance === option
-                    ? "bg-surface-active text-ink"
-                    : "text-ink-muted hover:text-ink-body"
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </Row>
+        <RadioCards
+          id="winnow-theme-mode"
+          label="Mode"
+          hint="System follows your device between light and dark. OLED is dark on true black."
+          options={APPEARANCES.map((option) => ({ value: option, label: APPEARANCE_LABELS[option] }))}
+          value={props.appearance}
+          onChange={props.onAppearance}
+        />
+        <RadioCards
+          id="winnow-theme-accent"
+          label="Accent"
+          hint="The one colour Winnow uses for unread, selection and the main action."
+          options={props.accentChoices.map((choice) => ({
+            value: choice.id,
+            label: choice.label,
+            swatch: choice.swatch,
+          }))}
+          value={props.accentTheme}
+          onChange={props.onAccentTheme}
+        />
       </Section>
 
       {props.isDesktop && props.backgroundSync !== null && (
@@ -362,7 +469,7 @@ export function Settings(props: SettingsProps) {
                   props.onBackgroundSyncInterval(Number(event.target.value))
                 }
                 aria-label="Check for new mail every"
-                className="rounded-full border border-hairline bg-surface px-3 py-1 text-[12px] font-semibold text-ink-body"
+                className="rounded-ctl border border-hairline bg-surface px-3 py-1 text-meta font-semibold text-ink-body"
               >
                 <option value={60}>Every minute</option>
                 <option value={300}>Every 5 minutes</option>
@@ -391,7 +498,7 @@ export function Settings(props: SettingsProps) {
             }
           >
             {props.contactsAccess === "granted" ? (
-              <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-muted">
+              <span className="inline-flex items-center gap-1 text-meta font-semibold text-ink-muted">
                 <Check size={13} aria-hidden="true" /> Connected
               </span>
             ) : (
@@ -399,14 +506,14 @@ export function Settings(props: SettingsProps) {
                 type="button"
                 onClick={props.onImproveSuggestions}
                 disabled={props.contactsBusy}
-                className="rounded-full border border-hairline px-3 py-1 text-[12px] font-semibold text-ink-body transition-colors hover:bg-surface-active disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 {props.contactsBusy ? "Waiting for Google…" : "Connect"}
               </button>
             )}
           </Row>
           {props.contactsError && (
-            <p role="alert" className="text-[12px] font-medium text-danger">
+            <p role="alert" className="text-meta font-medium text-danger">
               {props.contactsError}
             </p>
           )}
@@ -433,7 +540,7 @@ export function Settings(props: SettingsProps) {
           eye read the toggles as the eleventh and twelfth sliders.
         */}
         <div className="mt-1 flex flex-col gap-4 border-t border-hairline-soft pt-4">
-          <p className="-mt-1 text-[12px] text-ink-subtle">
+          <p className="-mt-1 text-meta text-ink-subtle">
             Weights start at these values and move as you star, unstar and hide
             buckets. Adjusting one by hand is always allowed.
           </p>
@@ -463,8 +570,8 @@ export function Settings(props: SettingsProps) {
               <fieldset key={group.title} className="flex flex-col gap-4">
                 <legend className="sr-only">{group.title}</legend>
                 <div className="-mb-2 flex items-baseline gap-2">
-                  <h4 className="text-[12.5px] font-semibold text-ink-body">{group.title}</h4>
-                  <p className="text-[12px] text-ink-subtle">{group.note}</p>
+                  <h4 className="text-meta font-semibold text-ink-body">{group.title}</h4>
+                  <p className="text-meta text-ink-subtle">{group.note}</p>
                 </div>
                 {group.keys.map((meta) => (
                   <WeightSlider
@@ -484,7 +591,7 @@ export function Settings(props: SettingsProps) {
           <button
             type="button"
             onClick={props.onResetWeights}
-            className="inline-flex items-center gap-1.5 rounded-full border border-control-border px-3 py-1.5 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <RotateCcw size={13} strokeWidth={2} aria-hidden="true" />
             Reset to defaults
@@ -494,7 +601,7 @@ export function Settings(props: SettingsProps) {
             onClick={() => setShowHistory((value) => !value)}
             aria-expanded={showHistory}
             aria-controls="winnow-learning-history"
-            className="rounded-full border border-control-border px-3 py-1.5 text-[12.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {showHistory ? "Hide" : "Show"} what I&apos;ve learned
             {props.events.length > 0 && ` (${props.events.length})`}
@@ -504,10 +611,10 @@ export function Settings(props: SettingsProps) {
         {showHistory && (
           <div
             id="winnow-learning-history"
-            className="max-h-64 overflow-y-auto rounded-lg border border-hairline bg-surface-sunken p-2"
+            className="max-h-64 overflow-y-auto rounded-ctl border border-hairline bg-surface-sunken p-2"
           >
             {props.events.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[12.5px] text-ink-subtle">
+              <p className="px-2 py-3 text-center text-meta text-ink-subtle">
                 Nothing yet. Star a message, or hide a filter, and Winnow will record what it
                 did and why.
               </p>
@@ -517,7 +624,7 @@ export function Settings(props: SettingsProps) {
                   {props.events.slice(0, HISTORY_LIMIT).map((event) => (
                     <li
                       key={event.id}
-                      className="flex items-baseline justify-between gap-3 px-2 py-1 text-[12px]"
+                      className="flex items-baseline justify-between gap-3 px-2 py-1 text-meta"
                     >
                       <span className="min-w-0 truncate text-ink-body">
                         {describeEvent(event)}
@@ -539,7 +646,7 @@ export function Settings(props: SettingsProps) {
                   *total*, so a silent truncation would be a lie.
                 */}
                 {props.events.length > HISTORY_LIMIT && (
-                  <p className="px-2 py-2 text-center text-[11.5px] text-ink-subtle">
+                  <p className="px-2 py-2 text-center text-meta text-ink-subtle">
                     Showing the {HISTORY_LIMIT} most recent of {props.events.length}. Older
                     entries are kept, but not listed here.
                   </p>
@@ -557,7 +664,7 @@ export function Settings(props: SettingsProps) {
               <button
                 type="button"
                 onClick={() => props.onUnblock(sender)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-control-border px-3 py-1 text-[12px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <Check size={12} strokeWidth={2.4} aria-hidden="true" />
                 Unhide
@@ -575,7 +682,7 @@ export function Settings(props: SettingsProps) {
       */}
       {props.mutedFilters.length > 0 && (
         <Section title={`Hidden buckets (${props.mutedFilters.length})`}>
-          <p className="-mt-1 text-[12px] text-ink-subtle">
+          <p className="-mt-1 text-meta text-ink-subtle">
             Not counted or shown in your inbox, and Winnow has learned they were
             over-firing.
           </p>
@@ -584,7 +691,7 @@ export function Settings(props: SettingsProps) {
               <button
                 type="button"
                 onClick={() => props.onRestoreFilter(id)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-control-border px-3 py-1 text-[12px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <Check size={12} strokeWidth={2.4} aria-hidden="true" />
                 Show again
@@ -616,12 +723,12 @@ function Toggle({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-        checked ? "bg-[var(--wn-inkBody)]" : "bg-surface-active"
+        checked ? "bg-accent" : "bg-surface-active"
       }`}
     >
       <span
         aria-hidden="true"
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow-pane transition-transform ${
+        className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-surface transition-transform ${
           checked ? "translate-x-[1.125rem]" : "translate-x-0.5"
         }`}
       />
@@ -788,7 +895,7 @@ export function Composer({
         />
 
         {improveSuggestions && (
-          <div className="-mt-1 flex flex-col gap-1 pl-14 text-[12px]">
+          <div className="-mt-1 flex flex-col gap-1 pl-14 text-meta">
             <button
               type="button"
               onClick={improveSuggestions.onClick}
@@ -807,14 +914,14 @@ export function Composer({
           </div>
         )}
 
-        <div className="flex items-center gap-2 text-[12.5px]">
+        <div className="flex items-center gap-2 text-meta">
           <span className="w-12 shrink-0 text-ink-subtle">Subject</span>
           <input
             type="text"
             aria-label="Subject"
             value={subject}
             onChange={(event) => onChange({ subject: event.target.value })}
-            className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus-visible:border-[var(--wn-inkBody)] max-sm:min-h-10 max-sm:text-[16px]"
+            className="min-w-0 flex-1 rounded-ctl border border-hairline bg-surface px-2.5 py-1.5 text-ui text-ink outline-none focus-visible:border-accent max-sm:min-h-10 max-sm:text-read"
           />
         </div>
 
@@ -825,14 +932,14 @@ export function Composer({
           onChange={(event) => onChange({ body: event.target.value })}
           rows={phone ? 8 : 16}
           spellCheck
-          className={`selectable thin-scroll w-full rounded-md border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-none focus-visible:border-[var(--wn-inkBody)] ${
+          className={`selectable thin-scroll w-full rounded-ctl border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-none focus-visible:border-accent ${
             // 16px on a phone: iOS zooms into any focused field smaller than that.
-            phone ? "min-h-[10rem] flex-1 resize-none text-[16px]" : "resize-y text-[13.5px]"
+            phone ? "min-h-[10rem] flex-1 resize-none text-read" : "resize-y text-ui"
           }`}
         />
 
         {error && (
-          <p role="alert" className="text-[12.5px] font-medium text-danger">
+          <p role="alert" className="text-meta font-medium text-danger">
             {error}
           </p>
         )}
@@ -849,13 +956,13 @@ export function Composer({
             // their recipients is wrong.
             disabled={!canSend}
             title={sendTitle}
-            className="inline-flex items-center gap-2 rounded-full bg-[var(--wn-inkBody)] px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="inline-flex items-center gap-2 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {sending ? "Sending…" : "Send"}
             {!sending && (
               <kbd
                 aria-hidden="true"
-                className="rounded border border-current/30 px-1 py-px font-mono text-[10.5px] opacity-70"
+                className="rounded-ctl border border-current/30 px-1 py-px font-mono text-meta opacity-70"
               >
                 ⌘⏎
               </kbd>
@@ -864,17 +971,17 @@ export function Composer({
           <button
             type="button"
             onClick={onDiscard}
-            className="rounded-full border border-control-border px-4 py-1.5 text-[13px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Discard
           </button>
-          <span className="ml-auto max-w-[19rem] text-right text-[11.5px] leading-snug text-ink-subtle">
+          <span className="ml-auto max-w-[19rem] text-right text-meta leading-snug text-ink-subtle">
             {hint}
           </span>
         </div>
         )}
         {phone && (
-          <p className="text-[12px] leading-snug text-ink-subtle">{hint}</p>
+          <p className="text-meta leading-snug text-ink-subtle">{hint}</p>
         )}
       </div>
       </div>
@@ -888,7 +995,7 @@ export function Composer({
           <button
             type="button"
             onClick={onDiscard}
-            className="h-11 rounded-full bg-sheen px-5 text-[14px] font-semibold text-ink-body transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="h-11 rounded-ctl bg-sheen px-5 text-ui font-semibold text-ink-body transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Discard
           </button>
@@ -897,7 +1004,7 @@ export function Composer({
             onClick={onSend}
             disabled={!canSend}
             title={sendTitle}
-            className="h-11 flex-1 rounded-full bg-[var(--wn-inkBody)] px-5 text-[14px] font-semibold text-[var(--wn-surface)] transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="h-11 flex-1 rounded-ctl bg-accent px-5 text-ui font-semibold text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {sending ? "Sending…" : "Send"}
           </button>

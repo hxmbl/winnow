@@ -14,12 +14,10 @@ import {
   type BuiltinSmartFilter,
   type FilterId,
 } from "../core/model/signals";
-import { FILTER_PILLS, senderPillColors, type PillColors } from "./filterColors";
 
 export type PillItem = {
   id: FilterId;
   label: string;
-  colors: PillColors;
   /**
    * How many messages this bucket holds in the *inbox*, not "in the current view".
    *
@@ -67,7 +65,6 @@ export function buildPills(
     .map((id) => ({
       id: { kind: "builtin", id },
       label: FILTER_LABELS[id],
-      colors: FILTER_PILLS[id],
       count: counts.get(id) ?? 0,
       muted: false,
     }));
@@ -77,7 +74,6 @@ export function buildPills(
     .map((id) => ({
       id: { kind: "builtin", id },
       label: FILTER_LABELS[id],
-      colors: FILTER_PILLS[id],
       count: counts.get(id) ?? 0,
       muted: true,
     }));
@@ -93,7 +89,6 @@ export function buildPills(
   const senders: PillItem[] = topSenders.map((sender) => ({
     id: { kind: "sender", sender },
     label: `From ${sender}`,
-    colors: senderPillColors(sender),
     count: senderCounts.get(sender) ?? 0,
   }));
 
@@ -108,7 +103,6 @@ export function buildPills(
     senders.push({
       id: filter,
       label: `From ${filter.sender}`,
-      colors: senderPillColors(filter.sender),
       count: senderCounts.get(filter.sender) ?? 0,
       muted: false,
     });
@@ -127,4 +121,71 @@ export function buildPills(
  */
 export function digitFor(index: number): string | null {
   return index < 9 ? String(index + 1) : null;
+}
+/**
+ * The rail's scroll geometry, as plain numbers.
+ *
+ * Every tab's `[left, right]` in the scroller's content coordinates (`offsetLeft` and
+ * `offsetLeft + offsetWidth`), the scroller's `scrollLeft`, `clientWidth` and
+ * `scrollWidth`, and the two insets: how much of each end is *not* clear viewing space.
+ * At the start that is the pinned mark and its veil; at the end it is the fade and the
+ * step button over it. A tab is only properly on screen between the two.
+ */
+export type RailGeometry = {
+  tabs: readonly (readonly [number, number])[];
+  scrollLeft: number;
+  clientWidth: number;
+  scrollWidth: number;
+  startInset: number;
+  endInset: number;
+};
+
+function clampScroll(value: number, { clientWidth, scrollWidth }: RailGeometry): number {
+  return Math.max(0, Math.min(Math.round(value), Math.max(0, scrollWidth - clientWidth)));
+}
+
+/**
+ * Where to scroll so one tab sits fully in the clear part of the rail, or `null` when
+ * it already does.
+ *
+ * Used when a tab takes keyboard focus. The browser's own scroll-into-view only makes
+ * the tab *visible*, which at the end of the rail means "under the fade and the step
+ * button" — a focused control you can barely read. This keeps it clear of both insets.
+ */
+export function scrollToReveal(geometry: RailGeometry, [left, right]: readonly [number, number]): number | null {
+  const { scrollLeft, clientWidth, startInset, endInset } = geometry;
+  const clearStart = scrollLeft + startInset;
+  const clearEnd = scrollLeft + clientWidth - endInset;
+  if (left >= clearStart - 1 && right <= clearEnd + 1) return null;
+  const target = left < clearStart ? left - startInset : right - clientWidth + endInset;
+  const next = clampScroll(target, geometry);
+  return next === Math.round(scrollLeft) ? null : next;
+}
+
+/**
+ * One step of the rail's arrow buttons.
+ *
+ * Forward: the first tab that is not wholly in the clear (the one the fade is cutting
+ * off) becomes the first tab after the mark, so nothing is skipped and a step never
+ * lands mid-word. Back: the mirror image — the tab cut off at the start becomes the
+ * last one before the fade. Falls back to a page of the clear width when a single tab
+ * is wider than the whole clear area.
+ */
+export function stepRail(geometry: RailGeometry, direction: 1 | -1): number {
+  const { tabs, scrollLeft, clientWidth, startInset, endInset } = geometry;
+  const clearStart = scrollLeft + startInset;
+  const clearEnd = scrollLeft + clientWidth - endInset;
+  const clearWidth = Math.max(1, clientWidth - startInset - endInset);
+
+  if (direction === 1) {
+    const cut = tabs.find(([, right]) => right > clearEnd + 1);
+    const target = cut && cut[0] - startInset > scrollLeft + 1 ? cut[0] - startInset : scrollLeft + clearWidth;
+    return clampScroll(target, geometry);
+  }
+  const cut = [...tabs].reverse().find(([left]) => left < clearStart - 1);
+  const target =
+    cut && cut[1] - clientWidth + endInset < scrollLeft - 1
+      ? cut[1] - clientWidth + endInset
+      : scrollLeft - clearWidth;
+  return clampScroll(target, geometry);
 }

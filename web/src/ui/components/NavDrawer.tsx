@@ -57,17 +57,17 @@ export function NavDrawer({
       label="Navigation"
       placement="left"
       onClose={onClose}
-      className="flex w-[17rem] max-w-[82vw] flex-col border-0 bg-veil shadow-lift backdrop-blur-xl"
+      className="flex w-[17rem] max-w-[82vw] flex-col border-0 border-r border-hairline bg-veil"
     >
       <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-4">
-        <span className="text-micro font-semibold uppercase tracking-[0.09em] text-ink-subtle">
+        <span className="text-meta font-semibold text-ink-subtle">
           Winnow
         </span>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close navigation"
-          className="flex h-7 w-7 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <X size={15} strokeWidth={2} />
         </button>
@@ -93,16 +93,16 @@ export function NavDrawer({
               }}
               data-unread={mailbox.unread || undefined}
               aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              className={`flex items-center gap-2.5 rounded-ctl px-2.5 py-2 text-left text-ui transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
                 active
-                  ? "bg-sheen font-semibold text-ink"
+                  ? "bg-surface-selected font-semibold text-ink"
                   : "text-ink-body hover:bg-surface-hover"
               }`}
             >
               <MailboxIcon id={mailbox.id} />
               <span className="flex-1 truncate">{mailbox.label}</span>
               {mailbox.unread > 0 && (
-                <span className="shrink-0 text-[11.5px] font-semibold tabular-nums text-ink-subtle">
+                <span className="shrink-0 text-meta font-semibold tabular-nums text-ink-subtle">
                   {mailbox.unread}
                 </span>
               )}
@@ -115,7 +115,7 @@ export function NavDrawer({
         <button
           type="button"
           onClick={onSettings}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13.5px] text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex w-full items-center gap-2.5 rounded-ctl px-2.5 py-2 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <Settings size={15} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
           Settings
@@ -136,7 +136,7 @@ export function NavDrawer({
         <div className="h-px w-full bg-hairline" />
         {accountEmail ? (
           <>
-            <p className="mt-3 truncate text-[12px] text-ink-subtle" title={accountEmail}>
+            <p className="mt-3 truncate text-meta text-ink-subtle" title={accountEmail}>
               {accountEmail}
             </p>
             <div className="mt-2 flex items-center gap-1">
@@ -144,7 +144,7 @@ export function NavDrawer({
                 type="button"
                 onClick={onRefresh}
                 disabled={syncing}
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex items-center gap-1.5 rounded-ctl px-2.5 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <RefreshCw
                   size={12}
@@ -157,7 +157,7 @@ export function NavDrawer({
               <button
                 type="button"
                 onClick={onSignOut}
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink-muted transition-colors hover:bg-surface-hover hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex items-center gap-1.5 rounded-ctl px-2.5 py-1 text-meta font-semibold text-ink-muted transition-colors hover:bg-surface-hover hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <LogOut size={12} strokeWidth={2} aria-hidden="true" />
                 Sign out
@@ -169,7 +169,7 @@ export function NavDrawer({
             type="button"
             onClick={onSignIn}
             disabled={signingIn}
-            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full bg-sheen px-3 py-1.5 text-[12.5px] font-semibold text-ink transition-opacity hover:opacity-80 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-ctl bg-sheen px-3 py-1.5 text-meta font-semibold text-ink transition-opacity hover:opacity-80 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
             {signingIn ? "Waiting for Google…" : "Connect Gmail"}
