@@ -1028,6 +1028,16 @@ export function App({ store }: Props) {
       // An open menu owns the keyboard; its own handler has already acted.
       if (menuRef.current) return;
 
+      // Enter or Space on a control that is not a row (an avatar, a star, a toolbar
+      // button) is that button's click, not "open the message at the cursor".
+      if (
+        (event.key === "Enter" || event.key === " ") &&
+        event.target instanceof HTMLButtonElement &&
+        !event.target.hasAttribute("data-message-id")
+      ) {
+        return;
+      }
+
       // Escape ends a multi-selection before it means anything else.
       if (
         event.key === "Escape" &&
