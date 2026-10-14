@@ -55,8 +55,12 @@ Take the newest one that isn't marked *Pre-release* unless you want the beta.
 - **Linux** doesn't care. The AppImage needs FUSE 2 (`libfuse2`) on some
   distros; the `.deb` doesn't.
 
-Signing in to Gmail from a download shows Google's "Google hasn't verified this
-app" screen until the app has been through Google's verification.
+Winnow doesn't ship a Google sign-in client. To connect Gmail you bring your own:
+create a free OAuth client in your own Google Cloud project and paste it into the
+app (**Connect Gmail**, or **Settings → Google account**).
+[docs/google-setup.md](docs/google-setup.md) walks through it in about ten
+minutes. Because the client is your own unverified project, Google shows its
+"Google hasn't verified this app" screen before consent; that's expected.
 
 ## Layout
 
@@ -122,25 +126,18 @@ the build is a script and not a bare `cargo tauri build`.
 
 ## Gmail setup
 
-Get this wrong and you'll lose an afternoon. One table:
+Bring your own client. Winnow ships none, so there is nothing to put in
+`.env.local` and no Google secret in any build. Each person creates an OAuth
+client in their own Google Cloud project and pastes it into the setup screen;
+[docs/google-setup.md](docs/google-setup.md) has the step-by-step.
 
-| Build | Client type | Redirect URI | Secret |
-| --- | --- | --- | --- |
-| Desktop | **Desktop app** | none, Winnow uses a loopback port | none, and must not be set |
-| Web | **Web application** | a URL on your own origin | required |
+| Build | Client type | Redirect URI | Secret | Stored in |
+| --- | --- | --- | --- | --- |
+| Desktop | **Desktop app** | none to register, Winnow uses a loopback port | optional; sent if you paste it (not confidential for an installed app) | OS keychain, entry `google.oauth-client` |
+| Web | **Web application** | the page's own address, shown on the setup screen | required | `localStorage`, key `winnow.google.oauthClient`, this origin only |
 
-```sh
-# web/.env.local
-VITE_GMAIL_CLIENT_ID=…apps.googleusercontent.com
-
-# web only, and nothing else
-# VITE_GMAIL_CLIENT_SECRET=…   # ← do NOT set this for a desktop build
-# VITE_GMAIL_REDIRECT_URI=https://your.host/auth/callback
-```
-
-**Scopes.** Add all three to the OAuth consent screen in Google Cloud Console
-(Google Auth Platform → Data access, or "OAuth consent screen → Scopes" in the
-older console):
+**Scopes.** Add all three to the OAuth consent screen (Google Auth Platform →
+Data access):
 
 | Scope | Asked for | Why |
 | --- | --- | --- |
@@ -154,15 +151,18 @@ through incremental consent (`include_granted_scopes=true`) when someone chooses
 under the composer's To field on the desktop (the web build would have to
 navigate away from the draft to ask). The People API has to be enabled for the
 project too, next to the Gmail API. Both contact scopes are *sensitive*, not
-restricted: fine for a test-mode app with listed test users, but a published app
-needs Google's verification for them.
+restricted: fine for a test-mode app with listed test users.
 
-Two things that bit me:
+Things worth knowing:
 
-- **No secret ever goes out on the desktop, and PKCE is the whole security story
-  there.** A shipped binary is a public binary. `platform/desktop.ts` ignores
-  `VITE_GMAIL_CLIENT_SECRET` outright rather than reading it, so having one set
-  for the web build doesn't break your desktop build.
+- **The client is read per request.** `TokenManager` asks the platform's
+  `CredentialStore` for it each time it exchanges or refreshes, so a changed client
+  takes effect without a reload. Saving a *different* client signs out first: a
+  refresh token belongs to the client that issued it.
+- **"Test connection" doesn't sign in.** It sends a made-up authorization code to
+  Google's token endpoint; Google checks the client before the code, so
+  `invalid_grant` means the client is good and `invalid_client` says which half is
+  wrong.
 - **The loopback port is a placeholder.** The web layer writes
   `__WINNOW_LOOPBACK_PORT__`, Rust binds a real ephemeral one and substitutes it.
   The redirect URI and the listening socket can't disagree that way. The failure
@@ -184,10 +184,9 @@ to a **draft** release for you to publish. A suffix (`-beta.1`) marks it a
 pre-release; the manifests stay plain `MAJOR.MINOR.PATCH`, because the Windows
 `.msi` refuses anything else. Windows may fail without holding up the other two.
 
-The build reads one repository secret, `VITE_GMAIL_CLIENT_ID` — the **Desktop
-app** client id — and pins `VITE_GMAIL_CLIENT_SECRET` empty: Vite inlines every
-`VITE_*` variable into the bundle, so a secret there would ship in every
-installer. It also fails if the bundle contains a `GOCSPX-` secret.
+The release needs no repository secrets: there is no Google client to bake in.
+It still fails if a bundle contains a `GOCSPX-` string, as a tripwire against a
+client secret ever ending up in one.
 
 ## The render proxy
 
@@ -208,7 +207,7 @@ VITE_RENDER_PROXY=http://127.0.0.1:8787 npm run build
 
 ## Tests
 
-1159 of them, none needing a DOM. 1122 over `web/src`, 37 for the proxy.
+1199 of them, none needing a DOM. 1162 over `web/src`, 37 for the proxy.
 
 Most are ordinary unit tests of ordinary pure functions. Four are worth naming,
 because each exists only because a real bug got out and nothing else would have
@@ -287,9 +286,10 @@ went wrong.
 
 ## Privacy
 
-Your mail goes between
-your computer and Google and nowhere else, there are no analytics, no ads and no
-AI training, and you can cut Winnow off at
+The developer runs no servers and
+collects nothing (no telemetry, analytics, crash reports or update checks); your
+mail, tokens and OAuth client stay on your device and go only to Google; and you
+can cut Winnow off at
 [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ## License

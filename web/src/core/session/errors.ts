@@ -60,16 +60,16 @@ export function describeFailure(error: unknown): AuthFailure {
       };
     case "config":
       return {
-        message: "This build is not configured to sign in.",
-        hint: "A desktop build needs VITE_GMAIL_CLIENT_ID; a website also needs VITE_GMAIL_REDIRECT_URI and VITE_GMAIL_CLIENT_SECRET. Set them and rebuild.",
+        message: "Google sign-in isn't set up yet.",
+        hint: "Add your own Google OAuth client under Settings → Google account. The setup guide walks through it.",
         retryable: false,
       };
     case "invalid_client":
       return {
-        message: "Google rejected this build's credentials.",
+        message: "Google rejected your OAuth client.",
         hint: isTauri()
-          ? "This looks like a web app client id. A desktop build needs one registered as 'Desktop app'."
-          : "This looks like a desktop app client id. A website needs one registered as 'Web application', along with VITE_GMAIL_CLIENT_SECRET.",
+          ? "Check the client ID and secret under Settings → Google account. The desktop app needs a client of type 'Desktop app'."
+          : "Check the client ID and secret under Settings → Google account. The browser build needs a client of type 'Web application', with its secret.",
         retryable: false,
       };
     case "network":

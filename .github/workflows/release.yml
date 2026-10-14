@@ -81,9 +81,6 @@ jobs:
 
       - name: Check versions
         id: meta
-        # env:
-        #   # Tests presence only; the value is never printed.
-        #   HAS_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID != '' }}
         run: |
           set -euo pipefail
           TAG="" PUBLISH=false PRERELEASE=false
@@ -93,17 +90,6 @@ jobs:
           fi
           # Fails when the manifests disagree with each other or with the tag.
           VERSION="$(node web/scripts/check-version.mjs "$TAG")"
-
-          # Without a client id the build cannot sign in to Gmail: fatal for a
-          # real release, a warning otherwise.
-          # if [ "$HAS_CLIENT_ID" != "true" ]; then
-          #   MESSAGE="The VITE_GMAIL_CLIENT_ID secret is not set, so these builds cannot sign in to Gmail (the demo mailbox still works)."
-          #   if [ "$PUBLISH" = "true" ] && [ "$PRERELEASE" = "false" ]; then
-          #     echo "::error::$MESSAGE Add it under Settings > Secrets and variables > Actions."
-          #     exit 1
-          #   fi
-          #   echo "::warning::$MESSAGE"
-          # fi
 
           printf 'version=%s\ntag=%s\nprerelease=%s\npublish=%s\n' \
             "$VERSION" "$TAG" "$PRERELEASE" "$PUBLISH" | tee -a "$GITHUB_OUTPUT"
@@ -135,6 +121,10 @@ jobs:
           **Open** the first time, or run `xattr -dr com.apple.quarantine /Applications/Winnow.app`.
           On Windows, SmartScreen may say it protected your PC: choose **More info**, then
           **Run anyway**. See the README for details.
+
+          Winnow ships no Google sign-in client. To connect Gmail, create your own OAuth
+          client in Google Cloud and paste it into the app; see `docs/google-setup.md`.
+          The demo mailbox works without one.
 
           EOF
 
@@ -220,19 +210,15 @@ jobs:
         working-directory: web
         run: npm ci
 
+      # No Google secret or client id: each user brings their own OAuth client and
+      # pastes it into the app at runtime (docs/google-setup.md).
       - name: Build bundles
         working-directory: web
-        env:
-          # Desktop-app OAuth client id: public, it ships in the binary.
-          # VITE_GMAIL_CLIENT_ID: ${{ secrets.VITE_GMAIL_CLIENT_ID }}
-          # Pinned empty: Vite inlines every VITE_* variable into the bundle, so a
-          # secret here would ship in every installer. Desktop PKCE sends none.
-          VITE_GMAIL_CLIENT_SECRET: ""
-          VITE_GMAIL_REDIRECT_URI: ""
         run: npm run tauri:build -- ${{ matrix.build-args }}
 
       - name: Check no client secret shipped
-        # Google client secrets start GOCSPX-.
+        # Google client secrets start GOCSPX-. Nothing should ever put one in a
+        # bundle; this stays as a tripwire.
         run: |
           if grep -rIl 'GOCSPX-' web/dist; then
             echo "::error::The web bundle contains what looks like a Google client secret."

@@ -3,6 +3,7 @@
  */
 
 import type { TokenStore } from "../core/gmail/tokens";
+import type { CredentialStore } from "../core/session/credentials";
 
 /** What this build can do. Reported to the UI so it can hide what is absent. */
 export type PlatformInfo = {
@@ -55,7 +56,12 @@ export interface Platform {
   /** A `TokenStore` backed by the keychain, or by `localStorage`. */
   tokenStore(): TokenStore;
 
-  oauthClientSecret(): string | undefined;
+  /**
+   * Where the user's own Google OAuth client (id, and secret when there is one) lives:
+   * the keychain on the desktop, `localStorage` in the browser. Never sent anywhere but
+   * Google.
+   */
+  credentialStore(): CredentialStore;
 
   // ── Sign-in ──────────────────────────────────────────────────────────────
 

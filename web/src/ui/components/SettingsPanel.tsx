@@ -250,6 +250,12 @@ export type SettingsProps = {
   onRestoreFilter: (id: BuiltinSmartFilter) => void;
   /** True when the build is a desktop shell, so the OS-only rows make sense. */
   isDesktop: boolean;
+  /** The user's own Google OAuth client, shortened for display, or `null` before setup. */
+  googleClient: string | null;
+  /** Whether a Gmail account is connected. */
+  signedIn: boolean;
+  /** Open the Google account sheet (set up, change or remove the OAuth client). */
+  onGoogleAccount: () => void;
   /** Where Google contacts stand. The row only shows for a signed-in account. */
   contactsAccess: ContactsAccessState;
   contactsBusy: boolean;
@@ -346,6 +352,29 @@ export function Settings(props: SettingsProps) {
         the element that scrolls.
       */}
       <div className="scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto">
+        {/*
+          Google account first: Winnow ships no Google client, so until one is set up
+          this is the row that decides whether Gmail can be connected at all.
+        */}
+        <Section title="Google account">
+          <Row
+            label="Your Google OAuth client"
+            hint={
+              props.googleClient
+                ? `${props.googleClient}${props.signedIn ? " · connected" : ""}`
+                : "Not set up. Winnow uses a client from your own Google Cloud project."
+            }
+          >
+            <button
+              type="button"
+              onClick={props.onGoogleAccount}
+              className="rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              {props.googleClient ? "Change" : "Set up"}
+            </button>
+          </Row>
+        </Section>
+
         <Section title="Reading">
         <Row label="Sort messages by">
           <div className="flex gap-1 rounded-ctl border border-hairline p-0.5">

@@ -230,12 +230,46 @@ describe("info()", () => {
   });
 });
 
-describe("oauthClientSecret()", () => {
-  it("has nothing to give, even when one is configured for the web build", async () => {
-    vi.stubEnv("VITE_GMAIL_CLIENT_SECRET", "GOCSPX-should-never-be-here");
+describe("credentialStore()", () => {
+  it("keeps the user's OAuth client in the keychain, under its own entry", async () => {
     const { desktopPlatform } = await loadDesktop();
-    expect(desktopPlatform.oauthClientSecret()).toBeUndefined();
-    expect(invokes).toHaveLength(0);
+    const store = desktopPlatform.credentialStore();
+    await store.write({ clientId: " 123-abc.apps.googleusercontent.com ", clientSecret: "shh" });
+
+    expect(commands()).toEqual(["secrets_set"]);
+    const args = argsFor("secrets_set");
+    // Not the token entry: removing the client must never touch the tokens' row.
+    expect(args?.name).toBe("google.oauth-client");
+    expect(JSON.parse(String(args?.value))).toEqual({
+      clientId: "123-abc.apps.googleusercontent.com",
+      clientSecret: "shh",
+    });
+  });
+
+  it("reads it back, and treats a malformed entry as nothing stored", async () => {
+    const { desktopPlatform } = await loadDesktop();
+    reply = () => JSON.stringify({ clientId: "123-abc.apps.googleusercontent.com" });
+    expect(await desktopPlatform.credentialStore().read()).toEqual({
+      clientId: "123-abc.apps.googleusercontent.com",
+    });
+    reply = () => "{not json";
+    expect(await desktopPlatform.credentialStore().read()).toBeNull();
+    reply = () => null;
+    expect(await desktopPlatform.credentialStore().read()).toBeNull();
+  });
+
+  it("removes it with secrets_delete", async () => {
+    const { desktopPlatform } = await loadDesktop();
+    await desktopPlatform.credentialStore().clear();
+    expect(argsFor("secrets_delete")).toEqual({ name: "google.oauth-client" });
+  });
+
+  it("never reads a client from the build environment", async () => {
+    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "baked.apps.googleusercontent.com");
+    vi.stubEnv("VITE_GMAIL_CLIENT_SECRET", "should-never-be-read");
+    const { desktopPlatform } = await loadDesktop();
+    reply = () => null;
+    expect(await desktopPlatform.credentialStore().read()).toBeNull();
   });
 });
 

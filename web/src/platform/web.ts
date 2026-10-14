@@ -3,7 +3,7 @@
  */
 
 import type { TokenStore } from "../core/gmail/tokens";
-import { clientSecretFromEnv, webRedirectUriFromEnv } from "../core/session/env";
+import { localStorageCredentialStore, type CredentialStore } from "../core/session/credentials";
 import { parseRedirect } from "../core/session/redirect";
 import {
   webTokenStore,
@@ -84,9 +84,8 @@ export const webPlatform: WebPlatform = {
     return webTokenStore();
   },
 
-  oauthClientSecret(): string | undefined {
-    if (!webRedirectUriFromEnv()) return undefined;
-    return clientSecretFromEnv();
+  credentialStore(): CredentialStore {
+    return localStorageCredentialStore();
   },
 
   async beginSignIn(request: SignInRequest): Promise<SignInResult> {

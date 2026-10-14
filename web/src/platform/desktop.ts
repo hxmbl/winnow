@@ -6,6 +6,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { TokenSet } from "../core/gmail/dto";
 import type { TokenStore } from "../core/gmail/tokens";
+import {
+  KEYCHAIN_CREDENTIALS_NAME,
+  normaliseCredentials,
+  parseStoredCredentials,
+  type CredentialStore,
+} from "../core/session/credentials";
 import type {
   NewMailNotification,
   Platform,
@@ -51,6 +57,25 @@ const keychainTokenStore = (name = "gmail.tokens"): TokenStore => ({
   },
 });
 
+/**
+ * The user's OAuth client, in the OS keychain next to the tokens.
+ *
+ * The same `secrets_*` commands, under its own entry name, so removing it never touches
+ * the token entry and vice versa.
+ */
+const keychainCredentialStore = (name = KEYCHAIN_CREDENTIALS_NAME): CredentialStore => ({
+  async read() {
+    const raw = await invoke<string | null>("secrets_get", { name });
+    return parseStoredCredentials(raw);
+  },
+  async write(credentials) {
+    await invoke("secrets_set", { name, value: JSON.stringify(normaliseCredentials(credentials)) });
+  },
+  async clear() {
+    await invoke("secrets_delete", { name });
+  },
+});
+
 /** Cached app info. */
 let infoPromise: Promise<PlatformInfo> | null = null;
 
@@ -69,8 +94,8 @@ export const desktopPlatform: Platform = {
     return keychainTokenStore();
   },
 
-  oauthClientSecret(): undefined {
-    return undefined;
+  credentialStore(): CredentialStore {
+    return keychainCredentialStore();
   },
 
   async beginSignIn(request: SignInRequest): Promise<SignInResult> {

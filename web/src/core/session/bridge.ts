@@ -6,8 +6,19 @@ import { GmailSession, localCache, type CompletedWebRedirect, type ContactsAcces
 import type { Platform } from "../../platform/types";
 import type { MailBackend, WinnowStore } from "../store/store";
 import type { GoogleContact } from "../contacts/google";
+import type { ConnectionTest, OAuthClientCredentials } from "./credentials";
 
 export type SessionBridge = {
+  /** The user's stored OAuth client, or `null` before setup. */
+  credentials(): Promise<OAuthClientCredentials | null>;
+  /** Save an OAuth client. A session made with a different one is signed out. */
+  saveCredentials(next: OAuthClientCredentials): Promise<{ signedOut: boolean }>;
+  /** Remove the OAuth client and sign out. */
+  removeCredentials(): Promise<{ signedOut: boolean }>;
+  /** Ask Google whether it recognises a client, without signing in. */
+  testCredentials(candidate: OAuthClientCredentials): Promise<ConnectionTest>;
+  /** The redirect URI a web user registers. Empty on the desktop. */
+  redirectUriToRegister(): Promise<string>;
   /** Whether a session already exists, even a stale one. */
   hasSession(): Promise<boolean>;
   /** The signed-in address. */
@@ -45,6 +56,25 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
   const session = new GmailSession(platform, localCache());
 
   const bridge: SessionBridge = {
+    credentials: () => session.storedCredentials(),
+
+    async saveCredentials(next) {
+      const result = await session.saveCredentials(next);
+      // The session half already wiped tokens and cache; the screen has to follow.
+      if (result.signedOut) await store.signOut();
+      return result;
+    },
+
+    async removeCredentials() {
+      const result = await session.removeCredentials();
+      if (result.signedOut) await store.signOut();
+      return result;
+    },
+
+    testCredentials: (candidate) => session.testCredentials(candidate),
+
+    redirectUriToRegister: () => session.redirectUriToRegister(),
+
     hasSession: () => session.hasSession(),
 
     async accountEmail() {

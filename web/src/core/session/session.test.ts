@@ -1,9 +1,9 @@
 /**
  * Which redirect URI a build sends to Google.
  *
- * The defect these exist for: `redirectUri()` used to read
- * `webRedirectUriFromEnv() || LOOPBACK_REDIRECT_URI`, which interpreted an empty
- * `VITE_GMAIL_REDIRECT_URI` as "desktop". That is the desktop's *correct*
+ * The defect these exist for: `redirectUri()` used to read a build-time web
+ * redirect URI and fall back to `LOOPBACK_REDIRECT_URI`, which interpreted an
+ * empty variable as "desktop". That is the desktop's *correct*
  * configuration — it has no registered URI and uses the loopback listener — so a
  * **web** build with no URI configured also fell through to the loopback
  * placeholder. Nothing substitutes it in a browser tab, so the browser navigated
@@ -12,8 +12,9 @@
  * the code never appears to build.
  *
  * The choice now follows the platform's own capability (`nativeOAuth`) rather
- * than an environment variable that happens to be empty, and a web build with no
- * URI refuses loudly instead of sending a placeholder to Google.
+ * than an environment variable that happens to be empty. The web URI is now the
+ * page's own address (there is no build-time configuration at all), and a page
+ * with no address refuses loudly instead of sending a placeholder to Google.
  *
  * The last test here covers the second defect in the same flow: the web platform
  * used to answer `signIn`'s `beginSignIn` with `{ kind: "cancelled" }` the moment
@@ -31,6 +32,18 @@ import { GmailError } from "../gmail/dto";
 import type { CursorStore, MailboxCache } from "../gmail/sync";
 import type { TokenStore } from "../gmail/tokens";
 import type { Platform, PlatformInfo, SignInRequest, SignInResult } from "../../platform/types";
+import type { OAuthClientCredentials } from "./credentials";
+
+/** The OAuth client the user has "set up" for the test at hand. */
+let storedClient: OAuthClientCredentials | null = null;
+
+/** Stand in for the page's own address, which is the web build's redirect URI. */
+function installLocation(origin: string, pathname = "/"): void {
+  Object.defineProperty(globalThis, "location", {
+    configurable: true,
+    value: { origin, pathname, search: "", hash: "" },
+  });
+}
 
 /** A `PlatformInfo` for a host, with everything else filled in. */
 function infoFor(kind: "desktop" | "web"): PlatformInfo {
@@ -67,7 +80,11 @@ function platformFor(kind: "desktop" | "web"): { platform: Platform; opened: str
   const platform = {
     info: async () => infoFor(kind),
     tokenStore: () => store,
-    oauthClientSecret: () => undefined,
+    credentialStore: () => ({
+      read: async () => storedClient,
+      write: async (next: OAuthClientCredentials) => void (storedClient = next),
+      clear: async () => void (storedClient = null),
+    }),
     async beginSignIn(request: SignInRequest): Promise<SignInResult> {
       opened.push(request.authorizeUrl);
       if (kind === "web") {
@@ -146,12 +163,14 @@ function installSessionStorage(): Map<string, string> {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  storedClient = null;
   Reflect.deleteProperty(globalThis, "sessionStorage");
+  Reflect.deleteProperty(globalThis, "location");
 });
 
 describe("the sign-in redirect URI", () => {
   it("is the loopback placeholder on the desktop", async () => {
-    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "desktop.apps.googleusercontent.com");
+    storedClient = { clientId: "desktop.apps.googleusercontent.com" };
     const { platform, opened } = platformFor("desktop");
     const session = new GmailSession(platform, cache);
 
@@ -164,13 +183,13 @@ describe("the sign-in redirect URI", () => {
     );
   });
 
-  it("ignores a web redirect URI configured for the web build", async () => {
-    // The other half of drawing the line at the platform: `tauri:dev` loads the
-    // same `.env.local` as the site, so a developer who sets a web redirect URI
-    // must not break the desktop build. Rust refuses a URL with no placeholder,
-    // so honouring the variable here would fail sign-in with an IPC error.
-    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "desktop.apps.googleusercontent.com");
-    vi.stubEnv("VITE_GMAIL_REDIRECT_URI", "https://app.example/auth/callback");
+  it("ignores the webview's own address on the desktop", async () => {
+    // The other half of drawing the line at the platform: a desktop webview has a
+    // location too (`tauri://localhost`, or the dev server under `tauri:dev`), and
+    // Rust refuses a URL with no placeholder, so using it here would fail sign-in
+    // with an IPC error.
+    storedClient = { clientId: "desktop.apps.googleusercontent.com" };
+    installLocation("http://localhost:5173");
     const { platform, opened } = platformFor("desktop");
     const session = new GmailSession(platform, cache);
 
@@ -180,9 +199,9 @@ describe("the sign-in redirect URI", () => {
     );
   });
 
-  it("is the configured URI on the web", async () => {
-    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "web.apps.googleusercontent.com");
-    vi.stubEnv("VITE_GMAIL_REDIRECT_URI", "https://app.example/auth/callback");
+  it("is the app's own address on the web", async () => {
+    storedClient = { clientId: "web.apps.googleusercontent.com", clientSecret: "web-secret" };
+    installLocation("https://app.example");
     const { platform, opened } = platformFor("web");
     const session = new GmailSession(platform, cache);
 
@@ -193,7 +212,7 @@ describe("the sign-in redirect URI", () => {
     const inflight = session.signIn();
     const authorizeUrl = await authorizeUrlFor(opened);
 
-    expect(redirectOf(authorizeUrl)).toBe("https://app.example/auth/callback");
+    expect(redirectOf(authorizeUrl)).toBe("https://app.example/");
 
     // And the promise must not have settled: nothing has happened yet, the
     // page has simply been handed to the browser.
@@ -210,18 +229,18 @@ describe("the sign-in redirect URI", () => {
     expect(settled).toBe(false);
   });
 
-  it("refuses on the web when no URI is configured, rather than sending the placeholder", async () => {
-    // The reported failure, at its source. An empty variable is a configuration
-    // error on the web, not a licence to use a port the browser cannot bind.
-    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "web.apps.googleusercontent.com");
-    vi.stubEnv("VITE_GMAIL_REDIRECT_URI", "");
+  it("refuses on the web when the page has no address, rather than sending the placeholder", async () => {
+    // The reported failure, at its source. No address to return to is a
+    // configuration error on the web, not a licence to use a port the browser
+    // cannot bind.
+    storedClient = { clientId: "web.apps.googleusercontent.com", clientSecret: "web-secret" };
     const { platform, opened } = platformFor("web");
     const session = new GmailSession(platform, cache);
 
     const error = await session.signIn().catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(GmailError);
     expect((error as GmailError).kind).toBe("config");
-    expect((error as GmailError).message).toContain("VITE_GMAIL_REDIRECT_URI");
+    expect((error as GmailError).message).toContain("web address");
 
     // Nothing was opened, so no URL carrying the placeholder can reach Google.
     expect(opened).toEqual([]);
@@ -236,8 +255,8 @@ describe("the sign-in redirect URI", () => {
     // every web sign-in ended in "Sign-in could not be verified." The platform
     // now never settles, and the stash has to be there when the page returns.
     installSessionStorage();
-    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "web.apps.googleusercontent.com");
-    vi.stubEnv("VITE_GMAIL_REDIRECT_URI", "https://app.example/auth/callback");
+    storedClient = { clientId: "web.apps.googleusercontent.com", clientSecret: "web-secret" };
+    installLocation("https://app.example");
     const { platform, opened } = platformFor("web");
     const session = new GmailSession(platform, cache);
 

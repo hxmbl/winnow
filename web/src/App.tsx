@@ -54,6 +54,9 @@ import { Composer, Settings } from "./ui/components/SettingsPanel";
 import { ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
 import { SignInScreen } from "./ui/SignInScreen";
+import { GoogleSetup, SETUP_GUIDE_URL } from "./ui/components/GoogleSetup";
+import { describeFailure } from "./core/session/errors";
+import { maskClientId, type OAuthClientCredentials } from "./core/session/credentials";
 
 type Props = {
   /** The one piece of global state. Everything else is derived from it. */
@@ -305,13 +308,20 @@ export function App({ store }: Props) {
    * success, on a decline, and on a timeout — and a button left spinning needs a second
    * click to recover.
    */
-  const signIn = useCallback(async (): Promise<void> => {
+  /**
+   * The user's own Google OAuth client, as last read from its store.
+   *
+   * `undefined` until the bridge has read it, `null` when there is none. Winnow ships no
+   * client, so "none" is the normal first-run state, and every route into sign-in opens
+   * the setup sheet instead of failing.
+   */
+  const [oauthClient, setOauthClient] = useState<OAuthClientCredentials | null | undefined>(undefined);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [redirectUri, setRedirectUri] = useState("");
+
+  const runSignIn = useCallback(async (): Promise<void> => {
     const bridge = sessionRef.current;
-    if (!bridge) {
-      throw new Error(
-        "This build has no Google client id, so it cannot sign in. Set VITE_GMAIL_CLIENT_ID and rebuild.",
-      );
-    }
+    if (!bridge) throw new Error("Sign-in is still starting up. Try again in a moment.");
     setSigningIn(true);
     try {
       const account = await bridge.signIn();
@@ -321,6 +331,23 @@ export function App({ store }: Props) {
       setSigningIn(false);
     }
   }, [store, syncGoogleContacts]);
+
+  /**
+   * Start a sign-in, or the setup that has to come first.
+   *
+   * With no OAuth client stored, there is nothing to sign in *with*, so the setup sheet
+   * opens instead and "Save and connect" there carries on into the sign-in.
+   */
+  const signIn = useCallback(async (): Promise<void> => {
+    const bridge = sessionRef.current;
+    const stored = bridge ? await bridge.credentials() : null;
+    setOauthClient(stored);
+    if (!stored) {
+      setSetupOpen(true);
+      return;
+    }
+    await runSignIn();
+  }, [runSignIn]);
 
   /**
    * Sign out for real.
@@ -407,6 +434,10 @@ export function App({ store }: Props) {
         const bridge = createSessionBridge(platform, store);
         sessionRef.current = bridge;
         setRestoringSession(true);
+        // Read once up front so Settings can say whether a client is set up, and the
+        // setup sheet can show the redirect URI a web user has to register.
+        setOauthClient(await bridge.credentials());
+        setRedirectUri(await bridge.redirectUriToRegister().catch(() => ""));
 
         // First, in case this page load *is* the redirect back from Google: the code is in
         // the URL and the verifier in `sessionStorage`, and both are consumed on the spot.
@@ -976,8 +1007,53 @@ export function App({ store }: Props) {
     store.markDemoMode(demo.now);
   }, [store]);
 
+  /*
+    The Google account sheet: set up, change or remove the user's own OAuth client.
+    Rendered from both the sign-in screen and the app, because "Continue with Google"
+    and "Connect Gmail" both lead here when no client is stored.
+  */
+  const googleSetup = setupOpen ? (
+    <GoogleSetup
+      kind={info?.kind === "desktop" ? "desktop" : "web"}
+      current={oauthClient ?? null}
+      redirectUri={redirectUri}
+      signedIn={snapshot.account !== null}
+      phone={phone}
+      onTest={async (candidate) => {
+        const bridge = sessionRef.current;
+        if (!bridge) return { ok: false, message: "Sign-in is still starting up. Try again in a moment." };
+        return bridge.testCredentials(candidate);
+      }}
+      onSaveAndConnect={async (candidate) => {
+        const bridge = sessionRef.current;
+        if (!bridge) throw new Error("Sign-in is still starting up. Try again in a moment.");
+        await bridge.saveCredentials(candidate);
+        setOauthClient(candidate);
+        try {
+          await runSignIn();
+        } catch (error) {
+          const failure = describeFailure(error);
+          throw new Error(failure.hint ? `${failure.message} ${failure.hint}` : failure.message, { cause: error });
+        }
+        setSetupOpen(false);
+        applySharedLink(launchLink.current);
+      }}
+      onRemove={async () => {
+        const bridge = sessionRef.current;
+        if (!bridge) return;
+        await bridge.removeCredentials();
+        setOauthClient(null);
+      }}
+      onOpenGuide={() => {
+        void platform.openExternal(SETUP_GUIDE_URL);
+      }}
+      onClose={() => setSetupOpen(false)}
+    />
+  ) : null;
+
   if (snapshot.status === "signed_out") {
     return (
+      <>
       <SignInScreen
         onSignIn={signIn}
         onTryDemo={enterDemo}
@@ -985,7 +1061,10 @@ export function App({ store }: Props) {
         // rather than by a timer, so it cannot hang on a claim.
         restoring={restoringSession}
         hasDemo
+        needsSetup={oauthClient === null}
       />
+      {googleSetup}
+      </>
     );
   }
 
@@ -1524,6 +1603,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           mutedFilters={snapshot.mutedFilters}
           onRestoreFilter={store.restoreFilter.bind(store)}
           isDesktop={info?.kind === "desktop"}
+          googleClient={oauthClient ? maskClientId(oauthClient.clientId) : null}
+          signedIn={snapshot.account !== null}
+          onGoogleAccount={() => {
+            store.setOverlay("none");
+            setSetupOpen(true);
+          }}
           contactsAccess={snapshot.contactsAccess}
           contactsBusy={contactsBusy}
           contactsError={contactsError}
@@ -1531,6 +1616,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onClose={() => store.setOverlay("none")}
         />
       )}
+
+      {googleSetup}
 
       {composer && (
         <Composer
