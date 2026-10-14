@@ -44,15 +44,28 @@ export type FetchLike = typeof globalThis.fetch;
 
 export type TokenManagerOptions = {
   store: TokenStore;
-  clientId: string;
+  /** A fixed client id. Ignored when `client` is given. */
+  clientId?: string;
   /**
-   * Only needed for the *web* flow, where the client is a confidential one and
-   * the secret cannot be kept out of the bundle. The installed-app flow omits
-   * it entirely, which is why the desktop build never sends one.
+   * A fixed client secret. Required by Google for a Web application client; optional
+   * for a Desktop app client, where it is not confidential. Ignored when `client` is
+   * given.
    */
   clientSecret?: string;
+  /**
+   * The user's own OAuth client, read when a request needs it.
+   *
+   * Winnow ships no client: the user pastes theirs into the setup screen, and it can
+   * change or disappear while the app runs. Reading it per request rather than at
+   * construction is what lets a changed client take effect without a reload.
+   */
+  client?: () => Promise<{ clientId: string; clientSecret?: string } | null>;
   fetchImpl?: FetchLike;
 };
+
+/** Thrown when no OAuth client has been set up. */
+export const NO_CLIENT_MESSAGE =
+  "Google sign-in isn't set up yet. Add your own Google OAuth client first.";
 
 export class TokenManager {
   private tokens: TokenSet | null = null;
@@ -64,6 +77,17 @@ export class TokenManager {
   private loadError: string | null = null;
 
   constructor(private readonly options: TokenManagerOptions) {}
+
+  /** The client to send, from the resolver if there is one. Throws when there is none. */
+  private async resolveClient(): Promise<{ clientId: string; clientSecret?: string }> {
+    const resolved = this.options.client
+      ? await this.options.client()
+      : this.options.clientId
+        ? { clientId: this.options.clientId, clientSecret: this.options.clientSecret }
+        : null;
+    if (!resolved?.clientId) throw new GmailError(NO_CLIENT_MESSAGE, 0, "config");
+    return resolved;
+  }
 
   private get fetchImpl(): FetchLike {
     const impl = this.options.fetchImpl ?? globalThis.fetch?.bind(globalThis);
@@ -198,13 +222,14 @@ export class TokenManager {
       throw error;
     }
 
+    const client = await this.resolveClient();
     const body = new URLSearchParams({
-      client_id: this.options.clientId,
+      client_id: client.clientId,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     });
-    // Sent only when the flow needs it. A desktop build must never send one.
-    if (this.options.clientSecret) body.set("client_secret", this.options.clientSecret);
+    // Sent only when the user's client has one.
+    if (client.clientSecret) body.set("client_secret", client.clientSecret);
 
     let response: Response;
     try {
@@ -228,7 +253,7 @@ export class TokenManager {
       // checked before the 400/401 branch that would.
       if (text.includes("invalid_client")) {
         throw new GmailError(
-          "Google rejected this build's client credentials.",
+          "Google rejected your OAuth client's credentials.",
           response.status,
           "invalid_client",
         );
@@ -279,14 +304,15 @@ export class TokenManager {
     verifier: string;
     redirectUri: string;
   }): Promise<TokenSet> {
+    const client = await this.resolveClient();
     const body = new URLSearchParams({
-      client_id: this.options.clientId,
+      client_id: client.clientId,
       code: args.code,
       code_verifier: args.verifier,
       grant_type: "authorization_code",
       redirect_uri: args.redirectUri,
     });
-    if (this.options.clientSecret) body.set("client_secret", this.options.clientSecret);
+    if (client.clientSecret) body.set("client_secret", client.clientSecret);
 
     let response: Response;
     try {
@@ -335,8 +361,9 @@ export class TokenManager {
  *
  * Used by the code exchange. Google's own `error` and `error_description` are
  * echoed (truncated) because they distinguish a spent code from a mismatched
- * redirect URI. Remedies differ: `invalid_client` means the build is wrong
- * (missing secret/wrong client type, cannot retry); `invalid_grant`/`invalid_request`
+ * redirect URI. Remedies differ: `invalid_client` (or a missing
+ * `client_secret`) means the user's OAuth client is wrong (missing or wrong secret, wrong
+ * client type; cannot retry); `invalid_grant`/`invalid_request`
  * mean this attempt is wrong (spent code/replayed verifier/wrong redirect) — start
  * over; `redirect_uri_mismatch` means the exchange named a different URI than the
  * authorize request. Anything else is passed through, truncated.
@@ -352,9 +379,10 @@ function describeTokenRejection(status: number, text: string): [string, AuthErro
     ? `${rejection.error}${rejection.description ? `: ${rejection.description}` : ""}`
     : "";
 
-  if (code === "invalid_client" || code === "unauthorized_client" || text.includes("invalid_client") || text.includes("unauthorized_client")) {
+  const missingSecret = code === "invalid_request" && /client_secret/i.test(rejection?.description ?? "");
+  if (missingSecret || code === "invalid_client" || code === "unauthorized_client" || text.includes("invalid_client") || text.includes("unauthorized_client")) {
     return [
-      `Google rejected this build's client credentials${quote ? ` (${quote})` : ""}.`,
+      `Google rejected your OAuth client's credentials${quote ? ` (${quote})` : ""}.`,
       "invalid_client",
     ];
   }

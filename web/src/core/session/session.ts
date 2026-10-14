@@ -22,7 +22,13 @@
  */
 
 import { GoogleAuthStateMissing } from "./errors";
-import { clientIdFromEnv, webRedirectUriFromEnv } from "./env";
+import {
+  testConnection,
+  webRedirectUriFor,
+  type ConnectionTest,
+  type CredentialStore,
+  type OAuthClientCredentials,
+} from "./credentials";
 import {
   clearPendingAuth,
   forgetPendingAuth,
@@ -33,7 +39,7 @@ import { parseRedirect, readOwnParams, stripRedirect } from "./redirect";
 import { GOOGLE_AUTH_URL, GMAIL_SCOPE, GmailError, LABEL } from "../gmail/dto";
 import { buildAuthorizeUrl, createPkcePair, describeAuthError, stateMatches } from "../gmail/pkce";
 import type { PlatformInfo } from "../../platform/types";
-import { TokenManager } from "../gmail/tokens";
+import { NO_CLIENT_MESSAGE, TokenManager } from "../gmail/tokens";
 import { GmailClient } from "../gmail/client";
 import { GmailSyncEngine, type MailboxCache, type CursorStore } from "../gmail/sync";
 import { CONTACT_SCOPES, PeopleClient, PeopleScopeMissing, hasContactScopes } from "../gmail/people";
@@ -50,7 +56,6 @@ import { mailboxFor } from "../gmail/mapper";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
 
-export { clientIdFromEnv, webRedirectUriFromEnv } from "./env";
 
 /**
  * The token the Rust listener replaces with the port it bound.
@@ -322,6 +327,8 @@ export class GmailSession {
   readonly client: GmailClient;
   readonly sync: GmailSyncEngine;
   readonly contacts: GoogleContactsSync;
+  /** The user's own OAuth client. See `credentials.ts`. */
+  readonly credentials: CredentialStore;
 
   constructor(
     private readonly platform: Platform,
@@ -329,14 +336,12 @@ export class GmailSession {
     private readonly cache: MailboxCache & CursorStore,
     contactsStore: GoogleContactsStore = localContactsStore(),
   ) {
+    this.credentials = platform.credentialStore();
     this.tokens = new TokenManager({
       store: platform.tokenStore(),
-      clientId: clientIdFromEnv(),
-      // Asked of the platform, not decided here: whether a secret is needed
-      // follows from how Google classifies the client, which follows from where
-      // the code runs. The desktop answer is always "no", and it is the platform
-      // layer's job to know that rather than this file's.
-      clientSecret: platform.oauthClientSecret(),
+      // Read per request from the user's own store: Winnow ships no client, and the
+      // user can change or remove theirs while the app runs.
+      client: () => this.credentials.read(),
     });
 
     this.client = new GmailClient(
@@ -421,6 +426,57 @@ export class GmailSession {
     return this.contactsAccess();
   }
 
+  /** The stored OAuth client, or `null` when the user has not set one up. */
+  async storedCredentials(): Promise<OAuthClientCredentials | null> {
+    try {
+      return await this.credentials.read();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Save a new OAuth client.
+   *
+   * A session made with a different client is signed out first: its refresh token
+   * belongs to the old client, and Google refuses to refresh it under another one.
+   */
+  async saveCredentials(next: OAuthClientCredentials): Promise<{ signedOut: boolean }> {
+    const previous = await this.storedCredentials();
+    const changed = previous?.clientId !== next.clientId || previous?.clientSecret !== next.clientSecret;
+    let signedOut = false;
+    if (changed && (await this.tokens.hasSession())) {
+      await this.signOut();
+      signedOut = true;
+    }
+    await this.credentials.write(next);
+    return { signedOut };
+  }
+
+  /** Remove the OAuth client. Signs out first, because nothing can refresh without it. */
+  async removeCredentials(): Promise<{ signedOut: boolean }> {
+    const hadSession = await this.tokens.hasSession();
+    // Always run: it also clears any half-finished sign-in and the cached mail.
+    await this.signOut();
+    await this.credentials.clear();
+    return { signedOut: hadSession };
+  }
+
+  /** Ask Google whether it recognises a client, without signing in. */
+  async testCredentials(candidate: OAuthClientCredentials): Promise<ConnectionTest> {
+    const { nativeOAuth } = await this.platform.info();
+    // Any well-formed loopback URI will do: the made-up code is refused before the
+    // redirect URI is compared.
+    const redirectUri = nativeOAuth ? "http://127.0.0.1:1/winnow-oauth" : webRedirectUriFor(globalThis.location);
+    return testConnection(candidate, redirectUri);
+  }
+
+  /** The redirect URI the setup screen asks a web user to register. Empty on desktop. */
+  async redirectUriToRegister(): Promise<string> {
+    const { nativeOAuth } = await this.platform.info();
+    return nativeOAuth ? "" : webRedirectUriFor(globalThis.location);
+  }
+
   /** Whether a session exists — enough to skip the sign-in screen. */
   async hasSession(): Promise<boolean> {
     return this.tokens.hasSession();
@@ -431,8 +487,9 @@ export class GmailSession {
    *
    * Asked of the platform rather than assumed, because the two flows differ in
    * ways the sign-in screen has to explain rather than discover: the desktop
-   * exchanges without a client secret and gets a code back over a socket, while
-   * the web build needs a registered redirect URI and a secret in the bundle.
+   * uses a Desktop app client and gets a code back over a socket, while the web
+   * build uses a Web application client, with its secret, and a registered
+   * redirect URI (the page's own address).
    * A user staring at "Sign in" deserves to know which they are looking at.
    */
   async capabilities(): Promise<PlatformInfo> {
@@ -474,14 +531,8 @@ export class GmailSession {
     extra: Record<string, string> = {},
     intent: { purpose?: "contacts"; expectEmail?: string } = {},
   ): Promise<void> {
-    const clientId = clientIdFromEnv();
-    if (!clientId) {
-      throw new GmailError(
-        "This build has no Google client id, so it cannot sign in. Set VITE_GMAIL_CLIENT_ID and rebuild.",
-        0,
-        "config",
-      );
-    }
+    const clientId = (await this.storedCredentials())?.clientId;
+    if (!clientId) throw new GmailError(NO_CLIENT_MESSAGE, 0, "config");
 
     const pkce = await createPkcePair();
     const redirectUri = await this.redirectUri();
@@ -573,33 +624,24 @@ export class GmailSession {
    *   - **Web** — a real, registered URI, because a page has no ability to bind
    *     a port and so cannot use the loopback one.
    *
-   * The distinction has to be drawn from the platform, not from whether
-   * `VITE_GMAIL_REDIRECT_URI` happens to be set. That variable is empty in a
-   * desktop build by design, so `webRedirectUriFromEnv() || LOOPBACK_REDIRECT_URI`
-   * read an empty value as "desktop" and — on a web build with no URI configured
-   * — fell through to the loopback placeholder. The browser then navigated to
-   * Google with `__WINNOW_LOOPBACK_PORT__` in the `redirect_uri`, which is a
-   * well-formed URL naming a port nothing is listening on, so Google rejected it
-   * with `Error 400: invalid_request` and the only clue was a token the code
-   * never appears to build.
-   *
-   * A web build with no registered URI is a configuration error, and it says so
-   * rather than sending a placeholder to Google. Desktop ignores the web variable
-   * entirely, matching how it already ignores `VITE_GMAIL_CLIENT_SECRET`.
+   * The web URI is the app's own address (see `webRedirectUriFor`): the page reads a
+   * returning code wherever it is loaded, and it is the URI the setup screen shows the
+   * user to register. Drawn from the platform rather than from the URL, so a desktop
+   * webview never sends `tauri://localhost` to Google.
    */
   private async redirectUri(): Promise<string> {
     const { nativeOAuth } = await this.platform.info();
     if (nativeOAuth) return LOOPBACK_REDIRECT_URI;
 
-    const configured = webRedirectUriFromEnv();
-    if (!configured) {
+    const here = webRedirectUriFor(globalThis.location);
+    if (!here) {
       throw new GmailError(
-        "This build has no Google redirect URI, so it cannot sign in. Set VITE_GMAIL_REDIRECT_URI to the URI registered for this site and rebuild.",
+        "This page has no web address to return to, so it cannot sign in. Open Winnow over http(s).",
         0,
         "config",
       );
     }
-    return configured;
+    return here;
   }
 
   /**

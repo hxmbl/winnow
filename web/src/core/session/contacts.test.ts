@@ -20,6 +20,10 @@ import type { GoogleContactsSnapshot, GoogleContactsStore } from "../contacts/go
 import type { CursorStore, MailboxCache } from "../gmail/sync";
 import type { TokenStore } from "../gmail/tokens";
 import type { Platform, PlatformInfo, SignInRequest, SignInResult } from "../../platform/types";
+import type { OAuthClientCredentials } from "./credentials";
+
+/** The OAuth client the user has "set up" for the test at hand. */
+let storedClient: OAuthClientCredentials | null = null;
 
 const ALL_SCOPES = `${GMAIL_SCOPE} ${CONTACTS_SCOPE} ${OTHER_CONTACTS_SCOPE}`;
 
@@ -65,7 +69,11 @@ function platformFor(
   const platform = {
     info: async () => infoFor(kind),
     tokenStore: () => tokens,
-    oauthClientSecret: () => undefined,
+    credentialStore: () => ({
+      read: async () => storedClient,
+      write: async (next: OAuthClientCredentials) => void (storedClient = next),
+      clear: async () => void (storedClient = null),
+    }),
     async beginSignIn(request: SignInRequest): Promise<SignInResult> {
       opened.push(request.authorizeUrl);
       if (kind === "web") return new Promise<SignInResult>(() => {});
@@ -150,7 +158,7 @@ const signedIn = (scope = GMAIL_SCOPE): TokenSet => ({
 let google: Google;
 
 beforeEach(() => {
-  vi.stubEnv("VITE_GMAIL_CLIENT_ID", "desktop.apps.googleusercontent.com");
+  storedClient = { clientId: "desktop.apps.googleusercontent.com" };
   google = {
     grantedScope: ALL_SCOPES,
     profiles: ["me@example.com"],
@@ -329,8 +337,7 @@ describe("grantContacts — web, finished by the redirect back", () => {
   }
 
   beforeEach(() => {
-    vi.stubEnv("VITE_GMAIL_CLIENT_ID", "web.apps.googleusercontent.com");
-    vi.stubEnv("VITE_GMAIL_REDIRECT_URI", "https://app.example/auth/callback");
+    storedClient = { clientId: "web.apps.googleusercontent.com", clientSecret: "web-secret" };
   });
 
   it("navigates to Google with the same incremental-consent request", async () => {
@@ -340,7 +347,8 @@ describe("grantContacts — web, finished by the redirect back", () => {
     for (let i = 0; i < 50 && opened.length === 0; i += 1) await new Promise((r) => setTimeout(r, 0));
     const query = new URL(opened[0]).searchParams;
     expect(query.get("include_granted_scopes")).toBe("true");
-    expect(query.get("redirect_uri")).toBe("https://app.example/auth/callback");
+    // The app's own address: what the setup screen tells the user to register.
+    expect(query.get("redirect_uri")).toBe("https://app.example/");
     expect(query.get("scope")).toContain(OTHER_CONTACTS_SCOPE);
   });
 
