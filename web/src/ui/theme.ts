@@ -58,84 +58,84 @@ type Palette = {
 /**
  * Light.
  *
- * Warm paper rather than blue-grey: every neutral carries a little of the accent's
- * hue, so the rust reads as belonging to the page instead of sitting on top of it.
+ * Cool violet-grey rather than beige or blue-grey: every neutral carries a little of the
+ * accent's hue, so the plum reads as belonging to the page instead of sitting on top of it.
  * Surfaces are separated by value alone — no rules, no shadows.
  */
 const LIGHT: Palette = {
   color: {
     // ── Surfaces ────────────────────────────────────────────────
     /** Whole-app backdrop: the chrome and the reader's gutter. */
-    canvas: "#F2EFE9",
+    canvas: "#EFEDF2",
     /** Pane and control fill — the default "thing you can touch". */
-    surface: "#FCFBF8",
+    surface: "#FBFAFC",
     /** Recessed fill: the reader pane, search, empty states. */
-    surfaceSunken: "#F7F5F0",
+    surfaceSunken: "#F6F4F8",
     /** Hover wash on rows and icon buttons. */
-    surfaceHover: "#F2EFE9",
+    surfaceHover: "#EFEDF2",
     /** Pressed and focused fills. */
-    surfaceActive: "#E9E4DB",
+    surfaceActive: "#E5E1EA",
     /** The selected list row: the accent, washed into `surface`. Opaque so the contrast test can see it. */
-    surfaceSelected: "#F5EBE5",
+    surfaceSelected: "#EFE8EF",
     /** Masthead and the mobile bar under it. */
-    chrome: "#FCFBF8",
+    chrome: "#FBFAFC",
 
     // ── Text ────────────────────────────────────────────────────
     /** Headlines — sender name, subject. */
-    ink: "#1D1A16",
+    ink: "#1B1820",
     /** Long-form body copy. */
-    inkBody: "#3D3832",
+    inkBody: "#3A3541",
     /** Secondary metadata: addresses, timestamps. Clears AA on every plane it sits on. */
-    inkMuted: "#58524A",
+    inkMuted: "#554E5D",
     /** Tertiary: section labels, empty-state copy, the row timestamp. Kept a visible step from `inkMuted`. */
-    inkSubtle: "#686158",
+    inkSubtle: "#655E6D",
     /** Toolbar icon buttons. */
-    inkIcon: "#4B463F",
+    inkIcon: "#48424F",
     /** Search placeholder. Same size requirement as `inkSubtle`. */
-    inkPlaceholder: "#686158",
+    inkPlaceholder: "#655E6D",
 
     // ── Accent ──────────────────────────────────────────────────
     /**
-     * Winnow's one colour: a rust, from the chaff the name is about. Unread, selection,
-     * focus and the primary action, and nothing else. 5.4:1 or better on every surface,
+     * Winnow's one colour: a plum, deep enough to read as ink rather than decoration. Unread,
+     * selection, focus and the primary action, and nothing else. 6.8:1 or better on every surface,
      * so it can carry text as well as a ring.
      */
-    accent: "#A63F18",
+    accent: "#74306A",
     /** Text on a solid accent fill. */
     onAccent: "#FFFFFF",
 
     // ── Status ──────────────────────────────────────────────────
-    /** Destructive actions and errors. Crimson, pulled away from the rust so "delete" never reads as "go". */
-    danger: "#B0203F",
+    /** Destructive actions and errors. A brick red, pulled well away from the plum so "delete" never reads as "go". */
+    danger: "#B42318",
     /** Confirmation, and "this worked". */
     success: "#2F7A3E",
     /** The notice strip's wash, for a non-blocking message. */
     notice: "rgba(47, 122, 62, 0.08)",
     /** The error strip's wash. */
-    dangerWash: "rgba(176, 32, 63, 0.07)",
+    dangerWash: "rgba(180, 35, 24, 0.07)",
 
     // ── Lines & controls ────────────────────────────────────────
     /** Default separator. Everything structural uses this unless it needs to recede. */
-    hairline: "rgba(48, 36, 20, 0.09)",
+    hairline: "rgba(38, 28, 54, 0.09)",
     /** Separator inside a container that already has a border. */
-    hairlineSoft: "rgba(48, 36, 20, 0.055)",
+    hairlineSoft: "rgba(38, 28, 54, 0.055)",
     /** Vertical separators splitting an action cluster into groups. */
-    divider: "rgba(48, 36, 20, 0.14)",
+    divider: "rgba(38, 28, 54, 0.14)",
     /** Neutral control border (search, action cluster). */
-    controlBorder: "rgba(48, 36, 20, 0.12)",
+    controlBorder: "rgba(38, 28, 54, 0.12)",
     /** Focus ring: the accent, solid. 3:1 or better against every surface. */
-    focusRing: "#A63F18",
+    focusRing: "#74306A",
 
     // ── Chrome ──────────────────────────────────────────────────
-    scrollbar: "rgba(48, 36, 20, 0.22)",
+    scrollbar: "rgba(38, 28, 54, 0.22)",
 
     // ── Depth, without borders ─────────────────────────────────
     /** Fill for layers floating over content (drawer, sheets). Opaque now that nothing blurs behind it. */
-    veil: "rgba(252, 251, 248, 0.96)",
+    veil: "rgba(251, 250, 252, 0.96)",
     /** A low-alpha wash of the palette's own ink: pressed states and quiet buttons. */
-    sheen: "rgba(48, 36, 20, 0.06)",
-    /** What the drawer dims. Warm, not black, so dimming reads as depth. */
-    scrim: "rgba(40, 30, 18, 0.18)",
+    sheen: "rgba(38, 28, 54, 0.06)",
+    /** What the drawer dims. Tinted, not black, so dimming reads as depth. */
+    scrim: "rgba(30, 20, 44, 0.18)",
   },
 
   badge: {
@@ -174,47 +174,47 @@ const LIGHT: Palette = {
  *
  * Not an inversion: surfaces step up in lightness rather than dropping to black,
  * because a true-black list behind white text is hard on the eyes. The neutrals keep
- * the light palette's warmth, so the two read as one system.
+ * the light palette's violet tint, so the two read as one system.
  */
 const DARK: Palette = {
   color: {
-    canvas: "#12110F",
-    surface: "#1A1816",
-    surfaceSunken: "#161412",
-    surfaceHover: "#22201C",
-    surfaceActive: "#2D2A25",
-    surfaceSelected: "#36271F",
-    chrome: "#171513",
+    canvas: "#110F14",
+    surface: "#19171C",
+    surfaceSunken: "#151318",
+    surfaceHover: "#211E25",
+    surfaceActive: "#2B2830",
+    surfaceSelected: "#312933",
+    chrome: "#161419",
 
-    ink: "#F2EEE7",
-    inkBody: "#D0C9BE",
+    ink: "#F0EDF3",
+    inkBody: "#CDC7D4",
     /** Kept a visible step above `inkSubtle`; both must clear AA on `surfaceSelected`. */
-    inkMuted: "#B2AA9E",
-    inkSubtle: "#9A9286",
-    inkIcon: "#B0A89C",
+    inkMuted: "#AEA7B7",
+    inkSubtle: "#9A93A3",
+    inkIcon: "#ACA5B5",
     /** Held one step off `inkSubtle`, so a placeholder does not read as filled-in text. */
-    inkPlaceholder: "#9A9286",
+    inkPlaceholder: "#9A93A3",
 
-    /** The same rust, lifted until it reads on a dark page. */
-    accent: "#EE8A5C",
-    /** Dark text on the light accent: white on #EE8A5C would fail AA. */
-    onAccent: "#1A1816",
+    /** The same plum, lifted to a soft mauve until it reads on a dark page. */
+    accent: "#D4A3CE",
+    /** Dark text on the light accent: white on #D4A3CE would fail AA. */
+    onAccent: "#19171C",
 
-    hairline: "rgba(255, 245, 230, 0.09)",
-    hairlineSoft: "rgba(255, 245, 230, 0.055)",
-    divider: "rgba(255, 245, 230, 0.15)",
-    controlBorder: "rgba(255, 245, 230, 0.12)",
-    focusRing: "#EE8A5C",
+    hairline: "rgba(244, 236, 255, 0.09)",
+    hairlineSoft: "rgba(244, 236, 255, 0.055)",
+    divider: "rgba(244, 236, 255, 0.15)",
+    controlBorder: "rgba(244, 236, 255, 0.12)",
+    focusRing: "#D4A3CE",
 
-    danger: "#F47A8C",
+    danger: "#F28B6E",
     success: "#6BCB7F",
     notice: "rgba(107, 203, 127, 0.1)",
-    dangerWash: "rgba(244, 122, 140, 0.1)",
+    dangerWash: "rgba(242, 139, 110, 0.1)",
 
-    scrollbar: "rgba(255, 245, 230, 0.24)",
+    scrollbar: "rgba(244, 236, 255, 0.24)",
 
-    veil: "rgba(26, 24, 22, 0.97)",
-    sheen: "rgba(242, 238, 231, 0.07)",
+    veil: "rgba(25, 23, 28, 0.97)",
+    sheen: "rgba(240, 237, 243, 0.07)",
     scrim: "rgba(0, 0, 0, 0.4)",
   },
 

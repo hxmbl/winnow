@@ -53,8 +53,8 @@ body,
 
 body {
   margin: 0;
-  background: var(--wn-canvas, #eff3f3);
-  color: var(--wn-ink, #15181d);
+  background: var(--wn-canvas, #efedf2);
+  color: var(--wn-ink, #1b1820);
   font-family: theme("fontFamily.sans");
   font-size: 14px;
   font-optical-sizing: auto;
