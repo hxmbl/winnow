@@ -16,7 +16,12 @@ import {
 } from "./types";
 
 const PENDING_STATE_KEY = "winnow.pendingState";
-const MIN_VISIBLE_POLL_SECONDS = 60;
+/**
+ * Floor on the background interval, in seconds — the same floor the desktop
+ * scheduler clamps to (`MIN_INTERVAL_SECS` in `scheduler.rs`). An incremental sync
+ * that finds nothing is one `history.list` (2 quota units), so 30s is cheap.
+ */
+export const MIN_BACKGROUND_POLL_SECONDS = 30;
 
 const WEB_INFO: PlatformInfo = {
   name: "Winnow",
@@ -53,26 +58,23 @@ function fireTick(): void {
   for (const handler of tickHandlers) handler(tickCounter);
 }
 
-function visibleNow(): boolean {
-  return globalThis.document?.visibilityState !== "hidden";
-}
-
+/**
+ * Background polling, at the user's interval, whether or not the tab is visible.
+ *
+ * While the tab is visible *and* focused, `foregroundSync.ts` polls faster and
+ * `main.tsx` drops these ticks; this ticker is the slow cadence for a tab in the
+ * background, which used to stop polling entirely. Browsers throttle timers in hidden
+ * tabs (to once a minute or less), which is the right amount of politeness anyway.
+ */
 function startPolling(intervalSeconds: number): void {
   stopPolling();
-  pollSeconds = Math.max(MIN_VISIBLE_POLL_SECONDS, Math.floor(intervalSeconds));
-
-  globalThis.document?.addEventListener("visibilitychange", onVisibilityChange);
-  if (visibleNow()) pollTimer = setInterval(fireTick, pollSeconds * 1000);
+  pollSeconds = Math.max(MIN_BACKGROUND_POLL_SECONDS, Math.floor(intervalSeconds));
+  pollTimer = setInterval(fireTick, pollSeconds * 1000);
 }
 
-function onVisibilityChange(): void {
-  if (pollSeconds === 0) return;
-  if (visibleNow()) {
-    if (pollTimer === null) pollTimer = setInterval(fireTick, pollSeconds * 1000);
-  } else {
-    if (pollTimer !== null) clearInterval(pollTimer);
-    pollTimer = null;
-  }
+/** The interval the ticker is running at, in seconds; 0 when stopped. For tests. */
+export function webPollSeconds(): number {
+  return pollSeconds;
 }
 
 export const webPlatform: WebPlatform = {
@@ -182,14 +184,8 @@ export const webPlatform: WebPlatform = {
   },
 
   async setBackgroundSync(intervalSeconds: number | null): Promise<void> {
-    if (intervalSeconds === null) {
+    if (intervalSeconds === null || !Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
       stopPolling();
-      globalThis.document?.removeEventListener("visibilitychange", onVisibilityChange);
-      return;
-    }
-    if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
-      stopPolling();
-      globalThis.document?.removeEventListener("visibilitychange", onVisibilityChange);
       return;
     }
     startPolling(intervalSeconds);

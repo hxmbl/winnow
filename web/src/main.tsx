@@ -15,6 +15,7 @@
  * screen first.
  */
 
+import { startForegroundSync } from "./platform/foregroundSync";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -242,7 +243,16 @@ void platform
     //
     // The unsubscribe is released on `pagehide`: the desktop listener holds a closure
     // over the store for the life of the process, so the caller should not leak it.
+    //
+    // While the window is visible and focused the foreground controller polls every
+    // 30s and syncs on focus / tab-visible / back-online; a background tick in that
+    // state would only double up, so it is dropped. `store.refresh` is a no-op in the
+    // demo (no backend), so the demo makes no requests either way.
+    const foreground = startForegroundSync(() => {
+      void store.refresh();
+    });
     const unlistenTick = platform.onBackgroundTick(() => {
+      if (foreground.active()) return;
       void store.refresh();
     });
 
@@ -253,6 +263,7 @@ void platform
 
     globalThis.addEventListener?.("pagehide", () => {
       unlistenTick();
+      foreground.stop();
       stopClock();
     });
 

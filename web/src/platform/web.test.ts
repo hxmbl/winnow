@@ -94,3 +94,15 @@ describe("webTokenStore", () => {
     expect(typeof webTokenStore).toBe("function");
   });
 });
+describe("webPlatform background polling", () => {
+  it("floors the interval at 30s and keeps polling while hidden", async () => {
+    const { webPollSeconds, MIN_BACKGROUND_POLL_SECONDS } = await import("./web");
+    expect(MIN_BACKGROUND_POLL_SECONDS).toBe(30);
+    await webPlatform.setBackgroundSync(5);
+    expect(webPollSeconds()).toBe(30);
+    await webPlatform.setBackgroundSync(300);
+    expect(webPollSeconds()).toBe(300);
+    await webPlatform.setBackgroundSync(null);
+    expect(webPollSeconds()).toBe(0);
+  });
+});
