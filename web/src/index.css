@@ -48,21 +48,21 @@ body,
 }
 
 :root[data-theme="dark"] {
-  --wn-boot-canvas: #070612;
-  --wn-boot-ink: #edebfa;
+  --wn-boot-canvas: #191919;
+  --wn-boot-ink: #e3e3e3;
   color-scheme: dark;
 }
 
 :root[data-theme="oled"] {
   --wn-boot-canvas: #000000;
-  --wn-boot-ink: #edebfa;
+  --wn-boot-ink: #e3e3e3;
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --wn-boot-canvas: #070612;
-    --wn-boot-ink: #edebfa;
+    --wn-boot-canvas: #191919;
+    --wn-boot-ink: #e3e3e3;
     color-scheme: dark;
   }
 }

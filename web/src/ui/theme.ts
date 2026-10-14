@@ -182,46 +182,50 @@ const LIGHT: Palette = {
 };
 
 /**
- * Dark mode, the palette's main expression.
+ * Dark mode: neutral greys, in the manner of Notion's dark theme.
  *
- * A night sky rather than an inversion: deep indigo-blacks with a clear blue-violet cast,
- * stepping up in lightness from canvas to surface. Darker than it first shipped — the
- * page is nearly black now — but deliberately not black: that is what OLED is for, and
- * keeping a little indigo in every plane is what lets the steps between them stay
- * visible. Lines and washes are violet-tinted lavender, the inks cool lavender-whites,
- * and the accent is the one luminous thing on the page.
+ * No tint in the planes or the inks: a near-black canvas (#191919), the chrome a step up,
+ * the panes a step above that, and hover, pressed and selected each a visible step
+ * brighter again. Without a cast in the neutrals the accent is the only colour on the
+ * page, which is the point of having one. Lines and washes are white at low alpha.
  *
- * The accent, its selected-row wash and danger are written here for Space and replaced
- * per accent theme by `paletteFor` (see `ACCENTS`).
+ * The muted and subtle inks sit a little brighter than Notion's (#9B9B9B / #7F7F7F):
+ * at those values the subtle grey misses WCAG AA even on the canvas, and every ink
+ * here is held to AA on every plane it can land on, the pressed fill included.
+ *
+ * The selected row is a neutral grey rather than an accent wash: on neutral planes a
+ * faint violet reads as a smudge, and a grey step reads as "this one". The accent and
+ * danger are written here for Space and replaced per accent theme by `paletteFor`.
  */
 const DARK: Palette = {
   color: {
-    canvas: "#070612",
-    surface: "#0D0B1E",
-    surfaceSunken: "#0A0918",
-    surfaceHover: "#141229",
-    surfaceActive: "#1C1A35",
-    surfaceSelected: "#221A3E",
-    chrome: "#0B0A1B",
+    canvas: "#191919",
+    surface: "#252525",
+    surfaceSunken: "#1F1F1F",
+    surfaceHover: "#2C2C2C",
+    surfaceActive: "#373737",
+    surfaceSelected: "#323232",
+    chrome: "#202020",
 
-    ink: "#EDEBFA",
-    inkBody: "#CAC6E0",
-    /** Kept a visible step above `inkSubtle`; both must clear AA on `surfaceSelected`. */
-    inkMuted: "#AAA5C4",
-    inkSubtle: "#9590B2",
-    inkIcon: "#A8A3C2",
+    /** About 87% white, written opaque so the contrast test can measure it. */
+    ink: "#E3E3E3",
+    inkBody: "#D4D4D4",
+    /** Kept a visible step above `inkSubtle`; both must clear AA on `surfaceActive`. */
+    inkMuted: "#A9A9A9",
+    inkSubtle: "#A0A0A0",
+    inkIcon: "#ABABAB",
     /** Held one step off `inkSubtle`, so a placeholder does not read as filled-in text. */
-    inkPlaceholder: "#9590B2",
+    inkPlaceholder: "#A0A0A0",
 
-    /** The same violet, lifted to a luminous lavender that glows against the indigo-black. */
+    /** The same violet, lifted to a luminous lavender. */
     accent: "#B9A5FF",
     /** Dark text on the light accent: white on #B9A5FF would fail AA. */
-    onAccent: "#0D0B1E",
+    onAccent: "#191919",
 
-    hairline: "rgba(200, 188, 255, 0.09)",
-    hairlineSoft: "rgba(200, 188, 255, 0.055)",
-    divider: "rgba(200, 188, 255, 0.15)",
-    controlBorder: "rgba(200, 188, 255, 0.12)",
+    hairline: "rgba(255, 255, 255, 0.09)",
+    hairlineSoft: "rgba(255, 255, 255, 0.055)",
+    divider: "rgba(255, 255, 255, 0.14)",
+    controlBorder: "rgba(255, 255, 255, 0.12)",
     focusRing: "#B9A5FF",
     edge: "transparent",
 
@@ -230,11 +234,11 @@ const DARK: Palette = {
     notice: "rgba(107, 203, 127, 0.1)",
     dangerWash: "rgba(242, 139, 110, 0.1)",
 
-    scrollbar: "rgba(200, 188, 255, 0.24)",
+    scrollbar: "rgba(255, 255, 255, 0.22)",
 
-    veil: "rgba(13, 11, 30, 0.97)",
-    sheen: "rgba(237, 235, 250, 0.07)",
-    scrim: "rgba(2, 1, 10, 0.55)",
+    veil: "rgba(37, 37, 37, 0.97)",
+    sheen: "rgba(255, 255, 255, 0.06)",
+    scrim: "rgba(0, 0, 0, 0.55)",
   },
 
   // The light palette's badge accents all fail on a dark surface: same hues, lifted.
@@ -272,10 +276,10 @@ const DARK: Palette = {
  * OLED: dark, with the lights all the way off.
  *
  * Canvas, panes and chrome are true black, so an OLED screen switches those pixels off.
- * Only the states that have to be seen — hover, pressed, the selected row — keep a
- * very dark indigo, still a visible step apart. With the planes no longer separated by
- * value, the violet-tinted hairlines carry the structure and are a touch stronger than
- * dark's. Inks, accent and danger are dark's, which only gain contrast on black.
+ * Only the states that have to be seen (hover, pressed, the selected row) keep a dark
+ * neutral grey, each a visible step apart, matching dark's neutrals. With the planes no
+ * longer separated by value, white hairlines carry the structure and are a touch
+ * stronger than dark's. Inks, accent and danger are dark's, which only gain on black.
  */
 const OLED: Palette = {
   color: {
@@ -284,23 +288,23 @@ const OLED: Palette = {
     surface: "#000000",
     surfaceSunken: "#000000",
     chrome: "#000000",
-    surfaceHover: "#0E0C1F",
-    surfaceActive: "#16132D",
-    surfaceSelected: "#1A1333",
+    surfaceHover: "#1A1A1A",
+    surfaceActive: "#2A2A2A",
+    surfaceSelected: "#242424",
 
     onAccent: "#000000",
 
-    hairline: "rgba(200, 188, 255, 0.13)",
-    hairlineSoft: "rgba(200, 188, 255, 0.08)",
-    divider: "rgba(200, 188, 255, 0.19)",
-    controlBorder: "rgba(200, 188, 255, 0.16)",
+    hairline: "rgba(255, 255, 255, 0.13)",
+    hairlineSoft: "rgba(255, 255, 255, 0.08)",
+    divider: "rgba(255, 255, 255, 0.18)",
+    controlBorder: "rgba(255, 255, 255, 0.16)",
     /** With every plane black, this is what tells the search field and the panes apart. */
-    edge: "rgba(200, 188, 255, 0.16)",
+    edge: "rgba(255, 255, 255, 0.16)",
 
-    scrollbar: "rgba(200, 188, 255, 0.26)",
+    scrollbar: "rgba(255, 255, 255, 0.26)",
 
     veil: "rgba(0, 0, 0, 0.97)",
-    sheen: "rgba(237, 235, 250, 0.08)",
+    sheen: "rgba(255, 255, 255, 0.08)",
     scrim: "rgba(0, 0, 0, 0.6)",
   },
   badge: DARK.badge,
@@ -339,24 +343,31 @@ type AccentSpec = {
 };
 
 /**
- * The accent themes. Neutrals are shared: every theme sits on the same indigo-tinted
- * greys (Space's), so the page stays Winnow's and only the one colour that means
- * something changes. Every combination is held to WCAG AA in `theme.test.ts`.
+ * The selected row in the dark modes: a neutral grey step, the same for every accent.
+ * Only light washes the accent into its selection.
+ */
+const DARK_SELECTED = DARK.color.surfaceSelected;
+const OLED_SELECTED = OLED.color.surfaceSelected;
+
+/**
+ * The accent themes. Neutrals are shared: light sits on Space's lavender-tinted greys,
+ * dark and OLED on neutral greys, so only the one colour that means something changes.
+ * Every combination is held to WCAG AA in `theme.test.ts`.
  */
 export const ACCENTS: Record<AccentTheme, AccentSpec> = {
   /** Space violet, the default: an indigo-leaning blue-violet. */
   space: {
     label: "Space",
     light: { accent: "#5028E2", onAccent: "#FFFFFF", surfaceSelected: "#E7E2FA" },
-    dark: { accent: "#B9A5FF", onAccent: "#0D0B1E", surfaceSelected: "#221A3E" },
-    oled: { accent: "#B9A5FF", onAccent: "#000000", surfaceSelected: "#1A1333" },
+    dark: { accent: "#B9A5FF", onAccent: "#191919", surfaceSelected: DARK_SELECTED },
+    oled: { accent: "#B9A5FF", onAccent: "#000000", surfaceSelected: OLED_SELECTED },
   },
   /** Plum: a dusky red-violet. */
   plum: {
     label: "Plum",
     light: { accent: "#74306A", onAccent: "#FFFFFF", surfaceSelected: "#F9DDF5" },
-    dark: { accent: "#D4A3CE", onAccent: "#0D0B1E", surfaceSelected: "#32152F" },
-    oled: { accent: "#D4A3CE", onAccent: "#000000", surfaceSelected: "#280F25" },
+    dark: { accent: "#D4A3CE", onAccent: "#191919", surfaceSelected: DARK_SELECTED },
+    oled: { accent: "#D4A3CE", onAccent: "#000000", surfaceSelected: OLED_SELECTED },
   },
   /**
    * Ember: rust in light, a warm amber glow in dark. It lives next door to red, so its
@@ -366,15 +377,15 @@ export const ACCENTS: Record<AccentTheme, AccentSpec> = {
   ember: {
     label: "Ember",
     light: { accent: "#A2470D", onAccent: "#FFFFFF", surfaceSelected: "#F8E0D2", danger: "#B8184A" },
-    dark: { accent: "#F0964F", onAccent: "#0D0B1E", surfaceSelected: "#2B1D12", danger: "#FF80A4" },
-    oled: { accent: "#F0964F", onAccent: "#000000", surfaceSelected: "#21160D", danger: "#FF80A4" },
+    dark: { accent: "#F0964F", onAccent: "#191919", surfaceSelected: DARK_SELECTED, danger: "#FF80A4" },
+    oled: { accent: "#F0964F", onAccent: "#000000", surfaceSelected: OLED_SELECTED, danger: "#FF80A4" },
   },
-  /** Aurora: a cool teal, the northern lights against the night-sky neutrals. */
+  /** Aurora: a cool teal. */
   aurora: {
     label: "Aurora",
     light: { accent: "#0A6E68", onAccent: "#FFFFFF", surfaceSelected: "#D9F2EF" },
-    dark: { accent: "#5ED6C5", onAccent: "#0D0B1E", surfaceSelected: "#0E2321" },
-    oled: { accent: "#5ED6C5", onAccent: "#000000", surfaceSelected: "#0A1B19" },
+    dark: { accent: "#5ED6C5", onAccent: "#191919", surfaceSelected: DARK_SELECTED },
+    oled: { accent: "#5ED6C5", onAccent: "#000000", surfaceSelected: OLED_SELECTED },
   },
 };
 

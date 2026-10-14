@@ -21,10 +21,10 @@
  *   4. **The accent works as text, as a ring and as a fill**, in every mode (light, dark,
  *      OLED) with every accent theme — each combination is its own case, so a new accent
  *      or mode is covered the day it is added. Space, the default, is a deliberate space
- *      violet rather than a stock Tailwind violet or indigo. The neutrals carry a shared
- *      blue-violet cast (OLED's black planes excepted), the selected row is the accent
- *      washed into the surface, and danger stays a readable red at least 40° of hue from
- *      every accent.
+ *      violet rather than a stock Tailwind violet or indigo. Light's neutrals carry a
+ *      shared blue-violet cast and its selected row is the accent washed into the surface;
+ *      dark and OLED are neutral greys with a neutral selected row. Danger stays a
+ *      readable red at least 40° of hue from every accent.
  *   6. **The theme is right before the bundle loads**: `public/theme-boot.js` agrees with
  *      `resolveScheme`, and the `index.css` fallbacks agree with the palettes.
  *   5. **The design system stays small**: four type sizes, two radii, no shadows and no
@@ -268,9 +268,9 @@ describe("the neutrals", () => {
   const SHARED_HUE = hsl(ACCENTS.space.dark.accent).hue;
 
   /**
-   * Neutrals are shared across accents, by design: every theme sits on the same
-   * indigo-tinted greys, and only the accent (with its selected-row wash and, for Ember,
-   * danger) changes. So the tint rule is asserted against Space's hue in every combo.
+   * Neutrals are shared across accents, by design: only the accent (with light's
+   * selected-row wash and, for Ember, danger) changes. Light's neutrals lean towards
+   * Space's hue; dark and OLED are plain neutral greys.
    */
   for (const { mode, accent, name } of COMBOS) {
     it(`${name}: neutrals are the shared set`, () => {
@@ -279,13 +279,23 @@ describe("the neutrals", () => {
       for (const token of NEUTRALS) expect(own[token], `${name}: ${token}`).toBe(space[token]);
     });
 
-    it(`${name}: are cool blue-violet greys, tinted but not coloured`, () => {
+    if (mode !== "light") {
+      it(`${name}: are neutral greys, with no tint`, () => {
+        const { color } = paletteFor(mode, accent);
+        for (const token of [...NEUTRALS, "surfaceSelected", "inkPlaceholder"]) {
+          const [r, g, b] = channels(color[token]);
+          expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${color[token]} is tinted`).toBeLessThanOrEqual(4);
+        }
+        for (const token of ["hairline", "hairlineSoft", "divider", "controlBorder", "scrollbar", "sheen"] as const) {
+          expect(color[token], `${name}: ${token}`).toMatch(/^rgba\(255, 255, 255, [\d.]+\)$/);
+        }
+      });
+    }
+
+    if (mode === "light") it(`${name}: are cool blue-violet greys, tinted but not coloured`, () => {
       const { color } = paletteFor(mode, accent);
       for (const token of NEUTRALS) {
         const hex = color[token];
-        // OLED's black planes are exempt: black has no hue. Its hover and pressed
-        // fills, and the inks, are still held to the rule.
-        if (mode === "oled" && hex === "#000000") continue;
         const [r, g, b] = channels(hex);
         // Blue over red over green: a blue-violet lean, not blue-grey, not teal, not beige.
         expect(b, `${name}: ${token} ${hex} is not violet-leaning`).toBeGreaterThan(g);
@@ -321,32 +331,42 @@ describe("the neutrals", () => {
       }
     });
 
-    it(`${name}: the selected row is the accent washed into the surface`, () => {
-      const { color } = paletteFor(mode, accent);
-      const gap = hueGap(hsl(color.surfaceSelected).hue, hsl(color.accent).hue);
-      expect(gap, `${name}: ${color.surfaceSelected} drifts from ${color.accent}`).toBeLessThanOrEqual(25);
-    });
+    if (mode === "light") {
+      it(`${name}: the selected row is the accent washed into the surface`, () => {
+        const { color } = paletteFor(mode, accent);
+        const gap = hueGap(hsl(color.surfaceSelected).hue, hsl(color.accent).hue);
+        expect(gap, `${name}: ${color.surfaceSelected} drifts from ${color.accent}`).toBeLessThanOrEqual(25);
+      });
+    } else {
+      it(`${name}: the selected row is the same neutral grey for every accent`, () => {
+        expect(paletteFor(mode, accent).color.surfaceSelected).toBe(paletteFor(mode, "space").color.surfaceSelected);
+      });
+    }
   }
 
-  it("dark is a notch darker than it first shipped, and still indigo", () => {
+  it("dark is Notion-like grey: a #191919 canvas under lighter chrome and panes", () => {
     const { color } = paletteFor("dark");
-    expect(relativeLuminance(color.canvas)).toBeLessThan(relativeLuminance("#0B0A1A"));
-    expect(relativeLuminance(color.surface)).toBeLessThan(relativeLuminance("#13112A"));
-    expect(color.canvas).not.toBe("#000000");
+    expect(color.canvas).toBe("#191919");
+    expect(color.chrome).toBe("#202020");
+    expect(color.surface).toBe("#252525");
+    expect(color.surfaceHover).toBe("#2C2C2C");
+    expect(color.surfaceActive).toBe("#373737");
+    expect(color.hairline).toBe("rgba(255, 255, 255, 0.09)");
+    expect(color.inkBody).toBe("#D4D4D4");
+    // Light is untouched by the dark rework.
+    expect(paletteFor("light").color.canvas).toBe("#EDECF4");
   });
 
-  it("OLED is true black where it can be, and violet in its lines", () => {
+  it("OLED is true black where it can be, with neutral grey states and lines", () => {
     const { color } = paletteFor("oled");
     for (const token of ["canvas", "surface", "chrome"] as const) expect(color[token]).toBe("#000000");
     for (const token of ["hairline", "hairlineSoft", "divider", "controlBorder"] as const) {
-      const match = /^rgba\((\d+), (\d+), (\d+), [\d.]+\)$/.exec(color[token]);
-      expect(match, `${token} ${color[token]}`).not.toBeNull();
-      const [r, g, b] = match!.slice(1, 4).map(Number);
-      expect(b, `${token} is not violet-tinted`).toBeGreaterThan(r);
-      expect(r, `${token} is not violet-tinted`).toBeGreaterThan(g);
+      expect(color[token], `${token} ${color[token]}`).toMatch(/^rgba\(255, 255, 255, [\d.]+\)$/);
     }
+    // Stronger than dark's, since nothing else separates the black planes.
+    expect(color.hairline).not.toBe(paletteFor("dark").color.hairline);
     // The edge is the one line OLED adds: invisible elsewhere, drawn here.
-    expect(color.edge).toMatch(/^rgba\(200, 188, 255, /);
+    expect(color.edge).toMatch(/^rgba\(255, 255, 255, /);
     expect(paletteFor("dark").color.edge).toBe("transparent");
     expect(paletteFor("light").color.edge).toBe("transparent");
     // Ink, accent and danger are dark's, unchanged.

@@ -2043,9 +2043,40 @@ try {
       canvas: getComputedStyle(document.body).backgroundColor,
     }));
 
+  // Dark is Notion-like neutral grey: a #191919 canvas and untinted hover and selection.
+  await modeRadios.filter({ hasText: "Dark" }).click();
+  await page.waitForTimeout(150);
+  const darkTokens = await page.evaluate(() => {
+    const style = document.documentElement.style;
+    const read = (name) => style.getPropertyValue(`--wn-${name}`).trim().toUpperCase();
+    return {
+      canvas: getComputedStyle(document.body).backgroundColor,
+      hover: read("surfaceHover"),
+      selected: read("surfaceSelected"),
+      hairline: read("hairline"),
+    };
+  });
+  const neutral = (hex) => /^#([0-9A-F]{2})\1\1$/.test(hex);
+  check(
+    "choosing Dark paints the neutral #191919 canvas with grey hover and selection",
+    darkTokens.canvas === "rgb(25, 25, 25)" && neutral(darkTokens.hover) && neutral(darkTokens.selected) &&
+      darkTokens.hairline.startsWith("RGBA(255, 255, 255"),
+    JSON.stringify(darkTokens),
+  );
+
   await modeRadios.filter({ hasText: "OLED" }).click();
   await page.waitForTimeout(150);
   let state = await themeState();
+  const oledStates = await page.evaluate(() =>
+    ["surfaceHover", "surfaceActive", "surfaceSelected", "edge"].map((name) =>
+      document.documentElement.style.getPropertyValue(`--wn-${name}`).trim().toUpperCase(),
+    ),
+  );
+  check(
+    "OLED's hover, pressed, selected and edge are neutral grey, not violet",
+    oledStates.slice(0, 3).every(neutral) && oledStates[3].startsWith("RGBA(255, 255, 255"),
+    JSON.stringify(oledStates),
+  );
   check(
     "choosing OLED paints true black",
     state.theme === "oled" && state.canvas === "rgb(0, 0, 0)" &&
