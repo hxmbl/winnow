@@ -431,6 +431,8 @@ type Props = {
   signals: ReadonlyMap<number, EmailSignals>;
   selectedId: number | null;
   cursorIndex: number;
+  /** Bumped by the store when the cursor moved by navigation. See the reveal effect. */
+  revealSeq: number;
   unreadIds: ReadonlySet<number>;
   freshIds: ReadonlySet<number>;
   emptyReason: EmptyState["reason"];
@@ -460,6 +462,7 @@ function MessageList({
   signals,
   selectedId,
   cursorIndex,
+  revealSeq,
   unreadIds,
   freshIds,
   emptyReason,
@@ -658,26 +661,30 @@ function MessageList({
   }, [items, offsets, scrollTop]);
 
   /**
-   * Keep the cursor's row in view.
+   * Bring the cursor's row into view — once per navigation, and only if it is off screen.
    *
-   * `block: "nearest"` matters: `"center"` would yank the list on every `j` press. And
-   * this follows the *cursor* rather than the selection, because `j` moves the cursor
-   * without opening anything.
+   * Keyed on `revealSeq`, which the store bumps only when the cursor moved by navigation
+   * (`j`/`k`, arrows, prev/next, a deep link, the auto-advance after marking unread). It
+   * used to run whenever the cursor index, the items or the offsets changed — and the
+   * offsets change every time a newly mounted row is measured, which is exactly what
+   * scrolling does. So a user who opened a message and scrolled away was yanked back to
+   * it a frame later, and again on every sync. A click opens the row under the pointer,
+   * which is already on screen, so it does not bump the sequence at all.
    *
-   * The dependency is the *cursor index*, not `threads`: `threads` is a fresh array on
-   * every derive, so it made this run on every store change — including the 80ms debounced
-   * reclassify after a weight tweak — and yank a user who had scrolled away back to the
-   * cursor. The count is included because the list can *shrink* under a fixed cursor index.
+   * `block: "nearest"` semantics: a row already fully visible is left alone.
    */
+  const revealedSeq = useRef(revealSeq);
   useEffect(() => {
+    if (revealedSeq.current === revealSeq) return;
     if (cursorIndex < 0) return;
     const element = scroller;
     if (!element) return;
+    // A list hidden behind the phone reader has no height; reveal when it is back.
+    if (element.clientHeight === 0) return;
+    revealedSeq.current = revealSeq;
 
     // Scroll by *offset*, not by `querySelectorAll` index: only a window of the list is
-    // mounted, so an index into the DOM is an index into whatever happened to be visible,
-    // and rows whose signals were missing were skipped at render time, shifting every
-    // index after them.
+    // mounted, so an index into the DOM is an index into whatever happened to be visible.
     const rowIndex = rowIndexForCursor(items, cursorIndex);
     if (rowIndex === null) return;
 
@@ -690,7 +697,7 @@ function MessageList({
 
     element.scrollTop = target;
     setScrollTop(target);
-  }, [cursorIndex, threads.length, items, offsets, scroller]);
+  }, [revealSeq, cursorIndex, items, offsets, scroller, viewportHeight]);
 
   /**
    * Carry keyboard focus along with the cursor, but only when it is already on a row.

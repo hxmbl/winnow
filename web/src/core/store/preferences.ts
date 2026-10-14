@@ -47,5 +47,10 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
       (sender): sender is string => typeof sender === "string" && sender.includes("@"),
     );
   }
+  if (Array.isArray(source.mutedSenders)) {
+    out.mutedSenders = source.mutedSenders.filter(
+      (sender): sender is string => typeof sender === "string" && sender.includes("@"),
+    );
+  }
   return out;
 }

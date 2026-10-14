@@ -651,6 +651,35 @@ export function App({ store }: Props) {
     });
   }, []);
 
+  /**
+   * Read/unread for a message, with the exit that marking unread implies.
+   *
+   * Marking the *open* message unread moves on — the next row on the desktop, the list on
+   * a phone (see `store.markUnreadAndMoveOn`); on a phone focus goes back to the row, as
+   * Back does. Marking read, or toggling a message that is not open, is a plain toggle.
+   */
+  const toggleReadFor = useCallback((id: number) => {
+    const s = storeRef.current;
+    const email = s.getSnapshot().all.find((candidate) => candidate.id === id);
+    if (!email) return;
+    if (email.unread) {
+      s.setRead(id, true);
+      return;
+    }
+    const phoneNow = phoneRef.current;
+    const wasOpen = snapshotRef.current.view.selected?.id === id;
+    s.markUnreadAndMoveOn(id, { phone: phoneNow });
+    if (phoneNow && wasOpen) {
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(`[data-row-count] button[data-message-id="${id}"]`)
+          ?.focus({ preventScroll: true });
+      });
+    }
+  }, []);
+  const toggleReadRef = useRef(toggleReadFor);
+  toggleReadRef.current = toggleReadFor;
+
   const handleSelectRow = useCallback((messageId: number) => {
     const s = storeRef.current;
     const index = snapshotRef.current.view.threads.findIndex(
@@ -959,7 +988,7 @@ export function App({ store }: Props) {
           if (selectedId !== undefined) s.trash(selectedId);
           break;
         case "toggleRead":
-          if (selectedId !== undefined) s.toggleRead(selectedId);
+          if (selectedId !== undefined) toggleReadRef.current(selectedId);
           break;
         case "markAllRead":
           // The mailbox on screen and nothing else — including not the spam folder.
@@ -1439,6 +1468,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             signals={view.signals}
             selectedId={listSelectedId}
             cursorIndex={listCursor}
+            revealSeq={snapshot.revealSeq}
             unreadIds={unreadIds}
             freshIds={snapshot.recentIds}
             emptyReason={view.result.emptyReason}
@@ -1511,8 +1541,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 onStar: act((s, snap) => {
                   if (snap.view.selected) s.toggleStar(snap.view.selected.id);
                 }),
-                onRead: act((s, snap) => {
-                  if (snap.view.selected) s.toggleRead(snap.view.selected.id);
+                onRead: act((_s, snap) => {
+                  if (snap.view.selected) toggleReadFor(snap.view.selected.id);
                 }),
                 onArchive: act((s, snap) => {
                   if (snap.view.selected) s.archive(snap.view.selected.id);

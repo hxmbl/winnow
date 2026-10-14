@@ -33,6 +33,7 @@ import {
   FILTER_LABELS,
   filterKey,
   parseFilterKey,
+  senderFilter,
   PERMANENT_FILTERS,
   NAVIGATION_ITEMS,
   NEUTRAL_SIGNALS,
@@ -216,6 +217,13 @@ export type Preferences = {
   /** How often, in seconds. */
   backgroundSyncInterval: number;
   blockedSenders: string[];
+  /**
+   * Senders whose mail still arrives and is still listed, but never notifies and is not
+   * counted in the unread badge. Gentler than `blockedSenders`, which hides the mail.
+   * Local to Winnow: Gmail's API has no per-sender mute without a filter, and filters
+   * need a settings scope Winnow does not ask for.
+   */
+  mutedSenders: string[];
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -227,6 +235,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   backgroundSync: true,
   backgroundSyncInterval: 300,
   blockedSenders: [],
+  mutedSenders: [],
 };
 
 /** Where the app is in its lifecycle. Drives which screen is shown. */
@@ -281,6 +290,17 @@ export type StoreState = {
    * is also "nothing selected yet".
    */
   cursorIndex: number;
+  /**
+   * Bumped whenever the cursor moved by *navigation* — `j`/`k`, the arrows, prev/next,
+   * a deep link, or the auto-advance after marking a message unread — and never by a
+   * click or a data change.
+   *
+   * The list scrolls a row into view only when this changes. Following the cursor index
+   * itself scrolled on every re-render that touched the list (a measured row height, a
+   * sync, a reclassify), which snapped a user who had scrolled away from the open message
+   * straight back to it.
+   */
+  revealSeq: number;
 
   preferences: Preferences;
   learning: LearningModel;
@@ -668,6 +688,7 @@ export class WinnowStore {
       searchQuery: "",
       selectedId: null,
       cursorIndex: NO_CURSOR,
+      revealSeq: 0,
       preferences: { ...DEFAULT_PREFERENCES, ...options.preferences },
       learning: LearningModel.initial(),
       overlay: "none",
@@ -1355,16 +1376,32 @@ export class WinnowStore {
   private async notifyIfNew(recent: ReadonlySet<number>): Promise<void> {
     if (!this.state.preferences.notificationsEnabled || !this.platform) return;
     if (recent.size === 0) return;
-    const arrived = this.state.all.filter((email) => recent.has(email.id));
+    // A muted sender's mail arrives silently: that is what muting them means.
+    const arrived = this.state.all.filter(
+      (email) => recent.has(email.id) && !this.isSenderMuted(email.sender),
+    );
     if (arrived.length === 0) return;
     await this.platform.notifyNewMail(arrived).catch(() => undefined);
+  }
+
+  /** The OS badge: the mailbox's unread count, less mail from muted senders. */
+  badgeCount(): number {
+    const muted = this.state.preferences.mutedSenders;
+    if (muted.length === 0) return this.view.unreadCount;
+    const keys = new Set(muted.map((s) => s.toLowerCase()));
+    const blocked = new Set(this.state.preferences.blockedSenders.map((s) => s.toLowerCase()));
+    const mutedUnread = this.state.all.filter((email) => {
+      const sender = email.sender.toLowerCase();
+      return email.unread && email.mailbox === this.state.mailbox && keys.has(sender) && !blocked.has(sender);
+    }).length;
+    return Math.max(0, this.view.unreadCount - mutedUnread);
   }
 
   /** Push badge count and sync cadence to the OS. */
   private async applyPlatform(): Promise<void> {
     if (!this.platform) return;
     const { preferences } = this.state;
-    await this.platform.setUnreadBadge(this.view.unreadCount).catch(() => undefined);
+    await this.platform.setUnreadBadge(this.badgeCount()).catch(() => undefined);
     // The cadence is only meaningful on the desktop; on the web the platform no-ops.
     await this.platform
       .setBackgroundSync(
@@ -1443,6 +1480,7 @@ export class WinnowStore {
     this.set({
       cursorIndex: next,
       selectedId: threads[next]?.representative.id ?? null,
+      revealSeq: this.state.revealSeq + 1,
     });
   }
 
@@ -1473,7 +1511,7 @@ export class WinnowStore {
       (row) => row.representative.id === id,
     );
     if (visibleAt >= 0) {
-      this.set({ cursorIndex: visibleAt, selectedId: id, overlay: "none" });
+      this.set({ cursorIndex: visibleAt, selectedId: id, overlay: "none", revealSeq: this.state.revealSeq + 1 });
       return true;
     }
 
@@ -1493,7 +1531,7 @@ export class WinnowStore {
     // The row index is only known after `set` re-derives the list, so the cursor is
     // placed by looking the id up again.
     const nowAt = this.view.threads.findIndex((row) => row.representative.id === id);
-    this.set({ cursorIndex: nowAt >= 0 ? nowAt : NO_CURSOR });
+    this.set({ cursorIndex: nowAt >= 0 ? nowAt : NO_CURSOR, revealSeq: this.state.revealSeq + 1 });
     return true;
   }
 
@@ -1788,6 +1826,125 @@ export class WinnowStore {
     this.mutate(id, () => ({ ...email, unread }), async () => {
       await this.backend?.setRead(id, !unread);
     });
+  }
+
+  /** Set the read state outright, rather than flipping it. A no-op when it already holds. */
+  setRead(id: number, read: boolean): void {
+    const email = this.state.all.find((candidate) => candidate.id === id);
+    if (!email || email.unread === !read) return;
+    this.mutate(id, () => ({ ...email, unread: !read }), async () => {
+      await this.backend?.setRead(id, read);
+    });
+  }
+
+  /**
+   * Mark the open message unread and get out of its way.
+   *
+   * Marking something unread is saying "not now", so the reader leaving is the point:
+   *
+   *   - **Desktop** advances to the next row in the list, the way Gmail's auto-advance
+   *     does; with no next row the reader closes onto the empty pane.
+   *   - **Phone** goes back to the list, with no current row, at the scroll position it
+   *     was left at — the same exit as Back.
+   *
+   * Opening a message never marks it read in Winnow, so moving on cannot quietly undo
+   * the unread flag; the tests pin that.
+   *
+   * A message that is not the open one is simply marked unread.
+   */
+  markUnreadAndMoveOn(id: number, { phone = false }: { phone?: boolean } = {}): void {
+    const threads = this.view.threads;
+    const index = threads.findIndex((row) => row.representative.id === id);
+    const wasOpen = this.state.selectedId === id;
+    this.setRead(id, false);
+    if (!wasOpen) return;
+    if (phone) {
+      this.closeReader({ dropCursor: true });
+      return;
+    }
+    // The list is unchanged by an unread flag, so the next row is the one after it.
+    const next = index >= 0 ? threads[index + 1] : undefined;
+    if (next) {
+      this.set({
+        cursorIndex: index + 1,
+        selectedId: next.representative.id,
+        revealSeq: this.state.revealSeq + 1,
+      });
+    } else {
+      this.set({ selectedId: null });
+    }
+  }
+
+  // ── Batch actions, for a multi-row selection ──────────────────────────────
+
+  /**
+   * Archive every id, each through `archive` so the per-mailbox meaning holds (archive
+   * from the inbox, back to the inbox from the archive, nothing from Sent).
+   */
+  archiveMany(ids: Iterable<number>): void {
+    for (const id of [...ids]) this.archive(id);
+  }
+
+  /** Move every id to the bin, or delete permanently from the bin. */
+  trashMany(ids: Iterable<number>): void {
+    for (const id of [...ids]) this.trash(id);
+  }
+
+  moveMany(ids: Iterable<number>, mailbox: Mailbox): void {
+    for (const id of [...ids]) this.move(id, mailbox);
+  }
+
+  setReadMany(ids: Iterable<number>, read: boolean): void {
+    for (const id of [...ids]) this.setRead(id, read);
+  }
+
+  // ── Senders ───────────────────────────────────────────────────────────────
+
+  /**
+   * Mute a sender: their mail stays in the list but never notifies and is not counted
+   * in the unread badge. Stored lowercased-insensitive like `blockedSenders`.
+   */
+  muteSender(sender: string): void {
+    const muted = this.state.preferences.mutedSenders;
+    if (muted.some((s) => s.toLowerCase() === sender.toLowerCase())) return;
+    const next = [...muted, sender];
+    this.set(
+      { preferences: { ...this.state.preferences, mutedSenders: next } },
+      { preferences: { mutedSenders: next } },
+    );
+    void this.applyPlatform();
+  }
+
+  unmuteSender(sender: string): void {
+    const next = this.state.preferences.mutedSenders.filter(
+      (s) => s.toLowerCase() !== sender.toLowerCase(),
+    );
+    this.set(
+      { preferences: { ...this.state.preferences, mutedSenders: next } },
+      { preferences: { mutedSenders: next } },
+    );
+    void this.applyPlatform();
+  }
+
+  isSenderMuted(sender: string): boolean {
+    const key = sender.toLowerCase();
+    return this.state.preferences.mutedSenders.some((s) => s.toLowerCase() === key);
+  }
+
+  /**
+   * Show every message from one sender: the sender filter, alone, with the search
+   * cleared — "all mail from" should not be narrowed by whatever was typed before.
+   */
+  showSender(sender: string): void {
+    this.set({ searchQuery: "", selectedId: null, cursorIndex: NO_CURSOR });
+    this.setFilters([senderFilter(sender)]);
+  }
+
+  /** Search for a subject, with any "Re:"/"Fwd:" prefixes taken off first. */
+  searchSubject(subject: string): void {
+    const bare = subject.replace(/^\s*((re|fwd?|aw|sv|tr)\s*:\s*)+/i, "").trim();
+    this.setFilters([]);
+    this.setSearchQuery(bare);
   }
 
   /**
