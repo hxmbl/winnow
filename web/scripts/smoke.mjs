@@ -1152,8 +1152,8 @@ try {
   // ── Recipient autocomplete ───────────────────────────────────────────────────
   //
   // Sourced from the mail already in the store — senders, and the recipients on the
-  // user's own sent mail, which is why that folder exists at all. No network, no
-  // contacts API, nothing to consent to.
+  // user's own sent mail, which is why that folder exists at all — plus, in the demo, a
+  // seeded stand-in for the Google contacts a real account can opt in to. No network.
   section("recipient autocomplete");
 
   const toField = page.locator('input[aria-label="To"]');
@@ -1175,6 +1175,19 @@ try {
   );
   const offered = await suggestions.count();
   check("and offers people straight away", offered > 0 && offered <= 8, `${offered} rows`);
+
+  // The demo's seeded Google address book: a saved contact the mailbox has never seen
+  // is still offered, with no network, which is what the offline demo promises.
+  await toField.type("jonah");
+  await page.waitForTimeout(300);
+  check(
+    "a saved Google contact with no mail is offered in the demo",
+    (await suggestions.count()) === 1 &&
+      (await suggestions.first().innerText()).includes("Jonah Mercer"),
+    JSON.stringify((await suggestions.first().innerText().catch(() => "")).trim()),
+  );
+  await toField.fill("");
+  await page.waitForTimeout(200);
 
   // The demo's own cast. "Helena Ruiz" is one correspondent, reached both as a sender
   // and on a sent message, so this cannot be satisfied by an address that merely shares

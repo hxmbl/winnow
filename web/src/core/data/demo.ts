@@ -32,6 +32,7 @@ import { parseAddressList } from "../mail/html";
 import { DEMO_NEWSLETTER_HTML, DEMO_NEWSLETTER_TEXT } from "./demoNewsletter";
 import type { Email, EmailCategory, Mailbox } from "../model/email";
 import type { TrashRecord } from "../model/profile";
+import type { GoogleContact } from "../contacts/google";
 
 /**
  * The reference instant. Exported so the list can be handed the same value and
@@ -1415,6 +1416,28 @@ export function demoMailbox(now: number = Date.now()): { emails: Email[]; now: n
     now: DEMO_NOW + shift,
   };
 }
+
+/**
+ * The demo's Google address book: what `GoogleContactsSync` would have stored for a
+ * real account that opted in, so the composer shows the merge with no network.
+ *
+ * Chosen to exercise every case the ranking has: a saved contact who is also a frequent
+ * correspondent (Dana), a saved contact the mail barely mentions (Helena), saved
+ * contacts the mailbox has never seen (Jonah, Rosa), an other contact who is also in
+ * the mail (Ana), and other contacts known only to Google (Lena, Theo). The demo user's
+ * own address is deliberately absent — the index would drop it anyway.
+ *
+ * Every address is on `.example`, like the rest of the seed.
+ */
+export const DEMO_CONTACTS: readonly GoogleContact[] = [
+  { address: "dana@northwind.example", name: "Dana Whitfield", source: "saved" },
+  { address: "helena@quarrylane.example", name: "Helena Ruiz", source: "saved" },
+  { address: "jonah.mercer@quarrylane.example", name: "Jonah Mercer", source: "saved" },
+  { address: "rosa@fieldnotes.example", name: "Rosa Lindqvist", source: "saved" },
+  { address: "ana@northwind.example", name: "Ana Ferreira", source: "other" },
+  { address: "lena.park@studio.example", name: "Lena Park", source: "other" },
+  { address: "theo@printshop.example", source: "other" },
+];
 
 /**
  * Senders the user has binned, for the trash-bias half of the profile.

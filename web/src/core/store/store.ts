@@ -50,6 +50,7 @@ import {
 import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
 import { buildContactIndex, type ContactIndex } from "../contacts/index";
+import type { GoogleContact } from "../contacts/google";
 import { defaultWeights, type SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
 import type { SyncProgress } from "../gmail/sync";
@@ -178,6 +179,16 @@ export type SessionStatus =
   | "ready"
   | "error";
 
+/**
+ * Where Google contacts stand, for the opt-in.
+ *
+ *   - `demo` — the demo mailbox, whose address book is seeded and offline.
+ *   - `unavailable` — signed out, or a host that cannot ask.
+ *   - `not_granted` — signed in without the contact scopes; the opt-in is offered.
+ *   - `granted` — the address book is part of the suggestions.
+ */
+export type ContactsAccessState = "demo" | "unavailable" | "not_granted" | "granted";
+
 export type StoreState = {
   status: SessionStatus;
   /** Set when `status` is `error`, or when a background action failed. */
@@ -186,6 +197,14 @@ export type StoreState = {
   notice: string | null;
 
   account: { email: string } | null;
+
+  /**
+   * Google's address book, merged into the contact index. Empty until the user opts in.
+   *
+   * Replaced whole, never mutated, so the contact index can memoise on its identity.
+   */
+  googleContacts: readonly GoogleContact[];
+  contactsAccess: ContactsAccessState;
 
   /** Every message the app knows about, across all mailboxes. */
   all: Email[];
@@ -404,6 +423,8 @@ type Undo = () => void;
 export type StoreOptions = {
   /** Seed messages for demo mode. */
   seed?: readonly Email[];
+  /** The demo's address book, so suggestions show the merge with no network. */
+  seedContacts?: readonly GoogleContact[];
   seedTrash?: readonly TrashRecord[];
   backend?: MailBackend;
   platform?: PlatformBridge;
@@ -466,6 +487,8 @@ export class WinnowStore {
 
   private backend: MailBackend | undefined;
   private platform: PlatformBridge | undefined;
+  /** The demo's address book, restored whenever the demo is. */
+  private readonly seedContacts: readonly GoogleContact[];
 
   /**
    * Resident HTML bodies, by message id. Bounded by `BODY_RETENTION`, and held apart
@@ -516,6 +539,7 @@ export class WinnowStore {
   constructor(options: StoreOptions = {}) {
     this.backend = options.backend;
     this.platform = options.platform;
+    this.seedContacts = options.seedContacts ?? [];
     this.trashSenders = (options.seedTrash ?? []).map((row) => row.sender);
 
     const seed = (options.seed ?? []).slice();
@@ -524,6 +548,8 @@ export class WinnowStore {
       error: null,
       notice: null,
       account: null,
+      googleContacts: options.backend ? [] : this.seedContacts,
+      contactsAccess: options.backend ? "unavailable" : "demo",
       all: seed,
       mailbox: "inbox",
       activeFilters: [],
@@ -629,17 +655,29 @@ export class WinnowStore {
   private contactCache: {
     all: readonly Email[];
     self: string | null;
+    google: readonly GoogleContact[];
     index: ContactIndex;
   } | null = null;
 
   private contacts(): ContactIndex {
     const all = this.state.all;
     const self = this.state.account?.email ?? null;
+    const google = this.state.googleContacts;
     const hit = this.contactCache;
-    if (hit && hit.all === all && hit.self === self) return hit.index;
-    const index = buildContactIndex(all, { selfAddress: self });
-    this.contactCache = { all, self, index };
+    if (hit && hit.all === all && hit.self === self && hit.google === google) return hit.index;
+    const index = buildContactIndex(all, { selfAddress: self, googleContacts: google });
+    this.contactCache = { all, self, google, index };
     return index;
+  }
+
+  /**
+   * Adopt Google's address book, and say where access stands.
+   *
+   * Called by the app after a refresh, and with `[]` when access is missing or revoked —
+   * so a permission the user took back stops shaping the suggestions immediately.
+   */
+  setGoogleContacts(contacts: readonly GoogleContact[], access: ContactsAccessState): void {
+    this.set({ googleContacts: contacts.slice(), contactsAccess: access });
   }
 
   private inboxAnalysis(): { profile: UserProfile; signals: SignalMap } {
@@ -983,6 +1021,11 @@ export class WinnowStore {
       error: null,
       // Live mail is real, so the wall clock is the right reference instant.
       now: Date.now(),
+      // The demo's seeded address book is not this account's. The app adopts the real
+      // one (if the user has opted in) once the session says where access stands.
+      ...(this.state.contactsAccess === "demo"
+        ? { googleContacts: [], contactsAccess: "unavailable" as const }
+        : {}),
     });
     await this.runSync({ initial: true });
     // The retained connection only exists so a *failed* connect can be retried;
@@ -1937,6 +1980,11 @@ export class WinnowStore {
     this.set({ notice: null });
   }
 
+  /** Show a non-blocking notice — something worth saying that is not a failure. */
+  setNotice(message: string | null): void {
+    this.set({ notice: message });
+  }
+
   setError(message: string | null): void {
     this.set({ error: message });
   }
@@ -1960,6 +2008,8 @@ export class WinnowStore {
     this.set({
       status: "ready",
       account: null,
+      googleContacts: this.seedContacts,
+      contactsAccess: "demo",
       selectedId: null,
       cursorIndex: NO_CURSOR,
       activeFilters: [],
@@ -2012,6 +2062,8 @@ export class WinnowStore {
       ...this.state,
       status: "signed_out",
       account: null,
+      googleContacts: [],
+      contactsAccess: "unavailable",
       all: [],
       selectedId: null,
       cursorIndex: NO_CURSOR,
