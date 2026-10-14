@@ -23,6 +23,7 @@ import {
   MAILBOX_LABEL,
   isBodyLoaded,
   withLoadedBody,
+  withCode,
   type Email,
   type LoadedBody,
   type Mailbox,
@@ -178,9 +179,12 @@ function partitionBodies(emails: readonly Email[]): {
   }
 
   const stripped = emails.map((email) => {
-    if (email.bodyHtml === undefined) return email;
+    // Rows cached before codes existed are looked at once, on the way in.
+    const coded = withCode(email);
+    if (coded !== email) changed = true;
+    if (coded.bodyHtml === undefined) return coded;
     changed = true;
-    return { ...email, bodyHtml: undefined };
+    return { ...coded, bodyHtml: undefined };
   });
 
   // The same array when nothing had a body, so the demo seed keeps the identity
@@ -720,10 +724,16 @@ export class WinnowStore {
    * refreshed on a slow tick; the store owns the timer because the store owns `now`.
    */
   startClock(): () => void {
+    let last = Date.now();
     const tick = (): void => {
-      // Demo mode keeps its fixed instant, which is what makes the seed's day sections
-      // and timestamps deterministic.
-      if (this.backend) this.set({ now: Date.now() });
+      const wall = Date.now();
+      // Live mail reads the wall clock. The demo's instant is wherever the seed was put
+      // (`demoMailbox` moves it onto the real clock at boot) and moves on at the same
+      // rate from there, so its day sections are fixed at boot while things that age,
+      // like a one-time code's Copy chip, still age out.
+      if (this.backend) this.set({ now: wall });
+      else if (wall > last) this.set({ now: this.state.now + (wall - last) });
+      last = wall;
     };
     const handle = setInterval(tick, CLOCK_INTERVAL_MS);
     return () => clearInterval(handle);

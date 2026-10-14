@@ -536,3 +536,20 @@ describe("toEmail — List-Unsubscribe", () => {
     expect(toEmail(message())!.unsubscribe).toBeUndefined();
   });
 });
+
+describe("one-time codes", () => {
+  it("finds the code from the subject and snippet on a metadata sync", () => {
+    const email = toEmail(
+      message({
+        snippet: "Your verification code is 418 902. It expires in 10 minutes.",
+        payload: { mimeType: "text/plain", headers: [{ name: "Subject", value: "Your verification code" }] },
+      }),
+      { format: "metadata" },
+    )!;
+    expect(email.code).toBe("418902");
+  });
+
+  it("says null, not absent, when it looked and found none", () => {
+    expect(toEmail(message())!.code).toBeNull();
+  });
+});

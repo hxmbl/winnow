@@ -5,6 +5,7 @@
  */
 
 import type { Unsubscribe } from "../mail/unsubscribe";
+import { detectCode } from "../mail/otp";
 
 /** Unix milliseconds (app-wide). */
 export type Millis = number;
@@ -192,7 +193,20 @@ export type Email = {
    * than guessing from a link in the body.
    */
   unsubscribe?: Unsubscribe;
+  /**
+   * The one-time code the message carries ("418902"), found locally at map time from
+   * the subject and the text (`core/mail/otp.ts`). `null` means "looked, none";
+   * absent means "not looked yet" (a cache row from before codes existed), which
+   * `withCode` fills in on the way into the store.
+   */
+  code?: string | null;
 };
+
+/** The message with `code` settled: kept if already looked for, detected otherwise. */
+export function withCode(email: Email): Email {
+  if (email.code !== undefined) return email;
+  return { ...email, code: detectCode(email.subject, email.body) };
+}
 
 /** True when `body`/`bodyHtml`/`attachments` hold the whole message, not a metadata stand-in. */
 export function isBodyLoaded(email: Pick<Email, "bodyLoaded">): boolean {
@@ -225,6 +239,7 @@ export function keepLoadedBody(fresh: Email, cached: Email | undefined): Email {
     attachments: cached.attachments,
     bodyLoaded: true,
     attachmentHint: undefined,
+    code: cached.code ?? fresh.code,
   };
 }
 
@@ -237,6 +252,8 @@ export function withLoadedBody(email: Email, loaded: LoadedBody): Email {
     attachments: loaded.attachments,
     bodyLoaded: true,
     attachmentHint: undefined,
+    // The snippet may have cut the code off; the whole body is the better witness.
+    code: email.code || detectCode(email.subject, loaded.body),
   };
 }
 

@@ -13,6 +13,7 @@
  *    when the message was received; a sender can put anything in `Date:`.
  */
 
+import { detectCode } from "../mail/otp";
 import {
   CATEGORY_MAP,
   type LoadedBody,
@@ -268,6 +269,9 @@ export function toEmail(
       headerValue(payload, "List-Unsubscribe"),
       headerValue(payload, "List-Unsubscribe-Post"),
     ),
+    // Subject plus the body we have: the snippet on a metadata sync, the decoded text
+    // on a full one.
+    code: detectCode(decodeMimeWord(headerValue(payload, "Subject") ?? ""), body),
   };
 }
 

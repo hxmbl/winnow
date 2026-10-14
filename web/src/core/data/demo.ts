@@ -31,7 +31,7 @@ import { hashId } from "../model/ids";
 import { parseAddressList } from "../mail/html";
 import { parseListUnsubscribe } from "../mail/unsubscribe";
 import { DEMO_NEWSLETTER_HTML, DEMO_NEWSLETTER_TEXT } from "./demoNewsletter";
-import type { Email, EmailCategory, Mailbox } from "../model/email";
+import { withCode, type Email, type EmailCategory, type Mailbox } from "../model/email";
 import type { TrashRecord } from "../model/profile";
 import type { GoogleContact } from "../contacts/google";
 
@@ -254,7 +254,9 @@ Device: MacBook Pro Location: London, United Kingdom`),
     id: "demo-codes-1",
     sender: "noreply@okta.com",
     name: "Okta",
-    at: 8 * MINUTE,
+    // Inside the list's five-minute window when the demo opens, so the row shows its
+    // "Copy 418 902" chip, and it ages out a few minutes later like real mail.
+    at: 2 * MINUTE,
     subject: "Your verification code",
     body: `
 Your verification code is 418 902.
@@ -1404,6 +1406,7 @@ function toEmail(seed: Seed): Email {
 /** Every demo message, newest first. */
 export const DEMO_EMAILS: readonly Email[] = seeds
   .map(toEmail)
+  .map(withCode)
   .sort((a, b) => b.receivedAt - a.receivedAt);
 
 /**

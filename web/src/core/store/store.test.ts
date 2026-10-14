@@ -900,9 +900,13 @@ describe("following a message by id", () => {
     // Filters are transient view state: a link has to reach its message, and doing nothing
     // would look exactly like a broken link.
     const store = demoStore();
-    const target = store.view.threads[2].representative.id;
+    const ids = store.view.threads.map((thread) => thread.representative.id);
     store.toggleFilter(builtinFilter("important"));
     expect(store.getSnapshot().activeFilters.length).toBeGreaterThan(0);
+    // One the filter hides, whatever the seed's order.
+    const shown = new Set(store.view.threads.map((thread) => thread.representative.id));
+    const target = ids.find((id) => !shown.has(id))!;
+    expect(target).toBeDefined();
 
     expect(store.focusMessage(target)).toBe(true);
     expect(store.getSnapshot().activeFilters).toHaveLength(0);
@@ -2030,5 +2034,25 @@ describe("sync status state", () => {
     ).rejects.toThrow("network down");
     expect(failing.getSnapshot().syncError).toBe("network down");
     expect(failing.getSnapshot().syncing).toBe(false);
+  });
+});
+
+describe("the demo's clock", () => {
+  it("moves on from the seed's instant at the wall clock's rate", () => {
+    // Fixed at boot so the day sections are stable, but not frozen: a one-time code's
+    // Copy chip has to age out in the demo too.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_800_000_000_000);
+      const store = new WinnowStore({ seed: [...DEMO_EMAILS], now: 1_000 });
+      const stop = store.startClock();
+      vi.advanceTimersByTime(60_000);
+      expect(store.getSnapshot().now).toBe(61_000);
+      vi.advanceTimersByTime(120_000);
+      expect(store.getSnapshot().now).toBe(181_000);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
