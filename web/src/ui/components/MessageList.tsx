@@ -577,10 +577,33 @@ function MessageList({
   useEffect(() => {
     if (!scroller) return;
 
-    const readViewport = (): void => setViewportHeight(scroller.clientHeight);
+    /*
+     * The scroll position survives the list being hidden.
+     *
+     * Below `lg` an open message hides the list with `display: none`, and Chromium drops a
+     * hidden scroller's offset — so Back on a phone used to land at the top of the inbox,
+     * or wherever the cursor effect dragged it. The last offset seen while the list was
+     * actually on screen is kept here and put back when it reappears.
+     */
+    let kept = scroller.scrollTop;
+    let shown = scroller.clientHeight > 0;
+
+    const readViewport = (): void => {
+      const height = scroller.clientHeight;
+      if (height > 0 && !shown && kept > 0 && Math.abs(scroller.scrollTop - kept) > 1) {
+        scroller.scrollTop = kept;
+        setScrollTop(scroller.scrollTop);
+      }
+      shown = height > 0;
+      setViewportHeight(height);
+    };
     readViewport();
 
-    const onScroll = (): void => setScrollTop(scroller.scrollTop);
+    const onScroll = (): void => {
+      // A scroll event on a hidden list is the browser zeroing it, not the user.
+      if (scroller.clientHeight > 0) kept = scroller.scrollTop;
+      setScrollTop(scroller.scrollTop);
+    };
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
     const observer =

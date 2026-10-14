@@ -2468,8 +2468,82 @@ try {
   await page.waitForTimeout(300);
   check(
     "and it works, bringing the dock back",
-    (await page.locator("text=Nothing selected").count()) > 0 && (await dock.count()) === 1,
+    (await page.locator("article h1").count()) === 0 && (await dock.count()) === 1,
   );
+
+  /*
+    No selection on a phone.
+
+    The list and the reader are never on screen together there, so a "current" row means
+    nothing: it would mark the message you just left. A fresh touch page, so nothing above
+    has moved a cursor: it must not open a message on its own, it must not draw or
+    announce a selected row while reading or after Back, there is no "Nothing selected"
+    placeholder anywhere in the document, and Back lands where the list was left.
+  */
+  const noSelect = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const tapPage = await noSelect.newPage();
+  tapPage.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  tapPage.on("pageerror", (error) => errors.push(String(error)));
+  await tapPage.goto(URL, { waitUntil: "networkidle" });
+  await tapPage.waitForSelector("[data-message-id]", { timeout: 10_000 });
+  await tapPage.waitForTimeout(500);
+  const listState = () =>
+    tapPage.evaluate(() => ({
+      reader: document.querySelectorAll("article h1").length,
+      current: document.querySelectorAll("[data-row-count] [aria-current]").length,
+      selectedRows: document.querySelectorAll("[data-row-count] .bg-surface-selected").length,
+      placeholder: document.body.textContent?.includes("Nothing selected") ?? false,
+      scrollTop: Math.round(document.querySelector("[data-row-count]")?.scrollTop ?? -1),
+      position: document.querySelector("[data-position]")?.textContent?.trim() ?? null,
+      ring: document.activeElement?.matches?.("[data-row-count] :focus-visible") ?? false,
+    }));
+  const onLoad = await listState();
+  check("the phone does not open a message on its own", onLoad.reader === 0, JSON.stringify(onLoad));
+  check(
+    "nor mark any row current, or render an empty reader",
+    onLoad.current === 0 && onLoad.selectedRows === 0 && !onLoad.placeholder,
+    JSON.stringify(onLoad),
+  );
+  await tapPage.locator("[data-row-count]").evaluate((element) => (element.scrollTop = 600));
+  await tapPage.waitForTimeout(300);
+  const leftAt = (await listState()).scrollTop;
+  // A tap on whatever row is under the thumb, not a locator: Playwright scrolls a
+  // located element into view first, which would move the list this is about to measure.
+  await tapPage.touchscreen.tap(195, 520);
+  await tapPage.waitForSelector("article h1", { timeout: 5_000 });
+  const whileReading = await listState();
+  check(
+    "a tap opens the reader, and the hidden list holds no selection",
+    whileReading.reader === 1 && whileReading.current === 0 && whileReading.selectedRows === 0,
+    JSON.stringify(whileReading),
+  );
+  await tapPage.locator('button[aria-label="Back to the list"]').first().tap();
+  await tapPage.waitForTimeout(400);
+  const afterBack = await listState();
+  check(
+    "Back returns to the list with no row highlighted or marked current",
+    afterBack.reader === 0 && afterBack.current === 0 && afterBack.selectedRows === 0 && !afterBack.ring,
+    JSON.stringify(afterBack),
+  );
+  check(
+    "and no position claimed in the list",
+    afterBack.position !== null && !afterBack.position.includes("of"),
+    afterBack.position ?? "none",
+  );
+  check("and no \"Nothing selected\" placeholder", !afterBack.placeholder);
+  check(
+    "at the scroll position the list was left at",
+    leftAt > 100 && Math.abs(afterBack.scrollTop - leftAt) <= 2,
+    `${leftAt} → ${afterBack.scrollTop}`,
+  );
+  check(
+    "rows are still plain buttons that open the message",
+    (await tapPage.locator("[data-row-count] button[data-message-id]").count()) > 3 &&
+      (await tapPage.locator("[data-row-count] [aria-selected]").count()) === 0,
+  );
+  await noSelect.close();
 
   // The rest is not about the phone, and the desktop masthead is where its helpers look.
   await page.setViewportSize({ width: 1440, height: 900 });

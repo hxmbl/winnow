@@ -1224,8 +1224,16 @@ export class WinnowStore {
     if (row) this.set({ selectedId: row.representative.id });
   }
 
-  closeReader(): void {
-    this.set({ selectedId: null });
+  /**
+   * Close the reader.
+   *
+   * `dropCursor` is for the phone, where the list and the reader are never on screen
+   * together: Back returns to a list with no current row, so the cursor goes with the
+   * message rather than lingering as "4 of 39" over a list nobody is moving through. The
+   * desktop keeps it, because there the cursor is where `j` carries on from.
+   */
+  closeReader({ dropCursor = false }: { dropCursor?: boolean } = {}): void {
+    this.set(dropCursor ? { selectedId: null, cursorIndex: NO_CURSOR } : { selectedId: null });
   }
 
   /**
