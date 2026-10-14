@@ -76,6 +76,8 @@ import {
   type Selection,
 } from "./ui/selection";
 import { mailtoAddress } from "./core/mail/unsubscribe";
+import { copyText } from "./ui/clipboard";
+import { CodeBar } from "./ui/components/CodeCopy";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -88,29 +90,6 @@ type OpenMenu = {
   /** Gets focus back when the menu closes by Escape or a choice. */
   trigger: HTMLElement | null;
 };
-
-/** Copy text, falling back to a hidden textarea where the async clipboard is refused. */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const area = document.createElement("textarea");
-      area.value = text;
-      area.setAttribute("readonly", "");
-      area.style.position = "fixed";
-      area.style.opacity = "0";
-      document.body.append(area);
-      area.select();
-      const ok = document.execCommand("copy");
-      area.remove();
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-}
 
 type Props = {
   /** The one piece of global state. Everything else is derived from it. */
@@ -774,6 +753,41 @@ export function App({ store }: Props) {
     if (!keep) setSelection(EMPTY_SELECTION);
   }, []);
 
+  /**
+   * One-time codes: copy from a row chip, the reader's bar, or `c`.
+   *
+   * `copiedCodeId` is the message just copied, so whichever surface shows its code says
+   * "Copied" for a moment, keyboard copies included; the sr-only line says it aloud.
+   */
+  const [copiedCodeId, setCopiedCodeId] = useState<number | null>(null);
+  const [codeAnnouncement, setCodeAnnouncement] = useState("");
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
+  const copyCode = useCallback(
+    (id: number) => {
+      const code = store.getSnapshot().all.find((email) => email.id === id)?.code;
+      if (!code) return;
+      void copyText(code).then((ok) => {
+        if (!ok) {
+          store.setError("Couldn't reach the clipboard. Select the code in the message to copy it.");
+          return;
+        }
+        setCopiedCodeId(id);
+        setCodeAnnouncement(`Copied code ${code}`);
+        if (copiedTimer.current) clearTimeout(copiedTimer.current);
+        copiedTimer.current = setTimeout(() => {
+          setCopiedCodeId(null);
+          setCodeAnnouncement("");
+        }, 1_600);
+      });
+    },
+    [store],
+  );
+  const copyCodeRef = useRef(copyCode);
+  copyCodeRef.current = copyCode;
+
   const openSenderMenu = useCallback((id: number, trigger: HTMLElement) => {
     setMenu({ kind: "sender", id, ids: [id], anchor: anchorFromElement(trigger), trigger });
   }, []);
@@ -1147,6 +1161,9 @@ export function App({ store }: Props) {
         case "toggleStar":
           if (selectedId !== undefined) s.toggleStar(selectedId);
           break;
+        case "copyCode":
+          if (snap.view.selected?.code) copyCodeRef.current(snap.view.selected.id);
+          break;
         case "archive":
           // Context-sensitive in the store, not here: the same key archives from the
           // inbox, unarchives from the archive and restores from the bin, and doing
@@ -1419,6 +1436,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       />
       )}
 
+      <p role="status" aria-live="polite" className="sr-only" data-code-announcement="">
+        {codeAnnouncement}
+      </p>
+
       {announcement && (
         <p aria-live="polite" aria-atomic="true" className="sr-only">
           {announcement}
@@ -1687,6 +1708,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             touchSelect={phone}
             onAvatar={openSenderMenu}
             onRowMenu={phone ? undefined : openRowMenu}
+            onCopyCode={copyCode}
+            copiedCodeId={copiedCodeId}
             className="min-w-0"
           />
         </div>
@@ -1740,6 +1763,16 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               onLoadBody={loadSelectedBody}
               phone={phone}
               senderPhoto={selected ? photos.get(selected.sender.toLowerCase()) : undefined}
+              codeBar={
+                selected?.code ? (
+                  <CodeBar
+                    code={selected.code}
+                    copied={copiedCodeId === selected.id}
+                    onCopy={() => copyCode(selected.id)}
+                    phone={phone}
+                  />
+                ) : null
+              }
               onSenderMenu={(trigger) => {
                 if (selected) openSenderMenu(selected.id, trigger);
               }}

@@ -18,7 +18,7 @@ import {
 function reachableCommandTypes(): Set<string> {
   const types = new Set<string>();
   const keys = [
-    ..."jkoseurfmuh#/,?!123456789".split(""),
+    ..."jkoseurfmuhc#/,?!123456789".split(""),
     "Enter",
     "Escape",
     "ArrowUp",
@@ -431,6 +431,7 @@ describe("the cheat sheet", () => {
       // Replying and forwarding need the reader open.
       r: context({ viewerOpen: true, hasActionTarget: true }),
       f: context({ viewerOpen: true, hasActionTarget: true }),
+      c: context({ viewerOpen: true, hasActionTarget: true }),
       // Escape closes the topmost layer; only the reader is open.
       Escape: context({ viewerOpen: true, hasActionTarget: true }),
       // Digits need a rail to address.
@@ -462,6 +463,7 @@ describe("the cheat sheet", () => {
       "dismissOverlay",
       "dismissNavigation",
       "toggleStar",
+      "copyCode",
       "archive",
       "trash",
       "toggleRead",
@@ -544,5 +546,15 @@ describe("the cheat sheet", () => {
     }
 
     expect(ambiguous).toEqual([]);
+  });
+});
+
+describe("copying a code", () => {
+  it("is c, with the reader open, and does not take Shift+C", () => {
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true })).toEqual({ type: "copyCode" });
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, viewerOpen: false, hasActionTarget: true })).toBeNull();
+    expect(commandForKey("C", { ...DEFAULT_CONTEXT, viewerOpen: true }, { shiftKey: true })).toBeNull();
+    // Nothing else claims `c`, compose included (there is no compose shortcut).
+    expect(BINDINGS.filter((binding) => binding.matches.keys?.includes("c"))).toHaveLength(1);
   });
 });

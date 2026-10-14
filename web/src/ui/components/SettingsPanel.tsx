@@ -81,12 +81,18 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="min-w-0">
+    /*
+      Wraps rather than squeezes. The label wants at least 14rem; a control that will not
+      fit beside that (a segmented control on a phone) drops to its own line under the
+      label, and the label keeps the full width. A small control (a switch, a button)
+      still sits on the right.
+    */
+    <div data-settings-row="" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="min-w-0 flex-[1_1_14rem]">
         <p className="text-ui font-medium text-ink-body">{label}</p>
         {hint && <p className="text-meta text-ink-subtle">{hint}</p>}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div data-settings-control="" className="max-w-full shrink-0">{children}</div>
     </div>
   );
 }

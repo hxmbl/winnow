@@ -508,6 +508,8 @@ type Props = {
   senderPhoto?: string;
   /** Open the sender menu from the header's avatar. */
   onSenderMenu?: (trigger: HTMLElement) => void;
+  /** The one-time code strip, drawn at the very top, above the sender. */
+  codeBar?: React.ReactNode;
 };
 
 export function Reader({
@@ -527,6 +529,7 @@ export function Reader({
   phone = false,
   senderPhoto,
   onSenderMenu,
+  codeBar = null,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -604,6 +607,8 @@ export function Reader({
       </div>
       )}
 
+      {codeBar}
+
       {/*
         The header.
 
@@ -611,7 +616,7 @@ export function Reader({
         layout does not otherwise have, so the separation is the padding below and the
         change in type size.
       */}
-      <div className={`flex items-start gap-3 px-5 pb-4 ${phone ? "pt-[max(1rem,env(safe-area-inset-top))]" : "pt-4"}`}>
+      <div className={`flex items-start gap-3 px-5 pb-4 ${phone && !codeBar ? "pt-[max(1rem,env(safe-area-inset-top))]" : "pt-4"}`}>
         {/*
           The sender's avatar — their photo, or the list's quiet monogram — and the door
           to the sender menu, as it is in the list. A button of its own; the name beside

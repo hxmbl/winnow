@@ -29,6 +29,7 @@ export type Command =
   | { type: "dismissOverlay" }
   | { type: "dismissNavigation" }
   | { type: "toggleStar" }
+  | { type: "copyCode" }
   | { type: "archive" }
   | { type: "trash" }
   | { type: "toggleRead" }
@@ -232,6 +233,15 @@ export const BINDINGS: readonly Binding[] = [
     matches: { keys: ["s"] },
     when: ({ context }) => context.hasActionTarget,
     command: { type: "toggleStar" },
+  },
+  {
+    // `c` is free: Winnow has no compose shortcut (new mail is not a feature yet), so
+    // nothing here collides with Gmail's "c to compose" habit.
+    keys: "c",
+    help: "Copy the open message's verification code",
+    matches: { keys: ["c"] },
+    when: ({ context, event }) => context.viewerOpen && event.shiftKey !== true,
+    command: { type: "copyCode" },
   },
   {
     // `e` is context-sensitive: archive, move back, or restore, following

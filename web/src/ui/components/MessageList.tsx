@@ -13,6 +13,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { CodeChip } from "./CodeCopy";
+import { codeChipVisible } from "../../core/mail/otp";
 import { anchorFromElement, type MenuAnchor } from "../menuPlacement";
 import {
   DRAG_THRESHOLD,
@@ -124,6 +126,11 @@ type RowProps = {
   onToggleStar: (id: number) => void;
   onAvatar: (id: number, trigger: HTMLElement) => void;
   onToggleChecked: (id: number) => void;
+  /** The one-time code, while it is fresh enough for the row chip; otherwise null. */
+  chipCode: string | null;
+  /** This row's code was just copied: the chip says so for a moment. */
+  codeCopied: boolean;
+  onCopyCode: (id: number) => void;
 };
 
 /**
@@ -209,6 +216,9 @@ const Row = memo(function Row({
   onToggleStar,
   onAvatar,
   onToggleChecked,
+  chipCode,
+  codeCopied,
+  onCopyCode,
 }: RowProps) {
   const email = row.representative;
   const indicators = rowIndicators(email, signals);
@@ -357,6 +367,13 @@ const Row = memo(function Row({
           </span>
         </span>
       </button>
+
+      {/*
+        "Copy 418 902", for a code that arrived in the last five minutes. A sibling of the
+        row button like the star, marked `data-row-control` so a press on it never starts
+        a drag-select, a long-press or an open.
+      */}
+      {chipCode && <CodeChip code={chipCode} copied={codeCopied} onCopy={() => onCopyCode(email.id)} />}
 
       {/*
         The star.
@@ -549,6 +566,10 @@ type Props = {
   onAvatar: (id: number, trigger: HTMLElement) => void;
   /** Open the row context menu (desktop only); `trigger` gets focus back. */
   onRowMenu?: (id: number, anchor: MenuAnchor, trigger: HTMLElement) => void;
+  /** Copy a row's one-time code. */
+  onCopyCode: (id: number) => void;
+  /** The message whose code was just copied, for the chip's "Copied". */
+  copiedCodeId: number | null;
   className?: string;
 };
 
@@ -575,6 +596,8 @@ function MessageList({
   touchSelect,
   onAvatar,
   onRowMenu,
+  onCopyCode,
+  copiedCodeId,
   className = "",
 }: Props) {
 
@@ -1161,6 +1184,11 @@ function MessageList({
                       onToggleStar={onToggleStar}
                       onAvatar={onAvatar}
                       onToggleChecked={onToggleChecked}
+                      // Re-checked on every clock tick (`now`), so the chip leaves on
+                      // its own five minutes after the message arrived.
+                      chipCode={codeChipVisible(email, now) ? (email.code ?? null) : null}
+                      codeCopied={copiedCodeId === email.id}
+                      onCopyCode={onCopyCode}
                     />
                   </div>
                 );
