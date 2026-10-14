@@ -55,6 +55,12 @@ import type { GoogleContact } from "../contacts/google";
 import { defaultWeights, type SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
 import type { SyncProgress } from "../gmail/sync";
+import {
+  DEFAULT_ACCENT_THEME,
+  DEFAULT_APPEARANCE,
+  type AccentTheme,
+  type Appearance,
+} from "../model/appearance";
 
 /** The five mailboxes, in the order the sidebar shows them. */
 export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
@@ -154,7 +160,10 @@ export type Preferences = {
    */
   imagePolicy: ImagePolicy;
   notificationsEnabled: boolean;
-  appearance: "system" | "light" | "dark";
+  /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
+  appearance: Appearance;
+  /** The accent theme, applied across every mode. */
+  accent: AccentTheme;
   /** Keep syncing while the window is closed. Desktop only. */
   backgroundSync: boolean;
   /** How often, in seconds. */
@@ -166,7 +175,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sortBy: DEFAULT_SORT,
   imagePolicy: "ask",
   notificationsEnabled: false,
-  appearance: "system",
+  appearance: DEFAULT_APPEARANCE,
+  accent: DEFAULT_ACCENT_THEME,
   backgroundSync: true,
   backgroundSyncInterval: 300,
   blockedSenders: [],

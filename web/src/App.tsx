@@ -39,7 +39,8 @@ import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import { readOwnParams } from "./core/session/redirect";
 import { platform, type PlatformInfo } from "./platform";
 import { useStore } from "./ui/useStore";
-import { applyTheme, resolveScheme } from "./ui/theme";
+import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
+import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
@@ -158,9 +159,22 @@ export function App({ store }: Props) {
     return () => query.removeEventListener("change", onChange);
   }, []);
 
+  const themeMode = resolveScheme(preferences.appearance, systemDark);
+
   useEffect(() => {
-    applyTheme(document.documentElement, resolveScheme(preferences.appearance, systemDark));
-  }, [preferences.appearance, systemDark]);
+    applyTheme(document.documentElement, themeMode, preferences.accent);
+  }, [themeMode, preferences.accent]);
+
+  /** The picker's swatches, drawn in the mode on screen so each one shows what it will look like. */
+  const accentChoices = useMemo(
+    () =>
+      ACCENT_THEMES.map((id) => ({
+        id,
+        label: ACCENTS[id].label,
+        swatch: paletteFor(themeMode, id).color.accent,
+      })),
+    [themeMode],
+  );
 
   // ── What this build can do ───────────────────────────────────────────────
   // Read once from the OS. Null until it lands, and the UI treats null as "not
@@ -1259,7 +1273,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           // `min-w-0` for the same reason.
           className={`${
             selected ? "flex" : "hidden lg:flex"
-          } min-h-0 w-full min-w-0 flex-col bg-surface-sunken lg:w-[38%] lg:shrink-0 ${
+          } min-h-0 w-full min-w-0 flex-col bg-surface-sunken lg:w-[38%] lg:shrink-0 lg:border-l lg:border-edge ${
             selected ? "animate-appear" : ""
           }`}
         >
@@ -1414,6 +1428,9 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           onSortBy={store.setSortBy.bind(store)}
           appearance={preferences.appearance}
           onAppearance={(appearance) => store.setPreferences({ appearance })}
+          accentTheme={preferences.accent}
+          accentChoices={accentChoices}
+          onAccentTheme={(accent) => store.setPreferences({ accent })}
           // Both hosts render a message's HTML in a `sandbox=""` iframe, which loads its
           // images and executes none of its code. A *prop* rather than a constant so a
           // build that genuinely could not would say so rather than offering a switch that

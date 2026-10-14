@@ -22,6 +22,7 @@ import {
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
+import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
 
@@ -97,13 +98,122 @@ function Row({
   );
 }
 
+/** What the mode picker calls each mode. */
+const APPEARANCE_LABELS: Record<Appearance, string> = {
+  system: "System",
+  light: "Light",
+  dark: "Dark",
+  oled: "OLED",
+};
+
+/** One accent theme as the picker shows it: its name and a swatch in the current mode. */
+export type AccentChoice = { id: AccentTheme; label: string; swatch: string };
+
+/**
+ * A labelled group of radios, laid out as a row of equal cells.
+ *
+ * A real radio group to assistive technology and to the keyboard: one tab stop (the
+ * checked option), arrow keys move the choice and the focus together, Home and End jump
+ * to the ends — the behaviour a screen-reader user expects from `role="radiogroup"`.
+ * The label is a visible heading the group points at, not an `aria-label` only a screen
+ * reader would hear.
+ */
+function RadioCards<T extends string>({
+  id,
+  label,
+  hint,
+  options,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  options: readonly { value: T; label: string; swatch?: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const move = (index: number) => {
+    const next = (index + options.length) % options.length;
+    onChange(options[next].value);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <div>
+        <p id={`${id}-label`} className="text-ui font-medium text-ink-body">
+          {label}
+        </p>
+        {hint && (
+          <p id={`${id}-hint`} className="text-meta text-ink-subtle">
+            {hint}
+          </p>
+        )}
+      </div>
+      <div
+        role="radiogroup"
+        aria-labelledby={`${id}-label`}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        data-picker={id}
+        className="grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      >
+        {options.map((option, index) => {
+          const checked = option.value === value;
+          return (
+            <button
+              key={option.value}
+              ref={(element) => {
+                refs.current[index] = element;
+              }}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              tabIndex={checked ? 0 : -1}
+              data-value={option.value}
+              onClick={() => onChange(option.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowDown") move(index + 1);
+                else if (event.key === "ArrowLeft" || event.key === "ArrowUp") move(index - 1);
+                else if (event.key === "Home") move(0);
+                else if (event.key === "End") move(options.length - 1);
+                else return;
+                event.preventDefault();
+              }}
+              className={`flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-ctl border px-2 py-1.5 text-meta transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
+                checked
+                  ? "border-accent bg-surface-selected font-semibold text-ink"
+                  : "border-hairline font-medium text-ink-muted hover:bg-surface-hover hover:text-ink-body"
+              }`}
+            >
+              {option.swatch && (
+                <span
+                  aria-hidden="true"
+                  className="h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: option.swatch }}
+                />
+              )}
+              <span className="truncate">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Settings ────────────────────────────────────────────────────────────────
 
 export type SettingsProps = {
   sortBy: SortBy;
   onSortBy: (sort: SortBy) => void;
-  appearance: "system" | "light" | "dark";
-  onAppearance: (value: "system" | "light" | "dark") => void;
+  appearance: Appearance;
+  onAppearance: (value: Appearance) => void;
+  /** The accent theme in force, and the choices with a swatch drawn in the current mode. */
+  accentTheme: AccentTheme;
+  accentChoices: readonly AccentChoice[];
+  onAccentTheme: (value: AccentTheme) => void;
   /**
    * Whether the reader can render a message's own markup at all.
    *
@@ -317,29 +427,26 @@ export function Settings(props: SettingsProps) {
         light and dark.
       */}
       <Section title="Appearance">
-        <Row label="Theme">
-          <div
-            role="group"
-            aria-label="Theme"
-            className="flex gap-1 rounded-ctl border border-hairline p-0.5"
-          >
-            {(["system", "light", "dark"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => props.onAppearance(option)}
-                aria-pressed={props.appearance === option}
-                className={`rounded-ctl px-2.5 py-1 text-meta font-semibold capitalize transition-colors ${
-                  props.appearance === option
-                    ? "bg-surface-active text-ink"
-                    : "text-ink-muted hover:text-ink-body"
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </Row>
+        <RadioCards
+          id="winnow-theme-mode"
+          label="Mode"
+          hint="System follows your device between light and dark. OLED is dark on true black."
+          options={APPEARANCES.map((option) => ({ value: option, label: APPEARANCE_LABELS[option] }))}
+          value={props.appearance}
+          onChange={props.onAppearance}
+        />
+        <RadioCards
+          id="winnow-theme-accent"
+          label="Accent"
+          hint="The one colour Winnow uses for unread, selection and the main action."
+          options={props.accentChoices.map((choice) => ({
+            value: choice.id,
+            label: choice.label,
+            swatch: choice.swatch,
+          }))}
+          value={props.accentTheme}
+          onChange={props.onAccentTheme}
+        />
       </Section>
 
       {props.isDesktop && props.backgroundSync !== null && (
@@ -621,7 +728,7 @@ function Toggle({
     >
       <span
         aria-hidden="true"
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface transition-transform ${
+        className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-surface transition-transform ${
           checked ? "translate-x-[1.125rem]" : "translate-x-0.5"
         }`}
       />
