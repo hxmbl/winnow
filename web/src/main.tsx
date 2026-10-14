@@ -245,7 +245,7 @@ void platform
     // over the store for the life of the process, so the caller should not leak it.
     //
     // While the window is visible and focused the foreground controller polls every
-    // 30s and syncs on focus / tab-visible / back-online; a background tick in that
+    // 10s and syncs on focus / tab-visible / back-online; a background tick in that
     // state would only double up, so it is dropped. `store.refresh` is a no-op in the
     // demo (no backend), so the demo makes no requests either way.
     // With automatic sync switched off ("Sync paused") only the button syncs.

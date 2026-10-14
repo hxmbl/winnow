@@ -84,7 +84,8 @@ function fakeEnv(initial: { visible?: boolean; focused?: boolean } = {}) {
 }
 
 describe("foreground sync", () => {
-  it("polls every 30s while visible and focused", () => {
+  it("polls every 10s while visible and focused", () => {
+    expect(FOREGROUND_POLL_SECONDS).toBe(10);
     const dom = fakeEnv();
     let refreshes = 0;
     const sync = startForegroundSync(() => void (refreshes += 1), dom.env);
@@ -147,12 +148,12 @@ describe("foreground sync", () => {
     const dom = fakeEnv();
     let refreshes = 0;
     const sync = startForegroundSync(() => void (refreshes += 1), dom.env);
-    dom.advance(25_000);
-    dom.online(); // wake at 25s
+    dom.advance(7_000);
+    dom.online(); // wake at 7s
     expect(refreshes).toBe(1);
-    dom.advance(10_000); // 35s: the original 30s tick must not have fired
+    dom.advance(5_000); // 12s: the original 10s tick must not have fired
     expect(refreshes).toBe(1);
-    dom.advance(20_000); // 55s = wake + 30s
+    dom.advance(5_000); // 17s = wake + 10s
     expect(refreshes).toBe(2);
     sync.stop();
   });

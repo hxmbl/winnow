@@ -19,8 +19,14 @@
  * Shared by both builds: the Tauri webview fires the same DOM events as a browser.
  */
 
-/** Poll interval while visible and focused. */
-export const FOREGROUND_POLL_SECONDS = 30;
+/**
+ * Poll interval while visible and focused: 10s, so a sign-in code lands while the
+ * user is still looking at the login form. An empty check is one `history.list`
+ * (about 2 quota units), so six a minute is far inside Gmail's per-user bucket.
+ * Only this fast path changed; the background floor (`web.ts`, the desktop scheduler)
+ * still governs hidden and unfocused windows.
+ */
+export const FOREGROUND_POLL_SECONDS = 10;
 
 /**
  * Wake-ups closer together than this collapse into one sync. Focusing a window from
