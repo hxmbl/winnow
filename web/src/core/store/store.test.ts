@@ -1999,3 +1999,64 @@ describe("metadata-first bodies", () => {
     expect(store.getSnapshot().all).toHaveLength(10);
   });
 });
+
+describe("sync status state", () => {
+  function backendWith(sync: MailBackend["sync"]): MailBackend {
+    return {
+      sync,
+      async toggleStar() {},
+      async moveToMailbox() {},
+      async setRead() {},
+      async deletePermanently() {},
+      async sendReply() {},
+      async fetchBody() {
+        return undefined;
+      },
+      async fetchAttachment() {
+        return { bytes: new Uint8Array(), filename: "a.bin", mimeType: "text/plain" };
+      },
+    };
+  }
+
+  it("carries stage and totals while syncing, and clears them when done", async () => {
+    const store = demoStore();
+    let during: ReturnType<typeof store.getSnapshot> | null = null;
+    await store.connect(
+      backendWith(async (options) => {
+        options?.onProgress?.({ phase: "full", fraction: 0.25, fetched: 340, failed: 0, stage: "inbox", total: 1200 });
+        during = store.getSnapshot();
+        return { emails: [...DEMO_EMAILS], failed: 0, truncated: false };
+      }),
+      { email: "user@example.com" },
+    );
+    expect(during!.syncing).toBe(true);
+    expect(during!.syncStage).toBe("inbox");
+    expect(during!.syncFetched).toBe(340);
+    expect(during!.syncTotal).toBe(1200);
+
+    const after = store.getSnapshot();
+    expect(after.syncing).toBe(false);
+    expect(after.syncStage).toBeNull();
+    expect(after.syncTotal).toBeNull();
+    expect(after.lastSyncedAt).not.toBeNull();
+  });
+
+  it("records how many messages failed, and a thrown sync's reason", async () => {
+    const store = demoStore();
+    await store.connect(
+      backendWith(async () => ({ emails: [...DEMO_EMAILS], failed: 12, truncated: false })),
+      { email: "user@example.com" },
+    );
+    expect(store.getSnapshot().syncFailed).toBe(12);
+    expect(store.getSnapshot().syncError).toBeNull();
+
+    const failing = demoStore();
+    await expect(
+      failing.connect(backendWith(async () => {
+        throw new Error("network down");
+      }), { email: "user@example.com" }),
+    ).rejects.toThrow("network down");
+    expect(failing.getSnapshot().syncError).toBe("network down");
+    expect(failing.getSnapshot().syncing).toBe(false);
+  });
+});

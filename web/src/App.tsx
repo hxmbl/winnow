@@ -37,7 +37,6 @@ import {
 } from "./core/model/signals";
 import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
 import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
-import { formatRelative } from "./core/mail/datetime";
 import { attentionSentence } from "./core/classify/attention";
 import { resolveImageConsent } from "./core/mail/imageConsent";
 import type { Draft } from "./core/model/email";
@@ -46,6 +45,8 @@ import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import { readOwnParams } from "./core/session/redirect";
 import { platform, type PlatformInfo } from "./platform";
 import { useStore } from "./ui/useStore";
+import { useOnline } from "./ui/useOnline";
+import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
 import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
@@ -145,6 +146,28 @@ export function App({ store }: Props) {
   const searchRef = useRef<HTMLInputElement>(null);
   const [scrollStep, setScrollStep] = useState(0);
   const [composer, setComposer] = useState<ComposerState | null>(null);
+
+  /**
+   * What the sync line and button say. Derived in one place (see `syncStatus`) so a
+   * syncing label only ever shows while a sync runs, and an idle one only while none
+   * does. `snapshot.now` ticks every minute in live mode, which keeps "3 min ago" true.
+   */
+  const online = useOnline();
+  const sync = syncStatus({
+    signedIn: snapshot.account !== null,
+    syncing: snapshot.syncing,
+    syncPhase: snapshot.syncPhase,
+    syncStage: snapshot.syncStage,
+    syncFetched: snapshot.syncFetched,
+    syncTotal: snapshot.syncTotal,
+    lastSyncedAt: snapshot.lastSyncedAt,
+    syncError: snapshot.syncError,
+    syncFailed: snapshot.syncFailed,
+    sending: composer?.sending ?? false,
+    online,
+    paused: !preferences.backgroundSync,
+    now: Math.max(snapshot.now, snapshot.lastSyncedAt ?? 0),
+  });
 
   /**
    * The phone arrangement: a top bar and a bottom dock instead of the masthead, and the
@@ -1360,12 +1383,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   {attentionSentence(view.attention)}
                 </p>
               )}
-              <p className="text-meta text-ink-subtle sm:truncate">
-                {snapshot.account === null
-                  ? "Demo mailbox. Nothing leaves this device."
-                  : snapshot.lastSyncedAt
-                    ? `Synced ${formatRelative(snapshot.lastSyncedAt, Date.now())}`
-                    : "Not synced yet"}
+              <p
+                data-sync-status={sync.tone}
+                role="status"
+                aria-live="polite"
+                className={`text-meta sm:truncate ${
+                  sync.tone === "error" ? "text-danger" : "text-ink-subtle"
+                }`}
+              >
+                {sync.line}
               </p>
             </div>
             {snapshot.account === null ? (
@@ -1387,7 +1413,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 onClick={() => {
                   void store.refresh();
                 }}
-                disabled={snapshot.syncing}
+                disabled={sync.busy}
+                aria-label={sync.button}
+                title={sync.button}
+                data-sync-button=""
                 className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <RefreshCw
@@ -1396,7 +1425,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   className={snapshot.syncing ? "animate-spin" : ""}
                   aria-hidden="true"
                 />
-                {snapshot.syncing ? "Syncing…" : "Sync now"}
+                {sync.button}
               </button>
             )}
           </div>
@@ -1584,7 +1613,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             void connectFromDemo();
           }}
           signingIn={signingIn}
-          syncing={snapshot.syncing}
+          syncing={sync.busy}
+          syncLabel={sync.button}
+          syncLine={sync.line}
           onRefresh={() => {
             void store.refresh();
           }}

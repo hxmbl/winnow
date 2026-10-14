@@ -61,7 +61,7 @@ import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
 import { defaultWeights, type SignalWeights } from "../classify/weights";
 import { DEMO_NOW } from "../data/demo";
-import type { SyncProgress } from "../gmail/sync";
+import type { SyncProgress, SyncStage } from "../gmail/sync";
 import {
   DEFAULT_ACCENT_THEME,
   DEFAULT_APPEARANCE,
@@ -123,6 +123,9 @@ export const PREFETCH_NEIGHBOURS = 2;
  * sync, and an opened message (high priority) must never wait behind more than this.
  */
 const BODY_CONCURRENCY = 2;
+
+/** At most how often sync progress re-renders. */
+const PROGRESS_NOTIFY_MS = 500;
 
 /** How long background-loaded bodies wait to be applied together, so a burst reclassifies once. */
 const BODY_APPLY_DELAY_MS = 400;
@@ -327,6 +330,14 @@ export type StoreState = {
   syncFraction: number | null;
   /** Messages that arrived in the run in progress, or the last completed one. */
   syncFetched: number;
+  /** Full sync only: the inbox, or the folders behind it. `null` otherwise. */
+  syncStage: SyncStage | null;
+  /** How many messages the running sync knows it has to fetch, when known. */
+  syncTotal: number | null;
+  /** The last sync threw, with this message; cleared when a sync starts or succeeds. */
+  syncError: string | null;
+  /** How many messages the last completed sync could not download. */
+  syncFailed: number;
   lastSyncedAt: number | null;
   /**
    * True when a sync walked a mailbox to its cap, so the cache is a triage set rather
@@ -667,6 +678,10 @@ export class WinnowStore {
       syncPhase: null,
       syncFraction: null,
       syncFetched: 0,
+      syncStage: null,
+      syncTotal: null,
+      syncError: null,
+      syncFailed: 0,
       lastSyncedAt: null,
       truncated: false,
       recentIds: new Set(),
@@ -1168,7 +1183,11 @@ export class WinnowStore {
       syncPhase: null,
       syncFraction: null,
       syncFetched: 0,
+      syncStage: null,
+      syncTotal: null,
+      syncError: null,
     });
+    let lastProgressNotify = 0;
 
     const known = new Set(this.state.all.map((email) => email.gmailId));
 
@@ -1183,15 +1202,24 @@ export class WinnowStore {
           const phase = progress.phase === "idle" || progress.phase === "sending"
             ? this.state.syncPhase
             : progress.phase;
-          const changed = this.state.syncPhase !== phase;
+          const stage = progress.stage ?? null;
+          const changed = this.state.syncPhase !== phase || this.state.syncStage !== stage;
           this.state = {
             ...this.state,
             syncing: true,
             syncPhase: phase,
+            syncStage: stage,
+            syncTotal: progress.total ?? null,
             syncFraction: progress.fraction,
             syncFetched: progress.fetched,
           };
-          if (changed) this.notify();
+          // The count on the status line ("Syncing inbox, 340 of 1,200") is worth a
+          // re-render twice a second, not once per message.
+          const now = Date.now();
+          if (changed || now - lastProgressNotify >= PROGRESS_NOTIFY_MS) {
+            lastProgressNotify = now;
+            this.notify();
+          }
         },
       });
 
@@ -1215,7 +1243,11 @@ export class WinnowStore {
         all: emails,
         syncing: false,
         syncPhase: null,
+        syncStage: null,
+        syncTotal: null,
         syncFraction: null,
+        syncError: null,
+        syncFailed: result.failed,
         lastSyncedAt: Date.now(),
         recentIds: recent,
         truncated: result.truncated,
@@ -1238,6 +1270,9 @@ export class WinnowStore {
         status: "error",
         syncing: false,
         syncPhase: null,
+        syncStage: null,
+        syncTotal: null,
+        syncError: error instanceof Error ? error.message : "Could not reach Gmail.",
         error: error instanceof Error ? error.message : "Could not reach Gmail.",
       });
       throw error;
@@ -2315,6 +2350,10 @@ export class WinnowStore {
       undo: null,
       syncPhase: null,
       syncFraction: null,
+      syncStage: null,
+      syncTotal: null,
+      syncError: null,
+      syncFailed: 0,
       truncated: false,
       error: null,
       notice: null,
@@ -2373,6 +2412,10 @@ export class WinnowStore {
       undo: null,
       syncPhase: null,
       syncFraction: null,
+      syncStage: null,
+      syncTotal: null,
+      syncError: null,
+      syncFailed: 0,
       truncated: false,
       error: null,
       notice: null,

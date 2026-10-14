@@ -33,6 +33,10 @@ export type NavDrawerProps = {
   onSignIn: () => void;
   signingIn: boolean;
   syncing: boolean;
+  /** The sync button's text — also its aria-label and tooltip. See `syncStatus`. */
+  syncLabel: string;
+  /** The sync status line, under the account. */
+  syncLine: string;
   onRefresh: () => void;
   onSettings: () => void;
   onClose: () => void;
@@ -47,6 +51,8 @@ export function NavDrawer({
   onSignIn,
   signingIn,
   syncing,
+  syncLabel,
+  syncLine,
   onRefresh,
   onSettings,
   onClose,
@@ -139,11 +145,16 @@ export function NavDrawer({
             <p className="mt-3 truncate text-meta text-ink-subtle" title={accountEmail}>
               {accountEmail}
             </p>
+            <p role="status" className="mt-1 truncate text-meta text-ink-subtle" title={syncLine}>
+              {syncLine}
+            </p>
             <div className="mt-2 flex items-center gap-1">
               <button
                 type="button"
                 onClick={onRefresh}
                 disabled={syncing}
+                aria-label={syncLabel}
+                title={syncLabel}
                 className="flex items-center gap-1.5 rounded-ctl px-2.5 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <RefreshCw
@@ -152,7 +163,7 @@ export function NavDrawer({
                   className={syncing ? "animate-spin" : ""}
                   aria-hidden="true"
                 />
-                {syncing ? "Syncing" : "Sync now"}
+                {syncLabel}
               </button>
               <button
                 type="button"

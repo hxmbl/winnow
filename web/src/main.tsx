@@ -248,8 +248,10 @@ void platform
     // 30s and syncs on focus / tab-visible / back-online; a background tick in that
     // state would only double up, so it is dropped. `store.refresh` is a no-op in the
     // demo (no backend), so the demo makes no requests either way.
+    // With automatic sync switched off ("Sync paused") only the button syncs.
+    const automatic = (): boolean => store.getSnapshot().preferences.backgroundSync;
     const foreground = startForegroundSync(() => {
-      void store.refresh();
+      if (automatic()) void store.refresh();
     });
     const unlistenTick = platform.onBackgroundTick(() => {
       if (foreground.active()) return;
