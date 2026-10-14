@@ -142,7 +142,7 @@ Data access):
 | Scope | Asked for | Why |
 | --- | --- | --- |
 | `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, send |
-| `https://www.googleapis.com/auth/contacts.readonly` | later, opt-in | saved contacts in recipient suggestions |
+| `https://www.googleapis.com/auth/contacts.readonly` | later, opt-in | saved contacts in recipient suggestions, and their photos in avatars |
 | `https://www.googleapis.com/auth/contacts.other.readonly` | later, opt-in | "other contacts" (people you've written to) |
 
 Sign-in only ever asks for `gmail.modify`. The two contact scopes are requested
@@ -261,7 +261,18 @@ reliably implement, so on desktop the question couldn't be asked at all.
   one click under one message turned on sandboxed sender markup for every message
   after it, forever.
 - **No gravatar.** A third-party request per message is a latency cost and a
-  privacy leak, for decoration.
+  privacy leak, for decoration. Avatars show a sender's photo only from your own
+  Google contacts (once you opt in to them), and otherwise a monogram.
+- **Brand logos are a separate, off-by-default setting.** **Show brand logos**
+  (Settings) looks up a sender domain's BIMI record (`default._bimi.<domain>`,
+  falling back to the organisational domain) over DNS-over-HTTPS at
+  `cloudflare-dns.com` and shows its `l=` logo — always through `<img>`, https
+  only, never inlined. It isn't tied to the remote-images policy because that one
+  is per message and defaults to asking, which a list avatar can't do, and
+  because this leaks every sender domain in the list to a resolver whether you
+  open the mail or not. Answers are cached locally (a week for a logo, a day for
+  none), rate-limited, and wiped on sign-out or when the setting goes off. The
+  `a=` certificate isn't verified.
 - **Google contacts are a prior, not a ranking.** A saved contact adds a fixed
   bonus on top of what the mail says, an "other contact" a smaller one. Saved
   beats other with the same history, and either can surface someone the mail
@@ -288,8 +299,9 @@ went wrong.
 
 The developer runs no servers and
 collects nothing (no telemetry, analytics, crash reports or update checks); your
-mail, tokens and OAuth client stay on your device and go only to Google; and you
-can cut Winnow off at
+mail, tokens and OAuth client stay on your device and go only to Google (if you
+turn on **Show brand logos**, sender domains also go to Cloudflare's DNS resolver
+and logos load from the senders' own sites); and you can cut Winnow off at
 [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ## License

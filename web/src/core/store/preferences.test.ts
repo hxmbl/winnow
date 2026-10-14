@@ -108,3 +108,11 @@ describe("theme persistence", () => {
     expect(revivePreferences("dark")).toBeNull();
   });
 });
+
+describe("brand logos preference", () => {
+  it("is off by default and survives a restart only as a boolean", () => {
+    expect(DEFAULT_PREFERENCES.brandLogos).toBe(false);
+    expect(revivePreferences({ brandLogos: true })).toMatchObject({ brandLogos: true });
+    expect(revivePreferences({ brandLogos: "yes" })?.brandLogos).toBeUndefined();
+  });
+});

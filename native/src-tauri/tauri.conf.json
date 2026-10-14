@@ -40,7 +40,7 @@
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: blob: https:",
         "font-src": "'self' data:",
-        "connect-src": "'self' ipc: http://ipc.localhost https://www.googleapis.com https://gmail.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://*.googleapis.com",
+        "connect-src": "'self' ipc: http://ipc.localhost https://www.googleapis.com https://gmail.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://*.googleapis.com https://cloudflare-dns.com",
         "frame-src": "'self'",
         "object-src": "'none'",
         "base-uri": "'self'",

@@ -32,6 +32,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   } else if (typeof source.loadRemoteContent === "boolean") {
     out.imagePolicy = source.loadRemoteContent ? "always" : "never";
   }
+  if (typeof source.brandLogos === "boolean") out.brandLogos = source.brandLogos;
   if (typeof source.notificationsEnabled === "boolean") {
     out.notificationsEnabled = source.notificationsEnabled;
   }

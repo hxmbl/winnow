@@ -212,6 +212,16 @@ export type Preferences = {
    * was opened and roughly where, and a pixel does it without showing anything.
    */
   imagePolicy: ImagePolicy;
+  /**
+   * Brand logos (BIMI) in sender avatars.
+   *
+   * Its own switch, off by default, rather than riding on `imagePolicy`: that policy is
+   * about one message's content and defaults to *asking*, which an avatar in a list has
+   * no way to do. A logo lookup also leaks something remote images do not — every sender
+   * domain in the list goes to a DNS resolver, opened or not — so it is a separate,
+   * explicit yes.
+   */
+  brandLogos: boolean;
   notificationsEnabled: boolean;
   /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
   appearance: Appearance;
@@ -234,6 +244,7 @@ export type Preferences = {
 export const DEFAULT_PREFERENCES: Preferences = {
   sortBy: DEFAULT_SORT,
   imagePolicy: "ask",
+  brandLogos: false,
   notificationsEnabled: false,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
