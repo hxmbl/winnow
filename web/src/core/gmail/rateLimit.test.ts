@@ -17,9 +17,13 @@ import {
   MAX_RETRIES,
   QuotaBucket,
   UNITS_PER_MINUTE,
+  MAX_SERVER_RETRIES,
+  METADATA_HEADERS,
   backoffMs,
   costOf,
   isRateLimited,
+  isServerError,
+  retryAfterMs,
   type FetchLike,
   type Sleep,
 } from "./client";
@@ -309,5 +313,101 @@ describe("GmailClient — quota pacing and rate-limit retries", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
     expect(calls).toHaveLength(3);
     expect(calls[2].init?.headers?.Authorization).toBe("Bearer token-2");
+  });
+});
+describe("retry timing — Retry-After and 5xx", () => {
+  it("reads Retry-After as seconds or as an HTTP date, and caps it", () => {
+    expect(retryAfterMs("7")).toBe(7_000);
+    expect(retryAfterMs("1.5")).toBe(1_500);
+    const now = Date.UTC(2026, 9, 14, 12, 0, 0);
+    expect(retryAfterMs(new Date(now + 3_000).toUTCString(), now)).toBe(3_000);
+    expect(retryAfterMs("3600")).toBe(MAX_BACKOFF_MS);
+    expect(retryAfterMs(null)).toBeNull();
+    expect(retryAfterMs("soon")).toBeNull();
+  });
+
+  it("treats 500/502/503/504 as transient and 501 as final", () => {
+    for (const status of [500, 502, 503, 504]) expect(isServerError(status)).toBe(true);
+    expect(isServerError(501)).toBe(false);
+    expect(isServerError(404)).toBe(false);
+  });
+
+  type Reply = { status: number; body?: string; retryAfter?: string };
+  function replies(queue: Reply[]) {
+    const calls: string[] = [];
+    const fetchImpl: FetchLike = async (url) => {
+      calls.push(url);
+      const next = queue.shift() ?? { status: 200, body: "{}" };
+      return {
+        ok: next.status >= 200 && next.status < 300,
+        status: next.status,
+        text: async () => next.body ?? "",
+        headers: { get: (name: string) => (name.toLowerCase() === "retry-after" ? next.retryAfter ?? null : null) },
+      };
+    };
+    return { fetchImpl, calls };
+  }
+
+  function observed(fetchImpl: FetchLike) {
+    const sleeps: number[] = [];
+    const drains: number[] = [];
+    const bucket = { take: async () => {}, drain: () => void drains.push(1) } as unknown as QuotaBucket;
+    const gmail = new GmailClient(async () => "t", {
+      fetchImpl,
+      bucket,
+      sleep: async (ms) => void sleeps.push(ms),
+    });
+    return { gmail, sleeps, drains };
+  }
+
+  it("waits at least as long as Retry-After asks on a 429", async () => {
+    const { fetchImpl } = replies([{ status: 429, retryAfter: "20" }, { status: 200, body: '{"emailAddress":"a"}' }]);
+    const { gmail, sleeps, drains } = observed(fetchImpl);
+    await gmail.profile();
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(20_000);
+    expect(drains).toHaveLength(1);
+  });
+
+  it("uses exponential backoff with jitter when there is no Retry-After", async () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const { fetchImpl } = replies([{ status: 429 }, { status: 429 }, { status: 429 }, { status: 200, body: "{}" }]);
+    const { gmail, sleeps } = observed(fetchImpl);
+    await gmail.profile();
+    expect(sleeps).toEqual([1_500, 2_500, 4_500]);
+    random.mockRestore();
+  });
+
+  it("retries a 503 a few times without draining the quota bucket", async () => {
+    const { fetchImpl, calls } = replies([{ status: 503 }, { status: 502 }, { status: 200, body: '{"emailAddress":"a"}' }]);
+    const { gmail, drains, sleeps } = observed(fetchImpl);
+    await expect(gmail.profile()).resolves.toMatchObject({ emailAddress: "a" });
+    expect(calls).toHaveLength(3);
+    expect(sleeps).toHaveLength(2);
+    expect(drains).toHaveLength(0);
+  });
+
+  it("gives up on a persistent 5xx after MAX_SERVER_RETRIES, surfacing the status", async () => {
+    const { fetchImpl, calls } = replies(Array.from({ length: 10 }, () => ({ status: 500 })));
+    const { gmail } = observed(fetchImpl);
+    await expect(gmail.profile()).rejects.toMatchObject({ status: 500 });
+    expect(calls).toHaveLength(MAX_SERVER_RETRIES + 1);
+  });
+
+  it("asks for metadata with exactly the headers the list and classifier read", async () => {
+    const { fetchImpl, calls } = replies([{ status: 200, body: '{"id":"m1"}' }]);
+    const { gmail } = observed(fetchImpl);
+    await gmail.message("m1", "metadata");
+    const params = new URLSearchParams(calls[0].split("?")[1]);
+    expect(params.get("format")).toBe("metadata");
+    expect(params.getAll("metadataHeaders")).toEqual([...METADATA_HEADERS]);
+    for (const header of ["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "List-Id", "Message-ID", "References", "In-Reply-To"]) {
+      expect(METADATA_HEADERS).toContain(header);
+    }
+  });
+
+  it("still charges 20 units for a metadata get — Gmail prices by method, not format", () => {
+    expect(costOf("/users/me/messages/m1?format=metadata&metadataHeaders=From", "GET")).toBe(20);
+    expect(costOf("/users/me/messages/m1?format=full", "GET")).toBe(20);
   });
 });

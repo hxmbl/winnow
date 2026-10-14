@@ -7,10 +7,15 @@
  *     units (`QuotaBucket` / `costOf`), so a sync paging a large mailbox cannot
  *     spend a minute's budget on back-to-back `messages.get` calls.
  *   - **Retries only where a retry can help.** A 429, or a 403 carrying a quota
- *     reason, is retried with bounded backoff. A 401 triggers one forced token
- *     refresh and one retry — a second 401 means the grant is gone.
+ *     reason, is retried with bounded exponential backoff and jitter, honouring a
+ *     `Retry-After` header when Google sends one. A 5xx is retried a few times
+ *     too — Google's own guidance for `backendError` — but without draining the
+ *     bucket, because a flaky backend says nothing about quota. A 401 triggers one
+ *     forced token refresh and one retry — a second 401 means the grant is gone.
  *
- * No batching, caching or retry queue; those belong to `sync.ts`.
+ * Concurrency is the caller's (`pool.ts`, driven by `sync.ts`): every request
+ * still goes through the one bucket, so eight in flight spend the same budget
+ * as one, just without the round trips in between.
  */
 
 import {
@@ -44,6 +49,36 @@ export const MAX_RETRIES = 6;
 
 /** The backoff is capped; beyond this, Google has said "leave it alone". */
 export const MAX_BACKOFF_MS = 64_000;
+
+/**
+ * How many times a 5xx is replayed. Fewer than a rate limit: a backend that fails
+ * three times in a row is down, and the sync engine's failure accounting (keep the
+ * cached copy, hold the cursor) is the right place for that answer to land.
+ */
+export const MAX_SERVER_RETRIES = 3;
+
+/**
+ * The headers `format=metadata` asks for — everything the list, the classifier,
+ * threading and the composer read without a body.
+ *
+ * `Content-Type` is not here because Gmail reports the top-level MIME type as
+ * `payload.mimeType` in every format, which is what the attachment hint reads.
+ */
+export const METADATA_HEADERS: readonly string[] = [
+  "From",
+  "To",
+  "Cc",
+  "Subject",
+  "Date",
+  "List-Unsubscribe",
+  "List-Id",
+  "Message-ID",
+  "References",
+  "In-Reply-To",
+];
+
+/** How much of a message to ask for. `metadata` is labels + headers + snippet. */
+export type MessageFormat = "full" | "metadata";
 
 /** A wait. Injectable so tests never sleep on the real clock. */
 export type Sleep = (ms: number) => Promise<void>;
@@ -97,6 +132,27 @@ export function isRateLimited(status: number, body: string): boolean {
  */
 export function backoffMs(attempt: number): number {
   return Math.min(2 ** attempt * 1000 + Math.random() * 1000, MAX_BACKOFF_MS);
+}
+
+/** A transient server-side failure, worth a short retry. 501 is "not implemented" and is not. */
+export function isServerError(status: number): boolean {
+  return status >= 500 && status <= 599 && status !== 501;
+}
+
+/**
+ * `Retry-After`, in milliseconds, or `null` when absent or unreadable.
+ *
+ * Both RFC 9110 forms are read: delta-seconds (what Google sends) and an HTTP date.
+ * Capped at `MAX_BACKOFF_MS` like everything else — a header asking for an hour is
+ * a header the sync engine should answer by failing the message, not by hanging.
+ */
+export function retryAfterMs(value: string | null | undefined, now: number = Date.now()): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.min(Number(trimmed) * 1000, MAX_BACKOFF_MS);
+  const at = Date.parse(trimmed);
+  if (!Number.isFinite(at)) return null;
+  return Math.min(Math.max(0, at - now), MAX_BACKOFF_MS);
 }
 
 /**
@@ -176,6 +232,8 @@ export type FetchLike = (
   ok: boolean;
   status: number;
   text: () => Promise<string>;
+  /** Optional so a test stub can omit it; the platform `fetch` always has it. */
+  headers?: { get(name: string): string | null };
 }>;
 
 export type GmailClientOptions = {
@@ -201,6 +259,7 @@ export class GmailClient {
   private readonly onUnauthorized: (() => Promise<string | null>) | undefined;
   private readonly sleep: Sleep;
   private readonly bucket: QuotaBucket;
+  private readonly now: () => number;
 
   constructor(
     private readonly tokenProvider: TokenProvider,
@@ -212,6 +271,7 @@ export class GmailClient {
     this.fetchImpl = impl;
     this.onUnauthorized = options.onUnauthorized;
     this.sleep = options.sleep ?? realSleep;
+    this.now = options.now ?? Date.now;
     this.bucket = options.bucket ?? new QuotaBucket(UNITS_PER_MINUTE, options.now, this.sleep);
   }
 
@@ -247,15 +307,18 @@ export class GmailClient {
           body: init.body === undefined ? undefined : JSON.stringify(init.body),
         });
         const text = await response.text();
-        if (!isRateLimited(response.status, text) || attempt >= MAX_RETRIES) {
+        const limited = isRateLimited(response.status, text);
+        const flaky = !limited && isServerError(response.status);
+        if ((!limited && !flaky) || attempt >= (limited ? MAX_RETRIES : MAX_SERVER_RETRIES)) {
           return { response, text };
         }
         // Google has just said the budget is spent. Waiting for the bucket to
         // refill around *this* request would leave the rest of the burst queued
         // behind it anyway, so drain instead and come back after a live-server
-        // backoff.
-        this.bucket.drain();
-        await this.sleep(backoffMs(attempt));
+        // backoff. A 5xx leaves the bucket alone: it is not a statement about quota.
+        if (limited) this.bucket.drain();
+        const hinted = retryAfterMs(response.headers?.get("Retry-After"), this.now());
+        await this.sleep(Math.max(backoffMs(attempt), hinted ?? 0));
       }
     };
 
@@ -303,12 +366,19 @@ export class GmailClient {
   }
 
   /**
-   * A full message, headers and all.
+   * One message.
    *
-   * `full` rather than `metadata`: the classifier needs the body.
+   * `full` by default, which is what opening a message needs. The sync engine asks
+   * for `metadata` — labels, `METADATA_HEADERS`, snippet, size — and fetches the body
+   * lazily. Gmail charges the same 20 units for either; what `metadata` saves is
+   * bytes, parse time and cache size, not quota.
    */
-  async message(id: string): Promise<GmailMessage> {
-    return this.request<GmailMessage>(`/users/me/messages/${encodeURIComponent(id)}?format=full`);
+  async message(id: string, format: MessageFormat = "full"): Promise<GmailMessage> {
+    const params = new URLSearchParams({ format });
+    if (format === "metadata") {
+      for (const header of METADATA_HEADERS) params.append("metadataHeaders", header);
+    }
+    return this.request<GmailMessage>(`/users/me/messages/${encodeURIComponent(id)}?${params}`);
   }
 
   /**
