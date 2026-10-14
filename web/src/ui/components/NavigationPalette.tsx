@@ -74,14 +74,14 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
             // set above.
             tabIndex={-1}
             onClick={() => onActivate(item.id)}
-            className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13.5px] transition-colors ${
+            className={`flex w-full items-center gap-2.5 rounded-ctl px-3 py-2 text-left text-ui transition-colors ${
               isActive ? "bg-surface-active text-ink" : "text-ink-body hover:bg-surface-hover"
             }`}
           >
             <Icon size={15} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
             <span className="flex-1 font-medium">{label}</span>
             {count > 0 && (
-              <span className="rounded-full bg-surface-sunken px-1.5 text-[11px] font-semibold tabular-nums text-ink-muted">
+              <span className="rounded-ctl bg-surface-sunken px-1.5 text-meta font-semibold tabular-nums text-ink-muted">
                 {count}
               </span>
             )}

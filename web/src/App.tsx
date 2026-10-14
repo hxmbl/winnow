@@ -31,6 +31,7 @@ import {
 import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
 import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
 import { formatRelative } from "./core/mail/datetime";
+import { attentionSentence } from "./core/classify/attention";
 import { resolveImageConsent } from "./core/mail/imageConsent";
 import type { Draft } from "./core/model/email";
 import { demoMailbox } from "./core/data/demo";
@@ -38,7 +39,8 @@ import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import { readOwnParams } from "./core/session/redirect";
 import { platform, type PlatformInfo } from "./platform";
 import { useStore } from "./ui/useStore";
-import { applyTheme, resolveScheme } from "./ui/theme";
+import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
+import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
@@ -143,6 +145,9 @@ export function App({ store }: Props) {
    * only where they sit changes. See `usePhoneLayout`.
    */
   const phone = usePhoneLayout();
+  // For handlers that are created once and read the layout when they fire.
+  const phoneRef = useRef(phone);
+  phoneRef.current = phone;
   useKeyboardInset(phone && composer !== null);
 
   // ── Theme ────────────────────────────────────────────────────────────────
@@ -160,9 +165,22 @@ export function App({ store }: Props) {
     return () => query.removeEventListener("change", onChange);
   }, []);
 
+  const themeMode = resolveScheme(preferences.appearance, systemDark);
+
   useEffect(() => {
-    applyTheme(document.documentElement, resolveScheme(preferences.appearance, systemDark));
-  }, [preferences.appearance, systemDark]);
+    applyTheme(document.documentElement, themeMode, preferences.accent);
+  }, [themeMode, preferences.accent]);
+
+  /** The picker's swatches, drawn in the mode on screen so each one shows what it will look like. */
+  const accentChoices = useMemo(
+    () =>
+      ACCENT_THEMES.map((id) => ({
+        id,
+        label: ACCENTS[id].label,
+        swatch: paletteFor(themeMode, id).color.accent,
+      })),
+    [themeMode],
+  );
 
   // ── What this build can do ───────────────────────────────────────────────
   // Read once from the OS. Null until it lands, and the UI treats null as "not
@@ -577,6 +595,32 @@ export function App({ store }: Props) {
    * keyboard navigation and clicking feel like different actions even though they select
    * the same message.
    */
+  /**
+   * Leave the open message.
+   *
+   * On a phone this is Back: the list returns with no current row (the cursor goes with
+   * the reader — see `listSelectedId`) and at the scroll position it was left at, which
+   * `MessageList` keeps across the reader covering it. Focus goes back to the row that
+   * was opened, so a screen reader resumes where it was rather than at the top of the
+   * document; `preventScroll` because the list is already where the user left it, and a
+   * focus after a tap draws no `focus-visible` ring, so nothing on screen marks the row.
+   */
+  const closeReader = useCallback(() => {
+    const s = storeRef.current;
+    if (!phoneRef.current) {
+      s.closeReader();
+      return;
+    }
+    const openedId = snapshotRef.current.view.selected?.id;
+    s.closeReader({ dropCursor: true });
+    if (openedId === undefined) return;
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-row-count] button[data-message-id="${openedId}"]`)
+        ?.focus({ preventScroll: true });
+    });
+  }, []);
+
   const handleSelectRow = useCallback((messageId: number) => {
     const s = storeRef.current;
     const index = snapshotRef.current.view.threads.findIndex(
@@ -636,7 +680,7 @@ export function App({ store }: Props) {
       setComposer({
         ...composer,
         sending: false,
-        error: error instanceof Error ? error.message : "The reply could not be sent.",
+        error: error instanceof Error ? error.message : "Couldn't send that reply.",
       });
     }
   }, [composer]);
@@ -752,7 +796,7 @@ export function App({ store }: Props) {
       s.setError(null);
     } catch (error) {
       s.setError(
-        error instanceof Error ? error.message : "That attachment could not be downloaded.",
+        error instanceof Error ? error.message : "Couldn't download that attachment.",
       );
     }
   }, []);
@@ -856,7 +900,8 @@ export function App({ store }: Props) {
           s.openCursor();
           break;
         case "closeViewer":
-          s.closeReader();
+          // On a phone, leaving the message leaves the list with no current row.
+          s.closeReader({ dropCursor: phoneRef.current });
           break;
         case "closeComposer":
           // Escape, in a composer. Goes through `closeComposer` rather than straight
@@ -1035,22 +1080,22 @@ export function App({ store }: Props) {
     return (
       <div className="flex h-dvh items-center justify-center bg-canvas px-6">
         <div className="max-w-[36rem] text-center">
-          <h1 className="text-subject font-semibold text-ink">Could not reach Gmail</h1>
-          <p className="mt-2 text-[13.5px] text-ink-muted">{snapshot.error}</p>
+          <h1 className="font-serif text-title font-semibold text-ink">Couldn&rsquo;t reach Gmail</h1>
+          <p className="mt-2 text-ui text-ink-muted">{snapshot.error}</p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
               onClick={() => {
                 void store.retryConnection();
               }}
-              className="rounded-full bg-[var(--wn-inkBody)] px-4 py-2 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl bg-accent px-4 py-2 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               Try again
             </button>
             <button
               type="button"
               onClick={enterDemo}
-              className="rounded-full border border-control-border px-4 py-2 text-[13px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl border border-control-border px-4 py-2 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               Use the demo inbox
             </button>
@@ -1069,6 +1114,19 @@ export function App({ store }: Props) {
   there is a list, and you are not on anything in it yet.
 */
 const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorIndex + 1;
+
+/*
+  The list's notion of a "current" message, which only the desktop has.
+
+  On a phone the list and the reader are never on screen together: a tap opens the
+  message over the list, and Back returns to the list. A highlighted row would mark the
+  message you just *left*, the cursor would claim a place in a list nobody is moving
+  through, and "4 of 39" would number a row that is no longer special. So the phone list
+  is given no selection and no cursor at all — the store still tracks both, because the
+  reader and the keyboard need them, but none of it reaches the list.
+*/
+const listSelectedId = phone ? null : snapshot.selectedId;
+const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
@@ -1089,7 +1147,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             onOpenNavigation={() => setDrawerOpen(true)}
             navigationOpen={drawerOpen}
             listTitle={store.listTitle()}
-            position={position}
+            position={null}
             total={view.threads.length}
             cursorIndex={snapshot.cursorIndex}
             onPrev={() => store.moveCursor(-1)}
@@ -1129,7 +1187,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
       {snapshot.error && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-[12.5px] font-medium text-ink-body"
+          className="flex items-center justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-meta font-medium text-ink-body"
         >
           <span className="min-w-0 truncate">{snapshot.error}</span>
           <button
@@ -1150,7 +1208,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
         alarming, dismissible banner of an error.
       */}
       {snapshot.notice && (
-        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-[12.5px] font-medium text-ink-body">
+        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body">
           <span className="min-w-0 truncate">{snapshot.notice}</span>
           <button
             type="button"
@@ -1177,13 +1235,16 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
       {snapshot.undo && (
         <div
           role="status"
-          className="flex items-center justify-center gap-3 px-4 py-1.5 text-[12.5px]"
+          // Re-keyed per action, so the strip arrives with the same short rise every time
+          // something is archived or trashed rather than only the first time.
+          key={snapshot.undo.label}
+          className="flex animate-appear items-center justify-center gap-3 px-4 py-1.5 text-meta"
         >
           <span className="min-w-0 truncate text-ink-muted">{snapshot.undo.label}</span>
           <button
             type="button"
             onClick={store.undoLast.bind(store)}
-            className="shrink-0 rounded-full bg-sheen px-2.5 py-0.5 font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 rounded-ctl bg-sheen px-2.5 py-0.5 font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Undo
           </button>
@@ -1191,7 +1252,7 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             type="button"
             onClick={store.dismissUndo.bind(store)}
             aria-label="Dismiss"
-            className="shrink-0 rounded-full p-1 text-ink-subtle transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 rounded-ctl p-1 text-ink-subtle transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <X size={12} strokeWidth={2.2} aria-hidden="true" />
           </button>
@@ -1230,58 +1291,71 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
             account is a button here rather than in a settings panel, because the app boots
             into the demo and never shows the sign-in screen on first run.
           */}
-          {snapshot.account === null ? (
-            <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-1">
-              <p className="min-w-0 truncate text-[11.5px] text-ink-subtle">
-                Demo mailbox — nothing leaves this device
+          {/*
+            The triage line, then the status line under it.
+
+            The first line is Winnow's one signature: what in the inbox needs you, as a
+            sentence ("3 waiting on you and 2 deliveries today"), derived from the
+            classifier's own signals. Only in the inbox — it is a claim about the inbox,
+            and over Sent or the bin it would be answering a question nobody asked.
+          */}
+          <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-3">
+            <div className="min-w-0">
+              {snapshot.mailbox === "inbox" && (
+                <p data-attention="" className="text-ui font-medium text-ink sm:truncate">
+                  {attentionSentence(view.attention)}
+                </p>
+              )}
+              <p className="text-meta text-ink-subtle sm:truncate">
+                {snapshot.account === null
+                  ? "Demo mailbox. Nothing leaves this device."
+                  : snapshot.lastSyncedAt
+                    ? `Synced ${formatRelative(snapshot.lastSyncedAt, Date.now())}`
+                    : "Not synced yet"}
               </p>
+            </div>
+            {snapshot.account === null ? (
               <button
                 type="button"
                 onClick={() => {
                   void connectFromDemo();
                 }}
                 disabled={signingIn}
-                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 max-sm:min-h-9 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                // The demo's one primary action, so it is the one filled control in view.
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
-                <LogIn size={11} strokeWidth={2.2} aria-hidden="true" />
+                <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
                 {signingIn ? "Waiting for Google…" : "Connect Gmail"}
               </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-1">
-              <p className="min-w-0 truncate text-[11.5px] text-ink-subtle">
-                {snapshot.lastSyncedAt
-                  ? `Synced ${formatRelative(snapshot.lastSyncedAt, Date.now())}`
-                  : "Not synced yet"}
-              </p>
+            ) : (
               <button
                 type="button"
                 onClick={() => {
                   void store.refresh();
                 }}
                 disabled={snapshot.syncing}
-                className="flex shrink-0 items-center gap-1.5 rounded-full bg-sheen px-2.5 py-1 text-[11.5px] font-medium text-ink-body transition-colors hover:text-ink disabled:opacity-50 max-sm:min-h-9 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <RefreshCw
-                  size={11}
+                  size={12}
                   strokeWidth={2.2}
                   className={snapshot.syncing ? "animate-spin" : ""}
                   aria-hidden="true"
                 />
                 {snapshot.syncing ? "Syncing…" : "Sync now"}
               </button>
-            </div>
-          )}
+            )}
+          </div>
           {connectError && (
-            <div role="alert" className="px-4 pb-2 text-[11.5px] font-medium text-danger">
+            <div role="alert" className="px-4 pb-2 text-meta font-medium text-danger">
               <ErrorText text={connectError} />
             </div>
           )}
           <MessageList
             threads={view.threads}
             signals={view.signals}
-            selectedId={snapshot.selectedId}
-            cursorIndex={snapshot.cursorIndex}
+            selectedId={listSelectedId}
+            cursorIndex={listCursor}
             unreadIds={unreadIds}
             freshIds={snapshot.recentIds}
             emptyReason={view.result.emptyReason}
@@ -1310,103 +1384,110 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           A sibling of the list rather than an overlay, and only rendered when there is a
           message — see the note on the list for why.
         */}
-        <div
-          key={selected?.id ?? "empty"}
-          // `w-full min-w-0` below `lg`, and the width is not optional there.
-          //
-          // Without `min-w-0` this pane is a flex item whose base size is its content —
-          // `max-w-[68ch]` of body text, 733px — which overflows a 390px phone and gets
-          // clipped by `body { overflow: hidden }`, leaving the message unreadable and the
-          // action toolbar past the viewport. The list pane beside it already carries
-          // `min-w-0` for the same reason.
-          className={`${
-            selected ? "flex" : "hidden lg:flex"
-          } min-h-0 w-full min-w-0 flex-col bg-surface-sunken lg:w-[38%] lg:shrink-0 ${
-            selected ? "animate-appear" : ""
-          }`}
-        >
-          <Reader
-            email={selected}
-            conversation={view.conversation}
-            signals={selected ? (view.signals.get(selected.id) ?? null) : null}
-            mailbox={snapshot.mailbox}
-            // Either the global preference, or this one message the reader's own
-            // escape hatch has been used on. See `remoteFor`.
-            imagesAllowed={imagesAllowed}
-            askAboutImages={askAboutImages}
-            accountAddress={snapshot.account?.email ?? null}
-            now={snapshot.now}
-            onClose={store.closeReader.bind(store)}
-            scrollStep={scrollStep}
-            // The HTML body is resident for a recent window and fetched for anything
-            // older, so "not here yet" is the normal state for a message far enough
-            // back. See `BODY_RETENTION` in the store.
-            bodyPending={selected !== null && !store.hasLoadedBody(selected.id)}
-            onLoadBody={loadSelectedBody}
-            phone={phone}
-            actions={{
-              onStar: act((s, snap) => {
-                if (snap.view.selected) s.toggleStar(snap.view.selected.id);
+        {/*
+          Nothing at all on a phone until a message is open: there the reader replaces the
+          list rather than sitting beside it, so its empty state ("Nothing selected") would
+          describe a selection the phone does not have.
+        */}
+        {(!phone || selected) && (
+          <div
+            key={selected?.id ?? "empty"}
+            // `w-full min-w-0` below `lg`, and the width is not optional there.
+            //
+            // Without `min-w-0` this pane is a flex item whose base size is its content —
+            // `max-w-[68ch]` of body text, 733px — which overflows a 390px phone and gets
+            // clipped by `body { overflow: hidden }`, leaving the message unreadable and the
+            // action toolbar past the viewport. The list pane beside it already carries
+            // `min-w-0` for the same reason.
+            className={`${
+              selected ? "flex" : "hidden lg:flex"
+            } min-h-0 w-full min-w-0 flex-col bg-surface-sunken lg:w-[38%] lg:shrink-0 lg:border-l lg:border-edge ${
+              selected ? "animate-appear" : ""
+            }`}
+          >
+            <Reader
+              email={selected}
+              conversation={view.conversation}
+              signals={selected ? (view.signals.get(selected.id) ?? null) : null}
+              mailbox={snapshot.mailbox}
+              // Either the global preference, or this one message the reader's own
+              // escape hatch has been used on. See `remoteFor`.
+              imagesAllowed={imagesAllowed}
+              askAboutImages={askAboutImages}
+              accountAddress={snapshot.account?.email ?? null}
+              now={snapshot.now}
+              onClose={closeReader}
+              scrollStep={scrollStep}
+              // The HTML body is resident for a recent window and fetched for anything
+              // older, so "not here yet" is the normal state for a message far enough
+              // back. See `BODY_RETENTION` in the store.
+              bodyPending={selected !== null && !store.hasLoadedBody(selected.id)}
+              onLoadBody={loadSelectedBody}
+              phone={phone}
+              actions={{
+                onStar: act((s, snap) => {
+                  if (snap.view.selected) s.toggleStar(snap.view.selected.id);
+                }),
+                onRead: act((s, snap) => {
+                  if (snap.view.selected) s.toggleRead(snap.view.selected.id);
+                }),
+                onArchive: act((s, snap) => {
+                  if (snap.view.selected) s.archive(snap.view.selected.id);
+                }),
+                onTrash: act((s, snap) => {
+                  if (snap.view.selected) s.trash(snap.view.selected.id);
+                }),
+                onReply: openReply,
+                onForward: openForward,
+                onNotSpam: act((s, snap) => {
+                  // "Not spam" is a move to the inbox, which is exactly what
+                  // `store.move` does — so it inherits the optimistic update, the undo,
+                  // and the label pair Gmail needs (drop SPAM, add INBOX) rather than
+                  // needing a third code path for the same operation.
+                  if (snap.view.selected) s.move(snap.view.selected.id, "inbox");
+                }),
+                onShowOriginal: () => {
+                  // Opened in the system browser, which is a different origin from the
+                  // app and the only context in which a message's own scripts can run —
+                  // so the sender gets no handle on anything Winnow knows. The comment
+                  // above said this was a `winnow:` deep link, which it is not, and which
+                  // would have been a link into the app itself.
+                  const gmailId = selected?.gmailId;
+                  if (!gmailId) return;
+                  void platform.openExternal(`https://mail.google.com/mail/u/0/#all/${encodeURIComponent(gmailId)}`);
+                },
+                onBlockSender: act((s, snap) => {
+                  if (snap.view.selected) {
+                    s.blockSender(snap.view.selected.sender);
+                    s.closeReader({ dropCursor: phoneRef.current });
+                  }
+                }),
+                onLoadRemoteContent: act((_store, snap) => {
+                // Not a preference change: this message only. See `remoteFor`.
+                if (snap.view.selected) setRemoteFor(snap.view.selected.id);
               }),
-              onRead: act((s, snap) => {
-                if (snap.view.selected) s.toggleRead(snap.view.selected.id);
-              }),
-              onArchive: act((s, snap) => {
-                if (snap.view.selected) s.archive(snap.view.selected.id);
-              }),
-              onTrash: act((s, snap) => {
-                if (snap.view.selected) s.trash(snap.view.selected.id);
-              }),
-              onReply: openReply,
-              onForward: openForward,
-              onNotSpam: act((s, snap) => {
-                // "Not spam" is a move to the inbox, which is exactly what
-                // `store.move` does — so it inherits the optimistic update, the undo,
-                // and the label pair Gmail needs (drop SPAM, add INBOX) rather than
-                // needing a third code path for the same operation.
-                if (snap.view.selected) s.move(snap.view.selected.id, "inbox");
-              }),
-              onShowOriginal: () => {
-                // Opened in the system browser, which is a different origin from the
-                // app and the only context in which a message's own scripts can run —
-                // so the sender gets no handle on anything Winnow knows. The comment
-                // above said this was a `winnow:` deep link, which it is not, and which
-                // would have been a link into the app itself.
-                const gmailId = selected?.gmailId;
-                if (!gmailId) return;
-                void platform.openExternal(`https://mail.google.com/mail/u/0/#all/${encodeURIComponent(gmailId)}`);
-              },
-              onBlockSender: act((s, snap) => {
-                if (snap.view.selected) {
-                  s.blockSender(snap.view.selected.sender);
-                  s.closeReader();
-                }
-              }),
-              onLoadRemoteContent: act((_store, snap) => {
-              // Not a preference change: this message only. See `remoteFor`.
-              if (snap.view.selected) setRemoteFor(snap.view.selected.id);
-            }),
-              onAlwaysLoadRemoteContent: () => {
-                store.setPreferences({ imagePolicy: "always" });
-                // The hatch is redundant once the answer is standing, and leaving it
-                // set would keep this one message's grant alive behind a policy that
-                // no longer needs it.
-                setRemoteFor(null);
-              },
-              onNeverLoadRemoteContent: () => {
-                store.setPreferences({ imagePolicy: "never" });
-                setRemoteFor(null);
-              },
-              onOpenMessage: (id) => {
-                // `focusMessage` rather than `select`, because the earlier message may
-                // not be in the current list — it may be in another mailbox, or behind
-                // the active filters — and the store handles both.
-                store.focusMessage(id);
-              },
-              onSaveAttachment: saveAttachment,
-            }}
-          />
-        </div>
+                onAlwaysLoadRemoteContent: () => {
+                  store.setPreferences({ imagePolicy: "always" });
+                  // The hatch is redundant once the answer is standing, and leaving it
+                  // set would keep this one message's grant alive behind a policy that
+                  // no longer needs it.
+                  setRemoteFor(null);
+                },
+                onNeverLoadRemoteContent: () => {
+                  store.setPreferences({ imagePolicy: "never" });
+                  setRemoteFor(null);
+                },
+                onOpenMessage: (id) => {
+                  // `focusMessage` rather than `select`, because the earlier message may
+                  // not be in the current list — it may be in another mailbox, or behind
+                  // the active filters — and the store handles both.
+                  store.focusMessage(id);
+                },
+                onSaveAttachment: saveAttachment,
+              }}
+            />
+          </div>
+        )}
       </main>
 
       {/*
@@ -1476,6 +1557,9 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
           onSortBy={store.setSortBy.bind(store)}
           appearance={preferences.appearance}
           onAppearance={(appearance) => store.setPreferences({ appearance })}
+          accentTheme={preferences.accent}
+          accentChoices={accentChoices}
+          onAccentTheme={(accent) => store.setPreferences({ accent })}
           // Both hosts render a message's HTML in a `sandbox=""` iframe, which loads its
           // images and executes none of its code. A *prop* rather than a constant so a
           // build that genuinely could not would say so rather than offering a switch that

@@ -3,7 +3,7 @@
  *
  * How it works:
  *   1. Edit a value below.
- *   2. `applyTheme(root, scheme)` mirrors the active palette to `--wn-*` custom
+ *   2. `applyTheme(root, mode, accent)` mirrors the active palette to `--wn-*` custom
  *      properties on `<html>`, so plain CSS in `index.css` — the scrollbar, the
  *      focus ring — reads from the same source as Tailwind.
  *   3. `tailwind.config.js` maps the same names onto utilities, so components
@@ -18,6 +18,12 @@
  * `contrastRatio` and `relativeLuminance` live here so `theme.test.ts` can assert
  * the palette's contrast guarantees rather than trusting them.
  */
+
+import {
+  DEFAULT_ACCENT_THEME,
+  type AccentTheme,
+  type Appearance,
+} from "../core/model/appearance";
 
 /** WCAG relative luminance of an `#RRGGBB` colour, 0–1. */
 export function relativeLuminance(hex: string): number {
@@ -45,76 +51,103 @@ export function contrastRatio(a: string, b: string): number {
 type Palette = {
   color: Record<string, string>;
   /**
-   * Accent per bucket. Drives the `starred` tint and the hue identities that
-   * `ui/filterColors` builds its pill washes from.
+   * A hue per bucket, published as `--wn-badge-<id>`. Only `starred` is drawn today
+   * (the star); the rest stay as named tokens so a bucket can be given a colour again
+   * in one place, but the interface does not tint by bucket — the accent is the only
+   * colour that means anything.
    */
   badge: Record<string, string>;
-  /** The two shadows in the system: `pane` and `lift`. */
+  /** The two shadows in the system: `pane` and `lift`. Both `none` while the design is flat. */
   elevation: Record<string, string>;
 };
 
+/**
+ * Light.
+ *
+ * Pale, cool lavender-greys: every neutral carries a little of the accent's blue-violet, so
+ * the light page reads as the same night sky with the lights on rather than a different app.
+ * Surfaces are separated by value alone — no rules, no shadows.
+ */
 const LIGHT: Palette = {
   color: {
     // ── Surfaces ────────────────────────────────────────────────
-    /** Whole-app backdrop. Tinted, not white, so an unshadowed card still reads as raised. */
-    canvas: "#EFF3F3",
+    /** Whole-app backdrop: the chrome and the reader's gutter. */
+    canvas: "#EDECF4",
     /** Pane and control fill — the default "thing you can touch". */
-    surface: "#FFFFFF",
-    /** Recessed fill: list section headers, search, empty states. */
-    surfaceSunken: "#F6F8F8",
+    surface: "#FAFAFD",
+    /** Recessed fill: the reader pane, search, empty states. */
+    surfaceSunken: "#F4F3F9",
     /** Hover wash on rows and icon buttons. */
-    surfaceHover: "#F2F5F6",
-    /** The selected list row. */
-    surfaceActive: "#E6EDEF",
+    surfaceHover: "#EDECF4",
+    /** Pressed and focused fills. */
+    surfaceActive: "#E2E0EE",
+    /** The selected list row: the accent, washed into `surface`. Opaque so the contrast test can see it. */
+    surfaceSelected: "#E7E2FA",
     /** Masthead and the mobile bar under it. */
-    chrome: "#FFFFFF",
+    chrome: "#FAFAFD",
 
     // ── Text ────────────────────────────────────────────────────
     /** Headlines — sender name, subject. */
-    ink: "#15181D",
+    ink: "#18162B",
     /** Long-form body copy. */
-    inkBody: "#3C434C",
+    inkBody: "#37334F",
     /** Secondary metadata: addresses, timestamps. Clears AA on every plane it sits on. */
-    inkMuted: "#5A5F67",
+    inkMuted: "#514C6A",
     /** Tertiary: section labels, empty-state copy, the row timestamp. Kept a visible step from `inkMuted`. */
-    inkSubtle: "#656B72",
+    inkSubtle: "#615C7A",
     /** Toolbar icon buttons. */
-    inkIcon: "#4A515A",
-    /** Search placeholder. Same size requirement as `inkSubtle`: 13px text. */
-    inkPlaceholder: "#656B72",
+    inkIcon: "#45405E",
+    /** Search placeholder. Same size requirement as `inkSubtle`. */
+    inkPlaceholder: "#615C7A",
+
+    // ── Accent ──────────────────────────────────────────────────
+    /**
+     * Winnow's one colour: a deep space violet, an indigo-leaning blue-violet saturated enough
+     * to read as a colour of its own. Unread, selection, focus and the primary action, and
+     * nothing else. 5.8:1 or better on every surface, so it can carry text as well as a ring.
+     */
+    accent: "#5028E2",
+    /** Text on a solid accent fill. */
+    onAccent: "#FFFFFF",
 
     // ── Status ──────────────────────────────────────────────────
-    /** Destructive actions and errors. The only red that is not a bucket. */
+    /** Destructive actions and errors. A brick red, more than 100° of hue from the violet so "delete" never reads as "go". */
     danger: "#B42318",
     /** Confirmation, and "this worked". */
-    success: "#15803D",
+    success: "#2F7A3E",
     /** The notice strip's wash, for a non-blocking message. */
-    notice: "rgba(21, 128, 61, 0.08)",
+    notice: "rgba(47, 122, 62, 0.08)",
     /** The error strip's wash. */
     dangerWash: "rgba(180, 35, 24, 0.07)",
 
     // ── Lines & controls ────────────────────────────────────────
     /** Default separator. Everything structural uses this unless it needs to recede. */
-    hairline: "rgba(15, 23, 42, 0.09)",
+    hairline: "rgba(28, 22, 72, 0.09)",
     /** Separator inside a container that already has a border. */
-    hairlineSoft: "rgba(15, 23, 42, 0.055)",
+    hairlineSoft: "rgba(28, 22, 72, 0.055)",
     /** Vertical separators splitting an action cluster into groups. */
-    divider: "rgba(15, 23, 42, 0.14)",
+    divider: "rgba(28, 22, 72, 0.14)",
     /** Neutral control border (search, action cluster). */
-    controlBorder: "rgba(15, 23, 42, 0.1)",
-    /** Focus ring. Replaces `ring-neutral-400/60`. */
-    focusRing: "rgba(120, 130, 145, 0.55)",
+    controlBorder: "rgba(28, 22, 72, 0.12)",
+    /** Focus ring: the accent, solid. 3:1 or better against every surface. */
+    focusRing: "#5028E2",
+    /**
+     * An edge drawn only where value cannot separate two planes: the search field, the
+     * reader pane, the phone dock. Transparent here and in dark, where the planes already
+     * differ in lightness; a violet hairline on OLED, where they are all black.
+     */
+    edge: "transparent",
 
     // ── Chrome ──────────────────────────────────────────────────
-    scrollbar: "rgba(15, 23, 42, 0.2)",
+    scrollbar: "rgba(28, 22, 72, 0.22)",
 
     // ── Depth, without borders ─────────────────────────────────
-    /** Translucent fill for layers floating over content (drawer, sheets); pair with `backdrop-filter`. */
-    veil: "rgba(255, 255, 255, 0.74)",
-    /** Selection as a low-alpha wash of the palette's own ink: darkens on light, lightens on dark. */
-    sheen: "rgba(21, 24, 29, 0.055)",
-    /** What the drawer dims. Warm-neutral, not black, so dimming reads as depth. */
-    scrim: "rgba(15, 23, 42, 0.16)",
+    /** Fill for layers floating over content (drawer, sheets). Opaque now that nothing blurs behind it. */
+    veil: "rgba(250, 250, 253, 0.96)",
+    /** A low-alpha wash of the palette's own ink: pressed states and quiet buttons. */
+    sheen: "rgba(28, 22, 72, 0.06)",
+    /** What the drawer dims. Tinted, not black, so dimming reads as depth. */
+    scrim: "rgba(16, 12, 52, 0.2)",
   },
 
   badge: {
@@ -143,54 +176,65 @@ const LIGHT: Palette = {
 
   /** `pane` sits on the list and reader cards; `lift` is for chrome floating over scrolling content. */
   elevation: {
-    pane: "0 1px 2px rgba(15, 23, 42, 0.05)",
-    lift: "0 12px 32px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.05)",
+    pane: "none",
+    lift: "none",
   },
 };
 
 /**
- * Dark mode.
+ * Dark mode, the palette's main expression.
  *
- * Not an inversion: surfaces step up in lightness rather than dropping to black,
- * because a true-black list behind white text is hard on the eyes. `#15181D` is
- * the light palette's ink, promoted to the canvas, so the two read as one system.
+ * A night sky rather than an inversion: deep indigo-blacks with a clear blue-violet cast,
+ * stepping up in lightness from canvas to surface. Darker than it first shipped — the
+ * page is nearly black now — but deliberately not black: that is what OLED is for, and
+ * keeping a little indigo in every plane is what lets the steps between them stay
+ * visible. Lines and washes are violet-tinted lavender, the inks cool lavender-whites,
+ * and the accent is the one luminous thing on the page.
+ *
+ * The accent, its selected-row wash and danger are written here for Space and replaced
+ * per accent theme by `paletteFor` (see `ACCENTS`).
  */
 const DARK: Palette = {
   color: {
-    canvas: "#0F1216",
-    surface: "#181C22",
-    surfaceSunken: "#13171C",
-    surfaceHover: "#1F242B",
-    surfaceActive: "#2A313A",
-    chrome: "#151A20",
+    canvas: "#070612",
+    surface: "#0D0B1E",
+    surfaceSunken: "#0A0918",
+    surfaceHover: "#141229",
+    surfaceActive: "#1C1A35",
+    surfaceSelected: "#221A3E",
+    chrome: "#0B0A1B",
 
-    ink: "#EDF1F4",
-    inkBody: "#C3CBD3",
-    /** Kept a visible step above `inkSubtle`; both must clear AA on `surfaceActive`. */
-    inkMuted: "#A9B2BA",
-    inkSubtle: "#929BA3",
-    inkIcon: "#A7B1BC",
+    ink: "#EDEBFA",
+    inkBody: "#CAC6E0",
+    /** Kept a visible step above `inkSubtle`; both must clear AA on `surfaceSelected`. */
+    inkMuted: "#AAA5C4",
+    inkSubtle: "#9590B2",
+    inkIcon: "#A8A3C2",
     /** Held one step off `inkSubtle`, so a placeholder does not read as filled-in text. */
-    inkPlaceholder: "#929AA2",
+    inkPlaceholder: "#9590B2",
 
-    hairline: "rgba(255, 255, 255, 0.09)",
-    hairlineSoft: "rgba(255, 255, 255, 0.055)",
-    divider: "rgba(255, 255, 255, 0.15)",
-    controlBorder: "rgba(255, 255, 255, 0.11)",
-    focusRing: "rgba(160, 172, 186, 0.7)",
+    /** The same violet, lifted to a luminous lavender that glows against the indigo-black. */
+    accent: "#B9A5FF",
+    /** Dark text on the light accent: white on #B9A5FF would fail AA. */
+    onAccent: "#0D0B1E",
 
-    danger: "#F97066",
-    success: "#4ADE80",
-    notice: "rgba(74, 222, 128, 0.1)",
-    dangerWash: "rgba(249, 112, 102, 0.1)",
+    hairline: "rgba(200, 188, 255, 0.09)",
+    hairlineSoft: "rgba(200, 188, 255, 0.055)",
+    divider: "rgba(200, 188, 255, 0.15)",
+    controlBorder: "rgba(200, 188, 255, 0.12)",
+    focusRing: "#B9A5FF",
+    edge: "transparent",
 
-    scrollbar: "rgba(255, 255, 255, 0.24)",
+    danger: "#F28B6E",
+    success: "#6BCB7F",
+    notice: "rgba(107, 203, 127, 0.1)",
+    dangerWash: "rgba(242, 139, 110, 0.1)",
 
-    // `veil` is the lighter alpha on purpose: on a near-black canvas a 74% fill reads
-    // as a grey card rather than glass. `sheen` lightens here, inverting the ink ramp.
-    veil: "rgba(28, 33, 40, 0.72)",
-    sheen: "rgba(237, 241, 244, 0.07)",
-    scrim: "rgba(0, 0, 0, 0.34)",
+    scrollbar: "rgba(200, 188, 255, 0.24)",
+
+    veil: "rgba(13, 11, 30, 0.97)",
+    sheen: "rgba(237, 235, 250, 0.07)",
+    scrim: "rgba(2, 1, 10, 0.55)",
   },
 
   // The light palette's badge accents all fail on a dark surface: same hues, lifted.
@@ -219,31 +263,161 @@ const DARK: Palette = {
   },
 
   elevation: {
-    pane: "0 1px 2px rgba(0, 0, 0, 0.3)",
-    lift: "0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3)",
+    pane: "none",
+    lift: "none",
   },
 };
 
-export const PALETTES = { light: LIGHT, dark: DARK } as const;
+/**
+ * OLED: dark, with the lights all the way off.
+ *
+ * Canvas, panes and chrome are true black, so an OLED screen switches those pixels off.
+ * Only the states that have to be seen — hover, pressed, the selected row — keep a
+ * very dark indigo, still a visible step apart. With the planes no longer separated by
+ * value, the violet-tinted hairlines carry the structure and are a touch stronger than
+ * dark's. Inks, accent and danger are dark's, which only gain contrast on black.
+ */
+const OLED: Palette = {
+  color: {
+    ...DARK.color,
+    canvas: "#000000",
+    surface: "#000000",
+    surfaceSunken: "#000000",
+    chrome: "#000000",
+    surfaceHover: "#0E0C1F",
+    surfaceActive: "#16132D",
+    surfaceSelected: "#1A1333",
+
+    onAccent: "#000000",
+
+    hairline: "rgba(200, 188, 255, 0.13)",
+    hairlineSoft: "rgba(200, 188, 255, 0.08)",
+    divider: "rgba(200, 188, 255, 0.19)",
+    controlBorder: "rgba(200, 188, 255, 0.16)",
+    /** With every plane black, this is what tells the search field and the panes apart. */
+    edge: "rgba(200, 188, 255, 0.16)",
+
+    scrollbar: "rgba(200, 188, 255, 0.26)",
+
+    veil: "rgba(0, 0, 0, 0.97)",
+    sheen: "rgba(237, 235, 250, 0.08)",
+    scrim: "rgba(0, 0, 0, 0.6)",
+  },
+  badge: DARK.badge,
+  elevation: DARK.elevation,
+};
+
+/** The three modes a palette is drawn for. `system` resolves to one of the first two. */
+export const PALETTES = { light: LIGHT, dark: DARK, oled: OLED } as const;
 
 export type ThemeName = keyof typeof PALETTES;
+
+/** The modes, in the order tests and the picker walk them. */
+export const MODES = Object.keys(PALETTES) as ThemeName[];
+
+/**
+ * What an accent theme replaces, per mode.
+ *
+ * `accent` is the colour itself (and the focus ring); `onAccent` is text on a solid
+ * accent fill; `surfaceSelected` is the accent washed into the surface, hand-matched in
+ * lightness across accents so the selected row is the same step on every theme.
+ * `danger` is only given where the shared red would sit too close to the accent.
+ */
+type AccentTones = {
+  accent: string;
+  onAccent: string;
+  surfaceSelected: string;
+  danger?: string;
+};
+
+type AccentSpec = {
+  /** What the picker calls it. */
+  label: string;
+  light: AccentTones;
+  dark: AccentTones;
+  oled: AccentTones;
+};
+
+/**
+ * The accent themes. Neutrals are shared: every theme sits on the same indigo-tinted
+ * greys (Space's), so the page stays Winnow's and only the one colour that means
+ * something changes. Every combination is held to WCAG AA in `theme.test.ts`.
+ */
+export const ACCENTS: Record<AccentTheme, AccentSpec> = {
+  /** Space violet, the default: an indigo-leaning blue-violet. */
+  space: {
+    label: "Space",
+    light: { accent: "#5028E2", onAccent: "#FFFFFF", surfaceSelected: "#E7E2FA" },
+    dark: { accent: "#B9A5FF", onAccent: "#0D0B1E", surfaceSelected: "#221A3E" },
+    oled: { accent: "#B9A5FF", onAccent: "#000000", surfaceSelected: "#1A1333" },
+  },
+  /** Plum: a dusky red-violet. */
+  plum: {
+    label: "Plum",
+    light: { accent: "#74306A", onAccent: "#FFFFFF", surfaceSelected: "#F9DDF5" },
+    dark: { accent: "#D4A3CE", onAccent: "#0D0B1E", surfaceSelected: "#32152F" },
+    oled: { accent: "#D4A3CE", onAccent: "#000000", surfaceSelected: "#280F25" },
+  },
+  /**
+   * Ember: rust in light, a warm amber glow in dark. It lives next door to red, so its
+   * danger moves the other way — to a crimson-rose — to keep the two more than 40°
+   * apart: "delete" must never read as the accent.
+   */
+  ember: {
+    label: "Ember",
+    light: { accent: "#A2470D", onAccent: "#FFFFFF", surfaceSelected: "#F8E0D2", danger: "#B8184A" },
+    dark: { accent: "#F0964F", onAccent: "#0D0B1E", surfaceSelected: "#2B1D12", danger: "#FF80A4" },
+    oled: { accent: "#F0964F", onAccent: "#000000", surfaceSelected: "#21160D", danger: "#FF80A4" },
+  },
+  /** Aurora: a cool teal, the northern lights against the night-sky neutrals. */
+  aurora: {
+    label: "Aurora",
+    light: { accent: "#0A6E68", onAccent: "#FFFFFF", surfaceSelected: "#D9F2EF" },
+    dark: { accent: "#5ED6C5", onAccent: "#0D0B1E", surfaceSelected: "#0E2321" },
+    oled: { accent: "#5ED6C5", onAccent: "#000000", surfaceSelected: "#0A1B19" },
+  },
+};
+
+/** `#RRGGBB` at an alpha, as `rgba()`. For the washes derived from a theme's colours. */
+function withAlpha(hex: string, alpha: number): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
 
 /** The light palette, for callers that need a value without the active scheme. */
 export const theme = LIGHT.color;
 
-/** The active palette, defaulting to light. */
-export function paletteFor(scheme: ThemeName): Palette {
-  return PALETTES[scheme];
+/** The palette for a mode and accent theme. Space when no accent is given. */
+export function paletteFor(scheme: ThemeName, accent: AccentTheme = DEFAULT_ACCENT_THEME): Palette {
+  const base = PALETTES[scheme];
+  const tones = ACCENTS[accent][scheme];
+  const danger = tones.danger ?? base.color.danger;
+  return {
+    ...base,
+    color: {
+      ...base.color,
+      accent: tones.accent,
+      focusRing: tones.accent,
+      onAccent: tones.onAccent,
+      surfaceSelected: tones.surfaceSelected,
+      danger,
+      dangerWash: tones.danger ? withAlpha(danger, scheme === "light" ? 0.07 : 0.1) : base.color.dangerWash,
+    },
+  };
 }
 
 /**
  * Mirror the active palette into `--wn-*` custom properties on `<html>`.
  *
- * Called on mount and whenever the scheme changes, because the Tailwind utilities
- * resolve against these variables at paint time.
+ * Called before the first render (`main.tsx`) and whenever the mode or accent changes,
+ * because the Tailwind utilities resolve against these variables at paint time.
  */
-export function applyTheme(root: HTMLElement, scheme: ThemeName = "light"): void {
-  const palette = paletteFor(scheme);
+export function applyTheme(
+  root: HTMLElement,
+  scheme: ThemeName = "light",
+  accent: AccentTheme = DEFAULT_ACCENT_THEME,
+): void {
+  const palette = paletteFor(scheme, accent);
   for (const [key, value] of Object.entries(palette.color)) {
     root.style.setProperty(`--wn-${key}`, value);
   }
@@ -254,19 +428,19 @@ export function applyTheme(root: HTMLElement, scheme: ThemeName = "light"): void
     root.style.setProperty(`--wn-elev-${key}`, value);
   }
   // Drives native form controls, scrollbars, and the OS `color-scheme`, so a dark
-  // app does not flash white before first paint.
-  root.style.colorScheme = scheme;
+  // app does not flash white before first paint. OLED is a dark scheme to the browser.
+  root.style.colorScheme = scheme === "light" ? "light" : "dark";
   root.dataset.theme = scheme;
+  root.dataset.accent = accent;
 }
 
 /**
- * The scheme to actually render. `system` resolves against the OS; the caller
- * (`ThemeProvider`) owns the subscription.
+ * The mode to actually render. `system` resolves against the OS — to dark, never OLED,
+ * since true black is a choice about one's own screen rather than something the OS
+ * reports. The caller (`App`) owns the subscription. `public/theme-boot.js` repeats
+ * this rule before the bundle loads, and `theme.test.ts` holds the two to each other.
  */
-export function resolveScheme(
-  preference: "system" | "light" | "dark",
-  systemPrefersDark: boolean,
-): ThemeName {
+export function resolveScheme(preference: Appearance, systemPrefersDark: boolean): ThemeName {
   if (preference === "system") return systemPrefersDark ? "dark" : "light";
   return preference;
 }

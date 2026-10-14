@@ -397,9 +397,13 @@ try {
   // which reads as an empty mailbox — and "0 of 0" on a narrowed list.
   const position = await page.locator("header").getByText(/^(—|\d+)\s*\/?\s*(of\s*)?\d+$/).count();
   check("the position cluster is not claiming row 0", position > 0);
+  // It used to be "— / 39": a dash for "no row", then a slash that read as a fraction.
+  // An untouched list now shows the total and nothing else; "3 of 39" once it moves.
+  const readout = ((await page.locator("header [data-position]").first().textContent()) ?? "").trim();
   check(
-    "an untouched list shows a dash rather than a row number",
-    (await page.locator("header").getByText("—", { exact: false }).count()) > 0,
+    "an untouched list shows the total rather than a row number",
+    /^\d+$/.test(readout) && Number(readout) === (await rowTotal()),
+    JSON.stringify(readout),
   );
 
   // ── Sign-in is reachable from the demo ─────────────────────────────────────
@@ -412,6 +416,18 @@ try {
   check(
     "and says the demo is a sample, not a synced account",
     (await page.locator("text=Demo mailbox").count()) > 0,
+  );
+
+  // ── The triage line ────────────────────────────────────────────────────────
+
+  // The inbox opens with a sentence about what needs you, built from the classifier's
+  // own signals. The demo seed has unread asks in it, so the sentence must count
+  // something rather than fall back to "Nothing needs you right now".
+  const attention = ((await page.locator("[data-attention]").first().textContent()) ?? "").trim();
+  check(
+    "the inbox leads with what needs attention, as a sentence",
+    /^\d+ waiting on you\b/.test(attention),
+    JSON.stringify(attention),
   );
 
   // ── Google account setup ───────────────────────────────────────────────────
@@ -919,29 +935,33 @@ try {
   );
 
   /**
-   * The same vocabulary in the list.
+   * The same vocabulary in the list, said once.
    *
-   * The row drew a coloured dot and the reader drew a chip, from two different
-   * predicates — so a message could be "Urgent" in one and unremarkable in the other,
-   * in the same window. Both now read `ui/filterIcons`, so the assertion is that the
-   * row carries the *explanation* rather than a colour.
+   * Rows used to carry a cluster of glyphs — bookmark, bolt, shield — on most messages.
+   * A row now says at most one thing, as a word (unsafe, urgent or security, else "New"),
+   * from the same `ui/filterIcons` explanations the reader uses, so hovering it still
+   * says *why*.
    */
   const rowFilters = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll("[data-message-id]")].slice(0, 8);
+    const rows = [...document.querySelectorAll("[data-message-id]")].slice(0, 12);
     return rows.map((row) => ({
-      glyphs: row.querySelectorAll("span[title] > svg").length,
-      titles: [...row.querySelectorAll("span[title]")].map((s) => s.getAttribute("title")),
+      glyphs: row.querySelectorAll("svg").length,
+      labels: [...row.querySelectorAll("span[title]")].map((s) => ({
+        text: (s.textContent ?? "").trim(),
+        title: s.getAttribute("title"),
+      })),
     }));
   });
   check(
-    "list rows carry the same semantic icons",
-    rowFilters.some((row) => row.glyphs > 0),
-    JSON.stringify(rowFilters.filter((r) => r.glyphs > 0).slice(0, 3)),
+    "list rows carry one signal at most, as a word rather than an icon cluster",
+    rowFilters.every((row) => row.glyphs === 0 && row.labels.length <= 1) &&
+      rowFilters.some((row) => row.labels.length === 1),
+    JSON.stringify(rowFilters.filter((r) => r.labels.length > 0).slice(0, 3)),
   );
   check(
-    "and every row glyph explains itself on hover",
-    rowFilters.every((row) => row.titles.every((t) => (t ?? "").length > 8)),
-    JSON.stringify(rowFilters.flatMap((r) => r.titles).slice(0, 4)),
+    "and every row signal explains itself on hover",
+    rowFilters.every((row) => row.labels.every((l) => (l.title ?? "").length > l.text.length + 8)),
+    JSON.stringify(rowFilters.flatMap((r) => r.labels).slice(0, 4)),
   );
 
   // ── The reader holds its message when the filters change ──────────────────
@@ -989,7 +1009,7 @@ try {
   // The list collapses a thread to one row, so without this the rest of the exchange
   // is unreachable from the reader — and a message that was archived is not in the
   // list at all, so it was unreachable anywhere.
-  const convoHeading = page.locator('article h3:has-text("in this conversation")');
+  const convoHeading = page.locator('article h3:has-text("earlier message")');
   check("a thread shows the rest of the exchange", (await convoHeading.count()) > 0);
 
   // The three "Re: the migration plan" messages share a subject, so the subject
@@ -997,7 +1017,7 @@ try {
   // row's text is the right thing: it names the sender and relative time, so a
   // different sender or a different timestamp proves the reader moved.
   const convoButtons = page.locator(
-    'article h3:has-text("in this conversation") + ul > li > button',
+    'article h3:has-text("earlier message") + ul > li > button',
   );
   const convoCount = await convoButtons.count();
   check("and each earlier message is a real button", convoCount >= 2, `${convoCount} entries`);
@@ -1960,6 +1980,133 @@ try {
     JSON.stringify(imagePrefs.imagePolicy),
   );
 
+  // ── Themes ─────────────────────────────────────────────────────────────────
+
+  section("themes");
+
+  /*
+   * The picker: two radio groups in Settings → Appearance, Mode and Accent.
+   *
+   * Driven the way a user would — a click, then the arrow keys a screen-reader user
+   * would use — and asserted on what reaches the page: `data-theme` / `data-accent` on
+   * `<html>`, the canvas actually painted, and what is written to storage. Then a reload
+   * with the bundle *blocked*, which is the only way to see what `theme-boot.js` and the
+   * `index.css` fallbacks paint on their own: the frame a user sees before the app loads.
+   */
+  await page.keyboard.press(",");
+  await page.waitForSelector('[role="radiogroup"][data-picker="winnow-theme-mode"]', { timeout: 5_000 });
+  const modeGroup = page.locator('[role="radiogroup"][data-picker="winnow-theme-mode"]');
+  const accentGroup = page.locator('[role="radiogroup"][data-picker="winnow-theme-accent"]');
+  const modeRadios = modeGroup.locator('[role="radio"]');
+  const accentRadios = accentGroup.locator('[role="radio"]');
+  check(
+    "the mode picker offers System, Light, Dark and OLED",
+    JSON.stringify(await modeRadios.allTextContents()) === JSON.stringify(["System", "Light", "Dark", "OLED"]),
+    JSON.stringify(await modeRadios.allTextContents()),
+  );
+  check(
+    "the accent picker offers the curated accents, Space first",
+    (await accentRadios.count()) >= 3 && ((await accentRadios.first().textContent()) ?? "").trim() === "Space",
+    JSON.stringify(await accentRadios.allTextContents()),
+  );
+  check(
+    "both groups are labelled by a visible heading",
+    (await page.evaluate(() =>
+      [...document.querySelectorAll('[role="radiogroup"][data-picker]')].every((group) => {
+        const label = document.getElementById(group.getAttribute("aria-labelledby") ?? "");
+        return Boolean(label && label.textContent?.trim() && label.offsetParent !== null);
+      }),
+    )),
+  );
+  check(
+    "each group is one tab stop: only the checked radio is focusable",
+    (await page.evaluate(() =>
+      [...document.querySelectorAll('[role="radiogroup"][data-picker]')].every((group) => {
+        const stops = [...group.querySelectorAll('[role="radio"]')].filter((radio) => radio.tabIndex === 0);
+        return stops.length === 1 && stops[0].getAttribute("aria-checked") === "true";
+      }),
+    )),
+  );
+  const themeState = () =>
+    page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      accent: document.documentElement.dataset.accent,
+      canvas: getComputedStyle(document.body).backgroundColor,
+    }));
+
+  await modeRadios.filter({ hasText: "OLED" }).click();
+  await page.waitForTimeout(150);
+  let state = await themeState();
+  check(
+    "choosing OLED paints true black",
+    state.theme === "oled" && state.canvas === "rgb(0, 0, 0)" &&
+      (await modeRadios.filter({ hasText: "OLED" }).getAttribute("aria-checked")) === "true",
+    JSON.stringify(state),
+  );
+
+  // The keyboard: arrows move the choice and the focus together, as a radio group should.
+  await accentRadios.first().focus();
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(100);
+  const secondAccent = ((await accentRadios.nth(1).getAttribute("data-value")) ?? "").trim();
+  check(
+    "ArrowRight selects and focuses the next accent",
+    (await accentRadios.nth(1).getAttribute("aria-checked")) === "true" &&
+      (await page.evaluate(() => document.activeElement?.getAttribute("data-value"))) === secondAccent,
+    secondAccent,
+  );
+  await page.keyboard.press("End");
+  await page.waitForTimeout(100);
+  const lastAccent = (await accentRadios.last().getAttribute("data-value")) ?? "";
+  check("End jumps to the last accent", (await themeState()).accent === lastAccent, lastAccent);
+
+  await accentRadios.filter({ hasText: "Ember" }).click();
+  await page.waitForTimeout(150);
+  state = await themeState();
+  const emberAccent = await page.evaluate(() =>
+    document.documentElement.style.getPropertyValue("--wn-accent").trim().toUpperCase(),
+  );
+  check("choosing Ember changes the accent on the page", state.accent === "ember" && emberAccent === "#F0964F", `${JSON.stringify(state)} ${emberAccent}`);
+
+  const themePrefs = JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}");
+  check(
+    "the mode and accent are persisted, without disturbing other preferences",
+    themePrefs.appearance === "oled" && themePrefs.accent === "ember" && themePrefs.imagePolicy === "always",
+    JSON.stringify(themePrefs),
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  // Before the bundle: answer every script but the boot one with an empty file, and see
+  // what paints. Fulfilled rather than aborted, so the run's console stays clean.
+  await page.route(/\/assets\/.*\.js$/, (route) =>
+    route.fulfill({ status: 200, contentType: "text/javascript", body: "" }),
+  );
+  await page.reload({ waitUntil: "load" });
+  await page.waitForTimeout(300);
+  state = await themeState();
+  check(
+    "before the app loads, the stored mode is already on the page (no flash of light)",
+    state.theme === "oled" && state.accent === "ember" && state.canvas === "rgb(0, 0, 0)",
+    JSON.stringify(state),
+  );
+  await page.unroute(/\/assets\/.*\.js$/);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(700);
+  state = await themeState();
+  check("and after a reload the app keeps OLED and Ember", state.theme === "oled" && state.accent === "ember", JSON.stringify(state));
+
+  // Put the world back: the rest of the run assumes the default theme.
+  await page.keyboard.press(",");
+  await page.waitForSelector('[role="radiogroup"][data-picker="winnow-theme-mode"]', { timeout: 5_000 });
+  await modeRadios.filter({ hasText: "System" }).click();
+  await accentRadios.filter({ hasText: "Space" }).click();
+  await page.waitForTimeout(150);
+  state = await themeState();
+  check("System and Space restore the default", state.theme === "light" && state.accent === "space", JSON.stringify(state));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
   await openMessage();
   await page.locator('[data-reader] button[aria-label="More"]:visible').first().click();
   const block = page.locator('[role="menu"] button:has-text("Hide everything from")').first();
@@ -1984,6 +2131,148 @@ try {
     "and none of their messages are left in the list",
     (await rows().filter({ hasText: blockedName }).count()) === 0,
     blockedName,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  // ── The rail against the search field ─────────────────────────────────────
+
+  section("rail edges");
+
+  /*
+    The rail is ~3,700px of tabs in a third of that, so at every desktop width one tab
+    meets its end — and with the reader open it was "Unread" at 1440px, sliced mid-word
+    beside the search box, which read as the search field covering it. What is claimed
+    here, across the common widths with and without a message open: the rail stops short
+    of the search field, nothing of it reaches under the field, and wherever it overflows
+    the end is a wide fade with a step button over it, so the tab meeting the edge
+    dissolves rather than being cut.
+  */
+  const RAIL_WIDTHS = [1024, 1280, 1366, 1440, 1536, 1680, 1920];
+  const EDGE_MIN = 48;
+  const railReport = [];
+  for (const width of RAIL_WIDTHS) {
+    for (const reading of [false, true]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(150);
+      if (reading) await openMessage();
+      else if ((await page.locator("article h1").count()) > 0) await page.keyboard.press("Escape");
+      await page.locator("header [data-rail-scroller]").evaluate((element) => (element.scrollLeft = 0));
+      await page.waitForTimeout(150);
+      const shape = await page.evaluate(() => {
+        const scroller = document.querySelector("header [data-rail-scroller]");
+        const search = document.querySelector("#winnow-search")?.closest("label");
+        if (!scroller || !search) return null;
+        const rail = scroller.getBoundingClientRect();
+        const field = search.getBoundingClientRect();
+        const tabs = [...scroller.querySelectorAll("[data-rail-item]")].map((item) => item.getBoundingClientRect());
+        const edge = document.querySelector('header [data-rail-edge="end"]')?.getBoundingClientRect() ?? null;
+        // What actually paints at the search field's left edge, mid-height: it must be
+        // the field (or something inside it), never a tab.
+        const probe = document.elementFromPoint(field.left + 2, field.top + field.height / 2);
+        return {
+          gap: Math.round(field.left - rail.right),
+          underField: tabs.filter((t) => t.right > field.left + 0.5 && t.left < field.right && rail.right > field.left).length,
+          probeIsField: Boolean(probe && search.contains(probe)),
+          overflows: scroller.scrollWidth > scroller.clientWidth + 1,
+          edge: edge && { left: Math.round(edge.left), right: Math.round(edge.right), width: Math.round(edge.width) },
+          railRight: Math.round(rail.right),
+        };
+      });
+      railReport.push({ width, reading, shape });
+    }
+  }
+  const railOk = (predicate) => railReport.every(({ shape }) => shape !== null && predicate(shape));
+  const railDetail = (pick) =>
+    railReport.map(({ width, reading, shape }) => `${width}${reading ? "r" : ""}:${shape ? pick(shape) : "?"}`).join(" ");
+  check(
+    "the rail stops short of the search field at every desktop width, reader open or not",
+    railOk((shape) => shape.gap >= 8),
+    railDetail((shape) => shape.gap),
+  );
+  check(
+    "and no tab reaches under the field",
+    railOk((shape) => shape.underField === 0 && shape.probeIsField),
+    railDetail((shape) => `${shape.underField}/${shape.probeIsField}`),
+  );
+  check(
+    "wherever the rail overflows, its end is a fade with a step button rather than a cut",
+    railOk((shape) => !shape.overflows || (shape.edge !== null && shape.edge.width >= EDGE_MIN && Math.abs(shape.edge.right - shape.railRight) <= 1)),
+    railDetail((shape) => (shape.edge ? shape.edge.width : shape.overflows ? "missing" : "fits")),
+  );
+
+  // Back to the case that was reported: 1440px with a message open.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(150);
+  if ((await page.locator("article h1").count()) === 0) await openMessage();
+  const railScroller = page.locator("header [data-rail-scroller]");
+  await railScroller.evaluate((element) => (element.scrollLeft = 0));
+  await page.waitForTimeout(100);
+
+  /*
+    The keyboard still reaches every tab, and a tab it lands on is never left under the
+    fade. The step buttons are out of the tab order on purpose, so Tab goes straight from
+    tab to tab; this walks past the edge and checks the focused tab is fully in the clear.
+  */
+  await page.locator("header [data-rail-scroller] button[aria-pressed]").first().focus();
+  let clearOfFade = true;
+  let walkedPastEdge = false;
+  const focusTrail = [];
+  for (let i = 0; i < 24; i += 1) {
+    await page.keyboard.press("Tab");
+    const spot = await page.evaluate(() => {
+      const scroller = document.querySelector("header [data-rail-scroller]");
+      const active = document.activeElement;
+      if (!scroller || !active || !scroller.contains(active)) return null;
+      const rail = scroller.getBoundingClientRect();
+      const r = active.getBoundingClientRect();
+      return { fromEnd: Math.round(rail.right - r.right), scrolled: scroller.scrollLeft > 0 };
+    });
+    if (!spot) break;
+    focusTrail.push(spot.fromEnd);
+    if (spot.scrolled) walkedPastEdge = true;
+    if (spot.fromEnd < EDGE_MIN) clearOfFade = false;
+  }
+  check(
+    "Tab walks the rail past its edge, scrolling as it goes",
+    walkedPastEdge,
+    `${focusTrail.length} stops`,
+  );
+  check(
+    "and every focused tab is fully clear of the fade",
+    clearOfFade,
+    focusTrail.join(","),
+  );
+  check(
+    "the step buttons stay out of the tab order",
+    (await page.locator('header [data-rail-edge] button:not([tabindex="-1"])').count()) === 0,
+  );
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+
+  await railScroller.evaluate((element) => (element.scrollLeft = 0));
+  await page.waitForTimeout(150);
+  const beforeStep = await railScroller.evaluate((element) => element.scrollLeft);
+  await page.locator('header button[aria-label="Scroll filters right"]').click();
+  await page.waitForTimeout(700);
+  const afterStep = await railScroller.evaluate((element) => element.scrollLeft);
+  check("the step button moves the rail on", afterStep > beforeStep + 100, `${beforeStep} → ${afterStep}`);
+  check(
+    "and a back button appears once there is something behind",
+    (await page.locator('header button[aria-label="Scroll filters left"]').count()) === 1,
+  );
+  await page.locator('header button[aria-label="Scroll filters left"]').click();
+  await page.waitForTimeout(700);
+  check(
+    "which steps back",
+    (await railScroller.evaluate((element) => element.scrollLeft)) < afterStep,
+  );
+
+  // The desktop keeps its selection exactly as it was: the open row is marked.
+  const openRow = page.locator('[data-row-count] button[data-message-id][aria-current="true"]');
+  check("on the desktop the open message's row is still marked current", (await openRow.count()) === 1);
+  check(
+    "and still drawn selected",
+    (await page.locator("[data-row-count] .bg-surface-selected").count()) === 1,
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
@@ -2013,7 +2302,7 @@ try {
   require("the phone top bar replaces the masthead", (await topBar.count()) === 1);
   check("and the masthead is gone rather than hidden", (await page.locator("header").count()) === 1);
 
-  const logoBox = await box(topBar.locator("span.rounded-full").first());
+  const logoBox = await box(topBar.locator("[data-phone-mark]").first());
   const accountBox = await box(topBar.locator('button[aria-label="Open navigation"]'));
   check(
     "the mark sits top-left and the account/menu circle top-right",
@@ -2366,8 +2655,82 @@ try {
   await page.waitForTimeout(300);
   check(
     "and it works, bringing the dock back",
-    (await page.locator("text=Nothing selected").count()) > 0 && (await dock.count()) === 1,
+    (await page.locator("article h1").count()) === 0 && (await dock.count()) === 1,
   );
+
+  /*
+    No selection on a phone.
+
+    The list and the reader are never on screen together there, so a "current" row means
+    nothing: it would mark the message you just left. A fresh touch page, so nothing above
+    has moved a cursor: it must not open a message on its own, it must not draw or
+    announce a selected row while reading or after Back, there is no "Nothing selected"
+    placeholder anywhere in the document, and Back lands where the list was left.
+  */
+  const noSelect = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const tapPage = await noSelect.newPage();
+  tapPage.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  tapPage.on("pageerror", (error) => errors.push(String(error)));
+  await tapPage.goto(URL, { waitUntil: "networkidle" });
+  await tapPage.waitForSelector("[data-message-id]", { timeout: 10_000 });
+  await tapPage.waitForTimeout(500);
+  const listState = () =>
+    tapPage.evaluate(() => ({
+      reader: document.querySelectorAll("article h1").length,
+      current: document.querySelectorAll("[data-row-count] [aria-current]").length,
+      selectedRows: document.querySelectorAll("[data-row-count] .bg-surface-selected").length,
+      placeholder: document.body.textContent?.includes("Nothing selected") ?? false,
+      scrollTop: Math.round(document.querySelector("[data-row-count]")?.scrollTop ?? -1),
+      position: document.querySelector("[data-position]")?.textContent?.trim() ?? null,
+      ring: document.activeElement?.matches?.("[data-row-count] :focus-visible") ?? false,
+    }));
+  const onLoad = await listState();
+  check("the phone does not open a message on its own", onLoad.reader === 0, JSON.stringify(onLoad));
+  check(
+    "nor mark any row current, or render an empty reader",
+    onLoad.current === 0 && onLoad.selectedRows === 0 && !onLoad.placeholder,
+    JSON.stringify(onLoad),
+  );
+  await tapPage.locator("[data-row-count]").evaluate((element) => (element.scrollTop = 600));
+  await tapPage.waitForTimeout(300);
+  const leftAt = (await listState()).scrollTop;
+  // A tap on whatever row is under the thumb, not a locator: Playwright scrolls a
+  // located element into view first, which would move the list this is about to measure.
+  await tapPage.touchscreen.tap(195, 520);
+  await tapPage.waitForSelector("article h1", { timeout: 5_000 });
+  const whileReading = await listState();
+  check(
+    "a tap opens the reader, and the hidden list holds no selection",
+    whileReading.reader === 1 && whileReading.current === 0 && whileReading.selectedRows === 0,
+    JSON.stringify(whileReading),
+  );
+  await tapPage.locator('button[aria-label="Back to the list"]').first().tap();
+  await tapPage.waitForTimeout(400);
+  const afterBack = await listState();
+  check(
+    "Back returns to the list with no row highlighted or marked current",
+    afterBack.reader === 0 && afterBack.current === 0 && afterBack.selectedRows === 0 && !afterBack.ring,
+    JSON.stringify(afterBack),
+  );
+  check(
+    "and no position claimed in the list",
+    afterBack.position !== null && !afterBack.position.includes("of"),
+    afterBack.position ?? "none",
+  );
+  check("and no \"Nothing selected\" placeholder", !afterBack.placeholder);
+  check(
+    "at the scroll position the list was left at",
+    leftAt > 100 && Math.abs(afterBack.scrollTop - leftAt) <= 2,
+    `${leftAt} → ${afterBack.scrollTop}`,
+  );
+  check(
+    "rows are still plain buttons that open the message",
+    (await tapPage.locator("[data-row-count] button[data-message-id]").count()) > 3 &&
+      (await tapPage.locator("[data-row-count] [aria-selected]").count()) === 0,
+  );
+  await noSelect.close();
 
   // The rest is not about the phone, and the desktop masthead is where its helpers look.
   await page.setViewportSize({ width: 1440, height: 900 });

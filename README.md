@@ -295,3 +295,6 @@ can cut Winnow off at
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The bundled typefaces, IBM Plex Sans and Source Serif 4, are under the SIL Open
+Font License 1.1; see [web/src/assets/fonts](web/src/assets/fonts/README.md).

@@ -55,15 +55,15 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
       <div className="w-full max-w-[400px]">
         <div className="flex flex-col items-center text-center">
           <AppMark size={48} />
-          <h1 className="mt-4 text-subject font-semibold text-ink">Winnow</h1>
-          <p className="mt-2 max-w-[30ch] text-[13.5px] leading-relaxed text-ink-muted">
+          <h1 className="mt-4 text-title font-semibold text-ink">Winnow</h1>
+          <p className="mt-2 max-w-[30ch] text-ui leading-relaxed text-ink-muted">
             An inbox that sorts itself. Winnow reads your mail, works out what is worth your
             attention, and puts the rest where you can deal with it later.
           </p>
         </div>
 
         {restoring ? (
-          <p className="mt-8 text-center text-[13px] text-ink-subtle" role="status">
+          <p className="mt-8 text-center text-ui text-ink-subtle" role="status">
             Restoring your session…
           </p>
         ) : (
@@ -72,13 +72,13 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
               type="button"
               onClick={start}
               disabled={busy}
-              className="mt-8 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--wn-inkBody)] px-4 py-2.5 text-[13.5px] font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="mt-8 flex w-full items-center justify-center gap-2 rounded-ctl bg-accent px-4 py-2.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <LogIn size={15} strokeWidth={2} aria-hidden="true" />
               {busy ? "Waiting for Google…" : needsSetup ? "Set up Google sign-in" : "Continue with Google"}
             </button>
             {needsSetup && (
-              <p className="mt-2 text-center text-[12px] text-ink-subtle">
+              <p className="mt-2 text-center text-meta text-ink-subtle">
                 Winnow uses a Google client from your own Cloud project. The setup takes about
                 ten minutes the first time.
               </p>
@@ -89,7 +89,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
                 role="alert"
                 className="mt-3 rounded-pane border border-hairline bg-danger-wash px-4 py-3 text-left"
               >
-                <div className="flex items-start gap-2 text-[13px] font-semibold text-ink">
+                <div className="flex items-start gap-2 text-ui font-semibold text-ink">
                   <AlertCircle
                     size={15}
                     strokeWidth={2}
@@ -99,14 +99,14 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
                   <ErrorText text={failure.message} />
                 </div>
                 {failure.hint && (
-                  <div className="mt-1 pl-[23px] text-[12.5px] text-ink-muted">
+                  <div className="mt-1 pl-[23px] text-meta text-ink-muted">
                     <ErrorText text={failure.hint} />
                   </div>
                 )}
               </div>
             )}
 
-            <p className="mt-4 text-[12px] leading-relaxed text-ink-subtle">
+            <p className="mt-4 text-meta leading-relaxed text-ink-subtle">
               Winnow asks for read, send and label access to Gmail, and nothing else. It
               never reads or stores a password — sign-in happens in Google's own window.
               {isTauri() ? (
@@ -128,7 +128,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
               <>
                 <div className="my-6 flex items-center gap-3">
                   <span className="h-px flex-1 bg-hairline" aria-hidden="true" />
-                  <span className="text-[11.5px] font-semibold uppercase tracking-[0.07em] text-ink-subtle">
+                  <span className="text-meta font-semibold text-ink-subtle">
                     or
                   </span>
                   <span className="h-px flex-1 bg-hairline" aria-hidden="true" />
@@ -137,12 +137,12 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
                 <button
                   type="button"
                   onClick={onTryDemo}
-                  className="flex w-full items-center justify-center gap-2 rounded-full border border-control-border px-4 py-2.5 text-[13.5px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="flex w-full items-center justify-center gap-2 rounded-ctl border border-control-border px-4 py-2.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   <Sparkles size={15} strokeWidth={1.9} aria-hidden="true" />
                   Look around the demo inbox
                 </button>
-                <p className="mt-2 text-center text-[12px] text-ink-subtle">
+                <p className="mt-2 text-center text-meta text-ink-subtle">
                   A sample mailbox with a message for every filter. Nothing leaves this device.
                 </p>
               </>
@@ -150,12 +150,12 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
           </>
         )}
 
-        <details className="mt-8 text-[11.5px] text-ink-subtle">
+        <details className="mt-8 text-meta text-ink-subtle">
           <summary className="cursor-pointer text-center hover:text-ink-muted">
             What exactly does Winnow ask for?
           </summary>
           <div className="mt-2 rounded-pane border border-hairline bg-surface p-3">
-            <p className="font-mono text-[11px] break-all">{GMAIL_SCOPE}</p>
+            <p className="font-mono text-meta break-all">{GMAIL_SCOPE}</p>
             <p className="mt-2">
               One scope, covering reading your mail, labelling it, and sending on your behalf.
               It is a single permission on purpose — asking for three would produce three

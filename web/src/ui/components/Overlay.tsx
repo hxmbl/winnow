@@ -268,23 +268,23 @@ export function ConfirmDialog({
       initialFocus={cancelRef}
       className="w-full max-w-[380px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
-      <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
-      <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{body}</p>
+      <h2 className="text-read font-semibold text-ink">{title}</h2>
+      <p className="mt-1.5 text-ui leading-relaxed text-ink-muted">{body}</p>
       <div className="mt-4 flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-full border border-control-border px-4 py-1.5 text-[13px] font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           Keep editing
         </button>
         <button
           type="button"
           onClick={onConfirm}
-          className={`rounded-full px-4 py-1.5 text-[13px] font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+          className={`rounded-ctl px-4 py-1.5 text-ui font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
             destructive
               ? "bg-danger text-[var(--wn-surface)]"
-              : "bg-[var(--wn-inkBody)] text-[var(--wn-surface)]"
+              : "bg-accent text-on-accent"
           }`}
         >
           {confirmLabel}
@@ -319,14 +319,14 @@ export function SheetHeader({
         touch ? "pb-1.5 pl-5 pr-3 pt-[max(0.375rem,env(safe-area-inset-top))]" : "px-5 py-3.5"
       }`}
     >
-      <h2 id={id} className="text-[15px] font-semibold text-ink">
+      <h2 id={id} className="text-read font-semibold text-ink">
         {title}
       </h2>
       <button
         type="button"
         onClick={onClose}
         aria-label={`Close ${title}`}
-        className={`flex ${touch ? "h-11 w-11" : "h-7 w-7"} items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+        className={`flex ${touch ? "h-11 w-11" : "h-7 w-7"} items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
       >
         <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
           <path d="M6 6l12 12M18 6L6 18" />

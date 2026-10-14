@@ -50,11 +50,11 @@ type Props = {
 };
 
 const FIELD =
-  "w-full rounded-md border bg-surface px-2.5 py-1.5 font-mono text-[12.5px] text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-[var(--wn-inkBody)] max-sm:min-h-11 max-sm:text-[16px]";
+  "w-full rounded-ctl border bg-surface px-2.5 py-1.5 font-mono text-ui text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
 const PRIMARY =
-  "rounded-full bg-[var(--wn-inkBody)] px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 const SECONDARY =
-  "rounded-full border border-control-border px-4 py-1.5 text-[13px] font-semibold text-ink-body transition-colors hover:bg-surface-hover aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 export function GoogleSetup(props: Props) {
   const { kind, current, phone } = props;
@@ -199,7 +199,7 @@ export function GoogleSetup(props: Props) {
       className={
         phone
           ? "flex h-[calc(100dvh-var(--wn-keyboard,0px))] w-full flex-col overflow-hidden bg-chrome"
-          : "flex max-h-[85vh] w-full max-w-[520px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+          : "flex max-h-[85vh] w-full max-w-[520px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome"
       }
     >
       <SheetHeader title="Google account" onClose={props.onClose} touch={phone} />
@@ -210,7 +210,7 @@ export function GoogleSetup(props: Props) {
         data-testid="google-setup"
       >
         <div className="flex flex-col gap-4 px-5 py-4">
-          <div className="flex flex-col gap-2 text-[13px] leading-relaxed text-ink-muted">
+          <div className="flex flex-col gap-2 text-ui leading-relaxed text-ink-muted">
             <p>
               Winnow doesn't come with a Google sign-in client. You use your own, made in your
               own Google Cloud project, so your mail goes between this{" "}
@@ -226,7 +226,7 @@ export function GoogleSetup(props: Props) {
             <button
               type="button"
               onClick={props.onOpenGuide}
-              className="inline-flex w-fit items-center gap-1.5 rounded-full text-[13px] font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="inline-flex w-fit items-center gap-1.5 rounded-ctl text-ui font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
               Open the setup guide
@@ -235,30 +235,30 @@ export function GoogleSetup(props: Props) {
 
           {kind === "web" && props.redirectUri && (
             <div className="rounded-pane border border-hairline bg-surface px-3 py-2.5">
-              <p className="text-[12px] font-medium text-ink-body">
+              <p className="text-meta font-medium text-ink-body">
                 Add this as an authorised JavaScript origin and redirect URI
               </p>
               <div className="mt-1.5 flex items-center gap-2">
-                <code className="min-w-0 flex-1 break-all font-mono text-[12px] text-ink">
+                <code className="min-w-0 flex-1 break-all font-mono text-meta text-ink">
                   {props.redirectUri}
                 </code>
                 <button
                   type="button"
                   onClick={() => void copyRedirect()}
                   aria-label={copied ? "Redirect URI copied" : "Copy redirect URI"}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
                 </button>
               </div>
-              <p className="mt-1 text-[11.5px] text-ink-subtle">
+              <p className="mt-1 text-meta text-ink-subtle">
                 The origin is the same address without the trailing slash.
               </p>
             </div>
           )}
 
           <div className="flex flex-col gap-1">
-            <label htmlFor={idField} className="text-[13px] font-medium text-ink-body">
+            <label htmlFor={idField} className="text-ui font-medium text-ink-body">
               Client ID
             </label>
             <input
@@ -284,17 +284,17 @@ export function GoogleSetup(props: Props) {
               className={`${FIELD} ${errors.clientId ? "border-danger" : "border-hairline"}`}
             />
             {errors.clientId && (
-              <p id={idError} className="text-[12px] font-medium text-danger">
+              <p id={idError} className="text-meta font-medium text-danger">
                 {errors.clientId}
               </p>
             )}
-            <p id={idHint} className="text-[12px] text-ink-subtle">
+            <p id={idHint} className="text-meta text-ink-subtle">
               Copy it from Google Auth Platform → Clients in your Cloud project.
             </p>
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor={secretField} className="text-[13px] font-medium text-ink-body">
+            <label htmlFor={secretField} className="text-ui font-medium text-ink-body">
               Client secret{" "}
               <span className="font-normal text-ink-subtle">
                 {secretRequired ? "(required)" : "(optional)"}
@@ -322,18 +322,18 @@ export function GoogleSetup(props: Props) {
               className={`${FIELD} ${errors.clientSecret ? "border-danger" : "border-hairline"}`}
             />
             {errors.clientSecret && (
-              <p id={secretError} className="text-[12px] font-medium text-danger">
+              <p id={secretError} className="text-meta font-medium text-danger">
                 {errors.clientSecret}
               </p>
             )}
-            <p id={secretHint} className="text-[12px] text-ink-subtle">
+            <p id={secretHint} className="text-meta text-ink-subtle">
               {kind === "desktop"
                 ? "Paste it if Google shows one for your client. For a desktop app it isn't confidential, and it stays in your system keychain."
                 : "Web application clients need it. It is kept in this browser only and sent to Google alone."}
             </p>
           </div>
 
-          <div role="status" aria-live="polite" className="min-h-0 text-[12.5px]">
+          <div role="status" aria-live="polite" className="min-h-0 text-ui">
             {test?.ok && (
               <p className="flex items-start gap-1.5 font-medium text-success">
                 <Check size={14} className="mt-px shrink-0" aria-hidden="true" />
@@ -348,7 +348,7 @@ export function GoogleSetup(props: Props) {
           </div>
 
           {failure && (
-            <div role="alert" className="rounded-pane border border-hairline bg-danger-wash px-3 py-2.5 text-[12.5px] font-medium text-ink">
+            <div role="alert" className="rounded-pane border border-hairline bg-danger-wash px-3 py-2.5 text-ui font-medium text-ink">
               <ErrorText text={failure} />
             </div>
           )}
@@ -366,7 +366,7 @@ export function GoogleSetup(props: Props) {
             </button>
           </div>
 
-          <p className="text-[12px] leading-relaxed text-ink-subtle">
+          <p className="text-meta leading-relaxed text-ink-subtle">
             {kind === "desktop"
               ? "Saved in your operating system's keychain. "
               : "Saved in this browser's local storage, on this site only. "}
@@ -379,7 +379,7 @@ export function GoogleSetup(props: Props) {
           <div className="border-t border-hairline-soft px-5 py-4">
             {confirmRemove ? (
               <div className="flex flex-col gap-2" role="group" aria-label="Confirm removal">
-                <p className="text-[13px] text-ink-body">
+                <p className="text-ui text-ink-body">
                   Remove your Google client from this {kind === "desktop" ? "computer" : "browser"}?
                   {props.signedIn ? " This signs you out of Gmail and clears the cached mail." : ""}
                 </p>
@@ -399,7 +399,7 @@ export function GoogleSetup(props: Props) {
                     type="button"
                     onClick={() => void remove()}
                     aria-disabled={busy !== null}
-                    className="rounded-full bg-danger px-4 py-1.5 text-[13px] font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    className="rounded-ctl bg-danger px-4 py-1.5 text-ui font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >
                     {busy === "remove" ? "Removing…" : props.signedIn ? "Remove and sign out" : "Remove"}
                   </button>
@@ -408,8 +408,8 @@ export function GoogleSetup(props: Props) {
             ) : (
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium text-ink-body">Remove client</p>
-                  <p className="text-[12px] text-ink-subtle">
+                  <p className="text-ui font-medium text-ink-body">Remove client</p>
+                  <p className="text-meta text-ink-subtle">
                     {props.signedIn ? "Signs you out and forgets the client." : "Forgets the client on this device."}
                   </p>
                 </div>
@@ -420,7 +420,7 @@ export function GoogleSetup(props: Props) {
                     focusAfter.current = "keep";
                     setConfirmRemove(true);
                   }}
-                  className="shrink-0 rounded-full border border-control-border px-3 py-1 text-[12px] font-semibold text-danger transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="shrink-0 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   Remove…
                 </button>

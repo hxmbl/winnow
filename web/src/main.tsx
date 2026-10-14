@@ -23,7 +23,10 @@ import { DEMO_CONTACTS, DEMO_TRASH, demoMailbox } from "./core/data/demo";
 import { desktopPlatformExtras, isTauri, platform } from "./platform";
 import { BUILTIN_FILTERS, filterKey, parseFilterKey } from "./core/model/signals";
 import { MAILBOX_ORDER } from "./core/store/store";
+import { revivePreferences } from "./core/store/preferences";
 import type { Preferences, StoreOptions } from "./core/store/store";
+import { applyTheme, resolveScheme } from "./ui/theme";
+import { DEFAULT_ACCENT_THEME, DEFAULT_APPEARANCE } from "./core/model/appearance";
 import type { LearningSnapshot } from "./core/learn/learning";
 import type { Mailbox } from "./core/model/email";
 import "./index.css";
@@ -86,46 +89,6 @@ function reviveMailbox(raw: unknown): Mailbox | null {
     : null;
 }
 
-/** Preferences, keeping only the keys the current build knows about. */
-function revivePreferences(raw: unknown): Partial<Preferences> | null {
-  if (!raw || typeof raw !== "object") return null;
-  const source = raw as Record<string, unknown>;
-  const out: Partial<Preferences> = {};
-
-  if (source.sortBy === "date" || source.sortBy === "sender" || source.sortBy === "score") {
-    out.sortBy = source.sortBy;
-  }
-  if (source.appearance === "system" || source.appearance === "light" || source.appearance === "dark") {
-    out.appearance = source.appearance;
-  }
-  /*
-   * The image policy, with the old boolean read as a migration rather than dropped:
-   * `true` maps to `always` and `false` to `never`, which is exactly what each setting
-   * meant. Resetting someone who had already answered would be wrong in either direction.
-   */
-  if (source.imagePolicy === "ask" || source.imagePolicy === "always" || source.imagePolicy === "never") {
-    out.imagePolicy = source.imagePolicy;
-  } else if (typeof source.loadRemoteContent === "boolean") {
-    out.imagePolicy = source.loadRemoteContent ? "always" : "never";
-  }
-  if (typeof source.notificationsEnabled === "boolean") {
-    out.notificationsEnabled = source.notificationsEnabled;
-  }
-  if (typeof source.backgroundSync === "boolean") out.backgroundSync = source.backgroundSync;
-  if (typeof source.backgroundSyncInterval === "number" && source.backgroundSyncInterval > 0) {
-    out.backgroundSyncInterval = source.backgroundSyncInterval;
-  }
-  // Addresses are matched case-insensitively everywhere they are read, so the
-  // comparison is on the lowercased form — but the *stored* form is kept, because it
-  // is what the settings panel shows and it is the address the user recognised.
-  if (Array.isArray(source.blockedSenders)) {
-    out.blockedSenders = source.blockedSenders.filter(
-      (sender): sender is string => typeof sender === "string" && sender.includes("@"),
-    );
-  }
-  return out;
-}
-
 /**
  * What the last session persisted, or `null` for a first run.
  *
@@ -170,6 +133,22 @@ type PersistedState = {
  * inside `App` on mount.
  */
 const persisted = loadPersisted();
+
+/*
+ * The theme, before the first render.
+ *
+ * `public/theme-boot.js` has already set the mode on `<html>` so the backdrop is right
+ * while this bundle loads; this writes the full palette, accent included, before React
+ * paints anything. `App` takes over from here and follows changes.
+ */
+applyTheme(
+  document.documentElement,
+  resolveScheme(
+    persisted.preferences?.appearance ?? DEFAULT_APPEARANCE,
+    globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
+  ),
+  persisted.preferences?.accent ?? DEFAULT_ACCENT_THEME,
+);
 
 const demo = demoMailbox();
 
