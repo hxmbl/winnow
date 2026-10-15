@@ -351,3 +351,43 @@ body {
     transition: none !important;
   }
 }
+
+/*
+ * Reduced transparency: no glass at all. The sidebar is the opaque surface and the
+ * scrim is the plain tint, both of which read the same with every blur layer gone.
+ * After the `@supports` rules above so it wins over the translucent tints.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  .wn-sidebar-blur,
+  .wn-scrim-layer {
+    display: none;
+  }
+
+  .wn-sidebar-tint {
+    background: var(--wn-surface);
+  }
+
+  .wn-scrim-tint {
+    background: var(--wn-scrim);
+  }
+}
+
+/*
+ * Forced colours (Windows High Contrast): the system's palette replaces ours, so the
+ * glass is noise. The sidebar is the system canvas with a visible border, the scrim
+ * draws nothing (the dialog is still modal, and the app behind it is still inert), and
+ * the blur layers are dropped, since a backdrop-filter ignores the forced palette and
+ * would leave the text behind it smeared rather than hidden.
+ */
+@media (forced-colors: active) {
+  .wn-sidebar-blur,
+  .wn-scrim-layer,
+  .wn-scrim-tint {
+    display: none;
+  }
+
+  .wn-sidebar-panel {
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+}
