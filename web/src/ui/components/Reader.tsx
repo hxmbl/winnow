@@ -21,6 +21,7 @@ import {
   ImageOff,
   Mail,
   MailOpen,
+  PanelLeft,
   MoreHorizontal,
   Paperclip,
   RotateCcw,
@@ -510,6 +511,13 @@ type Props = {
   onSenderMenu?: (trigger: HTMLElement) => void;
   /** The one-time code strip, drawn at the very top, above the sender. */
   codeBar?: React.ReactNode;
+  /**
+   * The sidebar's toggle, for the medium-width layout (640–1023px) where the reader
+   * replaces the list and so hides the masthead's toggle with it. Without this the
+   * folders and the account could not be reached while a message was open.
+   */
+  sidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 export function Reader({
@@ -530,6 +538,8 @@ export function Reader({
   senderPhoto,
   onSenderMenu,
   codeBar = null,
+  sidebarOpen = false,
+  onToggleSidebar,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -595,6 +605,24 @@ export function Reader({
           the list, so closing it would be redundant; on a phone the dock has Back. */}
       {!phone && (
       <div className="flex items-center gap-1 px-3 py-2 lg:hidden">
+        {onToggleSidebar && (
+          // At the edge the sidebar slides in from, like the masthead's. Hidden at `lg`
+          // with the rest of this bar, where the list (and its toggle) is back.
+          <button
+            type="button"
+            data-sidebar-toggle=""
+            data-reader-sidebar-toggle=""
+            onClick={onToggleSidebar}
+            aria-expanded={sidebarOpen}
+            aria-controls="winnow-sidebar"
+            aria-haspopup="dialog"
+            aria-label="Open sidebar"
+            title="Sidebar"
+            className={ICON_BUTTON}
+          >
+            <PanelLeft size={16} strokeWidth={1.8} aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}

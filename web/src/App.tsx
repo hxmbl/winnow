@@ -1843,6 +1843,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               bodyPending={selected !== null && !store.hasLoadedBody(selected.id)}
               onLoadBody={loadSelectedBody}
               phone={phone}
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={phone ? undefined : toggleSidebar}
               senderPhoto={selected ? photos.get(selected.sender.toLowerCase()) : undefined}
               codeBar={
                 selected?.code ? (
