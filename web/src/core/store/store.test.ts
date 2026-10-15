@@ -102,6 +102,12 @@ function demoStore() {
   return new WinnowStore({ seed: [...DEMO_EMAILS], seedTrash: DEMO_TRASH });
 }
 
+/** Star a message the classifier calls security mail, which moves the security weight. */
+function starSecurityMail(store: WinnowStore): void {
+  const security = store.view.emails.find((e) => store.view.signals.get(e.id)?.security)!;
+  store.toggleStar(security.id);
+}
+
 describe("the derived view stays consistent", () => {
   it("classifies and ranks from one pass over the messages", () => {
     const store = demoStore();
@@ -210,45 +216,57 @@ describe("filter toggling", () => {
   });
 });
 
-describe("muting a bucket", () => {
-  it("hides its mail from the unfiltered inbox", () => {
-    const store = demoStore();
-    const before = store.view.emails.length;
-    store.dismissFilter("newsletters");
-    expect(store.view.emails.length).toBeLessThan(before);
+/**
+ * Hiding a bucket from the rail is gone. Builds before that persisted the hidden list, so
+ * a restore can still be handed one; it must be ignored, and every bucket comes back.
+ */
+describe("buckets cannot be hidden", () => {
+  type Saved = Parameters<WinnowStore["restoreState"]>[0];
+  // What an earlier build's `loadPersisted` produced, plus a stray `mutedFilters` as an
+  // old snapshot field would carry it.
+  const legacy = {
+    activeFilters: [],
+    removedFilters: ["newsletters", "important", "unsafe", "not-a-bucket"],
+    mutedFilters: ["newsletters"],
+  } as unknown as Saved;
+
+  it("offers no way to hide a bucket", () => {
+    const store = demoStore() as unknown as Record<string, unknown>;
+    expect(store.dismissFilter).toBeUndefined();
+    expect(store.restoreFilter).toBeUndefined();
+    expect("mutedFilters" in demoStore().getSnapshot()).toBe(false);
   });
 
-  it("does not remove the message itself", () => {
-    // Muting is a view decision, not a deletion: nothing was deleted from the server, so
-    // nothing should vanish from the store.
-    const store = demoStore();
-    const count = store.getSnapshot().all.length;
-    store.dismissFilter("newsletters");
-    expect(store.getSnapshot().all).toHaveLength(count);
+  it("brings back buckets an earlier build hid", () => {
+    const fresh = demoStore();
+    const migrated = demoStore();
+    expect(() => migrated.restoreState(legacy)).not.toThrow();
+
+    expect(migrated.view.rail).toEqual(fresh.view.rail);
+    expect(migrated.view.rail).toContain("important");
+    expect(migrated.view.rail).toContain("unsafe");
+    // The inbox holds the hidden bucket's mail again, not just its pill.
+    expect(migrated.view.threads.length).toBe(fresh.view.threads.length);
+    expect("mutedFilters" in migrated.getSnapshot()).toBe(false);
   });
 
-  it("deactivates the filter if it was on", () => {
-    // Otherwise the user would see an active pill over an empty list.
+  it("lets a bucket an earlier build hid be switched on as a filter", () => {
     const store = demoStore();
+    store.restoreState(legacy);
     store.toggleFilter(builtinFilter("newsletters"));
-    store.dismissFilter("newsletters");
-    expect(store.getSnapshot().activeFilters).toHaveLength(0);
+    expect(store.getSnapshot().activeFilters).toEqual([builtinFilter("newsletters")]);
+    expect(store.view.emails.length).toBeGreaterThan(0);
   });
 
-  it("can be undone", () => {
+  it("never persists a hidden list", () => {
+    const patches: Record<string, unknown>[] = [];
     const store = demoStore();
-    const before = store.view.emails.length;
-    store.dismissFilter("newsletters");
-    store.restoreFilter("newsletters");
-    expect(store.view.emails.length).toBe(before);
-  });
-
-  it("refuses to mute unsafe", () => {
-    // The one bucket that must never be silenced: hiding it removes the user's only
-    // route to the mail it flagged.
-    const store = demoStore();
-    store.dismissFilter("unsafe");
-    expect(store.getSnapshot().mutedFilters).not.toContain("unsafe");
+    store.attach({ onPersist: (patch) => patches.push(patch) });
+    store.restoreState(legacy);
+    store.toggleFilter(builtinFilter("newsletters"));
+    store.clearFilters();
+    expect(patches.length).toBeGreaterThan(0);
+    for (const patch of patches) expect(patch).not.toHaveProperty("removedFilters");
   });
 });
 
@@ -458,25 +476,12 @@ describe("the derived view", () => {
     // The learning weights are written to state *before* the debounced reclassify, so a
     // snapshot's cheap fields must never go stale behind a memoised view.
     const store = demoStore();
-    const before = store.getSnapshot().learning.weights.newsletterPenalty;
+    const before = store.getSnapshot().learning.weights.security;
 
-    store.dismissFilter("newsletters");
+    starSecurityMail(store);
 
     const after = store.getSnapshot();
-    expect(after.learning.weights.newsletterPenalty).toBeGreaterThan(before);
-  });
-
-  it("keeps the view in step with the mutes, which are instance state", () => {
-    // `persistedRemoved` lives on the instance, not in `StoreState`, so a memo keyed on
-    // state alone would miss it; every mutation of it notifies, which makes the memo sound.
-    const store = demoStore();
-    const before = store.view;
-    expect(store.view.result.emails.length).toBe(before.result.emails.length);
-
-    store.dismissFilter("important");
-
-    expect(store.view).not.toBe(before);
-    expect(store.getSnapshot().mutedFilters).toContain("important");
+    expect(after.learning.weights.security).toBeGreaterThan(before);
   });
 
   it("re-derives when a discard changes the trash bias", () => {
@@ -517,116 +522,6 @@ describe("the derived view", () => {
     // The map is a cache, not the source of truth: a miss falls back to building one, so
     // an empty map for a given search would be a silent wrong answer rather than an error.
     expect(narrowed).toBe(store.view.threads.length);
-  });
-});
-
-/**
- * Muting a bucket, and the undo it now offers.
- *
- * A mute *is* reversible — the pill stays in the rail with a ↺, and Settings lists it
- * under "Hidden buckets". What it was not was *visible*: `orderedRail` sorts muted
- * buckets to the end, so the pill the user clicked left a 27-pill strip they have
- * probably not scrolled, and the whole visible effect was that something disappeared.
- */
-describe("muting a bucket", () => {
-  function storeWithMail() {
-    const { backend, calls } = fakeBackend();
-    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
-    return { store, calls };
-  }
-
-  it("offers an undo that says which bucket", () => {
-    const { store } = storeWithMail();
-    store.dismissFilter("newsletters");
-    const undo = store.getSnapshot().undo;
-    expect(undo).not.toBeNull();
-    expect(undo?.label).toMatch(/Newsletters/);
-    expect(undo?.label).toMatch(/inbox/);
-  });
-
-  it("and taking it puts the bucket back", () => {
-    const { store } = storeWithMail();
-    const before = store.getSnapshot().mutedFilters;
-    store.dismissFilter("newsletters");
-    expect(store.getSnapshot().mutedFilters).not.toEqual(before);
-
-    store.undoLast();
-
-    expect(store.getSnapshot().mutedFilters).toEqual(before);
-    expect(store.getSnapshot().undo).toBeNull();
-  });
-
-  it("and the mail comes back with it", () => {
-    const { store } = storeWithMail();
-    const inboxCount = () => store.getSnapshot().view.threads.length;
-    const before = inboxCount();
-
-    store.dismissFilter("newsletters");
-    const muted = inboxCount();
-    expect(muted).toBeLessThan(before);
-
-    store.undoLast();
-    expect(inboxCount()).toBe(before);
-  });
-
-  it("which is the same path the pill's own ↺ takes", () => {
-    // One way back, so the two controls cannot disagree about what a mute means.
-    const { store } = storeWithMail();
-    store.dismissFilter("newsletters");
-    store.restoreFilter("newsletters");
-    const viaRestore = store.getSnapshot();
-
-    store.dismissFilter("newsletters");
-    store.undoLast();
-    const viaUndo = store.getSnapshot();
-
-    expect(viaUndo.mutedFilters).toEqual(viaRestore.mutedFilters);
-  });
-
-  it("and either way back drops the offer", () => {
-    // Otherwise the strip keeps a "Hid Newsletters" line whose Undo button has no handler
-    // behind it — the state the offer's field comment forbids.
-    const { store } = storeWithMail();
-    store.dismissFilter("newsletters");
-    store.restoreFilter("newsletters");
-    expect(store.getSnapshot().undo).toBeNull();
-
-    store.dismissFilter("newsletters");
-    store.undoLast();
-    expect(store.getSnapshot().undo).toBeNull();
-  });
-
-  it("offers nothing for a bucket that is already muted", () => {
-    const { store } = storeWithMail();
-    store.dismissFilter("newsletters");
-    store.dismissFilter("newsletters");
-    // Still exactly one offer, from the first call: a second silent re-mute must not
-    // replace the label and reset the handler's meaning.
-    expect(store.getSnapshot().undo?.label).toMatch(/Newsletters/);
-  });
-
-  it("does not offer an undo for the bucket that cannot be muted at all", () => {
-    const { store } = storeWithMail();
-    store.dismissFilter("unsafe");
-    expect(store.getSnapshot().undo).toBeNull();
-  });
-
-  it("replaces a mark-all-read offer rather than stacking two", () => {
-    // The strip shows one line; two actions each with a live handler would leave the
-    // visible one undoing the other.
-    const { store } = storeWithMail();
-    store.markAllRead();
-    expect(store.getSnapshot().undo?.label).toMatch(/read/);
-    store.dismissFilter("newsletters");
-    expect(store.getSnapshot().undo?.label).toMatch(/Newsletters/);
-  });
-
-  it("dismissing the offer leaves the mute in place", () => {
-    const { store } = storeWithMail();
-    store.dismissFilter("newsletters");
-    store.dismissUndo();
-    expect(store.getSnapshot().undo).toBeNull();
-    expect(store.getSnapshot().mutedFilters).toContain("newsletters");
   });
 });
 
@@ -1141,20 +1036,10 @@ describe("learning from stars", () => {
     expect(store.getSnapshot().learning.weights.security).toBeGreaterThan(before);
   });
 
-  it("learns from a muted bucket", () => {
-    const store = demoStore();
-    const before = store.getSnapshot().learning.weights.newsletterPenalty;
-    store.dismissFilter("newsletters");
-    // The bucket under-fired, so its penalty should rise.
-    expect(store.getSnapshot().learning.weights.newsletterPenalty).toBeGreaterThan(before);
-  });
-
   it("resets to the factory weights but keeps the history", () => {
     const store = demoStore();
-    store.dismissFilter("newsletters");
-    expect(store.getSnapshot().learning.weights.newsletterPenalty).not.toBe(
-      defaultWeights().newsletterPenalty,
-    );
+    starSecurityMail(store);
+    expect(store.getSnapshot().learning.weights.security).not.toBe(defaultWeights().security);
     const events = store.getSnapshot().learning.events.length;
     store.resetLearning();
     expect(store.getSnapshot().learning.weights).toEqual(defaultWeights());
@@ -1295,12 +1180,13 @@ describe("sign out", () => {
 
   it("keeps the learning and the preferences", async () => {
     const store = demoStore();
-    store.dismissFilter("newsletters");
-    const learned = store.getSnapshot().learning.weights.newsletterPenalty;
+    starSecurityMail(store);
+    const learned = store.getSnapshot().learning.weights.security;
+    expect(learned).not.toBe(defaultWeights().security);
     store.blockSender("someone@example.com");
     await store.signOut();
     const state = store.getSnapshot();
-    expect(state.learning.weights.newsletterPenalty).toBe(learned);
+    expect(state.learning.weights.security).toBe(learned);
     expect(state.preferences.blockedSenders).toContain("someone@example.com");
   });
 

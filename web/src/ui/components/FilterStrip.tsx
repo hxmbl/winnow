@@ -11,14 +11,15 @@
  *
  * Each pill is a rounded capsule with its own colour (`filterColors.ts`), drawn as a
  * soft tint so a row of twenty reads as one quiet line rather than a shelf of sweets;
- * the one that is on gets a stronger tint, a ring in its hue and a heavier label. Muted
- * pills carry no colour. The hide control sits *inside* the pill, after the count,
- * instead of as a badge perched on the corner where it covered the neighbouring pill.
+ * the one that is on gets a stronger tint, a ring in its hue and a heavier label.
+ *
+ * A pill only switches its filter on and off; there is no control to hide a bucket
+ * from the rail. "All" clears the active filters.
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { filterKey, type BuiltinSmartFilter, type FilterId } from "../../core/model/signals";
+import { filterKey, type FilterId } from "../../core/model/signals";
 import { digitFor, scrollToReveal, stepRail, wheelPixels, type PillItem, type RailGeometry } from "../rail";
 
 export type { PillItem } from "../rail";
@@ -27,9 +28,6 @@ type Props = {
   pills: PillItem[];
   activeFilters: FilterId[];
   onToggle: (id: FilterId) => void;
-  onMute: (id: BuiltinSmartFilter) => void;
-  /** Undo a mute. Present because a mute has to be reversible from the rail. */
-  onRestore: (id: BuiltinSmartFilter) => void;
   onClear: () => void;
   /**
    * Pinned to the left edge of the scroller, with the pills passing underneath it.
@@ -39,7 +37,7 @@ type Props = {
    */
   leading?: React.ReactNode;
   /**
-   * Touch sizing, for the phone dock: 44px pills and a larger hide control, so the rail
+   * Touch sizing, for the phone dock: 44px pills, so the rail
    * that carries the product can be worked with a thumb.
    */
   touch?: boolean;
@@ -68,8 +66,6 @@ export const FilterStrip = memo(function FilterStrip({
   pills,
   activeFilters,
   onToggle,
-  onMute,
-  onRestore,
   onClear,
   leading,
   touch = false,
@@ -86,7 +82,7 @@ export const FilterStrip = memo(function FilterStrip({
   const leadingRef = useRef<HTMLDivElement>(null);
   /** What changes the rail's content width: which pills, their counts, and "All". */
   const contentSignature = `${hasActive ? "all|" : ""}${pills
-    .map((pill) => `${filterKey(pill.id)}:${pill.count}:${pill.muted ? 1 : 0}`)
+    .map((pill) => `${filterKey(pill.id)}:${pill.count}`)
     .join("|")}`;
 
   // The edge fade is only drawn when there is actually more to scroll to, so a short
@@ -253,14 +249,11 @@ export const FilterStrip = memo(function FilterStrip({
           </button>
         )}
 
-      {pills.map(({ id, label, hue, count, muted }, index) => {
+      {pills.map(({ id, label, hue, count }, index) => {
         const key = filterKey(id);
         const on = activeKeys.has(key);
-        // No digit for a muted pill: a shortcut to a bucket that is not filterable
-        // would do nothing. Nor on the phone dock: there is no number row to press.
-        const digit = muted || touch ? null : digitFor(index);
-        const isMuted = muted === true;
-        const hideable = id.kind === "builtin" && id.id !== "unsafe";
+        // No digit on the phone dock: there is no number row to press.
+        const digit = touch ? null : digitFor(index);
 
         return (
           <div
@@ -268,32 +261,24 @@ export const FilterStrip = memo(function FilterStrip({
             data-rail-item=""
             data-rail-key={key}
             data-on={on ? "" : undefined}
-            data-muted={isMuted ? "" : undefined}
             // The pill's identity only; the mode's recipe turns it into a fill.
             style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}
-            className="wn-pill group/pill relative flex shrink-0 items-center rounded-full transition-colors duration-150"
+            className="wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150"
           >
             <button
               type="button"
               aria-pressed={on}
-              // A muted pill is not a toggle, so it is not pressed — saying otherwise
-              // describes a state the app will not enter.
-              disabled={isMuted}
               onClick={() => onToggle(id)}
               // The count is in the accessible name, not just the visible number.
-              aria-label={
-                isMuted
-                  ? `${label}, hidden — ${count} ${count === 1 ? "message" : "messages"}`
-                  : `${label}, ${count} ${count === 1 ? "message" : "messages"}`
-              }
+              aria-label={`${label}, ${count} ${count === 1 ? "message" : "messages"}`}
               // The digit shortcut, where it can be found without a keycap crowding the
               // tab: the tooltip, the shortcut sheet, and `aria-keyshortcuts`.
               // Always set: a long label is truncated, and this is where it is whole.
               title={digit ? `${label} (${digit})` : label}
               aria-keyshortcuts={digit ?? undefined}
-              className={`relative flex ${tabHeight} items-center gap-1.5 rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
-                hideable ? (touch ? "pl-3.5 pr-0.5" : "pl-2.5 pr-0.5") : touch ? "px-3.5" : "px-2.5"
-              } ${isMuted ? "text-ink-subtle line-through opacity-60" : ""}`}
+              className={`relative flex ${tabHeight} items-center gap-1.5 rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                touch ? "px-3.5" : "px-2.5"
+              }`}
             >
               {/*
                 The label at both weights in one grid cell, the semibold copy invisible:
@@ -312,40 +297,9 @@ export const FilterStrip = memo(function FilterStrip({
                 <span className={`col-start-1 row-start-1 truncate ${on ? "font-semibold" : "font-medium"}`}>{label}</span>
               </span>
               {/* `tabular-nums` so a count changing from 9 to 10 does not shift the label. */}
-              <span className={`text-meta tabular-nums ${isMuted ? "" : "wn-pill-count"}`}>{count}</span>
+              <span className="wn-pill-count text-meta tabular-nums">{count}</span>
             </button>
 
-            {/*
-              One control per builtin pill, in whichever direction it points: hide the
-              bucket on a live pill, bring it back on a muted one — so a mute is not a
-              one-way door. `unsafe` has neither, as it is not hidden by default.
-
-              Inside the pill, after the count, in the pill's own ink. `opacity-0` rather
-              than `hidden`: `display: none` takes the control out of the tab order, where
-              `focus-visible` cannot rescue it — and the space stays reserved, so hovering
-              never shifts the rail. `[@media(hover:none)]` shows it outright on touch.
-            */}
-            {hideable && (
-              <button
-                type="button"
-                onClick={() => (isMuted ? onRestore(id.id) : onMute(id.id))}
-                title={
-                  isMuted
-                    ? `Show ${label} in the inbox again`
-                    : `Hide ${label} from the inbox`
-                }
-                aria-label={
-                  isMuted
-                    ? `Show ${label} in the inbox again`
-                    : `Hide ${label} from the inbox and tell Winnow it is over-firing`
-                }
-                className={`inline-flex shrink-0 items-center justify-center rounded-full leading-none opacity-0 transition-opacity duration-150 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring group-hover/pill:opacity-100 [@media(hover:none)]:opacity-100 ${
-                  isMuted ? "text-ink-subtle hover:text-ink" : "hover:bg-sheen"
-                } ${touch ? "mr-1 h-11 w-8 text-read" : "mr-0.5 h-6 w-5 text-ui"}`}
-              >
-                {isMuted ? "↺" : "×"}
-              </button>
-            )}
           </div>
         );
       })}

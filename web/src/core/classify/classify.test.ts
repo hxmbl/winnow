@@ -181,7 +181,7 @@ describe("classifyEmail — keyword matching is word-bounded", () => {
   it("does not read a bare 'free' as marketing", () => {
     // `promoRegex` carries `\bfree shipping\b` and `\bfree delivery\b`, not
     // "free". A substring search would call "Freedom of information request" a
-    // promo, which is how a bucket the user cannot trust gets muted.
+    // promo, which is how a bucket stops being trusted.
     const freedom = classifyEmail(
       email({ sender: REAL, subject: "Freedom of information request", body: "Your request is under consideration." }),
       EMPTY_PROFILE,

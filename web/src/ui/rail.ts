@@ -33,59 +33,22 @@ export type PillItem = {
    * rank beside it.
    */
   count: number;
-  /**
-   * Muted by the user: drawn struck through, with a restore control.
-   *
-   * Optional because a pill's mutability is a property of the *bucket*, not of the
-   * sender pills, which have no such state. `buildPills` sets it for every builtin pill
-   * (true or false), so the component can branch on `id.kind === "builtin"` and this
-   * field together.
-   */
-  muted?: boolean;
 };
 
-/**
- * Build the rail's items from the store's ranked buckets and the counts.
- *
- * `muted` is passed in rather than derived because the store is what knows: it is a
- * property of the bucket, not inferable from the counts (a muted bucket with mail in it
- * and a live bucket with mail in it have identical counts).
- *
- * A muted pill is drawn struck through, with its dismiss button replaced by a restore
- * one — without the marker it is indistinguishable from an active pill, its ✕ is a
- * no-op, and the user is left with a setting they cannot undo.
- */
+/** Build the rail's items from the store's ranked buckets and the counts. */
 export function buildPills(
   rail: readonly BuiltinSmartFilter[],
   counts: ReadonlyMap<BuiltinSmartFilter, number>,
   topSenders: readonly string[],
   senderCounts: ReadonlyMap<string, number>,
   activeFilters: readonly FilterId[],
-  mutedFilters: readonly BuiltinSmartFilter[] = [],
 ): PillItem[] {
-  const muted = new Set(mutedFilters);
-  // A muted bucket is at the end of the rail and is not filterable, so it must not take
-  // a digit: digits are assigned by position, so counting it would silently repoint
-  // every shortcut after it. The muted pills are counted separately and take no index.
-  const buckets: PillItem[] = rail
-    .filter((id) => !muted.has(id))
-    .map((id) => ({
-      id: { kind: "builtin", id },
-      label: FILTER_LABELS[id],
-      hue: FILTER_HUES[id],
-      count: counts.get(id) ?? 0,
-      muted: false,
-    }));
-
-  const mutedBuckets: PillItem[] = rail
-    .filter((id) => muted.has(id))
-    .map((id) => ({
-      id: { kind: "builtin", id },
-      label: FILTER_LABELS[id],
-      hue: FILTER_HUES[id],
-      count: counts.get(id) ?? 0,
-      muted: true,
-    }));
+  const buckets: PillItem[] = rail.map((id) => ({
+    id: { kind: "builtin", id },
+    label: FILTER_LABELS[id],
+    hue: FILTER_HUES[id],
+    count: counts.get(id) ?? 0,
+  }));
 
   /**
    * Sender pills, from the same engagement ranking the classifier uses, so "the people
@@ -115,13 +78,10 @@ export function buildPills(
       label: `From ${filter.sender}`,
       hue: senderHue(filter.sender),
       count: senderCounts.get(filter.sender) ?? 0,
-      muted: false,
     });
   }
 
-  // Muted buckets last, so the digit-to-pill mapping is only ever shifted by buckets
-  // that can actually be filtered by.
-  return [...buckets, ...senders, ...mutedBuckets];
+  return [...buckets, ...senders];
 }
 
 /**

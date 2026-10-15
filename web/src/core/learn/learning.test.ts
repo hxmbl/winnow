@@ -26,12 +26,7 @@ import {
   signalMeta,
   type SignalKey,
 } from "../classify/weights";
-import {
-  BUILTIN_FILTERS,
-  NEUTRAL_SIGNALS,
-  type BuiltinSmartFilter,
-  type EmailSignals,
-} from "../model/signals";
+import { NEUTRAL_SIGNALS, type EmailSignals } from "../model/signals";
 import type { Email } from "../model/email";
 
 function email(over: Partial<Email> = {}): Email {
@@ -105,7 +100,7 @@ describe("immutability", () => {
 
     const after = original
       .recordStar(email({ id: 4 }), SECURITY, true, 1_000)
-      .rejectFilter("newsletters", null, null, 1_001);
+      .recordStar(email({ id: 5 }), NEWSLETTER, false, 1_001);
 
     expect(after).not.toBe(original);
     expect(after.weights).not.toBe(original.weights);
@@ -319,119 +314,32 @@ describe("starring", () => {
   });
 });
 
-describe("muting a bucket", () => {
-  // Bucket → driving weight, and the direction a mute pulls it. A boosting signal
-  // steps down (this mail was not important); a penalty steps up (the label
-  // under-fired).
-  const DRIVING: { filter: BuiltinSmartFilter; key: SignalKey; delta: number }[] = [
-    { filter: "important", key: "actionNeeded", delta: -LEARNING_STEP },
-    { filter: "needs_action", key: "actionNeeded", delta: -LEARNING_STEP },
-    { filter: "urgent", key: "urgency", delta: -LEARNING_STEP },
-    { filter: "security", key: "security", delta: -LEARNING_STEP },
-    { filter: "receipts", key: "finance", delta: -LEARNING_STEP },
-    { filter: "newsletters", key: "newsletterPenalty", delta: LEARNING_STEP },
-    { filter: "promotional", key: "promoPenalty", delta: LEARNING_STEP },
-  ];
-
-  it("pulls each bucket's driving signal the right way, and nothing else", () => {
-    for (const row of DRIVING) {
-      const before = LearningModel.initial().toSnapshot();
-      const after = LearningModel.initial().rejectFilter(row.filter, null, null, 1_000);
-      expect(after.weights[row.key], `${row.filter} → ${row.key}`).toBe(
-        before.weights[row.key] + row.delta,
-      );
-      expect(moved(after, before), `${row.filter} moved the wrong weights`).toEqual([
-        row.key,
-      ]);
-    }
+describe("events from hiding a bucket, written by earlier builds", () => {
+  // Hiding a bucket from the rail is gone, but a snapshot written before then can
+  // still carry its events. They are history, not instructions: they load, stay in
+  // the log the settings panel lists, and nothing new of the kind is recorded.
+  it("loads a snapshot that carries a filter_rejected event", () => {
+    const legacy = {
+      weights: defaultWeights(),
+      events: [
+        {
+          id: "1000-newsletters-r",
+          action: "filter_rejected",
+          activeSignals: ["newsletterPenalty"],
+          rejectedFilter: "newsletters",
+          at: 1_000,
+        },
+      ],
+    } as LearningSnapshot;
+    const model = LearningModel.fromSnapshot(JSON.parse(JSON.stringify(legacy)));
+    expect(model.events).toHaveLength(1);
+    expect(model.events[0].rejectedFilter).toBe("newsletters");
+    expect(model.weights).toEqual(defaultWeights());
   });
 
-  it("logs an event and moves nothing for a bucket with no driving signal", () => {
-    // Codes, deliveries and social are matched by their own signals, none of which
-    // the user can retune. Guessing a weight for them would teach the model
-    // something untrue, so the event is recorded and the weights are left alone.
-    const undriven = BUILTIN_FILTERS.filter(
-      (id) => !DRIVING.some((row) => row.filter === id),
-    );
-    expect(undriven).toContain("codes");
-    expect(undriven).toContain("shipping");
-    expect(undriven).toContain("social");
-    expect(undriven).toContain("unsafe");
-
-    for (const filter of undriven) {
-      const before = LearningModel.initial().toSnapshot();
-      const after = LearningModel.initial().rejectFilter(filter, null, null, 1_000);
-      expect(after.weights, `${filter} moved a weight`).toEqual(before.weights);
-      expect(after.events, `${filter} logged nothing`).toHaveLength(1);
-    }
+  it("offers no way to record one", () => {
+    expect("rejectFilter" in LearningModel.initial()).toBe(false);
   });
-
-  it("records which bucket was rejected, and invents no message for a pill", () => {
-    // Two shapes arrive here: a muted bucket from the rail, which has no message
-    // behind it, and one from the reader, which does. The first must not borrow
-    // an email id.
-    const global = LearningModel.initial().rejectFilter("newsletters", null, null, 1_000);
-    expect(global.events[0]).toEqual({
-      id: "1000-newsletters-r",
-      emailId: undefined,
-      sender: undefined,
-      action: "filter_rejected",
-      predictedImportance: undefined,
-      // The bucket, not the message, decides what a mute moves — so this is set even
-      // with no message behind the mute. Muting Newsletters means the newsletter
-      // signal over-fired, whether or not one particular message triggered the click.
-      activeSignals: ["newsletterPenalty"],
-      rejectedFilter: "newsletters",
-      at: 1_000,
-    });
-
-    const scoped = LearningModel.initial().rejectFilter(
-      "receipts",
-      email({ id: 8, sender: "billing@acme.example" }),
-      ACTION_NEEDED,
-      1_001,
-    );
-    expect(scoped.events[0].emailId).toBe(8);
-    expect(scoped.events[0].sender).toBe("billing@acme.example");
-    expect(scoped.events[0].predictedImportance).toBe(64);
-    expect(scoped.events[0].rejectedFilter).toBe("receipts");
-    // `receipts` is driven by `finance`, not by the urgency this message happened to
-    // carry — the weight that moved is a property of the bucket being muted.
-    expect(scoped.events[0].activeSignals).toEqual(["finance"]);
-  });
-
-  it("records the weights the mute moved, and nothing else", () => {
-    // `activeSignals` means "what this event changed", not "what was on the message".
-    // Muting a bucket with no driving weight moves nothing, so an empty array is the
-    // honest record — an audit trail that overstates what it did is worse than one
-    // that is silent, because it is believed.
-    const scoped = LearningModel.initial().rejectFilter(
-      "travel",
-      email({ id: 3 }),
-      ACTION_NEEDED,
-      1_000,
-    );
-    expect(scoped.events[0].activeSignals).toEqual([]);
-
-    // And where the mute *does* drive a weight, that is what gets recorded.
-    const driven = LearningModel.initial().rejectFilter(
-      "receipts",
-      email({ id: 3 }),
-      sig({ finance: true, importanceScore: 40 }),
-      1_000,
-    );
-    expect(driven.events[0].activeSignals).toEqual(["finance"]);
-  });
-
-  it("never touches spam sensitivity, because unsafe is not muted", () => {
-    // The store refuses to mute `unsafe`; if that ever changed, the mute must not
-    // teach the model to trust spam.
-    const before = LearningModel.initial().toSnapshot();
-    const after = LearningModel.initial().rejectFilter("unsafe", email(), SECURITY, 1_000);
-    expect(after.weights).toEqual(before.weights);
-    expect(after.events[0].rejectedFilter).toBe("unsafe");
-  });
-
 });
 
 describe("nudging stops at the ends of the range", () => {
@@ -460,15 +368,6 @@ describe("nudging stops at the ends of the range", () => {
     expect(model.weights.newsletterPenalty).toBe(meta.min);
   });
 
-  it("walks a muted bucket's weight to its floor and holds there", () => {
-    const meta = signalMeta("actionNeeded");
-    let model = LearningModel.initial();
-    for (let i = 0; i < 60; i += 1) {
-      model = model.rejectFilter("important", null, null, 1_000 + i);
-    }
-    expect(model.weights.actionNeeded).toBe(meta.min);
-  });
-
   it("walks an unstarred penalty to its ceiling and holds there", () => {
     const meta = signalMeta("newsletterPenalty");
     const message = email();
@@ -487,7 +386,6 @@ describe("nudging stops at the ends of the range", () => {
     let model = LearningModel.initial();
     for (let i = 0; i < 120; i += 1) {
       model = model.recordStar(message, fixtures[i % fixtures.length], i % 3 !== 0, i);
-      model = model.rejectFilter(BUILTIN_FILTERS[i % BUILTIN_FILTERS.length], null, null, i);
     }
     for (const meta of SIGNAL_KEYS) {
       const value = model.weights[meta.key];
@@ -536,7 +434,7 @@ describe("resetting the adjustments", () => {
     // "The event log is kept: it is the audit trail." Resetting the tuning does
     // not delete the history that explains how the tuning happened.
     const model = LearningModel.initial()
-      .rejectFilter("newsletters", null, null, 500)
+      .recordStar(email({ id: 9 }), NEWSLETTER, false, 500)
       .recordStar(email(), ACTION_NEEDED, true, 1_000);
     expect(model.weights).not.toEqual(defaultWeights());
     const reset = model.resetAdjustments();
@@ -704,7 +602,7 @@ describe("reading a persisted snapshot", () => {
     const model = LearningModel.initial()
       .recordStar(email({ id: 1 }), ACTION_NEEDED, true, 1_000)
       .recordStar(email({ id: 2 }), NEWSLETTER, false, 2_000)
-      .rejectFilter("urgent", email({ id: 3 }), SECURITY, 3_000);
+      .recordStar(email({ id: 3 }), SECURITY, true, 3_000);
     const snapshot: LearningSnapshot = JSON.parse(JSON.stringify(model.toSnapshot()));
     const restored = LearningModel.fromSnapshot(snapshot);
 

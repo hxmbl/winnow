@@ -295,9 +295,12 @@ reliably implement, so on desktop the question couldn't be asked at all.
 - **Sent is a mailbox.** It's also the only source for "who do I write to". The
   recipient list is built from both halves of a conversation and sent mail is
   normally the invisible half.
-- **Every verb has a way back.** `⇧U` restores exactly the messages it touched, a
-  muted bucket stays in the rail struck through with a ↺, a filed message
-  reappears where it went.
+- **Every verb has a way back.** `⇧U` restores exactly the messages it touched,
+  and a filed message reappears where it went.
+- **The rail can't be pruned.** A pill switches its filter on and off and "All"
+  clears them; no bucket can be hidden from the rail or the inbox. (Earlier
+  builds could; the list they saved is deleted on launch and those buckets come
+  back.)
 
 ## And what isn't true forever
 

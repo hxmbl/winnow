@@ -13,7 +13,7 @@ import { RecipientField } from "./RecipientField";
 import { isValidAddress } from "../../core/contacts/addresses";
 import type { ContactIndex } from "../../core/contacts/index";
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
-import { FILTER_LABELS, type BuiltinSmartFilter } from "../../core/model/signals";
+import { FILTER_LABELS } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
 import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
 import { formatRelative } from "../../core/mail/datetime";
@@ -247,9 +247,6 @@ export type SettingsProps = {
   /** Senders muted from the sender menu: listed, but silent. */
   mutedSenders: readonly string[];
   onUnmute: (sender: string) => void;
-  /** Buckets the user has silenced, so a mute can be undone from here too. */
-  mutedFilters: readonly BuiltinSmartFilter[];
-  onRestoreFilter: (id: BuiltinSmartFilter) => void;
   /** True when the build is a desktop shell, so the OS-only rows make sense. */
   isDesktop: boolean;
   /** The user's own Google OAuth client, shortened for display, or `null` before setup. */
@@ -572,8 +569,7 @@ export function Settings(props: SettingsProps) {
           >
             {props.events.length === 0 ? (
               <p className="px-2 py-3 text-center text-meta text-ink-subtle">
-                Nothing yet. Star a message, or hide a filter, and Winnow will record what it
-                did and why.
+                Nothing yet. Star a message and Winnow will record what it did and why.
               </p>
             ) : (
               <>
@@ -651,32 +647,6 @@ export function Settings(props: SettingsProps) {
         </Section>
       )}
 
-      {/*
-        The muted buckets.
-
-        A second route to unmute, because the rail is a strip that scrolls and a bucket
-        muted weeks ago is not something anyone scrolls to look for.
-      */}
-      {props.mutedFilters.length > 0 && (
-        <Section title={`Hidden buckets (${props.mutedFilters.length})`}>
-          <p className="-mt-1 text-meta text-ink-subtle">
-            Not counted or shown in your inbox, and Winnow has learned they were
-            over-firing.
-          </p>
-          {props.mutedFilters.map((id) => (
-            <Row key={id} label={FILTER_LABELS[id]}>
-              <button
-                type="button"
-                onClick={() => props.onRestoreFilter(id)}
-                className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              >
-                <Check size={12} strokeWidth={2.4} aria-hidden="true" />
-                Show again
-              </button>
-            </Row>
-          ))}
-        </Section>
-      )}
       </div>
     </Sheet>
   );

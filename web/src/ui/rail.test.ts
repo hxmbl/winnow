@@ -174,7 +174,7 @@ describe("rail scrolling", () => {
 
 describe("pill colours", () => {
   it("gives every pill a colour: buckets their own, senders one from their domain", () => {
-    const pills = buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, [], ["needs_action"]);
+    const pills = buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, []);
     for (const pill of pills) {
       expect(pill.hue.h).toBeGreaterThanOrEqual(0);
       expect(pill.hue.h).toBeLessThan(360);
@@ -188,10 +188,10 @@ describe("pill colours", () => {
     for (const sender of senders) expect(sender.hue.s).toBeLessThanOrEqual(24);
   });
 
-  it("keeps a muted bucket's colour, for when it is restored", () => {
-    const pills = buildPills(RAIL, COUNTS, [], new Map(), [], ["needs_action"]);
-    const muted = pills.find((pill) => pill.muted);
-    expect(muted?.hue).toEqual(pills.find((pill) => pill.id.kind === "builtin" && pill.id.id === "needs_action")?.hue);
+  it("turns every bucket on the rail into a pill, in order, with nothing marked hidden", () => {
+    const pills = buildPills(RAIL, COUNTS, [], new Map(), []);
+    expect(pills.map((pill) => (pill.id.kind === "builtin" ? pill.id.id : null))).toEqual([...RAIL]);
+    for (const pill of pills) expect(pill).not.toHaveProperty("muted");
   });
 
   it("an appended active sender gets its colour too", () => {

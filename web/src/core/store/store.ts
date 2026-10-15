@@ -29,7 +29,6 @@ import {
   type Mailbox,
 } from "../model/email";
 import {
-  BUILTIN_FILTERS,
   catalogIndex,
   FILTER_LABELS,
   filterKey,
@@ -325,15 +324,6 @@ export type StoreState = {
   overlay: "none" | "shortcuts" | "navigation" | "settings";
   navigationIndex: number;
 
-  /**
-   * The buckets the user has silenced, in catalog order.
-   *
-   * Mirrors `persistedRemoved` onto the public state because the UI needs it to *draw*
-   * a muted pill: a muted bucket stays in the rail so it can be un-muted there, and a
-   * pill with no marker is indistinguishable from an active one.
-   */
-  mutedFilters: readonly BuiltinSmartFilter[];
-
   syncing: boolean;
   /**
    * A single undo, offered by whatever can be taken back.
@@ -344,13 +334,9 @@ export type StoreState = {
    * one — a star is a toggle, a move is answered by the message reappearing, a filter
    * has its own pill.
    *
-   * Two things land here. "Mark everything in this mailbox read" is a single keystroke
-   * (`⇧U`) with no window and no inverse, and on a mailbox with a thousand unread it is
-   * the one mistake in triaging you cannot walk back. Muting a bucket is the other: the
-   * muted pill is sorted to the *end* of the rail, so the pill the user just clicked
-   * vanishes from a 27-pill strip they are unlikely to have scrolled. The mute is
-   * reversible at the far end of the rail and in Settings, but neither is where someone
-   * looks immediately after a click.
+   * "Mark everything in this mailbox read" lands here: a single keystroke (`⇧U`) with
+   * no window and no inverse, and on a mailbox with a thousand unread it is the one
+   * mistake in triaging you cannot walk back.
    */
   undo: { label: string } | null;
   /**
@@ -588,14 +574,6 @@ export type PersistPatch = {
   learning?: ReturnType<LearningModel["toSnapshot"]>;
   activeFilters?: string[];
   mailbox?: Mailbox;
-  /**
-   * Buckets the user has silenced.
-   *
-   * Persisted with the rest of the "what you have told Winnow" state, because a mute is
-   * a statement about the mail rather than about this session — the same argument the
-   * blocked-sender list makes.
-   */
-  removedFilters?: string[];
 };
 
 /**
@@ -714,7 +692,6 @@ export class WinnowStore {
       learning: LearningModel.initial(),
       overlay: "none",
       navigationIndex: 0,
-      mutedFilters: [],
       syncing: false,
       undo: null,
       syncPhase: null,
@@ -914,20 +891,14 @@ export class WinnowStore {
       searchQuery: state.searchQuery,
       sortBy: state.preferences.sortBy,
       searchBags,
-      removedFilters: this.persistedRemoved,
     });
 
     const threads = groupThreads(result.emails);
 
     // The rail is ranked against the *inbox*, not the current view, so opening the bin
-    // does not change which buckets are pinned. Mutes are read from the instance.
-    const rail = rankFilters(
-      inboxForProfile,
-      inboxSignals,
-      profile,
-      this.persistedRemoved,
-    );
-    const railWithActive = this.orderedRail(rail, this.persistedRemoved);
+    // does not change which buckets are pinned.
+    const rail = rankFilters(inboxForProfile, inboxSignals, profile);
+    const railWithActive = this.orderedRail(rail);
 
     // The same inbox the rail was ranked against; see `inboxCounts`. A pill count is a
     // claim about the user's mail, not the current result set.
@@ -997,34 +968,20 @@ export class WinnowStore {
   }
 
   /**
-   * Buckets the user has silenced.
-   *
-   * On the instance rather than in `Preferences`: it is a classification input, not a
-   * setting — it changes what the inbox *contains*, not how it looks.
-   */
-  private persistedRemoved = new Set<BuiltinSmartFilter>();
-
-  /**
    * The rail's final order: the permanent pair leads, then activated buckets (in the
    * order they were turned on, *whether or not they match anything* — an empty active
    * bucket must keep its pill or a live filter is left with no control), then the
-   * ranking, then muted buckets struck through so muting is reversible. Mutes take no
-   * digit: a pill that prints a shortcut it ignores is the same lie as a badge in the
-   * wrong colour.
+   * ranking.
    *
    * Ported from `legacy/swift-native/Sources/winnow/Store/WinnowStore.swift`, which
    * pins the permanent pair *before* hoisting actives; the order matters.
    */
-  private orderedRail(
-    ranked: BuiltinSmartFilter[],
-    removed: ReadonlySet<BuiltinSmartFilter>,
-  ): BuiltinSmartFilter[] {
+  private orderedRail(ranked: BuiltinSmartFilter[]): BuiltinSmartFilter[] {
     const activeBuiltins = this.state.activeFilters
       .filter((filter): filter is Extract<FilterId, { kind: "builtin" }> => filter.kind === "builtin")
-      .map((filter) => filter.id)
-      .filter((id) => !removed.has(id));
+      .map((filter) => filter.id);
 
-    const pinned = PERMANENT_FILTERS.filter((id) => !removed.has(id));
+    const pinned = [...PERMANENT_FILTERS];
 
     // An active bucket keeps its place in the rail rather than being hoisted to the
     // front: a tab that jumped when clicked would move away from the pointer and
@@ -1036,19 +993,8 @@ export class WinnowStore {
       .filter((id) => !placed.has(id))
       .sort((a, b) => catalogIndex(a) - catalogIndex(b));
     const rest = ranked.filter((id) => !pinned.includes(id));
-    const muted = BUILTIN_FILTERS.filter((id) => removed.has(id));
 
-    return [...pinned, ...rest, ...extra, ...muted];
-  }
-
-  /**
-   * The muted buckets, in catalog order.
-   *
-   * Separate from the rail because the settings panel also renders an "unhide" row per
-   * bucket, so a mute is reversible from a place the user will look.
-   */
-  private mutedList(): BuiltinSmartFilter[] {
-    return BUILTIN_FILTERS.filter((id) => this.persistedRemoved.has(id));
+    return [...pinned, ...rest, ...extra];
   }
 
   // ── Changing ──────────────────────────────────────────────────────────────
@@ -1142,7 +1088,6 @@ export class WinnowStore {
   restoreState(saved: {
     mailbox?: Mailbox | null;
     activeFilters?: readonly string[];
-    removedFilters?: readonly string[];
     preferences?: Partial<Preferences>;
     learning?: ReturnType<LearningModel["toSnapshot"]> | null;
   }): void {
@@ -1150,20 +1095,12 @@ export class WinnowStore {
       .map(parseFilterKey)
       .filter((filter): filter is FilterId => filter !== null);
 
-    for (const key of saved.removedFilters ?? []) {
-      if ((BUILTIN_FILTERS as readonly string[]).includes(key)) {
-        this.persistedRemoved.add(key as BuiltinSmartFilter);
-      }
-    }
-
     this.state = {
       ...this.state,
       mailbox: MAILBOX_ORDER.includes(saved.mailbox as Mailbox)
         ? (saved.mailbox as Mailbox)
         : this.state.mailbox,
       activeFilters: filters,
-      // Mutes are applied in the loop above, so the list is already correct.
-      mutedFilters: this.mutedList(),
       preferences: { ...this.state.preferences, ...(saved.preferences ?? {}) },
       learning: saved.learning
         ? LearningModel.fromSnapshot(saved.learning)
@@ -1630,15 +1567,6 @@ export class WinnowStore {
       return;
     }
 
-    // A muted bucket cannot be re-activated by filtering: muting says the bucket is
-    // over-firing, and letting a filter turn it back on would show exactly the messages
-    // the user asked to stop seeing.
-    //
-    // `unsafe` is the deliberate exception — the one bucket the user goes to *on
-    // purpose*, never filterable alongside anything else (see above). Muting it is
-    // refused outright, so it can never be muted.
-    if (filter.kind === "builtin" && this.persistedRemoved.has(filter.id)) return;
-
     this.setFilters([...active, filter]);
   }
 
@@ -1652,79 +1580,12 @@ export class WinnowStore {
    * stayed one click behind.
    */
   private setFilters(activeFilters: FilterId[]): void {
-    this.set(
-      { activeFilters, mutedFilters: this.mutedList() },
-      {
-        activeFilters: activeFilters.map(filterKey),
-        removedFilters: [...this.persistedRemoved],
-      },
-    );
+    this.set({ activeFilters }, { activeFilters: activeFilters.map(filterKey) });
   }
 
   clearFilters(): void {
     if (this.state.activeFilters.length === 0) return;
     this.setFilters([]);
-  }
-
-  /**
-   * Mute a bucket: hide its mail *and* tell the learning model.
-   *
-   * Mutes survive sign-out and reload, unlike filters: muting is a statement about the
-   * mail, not the session, and a preference that resets on launch is not a preference.
-   * The bucket stays in the rail, struck through, so the mute can be undone where it
-   * was made; see `orderedRail`.
-   *
-   * The undo strip reads as redundant next to that until you watch the pill move:
-   * `orderedRail` sorts muted buckets to the *end* — a muted pill is not filterable,
-   * and leaving it in place would silently repoint every digit shortcut after it — so
-   * the control the user clicked leaves a 27-pill strip they have probably not
-   * scrolled, and the visible effect is that something disappeared. The strip says what
-   * happened and puts the way back under the hand that did it.
-   *
-   * The undo is installed before anything changes, for the same reason `markAllRead`
-   * does it: the strip must never render an offer with no handler. Taking it calls
-   * `restoreFilter`, which is also what the pill's own ↺ calls, so there is one code
-   * path back.
-   */
-  dismissFilter(filter: BuiltinSmartFilter): void {
-    if (filter === "unsafe" || this.persistedRemoved.has(filter)) return;
-
-    this.undoAction = () => this.restoreFilter(filter);
-    this.persistedRemoved.add(filter);
-    this.setFilters(
-      this.state.activeFilters.filter(
-        (f) => !(f.kind === "builtin" && f.id === filter),
-      ),
-    );
-
-    // The rejection is about a *bucket*, not a message, so it is recorded without one:
-    // attaching the open message would teach the model that this particular message was
-    // a bad example, a much stronger claim than the user made.
-    this.setLearning(this.state.learning.rejectFilter(filter, null, null, this.now()));
-    // `FILTER_LABELS` rather than `filterLabel`: only a *builtin* can be muted, and
-    // `filterLabel` takes a wider type, `FilterId`.
-    //
-    // No count, for the same reason "Marked everything in this mailbox as read" has
-    // none: the pill the user just clicked was showing it a moment ago, and the strip's
-    // job is to name what happened, not restate the rail.
-    this.set({ undo: { label: `Hid ${FILTER_LABELS[filter]} from the inbox` } });
-  }
-
-  /**
-   * Unmute a bucket.
-   *
-   * Also drops the undo offer, because this is what the offer's own handler calls:
-   * leaving the strip up would leave a "Hid Newsletters" line with a button that does
-   * nothing — the state the strip's field comment says must never happen. It is right
-   * for the other caller too: someone who unmutes with the pill's own ↺ need not be
-   * told how to unmute it again.
-   */
-  restoreFilter(filter: BuiltinSmartFilter): void {
-    if (!this.persistedRemoved.delete(filter)) return;
-    this.set(
-      { mutedFilters: this.mutedList(), undo: null },
-      { removedFilters: [...this.persistedRemoved] },
-    );
   }
 
   /** Hide every message from a sender, everywhere. */
@@ -2557,7 +2418,7 @@ export class WinnowStore {
    *
    * The line is "what is about this account" versus "what is about this person". Mail,
    * the account, the unread state and the active filters are the account's;
-   * preferences, blocked senders, mutes and what Winnow learned are the person's.
+   * preferences, blocked senders, muted senders and what Winnow learned are the person's.
    * Keeping the second group is why a user can sign back in and find the app tuned.
    */
   async signOut(): Promise<void> {
@@ -2567,7 +2428,6 @@ export class WinnowStore {
       preferences: this.state.preferences,
       learning: this.state.learning,
     };
-    const mutes = [...this.persistedRemoved];
     this.backend = undefined;
     this.pendingConnect = null;
     this.undoAction = null;
@@ -2581,7 +2441,6 @@ export class WinnowStore {
     // app is a lie the user has to look at.
     await this.platform?.setUnreadBadge(0).catch(() => undefined);
 
-    this.persistedRemoved = new Set(mutes);
     this.state = {
       ...this.state,
       status: "signed_out",
@@ -2653,6 +2512,3 @@ export function syncNotice(result: { truncated: boolean; cacheUnpersisted?: bool
   // lives in `storagePrompt` (see `STORAGE_PROMPT`).
   return notes.length > 0 ? notes.join(" ") : null;
 }
-
-/** Every bucket, for the settings panel's mute list. */
-export { BUILTIN_FILTERS };

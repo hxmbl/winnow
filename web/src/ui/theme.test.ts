@@ -688,6 +688,6 @@ describe("filter pill colours", () => {
     for (const variable of ["--wn-pill-l", "--wn-pill-sat", "--wn-pill-rest", "--wn-pill-on", "--wn-pill-ink", "--wn-pill-inkOn", "--wn-pill-count"]) {
       expect(css).toContain(`var(${variable})`);
     }
-    expect(css).toMatch(/\.wn-pill\[data-muted\]\s*\{[^}]*background-color:\s*transparent/);
+    expect(css).not.toContain("data-muted");
   });
 });

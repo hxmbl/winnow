@@ -18,7 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import { PositionReadout } from "./Masthead";
-import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
+import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 
 const ROUND_BUTTON =
@@ -159,8 +159,6 @@ export type PhoneDockProps = {
   pills: PillItem[];
   activeFilters: FilterId[];
   onToggleFilter: (id: FilterId) => void;
-  onMute: (id: BuiltinSmartFilter) => void;
-  onRestoreFilter: (id: BuiltinSmartFilter) => void;
   onClearFilters: () => void;
   mailbox: Mailbox;
   /** Unread per mailbox, for the tab's accessible name and its quiet count. */
@@ -174,8 +172,6 @@ export function PhoneDock({
   pills,
   activeFilters,
   onToggleFilter,
-  onMute,
-  onRestoreFilter,
   onClearFilters,
   mailbox,
   unread,
@@ -195,8 +191,6 @@ export function PhoneDock({
         pills={pills}
         activeFilters={activeFilters}
         onToggle={onToggleFilter}
-        onMute={onMute}
-        onRestore={onRestoreFilter}
         onClear={onClearFilters}
         touch
         className="px-3"

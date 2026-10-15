@@ -22,9 +22,10 @@ import { App } from "./App";
 import { WinnowStore } from "./core/store/store";
 import { DEMO_CONTACTS, DEMO_TRASH, demoMailbox } from "./core/data/demo";
 import { desktopPlatformExtras, isTauri, platform } from "./platform";
-import { BUILTIN_FILTERS, filterKey, parseFilterKey } from "./core/model/signals";
+import { filterKey, parseFilterKey } from "./core/model/signals";
 import { MAILBOX_ORDER } from "./core/store/store";
 import { revivePreferences } from "./core/store/preferences";
+import { dropRetiredKeys } from "./core/store/retiredKeys";
 import type { Preferences, StoreOptions } from "./core/store/store";
 import { applyTheme, resolveScheme } from "./ui/theme";
 import { DEFAULT_ACCENT_THEME, DEFAULT_APPEARANCE } from "./core/model/appearance";
@@ -46,7 +47,6 @@ const STORAGE_KEYS = {
   learning: "winnow.learning.v1",
   filters: "winnow.activeFilters.v1",
   mailbox: "winnow.mailbox.v1",
-  muted: "winnow.mutedFilters.v1",
 } as const;
 
 /**
@@ -76,13 +76,6 @@ function write(key: string, value: unknown): void {
   }
 }
 
-/** `string[]` of bucket names, filtered to buckets that still exist. */
-function reviveBucketNames(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const known = new Set<string>(BUILTIN_FILTERS);
-  return raw.filter((name): name is string => typeof name === "string" && known.has(name));
-}
-
 /** The mailbox the user last looked at, if it is one of the four. */
 function reviveMailbox(raw: unknown): Mailbox | null {
   return typeof raw === "string" && (MAILBOX_ORDER as readonly string[]).includes(raw)
@@ -93,7 +86,7 @@ function reviveMailbox(raw: unknown): Mailbox | null {
 /**
  * What the last session persisted, or `null` for a first run.
  *
- * Five independent reads, each guarded on its own — see `read`. Passed to
+ * Four independent reads, each guarded on its own — see `read`. Passed to
  * `store.restoreState` whole rather than applied key by key, so the store derives once
  * against a fully-restored world.
  */
@@ -111,7 +104,6 @@ function loadPersisted(): PersistedState {
             .map(filterKey)
         : null,
     ) ?? [],
-    removedFilters: read(STORAGE_KEYS.muted, reviveBucketNames) ?? [],
     mailbox: read(STORAGE_KEYS.mailbox, reviveMailbox),
     learning: read(STORAGE_KEYS.learning, (raw) => raw as LearningSnapshot),
   };
@@ -121,7 +113,6 @@ function loadPersisted(): PersistedState {
 type PersistedState = {
   preferences?: Partial<Preferences>;
   activeFilters: string[];
-  removedFilters: string[];
   mailbox: Mailbox | null;
   learning: LearningSnapshot | null;
 };
@@ -133,6 +124,9 @@ type PersistedState = {
  * store needs the session's backend, so neither is built here — the bridge is created
  * inside `App` on mount.
  */
+// Before anything is read: buckets hidden by an earlier build come back, and the list
+// that hid them is deleted rather than left behind (see `retiredKeys.ts`).
+dropRetiredKeys(() => globalThis.localStorage);
 const persisted = loadPersisted();
 
 /*
@@ -187,7 +181,6 @@ function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): 
   if (patch.learning) write(STORAGE_KEYS.learning, patch.learning);
   if (patch.activeFilters) write(STORAGE_KEYS.filters, patch.activeFilters);
   if (patch.mailbox) write(STORAGE_KEYS.mailbox, patch.mailbox);
-  if (patch.removedFilters) write(STORAGE_KEYS.muted, patch.removedFilters);
 }
 
 /**

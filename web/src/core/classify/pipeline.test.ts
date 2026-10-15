@@ -285,28 +285,6 @@ describe("runInboxQuery — filters", () => {
     expect(gmailIds(result)).toEqual(["g2"]);
   });
 
-  it("applies a muted bucket only while no filter is explicitly active", () => {
-    // Silencing a bucket is a statement about the default inbox, not about the
-    // bucket itself. Archiving everything in "Newsletters" and then clicking
-    // "Newsletters" to check what is in there must not show an empty list.
-    const messages = mailbox([{ starred: true, subject: "Contract" }]);
-    const removed = new Set(["starred"] as const);
-
-    const muted = runInboxQuery(
-      query({ emails: messages, removedFilters: new Set(removed) }),
-    );
-    expect(gmailIds(muted)).toEqual([]);
-    expect(muted.emptyReason).toBe("hidden");
-
-    const deliberate = runInboxQuery(
-      query({
-        emails: messages,
-        filters: [builtinFilter("starred")],
-        removedFilters: new Set(removed),
-      }),
-    );
-    expect(gmailIds(deliberate)).toEqual(["g1"]);
-  });
 });
 
 describe("runInboxQuery — matchCount", () => {
@@ -407,21 +385,9 @@ describe("runInboxQuery — emptyReason", () => {
     expect(result.emptyReason).toBe("filters");
   });
 
-  it("says hidden when a muted bucket is hiding all the mail", () => {
-    // The case that used to report "This mailbox is empty" — a statement about
-    // the user's mail that is plainly false, with no way out of it. Archive
-    // everything in a bucket you muted and the mailbox goes quiet without ever
-    // being empty.
-    const result = runInboxQuery(
-      query({ emails: plain, removedFilters: new Set(["starred"]) }),
-    );
-    expect(result.emptyReason).toBe("hidden");
-  });
-
   it("says noSignal when the default inbox's own spam rule is hiding all of it", () => {
-    // The mirror of `hidden`. Reading as an empty bin from inside the bin, which
-    // is what a spam folder looked like when it was filtered by the inbox's
-    // rules.
+    // Reading as an empty bin from inside the bin, which is what a spam folder
+    // looked like when it was filtered by the inbox's rules.
     const signals = new Map<number, EmailSignals>([[1, sig({ spamLikelihood: 0.95 })]]);
     const result = runInboxQuery(query({ emails: plain, signals }));
     expect(result.emptyReason).toBe("noSignal");
@@ -456,23 +422,9 @@ describe("runInboxQuery — emptyReason precedence", () => {
     ).toBe("filters");
   });
 
-  it("prefers an empty mailbox over the muted-bucket explanation", () => {
-    // With no mail at all there is nothing for a mute to be hiding, and telling
-    // the user to unmute a bucket would send them to fix a problem they do not
-    // have.
-    expect(
-      runInboxQuery(query({ emails: [], removedFilters: new Set(["starred"]) })).emptyReason,
-    ).toBe("mailbox");
-  });
-
-  it("prefers search over hidden and over noSignal alike", () => {
+  it("prefers search over noSignal", () => {
     const messages = mailbox([{ starred: true }]);
     const signals = new Map<number, EmailSignals>([[1, sig({ spamLikelihood: 0.95 })]]);
-    const hidden = runInboxQuery(
-      query({ emails: messages, searchQuery: "zzznomatch", removedFilters: new Set(["starred"]) }),
-    );
-    expect(hidden.emptyReason).toBe("search");
-
     const noSignal = runInboxQuery(
       query({ emails: messages, signals, searchQuery: "zzznomatch" }),
     );

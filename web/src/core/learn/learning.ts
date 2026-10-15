@@ -45,11 +45,16 @@ export const MAX_EVENTS = 400;
  */
 export const SPAM_CONTRADICTION = UNSAFE_THRESHOLD;
 
+/**
+ * `filter_rejected` is no longer recorded: it came from hiding a bucket from the rail,
+ * which Winnow no longer offers. It stays in the type because snapshots written by
+ * earlier builds carry such events, and the history in Settings still lists them.
+ */
 export type FeedbackAction = "starred" | "unstarred" | "filter_rejected";
 
 export type FeedbackEvent = {
   id: string;
-  /** Absent for a global "remove this pill" act. */
+  /** Absent for an event about a bucket rather than a message. */
   emailId?: number;
   sender?: string;
   action: FeedbackAction;
@@ -60,10 +65,8 @@ export type FeedbackEvent = {
    */
   predictedImportance?: number;
   /**
-   * The weights this event moved — not "the signals on the message". Muting a
-   * bucket with no single driving weight (`travel`, `shipping`, `codes`) moves
-   * nothing, and an empty array is a real answer: the user objected, the model had
-   * nothing to change.
+   * The weights this event moved — not "the signals on the message". An empty array
+   * is a real answer: the user objected, the model had nothing to change.
    */
   activeSignals: SignalKey[];
   rejectedFilter?: BuiltinSmartFilter;
@@ -90,30 +93,6 @@ function touchedKeys(signals: EmailSignals): SignalKey[] {
   if (signals.newsletter) keys.push("newsletterPenalty");
   if (signals.promotional) keys.push("promoPenalty");
   return keys;
-}
-
-/** Which signals plausibly drove a bucket's matches. */
-function drivingKeys(filter: BuiltinSmartFilter): SignalKey[] {
-  switch (filter) {
-    case "important":
-    case "needs_action":
-      return ["actionNeeded"];
-    case "urgent":
-      return ["urgency"];
-    case "security":
-      return ["security"];
-    case "receipts":
-      return ["finance"];
-    case "newsletters":
-      return ["newsletterPenalty"];
-    case "promotional":
-      return ["promoPenalty"];
-    default:
-      // Buckets with no single obvious signal (codes, shipping, social…) learn
-      // nothing from a mute, but the event is still logged so the history is
-      // complete.
-      return [];
-  }
 }
 
 /** Mutate a weight set, reporting whether anything actually moved. */
@@ -270,47 +249,6 @@ export class LearningModel {
     }
 
     const weights = applyDeltas(this.weights, deltas).weights;
-
-    return new LearningModel({
-      weights,
-      events: this.push(this.events, event),
-    });
-  }
-
-  /**
-   * Record a muted bucket and pull its driving signals the other way.
-   *
-   * Boosting signals step down (this mail was not important) and penalty
-   * signals step up (the label under-fired). `.unsafe` is never muted, so spam
-   * sensitivity is untouched by this path.
-   */
-  rejectFilter(
-    filter: BuiltinSmartFilter,
-    email: Email | null,
-    signals: EmailSignals | null,
-    now: number,
-  ): LearningModel {
-    const keys = drivingKeys(filter);
-    const event: FeedbackEvent = {
-      id: `${now}-${filter}-r`,
-      emailId: email?.id,
-      sender: email?.sender,
-      action: "filter_rejected",
-      predictedImportance: email && signals ? signals.importanceScore : undefined,
-      // The driving keys, not the message's own signals — see `activeSignals`. These
-      // are the weights the mute actually nudged.
-      activeSignals: keys,
-      rejectedFilter: filter,
-      at: now,
-    };
-
-    let weights = this.weights;
-    if (keys.length > 0) {
-      weights = applyDeltas(
-        weights,
-        keys.map((key) => ({ key, delta: isPenalty(key) ? LEARNING_STEP : -LEARNING_STEP })),
-      ).weights;
-    }
 
     return new LearningModel({
       weights,

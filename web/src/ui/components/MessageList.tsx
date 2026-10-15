@@ -477,11 +477,6 @@ function Empty({
           body: "Nothing matches those filters.",
           action: { label: "Show everything", run: onClearFilters },
         };
-      case "hidden":
-        return {
-          body: "Everything here is in a bucket you’ve hidden.",
-          action: { label: "Show everything", run: onClearFilters },
-        };
       case "noSignal":
         return {
           body: "All of this looks like junk, so Winnow is holding it back.",

@@ -214,17 +214,15 @@ export function rankFilters(
   inbox: readonly Email[],
   signals: ReadonlyMap<number, EmailSignals>,
   profile: UserProfile,
-  removed: ReadonlySet<BuiltinSmartFilter> = new Set(),
 ): BuiltinSmartFilter[] {
   const counts = countAllFilters(inbox, signals, profile);
 
-  const pinned = PERMANENT_FILTERS.filter((id) => !removed.has(id));
+  const pinned = [...PERMANENT_FILTERS];
 
   const magic = BUILTIN_FILTERS.filter(
     (id) =>
       !PERMANENT_FILTERS.includes(id) &&
       id !== "unsafe" &&
-      !removed.has(id) &&
       (counts.get(id) ?? 0) > 0,
   ).sort((a, b) => {
     const countA = counts.get(a) ?? 0;
@@ -235,7 +233,5 @@ export function rankFilters(
     return catalogIndex(a) - catalogIndex(b);
   });
 
-  const unsafe = removed.has("unsafe") ? [] : (["unsafe"] as const);
-
-  return [...pinned, ...magic, ...unsafe];
+  return [...pinned, ...magic, "unsafe"];
 }

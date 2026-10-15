@@ -15,12 +15,11 @@ import type { Email } from "../model/email";
 import {
   isUnsafe,
   NEUTRAL_SIGNALS,
-  type BuiltinSmartFilter,
   type EmailSignals,
   type FilterId,
 } from "../model/signals";
 import type { UserProfile } from "../model/profile";
-import { matchesBuiltin, matchesFilter } from "./filters";
+import { matchesFilter } from "./filters";
 import { inboxSearchBag } from "./classify";
 import { calculateWinnowScore, recencyWindow, type SortBy } from "./scoring";
 
@@ -39,9 +38,6 @@ export function buildSearchBags(emails: readonly Email[]): SearchBags {
  *   - `mailbox` — no mail here. The remedy is to sync.
  *   - `search` — the query is too narrow. Clear it.
  *   - `filters` — the buckets are too narrow. Clear them.
- *   - `hidden` — the mailbox has mail but a bucket the user *muted* is hiding all
- *     of it; saying "nothing matches those filters" when they set none would be a
- *     small lie.
  *   - `noSignal` — the mailbox has mail and the default inbox's own spam rule is
  *     hiding all of it.
  */
@@ -49,7 +45,6 @@ export type EmptyReason =
   | "mailbox"
   | "search"
   | "filters"
-  | "hidden"
   | "noSignal"
   | null;
 
@@ -61,11 +56,6 @@ export type InboxQuery = {
   searchQuery: string;
   sortBy: SortBy;
   searchBags?: SearchBags;
-  /**
-   * Buckets the user has silenced. Applies only to the *unfiltered* inbox:
-   * explicitly activating a filter is a deliberate act and overrides a mute.
-   */
-  removedFilters?: ReadonlySet<BuiltinSmartFilter>;
 };
 
 export type InboxResult = {
@@ -100,7 +90,6 @@ function signalFor(
  */
 export function runInboxQuery(query: InboxQuery): InboxResult {
   const { emails, profile, signals, filters, searchQuery, sortBy } = query;
-  const removed = query.removedFilters ?? new Set<BuiltinSmartFilter>();
   const bags = query.searchBags;
 
   const tokens = searchQuery
@@ -127,17 +116,8 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
       return filters.every((filter) => matchesFilter(filter, email, signal, profile));
     });
   } else {
-    // No filter: hide spam and anything in a bucket the user muted, so the
-    // default inbox stays clean.
-    rows = rows.filter((email) => {
-      const signal = signalFor(signals, email);
-      if (isUnsafe(signal)) return false;
-      if (removed.size === 0) return true;
-      for (const id of removed) {
-        if (matchesBuiltin(id, email, signal, profile)) return false;
-      }
-      return true;
-    });
+    // No filter: hide spam, so the default inbox stays clean.
+    rows = rows.filter((email) => !isUnsafe(signalFor(signals, email)));
   }
 
   // 3. Sort.
@@ -166,16 +146,14 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
   /**
    * Why the list is empty, in the order a user would want to be told.
    *
-   * `hidden` is the subtlest: the mailbox has mail, the user asked for no filter, and
-   * the list is empty because every message is in a bucket they muted. `noSignal` is
-   * the mirror: the mail is all unsafe and the default inbox hides it.
+   * `noSignal` is the subtlest: the mailbox has mail, the user asked for no filter,
+   * and the list is empty because the mail is all unsafe and the default inbox hides it.
    */
   let emptyReason: EmptyReason = null;
   if (out.length === 0) {
     if (tokens.length > 0) emptyReason = "search";
     else if (filtering) emptyReason = "filters";
     else if (emails.length === 0) emptyReason = "mailbox";
-    else if (removed.size > 0) emptyReason = "hidden";
     else emptyReason = "noSignal";
   }
 

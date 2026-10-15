@@ -860,36 +860,10 @@ describe("rankFilters", () => {
     expect(ranked).toEqual(["important", "shipping", "needs_action", "unread", "top_contacts", "unsafe"]);
   });
 
-  it("omits a muted bucket entirely, including a pinned one", () => {
-    expect(rankFilters(inbox, signals, profile, new Set(["urgent"]))).not.toContain("urgent");
-    // Muting the pinned pair moves the rest up rather than leaving a hole.
-    expect(rankFilters(inbox, signals, profile, new Set(["important"]))).toEqual([
-      "shipping",
-      "new_senders",
-      "needs_action",
-      "quiet_contacts",
-      "top_contacts",
-      "low_priority",
-      "unread",
-      "promotional",
-      "receipts",
-      "newsletters",
-      "urgent",
-      "security",
-      "codes",
-      "travel",
-      "events",
-      "social",
-      "starred",
-      "attachments",
-      "long_reads",
-      "unsafe",
-    ]);
-    // The safety valve can be muted too, and muting it must not promote
-    // anything in its place.
-    const withoutUnsafe = rankFilters(inbox, signals, profile, new Set(["unsafe"]));
-    expect(withoutUnsafe).toHaveLength(20);
-    expect(withoutUnsafe).not.toContain("unsafe");
+  it("always ranks the pinned pair first and the safety valve last", () => {
+    const ranked = rankFilters(inbox, signals, profile);
+    expect(ranked.slice(0, 2)).toEqual(["important", "shipping"]);
+    expect(ranked[ranked.length - 1]).toBe("unsafe");
   });
 });
 

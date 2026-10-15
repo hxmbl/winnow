@@ -143,9 +143,9 @@ describe("scale: a clock tick", () => {
     // invalidates classification, and a cache that ignored it would silently stop
     // respecting what the learning loop learned.
     //
-    // Driven through `dismissFilter`, which nudges weights: it returns a new model with a
-    // new `weights` object, the identity the memo keys on; `scheduleReclassify` alone only
-    // notifies, and would pass even if the memo ignored weights entirely.
+    // Driven through a star on security mail, which nudges weights: it returns a new model
+    // with a new `weights` object, the identity the memo keys on; `scheduleReclassify`
+    // alone only notifies, and would pass even if the memo ignored weights entirely.
     const classify = await import("../classify/classify");
     const spy = vi.spyOn(classify, "classifyAll");
 
@@ -153,7 +153,10 @@ describe("scale: a clock tick", () => {
     void store.view;
     const before = spy.mock.calls.length;
 
-    store.dismissFilter("newsletters");
+    const security = store.view.emails.find((e) => store.view.signals.get(e.id)?.security)!;
+    const weightsBefore = store.getSnapshot().learning.weights;
+    store.toggleStar(security.id);
+    expect(store.getSnapshot().learning.weights).not.toBe(weightsBefore);
     // The reclassify is debounced behind the drag, and `notify` only bumps the version —
     // nothing re-derives until a consumer asks for the view, which is what a render does.
     await new Promise((resolve) => setTimeout(resolve, 140));

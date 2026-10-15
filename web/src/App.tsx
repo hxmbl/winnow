@@ -587,9 +587,8 @@ export function App({ store }: Props) {
         view.profile.topSenders,
         view.inboxSenderCounts,
         snapshot.activeFilters,
-        snapshot.mutedFilters,
       ),
-    [view.rail, view.inboxCounts, view.profile.topSenders, view.inboxSenderCounts, snapshot.activeFilters, snapshot.mutedFilters],
+    [view.rail, view.inboxCounts, view.profile.topSenders, view.inboxSenderCounts, snapshot.activeFilters],
   );
 
   const unreadIds = useMemo(
@@ -1187,8 +1186,8 @@ export function App({ store }: Props) {
         hasActionTarget:
           snap.view.selected !== null || snap.cursorIndex !== NO_CURSOR || batch.size > 0,
         // The rail as the *pills* see it, not the store's ranked bucket list: sender
-        // pills take digits too, and the muted pills at the end do not. Counting the
-        // store's list would make `7` address a pill that is not there.
+        // pills take digits too. Counting the store's list would make `7` address a pill
+        // that is not there.
         railCount: rail.length,
       };
 
@@ -1284,12 +1283,9 @@ export function App({ store }: Props) {
           break;
         case "toggleFilter": {
           // Addressed by *pill position*, not by the store's ranked bucket list: the pills
-          // interleave sender pills and drop the muted ones, so index `3` is a different
-          // bucket in each.
+          // interleave sender pills, so index `3` is a different bucket in each.
           const pill = rail[command.railIndex];
-          // A muted pill has no toggle — it is drawn disabled, and the store refuses a
-          // muted bucket anyway. The check keeps the two from disagreeing.
-          if (pill && !pill.muted) s.toggleFilter(pill.id);
+          if (pill) s.toggleFilter(pill.id);
           break;
         }
         case "clearFilters":
@@ -1691,8 +1687,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               pills={pills}
               activeFilters={snapshot.activeFilters}
               onToggleFilter={store.toggleFilter.bind(store)}
-              onMute={store.dismissFilter.bind(store)}
-              onRestoreFilter={store.restoreFilter.bind(store)}
               onClearFilters={store.clearFilters.bind(store)}
               position={position}
               total={view.threads.length}
@@ -1948,8 +1942,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           pills={pills}
           activeFilters={snapshot.activeFilters}
           onToggleFilter={store.toggleFilter.bind(store)}
-          onMute={store.dismissFilter.bind(store)}
-          onRestoreFilter={store.restoreFilter.bind(store)}
           onClearFilters={store.clearFilters.bind(store)}
           mailbox={snapshot.mailbox}
           unread={paletteUnread}
@@ -2024,8 +2016,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onUnblock={store.unblockSender.bind(store)}
           mutedSenders={preferences.mutedSenders}
           onUnmute={store.unmuteSender.bind(store)}
-          mutedFilters={snapshot.mutedFilters}
-          onRestoreFilter={store.restoreFilter.bind(store)}
           isDesktop={info?.kind === "desktop"}
           googleClient={oauthClient ? maskClientId(oauthClient.clientId) : null}
           signedIn={snapshot.account !== null}

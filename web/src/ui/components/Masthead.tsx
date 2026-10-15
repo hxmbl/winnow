@@ -12,7 +12,7 @@
 import { Check, ChevronLeft, ChevronRight, PanelLeft, Search } from "lucide-react";
 import { shortcutFor } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
-import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
+import type { FilterId } from "../../core/model/signals";
 
 export type MastheadProps = {
   searchQuery: string;
@@ -30,8 +30,6 @@ export type MastheadProps = {
   pills: PillItem[];
   activeFilters: readonly FilterId[];
   onToggleFilter: (id: FilterId) => void;
-  onMute: (id: BuiltinSmartFilter) => void;
-  onRestoreFilter: (id: BuiltinSmartFilter) => void;
   onClearFilters: () => void;
   position: number | null;
   total: number;
@@ -90,8 +88,6 @@ export function Masthead({
   pills,
   activeFilters,
   onToggleFilter,
-  onMute,
-  onRestoreFilter,
   onClearFilters,
   position,
   total,
@@ -208,8 +204,6 @@ export function Masthead({
         pills={pills}
         activeFilters={activeFilters as FilterId[]}
         onToggle={onToggleFilter}
-        onMute={onMute}
-        onRestore={onRestoreFilter}
         onClear={onClearFilters}
         tone="surface"
         className="mx-2.5 pb-1"
