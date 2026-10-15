@@ -141,18 +141,39 @@ export function organisationalDomain(domain: string): string {
   return labels.slice(-keep).join(".");
 }
 
-/** The domain part of an address, lower-cased, or `null` when there is none. */
+/**
+ * The domain part of an address, lower-cased and in its ASCII (punycode) form, or `null`
+ * when there is none.
+ *
+ * An internationalised domain (`bücher.de`) is what the DNS knows as `xn--bcher-kva.de`,
+ * and that is the name a BIMI record lives under, so it is converted rather than
+ * rejected. An IP literal (`[192.0.2.1]`, or a bare dotted quad) has no BIMI record and
+ * is not asked about. `core/` has no DOM, but `URL` is in every JS runtime Winnow runs
+ * on, browser and Node alike.
+ */
 export function senderDomain(address: string): string | null {
   const at = address.lastIndexOf("@");
   if (at < 0) return null;
-  const domain = address
+  let domain = address
     .slice(at + 1)
     .trim()
-    .toLowerCase()
     .replace(/[>\s].*$/, "")
-    .replace(/\.$/, "");
-  // A hostname, nothing else: letters, digits, hyphens and dots, at least one dot.
+    .replace(/\.$/, "")
+    .toLowerCase();
+  if (!domain || domain.length > 253) return null;
+  if (/[^\x20-\x7e]/.test(domain)) {
+    try {
+      domain = new URL(`http://${domain}/`).hostname;
+    } catch {
+      return null;
+    }
+  }
+  // A hostname, nothing else: letters, digits, hyphens and dots, at least one dot, no
+  // empty or hyphen-edged label, and a top-level label that is not all digits.
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) || domain.length > 253) return null;
+  const labels = domain.split(".");
+  if (labels.some((label) => label.length > 63 || label.startsWith("-") || label.endsWith("-"))) return null;
+  if (/^\d+$/.test(labels[labels.length - 1])) return null;
   return domain;
 }
 

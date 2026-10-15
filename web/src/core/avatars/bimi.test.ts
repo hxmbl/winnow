@@ -154,3 +154,42 @@ describe("dohResolver", () => {
     await expect(dohResolver(respond({}, 503))("x")).rejects.toThrow();
   });
 });
+
+describe("senderDomain, awkward addresses", () => {
+  it("converts an internationalised domain to the name DNS knows", () => {
+    expect(senderDomain("info@bücher.de")).toBe("xn--bcher-kva.de");
+    expect(senderDomain("INFO@BÜCHER.DE")).toBe("xn--bcher-kva.de");
+  });
+
+  it("keeps an already-punycoded domain as it is", () => {
+    expect(senderDomain("a@xn--bcher-kva.de")).toBe("xn--bcher-kva.de");
+  });
+
+  it("lower-cases and keeps subdomains", () => {
+    expect(senderDomain("News@Mail.News.Brand.CO.UK")).toBe("mail.news.brand.co.uk");
+  });
+
+  it("reads through a display-name wrapper and a trailing dot", () => {
+    expect(senderDomain("Ana <ana@example.com>")).toBe("example.com");
+    expect(senderDomain("ana@example.com.")).toBe("example.com");
+  });
+
+  it("refuses IP literals, empty labels, hyphen-edged labels and empty domains", () => {
+    expect(senderDomain("a@192.0.2.1")).toBeNull();
+    expect(senderDomain("a@[192.0.2.1]")).toBeNull();
+    expect(senderDomain("a@example..com")).toBeNull();
+    expect(senderDomain("a@-bad.example")).toBeNull();
+    expect(senderDomain("a@bad-.example")).toBeNull();
+    expect(senderDomain("a@")).toBeNull();
+    expect(senderDomain("")).toBeNull();
+    expect(senderDomain("@")).toBeNull();
+  });
+
+  it("uses the last @ for a quoted local part", () => {
+    expect(senderDomain('"a@b"@example.org')).toBe("example.org");
+  });
+
+  it("refuses an over-long label", () => {
+    expect(senderDomain(`a@${"x".repeat(64)}.example`)).toBeNull();
+  });
+});
