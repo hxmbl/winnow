@@ -21,6 +21,7 @@
  * that the ones with a history of being broken stay fixed. Anything more precise
  * about pixels belongs in a component test, and there are none on purpose.
  */
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -4140,6 +4141,114 @@ try {
       `${await broken.getAttribute("data-avatar")} ${(await broken.textContent()) ?? ""}`,
     );
     await brokenCtx.close();
+
+    // Gravatar photos: off by default, its own switch, and when on, the d=404 URL for
+    // the SHA-256 of the address — intercepted here, never the real network. Marcus has
+    // a Gravatar; everyone else is a 404, so Northline falls through to its logo.
+    const sha = (address) => createHash("sha256").update(address.trim().toLowerCase()).digest("hex");
+    const PNG = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const marcusUrl = `https://gravatar.com/avatar/${sha("marcus@northwind.example")}?d=404&s=64`;
+    const gravatarHits = [];
+    const gOffOrigin = [];
+    const routeGravatar = (ctxToRoute) =>
+      ctxToRoute.route("https://gravatar.com/**", (route) => {
+        const request = route.request();
+        gravatarHits.push({ url: request.url(), headers: request.headers() });
+        const hit = request.url().startsWith(`https://gravatar.com/avatar/${sha("marcus@northwind.example")}?`);
+        return route.fulfill({
+          status: hit ? 200 : 404,
+          headers: { "access-control-allow-origin": "*", "content-type": hit ? "image/png" : "text/plain" },
+          body: hit ? PNG : "Not Found",
+        });
+      });
+
+    const gDefaultCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await routeGravatar(gDefaultCtx);
+    const gd = await gDefaultCtx.newPage();
+    await gd.goto(URL, { waitUntil: "networkidle" });
+    await gd.waitForSelector("[data-row-count] [data-row-id]");
+    await search(gd, "Marcus");
+    await gd.waitForTimeout(300);
+    check("Gravatar is off by default: no request to Gravatar", gravatarHits.length === 0, gravatarHits.map((h) => h.url).join(" | "));
+    check("and Marcus keeps his monogram", (await avatarFor(gd, "Marcus").getAttribute("data-avatar")) === "monogram");
+    await gd.locator("input[type='search']").first().fill("");
+    await gd.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await gd.keyboard.press(",");
+    await gd.waitForTimeout(300);
+    const gDefaultToggle = gd.locator('[aria-label="Gravatar photos"]');
+    check("Settings has a Gravatar photos switch", (await gDefaultToggle.count()) === 1);
+    check("which is off by default", (await gDefaultToggle.getAttribute("aria-checked")) === "false");
+    check(
+      "beside Show brand logos, with a hint that a hashed address goes to Gravatar",
+      await gd.evaluate(() => {
+        const text = document.body.innerText;
+        const logos = text.indexOf("Show brand logos");
+        const grav = text.indexOf("Gravatar photos");
+        return logos >= 0 && grav > logos && /hashed copy of each sender's address to Gravatar/.test(text);
+      }),
+    );
+    await gDefaultCtx.close();
+
+    const gCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await gCtx.addInitScript(() => {
+      if (!sessionStorage.getItem("seeded-gravatars")) {
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ gravatars: true, brandLogos: true }));
+        sessionStorage.setItem("seeded-gravatars", "1");
+      }
+    });
+    await routeGravatar(gCtx);
+    const g = await gCtx.newPage();
+    g.on("request", (request) => {
+      const url = request.url();
+      if (!url.startsWith(origin) && !url.startsWith("data:") && !url.startsWith("https://gravatar.com/")) gOffOrigin.push(url);
+    });
+    await g.goto(URL, { waitUntil: "networkidle" });
+    await g.waitForSelector("[data-row-count] [data-row-id]");
+    await search(g, "Marcus");
+    const marcus = avatarFor(g, "Marcus");
+    await marcus.locator("img").waitFor({ timeout: 5_000 }).catch(() => undefined);
+    await g.waitForTimeout(300);
+    check("with Gravatar on, the expected d=404 URL is requested", gravatarHits.some((h) => h.url === marcusUrl), gravatarHits.slice(0, 3).map((h) => h.url).join(" | "));
+    check("and a sender with a Gravatar shows it", (await marcus.getAttribute("data-avatar")) === "photo" && (await imageLoaded(marcus)));
+    check("at twice the list's 32px", (await marcus.locator("img").getAttribute("src")) === marcusUrl);
+    check(
+      "without cookies or a referrer",
+      gravatarHits.length > 0 && gravatarHits.every((h) => !h.headers.cookie && !h.headers.referer),
+    );
+    const skipped = ["no-reply@claims.example", "dana@northwind.example"].map((a) => sha(a));
+    check(
+      "no lookup for no-reply senders or senders with a contact photo",
+      !gravatarHits.some((h) => skipped.some((hash) => h.url.includes(hash))),
+    );
+    check("every Gravatar request has the expected shape", gravatarHits.every((h) => /^https:\/\/gravatar\.com\/avatar\/[0-9a-f]{64}\?d=404&s=(64|72)$/.test(h.url)), gravatarHits.map((h) => h.url).find((u) => !/d=404/.test(u)) ?? "");
+    await search(g, "deals@shop");
+    const northlineG = avatarFor(g, "Northline");
+    await northlineG.locator("img").waitFor({ timeout: 5_000 }).catch(() => undefined);
+    await g.waitForTimeout(300);
+    check(
+      "with no Gravatar (a 404), the brand logo is next",
+      (await northlineG.getAttribute("data-avatar")) === "photo" &&
+        ((await northlineG.locator("img").getAttribute("src")) ?? "").includes("/demo-avatars/"),
+      (await northlineG.locator("img").getAttribute("src").catch(() => "")) ?? "",
+    );
+    await g.locator("input[type='search']").first().fill("");
+    await g.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await g.keyboard.press(",");
+    await g.waitForTimeout(300);
+    const gToggle = g.locator('[aria-label="Gravatar photos"]');
+    check("the Gravatar switch shows on", (await gToggle.getAttribute("aria-checked")) === "true");
+    await gToggle.click();
+    await g.waitForTimeout(150);
+    check("and turns off", (await gToggle.getAttribute("aria-checked")) === "false");
+    check(
+      "which forgets the cached answers",
+      await g.evaluate(() => localStorage.getItem("winnow.gravatars.v1") === null),
+    );
+    check("nothing else off the origin is asked for", gOffOrigin.length === 0, gOffOrigin.slice(0, 3).join(" | "));
+    await gCtx.close();
   }
 
   // ── Sidebar, rail and avatar edge cases ───────────────────────────────────
