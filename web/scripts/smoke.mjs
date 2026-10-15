@@ -4702,6 +4702,182 @@ try {
     await ctx.close();
   }
 
+  // ── Reader split ───────────────────────────────────────────────────────────
+  //
+  // The divider between the list and the reader: a separator that drags, steps with
+  // the keyboard, resets on double-click and persists as a fraction. Only on the wide
+  // layout; the phone has one pane and nothing to divide.
+
+  section("reader split");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const t = await ctx.newPage();
+    t.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    t.on("pageerror", (error) => errors.push(String(error)));
+    await t.goto(URL, { waitUntil: "networkidle" });
+    await t.waitForSelector("[data-message-id]");
+    await t.locator("[data-message-id]").nth(1).click();
+    await t.waitForTimeout(300);
+
+    const handle = t.locator('[data-reader-split][role="separator"]');
+    const widths = () =>
+      t.evaluate(() => {
+        const main = document.querySelector("main");
+        const reader = document.querySelector("[data-reader-pane]");
+        const handleBox = document.querySelector("[data-reader-split]")?.getBoundingClientRect();
+        return {
+          main: main?.getBoundingClientRect().width ?? 0,
+          reader: reader?.getBoundingClientRect().width ?? 0,
+          readerLeft: reader?.getBoundingClientRect().left ?? 0,
+          handleMid: handleBox ? handleBox.left + handleBox.width / 2 : 0,
+          stored: localStorage.getItem("winnow.readerSplit.v1"),
+          resizing: document.documentElement.hasAttribute("data-resizing"),
+        };
+      });
+
+    require("the reader split handle is on the desktop layout", (await handle.count()) === 1);
+    const attrs = await handle.evaluate((el) => ({
+      orientation: el.getAttribute("aria-orientation"),
+      now: Number(el.getAttribute("aria-valuenow")),
+      min: Number(el.getAttribute("aria-valuemin")),
+      max: Number(el.getAttribute("aria-valuemax")),
+      tabIndex: el.tabIndex,
+      cursor: getComputedStyle(el).cursor,
+      width: el.getBoundingClientRect().width,
+    }));
+    check(
+      "it is a focusable vertical separator with a percentage value",
+      attrs.orientation === "vertical" && attrs.tabIndex === 0 && attrs.min < attrs.now && attrs.now < attrs.max && attrs.max <= 100,
+      JSON.stringify(attrs),
+    );
+    check("with a col-resize cursor and a thin hit area", attrs.cursor === "col-resize" && attrs.width >= 6 && attrs.width <= 8, JSON.stringify(attrs));
+
+    const start = await widths();
+    check(
+      "the default split gives the reader 38% and sits on the boundary",
+      Math.abs(start.reader / start.main - 0.38) < 0.01 && Math.abs(start.handleMid - start.readerLeft) <= 1.5 && start.stored === null,
+      JSON.stringify(start),
+    );
+
+    // Drag the divider 200px left: a wider reader. No row opens, nothing selects.
+    const openBefore = await t.locator("[data-reader-pane] h1").first().textContent();
+    await t.mouse.move(start.handleMid, 450);
+    await t.mouse.down();
+    await t.mouse.move(start.handleMid - 100, 450, { steps: 5 });
+    const during = await widths();
+    await t.mouse.move(start.handleMid - 200, 450, { steps: 5 });
+    await t.waitForTimeout(50);
+    await t.mouse.up();
+    await t.waitForTimeout(100);
+    const dragged = await widths();
+    check("dragging the divider widens the reader", Math.abs(dragged.reader - start.reader - 200) <= 3, `${start.reader} → ${dragged.reader}`);
+    check("the list narrows by the same amount", Math.abs(dragged.readerLeft - (start.readerLeft - 200)) <= 3, JSON.stringify(dragged));
+    check("text selection is vetoed while dragging, and restored after", during.resizing && !dragged.resizing, JSON.stringify({ during: during.resizing, after: dragged.resizing }));
+    check(
+      "the drag neither selects text nor opens a row",
+      (await t.evaluate(() => document.getSelection()?.toString() ?? "")) === "" &&
+        (await t.locator("[data-reader-pane] h1").first().textContent()) === openBefore &&
+        (await t.locator("[data-select-bar], [data-selection-bar]").count()) === 0,
+    );
+    const saved = JSON.parse(dragged.stored ?? "null");
+    check(
+      "the split is saved as a fraction on drag end",
+      typeof saved?.reader === "number" && Math.abs(saved.reader - dragged.reader / dragged.main) < 0.01,
+      String(dragged.stored),
+    );
+
+    // It is a proportion: the window grows, the reader keeps its share.
+    await t.setViewportSize({ width: 1800, height: 900 });
+    await t.waitForTimeout(200);
+    const grown = await widths();
+    check("the split scales with the window", Math.abs(grown.reader / grown.main - saved.reader) < 0.01, JSON.stringify(grown));
+    await t.setViewportSize({ width: 1440, height: 900 });
+    await t.waitForTimeout(200);
+
+    // Persists across a reload.
+    await t.reload({ waitUntil: "networkidle" });
+    await t.waitForSelector("[data-message-id]");
+    await t.waitForTimeout(200);
+    const reloaded = await widths();
+    check("the split survives a reload", Math.abs(reloaded.reader - dragged.reader) <= 2, `${dragged.reader} → ${reloaded.reader}`);
+
+    // The minimums hold against a drag past either end.
+    await t.mouse.move(reloaded.handleMid, 450);
+    await t.mouse.down();
+    await t.mouse.move(5, 450, { steps: 6 });
+    await t.mouse.up();
+    await t.waitForTimeout(100);
+    const farLeft = await widths();
+    check("the list keeps at least 280px", Math.round(farLeft.main - farLeft.reader) >= 279, JSON.stringify(farLeft));
+    await t.mouse.move(farLeft.handleMid, 450);
+    await t.mouse.down();
+    await t.mouse.move(1435, 450, { steps: 6 });
+    await t.mouse.up();
+    await t.waitForTimeout(100);
+    const farRight = await widths();
+    check("the reader keeps at least 360px", Math.round(farRight.reader) >= 359, JSON.stringify(farRight));
+
+    // Double-click resets.
+    await t.mouse.dblclick(farRight.handleMid, 450);
+    await t.waitForTimeout(100);
+    const reset = await widths();
+    check(
+      "double-clicking the divider resets the default split",
+      Math.abs(reset.reader / reset.main - 0.38) < 0.01 && reset.stored === null,
+      JSON.stringify(reset),
+    );
+
+    // The keyboard.
+    await handle.focus();
+    const value = () => handle.evaluate((el) => Number(el.getAttribute("aria-valuenow")));
+    const v0 = await value();
+    await t.keyboard.press("ArrowRight");
+    const v1 = await value();
+    await t.keyboard.press("Shift+ArrowLeft");
+    const v2 = await value();
+    await t.keyboard.press("Home");
+    const vHome = await value();
+    await t.keyboard.press("End");
+    const vEnd = await value();
+    const range = await handle.evaluate((el) => [Number(el.getAttribute("aria-valuemin")), Number(el.getAttribute("aria-valuemax"))]);
+    check("ArrowRight steps the divider by 2%", v1 - v0 === 2, `${v0} → ${v1}`);
+    check("Shift+ArrowLeft steps it back by 10%", v1 - v2 === 10, `${v1} → ${v2}`);
+    check("Home and End go to the minimum and maximum", vHome === range[0] && vEnd === range[1], JSON.stringify({ vHome, vEnd, range }));
+    check(
+      "the keys stay on the handle, not the app's shortcuts",
+      await t.evaluate(() => document.activeElement?.hasAttribute("data-reader-split") ?? false),
+    );
+    const keyed = await widths();
+    check("and the keyboard's split is saved too", keyed.stored !== null, String(keyed.stored));
+    await ctx.close();
+  }
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const t = await ctx.newPage();
+    t.on("pageerror", (error) => errors.push(String(error)));
+    await t.goto(URL, { waitUntil: "networkidle" });
+    await t.waitForSelector("[data-message-id]");
+    const listCount = await t.locator("[data-reader-split]").count();
+    await t.locator("[data-message-id]").first().tap();
+    await t.waitForTimeout(300);
+    check("there is no split handle on the phone layout", listCount === 0 && (await t.locator("[data-reader-split]").count()) === 0);
+    await ctx.close();
+  }
+  {
+    // A tablet keeps the single-pane reader: the handle is there but hidden with it.
+    const ctx = await browser.newContext({ viewport: { width: 820, height: 1000 } });
+    const t = await ctx.newPage();
+    t.on("pageerror", (error) => errors.push(String(error)));
+    await t.goto(URL, { waitUntil: "networkidle" });
+    await t.waitForSelector("[data-message-id]");
+    await t.locator("[data-message-id]").first().click();
+    await t.waitForTimeout(300);
+    check("and none to grab below the wide layout", !(await t.locator("[data-reader-split]").isVisible()));
+    await ctx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");
