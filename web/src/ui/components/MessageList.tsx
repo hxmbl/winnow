@@ -414,13 +414,17 @@ const Row = memo(function Row({
         every touch device. `@media (hover: hover)` scopes the hiding to devices that
         actually have a pointer, so a phone shows it outright and a mouse still gets a
         quiet list.
+
+        Its centre sits on the time's centre: `-mt-[0.5px]` for the 24px box, and on a
+        touch device the 44px target keeps that centre with `-mt-[10.5px]`. The code chip
+        does the same (`CodeCopy.tsx`).
       */}
       <button
         type="button"
         onClick={() => onToggleStar(email.id)}
         aria-label={email.starred ? "Unstar" : "Star"}
         aria-pressed={email.starred}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle [@media(hover:none)]:-m-2.5 [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+        className="-mt-[0.5px] flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle [@media(hover:none)]:-mx-2.5 [@media(hover:none)]:-mb-2.5 [@media(hover:none)]:-mt-[10.5px] [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
       >
         {/*
           The star is a sprite rather than a lucide icon so the filled and outline states
