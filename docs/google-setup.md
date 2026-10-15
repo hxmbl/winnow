@@ -20,8 +20,8 @@ You only need this to connect a real account. The demo mailbox works without it.
 In **APIs & Services → Library**, search for and **Enable** each of these:
 
 - **Gmail API**, for your mail.
-- **People API**, for the optional "Improve suggestions from Google contacts"
-  feature. Winnow works without it, but enabling it now saves a trip back later.
+- **People API**, for the optional contact photos and recipient suggestions
+  (Settings → Google contacts). Winnow works without it, but enabling it now saves a trip back later.
 
 ## 3. Configure the OAuth consent screen
 
@@ -159,5 +159,5 @@ different client. **Remove** forgets the client and signs you out.
 | `access_denied` / "app is being tested" | The account you picked isn't listed under **Test users**. |
 | "This is a Web application client, which the desktop app can't use" | You downloaded the JSON of a Web application client. Create a **Desktop app** client and import its JSON. |
 | "This is a Desktop app client, which Winnow in the browser can't use" | Create a **Web application** client for the browser, or use the desktop app. |
-| Contacts suggestions won't connect | The People API isn't enabled, or the two contact scopes aren't on the consent screen. |
+| No contact photos / suggestions | Connect them in Settings → Google contacts. If it says the People API is off, enable it in the project your client lives in. Otherwise check the two contact scopes are on the consent screen. |
 | Signed out every week | Testing mode's 7-day refresh tokens, see above. |

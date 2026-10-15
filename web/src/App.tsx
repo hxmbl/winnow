@@ -83,6 +83,7 @@ import { SenderPicturesContext, type SenderPictures } from "./ui/senderPictures"
 import { contactPhotoMap } from "./core/avatars/photos";
 import { BrandLogoCache } from "./core/avatars/logoCache";
 import { dohResolver } from "./core/avatars/bimi";
+import { contactsFailureNotice } from "./core/gmail/people";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 
 /** Which popover menu is open, and what it acts on. */
@@ -336,23 +337,35 @@ export function App({ store }: Props) {
    *
    * With no grant the store is told so, which is what makes the opt-in appear.
    */
-  const syncGoogleContacts = useCallback(async (force = false): Promise<void> => {
+  /**
+   * Why contacts are connected but not arriving, when the user can fix it: today, the
+   * People API switched off in their Cloud project. Shown in Settings with a link.
+   */
+  const [contactsProblem, setContactsProblem] = useState<{ message: string; url: string | null } | null>(null);
+  const syncGoogleContacts = useCallback(async (force = false): Promise<{ message: string; url: string | null } | null> => {
     const bridge = sessionRef.current;
-    if (!bridge || !store.getSnapshot().account) return;
+    if (!bridge || !store.getSnapshot().account) return null;
     try {
       const access = await bridge.contactsAccess();
       if (access !== "granted") {
         store.setGoogleContacts([], access);
-        return;
+        return null;
       }
       store.setGoogleContacts(await bridge.cachedContacts(), "granted");
       const last = await bridge.contactsSyncedAt();
-      if (!force && last !== null && Date.now() - last < CONTACTS_REFRESH_MS) return;
+      if (!force && last !== null && Date.now() - last < CONTACTS_REFRESH_MS) return null;
       const fresh = await bridge.refreshContacts();
       if (fresh) store.setGoogleContacts(fresh, "granted");
       else store.setGoogleContacts([], await bridge.contactsAccess());
+      setContactsProblem(null);
+      return null;
     } catch (error) {
-      console.warn("winnow: could not refresh Google contacts:", error);
+      // A failure the user can fix is said where the switch is (Settings → Google
+      // contacts); anything else keeps the stored copy and tries again next time.
+      const notice = contactsFailureNotice(error);
+      if (notice) setContactsProblem(notice);
+      else console.warn("winnow: could not refresh Google contacts:", error);
+      return notice;
     }
   }, [store]);
 
@@ -365,25 +378,33 @@ export function App({ store }: Props) {
    */
   const [contactsBusy, setContactsBusy] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
-  const improveSuggestions = useCallback(async (): Promise<void> => {
+  const improveSuggestions = useCallback(async (notify = false): Promise<void> => {
     const bridge = sessionRef.current;
     if (!bridge) return;
     setContactsError(null);
     setContactsBusy(true);
+    // From the sender menu there is no inline place for the outcome, so it is a notice.
+    const fail = (message: string) => {
+      setContactsError(message);
+      if (notify) store.setNotice(message);
+    };
     try {
       const access = await bridge.grantContacts();
-      if (access === "granted") await syncGoogleContacts(true);
-      else {
+      if (access === "granted") {
+        const problem = await syncGoogleContacts(true);
+        if (problem && notify) store.setNotice(problem.message);
+      } else {
         store.setGoogleContacts([], access);
-        setContactsError(HALF_GRANT_MESSAGE);
+        fail(HALF_GRANT_MESSAGE);
       }
     } catch (error) {
-      setContactsError(error instanceof Error ? error.message : "Google contacts were not connected.");
+      fail(error instanceof Error ? error.message : "Google contacts were not connected.");
     } finally {
       setContactsBusy(false);
     }
   }, [store, syncGoogleContacts]);
   const onImproveSuggestions = useCallback(() => void improveSuggestions(), [improveSuggestions]);
+  const onConnectContactPhotos = useCallback(() => void improveSuggestions(true), [improveSuggestions]);
 
   const [restoringSession, setRestoringSession] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
@@ -553,7 +574,10 @@ export function App({ store }: Props) {
           } else if (completed.contacts === "not_granted") {
             store.setNotice(HALF_GRANT_MESSAGE);
           }
-          void syncGoogleContacts(completed.contacts === "granted");
+          void syncGoogleContacts(completed.contacts === "granted").then((problem) => {
+            // Just granted, and it still cannot read them: say so now, not only in Settings.
+            if (problem && completed.contacts === "granted") store.setNotice(problem.message);
+          });
           return;
         }
 
@@ -2046,6 +2070,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           contactsAccess={snapshot.contactsAccess}
           contactsBusy={contactsBusy}
           contactsError={contactsError}
+          contactsProblem={contactsProblem}
+          onOpenContactsHelp={(url) => void platform.openExternal(url)}
           onImproveSuggestions={onImproveSuggestions}
           onClose={() => store.setOverlay("none")}
         />

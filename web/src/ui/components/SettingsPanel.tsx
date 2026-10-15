@@ -259,6 +259,12 @@ export type SettingsProps = {
   contactsAccess: ContactsAccessState;
   contactsBusy: boolean;
   contactsError: string | null;
+  /**
+   * Connected, but nothing can arrive, for a reason the user can fix (the People API is
+   * off in their Cloud project). Said under the row, with Google's link to the switch.
+   */
+  contactsProblem?: { message: string; url: string | null } | null;
+  onOpenContactsHelp?: (url: string) => void;
   /** Start the incremental-consent flow for the two contact scopes. */
   onImproveSuggestions: () => void;
   onClose: () => void;
@@ -466,15 +472,19 @@ export function Settings(props: SettingsProps) {
         mail at sign-in and nothing else, and this is where the user can choose to add
         their address book later. Hidden in the demo (whose address book is seeded) and
         while signed out (there is no account to ask for).
+
+        It is the grant behind contact *photos* as well as recipient suggestions, and it
+        used to be labelled for suggestions alone — so someone who wanted their contacts'
+        faces in the list had no way to tell this was the switch. It leads with photos.
       */}
       {(props.contactsAccess === "not_granted" || props.contactsAccess === "granted") && (
-        <Section title="Recipient suggestions">
+        <Section title="Google contacts">
           <Row
-            label="Improve suggestions from Google contacts"
+            label="Contact photos and suggestions"
             hint={
               props.contactsAccess === "granted"
-                ? "Your saved contacts and the people Google remembers you writing to are suggested alongside the people in your mail."
-                : "Adds your saved contacts and the people Google remembers you writing to. Read-only; Google asks you to approve it."
+                ? "Your contacts' photos appear beside their mail, and your saved contacts and the people Google remembers you writing to are suggested as recipients."
+                : "Shows your contacts' photos beside their mail and suggests them as recipients. Read-only; Google asks you to approve it."
             }
           >
             {props.contactsAccess === "granted" ? (
@@ -496,6 +506,20 @@ export function Settings(props: SettingsProps) {
             <p role="alert" className="text-meta font-medium text-danger">
               {props.contactsError}
             </p>
+          )}
+          {props.contactsAccess === "granted" && props.contactsProblem && (
+            <div data-contacts-problem="" role="alert" className="flex flex-col items-start gap-1.5">
+              <p className="text-meta font-medium text-danger">{props.contactsProblem.message}</p>
+              {props.contactsProblem.url && props.onOpenContactsHelp && (
+                <button
+                  type="button"
+                  onClick={() => props.onOpenContactsHelp?.(props.contactsProblem!.url!)}
+                  className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  Turn on the People API
+                </button>
+              )}
+            </div>
           )}
         </Section>
       )}

@@ -19,8 +19,13 @@ import {
   PEOPLE_API,
   PEOPLE_PAGE_SIZE,
   PeopleClient,
+  PEOPLE_API_LIBRARY_URL,
+  PeopleApiDisabled,
   PeopleScopeMissing,
+  apiActivationUrl,
+  contactsFailureNotice,
   hasContactScopes,
+  isApiDisabled,
   isExpiredSyncToken,
   isScopeMissing,
 } from "./people";
@@ -264,5 +269,75 @@ describe("PeopleClient — retries and pacing", () => {
     await people.list("saved");
     await people.list("other");
     expect(taken).toEqual([1, 1]);
+  });
+});
+
+describe("the People API switched off in the user's Cloud project", () => {
+  // Google's response, trimmed: a 403 PERMISSION_DENIED with a SERVICE_DISABLED reason
+  // and the project's own enable link in the metadata.
+  const disabled = JSON.stringify({
+    error: {
+      code: 403,
+      message:
+        "People API has not been used in project 123456 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=123456 then retry.",
+      status: "PERMISSION_DENIED",
+      details: [
+        {
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          reason: "SERVICE_DISABLED",
+          metadata: { activationUrl: "https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=123456" },
+        },
+      ],
+    },
+  });
+
+  it("is told apart from a missing scope and from a rate limit", () => {
+    expect(isApiDisabled(403, disabled)).toBe(true);
+    expect(isScopeMissing(403, disabled)).toBe(false);
+    expect(isApiDisabled(403, JSON.stringify({ error: { errors: [{ reason: "accessNotConfigured" }] } }))).toBe(true);
+    expect(isApiDisabled(403, JSON.stringify({ error: { message: "Request had insufficient authentication scopes." } }))).toBe(false);
+    expect(isApiDisabled(500, disabled)).toBe(false);
+  });
+
+  it("carries Google's enable link for the project", () => {
+    expect(apiActivationUrl(disabled)).toBe(
+      "https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=123456",
+    );
+  });
+
+  it("finds the link in the prose when the metadata is missing", () => {
+    const body = JSON.stringify({ error: { message: "Enable it by visiting https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=9 then retry." } });
+    expect(apiActivationUrl(body)).toBe("https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=9");
+  });
+
+  it("never hands back a link to anywhere but Google's console", () => {
+    const body = JSON.stringify({ error: { details: [{ metadata: { activationUrl: "https://evil.example/apis" } }], message: "x" } });
+    expect(apiActivationUrl(body)).toBeNull();
+    expect(apiActivationUrl("not json http://console.developers.google.com/x")).toBeNull();
+  });
+
+  it("is thrown by the client as its own error, not a bare HTTP failure", async () => {
+    const { fetchImpl } = stubFetch([{ status: 403, body: disabled }]);
+    const failure = await client(fetchImpl).list("saved").catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(PeopleApiDisabled);
+    expect((failure as PeopleApiDisabled).activationUrl).toContain("project=123456");
+  });
+
+  it("becomes a notice the user can act on, with a fallback link", () => {
+    const notice = contactsFailureNotice(new PeopleApiDisabled(null));
+    expect(notice?.message).toMatch(/People API is turned off/);
+    expect(notice?.url).toBe(PEOPLE_API_LIBRARY_URL);
+    expect(contactsFailureNotice(new PeopleApiDisabled("https://console.cloud.google.com/x"))?.url).toBe("https://console.cloud.google.com/x");
+  });
+
+  it("is recognised by name after crossing a boundary", () => {
+    const crossed = Object.assign(new Error("off"), { name: "PeopleApiDisabled" });
+    expect(contactsFailureNotice(crossed)).toEqual({ message: "off", url: PEOPLE_API_LIBRARY_URL });
+  });
+
+  it("stays quiet for failures that are not the user's to fix", () => {
+    expect(contactsFailureNotice(new GmailHttpError(503, "busy"))).toBeNull();
+    expect(contactsFailureNotice(new PeopleScopeMissing())).toBeNull();
+    expect(contactsFailureNotice("offline")).toBeNull();
   });
 });

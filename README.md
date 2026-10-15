@@ -149,10 +149,11 @@ Data access):
 
 Sign-in only ever asks for `gmail.modify`. The two contact scopes are requested
 through incremental consent (`include_granted_scopes=true`) when someone chooses
-**Improve suggestions from Google contacts** — in Settings on both builds, and
-under the composer's To field on the desktop (the web build would have to
-navigate away from the draft to ask). The People API has to be enabled for the
-project too, next to the Gmail API. Both contact scopes are *sensitive*, not
+**Settings → Google contacts → Contact photos and suggestions → Connect**, or
+**Show contact photos** in a sender's menu, on both builds, and under the
+composer's To field on the desktop (the web build would have to navigate away
+from the draft to ask). The People API has to be enabled for the project too,
+next to the Gmail API; if it is off, Settings says so and links to the switch. Both contact scopes are *sensitive*, not
 restricted: fine for a test-mode app with listed test users.
 
 Things worth knowing:

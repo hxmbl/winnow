@@ -167,6 +167,69 @@ export function isExpiredSyncToken(status: number, body: string): boolean {
   return status === 400 && /sync token is expired/i.test(body);
 }
 
+/**
+ * The People API is switched off in the user's own Google Cloud project.
+ *
+ * Winnow ships no OAuth client, so every user's grant runs against their own project,
+ * and the People API is a separate switch from the Gmail API there. Off, the grant
+ * still succeeds (scopes are on the consent screen, not tied to an enabled API) and
+ * every listing fails with a 403 — which used to be logged and swallowed, so Settings
+ * said "Connected" and no contact photo ever appeared. Its own class so the app can say
+ * so, with Google's own link to the switch when the response carries one.
+ */
+export class PeopleApiDisabled extends GmailError {
+  constructor(
+    /** Google's "enable this API" page for the user's project, when it said which. */
+    readonly activationUrl: string | null = null,
+    message = "The People API is turned off in your Google Cloud project, so Winnow can't read your contacts or their photos. Turn it on, then try again.",
+  ) {
+    super(message, 403, "unknown");
+    this.name = "PeopleApiDisabled";
+  }
+}
+
+/**
+ * Whether a 403 says the API is not enabled for the project.
+ *
+ * Google reports it as `PERMISSION_DENIED` with an `ErrorInfo` reason of
+ * `SERVICE_DISABLED`, and in the older error list as `accessNotConfigured`, with prose
+ * that says the API "has not been used in project … or it is disabled". Any of the three
+ * is enough.
+ */
+export function isApiDisabled(status: number, body: string): boolean {
+  if (status !== 403) return false;
+  return /SERVICE_DISABLED|accessNotConfigured|has not been used in project|it is disabled/i.test(body);
+}
+
+/**
+ * The enable link from a `SERVICE_DISABLED` response: the `activationUrl` in the error's
+ * metadata, or the console link in its prose. Only Google's own console hosts are
+ * accepted, since this becomes a link the user is sent to.
+ */
+export function apiActivationUrl(body: string): string | null {
+  const candidates: string[] = [];
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: { details?: { metadata?: { activationUrl?: unknown } }[]; message?: unknown };
+    };
+    for (const detail of parsed.error?.details ?? []) {
+      if (typeof detail?.metadata?.activationUrl === "string") candidates.push(detail.metadata.activationUrl);
+    }
+    if (typeof parsed.error?.message === "string") candidates.push(...(parsed.error.message.match(/https:\/\/\S+/g) ?? []));
+  } catch {
+    candidates.push(...(body.match(/https:\/\/[^\s"']+/g) ?? []));
+  }
+  for (const raw of candidates) {
+    try {
+      const url = new URL(raw.replace(/[.,)]+$/, ""));
+      if (url.protocol === "https:" && /^console\.(developers|cloud)\.google\.com$/.test(url.hostname)) return url.toString();
+    } catch {
+      // not a URL
+    }
+  }
+  return null;
+}
+
 /** Whether a 403 is a missing scope rather than a quota or a policy refusal. */
 export function isScopeMissing(status: number, body: string): boolean {
   if (status !== 403) return false;
@@ -248,6 +311,7 @@ export class PeopleClient {
     if (!response.ok) {
       if (isExpiredSyncToken(response.status, text)) throw new ExpiredSyncToken();
       if (isScopeMissing(response.status, text)) throw new PeopleScopeMissing();
+      if (isApiDisabled(response.status, text)) throw new PeopleApiDisabled(apiActivationUrl(text));
       throw new GmailHttpError(response.status, text);
     }
     return (text ? JSON.parse(text) : {}) as T;
@@ -277,3 +341,24 @@ export class PeopleClient {
     };
   }
 }
+
+/**
+ * What to tell the user about a failed contacts refresh, or `null` for a failure that is
+ * not theirs to fix (offline, a 5xx, a rate limit): those keep the stored copy quietly
+ * and try again on the next refresh.
+ *
+ * By name as well as by class, because an error that crossed a bridge or a bundle
+ * boundary is no longer an instance of the class it was thrown as.
+ */
+export function contactsFailureNotice(error: unknown): { message: string; url: string | null } | null {
+  if (!(error instanceof Error) || error.name !== "PeopleApiDisabled") return null;
+  const url = (error as Partial<PeopleApiDisabled>).activationUrl ?? null;
+  return { message: error.message, url: url ?? PEOPLE_API_LIBRARY_URL };
+}
+
+/**
+ * The People API's page in the Cloud console, for when Google's error did not name the
+ * project. The console asks which project, and the user picks the one their Winnow
+ * client lives in.
+ */
+export const PEOPLE_API_LIBRARY_URL = "https://console.cloud.google.com/apis/library/people.googleapis.com";
