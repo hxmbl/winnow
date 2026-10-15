@@ -167,6 +167,9 @@ export function retryAfterMs(value: string | null | undefined, now: number = Dat
  * `take` calls are serialised through a promise chain, so two concurrent
  * requests cannot hand each other the same units.
  */
+/** Every type `history` asks for; see `GmailClient.history`. */
+const HISTORY_TYPES = ["messageAdded", "labelsAdded", "labelsRemoved", "messagesDeleted"] as const;
+
 export class QuotaBucket {
   private units: number;
   private last: number;
@@ -407,10 +410,11 @@ export class GmailClient {
    * applies all four.
    */
   async history(startHistoryId: string, pageToken?: string): Promise<GmailHistoryResponse> {
-    const params = new URLSearchParams({
-      startHistoryId,
-      historyTypes: "messageAdded,labelsAdded,labelsRemoved,messagesDeleted",
-    });
+    const params = new URLSearchParams({ startHistoryId });
+    // A repeated parameter, one per type. Gmail parses `historyTypes` as a repeated
+    // enum, so a single comma-joined value is one unknown enum and the call fails
+    // with 400 "Invalid value at 'history_types'", which stalls every incremental sync.
+    for (const type of HISTORY_TYPES) params.append("historyTypes", type);
     if (pageToken) params.set("pageToken", pageToken);
     return this.request<GmailHistoryResponse>(`/users/me/history?${params}`);
   }

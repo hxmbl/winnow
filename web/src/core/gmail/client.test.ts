@@ -187,10 +187,21 @@ describe("GmailClient — the queries the sync engine relies on", () => {
     // copy forever.
     const { fetchImpl, calls } = stubFetch([{ status: 200 }]);
     await client(fetchImpl).history("1234");
-    const types = new URLSearchParams(calls[0].url.split("?")[1]).get("historyTypes")!.split(",");
+    const types = new URLSearchParams(calls[0].url.split("?")[1]).getAll("historyTypes");
     expect(types.sort()).toEqual(
       ["labelsAdded", "labelsRemoved", "messageAdded", "messagesDeleted"].sort(),
     );
+  });
+
+  it("sends each history type as its own parameter, never comma-joined", async () => {
+    // Gmail reads `historyTypes` as a repeated enum: "messageAdded,labelsAdded,..."
+    // is one invalid value and the whole call fails with 400.
+    const { fetchImpl, calls } = stubFetch([{ status: 200 }]);
+    await client(fetchImpl).history("1234");
+    const types = new URLSearchParams(calls[0].url.split("?")[1]).getAll("historyTypes");
+    expect(types.length).toBe(4);
+    for (const type of types) expect(type).not.toContain(",");
+    expect(calls[0].url).not.toContain("%2C");
   });
 
   it("clamps nothing itself — Gmail clamps silently, so the engine caps instead", () => {
