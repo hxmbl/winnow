@@ -11,10 +11,16 @@
  * without signing anyone in. Errors sit under their field and are tied to it with
  * `aria-describedby` and `aria-invalid`, so a screen reader reads the problem with the
  * label.
+ *
+ * "Import JSON" fills both fields from the file Google Cloud downloads for a client
+ * (`client_secret_….json`): from a file picker, by dropping the file anywhere on the
+ * sheet, or by pasting the file's text into the client ID field. `core/session/clientJson`
+ * does the parsing and refuses a client type this host cannot use. The imported pair is
+ * stored exactly as typed-in values are, through the same Save and connect.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
-import { BookOpen, Check, Copy } from "lucide-react";
+import { BookOpen, Check, Copy, ExternalLink, FileJson, TriangleAlert } from "lucide-react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { ErrorText } from "./ErrorText";
 import {
@@ -27,6 +33,15 @@ import {
   type CredentialErrors,
   type OAuthClientCredentials,
 } from "../../core/session/credentials";
+import {
+  REQUIRED_APIS,
+  apiLibraryUrl,
+  looksLikeClientJson,
+  parseClientJson,
+  readClientJsonFile,
+  type ClientJsonImport,
+  type ClientJsonType,
+} from "../../core/session/clientJson";
 
 /** Where the setup guide lives. Opened in the system browser. */
 export const SETUP_GUIDE_URL = "https://github.com/hxmbl/winnow/blob/master/docs/google-setup.md";
@@ -46,8 +61,13 @@ type Props = {
   onSaveAndConnect: (credentials: OAuthClientCredentials) => Promise<void>;
   onRemove: () => Promise<void>;
   onOpenGuide: () => void;
+  /** Open a Cloud Console link in the system browser. Defaults to a new tab. */
+  onOpenLink?: (url: string) => void;
   onClose: () => void;
 };
+
+/** What the last successful import brought in, shown under the import button. */
+type Imported = { type: ClientJsonType; projectId?: string; warnings: string[] };
 
 const FIELD =
   "w-full rounded-ctl border bg-surface px-2.5 py-1.5 font-mono text-ui text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
@@ -76,17 +96,24 @@ export function GoogleSetup(props: Props) {
   const [failure, setFailure] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [imported, setImported] = useState<Imported | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  /** A file is being dragged over the sheet. */
+  const [dragging, setDragging] = useState(false);
 
   const idRef = useRef<HTMLInputElement>(null);
   const secretRef = useRef<HTMLInputElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   const removeRef = useRef<HTMLButtonElement>(null);
+  const importRef = useRef<HTMLButtonElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
   /**
    * Where focus goes after the remove row swaps its buttons. The button that had focus
    * unmounts, and focus left on <body> is outside the sheet, where Escape and the Tab
    * trap cannot reach it.
    */
-  const focusAfter = useRef<"keep" | "remove" | "clientId" | null>(null);
+  const focusAfter = useRef<"keep" | "remove" | "clientId" | "import" | "submit" | null>(null);
 
   useEffect(() => {
     const target = focusAfter.current;
@@ -94,6 +121,8 @@ export function GoogleSetup(props: Props) {
     if (target === "keep") keepRef.current?.focus();
     else if (target === "remove") removeRef.current?.focus();
     else if (target === "clientId") idRef.current?.focus();
+    else if (target === "import") importRef.current?.focus();
+    else if (target === "submit") submitRef.current?.focus();
   });
 
   const local = validateCredentials({ clientId, clientSecret }, kind);
@@ -163,12 +192,59 @@ export function GoogleSetup(props: Props) {
       setShown({ clientId: false, clientSecret: false });
       setConfirmRemove(false);
       setTest(null);
+      setImported(null);
+      setImportError(null);
       focusAfter.current = "clientId";
     } catch (error) {
       setFailure(error instanceof Error ? error.message : "The client could not be removed.");
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * Apply an import's outcome. On success both fields are filled and checked, and focus
+   * moves to Save and connect, the next step; the summary is announced by its live
+   * region. On failure the fields are left as they were and the error is announced.
+   * The secret never reaches a message: the parser keeps it out of every one.
+   */
+  function applyImport(result: ClientJsonImport, from: "file" | "paste") {
+    setFailure(null);
+    setTest(null);
+    setRemote({});
+    if (!result.ok) {
+      setImported(null);
+      setImportError(result.error);
+      focusAfter.current = from === "paste" ? "clientId" : "import";
+      return;
+    }
+    setImportError(null);
+    setClientId(result.credentials.clientId);
+    setClientSecret(result.credentials.clientSecret ?? "");
+    setShown({ clientId: true, clientSecret: true });
+    setImported({ type: result.type, projectId: result.projectId, warnings: result.warnings });
+    focusAfter.current = "submit";
+  }
+
+  const importContext = { kind, redirectUri: props.redirectUri };
+
+  async function importFiles(files: FileList | File[] | null | undefined) {
+    const list = Array.from(files ?? []);
+    if (list.length === 0) return;
+    if (list.length > 1) {
+      applyImport({ ok: false, error: "Drop one file: the client_secret_….json for your client." }, "file");
+      return;
+    }
+    applyImport(await readClientJsonFile(list[0], importContext), "file");
+  }
+
+  function hasFiles(event: React.DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes("Files");
+  }
+
+  function openLink(url: string) {
+    if (props.onOpenLink) props.onOpenLink(url);
+    else globalThis.open?.(url, "_blank", "noopener,noreferrer");
   }
 
   async function copyRedirect() {
@@ -206,8 +282,31 @@ export function GoogleSetup(props: Props) {
       <form
         noValidate
         onSubmit={(event) => void connect(event)}
-        className="scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto"
+        onDragEnter={(event) => {
+          if (!hasFiles(event)) return;
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragOver={(event) => {
+          if (!hasFiles(event)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          if (!dragging) setDragging(true);
+        }}
+        onDragLeave={(event) => {
+          // Leaving for a child is not leaving the sheet.
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          setDragging(false);
+        }}
+        onDrop={(event) => {
+          if (!hasFiles(event)) return;
+          event.preventDefault();
+          setDragging(false);
+          void importFiles(event.dataTransfer.files);
+        }}
+        className={`scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto ${dragging ? "outline-dashed outline-2 -outline-offset-4 outline-accent" : ""}`}
         data-testid="google-setup"
+        data-dragging={dragging || undefined}
       >
         <div className="flex flex-col gap-4 px-5 py-4">
           <div className="flex flex-col gap-2 text-ui leading-relaxed text-ink-muted">
@@ -231,6 +330,102 @@ export function GoogleSetup(props: Props) {
               <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
               Open the setup guide
             </button>
+          </div>
+
+          <div
+            className={`flex flex-col gap-2 rounded-pane border px-3 py-2.5 ${dragging ? "border-dashed border-accent bg-surface-hover" : "border-hairline bg-surface"}`}
+          >
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <button
+                ref={importRef}
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                aria-describedby={`${ids}-import-hint`}
+                className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <FileJson size={14} strokeWidth={2} aria-hidden="true" />
+                Import JSON
+              </button>
+              <p id={`${ids}-import-hint`} className="min-w-0 flex-1 text-meta text-ink-subtle">
+                {dragging
+                  ? "Drop the client's JSON file to import it."
+                  : "Choose the client_secret_….json Google Cloud downloads, drop it here, or paste its text into Client ID."}
+              </p>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              tabIndex={-1}
+              aria-hidden="true"
+              className="hidden"
+              data-testid="google-setup-file"
+              onChange={(event) => {
+                const files = event.target.files;
+                void importFiles(files ? Array.from(files) : null).finally(() => {
+                  // Let the same file be chosen again after a fix.
+                  if (fileRef.current) fileRef.current.value = "";
+                });
+              }}
+            />
+            <div role="status" aria-live="polite" aria-atomic="true" data-import-status="">
+              {imported && (
+                <div className="flex flex-col gap-1.5 text-meta text-ink-body">
+                  <p className="flex items-start gap-1.5 font-medium text-success">
+                    <Check size={14} className="mt-px shrink-0" aria-hidden="true" />
+                    <span>
+                      Imported the {imported.type === "installed" ? "Desktop app" : "Web application"} client
+                      {imported.projectId ? (
+                        <>
+                          {" "}from project{" "}
+                          <code className="font-mono text-ink" data-imported-project="">
+                            {imported.projectId}
+                          </code>
+                        </>
+                      ) : null}
+                      . Check the fields, then save.
+                    </span>
+                  </p>
+                  {imported.warnings.map((warning) => (
+                    <p key={warning} className="flex items-start gap-1.5 text-ink-body" data-import-warning="">
+                      <TriangleAlert size={14} className="mt-px shrink-0 text-danger" aria-hidden="true" />
+                      <span className="selectable">{warning}</span>
+                    </p>
+                  ))}
+                  <p className="text-ink-subtle" data-api-note="">
+                    Also enable{" "}
+                    {REQUIRED_APIS.map((api, index) => {
+                      const url = apiLibraryUrl(api.id, imported.projectId);
+                      return (
+                        <span key={api.id}>
+                          {index > 0 ? " and " : ""}
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              openLink(url);
+                            }}
+                            className="inline-flex items-center gap-0.5 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                          >
+                            {api.name}
+                            <ExternalLink size={11} aria-hidden="true" />
+                          </a>
+                          {api.required ? "" : ` (${api.purpose}, optional)`}
+                        </span>
+                      );
+                    })}{" "}
+                    {imported.projectId ? "for this project." : "for your project."}
+                  </p>
+                </div>
+              )}
+            </div>
+            {importError && (
+              <p role="alert" className="text-meta font-medium text-danger" data-import-error="">
+                <ErrorText text={importError} />
+              </p>
+            )}
           </div>
 
           {kind === "web" && props.redirectUri && (
@@ -273,8 +468,21 @@ export function GoogleSetup(props: Props) {
               spellCheck={false}
               value={clientId}
               placeholder={`1234567890-abc123${CLIENT_ID_SUFFIX}`}
+              onPaste={(event) => {
+                // The whole client file pasted in: import it instead of filling the field.
+                const text = event.clipboardData?.getData("text") ?? "";
+                if (!looksLikeClientJson(text)) return;
+                event.preventDefault();
+                applyImport(parseClientJson(text, importContext), "paste");
+              }}
               onChange={(event) => {
-                setClientId(event.target.value);
+                const value = event.target.value;
+                // A paste that arrived without a paste event (drag-in text, autofill).
+                if (looksLikeClientJson(value) && value.trim().endsWith("}")) {
+                  applyImport(parseClientJson(value, importContext), "paste");
+                  return;
+                }
+                setClientId(value);
                 setRemote((r) => ({ ...r, clientId: undefined }));
                 setTest(null);
               }}
@@ -361,7 +569,7 @@ export function GoogleSetup(props: Props) {
             <button type="button" onClick={() => void runTest()} aria-disabled={busy !== null} className={SECONDARY}>
               {busy === "test" ? "Testing…" : "Test connection"}
             </button>
-            <button type="submit" aria-disabled={busy !== null} className={PRIMARY}>
+            <button ref={submitRef} type="submit" aria-disabled={busy !== null} className={PRIMARY}>
               {busy === "connect" ? "Waiting for Google…" : "Save and connect"}
             </button>
           </div>

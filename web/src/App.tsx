@@ -1382,6 +1382,9 @@ export function App({ store }: Props) {
       onOpenGuide={() => {
         void platform.openExternal(SETUP_GUIDE_URL);
       }}
+      onOpenLink={(url) => {
+        void platform.openExternal(url);
+      }}
       onClose={() => setSetupOpen(false)}
     />
   ) : null;
