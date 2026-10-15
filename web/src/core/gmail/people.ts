@@ -181,7 +181,7 @@ export class PeopleApiDisabled extends GmailError {
   constructor(
     /** Google's "enable this API" page for the user's project, when it said which. */
     readonly activationUrl: string | null = null,
-    message = "The People API is turned off in your Google Cloud project, so Winnow can't read your contacts or their photos. Turn it on, then try again.",
+    message = "The People API is turned off in your Google Cloud project, so Winnow can't read your contacts or their photos. Turn it on, then try again. It's the People API you want, not the old Contacts API, which Google has shut down.",
   ) {
     super(message, 403, "unknown");
     this.name = "PeopleApiDisabled";
