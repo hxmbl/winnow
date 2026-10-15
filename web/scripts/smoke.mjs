@@ -178,24 +178,31 @@ try {
   const pills = () => page.locator("header button[aria-pressed]:visible");
   const isOn = async (locator) => (await locator.getAttribute("aria-pressed")) === "true";
   /**
-   * The navigation: always on screen on the desktop (the floating sidebar), behind the
-   * menu button on a phone (the overflow menu, a `dialog` named "Menu"). Neither holds
-   * the smart filters; those are the rail above.
+   * The navigation: the sidebar, an overlay on every screen size, opened by the toggle
+   * at the head of the list (desktop) or the top bar's menu button (phone). It is always
+   * mounted so it can animate out; `data-open` says whether it is open, and closed it is
+   * `visibility: hidden` once its slide has finished. It holds no smart filters; those
+   * are the rail above.
    */
-  const overflowMenu = () => page.locator('[role="dialog"][aria-label="Menu"]');
-  const drawer = () => page.locator("[data-mail-nav]:visible");
+  const overflowMenu = () => page.locator('[data-sidebar][role="dialog"][aria-label="Menu"]');
+  const sidebarToggle = () => page.locator("[data-sidebar-toggle]:visible").first();
+  const sidebarOpen = async () => (await page.locator("[data-sidebar][data-open]").count()) > 0;
+  const waitSidebarClosed = () =>
+    page.locator("[data-sidebar]").waitFor({ state: "hidden", timeout: 5_000 });
   const openDrawer = async () => {
-    if ((await drawer().count()) > 0) return;
+    if (await sidebarOpen()) return;
     await page
       .waitForFunction(() => !document.querySelector('[role="presentation"]'), null, { timeout: 5_000 })
       .catch(() => undefined);
-    await page.locator('button[aria-label="Open menu"]').click();
-    await overflowMenu().waitFor({ state: "visible", timeout: 5_000 });
+    await sidebarToggle().click();
+    await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    // The slide-in, so boxes measured next are where they settle.
+    await page.waitForTimeout(300);
   };
   const closeDrawer = async () => {
-    if ((await overflowMenu().count()) === 0) return;
+    if (!(await sidebarOpen())) return;
     await page.keyboard.press("Escape");
-    await overflowMenu().waitFor({ state: "detached", timeout: 5_000 });
+    await waitSidebarClosed();
   };
   const mailbox = (name) =>
     page
@@ -216,7 +223,7 @@ try {
   const goTo = async (name) => {
     await openDrawer();
     await mailbox(name).click();
-    await overflowMenu().waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
+    await waitSidebarClosed().catch(() => undefined);
     await page.waitForTimeout(250);
   };
   /**
@@ -424,32 +431,97 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(250);
 
-  // ── The floating sidebar ───────────────────────────────────────────────────
+  // ── The sidebar overlay ────────────────────────────────────────────────────
   //
-  // Folders and the account, not the smart filters (those are the rail). 8px from the
-  // left and top, 12px radius, a hairline and no shadow, translucent over a progressive
-  // blur, and only as tall as what it holds: it must not be stretched to the bottom of
-  // the window.
+  // Folders and the account, not the smart filters (those are the rail). An overlay on
+  // every screen: closed until its toggle opens it, it slides in over the list instead
+  // of taking a column from it, and while it is open the rest of the app sits behind a
+  // progressive blur that is strongest at its edge. 8px from the left and top, 12px
+  // radius, a hairline and no shadow, translucent over its own blur, and only as tall as
+  // what it holds. It closes on a click outside, Escape, a destination chosen, and the
+  // mouse being away from it for a moment.
+  section("sidebar overlay");
   const sidebar = page.locator("[data-sidebar]");
+  const toggle = page.locator("header [data-sidebar-toggle]");
+  const SIDEBAR_IDLE_MS = 1500;
   check("the sidebar is rendered exactly once", (await sidebar.count()) === 1);
   check("and it lists no smart filters: no category rows, no Edit mode",
     (await sidebar.locator("[data-nav-category], [data-nav-edit], [data-rail-scroller], button[aria-pressed]").count()) === 0);
+  const contentBoxes = () =>
+    page.evaluate(() => {
+      const round = (rect) => [Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height)];
+      return {
+        search: round(document.querySelector("#winnow-search").closest("label").getBoundingClientRect()),
+        list: round(document.querySelector("[data-row-count]").getBoundingClientRect()),
+        rail: round(document.querySelector("header [data-rail-scroller]").getBoundingClientRect()),
+        reader: document.querySelector("[data-reader]") ? round(document.querySelector("[data-reader]").getBoundingClientRect()) : null,
+      };
+    });
+  const closedState = await page.evaluate(() => {
+    const side = document.querySelector("[data-sidebar]");
+    const scrim = document.querySelector("[data-sidebar-scrim]");
+    return {
+      visibility: getComputedStyle(side).visibility,
+      inert: side.inert,
+      right: side.getBoundingClientRect().right,
+      scrim: getComputedStyle(scrim).visibility,
+      listLeft: document.querySelector("[data-row-count]").getBoundingClientRect().left,
+    };
+  });
+  check(
+    "it starts closed: off the left edge, hidden, inert, and no scrim",
+    closedState.visibility === "hidden" && closedState.inert && closedState.right <= 0 && closedState.scrim === "hidden",
+    JSON.stringify(closedState),
+  );
+  check("and the list takes the window from its left edge, no column kept for it", closedState.listLeft < 1, JSON.stringify(closedState));
+  check(
+    "the toggle heads the list, says it is collapsed and names what it controls",
+    (await toggle.count()) === 1 && (await toggle.getAttribute("aria-expanded")) === "false" &&
+      (await toggle.getAttribute("aria-controls")) === "winnow-sidebar",
+  );
+
+  const beforeOpen = await contentBoxes();
+  await openDrawer();
+  const afterOpen = await contentBoxes();
+  check(
+    "opening it from the toggle shifts nothing under it: search, rail and list stay put",
+    JSON.stringify(beforeOpen) === JSON.stringify(afterOpen),
+    `${JSON.stringify(beforeOpen)} → ${JSON.stringify(afterOpen)}`,
+  );
+  const openState = await page.evaluate(() => {
+    const side = document.querySelector("[data-sidebar]");
+    const root = document.querySelector("#root > div") ?? document.querySelector("[data-masthead]").closest("[inert]");
+    const active = document.activeElement;
+    return {
+      expanded: document.querySelector("header [data-sidebar-toggle]").getAttribute("aria-expanded"),
+      modal: side.getAttribute("aria-modal"),
+      role: side.getAttribute("role"),
+      focusInside: side.contains(active),
+      focused: active?.getAttribute("data-nav") ?? active?.getAttribute("data-nav-folder") ?? active?.tagName,
+      appInert: Boolean(document.querySelector("[data-masthead]").closest("[inert]")),
+      rootInert: root?.inert ?? null,
+    };
+  });
+  check(
+    "open: the toggle says expanded, the sidebar is a modal dialog with focus on the current destination",
+    openState.expanded === "true" && openState.role === "dialog" && openState.modal === "true" &&
+      openState.focusInside && openState.focused === "inbox",
+    JSON.stringify(openState),
+  );
+  check("and the app behind it is inert", openState.appInert, JSON.stringify(openState));
+
   const sideShape = await page.evaluate(() => {
     const side = document.querySelector("[data-sidebar]");
     const style = getComputedStyle(side);
     const rect = side.getBoundingClientRect();
     const layer = (n) => getComputedStyle(side.querySelector(`.wn-sidebar-blur-${n}`)).backdropFilter;
     const tint = getComputedStyle(side.querySelector(".wn-sidebar-tint")).backgroundImage;
-    const search = document.querySelector("#winnow-search").closest("label").getBoundingClientRect();
-    const list = document.querySelector("[data-row-count]").getBoundingClientRect();
     return {
       left: rect.left, top: rect.top, width: rect.width, height: rect.height,
       radius: style.borderTopLeftRadius, shadow: style.boxShadow, border: style.borderTopWidth,
       blurs: [layer(1), layer(2), layer(3)],
       mask: getComputedStyle(side.querySelector(".wn-sidebar-blur-3")).maskImage,
       tint,
-      searchLeft: search.left, searchWidth: search.width, listLeft: list.left, listWidth: list.width,
-      contentHeight: side.scrollHeight,
     };
   });
   check(
@@ -458,16 +530,46 @@ try {
     JSON.stringify(sideShape),
   );
   check(
-    "its blur is 2/6/14px, masked from the left edge outward, under a translucent tint",
+    "its own blur is 2/6/14px, masked from the left edge outward, under a translucent tint",
     JSON.stringify(sideShape.blurs) === JSON.stringify(["blur(2px)", "blur(6px)", "blur(14px)"]) &&
       /linear-gradient/.test(sideShape.mask) && /rgba?\(.*0\.\d+\)|color\(srgb.* \/ 0\.\d+\)/.test(sideShape.tint),
     JSON.stringify({ blurs: sideShape.blurs, mask: sideShape.mask, tint: sideShape.tint }),
   );
+
+  // The scrim: a progressive blur over the rest of the app, strongest at the sidebar.
+  const scrim = await page.evaluate(() => {
+    const element = document.querySelector("[data-sidebar-scrim]");
+    const rect = element.getBoundingClientRect();
+    const layers = [...element.querySelectorAll("[data-scrim-layer]")].map((layer) => {
+      const style = getComputedStyle(layer);
+      return { blur: parseFloat(style.backdropFilter.replace("blur(", "")), mask: style.maskImage || style.webkitMaskImage, opacity: style.opacity };
+    });
+    const tint = getComputedStyle(element.querySelector(".wn-scrim-tint"));
+    return {
+      visibility: getComputedStyle(element).visibility,
+      covers: rect.left === 0 && rect.top === 0 && rect.width === innerWidth && rect.height === innerHeight,
+      under: Number(getComputedStyle(element).zIndex) < Number(getComputedStyle(document.querySelector("[data-sidebar]")).zIndex),
+      layers,
+      tint: tint.backgroundImage !== "none" ? tint.backgroundImage : tint.backgroundColor,
+      tintOpacity: tint.opacity,
+    };
+  });
   check(
-    "the list and its search clear the sidebar, and search takes the list column's width",
-    sideShape.searchLeft >= sideShape.left + sideShape.width + 8 && sideShape.listLeft >= sideShape.left + sideShape.width &&
-      sideShape.searchWidth > sideShape.listWidth * 0.6,
-    JSON.stringify(sideShape),
+    "behind it, a scrim over the whole window, under the sidebar",
+    scrim.visibility === "visible" && scrim.covers && scrim.under,
+    JSON.stringify({ visibility: scrim.visibility, covers: scrim.covers, under: scrim.under }),
+  );
+  check(
+    "a progressive blur: stacked layers, strongest first, each masked out from the sidebar's edge",
+    scrim.layers.length >= 3 &&
+      scrim.layers.every((layer, i) => i === 0 || layer.blur < scrim.layers[i - 1].blur) &&
+      scrim.layers.every((layer) => /linear-gradient\(to right/.test(layer.mask) && layer.opacity === "1"),
+    JSON.stringify(scrim.layers),
+  );
+  check(
+    "over a light translucent tint",
+    /linear-gradient|rgba|color\(srgb/.test(scrim.tint) && scrim.tintOpacity === "1",
+    scrim.tint,
   );
   // Only as tall as its contents: in a tall window it stops well short of the bottom.
   await page.setViewportSize({ width: 1440, height: 1600 });
@@ -518,6 +620,124 @@ try {
     ((await sidebar.locator('button[data-nav="inbox"]').textContent()) ?? "").replace(/\D/g, ""),
   );
   check("the Inbox count is the list's own", sidebarInboxCount === (await rowTotal()), `${sidebarInboxCount} vs ${await rowTotal()}`);
+
+  // The ways it closes. Escape first: it closes the sidebar and nothing else, and focus
+  // goes back to the toggle.
+  await page.keyboard.press("Escape");
+  await waitSidebarClosed();
+  const afterEscape = await page.evaluate(() => ({
+    toggleFocused: document.activeElement?.hasAttribute("data-sidebar-toggle") ?? false,
+    expanded: document.querySelector("header [data-sidebar-toggle]").getAttribute("aria-expanded"),
+    scrim: getComputedStyle(document.querySelector("[data-sidebar-scrim]")).visibility,
+    appInert: Boolean(document.querySelector("[data-masthead]").closest("[inert]")),
+  }));
+  check(
+    "Escape closes it: focus back on the toggle, collapsed, scrim gone, app live again",
+    afterEscape.toggleFocused && afterEscape.expanded === "false" && afterEscape.scrim === "hidden" && !afterEscape.appInert,
+    JSON.stringify(afterEscape),
+  );
+  check("and that Escape closed nothing else", (await rowTotal()) === rowCount, `${await rowTotal()} rows`);
+
+  // The toggle again: open, then a click outside it, on the scrim over the list.
+  await openDrawer();
+  await page.mouse.click(1000, 500);
+  await waitSidebarClosed().catch(() => undefined);
+  check(
+    "a click outside it closes it, and the click does not reach what is under the scrim",
+    !(await sidebarOpen()) && (await page.locator("article h1").count()) === 0,
+  );
+
+  // Choosing a destination closes it.
+  await openDrawer();
+  await sidebar.locator('button[data-nav-folder="sent"]').click();
+  await waitSidebarClosed().catch(() => undefined);
+  check(
+    "choosing a folder goes there and closes it",
+    !(await sidebarOpen()) && (await listTitle())?.trim() === "Sent",
+    await listTitle(),
+  );
+  await openDrawer();
+  await sidebar.locator('button[data-nav="inbox"]').click();
+  await waitSidebarClosed().catch(() => undefined);
+  check("and Inbox comes back the same way", !(await sidebarOpen()) && (await listTitle())?.trim() === "Inbox", await listTitle());
+
+  // Idle: the mouse in, then away from it. Still open just before the timer, closed after.
+  await openDrawer();
+  await page.mouse.move(120, 120);
+  await page.mouse.move(130, 130);
+  await page.mouse.move(900, 450, { steps: 4 });
+  await page.waitForTimeout(SIDEBAR_IDLE_MS - 600);
+  const stillOpen = await sidebarOpen();
+  await page.waitForTimeout(1_100);
+  check(
+    `the mouse away for ${SIDEBAR_IDLE_MS}ms closes it, and not before`,
+    stillOpen && !(await sidebarOpen()),
+    `open at ${SIDEBAR_IDLE_MS - 600}ms: ${stillOpen}`,
+  );
+  await waitSidebarClosed().catch(() => undefined);
+
+  // Coming back inside cancels the timer; and an open account menu keeps it open.
+  await openDrawer();
+  await page.mouse.move(120, 120);
+  await page.mouse.move(900, 450, { steps: 3 });
+  await page.waitForTimeout(500);
+  await page.mouse.move(120, 140, { steps: 3 });
+  await page.waitForTimeout(SIDEBAR_IDLE_MS + 300);
+  check("coming back before the timer keeps it open", await sidebarOpen());
+  await sidebar.locator("[data-nav-account] button[aria-haspopup='menu']").click();
+  await page.locator('[role="menu"]').first().waitFor({ state: "visible", timeout: 5_000 });
+  const menuBox = await page.locator('[role="menu"]').first().boundingBox();
+  // Out of the sidebar without crossing the menu, and wait well past the timer.
+  await page.mouse.move(900, 80, { steps: 3 });
+  await page.waitForTimeout(SIDEBAR_IDLE_MS + 400);
+  check(
+    "an open account menu inside it holds off the idle close",
+    (await sidebarOpen()) && (await page.locator('[role="menu"]').count()) > 0,
+    JSON.stringify(menuBox),
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+  check("Escape in the account menu closes the menu, not the sidebar", await sidebarOpen());
+  await closeDrawer();
+
+  // Keyboard: opened from the toggle with Enter, Tab stays inside, and the idle timer
+  // leaves a keyboard user alone.
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+  await page.waitForTimeout(250);
+  let escaped = false;
+  for (let i = 0; i < 14; i += 1) {
+    await page.keyboard.press("Tab");
+    if (!(await page.evaluate(() => document.querySelector("[data-sidebar]").contains(document.activeElement)))) escaped = true;
+  }
+  check("Tab cycles inside the open sidebar", !escaped);
+  await closeDrawer();
+  check(
+    "and closing hands focus back to the toggle",
+    await page.evaluate(() => document.activeElement?.hasAttribute("data-sidebar-toggle") ?? false),
+  );
+  await page.mouse.move(900, 450);
+
+  // Reduced motion: no slide and no fade, the sidebar and its scrim simply appear.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openDrawer();
+  const still = await page.evaluate(() => {
+    const longest = (element) =>
+      Math.max(...getComputedStyle(element).transitionDuration.split(",").map((value) => parseFloat(value) || 0));
+    return {
+      panel: longest(document.querySelector("[data-sidebar]")),
+      layer: longest(document.querySelector("[data-scrim-layer]")),
+      visible: getComputedStyle(document.querySelector("[data-sidebar-scrim]")).visibility,
+    };
+  });
+  check(
+    "with reduced motion it shows and hides without a slide or a fade, the blur still there",
+    still.panel === 0 && still.layer === 0 && still.visible === "visible",
+    JSON.stringify(still),
+  );
+  await closeDrawer();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
 
   // The position cluster said "0 of 38" before the keyboard had ever been touched,
   // which reads as an empty mailbox — and "0 of 0" on a narrowed list.
@@ -2481,8 +2701,8 @@ try {
     (await railScroller.evaluate((element) => element.scrollLeft)) < afterStep,
   );
 
-  // The list, its search field and the reader all clear the floating sidebar at every
-  // common desktop width, with and without a message open.
+  // The sidebar is an overlay: closed, it is off the left edge, and the list, its search
+  // field and the reader never sit under it, at every common desktop width, reading or not.
   const SIDEBAR_WIDTHS = [1024, 1280, 1440, 1920];
   const overlaps = [];
   for (const width of SIDEBAR_WIDTHS) {
@@ -2503,7 +2723,7 @@ try {
       if (shape.lefts.some((left) => left < shape.right)) overlaps.push({ width, reading, ...shape });
     }
   }
-  check("nothing sits under the sidebar at any desktop width, reading or not", overlaps.length === 0, JSON.stringify(overlaps));
+  check("nothing sits under the closed sidebar at any desktop width, reading or not", overlaps.length === 0, JSON.stringify(overlaps));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(150);
   if ((await page.locator("article h1").count()) === 0) await openMessage();
@@ -2602,7 +2822,10 @@ try {
     swipeable: getComputedStyle(element).overflowX === "auto" && element.scrollWidth > element.clientWidth,
   }));
   check("and the chip row swipes sideways", chipRow.swipeable, JSON.stringify(chipRow));
-  check("and no sidebar on a phone", (await page.locator("[data-sidebar]").count()) === 0);
+  check(
+    "and the sidebar starts closed on a phone",
+    !(await sidebarOpen()) && (await page.locator("[data-sidebar]").isHidden()),
+  );
   check(
     "and none of them are left in the top bar",
     (await topBar.locator("button[aria-pressed]").count()) === 0,
@@ -2645,6 +2868,28 @@ try {
     nodes.map((node) => Math.round(node.getBoundingClientRect().height)),
   );
   check("its rows are touch-sized", menuTargets.every((h) => h >= MIN_TARGET), JSON.stringify(menuTargets));
+  const phoneSide = await page.evaluate(() => {
+    const side = document.querySelector("[data-sidebar]").getBoundingClientRect();
+    const scrim = document.querySelector("[data-sidebar-scrim]");
+    return {
+      left: Math.round(side.left),
+      right: Math.round(side.right),
+      window: innerWidth,
+      scrim: getComputedStyle(scrim).visibility,
+      layers: scrim.querySelectorAll("[data-scrim-layer]").length,
+      dockInert: Boolean(document.querySelector("[data-phone-dock]")?.closest("[inert]")),
+    };
+  });
+  check(
+    "on a phone it is the same sidebar from the left edge, a strip of the app left showing under a lighter blur",
+    phoneSide.left === 8 && phoneSide.right < phoneSide.window - 40 && phoneSide.scrim === "visible" &&
+      phoneSide.layers >= 2 && phoneSide.layers < 4 && phoneSide.dockInert,
+    JSON.stringify(phoneSide),
+  );
+  // A tap on the strip of app it leaves closes it.
+  await page.mouse.click(phoneSide.window - 15, 400);
+  await waitSidebarClosed().catch(() => undefined);
+  check("a tap outside it closes it on a phone", !(await sidebarOpen()) && (await page.locator("article h1").count()) === 0);
   await closeDrawer();
 
   // The tabs switch mailbox and open Settings.
@@ -2774,7 +3019,9 @@ try {
     };
     const buttons = [...document.querySelectorAll("button[aria-label]")].filter((b) => {
       const r = b.getBoundingClientRect();
-      return r.width > 0 && r.height > 0 && !scrollable(b);
+      // A closed overlay (the sidebar, off the left edge) is hidden and inert, not a
+      // control anyone can reach for.
+      return r.width > 0 && r.height > 0 && !scrollable(b) && getComputedStyle(b).visibility !== "hidden" && !b.closest("[inert]");
     });
     const offscreen = buttons
       .filter((b) => {
