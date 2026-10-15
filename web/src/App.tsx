@@ -217,6 +217,19 @@ export function App({ store }: Props) {
    * single `selectedId` keeps meaning "the open message".
    */
   const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  /** The phone top bar's height, which the selection bar keeps while it stands in for it. */
+  const [phoneBarHeight, setPhoneBarHeight] = useState(0);
+  const phoneBarObserver = useRef<ResizeObserver | null>(null);
+  const measurePhoneBar = useCallback((element: HTMLDivElement | null) => {
+    phoneBarObserver.current?.disconnect();
+    phoneBarObserver.current = null;
+    if (!element) return;
+    setPhoneBarHeight(element.getBoundingClientRect().height);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setPhoneBarHeight(element.getBoundingClientRect().height));
+    observer.observe(element);
+    phoneBarObserver.current = observer;
+  }, []);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
@@ -1475,6 +1488,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         // On a phone the reader takes the whole screen, its own way back included, so
         // the list's bar steps aside while a message is open.
         !selected && selection.size > 0 ? (
+          // Held at the top bar's height, so entering select mode does not pull the list
+          // up under the finger: a long-press that goes on to drag would otherwise land
+          // on a row a bar's height further down than the one it meant.
+          <div data-phone-selection-slot="" className="shrink-0" style={{ minHeight: phoneBarHeight || undefined }}>
           <SelectionBar
             phone
             count={selection.size}
@@ -1486,7 +1503,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
             onClear={() => setSelection(EMPTY_SELECTION)}
           />
+          </div>
         ) : !selected && (
+          <div ref={measurePhoneBar} className="shrink-0">
           <PhoneTopBar
             searchQuery={snapshot.searchQuery}
             onSearchChange={store.setSearchQuery.bind(store)}
@@ -1502,6 +1521,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onNext={() => store.moveCursor(1)}
             onMarkAllRead={store.markAllRead.bind(store)}
           />
+          </div>
         )
       ) : null}
 

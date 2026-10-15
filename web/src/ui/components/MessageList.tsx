@@ -20,7 +20,11 @@ import {
   DRAG_THRESHOLD,
   LONG_PRESS_MS,
   LongPress,
+  avatarDragBase,
   dragSelection,
+  edgeScrollSpeed,
+  nearestRow,
+  sameSelection,
   shiftSelection,
   toggleId,
   type Selection,
@@ -118,7 +122,10 @@ type RowProps = {
   fresh: boolean;
   /** Part of the multi-row selection. */
   checked: boolean;
-  /** Phone select mode: the avatar is a checkbox and a tap toggles. */
+  /**
+   * Something is selected: the avatar is the row's checkbox and a click or tap on it
+   * toggles the row. On a phone a tap on the row body toggles too (see the list).
+   */
   selectMode: boolean;
   /** The sender's contact photo, when known. */
   photo: string | undefined;
@@ -254,8 +261,10 @@ const Row = memo(function Row({
 
       {/*
         The avatar is its own button — a sibling of the row button, never inside it —
-        and opens the sender menu rather than the message. In phone select mode it is
-        the row's checkbox instead.
+        and opens the sender menu rather than the message. Once anything is selected it
+        is the row's checkbox instead. Pressing it and dragging selects a range (see the
+        gestures in the list): it is marked `data-row-control` so a click on it never
+        opens the row, but the drag code lets the avatar through.
       */}
       <button
         type="button"
@@ -273,7 +282,12 @@ const Row = memo(function Row({
           if (selectMode) onToggleChecked(email.id);
           else onAvatar(email.id, event.currentTarget);
         }}
-        className="mt-0.5 shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        // The children take no pointer events, so a press always lands on the button
+        // itself. The button outlives the swap from picture to check when a long-press
+        // selects the row; a swapped-out child would take the rest of the touch with it
+        // (events on a detached node reach no listener), and the finger could not slide
+        // on to extend the range.
+        className="mt-0.5 shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [&>*]:pointer-events-none"
       >
         {checked ? (
           <span
@@ -869,17 +883,29 @@ function MessageList({
   const longPress = useRef(new LongPress());
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keyMenuAt = useRef(0);
+  /**
+   * The drag in progress, if any.
+   *
+   * A mouse press on a row's body or its avatar arms one and it becomes active past
+   * `DRAG_THRESHOLD`; a touch becomes one when a long-press fires (on the avatar in any
+   * layout, on the row body on a phone), so the finger can then slide on to extend it.
+   * `before` is the selection the press found, which Escape puts back.
+   */
   const drag = useRef<{
     pointerId: number;
+    pointerType: string;
     anchor: number;
     x: number;
     y: number;
     base: Selection;
+    before: Selection;
     active: boolean;
     lastX: number;
     lastY: number;
     frame: number | null;
   } | null>(null);
+  /** Undoes what an active drag attached to the window (Escape, scroll, blur). */
+  const dragCleanup = useRef<(() => void) | null>(null);
 
   const rowIdAt = (target: EventTarget | null): number | null => {
     const element = target instanceof Element ? target.closest<HTMLElement>("[data-row-id]") : null;
@@ -898,47 +924,133 @@ function MessageList({
     longPressTimer.current = null;
   };
 
+  /** The row under (x, y), or the nearest mounted one when the pointer is past the rows. */
+  const rowNear = (x: number, y: number): number | null => {
+    if (!scroller) return null;
+    const box = scroller.getBoundingClientRect();
+    const probeX = Math.max(box.left + 1, Math.min(box.right - 1, x));
+    const probeY = Math.max(box.top + 1, Math.min(box.bottom - 1, y));
+    const under = rowIdAt(document.elementFromPoint(probeX, probeY));
+    if (under !== null) return under;
+    const mounted = [...scroller.querySelectorAll<HTMLElement>("[data-row-id]")].map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { id: Number(element.dataset.rowId), top: rect.top, bottom: rect.bottom };
+    });
+    return nearestRow(mounted, y);
+  };
+
   /** Extend a drag to the row under the pointer, scrolling the list near its edges. */
   const dragTo = (x: number, y: number) => {
     const state = drag.current;
-    if (!state || !scroller) return;
+    if (!state || !state.active || !scroller) return;
     state.lastX = x;
     state.lastY = y;
-    const box = scroller.getBoundingClientRect();
-    const probeY = Math.max(box.top + 1, Math.min(box.bottom - 1, y));
-    const under = document.elementFromPoint(Math.max(box.left + 1, Math.min(box.right - 1, x)), probeY);
-    const id = rowIdAt(under);
+    const id = rowNear(x, y);
     if (id !== null) {
-      live.current.onSelectionChange(dragSelection(state.base, live.current.order, state.anchor, id));
+      const next = dragSelection(state.base, live.current.order, state.anchor, id);
+      if (!sameSelection(next, live.current.selection)) live.current.onSelectionChange(next);
     }
-    // Edge scrolling, so a drag can reach rows that are not mounted yet.
-    const edge = 28;
-    const speed = y < box.top + edge ? -(box.top + edge - y) : y > box.bottom - edge ? y - (box.bottom - edge) : 0;
+    // Edge scrolling, so a drag can reach rows that are not mounted yet. It keeps going
+    // while the pointer rests near (or past) an edge, one step a frame.
+    const box = scroller.getBoundingClientRect();
+    const speed = edgeScrollSpeed(y, box.top, box.bottom);
     if (speed !== 0 && state.frame === null) {
       state.frame = requestAnimationFrame(() => {
-        if (!drag.current) return;
-        drag.current.frame = null;
-        scroller.scrollTop += Math.max(-24, Math.min(24, speed / 2));
-        dragTo(drag.current.lastX, drag.current.lastY);
+        const now = drag.current;
+        if (!now) return;
+        now.frame = null;
+        const before = scroller.scrollTop;
+        scroller.scrollTop += speed;
+        // At the end of the list there is nothing left to scroll to: stop asking.
+        if (scroller.scrollTop !== before) dragTo(now.lastX, now.lastY);
       });
     }
   };
 
+  /**
+   * End the drag. `keep` false is Escape: the selection goes back to what it was before
+   * the press. Either way the click the browser sends after the release is eaten, so a
+   * drag that ends where it began never opens the row or the sender menu.
+   */
+  const finishDrag = (keep: boolean) => {
+    const state = drag.current;
+    if (!state) return;
+    drag.current = null;
+    if (state.frame !== null) cancelAnimationFrame(state.frame);
+    dragCleanup.current?.();
+    dragCleanup.current = null;
+    if (scroller?.hasPointerCapture?.(state.pointerId)) scroller.releasePointerCapture(state.pointerId);
+    if (!state.active) return;
+    suppressClick.current = true;
+    anchorRef.current = state.anchor;
+    if (!keep) live.current.onSelectionChange(state.before);
+  };
+
+  /** A pressed drag passes the threshold (or a long-press fires): it starts selecting. */
+  const activateDrag = () => {
+    const state = drag.current;
+    if (!state || state.active || !scroller) return;
+    state.active = true;
+    try {
+      // On the scroller rather than the row, so rows unmounted by the window (or by an
+      // edge scroll) cannot take the capture with them, and the release still arrives
+      // when the pointer is let go outside the window.
+      scroller.setPointerCapture(state.pointerId);
+    } catch {
+      // The pointer is already gone (released between the press and this frame).
+    }
+    window.getSelection()?.removeAllRanges();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      finishDrag(false);
+    };
+    // Scrolling with the wheel (or a trackpad) mid-drag moves rows under a still
+    // pointer, so the range follows.
+    const onScroll = () => {
+      const now = drag.current;
+      if (now?.active) dragTo(now.lastX, now.lastY);
+    };
+    const onBlur = () => finishDrag(true);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", onBlur);
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    dragCleanup.current = () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", onBlur);
+      scroller.removeEventListener("scroll", onScroll);
+    };
+  };
+
   const onPointerDown = (event: React.PointerEvent) => {
     lastPointerType.current = event.pointerType;
-    if ((event.target as Element).closest("[data-row-control]")) return;
-    const id = rowIdAt(event.target);
+    // A fresh press: a click left unclaimed by an earlier gesture (a touch that ended in
+    // a long-press and never produced one) must not eat this press's click.
+    suppressClick.current = false;
+    if (drag.current) finishDrag(true);
+    const target = event.target as Element;
+    const control = target.closest<HTMLElement>("[data-row-control]");
+    const onAvatar = control?.dataset.rowControl === "avatar";
+    if (control && !onAvatar) return;
+    const id = rowIdAt(target);
     if (id === null) return;
 
     if (event.pointerType === "mouse") {
-      if (event.button !== 0 || event.shiftKey || live.current.touchSelect) return;
+      if (event.button !== 0 || event.shiftKey) return;
+      // The phone layout with a mouse attached keeps its tap semantics on the body; the
+      // avatar still drags.
+      if (live.current.touchSelect && !onAvatar) return;
       const additive = event.metaKey || event.ctrlKey;
+      const current = live.current.selection;
       drag.current = {
         pointerId: event.pointerId,
+        pointerType: "mouse",
         anchor: id,
         x: event.clientX,
         y: event.clientY,
-        base: additive ? live.current.selection : new Set<number>(),
+        base: onAvatar ? avatarDragBase(current, additive) : additive ? current : new Set<number>(),
+        before: current,
         active: false,
         lastX: event.clientX,
         lastY: event.clientY,
@@ -947,7 +1059,15 @@ function MessageList({
       return;
     }
 
-    if (!live.current.touchSelect) return;
+    // Touch and pen: a long-press. On the avatar in any layout, on the row body only on
+    // a phone (the desktop layout's body is a tap that opens).
+    if (!live.current.touchSelect && !onAvatar) return;
+    // Touch events keep the element the finger first landed on as their target, even
+    // after the window unmounts its row during an edge scroll; a listener on that
+    // element is the one place the scroll can still be vetoed from. See `noScroll`.
+    if (event.pointerType === "touch") holdTouchTarget(target);
+    const pointerId = event.pointerId;
+    const pointerType = event.pointerType;
     longPress.current.down(id, event.clientX, event.clientY, performance.now());
     clearLongPress();
     longPressTimer.current = setTimeout(() => {
@@ -955,23 +1075,41 @@ function MessageList({
       if (fired === null) return;
       const { selection: current, onSelectionChange: change } = live.current;
       anchorRef.current = fired;
-      change(current.size === 0 ? new Set([fired]) : toggleId(current, fired));
+      const next = current.size === 0 ? new Set([fired]) : toggleId(current, fired);
+      change(next);
       navigator.vibrate?.(8);
+      // Pressed onto a row: the finger can now slide to extend the range. Pressing a row
+      // that was already selected took it out, and that is the whole gesture.
+      if (next.has(fired)) {
+        drag.current = {
+          pointerId,
+          pointerType,
+          anchor: fired,
+          x: 0,
+          y: 0,
+          base: next,
+          before: current,
+          active: false,
+          lastX: 0,
+          lastY: 0,
+          frame: null,
+        };
+        activateDrag();
+      }
     }, LONG_PRESS_MS);
   };
 
   const onPointerMove = (event: React.PointerEvent) => {
     const state = drag.current;
     if (state && state.pointerId === event.pointerId) {
-      if ((event.buttons & 1) === 0) {
-        drag.current = null;
+      if (state.pointerType === "mouse" && (event.buttons & 1) === 0) {
+        // The button came up somewhere we never heard about.
+        finishDrag(true);
         return;
       }
       if (!state.active) {
         if (Math.hypot(event.clientX - state.x, event.clientY - state.y) < DRAG_THRESHOLD) return;
-        state.active = true;
-        scroller?.setPointerCapture?.(event.pointerId);
-        window.getSelection()?.removeAllRanges();
+        activateDrag();
       }
       event.preventDefault();
       dragTo(event.clientX, event.clientY);
@@ -983,18 +1121,63 @@ function MessageList({
   const endPointer = (event: React.PointerEvent) => {
     const state = drag.current;
     if (state && state.pointerId === event.pointerId) {
-      if (state.active) {
-        suppressClick.current = true;
-        anchorRef.current = state.anchor;
-        if (scroller?.hasPointerCapture?.(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+      finishDrag(true);
+      if (state.pointerType !== "mouse") {
+        clearLongPress();
+        longPress.current.up();
       }
-      if (state.frame !== null) cancelAnimationFrame(state.frame);
-      drag.current = null;
       return;
     }
     clearLongPress();
     if (longPress.current.up()) suppressClick.current = event.type === "pointerup";
   };
+
+  /** Capture went elsewhere (the window lost the pointer): the drag ends where it is. */
+  const onLostPointerCapture = (event: React.PointerEvent) => {
+    const state = drag.current;
+    if (state?.active && state.pointerId === event.pointerId) finishDrag(true);
+  };
+
+  /** Stops a touch drag from scrolling the list; attached to the scroller and the touch target. */
+  const noScroll = useRef((event: TouchEvent) => {
+    const state = drag.current;
+    if (state?.active && state.pointerType !== "mouse" && event.cancelable) event.preventDefault();
+  }).current;
+  const touchTarget = useRef<Element | null>(null);
+  const holdTouchTarget = (target: Element) => {
+    touchTarget.current?.removeEventListener("touchmove", noScroll as EventListener);
+    touchTarget.current = target;
+    target.addEventListener("touchmove", noScroll as EventListener, { passive: false });
+  };
+
+  /*
+    While a press may become a drag, the browser's own drags stay out of it: no text
+    selection sweeping across the rows and no ghost image of an avatar. And a touch drag
+    must not scroll the list: React's touch listeners are passive, so this one is
+    attached by hand, and only cancels once a long-press has turned into a drag.
+  */
+  useEffect(() => {
+    const veto = (event: Event) => {
+      if (drag.current) event.preventDefault();
+    };
+    document.addEventListener("selectstart", veto, true);
+    document.addEventListener("dragstart", veto, true);
+    scroller?.addEventListener("touchmove", noScroll, { passive: false });
+    return () => {
+      document.removeEventListener("selectstart", veto, true);
+      document.removeEventListener("dragstart", veto, true);
+      scroller?.removeEventListener("touchmove", noScroll);
+    };
+  }, [scroller, noScroll]);
+
+  useEffect(
+    () => () => {
+      dragCleanup.current?.();
+      dragCleanup.current = null;
+      touchTarget.current?.removeEventListener("touchmove", noScroll as EventListener);
+    },
+    [noScroll],
+  );
 
   /**
    * Clicks, decided before the row's own handler sees them.
@@ -1106,6 +1289,8 @@ function MessageList({
         onPointerMove={onPointerMove}
         onPointerUp={endPointer}
         onPointerCancel={endPointer}
+        onLostPointerCapture={onLostPointerCapture}
+        onDragStart={(event) => event.preventDefault()}
         onClickCapture={onClickCapture}
         onContextMenu={onContextMenu}
         onKeyDown={onKeyDownList}
@@ -1173,7 +1358,7 @@ function MessageList({
                       unread={unreadIds.has(email.id)}
                       fresh={freshIds.has(email.id)}
                       checked={selection.has(email.id)}
-                      selectMode={selectMode}
+                      selectMode={selection.size > 0}
                       photo={photos.get(email.sender.toLowerCase())}
                       onSelect={onSelect}
                       onToggleStar={onToggleStar}

@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  EDGE_SCROLL_MAX,
+  EDGE_SCROLL_ZONE,
   LONG_PRESS_MS,
   LongPress,
   TOUCH_SLOP,
+  avatarDragBase,
   dragSelection,
+  edgeScrollSpeed,
+  nearestRow,
+  sameSelection,
   orderedSelection,
   pruneSelection,
   rangeBetween,
@@ -93,5 +99,86 @@ describe("long-press", () => {
     press.down(30, 0, 0, 0);
     expect(press.tick(100)).toBeNull();
     expect(press.up()).toBe(false);
+  });
+});
+
+describe("dragging from an avatar", () => {
+  it("starts fresh when nothing is selected and adds to a selection that exists", () => {
+    expect([...avatarDragBase(new Set(), false)]).toEqual([]);
+    expect([...avatarDragBase(new Set([4]), false)]).toEqual([4]);
+    expect([...avatarDragBase(new Set([4]), true)]).toEqual([4]);
+  });
+
+  it("extends and shrinks as the pointer moves back past the anchor", () => {
+    const order = [1, 2, 3, 4, 5, 6];
+    const base = avatarDragBase(new Set(), false);
+    expect([...dragSelection(base, order, 2, 5)]).toEqual([2, 3, 4, 5]);
+    expect([...dragSelection(base, order, 2, 3)]).toEqual([2, 3]);
+    // Back up past where it started: the range flips to above the anchor.
+    expect([...dragSelection(base, order, 2, 1)].sort()).toEqual([1, 2]);
+  });
+
+  it("keeps what 'Select' picked when the drag adds more", () => {
+    const base = avatarDragBase(new Set([6]), false);
+    expect([...dragSelection(base, [1, 2, 3, 4, 5, 6], 1, 3)].sort()).toEqual([1, 2, 3, 6]);
+  });
+});
+
+describe("edge scrolling", () => {
+  it("is still in the middle of the list", () => {
+    expect(edgeScrollSpeed(400, 100, 900)).toBe(0);
+  });
+
+  it("ramps up toward an edge and never passes the cap", () => {
+    const near = edgeScrollSpeed(900 - 30, 100, 900);
+    const nearer = edgeScrollSpeed(900 - 5, 100, 900);
+    expect(near).toBeGreaterThan(0);
+    expect(nearer).toBeGreaterThan(near);
+    expect(edgeScrollSpeed(5000, 100, 900)).toBe(EDGE_SCROLL_MAX);
+    expect(edgeScrollSpeed(-5000, 100, 900)).toBe(-EDGE_SCROLL_MAX);
+  });
+
+  it("scrolls up above the top", () => {
+    expect(edgeScrollSpeed(105, 100, 900)).toBeLessThan(0);
+    expect(edgeScrollSpeed(100 + EDGE_SCROLL_ZONE + 1, 100, 900)).toBe(0);
+  });
+
+  it("shrinks its zone for a short list so the middle still stands still", () => {
+    expect(edgeScrollSpeed(150, 100, 200)).toBe(0);
+    expect(edgeScrollSpeed(101, 100, 200)).toBeLessThan(0);
+  });
+});
+
+describe("the row nearest the pointer", () => {
+  const rows = [
+    { id: 1, top: 100, bottom: 150 },
+    { id: 2, top: 150, bottom: 200 },
+    { id: 3, top: 230, bottom: 280 },
+  ];
+
+  it("is the row under it", () => {
+    expect(nearestRow(rows, 160)).toBe(2);
+  });
+
+  it("is the last row past the end and the first above the start", () => {
+    expect(nearestRow(rows, 900)).toBe(3);
+    expect(nearestRow(rows, 0)).toBe(1);
+  });
+
+  it("is the closer neighbour over a gap such as a day heading", () => {
+    expect(nearestRow(rows, 205)).toBe(2);
+    expect(nearestRow(rows, 226)).toBe(3);
+  });
+
+  it("is null with nothing mounted", () => {
+    expect(nearestRow([], 10)).toBeNull();
+  });
+});
+
+describe("sameSelection", () => {
+  it("compares by membership, not identity", () => {
+    expect(sameSelection(new Set([1, 2]), new Set([2, 1]))).toBe(true);
+    expect(sameSelection(new Set([1]), new Set([1, 2]))).toBe(false);
+    expect(sameSelection(new Set([1, 3]), new Set([1, 2]))).toBe(false);
   });
 });

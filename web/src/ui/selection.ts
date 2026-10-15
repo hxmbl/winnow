@@ -139,3 +139,65 @@ export class LongPress {
     this.fired = false;
   }
 }
+
+/** How close (px) to the list's top or bottom edge a drag starts scrolling it. */
+export const EDGE_SCROLL_ZONE = 40;
+/** The fastest a drag scrolls the list, in px per frame. */
+export const EDGE_SCROLL_MAX = 24;
+
+/**
+ * How far to scroll the list this frame for a drag at `y`, given the list's box.
+ *
+ * Zero in the middle; inside the edge zone it ramps up with depth, and past the edge
+ * (the pointer dragged out above or below the list, or out of the window) it runs at
+ * full speed. Negative scrolls up.
+ */
+export function edgeScrollSpeed(
+  y: number,
+  top: number,
+  bottom: number,
+  zone = EDGE_SCROLL_ZONE,
+  max = EDGE_SCROLL_MAX,
+): number {
+  const near = Math.min(zone, Math.max(0, (bottom - top) / 4));
+  if (y < top + near) return -Math.min(max, Math.ceil(((top + near - y) / Math.max(1, near)) * max));
+  if (y > bottom - near) return Math.min(max, Math.ceil(((y - (bottom - near)) / Math.max(1, near)) * max));
+  return 0;
+}
+
+/**
+ * The row a drag is over when the pointer is not over any row: past the last row, above
+ * the first, or over a day heading. The nearest mounted row by vertical distance, so a
+ * drag carried past the end of the list selects through to its last row rather than
+ * freezing wherever the rows ran out. Null when nothing is mounted.
+ */
+export function nearestRow(rows: readonly { id: number; top: number; bottom: number }[], y: number): number | null {
+  let best: number | null = null;
+  let distance = Infinity;
+  for (const row of rows) {
+    const d = y < row.top ? row.top - y : y > row.bottom ? y - row.bottom : 0;
+    if (d < distance) {
+      distance = d;
+      best = row.id;
+    }
+  }
+  return best;
+}
+
+/**
+ * What an avatar drag adds to. A drag from a row's body replaces the selection (unless
+ * ⌘/Ctrl is held); a drag from an avatar adds to it, because the avatar is the row's
+ * checkbox once anything is selected — "Select" from the sender menu, then drag down
+ * the avatars to add the rest.
+ */
+export function avatarDragBase(selection: Selection, additive: boolean): Selection {
+  return additive || selection.size > 0 ? selection : EMPTY_SELECTION;
+}
+
+/** Whether two selections hold the same ids, so a drag frame that changes nothing is not a re-render. */
+export function sameSelection(a: Selection, b: Selection): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
