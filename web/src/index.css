@@ -309,16 +309,19 @@ body {
   transition: opacity 240ms ease-out;
 }
 
-/* The tint: the mode's scrim colour, heavier at the sidebar and lighter across. */
+/*
+ * The tint: the mode's scrim colour, heavier at the sidebar and lighter further away,
+ * spreading from the same point as the blur (`SCRIM_ORIGIN` in `sidebarOverlay.ts`).
+ */
 .wn-scrim-tint {
   background: var(--wn-scrim);
 }
 
 @supports (background: color-mix(in srgb, red 50%, transparent)) {
   .wn-scrim-tint {
-    background: linear-gradient(
-      to right,
-      color-mix(in srgb, var(--wn-scrim) 70%, transparent) var(--wn-sidebar-edge),
+    background: radial-gradient(
+      circle farthest-corner at var(--wn-sidebar-edge) var(--wn-sidebar-mid, 50%),
+      color-mix(in srgb, var(--wn-scrim) 70%, transparent),
       color-mix(in srgb, var(--wn-scrim) 25%, transparent)
     );
   }

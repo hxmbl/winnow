@@ -30,6 +30,7 @@ import {
   armsIdleClose,
   idleCloseAllowed,
   isEditingElement,
+  SCRIM_ORIGIN,
   scrimLayers,
   scrimMask,
 } from "../sidebarOverlay";
@@ -255,8 +256,8 @@ const FOCUSABLE =
  *
  * It slides in over the list and the reader rather than taking a column from them, so
  * opening it never reflows anything. While it is open the rest of the app is behind a
- * progressive blur that is strongest at the sidebar's edge and fades out across the
- * window (`scrimLayers`), over a light tint of the mode's scrim colour, and is `inert`.
+ * progressive blur that is strongest at the middle of the sidebar's right edge and
+ * fades out evenly in every direction across the window (`scrimLayers`), over a light tint of the mode's scrim colour, and is `inert`.
  *
  * It closes itself when it is not in use: a click or tap outside it, Escape, choosing
  * anything in it, or the mouse being away from it for `SIDEBAR_IDLE_CLOSE_MS` while
@@ -371,9 +372,29 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
   // Where the sidebar's right edge is, for the scrim's masks.
   const edge = touch ? "calc(0.5rem + min(18rem, 100vw - 4rem))" : "calc(0.5rem + 15rem)";
 
+  // And the height of its middle: the panel is only as tall as its contents, so this is
+  // measured rather than worked out, and kept current as the panel grows or the window
+  // shrinks it. Written straight onto the scrim, so a resize never re-renders the sidebar.
+  const scrimRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    const scrim = scrimRef.current;
+    if (!panel || !scrim) return;
+    const measure = () => {
+      const rect = panel.getBoundingClientRect();
+      scrim.style.setProperty("--wn-sidebar-mid", `${Math.round(rect.top + rect.height / 2)}px`);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [touch]);
+
   return (
     <>
       <div
+        ref={scrimRef}
         aria-hidden="true"
         data-sidebar-scrim=""
         data-open={open ? "" : undefined}
@@ -382,7 +403,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
         onClick={open ? onClose : undefined}
       >
         {scrimLayers(touch).map((layer) => {
-          const mask = scrimMask(layer, "var(--wn-sidebar-edge)");
+          const mask = scrimMask(layer, SCRIM_ORIGIN);
           return (
             <div
               key={layer.blur}

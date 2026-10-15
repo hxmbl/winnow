@@ -440,6 +440,51 @@ try {
   // radius, a hairline and no shadow, translucent over its own blur, and only as tall as
   // what it holds. It closes on a click outside, Escape, a destination chosen, and the
   // mouse being away from it for a moment.
+  // Where the scrim's blur spreads from, and how strong it is around that point, read from
+  // the live page: the origin is resolved by placing a probe at the masks' own custom
+  // properties, and each layer's reach is read back off its computed mask. The strength at
+  // a point is each layer's blur times what is left of its mask there (as `scrimBlurAt`
+  // in `sidebarOverlay.ts`), sampled right of, below and above the origin.
+  const scrimFalloff = () =>
+    page.evaluate(() => {
+      const element = document.querySelector("[data-sidebar-scrim]");
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:absolute;width:0;height:0;left:var(--wn-sidebar-edge);top:var(--wn-sidebar-mid, 50%)";
+      element.append(probe);
+      const at = probe.getBoundingClientRect();
+      probe.remove();
+      const origin = { x: Math.round(at.left), y: Math.round(at.top) };
+      const sideRect = document.querySelector("[data-sidebar]").getBoundingClientRect();
+      const side = { right: Math.round(sideRect.right), mid: Math.round(sideRect.top + sideRect.height / 2) };
+      const layers = [...element.querySelectorAll("[data-scrim-layer]")].map((layer) => {
+        const style = getComputedStyle(layer);
+        const mask = style.maskImage || style.webkitMaskImage;
+        const reach = Number(/([\d.]+)%\)$/.exec(mask)?.[1]) / 100;
+        return { blur: parseFloat(style.backdropFilter.replace("blur(", "")), reach };
+      });
+      const corners = [[0, 0], [innerWidth, 0], [0, innerHeight], [innerWidth, innerHeight]];
+      const distances = corners.map(([x, y]) => Math.hypot(x - origin.x, y - origin.y));
+      const corner = Math.max(...distances);
+      const farthest = corners[distances.indexOf(corner)];
+      const blurAt = (x, y) => {
+        const d = Math.hypot(x - origin.x, y - origin.y);
+        return layers.reduce((sum, l) => sum + l.blur * Math.max(0, 1 - d / (l.reach * corner)), 0);
+      };
+      const room = Math.min(innerWidth - origin.x, innerHeight - origin.y, origin.y) - 1;
+      const steps = [0.1, 0.3, 0.6, 0.95].map((share) => Math.round(room * share));
+      const right = steps.map((d) => blurAt(origin.x + d, origin.y));
+      const down = steps.map((d) => blurAt(origin.x, origin.y + d));
+      const up = steps.map((d) => blurAt(origin.x, origin.y - d));
+      const falling = (list) => list.every((v, i) => i === 0 || v < list[i - 1]);
+      const same = right.every((v, i) => Math.abs(v - down[i]) < 0.01 && Math.abs(v - up[i]) < 0.01);
+      const far = blurAt(...farthest);
+      const ok =
+        layers.length >= 2 && layers.every((l) => l.reach > 0 && l.reach <= 1) &&
+        blurAt(origin.x, origin.y) > right[0] && falling(right) && falling(down) && falling(up) && same && far < 0.05;
+      const round = (list) => list.map((v) => Math.round(v * 100) / 100);
+      return { origin, side, ok, samples: { steps, right: round(right), down: round(down), up: round(up), far, layers } };
+    });
+
   section("sidebar overlay");
   const sidebar = page.locator("[data-sidebar]");
   const toggle = page.locator("header [data-sidebar-toggle]");
@@ -537,6 +582,14 @@ try {
   );
 
   // The scrim: a progressive blur over the rest of the app, strongest at the sidebar.
+  // Its fade-in can trail the slide by a frame or two on a busy machine.
+  await page
+    .waitForFunction(
+      () => [...document.querySelectorAll("[data-sidebar-scrim] > *")].every((node) => getComputedStyle(node).opacity === "1"),
+      null,
+      { timeout: 2_000 },
+    )
+    .catch(() => undefined);
   const scrim = await page.evaluate(() => {
     const element = document.querySelector("[data-sidebar-scrim]");
     const rect = element.getBoundingClientRect();
@@ -560,15 +613,26 @@ try {
     JSON.stringify({ visibility: scrim.visibility, covers: scrim.covers, under: scrim.under }),
   );
   check(
-    "a progressive blur: stacked layers, strongest first, each masked out from the sidebar's edge",
+    "a progressive blur: stacked layers, strongest first, each a radial mask",
     scrim.layers.length >= 3 &&
       scrim.layers.every((layer, i) => i === 0 || layer.blur < scrim.layers[i - 1].blur) &&
-      scrim.layers.every((layer) => /linear-gradient\(to right/.test(layer.mask) && layer.opacity === "1"),
+      scrim.layers.every((layer) => /^radial-gradient\(circle/.test(layer.mask) && layer.opacity === "1"),
     JSON.stringify(scrim.layers),
   );
+  const radial = await scrimFalloff();
   check(
-    "over a light translucent tint",
-    /linear-gradient|rgba|color\(srgb/.test(scrim.tint) && scrim.tintOpacity === "1",
+    "the blur spreads from the middle of the sidebar's right edge",
+    Math.abs(radial.origin.x - radial.side.right) <= 1 && Math.abs(radial.origin.y - radial.side.mid) <= 1,
+    JSON.stringify({ origin: radial.origin, side: radial.side }),
+  );
+  check(
+    "and falls off evenly in every direction: weaker further right, further down and further up, the same at the same distance",
+    radial.ok,
+    JSON.stringify(radial.samples),
+  );
+  check(
+    "over a light translucent tint, spreading from the same point",
+    /radial-gradient|rgba|color\(srgb/.test(scrim.tint) && scrim.tintOpacity === "1",
     scrim.tint,
   );
   // Only as tall as its contents: in a tall window it stops well short of the bottom.
@@ -2885,6 +2949,13 @@ try {
     phoneSide.left === 8 && phoneSide.right < phoneSide.window - 40 && phoneSide.scrim === "visible" &&
       phoneSide.layers >= 2 && phoneSide.layers < 4 && phoneSide.dockInert,
     JSON.stringify(phoneSide),
+  );
+  const phoneRadial = await scrimFalloff();
+  check(
+    "and its blur spreads from the middle of its right edge, falling off evenly in every direction",
+    Math.abs(phoneRadial.origin.x - phoneRadial.side.right) <= 1 &&
+      Math.abs(phoneRadial.origin.y - phoneRadial.side.mid) <= 1 && phoneRadial.ok,
+    JSON.stringify({ origin: phoneRadial.origin, side: phoneRadial.side, samples: phoneRadial.samples }),
   );
   // A tap on the strip of app it leaves closes it.
   await page.mouse.click(phoneSide.window - 15, 400);

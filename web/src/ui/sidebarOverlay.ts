@@ -58,9 +58,13 @@ export function isEditingElement(element: Element | null): boolean {
 /**
  * One layer of the progressive blur.
  *
- * `reach` is where the layer has faded to nothing, as a share of the space between the
- * sidebar's edge and the far side of the window (0 is the edge, 1 is the far side).
- * Every layer is fully on from the window's left edge to the sidebar's.
+ * The blur is radial: it spreads from one point, the middle of the sidebar's right edge
+ * (`SCRIM_ORIGIN`), and falls off evenly in every direction, so a spot above or below
+ * the sidebar is as clear as a spot the same distance to its right.
+ *
+ * `reach` is where the layer has faded to nothing, as a share of the distance from that
+ * point to the window's farthest corner (0 is the point itself, 1 is the corner). In
+ * between the layer fades in a straight line with distance.
  */
 export type ScrimLayer = { blur: number; reach: number };
 
@@ -69,8 +73,8 @@ export type ScrimLayer = { blur: number; reach: number };
  *
  * Stacked, so they compound: right at the sidebar's edge all of them are on and the
  * content is unreadable glass; a little further out only the weaker ones are left; at
- * the far side of the window nothing is. The phone gets three lighter layers instead of
- * four, because a full-screen backdrop blur is paid for per frame and a phone's GPU is
+ * the window's farthest corner nothing is. The phone gets three lighter layers instead
+ * of four, because a full-screen backdrop blur is paid for per frame and a phone's GPU is
  * the one that notices.
  */
 export function scrimLayers(compact: boolean): ScrimLayer[] {
@@ -89,13 +93,37 @@ export function scrimLayers(compact: boolean): ScrimLayer[] {
 }
 
 /**
- * A layer's mask: opaque up to the sidebar's edge, then fading out to its reach.
+ * Where the blur spreads from: the middle of the sidebar's right edge.
  *
- * `edge` is a CSS length (a custom property, in practice), so the same recipe follows
- * the sidebar whatever width it is on this screen.
+ * Two custom properties set on the scrim, so the point follows the sidebar on every
+ * screen: `--wn-sidebar-edge` is the edge's distance from the left (a CSS length worked
+ * out from the sidebar's own width rules), and `--wn-sidebar-mid` is the height of the
+ * sidebar's middle, measured from the panel, since the panel is only as tall as its
+ * contents. Until it is measured, the middle of the window.
  */
-export function scrimMask(layer: ScrimLayer, edge: string): string {
-  const end =
-    layer.reach >= 1 ? "100%" : `calc(${edge} + (100% - ${edge}) * ${layer.reach})`;
-  return `linear-gradient(to right, #000 0, #000 ${edge}, transparent ${end})`;
+export const SCRIM_ORIGIN = "var(--wn-sidebar-edge) var(--wn-sidebar-mid, 50%)";
+
+/**
+ * A layer's mask: a circle around `origin`, opaque at its centre and fading in a straight
+ * line to nothing at the layer's reach.
+ *
+ * `farthest-corner` sizes the circle to the window's farthest corner from the origin, so
+ * a reach of 1 is the whole window and every reach is the same distance in every
+ * direction.
+ */
+export function scrimMask(layer: ScrimLayer, origin: string): string {
+  const end = `${+(layer.reach * 100).toFixed(2)}%`;
+  return `radial-gradient(circle farthest-corner at ${origin}, #000 0, transparent ${end})`;
+}
+
+/**
+ * How strongly the stack blurs a point `distance` from the origin, where `corner` is
+ * the distance to the window's farthest corner: each layer's blur times how much of its
+ * mask is left there. For tests, and for checking a real window against the recipe.
+ */
+export function scrimBlurAt(layers: ScrimLayer[], distance: number, corner: number): number {
+  return layers.reduce(
+    (sum, layer) => sum + layer.blur * Math.max(0, 1 - distance / (layer.reach * corner)),
+    0,
+  );
 }

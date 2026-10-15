@@ -4,6 +4,8 @@ import {
   armsIdleClose,
   idleCloseAllowed,
   isEditingElement,
+  SCRIM_ORIGIN,
+  scrimBlurAt,
   scrimLayers,
   scrimMask,
 } from "./sidebarOverlay";
@@ -81,12 +83,45 @@ describe("the progressive blur", () => {
     expect(phone[0].blur).toBeLessThan(desktop[0].blur);
   });
 
-  it("masks each layer opaque up to the sidebar's edge, then fades it out", () => {
-    expect(scrimMask({ blur: 8, reach: 0.3 }, "var(--edge)")).toBe(
-      "linear-gradient(to right, #000 0, #000 var(--edge), transparent calc(var(--edge) + (100% - var(--edge)) * 0.3))",
+  it("masks each layer as a circle around the origin, fading to nothing at its reach", () => {
+    expect(scrimMask({ blur: 8, reach: 0.3 }, "var(--x) var(--y)")).toBe(
+      "radial-gradient(circle farthest-corner at var(--x) var(--y), #000 0, transparent 30%)",
     );
-    expect(scrimMask({ blur: 1, reach: 1 }, "248px")).toBe(
-      "linear-gradient(to right, #000 0, #000 248px, transparent 100%)",
+    expect(scrimMask({ blur: 1, reach: 1 }, "248px 300px")).toBe(
+      "radial-gradient(circle farthest-corner at 248px 300px, #000 0, transparent 100%)",
     );
+    expect(scrimMask({ blur: 16, reach: 0.12 }, "0 0")).toMatch(/transparent 12%\)$/);
   });
+
+  it("spreads from the middle of the sidebar's right edge", () => {
+    expect(SCRIM_ORIGIN).toBe("var(--wn-sidebar-edge) var(--wn-sidebar-mid, 50%)");
+  });
+
+  for (const compact of [false, true]) {
+    const layers = scrimLayers(compact);
+    const name = compact ? "on a phone" : "on the desktop";
+    // A 1440 × 900 window with the origin at (248, 450): the farthest corner is top right.
+    const corner = Math.hypot(1440 - 248, 450);
+
+    it(`${name}: weaker further away, the same at the same distance in any direction`, () => {
+      let previous = Infinity;
+      for (let d = 0; d <= corner; d += 40) {
+        const here = scrimBlurAt(layers, d, corner);
+        expect(here).toBeLessThan(previous);
+        previous = here;
+      }
+      // Radial: the blur depends on distance alone, so 200px right, 200px down and
+      // 200px up (or along a diagonal) are all the same.
+      const right = scrimBlurAt(layers, Math.hypot(200, 0), corner);
+      expect(scrimBlurAt(layers, Math.hypot(0, 200), corner)).toBe(right);
+      expect(scrimBlurAt(layers, Math.hypot(120, 160), corner)).toBeCloseTo(right, 10);
+    });
+
+    it(`${name}: everything on at the origin, nothing at the farthest corner`, () => {
+      const total = layers.reduce((sum, layer) => sum + layer.blur, 0);
+      expect(scrimBlurAt(layers, 0, corner)).toBe(total);
+      expect(scrimBlurAt(layers, corner, corner)).toBe(0);
+      expect(scrimBlurAt(layers, corner * 0.9, corner)).toBeLessThan(layers[layers.length - 1].blur * 0.11);
+    });
+  }
 });
