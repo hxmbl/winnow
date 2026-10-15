@@ -38,7 +38,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || 'main' }}
+          ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -134,7 +134,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || 'main' }}
+          ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js

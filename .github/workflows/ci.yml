@@ -272,8 +272,11 @@ jobs:
     needs: [minesweep, npm-checks, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Dispatching a workflow is an Actions write; job-level permissions zero every
+    # scope they don't name, so `contents: write` alone made this a 403.
     permissions:
-      contents: write
+      actions: write
+      contents: read
     steps:
       - name: Trigger release workflow
         env:
