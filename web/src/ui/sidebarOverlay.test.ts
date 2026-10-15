@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   SIDEBAR_IDLE_CLOSE_MS,
   armsIdleClose,
+  firstVisible,
   idleCloseAllowed,
+  scrimClickCloses,
+  scrimMidpoint,
   isEditingElement,
   SCRIM_ORIGIN,
   scrimBlurAt,
@@ -124,4 +127,76 @@ describe("the progressive blur", () => {
       expect(scrimBlurAt(layers, corner * 0.9, corner)).toBeLessThan(layers[layers.length - 1].blur * 0.11);
     });
   }
+});
+
+describe("the idle close's edge cases", () => {
+  it("holds while a press that began inside is still down (drag-select, scrollbar drag)", () => {
+    expect(idleCloseAllowed({ ...idle, pressing: true })).toBe(false);
+  });
+
+  it("holds while the browser's context menu opened from inside is up", () => {
+    expect(idleCloseAllowed({ ...idle, contextMenu: true })).toBe(false);
+  });
+
+  it("holds while text inside the sidebar is selected", () => {
+    expect(idleCloseAllowed({ ...idle, selecting: true })).toBe(false);
+  });
+
+  it("reads the new fields as off when a caller leaves them out", () => {
+    expect(idleCloseAllowed({ ...idle, pressing: false, contextMenu: false, selecting: false })).toBe(true);
+    expect(idleCloseAllowed(idle)).toBe(true);
+  });
+
+  it("is never armed by touch, whatever the device also has", () => {
+    expect(armsIdleClose("touch")).toBe(false);
+    expect(armsIdleClose("")).toBe(false);
+  });
+});
+
+describe("a click on the scrim", () => {
+  it("closes on a single click", () => {
+    expect(scrimClickCloses(1)).toBe(true);
+  });
+
+  it("does not close on the second click of a double-click on the toggle under it", () => {
+    expect(scrimClickCloses(2)).toBe(false);
+    expect(scrimClickCloses(3)).toBe(false);
+  });
+
+  it("closes for a synthetic click with no count (keyboard, assistive tech)", () => {
+    expect(scrimClickCloses(0)).toBe(true);
+  });
+});
+
+describe("which toggle gets focus back", () => {
+  const node = (name: string, rects: number) => ({ name, getClientRects: () => ({ length: rects }) });
+
+  it("skips a toggle that is mounted but hidden", () => {
+    expect(firstVisible([node("masthead", 0), node("reader", 1)])?.name).toBe("reader");
+  });
+
+  it("takes the first visible one in document order", () => {
+    expect(firstVisible([node("a", 1), node("b", 1)])?.name).toBe("a");
+  });
+
+  it("gives nothing rather than a hidden toggle", () => {
+    expect(firstVisible([node("a", 0)])).toBeNull();
+    expect(firstVisible([])).toBeNull();
+  });
+});
+
+describe("the scrim's measured origin", () => {
+  it("is the middle of the panel, rounded", () => {
+    expect(scrimMidpoint({ top: 8, height: 301 })).toBe("159px");
+  });
+
+  it("falls back to the window's middle for a panel with no height", () => {
+    expect(scrimMidpoint({ top: 8, height: 0 })).toBeNull();
+    expect(scrimMidpoint({ top: 0, height: -4 })).toBeNull();
+  });
+
+  it("ignores a measurement that is not a number", () => {
+    expect(scrimMidpoint({ top: Number.NaN, height: 200 })).toBeNull();
+    expect(scrimMidpoint({ top: 8, height: Number.POSITIVE_INFINITY })).toBeNull();
+  });
 });

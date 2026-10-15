@@ -28,7 +28,10 @@ import type { Mailbox } from "../../core/model/email";
 import {
   SIDEBAR_IDLE_CLOSE_MS,
   armsIdleClose,
+  firstVisible,
   idleCloseAllowed,
+  scrimClickCloses,
+  scrimMidpoint,
   isEditingElement,
   SCRIM_ORIGIN,
   scrimLayers,
@@ -274,6 +277,10 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
   const wasOpen = useRef(false);
   const idleTimer = useRef<number | null>(null);
   const pointerInside = useRef(false);
+  /** A press that began inside the panel is still held (drag-select, scrollbar drag). */
+  const pressing = useRef(false);
+  /** The browser's context menu was opened from inside the panel. */
+  const contextMenu = useRef(false);
 
   const clearIdle = useCallback(() => {
     if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
@@ -287,11 +294,19 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
       if (!panel) return;
       const active = document.activeElement;
       const inside = active !== null && panel.contains(active);
+      const selection = document.getSelection();
       const state = {
         pointerInside: pointerInside.current,
         menuOpen: panel.querySelector('[role="menu"]') !== null,
         editing: inside && isEditingElement(active),
         keyboardFocus: inside && active.matches(":focus-visible"),
+        pressing: pressing.current,
+        contextMenu: contextMenu.current,
+        selecting:
+          selection !== null &&
+          !selection.isCollapsed &&
+          selection.anchorNode !== null &&
+          panel.contains(selection.anchorNode),
       };
       if (idleCloseAllowed(state)) {
         idleTimer.current = null;
@@ -306,6 +321,38 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
   }, [clearIdle, onClose]);
 
   useEffect(() => clearIdle, [clearIdle]);
+
+  // A press that began inside ends wherever the button comes up, which is often outside
+  // the panel (and, for a drag-select, outside the window). Listened for on the window
+  // only while open, and the context-menu hold lifts on the first movement back over the
+  // page, which is the earliest sign the browser's menu has gone.
+  useEffect(() => {
+    if (!open) {
+      pressing.current = false;
+      contextMenu.current = false;
+      return;
+    }
+    const release = () => {
+      if (!pressing.current) return;
+      pressing.current = false;
+      if (!pointerInside.current) armIdle();
+    };
+    const moved = (event: PointerEvent) => {
+      if (!contextMenu.current) return;
+      contextMenu.current = false;
+      if (!pointerInside.current && armsIdleClose(event.pointerType)) armIdle();
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    window.addEventListener("blur", release);
+    window.addEventListener("pointermove", moved);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      window.removeEventListener("blur", release);
+      window.removeEventListener("pointermove", moved);
+    };
+  }, [open, armIdle]);
 
   // Focus in on open; back out on close.
   useEffect(() => {
@@ -331,10 +378,13 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     if (active && active !== document.body && !panel.contains(active)) return;
     const opener = restoreRef.current;
     restoreRef.current = null;
+    // The opener may have gone while the sidebar was open: unmounted by a breakpoint
+    // change, or hidden (the medium-width reader's toggle at `lg`). Then whichever
+    // toggle is on screen now, never one that is mounted but hidden.
     const back =
       opener?.isConnected && opener.getClientRects().length > 0
         ? opener
-        : document.querySelector<HTMLElement>("[data-sidebar-toggle]");
+        : firstVisible(document.querySelectorAll<HTMLElement>("[data-sidebar-toggle]"));
     back?.focus({ preventScroll: true });
   }, [open, clearIdle]);
 
@@ -380,15 +430,38 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     const panel = panelRef.current;
     const scrim = scrimRef.current;
     if (!panel || !scrim) return;
+    let last: string | null | undefined;
     const measure = () => {
-      const rect = panel.getBoundingClientRect();
-      scrim.style.setProperty("--wn-sidebar-mid", `${Math.round(rect.top + rect.height / 2)}px`);
+      const mid = scrimMidpoint(panel.getBoundingClientRect());
+      // Written only when it changes: a style write invalidates the scrim's masks, and a
+      // resize drag fires this every frame with the same answer.
+      if (mid === last) return;
+      last = mid;
+      if (mid === null) scrim.style.removeProperty("--wn-sidebar-mid");
+      else scrim.style.setProperty("--wn-sidebar-mid", mid);
     };
     measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(panel);
-    return () => observer.disconnect();
+    // The panel's size is watched; its *position* is not something a ResizeObserver
+    // sees, and the top moves with the safe area when a phone turns, without the panel
+    // changing size. So the window's resize is watched too, once per frame at most.
+    let frame = 0;
+    const onResize = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(panel);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [touch]);
 
   return (
@@ -400,7 +473,9 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
         data-open={open ? "" : undefined}
         className="wn-scrim fixed inset-0 z-40"
         style={{ "--wn-sidebar-edge": edge } as React.CSSProperties}
-        onClick={open ? onClose : undefined}
+        onClick={open ? (event) => {
+          if (scrimClickCloses(event.detail)) onClose();
+        } : undefined}
       >
         {scrimLayers(touch).map((layer) => {
           const mask = scrimMask(layer, SCRIM_ORIGIN);
@@ -440,9 +515,19 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
           clearIdle();
         }}
         onPointerLeave={(event) => {
-          if (!armsIdleClose(event.pointerType)) return;
+          // Whatever left, it is not inside any more: a finger lifting off a hybrid
+          // laptop's screen used to leave this set, and the mouse could then never
+          // close the sidebar by idling. Only a mouse or a pen arms the timer, though.
           pointerInside.current = false;
+          if (!armsIdleClose(event.pointerType)) return;
           if (open) armIdle();
+        }}
+        onPointerDown={(event) => {
+          if (event.button === 0) pressing.current = true;
+        }}
+        onContextMenu={() => {
+          contextMenu.current = true;
+          clearIdle();
         }}
         className={`wn-sidebar-panel fixed left-2 z-50 flex flex-col overflow-hidden rounded-pane border border-hairline outline-none ${
           touch
@@ -463,7 +548,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
             </span>
             <span className="text-read font-semibold text-ink">Winnow</span>
           </div>
-          <div data-sidebar-scroll="" className="thin-scroll min-h-0 overflow-y-auto px-1.5 pb-2">
+          <div data-sidebar-scroll="" className="thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 pb-2">
             <NavSections {...props} touch={touch} onNavigate={onClose} />
           </div>
           <AccountFooter {...props} touch={touch} onNavigate={onClose} />

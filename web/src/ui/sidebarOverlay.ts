@@ -31,16 +31,75 @@ export type IdleState = {
    * idle close could never fire: opening always moves focus in.
    */
   keyboardFocus: boolean;
+  /**
+   * A button is held down after a press that began inside the sidebar: a drag-select,
+   * or the scrollbar being dragged, which both carry the pointer out of the panel
+   * without anyone having walked away. Optional so older callers read as "no".
+   */
+  pressing?: boolean;
+  /**
+   * The browser's own context menu was opened from inside the sidebar. It draws outside
+   * the page, so the pointer "leaves" to reach it; the hold lifts on the next pointer
+   * movement over the page.
+   */
+  contextMenu?: boolean;
+  /** Text inside the sidebar is selected, presumably to be copied. */
+  selecting?: boolean;
 };
 
 /** Whether the sidebar may close itself now. Anything still using it keeps it open. */
 export function idleCloseAllowed(state: IdleState): boolean {
-  return !state.pointerInside && !state.menuOpen && !state.editing && !state.keyboardFocus;
+  return (
+    !state.pointerInside &&
+    !state.menuOpen &&
+    !state.editing &&
+    !state.keyboardFocus &&
+    !state.pressing &&
+    !state.contextMenu &&
+    !state.selecting
+  );
 }
 
 /** Only a mouse or a pen "leaves": a finger lifting off the glass is not walking away. */
 export function armsIdleClose(pointerType: string): boolean {
   return pointerType === "mouse" || pointerType === "pen";
+}
+
+/**
+ * Whether a click on the scrim should close the sidebar.
+ *
+ * Not the second (or third) click of a multi-click. The toggle sits under the scrim
+ * once the sidebar is open, so a double-click on the toggle used to open the sidebar
+ * with the first click and close it with the second, landing on the scrim. `detail` is
+ * the browser's own count of clicks in quick succession on one spot; a single click
+ * after a pause is 1 again, so closing by clicking outside is unaffected.
+ */
+export function scrimClickCloses(detail: number): boolean {
+  return !(detail > 1);
+}
+
+/**
+ * The first of several sidebar toggles that is actually on screen.
+ *
+ * There can be more than one in the document (the masthead's, the phone bar's, the
+ * medium-width reader's), and the masthead's stays mounted, hidden, while the reader
+ * replaces the list. Giving focus back to a hidden toggle drops it on the body.
+ */
+export function firstVisible<T extends { getClientRects(): { length: number } }>(
+  candidates: Iterable<T>,
+): T | null {
+  for (const candidate of candidates) if (candidate.getClientRects().length > 0) return candidate;
+  return null;
+}
+
+/**
+ * `--wn-sidebar-mid` for a measured panel: the height of its middle in px, or `null`
+ * when the measurement means nothing (a panel with no height yet, or not laid out), in
+ * which case the property is removed and the origin falls back to the window's middle.
+ */
+export function scrimMidpoint(rect: { top: number; height: number }): string | null {
+  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) return null;
+  return `${Math.round(rect.top + rect.height / 2)}px`;
 }
 
 /** A text field, a select, or an editable region: somewhere typing is happening. */
