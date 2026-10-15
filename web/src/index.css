@@ -391,3 +391,11 @@ body {
     border: 1px solid CanvasText;
   }
 }
+
+/* The rail's edge fades are gradients, which forced colours drop, so the step button sat
+   over the label it was meant to fade out. An opaque button at least covers its part. */
+@media (forced-colors: active) {
+  [data-rail-edge] button {
+    background: Canvas;
+  }
+}
