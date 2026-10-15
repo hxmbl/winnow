@@ -24,10 +24,12 @@ import {
   AtSign,
   BellOff,
   Bell,
+  ContactRound,
   Copy,
   ExternalLink,
   FolderInput,
   Forward,
+  ListChecks,
   Inbox,
   Mail,
   MailOpen,
@@ -36,6 +38,7 @@ import {
   ReplyAll,
   Search,
   ShieldAlert,
+  SquareCheck,
   Trash2,
   UserPlus,
   UserX,
@@ -200,7 +203,27 @@ export type SenderMenuInput = {
   savedContact: boolean;
   /** From the message's `List-Unsubscribe`; Unsubscribe only appears with one. */
   canUnsubscribe: boolean;
+  /**
+   * Whether this message's row is already in the multi-selection: "Select" reads
+   * "Deselect" and takes it out. Undefined when the message is not a row in the list
+   * (nothing to select), which drops both select items.
+   */
+  selected?: boolean;
+  /**
+   * How many rows in the list are from this sender. "Select all from this sender" only
+   * appears when there is more than one, since for one it is the same as "Select".
+   */
+  fromSenderCount?: number;
+  /**
+   * Contacts are not connected, so no sender has a contact photo. The menu offers the
+   * grant right where the missing picture is — the Settings row alone was too far from
+   * the avatar for anyone to connect the two.
+   */
+  offerContactPhotos?: boolean;
   actions: {
+    connectContacts?: () => void;
+    select?: () => void;
+    selectAllFromSender?: () => void;
     showAll: () => void;
     toggleMute: () => void;
     block: () => void;
@@ -212,12 +235,43 @@ export type SenderMenuInput = {
 
 export function buildSenderMenu(input: SenderMenuInput): MenuEntry[] {
   const { actions } = input;
-  const entries: MenuEntry[] = [
+  const entries: MenuEntry[] = [];
+  // Selection first: it is the menu's way into multi-select for a pointer that cannot
+  // drag (or a user who never found the drag), so it leads rather than hides.
+  if (input.selected !== undefined && actions.select) {
+    entries.push({
+      kind: "item",
+      id: "sender-select",
+      label: input.selected ? "Deselect" : "Select",
+      icon: SquareCheck,
+      onSelect: actions.select,
+    });
+    if ((input.fromSenderCount ?? 0) > 1 && actions.selectAllFromSender) {
+      entries.push({
+        kind: "item",
+        id: "sender-select-all",
+        label: `Select all ${input.fromSenderCount} from this sender`,
+        icon: ListChecks,
+        onSelect: actions.selectAllFromSender,
+      });
+    }
+    entries.push(divider("s0"));
+  }
+  entries.push(
     { kind: "item", id: "sender-all", label: "All mail from this sender", icon: Search, onSelect: actions.showAll },
     { kind: "item", id: "sender-copy", label: "Copy address", icon: Copy, onSelect: actions.copyAddress },
-  ];
+  );
   if (!input.savedContact) {
     entries.push({ kind: "item", id: "sender-contact", label: "Add to contacts", icon: UserPlus, onSelect: actions.addToContacts });
+  }
+  if (input.offerContactPhotos && actions.connectContacts) {
+    entries.push({
+      kind: "item",
+      id: "sender-photos",
+      label: "Show contact photos",
+      icon: ContactRound,
+      onSelect: actions.connectContacts,
+    });
   }
   entries.push(divider("s1"));
   if (input.canUnsubscribe) {

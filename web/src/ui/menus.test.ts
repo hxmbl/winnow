@@ -103,6 +103,64 @@ describe("the sender menu", () => {
   });
 });
 
+describe("the sender menu's way into selection", () => {
+  const actions = { showAll: noop, toggleMute: noop, block: noop, addToContacts: noop, unsubscribe: noop, copyAddress: noop };
+  const base = { name: "Ada", address: "a@b.c", muted: false, savedContact: true, canUnsubscribe: false };
+
+  it("leads with Select, set apart from the sender's own items", () => {
+    const entries = buildSenderMenu({ ...base, selected: false, fromSenderCount: 1, actions: { ...actions, select: noop, selectAllFromSender: noop } });
+    expect(ids(entries).slice(0, 3)).toEqual(["sender-select", "—", "sender-all"]);
+    const select = entries[0]!;
+    expect(select.kind === "item" && select.label).toBe("Select");
+    expect(select.kind === "item" && select.icon).toBeTruthy();
+  });
+
+  it("reads Deselect for a row that is already selected", () => {
+    const entries = buildSenderMenu({ ...base, selected: true, actions: { ...actions, select: noop } });
+    const select = entries.find((e) => e.kind === "item" && e.id === "sender-select");
+    expect(select && select.kind === "item" && select.label).toBe("Deselect");
+  });
+
+  it("offers Select all from this sender only when there is more than one", () => {
+    const withAll = buildSenderMenu({ ...base, selected: false, fromSenderCount: 3, actions: { ...actions, select: noop, selectAllFromSender: noop } });
+    const all = withAll.find((e) => e.kind === "item" && e.id === "sender-select-all");
+    expect(all && all.kind === "item" && all.label).toBe("Select all 3 from this sender");
+    const one = buildSenderMenu({ ...base, selected: false, fromSenderCount: 1, actions: { ...actions, select: noop, selectAllFromSender: noop } });
+    expect(ids(one)).not.toContain("sender-select-all");
+  });
+
+  it("runs its actions", () => {
+    const select = vi.fn();
+    const all = vi.fn();
+    const entries = buildSenderMenu({ ...base, selected: false, fromSenderCount: 2, actions: { ...actions, select, selectAllFromSender: all } });
+    for (const entry of entries) if (entry.kind === "item" && entry.id.startsWith("sender-select")) entry.onSelect?.();
+    expect(select).toHaveBeenCalledOnce();
+    expect(all).toHaveBeenCalledOnce();
+  });
+
+  it("drops both for a message that is not a row in the list", () => {
+    expect(ids(buildSenderMenu({ ...base, fromSenderCount: 4, actions: { ...actions, select: noop, selectAllFromSender: noop } }))).not.toContain("sender-select");
+  });
+});
+
+describe("the sender menu's contact photos offer", () => {
+  const actions = { showAll: noop, toggleMute: noop, block: noop, addToContacts: noop, unsubscribe: noop, copyAddress: noop };
+  const base = { name: "Ada", address: "a@b.c", muted: false, savedContact: false, canUnsubscribe: false };
+
+  it("offers Show contact photos while contacts are not connected", () => {
+    const connect = vi.fn();
+    const entries = buildSenderMenu({ ...base, offerContactPhotos: true, actions: { ...actions, connectContacts: connect } });
+    const item = entries.find((e) => e.kind === "item" && e.id === "sender-photos");
+    expect(item && item.kind === "item" && item.label).toBe("Show contact photos");
+    if (item?.kind === "item") item.onSelect?.();
+    expect(connect).toHaveBeenCalledOnce();
+  });
+
+  it("does not once they are", () => {
+    expect(ids(buildSenderMenu({ ...base, offerContactPhotos: false, actions: { ...actions, connectContacts: noop } }))).not.toContain("sender-photos");
+  });
+});
+
 describe("tidy", () => {
   it("drops leading, trailing and doubled dividers", () => {
     const d = (id: string): MenuEntry => ({ kind: "divider", id });

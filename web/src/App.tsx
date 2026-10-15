@@ -73,6 +73,7 @@ import {
   EMPTY_SELECTION,
   orderedSelection,
   pruneSelection,
+  toggleId,
   type Selection,
 } from "./ui/selection";
 import { mailtoAddress } from "./core/mail/unsubscribe";
@@ -2110,6 +2111,13 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         };
 
         if (menu.kind === "sender") {
+          // The rows "Select" and "Select all from this sender" act on: list rows only,
+          // so a message the reader shows that is not in the list offers neither.
+          const inList = rowOrder.includes(email.id);
+          const sender = email.sender.toLowerCase();
+          const fromSender = view.threads
+            .filter((row) => row.representative.sender.toLowerCase() === sender)
+            .map((row) => row.representative.id);
           const savedContact = snapshot.googleContacts.some(
             (contact) => contact.source === "saved" && contact.address.toLowerCase() === email.sender.toLowerCase(),
           );
@@ -2135,7 +2143,22 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 muted,
                 savedContact,
                 canUnsubscribe: email.unsubscribe !== undefined,
+                selected: inList ? selection.has(email.id) : undefined,
+                fromSenderCount: fromSender.length,
+                offerContactPhotos: snapshot.contactsAccess === "not_granted",
                 actions: {
+                  connectContacts: onConnectContactPhotos,
+                  select: () => {
+                    // Into select mode with this row, from where the user adds more:
+                    // drag down the avatars, click them, or ⌘/Shift-click rows. On a
+                    // phone the reader covers the list, so it steps back to it first.
+                    if (phoneRef.current && snapshotRef.current.view.selected) store.closeReader({ dropCursor: true });
+                    setSelection((current) => toggleId(current, email.id));
+                  },
+                  selectAllFromSender: () => {
+                    if (phoneRef.current && snapshotRef.current.view.selected) store.closeReader({ dropCursor: true });
+                    setSelection((current) => new Set([...current, ...fromSender]));
+                  },
                   showAll,
                   toggleMute,
                   block: () => {
