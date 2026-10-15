@@ -17,49 +17,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Same scan as CI: nothing is built from a tree that fails it.
-  minesweep:
-    name: Secret scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install minesweep
-        run: |
-          set -euo pipefail
-          TAG="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/hxmbl/minesweep/releases/latest)"
-          TAG="${TAG##*/}"
-          VERSION="${TAG#v}"
-          case "$(uname -m)" in
-            x86_64) ARCH=x86_64 ;;
-            aarch64|arm64) ARCH=arm64 ;;
-            *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
-          esac
-          FILE="minesweep_${VERSION}_$(uname -s)_${ARCH}.tar.gz"
-          BASE="https://github.com/hxmbl/minesweep/releases/download/${TAG}"
-          cd "$RUNNER_TEMP"
-          curl -fsSLO "$BASE/$FILE"
-          curl -fsSLO "$BASE/checksums.txt"
-          grep " ${FILE}\$" checksums.txt | sha256sum -c -
-          tar -xzf "$FILE" minesweep
-          mkdir -p "$RUNNER_TEMP/bin"
-          install -m 0755 minesweep "$RUNNER_TEMP/bin/minesweep"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-          echo "Installed minesweep ${TAG}"
-
-      - name: Scan for secrets
-        # --config: an auto-discovered .minesweep.yml has its fail-on/policy keys ignored.
-        # Exit 1 = findings >= high, exit 2 = incomplete scan; both fail the job.
-        run: minesweep --config .minesweep.yml --fail-on high --annotations --no-pager .
+  # The whole CI workflow (secret scan, typecheck, lint, unit tests, smoke test):
+  # nothing is built or released from a commit that fails any of it.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    # A called workflow can't hold more than its caller grants, and CI asks for these.
+    permissions:
+      contents: read
+      pull-requests: read
 
   # Creates the draft once, so the platform jobs don't race to create it.
   prepare:
     name: Prepare release
-    needs: minesweep
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -178,8 +178,9 @@ cd web && node scripts/check-version.mjs     # prints it, or lists the disagreem
 git tag v0.2.0 && git push origin v0.2.0      # or v0.2.0-beta.1 for a pre-release
 ```
 
-`.github/workflows/release.yml` runs the secret scan, checks the tag against the
-manifests, builds Linux, macOS (universal) and Windows, and attaches the bundles
+`.github/workflows/release.yml` first runs the whole CI workflow (secret scan,
+typecheck, lint, unit and smoke tests) and builds nothing if any of it fails. Then
+it checks the tag against the manifests, builds Linux, macOS (universal) and Windows, and attaches the bundles
 to a **draft** release for you to publish. A suffix (`-beta.1`) marks it a
 pre-release; the manifests stay plain `MAJOR.MINOR.PATCH`, because the Windows
 `.msi` refuses anything else. Windows may fail without holding up the other two.
