@@ -482,6 +482,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `ShortcutSheet.tsx` | The cheat sheet, rendered from `BINDINGS`. |
 | `CodeCopy.tsx` | The code chip in a row and the code bar in the reader. |
 | `ErrorText.tsx` | Selectable failure copy, collapsed under a disclosure when long — the one text in the app a user needs to copy. |
+| `ReaderSplitHandle.tsx` | The list/reader divider at `lg` and up: pointer-captured drag, arrow keys, double-click reset. It writes `--wn-reader-split` on `main` so a drag never re-renders the app; `index.css` clamps the pane's width from it. |
 
 ### 7.2 Pure helpers worth knowing exist
 
@@ -497,6 +498,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `senderPictures.ts` / `avatar.ts` / `demoPictures.ts` | Avatar sourcing as a context, plus the pure hash that gives a sender a stable tone. |
 | `sidebarOverlay.ts` | The idle-close policy (all seven conditions must be false) and the scrim recipe. |
 | `menus.ts` | Both menus' contents as data, so the rules are unit-tested rather than trapped in JSX. |
+| `readerSplit.ts` | The reader's share of the width as a fraction (default 0.38, saved under `winnow.readerSplit.v1`), its 280 px list / 360 px reader minimums resolved per width, and the handle's key steps. |
 | `useStore.ts` / `useOnline.ts` / `usePhoneLayout.ts` | The three hooks. `useStore` caches the snapshot against the store's key; `usePhoneLayout` publishes the on-screen-keyboard inset as `--wn-keyboard`. |
 
 ### 7.3 What lives in `App.tsx` instead of the store

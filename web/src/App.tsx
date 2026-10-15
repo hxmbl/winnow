@@ -56,6 +56,7 @@ import { Sidebar, type NavProps } from "./ui/components/MailNav";
 import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
 import { Reader } from "./ui/components/Reader";
+import { ReaderSplitHandle } from "./ui/components/ReaderSplitHandle";
 import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer, Settings } from "./ui/components/SettingsPanel";
@@ -254,6 +255,8 @@ export function App({ store }: Props) {
   const phone = usePhoneLayout();
   // For handlers that are created once and read the layout when they fire.
   const phoneRef = useRef(phone);
+  /** The two panes' container, which the reader split is a fraction of. */
+  const mainRef = useRef<HTMLElement | null>(null);
   phoneRef.current = phone;
   useKeyboardInset(phone && composer !== null);
 
@@ -1749,7 +1752,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         Small screens replace one with the other: the reader covers the list outright,
         since there is no width for two regions.
       */}
-      <main className="flex min-h-0 flex-1">
+      <main ref={mainRef} className="flex min-h-0 flex-1">
         {/*
           The list.
 
@@ -1918,9 +1921,16 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           list rather than sitting beside it, so its empty state ("Nothing selected") would
           describe a selection the phone does not have.
         */}
+        {/*
+          The divider. Wide layout only: the handle hides itself below `lg` with the
+          reader-beside-list arrangement it resizes, and a phone never renders it.
+        */}
+        {!phone && <ReaderSplitHandle containerRef={mainRef} />}
         {(!phone || selected) && (
           <div
             key={selected?.id ?? "empty"}
+            // At `lg` the width is the split's: see `[data-reader-pane]` in `index.css`.
+            data-reader-pane=""
             // `w-full min-w-0` below `lg`, and the width is not optional there.
             //
             // Without `min-w-0` this pane is a flex item whose base size is its content —
@@ -1930,7 +1940,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // `min-w-0` for the same reason.
             className={`${
               selected ? "flex" : "hidden lg:flex"
-            } min-h-0 w-full min-w-0 flex-col bg-surface-sunken lg:w-[38%] lg:shrink-0 lg:border-l lg:border-edge ${
+            } min-h-0 w-full min-w-0 flex-col bg-surface-sunken lg:shrink-0 lg:border-l lg:border-edge ${
               selected ? "animate-appear" : ""
             }`}
           >

@@ -128,6 +128,38 @@ textarea,
   user-select: text;
 }
 
+/*
+  The reader's width on the wide layout: the split's fraction (`--wn-reader-split`, set by
+  `ReaderSplitHandle`), held between the reader's and the list's pixel minimums at the
+  width of the moment. 360px and 280px are `MIN_READER_PX` and `MIN_LIST_PX` in
+  `ui/readerSplit.ts`; 38% is `DEFAULT_READER_FRACTION`.
+*/
+@media (min-width: 1024px) {
+  [data-reader-pane] {
+    width: clamp(360px, var(--wn-reader-split, 38%), calc(100% - 280px));
+  }
+}
+
+/*
+  While the divider is dragged nothing selects, and the cursor stays a resize cursor even
+  where the pointer runs ahead of the handle. Frames (a message body) would otherwise take
+  the pointer; capture already keeps it, this keeps their cursor out of it too.
+*/
+html[data-resizing],
+html[data-resizing] * {
+  user-select: none !important;
+  cursor: col-resize !important;
+}
+html[data-resizing] iframe {
+  pointer-events: none;
+}
+
+@media (forced-colors: active) {
+  .wn-split > span {
+    background: CanvasText;
+  }
+}
+
 @layer components {
   .thin-scroll {
     scrollbar-width: thin;
