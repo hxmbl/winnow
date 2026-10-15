@@ -13,7 +13,7 @@
  * hover.
  */
 
-import { Archive, Check, ChevronLeft, ChevronRight, Inbox, Menu, Search, Send, Settings } from "lucide-react";
+import { Archive, Check, ChevronLeft, ChevronRight, Inbox, PanelLeft, Search, Send, Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { FilterStrip, type PillItem } from "./FilterStrip";
@@ -35,7 +35,7 @@ export type PhoneTopBarProps = {
   onSearchChange: (value: string) => void;
   /** The same ref the keyboard handler focuses on `/`. See `Masthead`. */
   searchRef: React.RefObject<HTMLInputElement | null>;
-  /** Signed-in address, or null in the demo. Decides what the trailing circle shows. */
+  /** Signed-in address, or null in the demo. The menu button's tooltip. */
   accountEmail: string | null;
   onOpenNavigation: () => void;
   navigationOpen: boolean;
@@ -63,8 +63,6 @@ export function PhoneTopBar({
   onNext,
   onMarkAllRead,
 }: PhoneTopBarProps) {
-  const initial = accountEmail ? (accountEmail.trim()[0] ?? "?").toUpperCase() : null;
-
   return (
     <header
       data-phone-topbar=""
@@ -99,7 +97,7 @@ export function PhoneTopBar({
         {/*
           The menu: the sidebar it opens holds Inbox, every folder (Trash and Spam
           included, which the dock has no room for), the account and Settings. The smart
-          filters are not in it: they are the chip row above the dock. Signed in, it wears the account's initial.
+          filters are not in it: they are the chip row above the dock.
         */}
         <button
           type="button"
@@ -112,16 +110,8 @@ export function PhoneTopBar({
           title={accountEmail ?? "Menu"}
           className={`${ROUND_BUTTON} bg-surface`}
         >
-          {accountEmail ? (
-            <span
-              aria-hidden="true"
-              className="flex h-8 w-8 items-center justify-center rounded-ctl bg-surface-active text-ui font-semibold text-ink-body"
-            >
-              {initial}
-            </span>
-          ) : (
-            <Menu size={19} strokeWidth={1.9} aria-hidden="true" />
-          )}
+          {/* The same panel icon as the desktop and reader toggles, signed in or not. */}
+          <PanelLeft size={19} strokeWidth={1.9} aria-hidden="true" />
         </button>
       </div>
 
