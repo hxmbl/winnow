@@ -251,7 +251,8 @@ The developer runs no servers and
 collects nothing (no telemetry, analytics, crash reports or update checks); your
 mail, tokens and OAuth client stay on your device and go only to Google (if you
 turn on **Show brand logos**, sender domains also go to Cloudflare's DNS resolver
-and logos load from the senders' own sites); and you can cut Winnow off at
+and logos load from the senders' own sites; with **Gravatar photos** on, a SHA-256
+hash of each sender's address goes to Gravatar); and you can cut Winnow off at
 [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 The mail itself is a mirror in browser storage: `winnow.gmail.cache.messages` holds
