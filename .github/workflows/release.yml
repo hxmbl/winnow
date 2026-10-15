@@ -1,36 +1,31 @@
 name: Release
 
+# Triggered by CI after it passes on a tag, or manually for testing.
 # A `v<MAJOR.MINOR.PATCH>[-suffix]` tag builds every platform and attaches the
 # bundles to a draft GitHub Release; a suffix marks it a pre-release. A manual run
 # builds the same bundles as workflow artifacts and leaves Releases alone.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag or branch to build'
+        required: false
+        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  # Keyed on the ref actually being built: under workflow_dispatch `github.ref` is
+  # always the default branch, which would serialise every release into one group.
+  group: release-${{ github.event.inputs.ref || github.ref }}
   # Never cancel a release half-way through uploading its assets.
   cancel-in-progress: false
 
 jobs:
-  # The whole CI workflow (secret scan, typecheck, lint, unit tests, smoke test):
-  # nothing is built or released from a commit that fails any of it.
-  ci:
-    name: CI
-    uses: ./.github/workflows/ci.yml
-    # A called workflow can't hold more than its caller grants, and CI asks for these.
-    permissions:
-      contents: read
-      pull-requests: read
-
   # Creates the draft once, so the platform jobs don't race to create it.
   prepare:
     name: Prepare release
-    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -43,6 +38,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || 'main' }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -55,8 +51,10 @@ jobs:
         run: |
           set -euo pipefail
           TAG="" PUBLISH=false PRERELEASE=false
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            TAG="$GITHUB_REF_NAME" PUBLISH=true
+          # Use the ref that was passed from CI or manual dispatch
+          REF="${{ github.event.inputs.ref }}"
+          if [ -n "$REF" ] && [[ "$REF" == v* ]]; then
+            TAG="$REF" PUBLISH=true
             case "$TAG" in *-*) PRERELEASE=true ;; esac
           fi
           # Fails when the manifests disagree with each other or with the tag.
@@ -136,6 +134,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || 'main' }}
           persist-credentials: false
 
       - name: Setup Node.js

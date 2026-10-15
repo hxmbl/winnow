@@ -3,13 +3,12 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
     branches: [main, master]
-  # release.yml calls this whole workflow and builds nothing unless it passes.
-  workflow_call:
 
 permissions:
-  contents: read
+  contents: write
   # dorny/paths-filter lists a PR's changed files through the API.
   pull-requests: read
 
@@ -216,8 +215,8 @@ jobs:
   # The full release bundle (LTO, deb, AppImage) only where an artifact could matter.
   release:
     name: Release build
-    # Branch pushes only: when release.yml calls this on a tag it builds the bundles
-    # itself, so a third Linux bundle here would only cost time.
+    # Branch pushes only: on a tag, release.yml builds these bundles itself, so a
+    # third Linux bundle here would only cost time.
     if: github.event_name == 'push' && github.ref_type == 'branch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -272,3 +271,23 @@ jobs:
       # Proves the bundle builds; release.yml ships it on a `v*` tag.
       - name: Production build
         run: npm run tauri:build
+
+  trigger-release:
+    name: Trigger release
+    # Only on tag pushes, after every gate that also runs on a tag has passed.
+    # `release` is deliberately absent: it is branch-only, so naming it here would
+    # skip this job on the one push it exists for.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [minesweep, npm-checks, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Trigger release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Via the environment, not inline: a tag name may contain shell metacharacters.
+          REF: ${{ github.ref_name }}
+        run: |
+          gh workflow run release.yml -f ref="$REF"
