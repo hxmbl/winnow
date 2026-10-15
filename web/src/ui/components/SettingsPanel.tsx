@@ -227,6 +227,9 @@ export type SettingsProps = {
   /** Brand logos from BIMI in avatars. Off by default; see `Preferences.brandLogos`. */
   brandLogos: boolean;
   onBrandLogos: (value: boolean) => void;
+  /** Gravatar photos in avatars. Off by default; see `Preferences.gravatars`. */
+  gravatars: boolean;
+  onGravatars: (value: boolean) => void;
   notificationsEnabled: boolean;
   onNotifications: (value: boolean) => void;
   /** Null on the web, where there is no background thread to hand. */
@@ -391,6 +394,13 @@ export function Settings(props: SettingsProps) {
           hint="Shows a company's logo beside its mail, from the logo it publishes for email (BIMI). Turning this on sends each sender's domain to Cloudflare's DNS resolver and loads the logo from the sender's own site."
         >
           <Toggle checked={props.brandLogos} onChange={props.onBrandLogos} label="Show brand logos" />
+        </Row>
+
+        <Row
+          label="Gravatar photos"
+          hint="Shows a sender's Gravatar when they are not in your contacts. Turning this on sends a hashed copy of each sender's address to Gravatar."
+        >
+          <Toggle checked={props.gravatars} onChange={props.onGravatars} label="Gravatar photos" />
         </Row>
 
         <Row

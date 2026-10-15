@@ -81,7 +81,8 @@ import { mailtoAddress } from "./core/mail/unsubscribe";
 import { copyText } from "./ui/clipboard";
 import { CodeBar } from "./ui/components/CodeCopy";
 import { Avatar } from "./ui/components/Avatar";
-import { SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
+import { imageProbe, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
+import { GravatarCache } from "./core/avatars/gravatar";
 import { contactPhotoMap } from "./core/avatars/photos";
 import { BrandLogoCache } from "./core/avatars/logoCache";
 import { dohResolver } from "./core/avatars/bimi";
@@ -169,6 +170,11 @@ export function App({ store }: Props) {
         isOnline: () => globalThis.navigator?.onLine !== false,
       }),
   );
+  /** Gravatar photos, behind "Gravatar photos": the same lifetime and clearing. */
+  const [gravatarCache] = useState(() => {
+    const isOnline = () => globalThis.navigator?.onLine !== false;
+    return new GravatarCache({ probe: imageProbe(isOnline), isOnline });
+  });
 
   // ── Refs the keyboard handler reads ─────────────────────────────────────
   // The handler is registered once and reads through these, because
@@ -484,6 +490,7 @@ export function App({ store }: Props) {
   const signOut = useCallback(async () => {
     // Brand logos are cached per sender domain: a list of who mails this account.
     logoCache.clear();
+    gravatarCache.clear();
     const bridge = sessionRef.current;
     try {
       if (bridge) {
@@ -498,7 +505,7 @@ export function App({ store }: Props) {
       );
     }
     await store.signOut();
-  }, [store, logoCache]);
+  }, [store, logoCache, gravatarCache]);
 
   /**
    * Sign in from the demo mailbox.
@@ -841,23 +848,34 @@ export function App({ store }: Props) {
   useEffect(() => {
     if (snapshot.status === "signed_out" || !preferences.brandLogos) logoCache.clear();
   }, [snapshot.status, preferences.brandLogos, logoCache]);
+  useEffect(() => {
+    if (snapshot.status === "signed_out" || !preferences.gravatars) gravatarCache.clear();
+  }, [snapshot.status, preferences.gravatars, gravatarCache]);
 
   // Back online: logos that could not be looked up while offline are asked for again.
   useEffect(() => {
-    const retry = () => logoCache.retryFailed();
+    const retry = () => {
+      logoCache.retryFailed();
+      gravatarCache.retryFailed();
+    };
     window.addEventListener("online", retry);
     return () => window.removeEventListener("online", retry);
-  }, [logoCache]);
+  }, [logoCache, gravatarCache]);
 
   // The demo answers brand logos from bundled images and never touches the network.
+  // Gravatar is the real lookup even there, once switched on: the demo's addresses are
+  // fictional, so their hashes say nothing about anyone, and the switch is the thing to
+  // try out.
   const isDemo = snapshot.contactsAccess === "demo";
   const brandLogos = preferences.brandLogos;
+  const gravatars = preferences.gravatars;
   const senderPictures = useMemo<SenderPictures>(
     () => ({
       photos,
+      gravatars: gravatars ? gravatarCache : null,
       logos: brandLogos ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
     }),
-    [photos, brandLogos, isDemo, logoCache],
+    [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache],
   );
 
   const runBatch = useCallback((fn: (s: WinnowStore, ids: number[]) => void, keep = false) => {
@@ -2069,6 +2087,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onImagePolicy={(imagePolicy) => store.setPreferences({ imagePolicy })}
           brandLogos={preferences.brandLogos}
           onBrandLogos={(value) => store.setPreferences({ brandLogos: value })}
+          gravatars={preferences.gravatars}
+          onGravatars={(value) => store.setPreferences({ gravatars: value })}
           notificationsEnabled={preferences.notificationsEnabled}
           onNotifications={(notificationsEnabled) => {
             store.setPreferences({ notificationsEnabled });

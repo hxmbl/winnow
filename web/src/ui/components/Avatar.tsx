@@ -2,11 +2,12 @@
  * A sender's avatar: their real photo when Winnow has one, otherwise a quiet monogram.
  *
  * Pictures come from `useSenderPictures`: the user's own Google contacts first (only
- * once they opted in to contact suggestions), then — when "Show brand logos" is on — the
- * sender domain's BIMI logo. The monogram renders until a picture is known and stays
+ * once they opted in to contact suggestions), then — when "Gravatar photos" is on — the
+ * sender's Gravatar, then — when "Show brand logos" is on — the sender domain's BIMI logo. The monogram renders until a picture is known and stays
  * when none is, or when one fails to load (revoked, offline, CSP, a broken URL): each
- * candidate is tried in turn and a failure falls through to the next. No Gravatar or
- * favicon lookups: each of those would tell a third party who mails the user.
+ * candidate is tried in turn and a failure falls through to the next. No favicon
+ * lookups, and Gravatar only behind its own switch: each tells a third party who mails
+ * the user.
  *
  * Every picture is an `<img>`. A BIMI logo is an SVG from the sender's own host, and an
  * SVG drawn through `<img>` runs no script and loads nothing else; it is never inlined.
@@ -20,6 +21,7 @@
 
 import { useState } from "react";
 import { useSenderPictures } from "../senderPictures";
+import { isGravatarUrl } from "../../core/avatars/gravatar";
 import { avatarInitial, avatarTone, type AvatarTone } from "../avatar";
 
 const TONE_CLASS: Record<AvatarTone, string> = {
@@ -40,7 +42,7 @@ type Props = {
 };
 
 export function Avatar({ name, address, photo, lookup = true, size = 32, className = "" }: Props) {
-  const found = useSenderPictures(lookup ? address : "", photo, name);
+  const found = useSenderPictures(lookup ? address : "", photo, name, size);
   const candidates = lookup ? found : photo ? [photo] : [];
   // URLs that failed to load in this avatar. A new URL gets a fresh attempt.
   const [failed, setFailed] = useState<readonly string[]>([]);
@@ -72,6 +74,9 @@ export function Avatar({ name, address, photo, lookup = true, size = 32, classNa
           alt=""
           // No referrer, no drag ghost, no layout jump while it loads.
           referrerPolicy="no-referrer"
+          // Gravatar sends `Access-Control-Allow-Origin: *`, so its image can go without
+          // cookies. Not for other hosts: one without that header would fail to load.
+          crossOrigin={isGravatarUrl(picture) ? "anonymous" : undefined}
           draggable={false}
           loading="lazy"
           decoding="async"
