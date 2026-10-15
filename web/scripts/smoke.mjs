@@ -3489,7 +3489,7 @@ try {
     await d.keyboard.press("ArrowDown");
     check(
       "arrow keys move through it",
-      (await d.evaluate(() => document.activeElement?.getAttribute("data-menu-item"))) === "sender-copy",
+      (await d.evaluate(() => document.activeElement?.getAttribute("data-menu-item"))) === "sender-all",
     );
     await d.keyboard.press("j"); // swallowed by the menu, not routed to the list
     check("shortcuts do not leak out of an open menu", (await current()) === 0);
@@ -3562,6 +3562,148 @@ try {
     await d.keyboard.press("Escape");
     await d.waitForTimeout(100);
     check("Escape clears the selection", (await checkedCount()) === 0 && (await d.locator("[data-selection-bar]").count()) === 0);
+
+    // Drag from the sender avatar. The avatar is a control (a click opens the sender
+    // menu), and the drag code used to ignore every press on a control, so pressing an
+    // avatar and dragging did nothing at all.
+    {
+      const scroller = d.locator("[data-row-count]");
+      const avatarCenter = async (i) => {
+        const box = await rows.nth(i).locator("[data-row-control='avatar']").boundingBox();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      };
+      await d.evaluate(() => {
+        window.__nativeDrags = 0;
+        document.addEventListener("dragstart", () => (window.__nativeDrags += 1), true);
+      });
+      const from = await avatarCenter(1);
+      const to = await avatarCenter(4);
+      const back = await avatarCenter(2);
+      await d.mouse.move(from.x, from.y);
+      await d.mouse.down();
+      await d.mouse.move(from.x, from.y + 12, { steps: 3 });
+      await d.mouse.move(to.x, to.y, { steps: 8 });
+      await d.waitForTimeout(100);
+      check("dragging down from an avatar selects the rows it passes", (await checkedCount()) === 4, `${await checkedCount()}`);
+      await d.mouse.move(back.x, back.y, { steps: 6 });
+      await d.waitForTimeout(100);
+      check("and moving back up shrinks the range", (await checkedCount()) === 2, `${await checkedCount()}`);
+      await d.mouse.move(to.x, to.y, { steps: 6 });
+      await d.mouse.up();
+      await d.waitForTimeout(150);
+      check("releasing keeps the range", (await checkedCount()) === 4, `${await checkedCount()}`);
+      check("the selection bar shows the count, ready for an action", (await d.locator("[data-selection-bar='desktop'] [data-selection-count='4']").count()) === 1);
+      check("an avatar drag opens neither the sender menu nor a message", (await d.locator("[data-menu='sender']").count()) === 0 && (await current()) === 0);
+      check("no native image drag starts from the avatar", (await d.evaluate(() => window.__nativeDrags)) === 0);
+      check("and no text is selected", (await d.evaluate(() => window.getSelection()?.toString() ?? "")) === "");
+      check(
+        "with something selected the avatars become checkboxes",
+        (await d.locator("[data-row-count] [data-row-control='avatar'][aria-pressed]").count()) === (await rows.count()),
+      );
+      await d.keyboard.press("Escape");
+      await d.waitForTimeout(100);
+
+      // Escape mid-drag puts back what was there before the press.
+      await d.mouse.move(from.x, from.y);
+      await d.mouse.down();
+      await d.mouse.move(to.x, to.y, { steps: 8 });
+      await d.waitForTimeout(80);
+      const during = await checkedCount();
+      await d.keyboard.press("Escape");
+      await d.waitForTimeout(80);
+      check("Escape mid-drag cancels it", during === 4 && (await checkedCount()) === 0, `${during} → ${await checkedCount()}`);
+      await d.mouse.move(to.x, to.y + 40, { steps: 3 });
+      await d.mouse.up();
+      await d.waitForTimeout(120);
+      check("and the rest of that press does nothing", (await checkedCount()) === 0 && (await d.locator("[data-menu]").count()) === 0 && (await current()) === 0);
+
+      // A plain click on an avatar is still the sender menu, after all of that.
+      await rows.nth(3).locator("[data-row-control='avatar']").click();
+      await d.waitForTimeout(120);
+      check("a plain click on an avatar still opens the sender menu", (await d.locator("[data-menu='sender']").count()) === 1);
+      await d.keyboard.press("Escape");
+      await d.waitForTimeout(80);
+
+      // Past the bottom of the list: it scrolls and keeps selecting.
+      const box = await scroller.boundingBox();
+      const top0 = await scroller.evaluate((el) => el.scrollTop);
+      await d.mouse.move(from.x, from.y);
+      await d.mouse.down();
+      await d.mouse.move(from.x, from.y + 20, { steps: 3 });
+      await d.mouse.move(from.x, box.y + box.height + 60, { steps: 10 });
+      await d.waitForTimeout(700);
+      const scrolledBy = (await scroller.evaluate((el) => el.scrollTop)) - top0;
+      const farCount = await checkedCount();
+      check("dragging past the list's edge scrolls it", scrolledBy > 100, `${scrolledBy}px`);
+      // The wheel mid-drag moves rows under a still pointer; the range follows.
+      await d.mouse.move(from.x, box.y + box.height / 2, { steps: 4 });
+      await d.waitForTimeout(80);
+      const beforeWheel = Number(await d.locator("[data-selection-bar='desktop'] [data-selection-count]").getAttribute("data-selection-count"));
+      await d.mouse.wheel(0, 400);
+      await d.waitForTimeout(250);
+      const afterWheel = Number(await d.locator("[data-selection-bar='desktop'] [data-selection-count]").getAttribute("data-selection-count"));
+      check("and the selection grows with it", farCount > 4, `${farCount}`);
+      check("scrolling with the wheel mid-drag extends the range", afterWheel > beforeWheel, `${beforeWheel} → ${afterWheel}`);
+      // Let go outside the window: the drag still ends, and nothing is left stuck.
+      await d.mouse.move(from.x, -40, { steps: 4 });
+      await d.mouse.up();
+      await d.waitForTimeout(150);
+      const kept = Number(await d.locator("[data-selection-bar='desktop'] [data-selection-count]").getAttribute("data-selection-count"));
+      await d.mouse.move(from.x, box.y + box.height / 2, { steps: 4 });
+      await d.waitForTimeout(100);
+      const afterRelease = Number(await d.locator("[data-selection-bar='desktop'] [data-selection-count]").getAttribute("data-selection-count"));
+      check("releasing outside the window ends the drag", kept > 0 && afterRelease === kept, `${kept} → ${afterRelease}`);
+      await d.keyboard.press("Escape");
+      await scroller.evaluate((el) => (el.scrollTop = 0));
+      await d.waitForTimeout(200);
+
+      // The sender menu's way in: Select, then add to it.
+      await rows.nth(1).locator("[data-row-control='avatar']").click();
+      await d.waitForTimeout(120);
+      const menuIds = await d.locator("[data-menu='sender'] [role='menuitem']").evaluateAll((els) => els.map((e) => e.dataset.menuItem));
+      check("the sender menu leads with Select", menuIds[0] === "sender-select", menuIds.join(","));
+      check("with a lucide icon like its other items", (await d.locator("[data-menu-item='sender-select'] svg").count()) === 1);
+      check("the demo, whose contacts are seeded, does not offer to connect contact photos", !menuIds.includes("sender-photos"));
+      await d.keyboard.press("Enter"); // focus starts on the first item
+      await d.waitForTimeout(120);
+      check("Select puts that row in a selection", (await checkedCount()) === 1 && (await d.locator("[data-selection-bar='desktop'] [data-selection-count='1']").count()) === 1);
+      check("and closes the menu", (await d.locator("[data-menu='sender']").count()) === 0);
+      await rows.nth(3).locator("[data-row-control='avatar']").click();
+      await d.waitForTimeout(100);
+      check("then a click on another avatar adds it", (await checkedCount()) === 2);
+      const a2 = await avatarCenter(4);
+      const a3 = await avatarCenter(6);
+      await d.mouse.move(a2.x, a2.y);
+      await d.mouse.down();
+      await d.mouse.move(a3.x, a3.y, { steps: 8 });
+      await d.mouse.up();
+      await d.waitForTimeout(120);
+      check("and an avatar drag adds a range on top", (await checkedCount()) === 5, `${await checkedCount()}`);
+      await d.keyboard.press("Escape");
+      await d.waitForTimeout(100);
+
+      // Select all from this sender, for a sender with several rows.
+      const multi = await d.evaluate(() => {
+        const names = [...document.querySelectorAll("[data-row-count] [data-row-id] [data-row-sender]")].map((n) => n.textContent.trim());
+        const counts = new Map();
+        for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+        const name = [...counts].find(([, c]) => c > 1)?.[0];
+        return name ? { index: names.indexOf(name), count: counts.get(name) } : null;
+      });
+      if (multi) {
+        await rows.nth(multi.index).locator("[data-row-control='avatar']").click();
+        await d.waitForTimeout(120);
+        const all = d.locator("[data-menu-item='sender-select-all']");
+        check("Select all from this sender appears for a sender with several rows", (await all.count()) === 1, await all.textContent().catch(() => ""));
+        await all.click();
+        await d.waitForTimeout(120);
+        check("and selects at least every one of their mounted rows", (await checkedCount()) >= multi.count, `${await checkedCount()} of ${multi.count}`);
+        await d.keyboard.press("Escape");
+        await d.waitForTimeout(100);
+      } else {
+        check("the demo has a sender with several rows for Select all", false);
+      }
+    }
 
     // A plain click still opens.
     await rowButton(1).click();
@@ -3686,6 +3828,54 @@ try {
     const count = () => p.locator("[data-row-count] [data-row-id][data-checked]").count();
 
     check("phone rows have avatars", (await p.locator("[data-row-count] [data-row-control='avatar']").count()) > 0);
+    // The avatar on a phone: a tap is the sender menu, a swipe is a scroll, and a
+    // long-press selects and then slides on to select a range.
+    {
+      const avatarAt = async (i) => {
+        const box = await rows.nth(i).locator("[data-row-control='avatar']").boundingBox();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      };
+      const scroller = p.locator("[data-row-count]");
+      const slide = async (from, toY, { hold }) => {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] });
+        await p.waitForTimeout(hold);
+        for (let i = 1; i <= 12; i += 1) {
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x, y: from.y + ((toY - from.y) * i) / 12 }] });
+          await p.waitForTimeout(16);
+        }
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await p.waitForTimeout(250);
+      };
+
+      const tapAt = await avatarAt(2);
+      await p.touchscreen.tap(tapAt.x, tapAt.y);
+      await p.waitForTimeout(150);
+      check("a tap on a phone avatar opens the sender menu", (await p.locator("[data-menu='sender']").count()) === 1);
+      check("which offers Select there too", (await p.locator("[data-menu='sender'] [data-menu-item='sender-select']").count()) === 1);
+      await p.keyboard.press("Escape");
+      await p.waitForTimeout(150);
+
+      const top0 = await scroller.evaluate((el) => el.scrollTop);
+      const start = await avatarAt(5);
+      await slide(start, start.y - 220, { hold: 0 });
+      const swiped = (await scroller.evaluate((el) => el.scrollTop)) - top0;
+      check("a quick swipe starting on an avatar scrolls the list", swiped > 50, `${swiped}px`);
+      check("and selects nothing", (await count()) === 0);
+      await scroller.evaluate((el) => (el.scrollTop = 0));
+      await p.waitForTimeout(200);
+
+      const from = await avatarAt(1);
+      const to = await avatarAt(4);
+      const top1 = await scroller.evaluate((el) => el.scrollTop);
+      await slide(from, to.y, { hold: 650 });
+      check("a long-press on an avatar, then a slide, selects the range", (await count()) === 4, `${await count()}`);
+      check("without scrolling the list under the finger", Math.abs((await scroller.evaluate((el) => el.scrollTop)) - top1) < 2);
+      check("the phone selection bar shows the count", (await p.locator("[data-selection-bar='phone'] [data-selection-count='4']").count()) === 1);
+      check("nothing opened", (await p.locator("[data-reader]").count()) === 0 && (await p.locator("[data-menu]").count()) === 0);
+      await p.locator("[data-selection-bar='phone'] button[aria-label='Clear selection']").tap();
+      await p.waitForTimeout(150);
+    }
+
     await longPress(1);
     check("a long-press enters select mode with that row", (await count()) === 1 && (await p.locator("[data-row-count][data-select-mode]").count()) === 1);
     check("without opening the message", (await p.locator("[data-reader]").count()) === 0);
