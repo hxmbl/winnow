@@ -1,30 +1,38 @@
 /**
- * Where you can go: the desktop's floating sidebar and the phone's overflow menu.
+ * Where you can go: the sidebar, an overlay on every screen size.
  *
- * Both draw the same `NavSections`: Inbox with its count, then "Mail" (the other
- * folders). They differ only in where they sit and how big a target is. The smart
- * filters are not here: they are the filter rail above the list on the desktop and the
- * chip row above the dock on a phone (`FilterStrip`).
+ * It draws `NavSections` (Inbox with its count, then "Mail", the other folders) and the
+ * account footer. The smart filters are not here: they are the filter rail above the
+ * list on the desktop and the chip row above the dock on a phone (`FilterStrip`).
  *
- * **The sidebar floats.** 8px from the window's left and top edges, 12px radius, and
- * only as tall as what is in it: it does not run to the bottom of the window, and it
- * scrolls inside itself when the window is shorter than its contents. Its fill is the
- * surface at about three-quarters opacity over a progressive backdrop blur, strongest at
- * its root (the left edge) and fading towards the right: three stacked `backdrop-filter`
- * layers (2/6/14px), each masked by a left→right gradient. No shadow; a hairline edge.
+ * **The sidebar floats over the app.** 8px from the window's left and top edges, 12px
+ * radius, and only as tall as what is in it; it scrolls inside itself when the window is
+ * shorter than its contents. It slides in over the list and the reader instead of
+ * taking a column from them, and the rest of the app sits behind a progressive blur
+ * while it is open (see `Sidebar` and `sidebarOverlay.ts`). Its own fill is the surface
+ * at about three-quarters opacity over a progressive backdrop blur, strongest at its
+ * root (the left edge): three stacked `backdrop-filter` layers (2/6/14px), each masked
+ * by a left→right gradient. No shadow; a hairline edge.
  *
  * Every destination is a button in a `nav` list and the one you are on carries
  * `aria-current`.
  */
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { Avatar } from "./Avatar";
 import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
-import { Sheet } from "./Overlay";
 import { anchorFromElement } from "../menuPlacement";
 import type { Mailbox } from "../../core/model/email";
+import {
+  SIDEBAR_IDLE_CLOSE_MS,
+  armsIdleClose,
+  idleCloseAllowed,
+  isEditingElement,
+  scrimLayers,
+  scrimMask,
+} from "../sidebarOverlay";
 
 export type NavFolder = { id: Mailbox; label: string; unread: number };
 
@@ -65,7 +73,7 @@ function countLabel(count: number): string {
 type SectionsProps = NavProps & {
   /** 44px rows for a thumb, on the phone. */
   touch: boolean;
-  /** Called after any destination is chosen, so the phone menu can close. */
+  /** Called after any destination is chosen, so the sidebar can close. */
   onNavigate?: () => void;
 };
 
@@ -151,7 +159,11 @@ function NavSections({
 }
 
 /** The account's menu: sync and sign out, or connect from the demo. */
-function accountMenu(props: NavProps): MenuEntry[] {
+function accountMenu(props: NavProps, onNavigate?: () => void): MenuEntry[] {
+  const then = (action: () => void) => () => {
+    action();
+    onNavigate?.();
+  };
   if (!props.accountEmail) {
     return [
       {
@@ -160,14 +172,14 @@ function accountMenu(props: NavProps): MenuEntry[] {
         label: props.signingIn ? "Waiting for Google…" : "Connect Gmail",
         icon: LogIn,
         disabled: props.signingIn,
-        onSelect: props.onConnect,
+        onSelect: then(props.onConnect),
       },
     ];
   }
   return [
-    { kind: "item", id: "sync", label: props.syncLabel, icon: RefreshCw, disabled: props.syncing, onSelect: props.onRefresh },
+    { kind: "item", id: "sync", label: props.syncLabel, icon: RefreshCw, disabled: props.syncing, onSelect: then(props.onRefresh) },
     { kind: "divider", id: "d1" },
-    { kind: "item", id: "sign-out", label: "Sign out", icon: LogOut, danger: true, onSelect: props.onSignOut },
+    { kind: "item", id: "sign-out", label: "Sign out", icon: LogOut, danger: true, onSelect: then(props.onSignOut) },
   ];
 }
 
@@ -214,7 +226,7 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
       </button>
       {anchor && (
         <Menu
-          items={accountMenu(props)}
+          items={accountMenu(props, props.onNavigate)}
           anchor={anchor}
           label="Account"
           testId="account-menu"
@@ -226,55 +238,216 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
   );
 }
 
-/** The desktop sidebar. See the file comment for why it floats and how it blurs. */
-export function Sidebar(props: NavProps) {
-  return (
-    <aside
-      data-sidebar=""
-      aria-label="Sidebar"
-      className="fixed left-2 top-2 z-30 flex max-h-[calc(100dvh-1rem)] w-60 flex-col overflow-hidden rounded-pane border border-hairline"
-    >
-      {/* The progressive blur, root (left) to tip (right), then the tint over it. */}
-      <div aria-hidden="true" className="wn-sidebar-blur wn-sidebar-blur-1" />
-      <div aria-hidden="true" className="wn-sidebar-blur wn-sidebar-blur-2" />
-      <div aria-hidden="true" className="wn-sidebar-blur wn-sidebar-blur-3" />
-      <div aria-hidden="true" className="wn-sidebar-tint" />
+export type SidebarProps = NavProps & {
+  open: boolean;
+  /** Close it: outside click, Escape, a destination chosen, or the idle timer. */
+  onClose: () => void;
+  /** Touch-sized rows and a width that leaves a strip of the app showing, on a phone. */
+  touch: boolean;
+};
 
-      <div className="relative flex min-h-0 flex-col">
-        <div className="flex shrink-0 items-center gap-2.5 px-3 pb-2 pt-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline">
-            <AppMark size={22} />
-          </span>
-          <span className="text-read font-semibold text-ink">Winnow</span>
-        </div>
-        <div data-sidebar-scroll="" className="thin-scroll min-h-0 overflow-y-auto px-1.5 pb-2">
-          <NavSections {...props} touch={false} />
-        </div>
-        <AccountFooter {...props} touch={false} />
-      </div>
-    </aside>
-  );
-}
+/** Elements that can hold focus, for the Tab trap. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * The phone's overflow menu, Linear-style: one sheet from the top-bar menu button with
- * Inbox, the folders, and the account with Settings. No quick filter: with the smart
- * filters back in the dock's chip row there are only a handful of rows left to narrow.
+ * The sidebar, as an overlay over the app on every screen.
+ *
+ * It slides in over the list and the reader rather than taking a column from them, so
+ * opening it never reflows anything. While it is open the rest of the app is behind a
+ * progressive blur that is strongest at the sidebar's edge and fades out across the
+ * window (`scrimLayers`), over a light tint of the mode's scrim colour, and is `inert`.
+ *
+ * It closes itself when it is not in use: a click or tap outside it, Escape, choosing
+ * anything in it, or the mouse being away from it for `SIDEBAR_IDLE_CLOSE_MS` while
+ * nothing inside it is being used (`idleCloseAllowed`). Focus moves in on open (to the
+ * current destination) and back to whatever opened it on close.
+ *
+ * Always mounted, so it can animate out as well as in: closed, it is translated off the
+ * left edge, `visibility: hidden` once the slide has finished, and `inert`.
  */
-export function OverflowMenu(props: NavProps & { onClose: () => void }) {
+export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  /** Whatever had focus when the sidebar opened, so it can be given back. */
+  const restoreRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  const idleTimer = useRef<number | null>(null);
+  const pointerInside = useRef(false);
+
+  const clearIdle = useCallback(() => {
+    if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
+    idleTimer.current = null;
+  }, []);
+
+  const armIdle = useCallback(() => {
+    clearIdle();
+    idleTimer.current = window.setTimeout(function check() {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const active = document.activeElement;
+      const inside = active !== null && panel.contains(active);
+      const state = {
+        pointerInside: pointerInside.current,
+        menuOpen: panel.querySelector('[role="menu"]') !== null,
+        editing: inside && isEditingElement(active),
+        keyboardFocus: inside && active.matches(":focus-visible"),
+      };
+      if (idleCloseAllowed(state)) {
+        idleTimer.current = null;
+        onClose();
+      } else if (!state.pointerInside) {
+        // Still away, but something in the sidebar is in use: look again later.
+        idleTimer.current = window.setTimeout(check, SIDEBAR_IDLE_CLOSE_MS);
+      } else {
+        idleTimer.current = null;
+      }
+    }, SIDEBAR_IDLE_CLOSE_MS);
+  }, [clearIdle, onClose]);
+
+  useEffect(() => clearIdle, [clearIdle]);
+
+  // Focus in on open; back out on close.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    if (open) {
+      wasOpen.current = true;
+      pointerInside.current = false;
+      const active = document.activeElement;
+      restoreRef.current = active instanceof HTMLElement && !panel.contains(active) ? active : null;
+      const target =
+        panel.querySelector<HTMLElement>('[data-mail-nav] [aria-current="page"]') ??
+        panel.querySelector<HTMLElement>("[data-mail-nav] button") ??
+        panel;
+      target.focus({ preventScroll: true });
+      return;
+    }
+    clearIdle();
+    if (!wasOpen.current) return;
+    wasOpen.current = false;
+    // Something else took focus on the way out (Settings opening its sheet): leave it.
+    const active = document.activeElement;
+    if (active && active !== document.body && !panel.contains(active)) return;
+    const opener = restoreRef.current;
+    restoreRef.current = null;
+    const back =
+      opener?.isConnected && opener.getClientRects().length > 0
+        ? opener
+        : document.querySelector<HTMLElement>("[data-sidebar-toggle]");
+    back?.focus({ preventScroll: true });
+  }, [open, clearIdle]);
+
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // The account menu handles its own Escape and stops it, so this is the sidebar's.
+        // Stopped here so the app's window handler does not also clear a filter or close
+        // the reader on the same keypress.
+        event.stopPropagation();
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+        (element) => element.getClientRects().length > 0,
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    },
+    [onClose],
+  );
+
+  // Where the sidebar's right edge is, for the scrim's masks.
+  const edge = touch ? "calc(0.5rem + min(18rem, 100vw - 4rem))" : "calc(0.5rem + 15rem)";
+
   return (
-    <Sheet
-      label="Menu"
-      placement="fill"
-      onClose={props.onClose}
-      className="mx-2 mt-[max(0.5rem,env(safe-area-inset-top))] flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome"
-    >
-      <div data-overflow-menu="" className="flex min-h-0 flex-1 flex-col">
-        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto px-1 pb-2 pt-2">
-          <NavSections {...props} touch onNavigate={props.onClose} />
-        </div>
-        <AccountFooter {...props} touch onNavigate={props.onClose} />
+    <>
+      <div
+        aria-hidden="true"
+        data-sidebar-scrim=""
+        data-open={open ? "" : undefined}
+        className="wn-scrim fixed inset-0 z-40"
+        style={{ "--wn-sidebar-edge": edge } as React.CSSProperties}
+        onClick={open ? onClose : undefined}
+      >
+        {scrimLayers(touch).map((layer) => {
+          const mask = scrimMask(layer, "var(--wn-sidebar-edge)");
+          return (
+            <div
+              key={layer.blur}
+              data-scrim-layer={layer.blur}
+              className="wn-scrim-layer"
+              style={{
+                backdropFilter: `blur(${layer.blur}px)`,
+                WebkitBackdropFilter: `blur(${layer.blur}px)`,
+                maskImage: mask,
+                WebkitMaskImage: mask,
+              }}
+            />
+          );
+        })}
+        <div className="wn-scrim-tint" />
       </div>
-    </Sheet>
+
+      <div
+        ref={panelRef}
+        id="winnow-sidebar"
+        data-sidebar=""
+        data-open={open ? "" : undefined}
+        // A dialog only while it is one: closed, it is hidden and inert, and a closed
+        // sidebar answering to `[role="dialog"]` would read as an open sheet.
+        role={open ? "dialog" : undefined}
+        aria-modal={open ? true : undefined}
+        aria-label="Menu"
+        aria-hidden={open ? undefined : true}
+        inert={!open}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        onPointerEnter={() => {
+          pointerInside.current = true;
+          clearIdle();
+        }}
+        onPointerLeave={(event) => {
+          if (!armsIdleClose(event.pointerType)) return;
+          pointerInside.current = false;
+          if (open) armIdle();
+        }}
+        className={`wn-sidebar-panel fixed left-2 z-50 flex flex-col overflow-hidden rounded-pane border border-hairline outline-none ${
+          touch
+            ? "top-[max(0.5rem,env(safe-area-inset-top))] max-h-[calc(100dvh-1rem-env(safe-area-inset-top))] w-[min(18rem,calc(100vw-4rem))]"
+            : "top-2 max-h-[calc(100dvh-1rem)] w-60"
+        }`}
+      >
+        {/* The progressive blur, root (left) to tip (right), then the tint over it. */}
+        <div aria-hidden="true" className="wn-sidebar-blur wn-sidebar-blur-1" />
+        <div aria-hidden="true" className="wn-sidebar-blur wn-sidebar-blur-2" />
+        <div aria-hidden="true" className="wn-sidebar-blur wn-sidebar-blur-3" />
+        <div aria-hidden="true" className="wn-sidebar-tint" />
+
+        <div className="relative flex min-h-0 flex-col">
+          <div className="flex shrink-0 items-center gap-2.5 px-3 pb-2 pt-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline">
+              <AppMark size={22} />
+            </span>
+            <span className="text-read font-semibold text-ink">Winnow</span>
+          </div>
+          <div data-sidebar-scroll="" className="thin-scroll min-h-0 overflow-y-auto px-1.5 pb-2">
+            <NavSections {...props} touch={touch} onNavigate={onClose} />
+          </div>
+          <AccountFooter {...props} touch={touch} onNavigate={onClose} />
+        </div>
+      </div>
+    </>
   );
 }

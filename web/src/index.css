@@ -252,3 +252,99 @@ body {
 .wn-pill-count {
   color: var(--wn-pill-count);
 }
+
+/*
+ * The sidebar as an overlay (`Sidebar` in `MailNav.tsx`).
+ *
+ * The panel slides in from the left edge and the scrim fades in behind it. Both stay
+ * mounted, so closing animates too: `visibility` flips to hidden only once the slide
+ * has finished, which keeps the off-screen panel and the full-screen blur out of the
+ * paint (and the tab order) while closed.
+ *
+ * The opacity sits on each scrim layer rather than on the scrim: an ancestor with
+ * `opacity` below 1 is a backdrop root, and a `backdrop-filter` under one blurs
+ * nothing.
+ */
+.wn-sidebar-panel {
+  transform: translateX(calc(-100% - 1rem));
+  visibility: hidden;
+  transition:
+    transform 160ms cubic-bezier(0.4, 0, 1, 1),
+    visibility 0s linear 160ms;
+}
+
+.wn-sidebar-panel[data-open] {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s;
+}
+
+.wn-scrim {
+  visibility: hidden;
+  pointer-events: none;
+  touch-action: none;
+  transition: visibility 0s linear 180ms;
+}
+
+.wn-scrim[data-open] {
+  visibility: visible;
+  pointer-events: auto;
+  transition: visibility 0s;
+}
+
+.wn-scrim-layer,
+.wn-scrim-tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease-in;
+}
+
+.wn-scrim[data-open] .wn-scrim-layer,
+.wn-scrim[data-open] .wn-scrim-tint {
+  opacity: 1;
+  transition: opacity 240ms ease-out;
+}
+
+/* The tint: the mode's scrim colour, heavier at the sidebar and lighter across. */
+.wn-scrim-tint {
+  background: var(--wn-scrim);
+}
+
+@supports (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-scrim-tint {
+    background: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--wn-scrim) 70%, transparent) var(--wn-sidebar-edge),
+      color-mix(in srgb, var(--wn-scrim) 25%, transparent)
+    );
+  }
+}
+
+/* No backdrop-filter: no glass, just the plain tint at full strength. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .wn-scrim-layer {
+    display: none;
+  }
+
+  .wn-scrim-tint {
+    background: var(--wn-scrim);
+  }
+}
+
+/* Reduced motion: no slide and no fade, it is simply there or not. */
+@media (prefers-reduced-motion: reduce) {
+  .wn-sidebar-panel,
+  .wn-sidebar-panel[data-open],
+  .wn-scrim,
+  .wn-scrim[data-open],
+  .wn-scrim-layer,
+  .wn-scrim-tint,
+  .wn-scrim[data-open] .wn-scrim-layer,
+  .wn-scrim[data-open] .wn-scrim-tint {
+    transition: none !important;
+  }
+}

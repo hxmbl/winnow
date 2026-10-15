@@ -52,7 +52,7 @@ import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
-import { OverflowMenu, Sidebar, type NavProps } from "./ui/components/MailNav";
+import { Sidebar, type NavProps } from "./ui/components/MailNav";
 import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
 import { Reader } from "./ui/components/Reader";
@@ -608,17 +608,22 @@ export function App({ store }: Props) {
   );
 
   /**
-   * Whether the phone's overflow menu is open.
+   * Whether the sidebar is open.
    *
-   * Local state rather than a store `overlay`, because the menu is not one of the three
-   * things the keyboard router dismisses and must not inherit their `Escape` handling:
-   * the `Sheet` inside it handles its own, and two Escape handlers on one keypress is how
-   * a sheet closes the reader *and* itself.
+   * The sidebar is an overlay on every screen (`Sidebar` in `MailNav.tsx`), opened from
+   * the masthead's toggle on the desktop and the top bar's menu button on a phone.
+   * Local state rather than a store `overlay`, because the sidebar handles its own
+   * Escape and must not inherit the keyboard router's: two Escape handlers on one
+   * keypress is how a sheet closes the reader *and* itself.
    */
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarOpenRef = useRef(sidebarOpen);
+  sidebarOpenRef.current = sidebarOpen;
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), []);
 
   /**
-   * The sidebar and the overflow menu: the same destinations, one model. The Inbox
+   * The sidebar's destinations. The Inbox
    * count is the unfiltered inbox list's own number of conversations. The smart filters
    * are not here; they are the rail (`FilterStrip`).
    */
@@ -1105,6 +1110,16 @@ export function App({ store }: Props) {
       // An open menu owns the keyboard; its own handler has already acted.
       if (menuRef.current) return;
 
+      // The open sidebar is modal: the app behind it is inert, so no shortcut reaches
+      // it. Escape from outside the sidebar (focus fell to the body) still closes it.
+      if (sidebarOpenRef.current) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setSidebarOpen(false);
+        }
+        return;
+      }
+
       // Enter or Space on a control that is not a row (an avatar, a star, a toolbar
       // button) is that button's click, not "open the message at the cursor".
       if (
@@ -1439,12 +1454,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   return (
     <SenderPicturesContext.Provider value={senderPictures}>
-    <div className={`flex h-dvh flex-col overflow-hidden bg-canvas text-ink ${phone ? "" : "pl-64"}`}>
+    <div inert={sidebarOpen} className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
       {/*
         The chrome. On a phone, the top bar (search and the menu button). On the desktop,
-        the floating sidebar with every destination; search, where-you-are and the filter
-        rail head the list column (see `Masthead` below), and the email actions live in
-        the reader.
+        search, where-you-are, the filter rail and the sidebar toggle head the list column
+        (see `Masthead` below), and the email actions live in the reader. The sidebar
+        itself is an overlay on both, rendered after everything else.
       */}
       {phone ? (
         // On a phone the reader takes the whole screen, its own way back included, so
@@ -1467,8 +1482,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onSearchChange={store.setSearchQuery.bind(store)}
             searchRef={searchRef}
             accountEmail={snapshot.account?.email ?? null}
-            onOpenNavigation={() => setDrawerOpen(true)}
-            navigationOpen={drawerOpen}
+            onOpenNavigation={toggleSidebar}
+            navigationOpen={sidebarOpen}
             listTitle={store.listTitle()}
             position={null}
             total={view.threads.length}
@@ -1478,9 +1493,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onMarkAllRead={store.markAllRead.bind(store)}
           />
         )
-      ) : (
-        <Sidebar {...navProps} />
-      )}
+      ) : null}
 
       <p role="status" aria-live="polite" className="sr-only" data-code-announcement="">
         {codeAnnouncement}
@@ -1659,6 +1672,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               searchQuery={snapshot.searchQuery}
               onSearchChange={store.setSearchQuery.bind(store)}
               searchRef={searchRef}
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={toggleSidebar}
               pills={pills}
               activeFilters={snapshot.activeFilters}
               onToggleFilter={store.toggleFilter.bind(store)}
@@ -1934,8 +1949,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       {snapshot.overlay === "shortcuts" && (
         <ShortcutSheet onClose={() => store.setOverlay("none")} />
       )}
-
-      {phone && drawerOpen && <OverflowMenu {...navProps} onClose={() => setDrawerOpen(false)} />}
 
       {snapshot.overlay === "navigation" && (
         <NavigationPalette
@@ -2228,6 +2241,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
       )}
     </div>
+
+    {/*
+      The sidebar: an overlay on every screen, outside the app's root so that root can be
+      made `inert` while it is open.
+    */}
+    <Sidebar {...navProps} open={sidebarOpen} onClose={closeSidebar} touch={phone} />
     </SenderPicturesContext.Provider>
   );
 }

@@ -97,14 +97,16 @@ export function PhoneTopBar({
         </label>
 
         {/*
-          The menu: the overflow sheet it opens holds Inbox, every folder (Trash and Spam
+          The menu: the sidebar it opens holds Inbox, every folder (Trash and Spam
           included, which the dock has no room for), the account and Settings. The smart
           filters are not in it: they are the chip row above the dock. Signed in, it wears the account's initial.
         */}
         <button
           type="button"
+          data-sidebar-toggle=""
           onClick={onOpenNavigation}
           aria-expanded={navigationOpen}
+          aria-controls="winnow-sidebar"
           aria-haspopup="dialog"
           aria-label="Open menu"
           title={accountEmail ?? "Menu"}

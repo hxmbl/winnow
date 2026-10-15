@@ -5,10 +5,11 @@
  * The smart filters are the rail (`FilterStrip`), not sidebar rows: coloured pills with
  * their counts, ranked by the store, fading into a step chevron at either edge. It has
  * the list column's full width to itself, so the search field can never sit over its
- * last tab. Folders and the account are the floating sidebar's (`MailNav.tsx`).
+ * last tab. Folders and the account are the sidebar's (`MailNav.tsx`), an overlay the
+ * toggle at the head of this row opens.
  */
 
-import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, PanelLeft, Search } from "lucide-react";
 import { shortcutFor } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { BuiltinSmartFilter, FilterId } from "../../core/model/signals";
@@ -23,6 +24,9 @@ export type MastheadProps = {
    * exact element. If the two diverge, `/` silently does nothing.
    */
   searchRef: React.RefObject<HTMLInputElement | null>;
+  /** Whether the sidebar overlay is open, for the toggle's `aria-expanded`. */
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
   pills: PillItem[];
   activeFilters: readonly FilterId[];
   onToggleFilter: (id: FilterId) => void;
@@ -81,6 +85,8 @@ export function Masthead({
   searchQuery,
   onSearchChange,
   searchRef,
+  sidebarOpen,
+  onToggleSidebar,
   pills,
   activeFilters,
   onToggleFilter,
@@ -100,6 +106,20 @@ export function Masthead({
     // it, separated by nothing but the change in what the two contain.
     <header data-masthead="" className="relative z-20 shrink-0">
       <div className="flex h-14 min-w-0 items-center gap-3 px-4">
+        {/* The sidebar's toggle, at the edge the sidebar slides in from. */}
+        <button
+          type="button"
+          data-sidebar-toggle=""
+          onClick={onToggleSidebar}
+          aria-expanded={sidebarOpen}
+          aria-controls="winnow-sidebar"
+          aria-haspopup="dialog"
+          aria-label="Open sidebar"
+          title="Sidebar"
+          className="-ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          <PanelLeft size={18} strokeWidth={1.8} aria-hidden="true" />
+        </button>
         {/* Search takes the width; where-you-are keeps its own. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <label
