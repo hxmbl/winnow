@@ -24,6 +24,15 @@ export const LOGO_RETRY_MS = 10 * 60 * 1000;
 /** Entries kept in storage. Oldest dropped first. */
 export const MAX_LOGO_ENTRIES = 500;
 export const LOGO_STORAGE_KEY = "winnow.brandLogos.v1";
+/**
+ * Lookups waiting behind the rate limit, at most. Scrolling through a few thousand
+ * senders would otherwise queue a lookup for every row that ever flashed past; the
+ * oldest requests (rows long scrolled away) are dropped, unanswered rather than
+ * remembered, so a row that comes back asks again.
+ */
+export const MAX_QUEUED_LOOKUPS = 100;
+/** A stored entry dated further ahead than this is a bad clock or a bad write, not a fact. */
+const FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
 
 type Entry = { url: string | null; at: number };
 
@@ -45,10 +54,23 @@ export function localLogoStorage(key: string = LOGO_STORAGE_KEY): LogoStorage {
       }
     },
     write(entries) {
+      // Over quota: keep the newest half, then a quarter, and so on, rather than nothing
+      // or (worse) the stale copy from the last write that fitted. If even a handful
+      // will not fit, the key is removed and the cache lives in memory for this run.
+      let keep = Object.entries(entries).sort(([, a], [, b]) => b.at - a.at);
+      for (;;) {
+        try {
+          globalThis.localStorage?.setItem(key, JSON.stringify(Object.fromEntries(keep)));
+          return;
+        } catch {
+          if (keep.length <= 1) break;
+          keep = keep.slice(0, Math.floor(keep.length / 2));
+        }
+      }
       try {
-        globalThis.localStorage?.setItem(key, JSON.stringify(entries));
+        globalThis.localStorage?.removeItem(key);
       } catch {
-        // In memory for this run.
+        // Storage is unusable; memory it is.
       }
     },
     clear() {
@@ -82,6 +104,13 @@ type Options = {
   perMinute?: number;
   /** Injected for tests. */
   setTimer?: (fn: () => void, ms: number) => unknown;
+  /**
+   * Whether the network is there. Offline, nothing is looked up and nothing is
+   * remembered as a failure: the answer is simply not known yet, and `retryFailed` (on
+   * the window's `online` event) asks again. `core/` cannot read `navigator`, so the app
+   * passes it in; the default is always online.
+   */
+  isOnline?: () => boolean;
 };
 
 /** The answer for an address, as far as the cache knows right now. */
@@ -91,7 +120,7 @@ export class BrandLogoCache {
   private entries: Record<string, Entry>;
   private readonly inflight = new Map<string, Promise<string | null>>();
   private readonly failedAt = new Map<string, number>();
-  private readonly queue: { domain: string; run: () => void }[] = [];
+  private readonly queue: { domain: string; run: () => void; drop: () => void }[] = [];
   private readonly starts: number[] = [];
   private active = 0;
   private timerPending = false;
@@ -102,6 +131,7 @@ export class BrandLogoCache {
   private readonly concurrency: number;
   private readonly perMinute: number;
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
+  private readonly isOnline: () => boolean;
   /** Bumped on every change, for `useSyncExternalStore`. */
   version = 0;
 
@@ -111,7 +141,8 @@ export class BrandLogoCache {
     this.concurrency = options.concurrency ?? 2;
     this.perMinute = options.perMinute ?? 30;
     this.setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
-    this.entries = sanitise(this.storage.read());
+    this.isOnline = options.isOnline ?? (() => true);
+    this.entries = sanitise(this.storage.read(), this.now());
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -144,12 +175,22 @@ export class BrandLogoCache {
     if (running) return running;
     const failed = this.failedAt.get(domain);
     if (failed !== undefined && this.now() - failed < LOGO_RETRY_MS) return Promise.resolve(null);
+    if (!this.isOnline()) return Promise.resolve(null);
 
     const generation = this.generation;
+    // Only the entry this request put in the map: a lookup from before a `clear` must not
+    // delete the one a newer request for the same domain has started since.
+    const settle = () => {
+      if (this.inflight.get(domain) === promise) this.inflight.delete(domain);
+    };
     const promise = new Promise<string | null>((resolve) => {
       // Newest first: the rows on screen now are the ones that asked last.
       this.queue.unshift({
         domain,
+        drop: () => {
+          settle();
+          resolve(null);
+        },
         run: () => {
           void lookupBimiLogo(domain, this.options.resolve)
             .then(
@@ -164,7 +205,7 @@ export class BrandLogoCache {
             )
             .then((url) => {
               this.active -= 1;
-              this.inflight.delete(domain);
+              settle();
               resolve(url);
               this.pump();
             });
@@ -172,8 +213,18 @@ export class BrandLogoCache {
       });
     });
     this.inflight.set(domain, promise);
+    while (this.queue.length > MAX_QUEUED_LOOKUPS) this.queue.pop()?.drop();
     this.pump();
     return promise;
+  }
+
+  /**
+   * Forget recent failures and tell subscribers to ask again: for when the network
+   * comes back, so avatars that came up while offline get their logos without a reload.
+   */
+  retryFailed(): void {
+    this.failedAt.clear();
+    this.emit();
   }
 
   /** Forget everything: storage, memory, failures. Lookups still running are ignored. */
@@ -181,7 +232,9 @@ export class BrandLogoCache {
     this.generation += 1;
     this.entries = {};
     this.failedAt.clear();
-    this.queue.length = 0;
+    // Queued lookups never start; their callers get "no logo" rather than a promise
+    // that never settles.
+    for (const entry of this.queue.splice(0)) entry.drop();
     this.inflight.clear();
     this.storage.clear();
     this.emit();
@@ -237,11 +290,19 @@ export class BrandLogoCache {
   }
 }
 
-function sanitise(raw: Record<string, Entry> | null): Record<string, Entry> {
-  const out: Record<string, Entry> = {};
-  if (!raw || typeof raw !== "object") return out;
-  for (const [domain, entry] of Object.entries(raw)) {
+/**
+ * What storage held, minus anything it should not have: entries under a key that is not
+ * a domain, with a time that is not a finite number or is in the future (which would
+ * pin the entry until the clock caught up), and URLs that are no longer acceptable.
+ * Exported for tests.
+ */
+export function sanitise(raw: unknown, now: number): Record<string, Entry> {
+  const out: Record<string, Entry> = Object.create(null) as Record<string, Entry>;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [domain, entry] of Object.entries(raw as Record<string, Entry>)) {
+    if (senderDomain(`x@${domain}`) !== domain) continue;
     if (!entry || typeof entry !== "object" || typeof entry.at !== "number") continue;
+    if (!Number.isFinite(entry.at) || entry.at > now + FUTURE_SLACK_MS) continue;
     if (entry.url === null) {
       out[domain] = { url: null, at: entry.at };
       continue;
