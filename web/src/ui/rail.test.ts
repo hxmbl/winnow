@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildPills, digitFor, scrollToReveal, stepRail, type RailGeometry } from "./rail";
+import { buildPills, digitFor, scrollToReveal, stepRail, wheelPixels, type RailGeometry } from "./rail";
 import { builtinFilter, senderFilter, type BuiltinSmartFilter } from "../core/model/signals";
 
 const RAIL: BuiltinSmartFilter[] = ["important", "needs_action", "unsafe"];
@@ -197,5 +197,65 @@ describe("pill colours", () => {
   it("an appended active sender gets its colour too", () => {
     const pills = buildPills(RAIL, COUNTS, [], SENDER_COUNTS, [senderFilter("zed@other.test")]);
     expect(pills.find((pill) => pill.id.kind === "sender")?.hue.s).toBeGreaterThan(0);
+  });
+});
+
+describe("rail edge cases", () => {
+  const wide: RailGeometry = {
+    // A 600px sender pill in a rail whose clear area is 400px.
+    tabs: [
+      [0, 100],
+      [104, 704],
+      [708, 800],
+    ],
+    scrollLeft: 0,
+    clientWidth: 500,
+    scrollWidth: 800,
+    startInset: 44,
+    endInset: 56,
+  };
+
+  it("reveals the start of a tab wider than the clear area, not its end", () => {
+    // Coming from the left: its start lines up with the clear area's start.
+    expect(scrollToReveal(wide, wide.tabs[1])).toBe(104 - 44);
+    // Coming from the right (scrolled past it), the same.
+    expect(scrollToReveal({ ...wide, scrollLeft: 300 }, wide.tabs[1])).toBe(104 - 44);
+  });
+
+  it("clamps the reveal at both ends of the rail", () => {
+    expect(scrollToReveal({ ...wide, scrollLeft: 300 }, wide.tabs[0])).toBe(0);
+    expect(scrollToReveal(wide, wide.tabs[2])).toBe(300);
+  });
+
+  it("does not scroll a rail that has nothing to scroll", () => {
+    const short: RailGeometry = { ...wide, tabs: [[0, 80]], scrollWidth: 500 };
+    expect(scrollToReveal(short, [0, 80])).toBeNull();
+    expect(stepRail(short, 1)).toBe(0);
+    expect(stepRail(short, -1)).toBe(0);
+  });
+
+  it("steps through a tab wider than the clear area by pages, never backwards", () => {
+    const next = stepRail({ ...wide, scrollLeft: 60 }, 1);
+    expect(next).toBeGreaterThan(60);
+  });
+});
+
+describe("wheelPixels", () => {
+  it("passes pixel deltas through", () => {
+    expect(wheelPixels(120, 0, 500)).toBe(120);
+  });
+
+  it("turns Firefox's line deltas into pixels", () => {
+    expect(wheelPixels(3, 1, 500)).toBe(48);
+    expect(wheelPixels(-3, 1, 500)).toBe(-48);
+  });
+
+  it("turns page deltas into the rail's width", () => {
+    expect(wheelPixels(1, 2, 500)).toBe(500);
+    expect(wheelPixels(1, 2, 0)).toBe(1);
+  });
+
+  it("ignores a delta that is not a number", () => {
+    expect(wheelPixels(Number.NaN, 0, 500)).toBe(0);
   });
 });

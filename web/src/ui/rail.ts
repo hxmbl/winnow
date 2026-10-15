@@ -168,7 +168,10 @@ export function scrollToReveal(geometry: RailGeometry, [left, right]: readonly [
   const clearStart = scrollLeft + startInset;
   const clearEnd = scrollLeft + clientWidth - endInset;
   if (left >= clearStart - 1 && right <= clearEnd + 1) return null;
-  const target = left < clearStart ? left - startInset : right - clientWidth + endInset;
+  // A tab wider than the clear area (a long sender name in a narrow window) cannot fit
+  // either way; its start is what says what it is, so that is what is kept in view.
+  const tooWide = right - left > clientWidth - startInset - endInset;
+  const target = left < clearStart || tooWide ? left - startInset : right - clientWidth + endInset;
   const next = clampScroll(target, geometry);
   return next === Math.round(scrollLeft) ? null : next;
 }
@@ -199,4 +202,18 @@ export function stepRail(geometry: RailGeometry, direction: 1 | -1): number {
       ? cut[1] - clientWidth + endInset
       : scrollLeft - clearWidth;
   return clampScroll(target, geometry);
+}
+
+/**
+ * A wheel event's vertical delta in pixels, for scrolling the rail sideways.
+ *
+ * `deltaMode` is 0 for pixels (Chromium, Safari, trackpads), 1 for lines (Firefox with
+ * a mouse wheel: a notch is about 3) and 2 for pages. Read as pixels, a Firefox notch
+ * moved the rail three pixels. A line is taken as 16px and a page as the rail's width.
+ */
+export function wheelPixels(delta: number, deltaMode: number, pageWidth: number): number {
+  if (!Number.isFinite(delta)) return 0;
+  if (deltaMode === 1) return delta * 16;
+  if (deltaMode === 2) return delta * Math.max(1, pageWidth);
+  return delta;
 }

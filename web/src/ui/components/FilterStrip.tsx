@@ -19,7 +19,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { filterKey, type BuiltinSmartFilter, type FilterId } from "../../core/model/signals";
-import { digitFor, scrollToReveal, stepRail, type PillItem, type RailGeometry } from "../rail";
+import { digitFor, scrollToReveal, stepRail, wheelPixels, type PillItem, type RailGeometry } from "../rail";
 
 export type { PillItem } from "../rail";
 
@@ -84,6 +84,10 @@ export const FilterStrip = memo(function FilterStrip({
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   const leadingRef = useRef<HTMLDivElement>(null);
+  /** What changes the rail's content width: which pills, their counts, and "All". */
+  const contentSignature = `${hasActive ? "all|" : ""}${pills
+    .map((pill) => `${filterKey(pill.id)}:${pill.count}:${pill.muted ? 1 : 0}`)
+    .join("|")}`;
 
   // The edge fade is only drawn when there is actually more to scroll to, so a short
   // rail does not get a mysterious gradient over its last pill.
@@ -109,14 +113,20 @@ export const FilterStrip = memo(function FilterStrip({
     update();
     element.addEventListener("scroll", update, { passive: true });
     // A ResizeObserver rather than a window resize listener: the rail also reflows
-    // when the pane it lives in changes width, which is not a window event.
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
+    // when the pane it lives in changes width, which is not a window event. Its
+    // children are observed too: the scroller keeps its own size when its *content*
+    // grows ("All" appearing, a count gaining a digit, a pill going bold), and that is
+    // exactly when the end fade and its step button have to appear.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    if (observer) {
+      observer.observe(element);
+      for (const child of element.children) observer.observe(child);
+    }
     return () => {
       element.removeEventListener("scroll", update);
-      observer.disconnect();
+      observer?.disconnect();
     };
-  }, [pills.length]);
+  }, [contentSignature]);
 
   /** The rail as numbers, for the pure helpers in `rail.ts`. */
   const geometry = useCallback((): RailGeometry | null => {
@@ -204,7 +214,7 @@ export const FilterStrip = memo(function FilterStrip({
   const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     const element = scrollerRef.current;
     if (!element || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-    element.scrollLeft += event.deltaY;
+    element.scrollLeft += wheelPixels(event.deltaY, event.deltaMode, element.clientWidth);
   }, []);
 
   return (
@@ -278,7 +288,8 @@ export const FilterStrip = memo(function FilterStrip({
               }
               // The digit shortcut, where it can be found without a keycap crowding the
               // tab: the tooltip, the shortcut sheet, and `aria-keyshortcuts`.
-              title={digit ? `${label} (${digit})` : undefined}
+              // Always set: a long label is truncated, and this is where it is whole.
+              title={digit ? `${label} (${digit})` : label}
               aria-keyshortcuts={digit ?? undefined}
               className={`relative flex ${tabHeight} items-center gap-1.5 rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-default ${
                 hideable ? (touch ? "pl-3.5 pr-0.5" : "pl-2.5 pr-0.5") : touch ? "px-3.5" : "px-2.5"
@@ -289,11 +300,16 @@ export const FilterStrip = memo(function FilterStrip({
                 the cell is always as wide as the bolder one, so switching a pill on
                 thickens its text without nudging every pill after it along the rail.
               */}
-              <span className="grid">
-                <span aria-hidden="true" className="invisible col-start-1 row-start-1 font-semibold">
+              {/*
+                Capped, with an ellipsis: a sender pill is "From " plus whatever the
+                address is, and an unbroken 60-character one was wider than a medium
+                window's whole rail. The full label is in the title and the name.
+              */}
+              <span data-pill-label="" className="grid min-w-0 max-w-[14rem]">
+                <span aria-hidden="true" className="invisible col-start-1 row-start-1 truncate font-semibold">
                   {label}
                 </span>
-                <span className={`col-start-1 row-start-1 ${on ? "font-semibold" : "font-medium"}`}>{label}</span>
+                <span className={`col-start-1 row-start-1 truncate ${on ? "font-semibold" : "font-medium"}`}>{label}</span>
               </span>
               {/* `tabular-nums` so a count changing from 9 to 10 does not shift the label. */}
               <span className={`text-meta tabular-nums ${isMuted ? "" : "wn-pill-count"}`}>{count}</span>
