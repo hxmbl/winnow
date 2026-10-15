@@ -33,7 +33,7 @@ import {
 import { formatFullTime, formatRelative } from "../../core/mail/datetime";
 import { shortcutHint } from "../../core/mail/keybinds";
 import { countRemoteReferences } from "../../core/mail/html";
-import { displayAddress, displayName, type Email } from "../../core/model/email";
+import { displayAddress, displayName, recipientLines, type Email } from "../../core/model/email";
 import { Avatar } from "./Avatar";
 import {
   badgeFilters,
@@ -600,7 +600,7 @@ export function Reader({
     // `data-reader` so a test can reach the pane as a whole — the header's `<time>`
     // lives outside `<article>`, so "which message is open" cannot be answered from
     // the article alone.
-    <div data-reader="" className="flex min-h-0 flex-1 flex-col">
+    <div data-reader="" data-select-scope="" className="flex min-h-0 flex-1 flex-col">
       {/* Back bar for a narrow window. On a wide screen the reader is a pane beside
           the list, so closing it would be redundant; on a phone the dock has Back. */}
       {!phone && (
@@ -671,10 +671,10 @@ export function Reader({
               way, and it ellipsised to make room for controls you reach for later. */}
           <div className="flex flex-col gap-2.5 min-[1200px]:flex-row min-[1200px]:items-start min-[1200px]:justify-between min-[1200px]:gap-3">
             <div className="min-w-0">
-              <h2 className="truncate text-ui font-semibold text-ink">
+              <h2 data-reader-sender="" className="selectable truncate text-ui font-semibold text-ink">
                 {displayName(email)}
               </h2>
-              <p className="selectable truncate text-meta text-ink-subtle">
+              <p data-reader-address="" className="selectable truncate text-meta text-ink-subtle">
                 {displayAddress(email)}
               </p>
             </div>
@@ -690,7 +690,21 @@ export function Reader({
             />}
           </div>
 
-          <p className="mt-1 text-meta text-ink-subtle">
+          {/*
+            Who it went to. Selectable, and wrapped rather than truncated, because a
+            recipient list is exactly the text someone copies into another message.
+          */}
+          {recipientLines(email).map((line) => (
+            <p
+              key={line.field}
+              data-reader-recipients={line.field}
+              className="selectable mt-1 break-words text-meta text-ink-subtle"
+            >
+              <span className="text-ink-muted">{line.field}</span> {line.text}
+            </p>
+          ))}
+
+          <p data-reader-date="" className="selectable mt-1 text-meta text-ink-subtle">
             <time dateTime={new Date(email.receivedAt).toISOString()}>
               {formatFullTime(email.receivedAt)}
             </time>
@@ -764,7 +778,7 @@ export function Reader({
             </div>
           )}
 
-          <h1 className="max-w-[42ch] text-title font-semibold tracking-[-0.01em] text-ink">
+          <h1 className="max-w-[42ch] text-title font-semibold tracking-[-0.01em] text-ink" data-reader-subject="">
             {email.subject || "(no subject)"}
           </h1>
 

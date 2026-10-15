@@ -83,7 +83,48 @@ body {
   user-select: none;
 }
 
+/*
+  Readable text opts back in.
+
+  The body is chrome: a drag across the list, a double-click on a button or a long-press
+  on a row must not paint a selection. Text a user reads — a message, its header, an
+  error, a setting's value — is `.selectable`, and keeps the platform's long-press
+  callout (Copy, Look Up) that the list rows turn off.
+*/
 .selectable {
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/*
+  Controls stay chrome inside a selectable region: a double-click on a toolbar button or
+  a pill selects nothing, and a drag from the subject into the toolbar stops at its edge
+  instead of copying "Archive Trash Star". A sender's own markup is the exception; what
+  looks like a button in a message is the message.
+*/
+.selectable
+  :is(
+    button,
+    select,
+    summary,
+    label,
+    svg,
+    [role="button"],
+    [role="menuitem"],
+    [role="tab"],
+    [role="radio"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="option"],
+    [data-chrome]
+  ):not([data-wn-email] *) {
+  user-select: none;
+}
+
+/* A text field is always editable and selectable, wherever it sits. */
+input,
+textarea,
+[contenteditable]:not([contenteditable="false"]) {
   user-select: text;
 }
 

@@ -304,7 +304,10 @@ export function GoogleSetup(props: Props) {
           setDragging(false);
           void importFiles(event.dataTransfer.files);
         }}
-        className={`scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto ${dragging ? "outline-dashed outline-2 -outline-offset-4 outline-accent" : ""}`}
+        // Selectable, as one region: the setup steps, the redirect URI and the imported
+        // project id are text a user copies into the Google Cloud console.
+        data-select-scope=""
+        className={`selectable scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto ${dragging ? "outline-dashed outline-2 -outline-offset-4 outline-accent" : ""}`}
         data-testid="google-setup"
         data-dragging={dragging || undefined}
       >

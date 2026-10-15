@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hashId, localId, threadKey } from "./ids";
-import { displayAddress, displayName, isMailbox, MAILBOXES, MAILBOX_LABEL, mimeTypeForFilename, monogram } from "./email";
+import { displayAddress, displayName, formatContact, isMailbox, MAILBOXES, MAILBOX_LABEL, mimeTypeForFilename, monogram, recipientLines } from "./email";
 import type { Email } from "./email";
 
 function email(over: Partial<Email> = {}): Email {
@@ -131,5 +131,32 @@ describe("isMailbox", () => {
     // "One name per folder" — the palette reads `MAILBOX_LABEL` too, so a mailbox
     // without one renders as `undefined` rather than as a row with no text.
     expect(Object.keys(MAILBOX_LABEL).sort()).toEqual([...MAILBOXES].sort());
+  });
+});
+
+describe("recipientLines", () => {
+  it("prints a named recipient as a header would, and a bare one as its address", () => {
+    expect(formatContact({ name: "Ada Lovelace", address: "ada@example.com" })).toBe("Ada Lovelace <ada@example.com>");
+    expect(formatContact({ address: "bob@example.com" })).toBe("bob@example.com");
+    expect(formatContact({ name: "  ", address: "bob@example.com" })).toBe("bob@example.com");
+    expect(formatContact({ name: "bob@example.com", address: "bob@example.com" })).toBe("bob@example.com");
+  });
+
+  it("gives one line per field with anyone in it, in to/cc/bcc order", () => {
+    const lines = recipientLines(
+      email({
+        to: [{ name: "Ada", address: "ada@example.com" }, { address: "bob@example.com" }],
+        bcc: [{ address: "eve@example.com" }],
+        cc: [],
+      }),
+    );
+    expect(lines).toEqual([
+      { field: "to", text: "Ada <ada@example.com>, bob@example.com" },
+      { field: "bcc", text: "eve@example.com" },
+    ]);
+  });
+
+  it("is empty for a cached message that predates the recipient fields", () => {
+    expect(recipientLines(email())).toEqual([]);
   });
 });

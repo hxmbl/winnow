@@ -61,6 +61,7 @@ import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer, Settings } from "./ui/components/SettingsPanel";
 import { ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
+import { isSelectAll, selectAllScope } from "./ui/textSelection";
 import { SignInScreen } from "./ui/SignInScreen";
 import { GoogleSetup, SETUP_GUIDE_URL } from "./ui/components/GoogleSetup";
 import { describeFailure } from "./core/session/errors";
@@ -1147,6 +1148,16 @@ export function App({ store }: Props) {
   const closeComposerRef = useRef(closeComposer);
   closeComposerRef.current = closeComposer;
 
+  /** The element last pressed, for ⌘A to find the region the user is working in. */
+  const lastPressRef = useRef<Element | null>(null);
+  useEffect(() => {
+    const onPress = (event: PointerEvent) => {
+      lastPressRef.current = event.target instanceof Element ? event.target : null;
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  }, []);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const s = storeRef.current;
@@ -1157,6 +1168,26 @@ export function App({ store }: Props) {
 
       // An open menu owns the keyboard; its own handler has already acted.
       if (menuRef.current) return;
+
+      /*
+        ⌘A / Ctrl+A outside a text field selects the region the user is in — the
+        reader, the Settings sheet — rather than the browser's whole document, which in
+        an app whose chrome is unselectable means every scrap of selectable text at
+        once: the banner, the status line and the open message run together. With no
+        region to answer (the list has focus), it does nothing. A field keeps the
+        platform's own select-all.
+      */
+      if (isSelectAll(event) && !isEditingTarget(event.target)) {
+        event.preventDefault();
+        selectRegion(
+          selectAllScope([
+            document.activeElement === document.body ? null : document.activeElement,
+            lastPressRef.current,
+            document.getSelection()?.anchorNode?.parentElement ?? null,
+          ]) as Element | null,
+        );
+        return;
+      }
 
       // The open sidebar is modal: the app behind it is inert, so no shortcut reaches
       // it. Escape from outside the sidebar (focus fell to the body) still closes it.
@@ -1451,9 +1482,11 @@ export function App({ store }: Props) {
   if (snapshot.status === "error") {
     return (
       <div className="flex h-dvh items-center justify-center bg-canvas px-6">
-        <div className="max-w-[36rem] text-center">
-          <h1 className="text-title font-semibold tracking-[-0.01em] text-ink">Couldn&rsquo;t reach Gmail</h1>
-          <p className="mt-2 text-ui text-ink-muted">{snapshot.error}</p>
+        <div data-select-scope="" className="max-w-[36rem] text-center">
+          <h1 className="selectable text-title font-semibold tracking-[-0.01em] text-ink">Couldn&rsquo;t reach Gmail</h1>
+          <p data-connection-error="" className="mt-2 text-ui text-ink-muted">
+            {snapshot.error && <ErrorText text={snapshot.error} className="text-left" />}
+          </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
@@ -1563,9 +1596,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       {snapshot.error && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-meta font-medium text-ink-body"
+          data-error-banner=""
+          className="flex items-start justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-meta font-medium text-ink-body"
         >
-          <span className="min-w-0 truncate">{snapshot.error}</span>
+          {/*
+            The whole error, selectable and with a Copy button: this is the text a user
+            pastes into a search or a bug report, and a truncated line cannot be copied
+            past its ellipsis.
+          */}
+          <ErrorText text={snapshot.error} className="min-w-0 flex-1" />
           <button
             type="button"
             onClick={store.dismissError.bind(store)}
@@ -1585,7 +1624,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       */}
       {snapshot.notice && (
         <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body">
-          <span className="min-w-0 truncate">{snapshot.notice}</span>
+          <span data-notice-text="" className="selectable min-w-0 truncate">{snapshot.notice}</span>
           <button
             type="button"
             onClick={store.dismissNotice.bind(store)}
@@ -1609,7 +1648,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           aria-label="Save this mailbox offline"
           className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body"
         >
-          <span className="min-w-0">
+          <span className="selectable min-w-0">
             {snapshot.storagePrompt === "failed" ? STORAGE_SAVE_FAILED : STORAGE_PROMPT}
           </span>
           {snapshot.storagePrompt === "failed" ? (
@@ -1663,7 +1702,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           key={snapshot.undo.label}
           className="flex animate-appear items-center justify-center gap-3 px-4 py-1.5 text-meta"
         >
-          <span className="min-w-0 truncate text-ink-muted">{snapshot.undo.label}</span>
+          <span data-undo-label="" className="selectable min-w-0 truncate text-ink-muted">{snapshot.undo.label}</span>
           <button
             type="button"
             onClick={store.undoLast.bind(store)}
@@ -1766,7 +1805,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 data-sync-status={sync.tone}
                 role="status"
                 aria-live="polite"
-                className={`text-meta sm:truncate ${
+                className={`selectable text-meta sm:truncate ${
                   sync.tone === "error" ? "text-danger" : "text-ink-subtle"
                 }`}
               >
@@ -2324,4 +2363,25 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
     <Sidebar {...navProps} open={sidebarOpen} onClose={closeSidebar} touch={phone} />
     </SenderPicturesContext.Provider>
   );
+}
+
+/** A keypress that landed in a text field, which owns its own select-all. */
+function isEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
+/** Select a region's text. With no region, the selection is left as it was. */
+function selectRegion(scope: Element | null): void {
+  const selection = document.getSelection();
+  if (!selection || !scope) return;
+  selection.removeAllRanges();
+  const range = document.createRange();
+  range.selectNodeContents(scope);
+  selection.addRange(range);
 }

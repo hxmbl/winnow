@@ -268,6 +268,26 @@ export function displayAddress(email: Email): string {
   return email.address ?? email.sender;
 }
 
+/** One recipient as a header would print it: `Name <address>`, or the bare address. */
+export function formatContact(contact: Contact): string {
+  const name = contact.name?.trim();
+  return name && name !== contact.address ? `${name} <${contact.address}>` : contact.address;
+}
+
+/**
+ * Who the message went to, one line per field that has anyone in it — `to …`, `cc …`,
+ * `bcc …` — for the reader header, where it is selectable text the user can copy.
+ * Empty for a message that predates the recipient fields (see `Email.to`).
+ */
+export function recipientLines(email: Email): { field: "to" | "cc" | "bcc"; text: string }[] {
+  const lines: { field: "to" | "cc" | "bcc"; text: string }[] = [];
+  for (const field of ["to", "cc", "bcc"] as const) {
+    const contacts = email[field] ?? [];
+    if (contacts.length > 0) lines.push({ field, text: contacts.map(formatContact).join(", ") });
+  }
+  return lines;
+}
+
 /** Single-cap monogram for avatar (first char only). */
 export function monogram(email: Email): string {
   const source = displayName(email).trim();

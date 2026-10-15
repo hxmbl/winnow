@@ -52,7 +52,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
 
   return (
     <div className="flex h-dvh items-center justify-center bg-canvas px-5 py-10">
-      <div className="w-full max-w-[400px]">
+      <div data-select-scope="" className="selectable w-full max-w-[400px]">
         <div className="flex flex-col items-center text-center">
           <AppMark size={48} />
           <h1 className="mt-4 text-title font-semibold text-ink">Winnow</h1>
@@ -100,7 +100,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
                 </div>
                 {failure.hint && (
                   <div className="mt-1 pl-[23px] text-meta text-ink-muted">
-                    <ErrorText text={failure.hint} />
+                    <ErrorText text={failure.hint} copyable={false} />
                   </div>
                 )}
               </div>

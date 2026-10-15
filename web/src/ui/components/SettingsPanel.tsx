@@ -301,7 +301,7 @@ export function Settings(props: SettingsProps) {
         No wrapper element: `scroll-shadow` paints its own background, so it has to be
         the element that scrolls.
       */}
-      <div className="scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto">
+      <div data-select-scope="" data-settings-body="" className="selectable scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto">
         {/*
           Google account first: Winnow ships no Google client, so until one is set up
           this is the row that decides whether Gmail can be connected at all.
