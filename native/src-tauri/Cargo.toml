@@ -1,6 +1,6 @@
 [package]
 name = "winnow"
-version = "0.1.0"
+version = "1.0.1"
 description = "Winnow — an email client that sorts the noise out for you"
 authors = ["hxmbl"]
 license = "MIT"
