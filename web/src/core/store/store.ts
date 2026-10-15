@@ -221,6 +221,12 @@ export type Preferences = {
    * explicit yes.
    */
   brandLogos: boolean;
+  /**
+   * Gravatar photos in sender avatars, for people who are not in the user's contacts.
+   * Off by default, for the same reason as `brandLogos`: it sends a hash of every sender
+   * address in the list to Gravatar, opened or not.
+   */
+  gravatars: boolean;
   notificationsEnabled: boolean;
   /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
   appearance: Appearance;
@@ -244,6 +250,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sortBy: DEFAULT_SORT,
   imagePolicy: "ask",
   brandLogos: false,
+  gravatars: false,
   notificationsEnabled: false,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,

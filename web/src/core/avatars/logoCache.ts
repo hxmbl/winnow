@@ -13,6 +13,9 @@
  * - **Never blocks.** `peek` is synchronous and returns what is known; `request` starts a
  *   lookup and notifies subscribers when it lands, so an avatar swaps in afterwards.
  * - **Cleared with the mail.** Signing out, or turning the setting off, calls `clear`.
+ *
+ * The machinery lives in `PictureCache`, which `gravatar.ts` reuses with its own key,
+ * lookup and storage; `BrandLogoCache` is that machinery pointed at BIMI.
  */
 
 import { lookupBimiLogo, safeLogoUrl, senderDomain, type TxtResolver } from "./bimi";
@@ -34,7 +37,7 @@ export const MAX_QUEUED_LOOKUPS = 100;
 /** A stored entry dated further ahead than this is a bad clock or a bad write, not a fact. */
 const FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
 
-type Entry = { url: string | null; at: number };
+export type Entry = { url: string | null; at: number };
 
 export interface LogoStorage {
   read(): Record<string, Entry> | null;
@@ -96,8 +99,8 @@ export function memoryLogoStorage(): LogoStorage {
   };
 }
 
-type Options = {
-  resolve: TxtResolver;
+/** Limits and injections shared by every picture cache. */
+export type PictureCacheOptions = {
   storage?: LogoStorage;
   now?: () => number;
   concurrency?: number;
@@ -113,10 +116,31 @@ type Options = {
   isOnline?: () => boolean;
 };
 
+type Options = PictureCacheOptions & { resolve: TxtResolver };
+
+/**
+ * What a picture cache looks up and how it keeps the answers: the brand-logo cache keys
+ * by sender domain and asks BIMI; the Gravatar cache keys by address and asks Gravatar.
+ * The queue, the limits, the storage and the offline handling are the same for both.
+ */
+export type PictureSource = {
+  /** The cache key for an address, or `null` for an address never looked up. */
+  keyOf(address: string): string | null;
+  /** The picture URL for a key, `null` for none; rejects for a failed lookup. */
+  lookup(key: string): Promise<string | null>;
+  /** Stored entries minus anything not acceptable. */
+  sanitise(raw: unknown, now: number): Record<string, Entry>;
+  hitTtlMs: number;
+  missTtlMs: number;
+  maxEntries: number;
+  /** Storage used when the options name none. */
+  defaultStorage(): LogoStorage;
+};
+
 /** The answer for an address, as far as the cache knows right now. */
 export type LogoState = { kind: "logo"; url: string } | { kind: "none" } | { kind: "unknown" };
 
-export class BrandLogoCache {
+export class PictureCache {
   private entries: Record<string, Entry>;
   private readonly inflight = new Map<string, Promise<string | null>>();
   private readonly failedAt = new Map<string, number>();
@@ -135,14 +159,17 @@ export class BrandLogoCache {
   /** Bumped on every change, for `useSyncExternalStore`. */
   version = 0;
 
-  constructor(private readonly options: Options) {
-    this.storage = options.storage ?? localLogoStorage();
+  constructor(
+    private readonly source: PictureSource,
+    options: PictureCacheOptions = {},
+  ) {
+    this.storage = options.storage ?? source.defaultStorage();
     this.now = options.now ?? Date.now;
     this.concurrency = options.concurrency ?? 2;
     this.perMinute = options.perMinute ?? 30;
     this.setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
     this.isOnline = options.isOnline ?? (() => true);
-    this.entries = sanitise(this.storage.read(), this.now());
+    this.entries = source.sanitise(this.storage.read(), this.now());
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -152,9 +179,9 @@ export class BrandLogoCache {
 
   getVersion = (): number => this.version;
 
-  /** What is known for this address's domain, without starting anything. */
+  /** What is known for this address's key, without starting anything. */
   peek(address: string): LogoState {
-    const domain = senderDomain(address);
+    const domain = this.source.keyOf(address);
     if (!domain) return { kind: "none" };
     const entry = this.fresh(domain);
     if (!entry) return { kind: "unknown" };
@@ -167,7 +194,7 @@ export class BrandLogoCache {
    * rejects.
    */
   request(address: string): Promise<string | null> {
-    const domain = senderDomain(address);
+    const domain = this.source.keyOf(address);
     if (!domain) return Promise.resolve(null);
     const entry = this.fresh(domain);
     if (entry) return Promise.resolve(entry.url);
@@ -192,7 +219,8 @@ export class BrandLogoCache {
           resolve(null);
         },
         run: () => {
-          void lookupBimiLogo(domain, this.options.resolve)
+          void this.source
+            .lookup(domain)
             .then(
               (url) => {
                 if (generation === this.generation) this.remember(domain, url);
@@ -243,7 +271,7 @@ export class BrandLogoCache {
   private fresh(domain: string): Entry | null {
     const entry = this.entries[domain];
     if (!entry) return null;
-    const ttl = entry.url ? LOGO_HIT_TTL_MS : LOGO_MISS_TTL_MS;
+    const ttl = entry.url ? this.source.hitTtlMs : this.source.missTtlMs;
     return this.now() - entry.at < ttl ? entry : null;
   }
 
@@ -251,10 +279,11 @@ export class BrandLogoCache {
     this.failedAt.delete(domain);
     this.entries[domain] = { url, at: this.now() };
     const keys = Object.keys(this.entries);
-    if (keys.length > MAX_LOGO_ENTRIES) {
+    const max = this.source.maxEntries;
+    if (keys.length > max) {
       keys
         .sort((a, b) => this.entries[a].at - this.entries[b].at)
-        .slice(0, keys.length - MAX_LOGO_ENTRIES)
+        .slice(0, keys.length - max)
         .forEach((key) => delete this.entries[key]);
     }
     this.storage.write(this.entries);
@@ -287,6 +316,25 @@ export class BrandLogoCache {
       this.starts.push(now);
       next.run();
     }
+  }
+}
+
+/** The brand-logo cache: BIMI answers by sender domain. */
+export class BrandLogoCache extends PictureCache {
+  constructor(options: Options) {
+    const { resolve, ...rest } = options;
+    super(
+      {
+        keyOf: senderDomain,
+        lookup: (domain) => lookupBimiLogo(domain, resolve),
+        sanitise,
+        hitTtlMs: LOGO_HIT_TTL_MS,
+        missTtlMs: LOGO_MISS_TTL_MS,
+        maxEntries: MAX_LOGO_ENTRIES,
+        defaultStorage: () => localLogoStorage(),
+      },
+      rest,
+    );
   }
 }
 

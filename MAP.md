@@ -40,7 +40,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       contacts/     People API sync, the contact index, suggestions.
       mail/         Sanitising, quoting, dates, codes, unsubscribe, keybinds.
       store/        The store, its derived view, preferences.
-      avatars/      Contact photos, BIMI logos, the local logo cache.
+      avatars/      Contact photos, Gravatar, BIMI logos, the local picture caches.
       data/         The demo mailbox seed.
     platform/       The boundary. Two implementations (web.ts, desktop.ts), one interface.
     ui/             React components and the pure helpers beside them.
@@ -391,9 +391,13 @@ URI or origin. The secret never appears in an error, a warning or a log.
   `cloudflare-dns.com` and shows its `l=` logo — always through `<img>`, https
   only, never inlined. The `a=` certificate is not verified, and the code says so.
 - `logoCache.ts` keeps answers for a week (a day for "no record"), rate-limits,
-  and is wiped on sign-out or when the setting goes off.
+  and is wiped on sign-out or when the setting goes off. Its `PictureCache` is
+  shared with `gravatar.ts`.
+- `gravatar.ts` is opt-in Gravatar photos: SHA-256 of the trimmed, lower-cased
+  address, `?d=404`, probed as a credential-less, no-referrer `<img>`; never for
+  malformed, no-reply or relayed ("via") senders.
 - `photos.ts` is contact photos, opt-in, from the People API only.
-- No gravatar, no favicon lookup: each would tell a third party who mails you.
+- No favicon lookup, and Gravatar only behind its own switch: each tells a third party who mails you.
 - `data/demo.ts` seeds **57 messages** against a fixed instant
   (`DEMO_NOW = 2026-05-09T18:00Z`), plus `DEMO_TRASH` (12 records),
   `DEMO_CONTACTS`, `DEMO_BRAND_LOGOS` and `demoNewsletter.ts` for the rich view.
@@ -474,7 +478,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `NavigationPalette.tsx` | The `!` palette: inbox, spam, trash, sent, settings. It is a `menu`, not a `dialog`. |
 | `PhoneChrome.tsx` | `PhoneTopBar` and `PhoneDock`. Below `sm` the masthead is replaced, not squeezed; all targets are 44 px. |
 | `SelectionBar.tsx` | The batch bar, using the same `archiveLabel` and `moveTargets` helpers as the row menu so the two cannot disagree. |
-| `Avatar.tsx` | Contact photo → BIMI logo → monogram. Every picture is an `<img>`; the monogram stays present under a loaded logo so a transparent logo does not let the letter through. |
+| `Avatar.tsx` | Contact photo → Gravatar → BIMI logo → monogram. Every picture is an `<img>`; the monogram stays present under a loaded logo so a transparent logo does not let the letter through. |
 | `ShortcutSheet.tsx` | The cheat sheet, rendered from `BINDINGS`. |
 | `CodeCopy.tsx` | The code chip in a row and the code bar in the reader. |
 | `ErrorText.tsx` | Selectable failure copy, collapsed under a disclosure when long — the one text in the app a user needs to copy. |
@@ -611,6 +615,7 @@ judged as IPv4.
 | `winnow.gmail.cache.cursor` | Gmail `historyId` | sign-out |
 | `winnow.google.contacts.v1` | The People API snapshot | sign-out, revocation |
 | `winnow.brandLogos.v1` | Cached BIMI answers | sign-out, setting off |
+| `winnow.gravatars.v1` | Cached Gravatar answers, by sender address | sign-out, setting off |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
 | `winnow.gmail.tokens` | Tokens (web only) | sign-out |
 | `winnow.pendingAuth`, `winnow.pendingState` | PKCE verifier, sign-in state (`sessionStorage`) | read, or 15 min |

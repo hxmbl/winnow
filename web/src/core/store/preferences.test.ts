@@ -116,3 +116,11 @@ describe("brand logos preference", () => {
     expect(revivePreferences({ brandLogos: "yes" })?.brandLogos).toBeUndefined();
   });
 });
+
+describe("Gravatar preference", () => {
+  it("is off by default and survives a restart only as a boolean", () => {
+    expect(DEFAULT_PREFERENCES.gravatars).toBe(false);
+    expect(revivePreferences({ gravatars: true })).toMatchObject({ gravatars: true });
+    expect(revivePreferences({ gravatars: "yes" })?.gravatars).toBeUndefined();
+  });
+});
