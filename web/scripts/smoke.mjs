@@ -3475,6 +3475,17 @@ try {
 
     // The sender menu, from the list.
     const avatar = rows.nth(2).locator("[data-row-control='avatar']");
+    // Right-click on an avatar is the same as a left click: the sender menu, never the
+    // row's menu or the browser's.
+    await avatar.click({ button: "right" });
+    await d.waitForTimeout(150);
+    check(
+      "right-clicking an avatar opens the sender menu, not the row menu",
+      (await d.locator("[data-menu='sender']").count()) === 1 && (await d.locator("[data-menu='row']").count()) === 0,
+    );
+    check("and does not open the message either", (await current()) === 0);
+    await d.keyboard.press("Escape");
+    await d.waitForTimeout(150);
     await avatar.click();
     await d.waitForTimeout(150);
     check("clicking an avatar opens the sender menu", (await d.locator("[data-menu='sender']").count()) === 1);

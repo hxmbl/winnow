@@ -282,6 +282,22 @@ const Row = memo(function Row({
           if (selectMode) onToggleChecked(email.id);
           else onAvatar(email.id, event.currentTarget);
         }}
+        // Right-click (or the menu key) does exactly what a left click does: the sender
+        // menu, or the row's checkbox in select mode. Never the row's own menu, and
+        // never the browser's. A touch long-press is left to the list, where it is
+        // select mode.
+        onContextMenu={(event) => {
+          if ((event.nativeEvent as PointerEvent).pointerType === "touch") return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (selectMode) onToggleChecked(email.id);
+          else onAvatar(email.id, event.currentTarget);
+        }}
+        // The menu key and Shift+F10 fire `contextmenu` on the avatar themselves; keep
+        // the list's keyboard handler from also opening the row menu.
+        onKeyDown={(event) => {
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) event.stopPropagation();
+        }}
         // The children take no pointer events, so a press always lands on the button
         // itself. The button outlives the swap from picture to check when a long-press
         // selects the row; a swapped-out child would take the rest of the touch with it
