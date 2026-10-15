@@ -160,7 +160,11 @@ export function App({ store }: Props) {
    * cleared on sign-out and when the setting is turned off.
    */
   const [logoCache] = useState(
-    () => new BrandLogoCache({ resolve: dohResolver((input, init) => fetch(input, init)) }),
+    () =>
+      new BrandLogoCache({
+        resolve: dohResolver((input, init) => fetch(input, init)),
+        isOnline: () => globalThis.navigator?.onLine !== false,
+      }),
   );
 
   // ── Refs the keyboard handler reads ─────────────────────────────────────
@@ -799,6 +803,13 @@ export function App({ store }: Props) {
   useEffect(() => {
     if (snapshot.status === "signed_out" || !preferences.brandLogos) logoCache.clear();
   }, [snapshot.status, preferences.brandLogos, logoCache]);
+
+  // Back online: logos that could not be looked up while offline are asked for again.
+  useEffect(() => {
+    const retry = () => logoCache.retryFailed();
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [logoCache]);
 
   // The demo answers brand logos from bundled images and never touches the network.
   const isDemo = snapshot.contactsAccess === "demo";

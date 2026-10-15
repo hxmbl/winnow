@@ -40,23 +40,32 @@ type Props = {
 };
 
 export function Avatar({ name, address, photo, lookup = true, size = 32, className = "" }: Props) {
-  const found = useSenderPictures(lookup ? address : "", photo);
+  const found = useSenderPictures(lookup ? address : "", photo, name);
   const candidates = lookup ? found : photo ? [photo] : [];
   // URLs that failed to load in this avatar. A new URL gets a fresh attempt.
   const [failed, setFailed] = useState<readonly string[]>([]);
+  // The URL that has finished loading. Until then the monogram stays, so a slow host
+  // (or an offline one that never answers) shows a letter rather than an empty disc.
+  const [loaded, setLoaded] = useState<string | null>(null);
   const picture = candidates.find((url) => !failed.includes(url));
   const showPhoto = picture !== undefined;
+  const ready = showPhoto && loaded === picture;
   const dimension = size === 36 ? "h-9 w-9" : "h-8 w-8";
+  const fail = (url: string) => setFailed((list) => (list.includes(url) ? list : [...list, url]));
 
   return (
     <span
       aria-hidden="true"
       data-avatar={showPhoto ? "photo" : "monogram"}
-      className={`flex ${dimension} shrink-0 select-none items-center justify-center overflow-hidden rounded-full text-ui font-semibold ${
-        showPhoto ? "bg-surface-active" : TONE_CLASS[avatarTone(address)]
+      data-avatar-loaded={ready ? "" : undefined}
+      className={`relative flex ${dimension} shrink-0 select-none items-center justify-center overflow-hidden rounded-full text-ui font-semibold ${
+        ready ? "bg-surface-active" : TONE_CLASS[avatarTone(address)]
       } ${className}`}
     >
-      {showPhoto ? (
+      {/* Hidden, not removed, once the picture is in: a logo with a transparent
+          background must not show the letter through it. */}
+      <span className={ready ? "invisible" : undefined}>{avatarInitial(name, address)}</span>
+      {showPhoto && (
         <img
           key={picture}
           src={picture}
@@ -68,11 +77,13 @@ export function Avatar({ name, address, photo, lookup = true, size = 32, classNa
           decoding="async"
           width={size}
           height={size}
-          onError={() => setFailed((list) => (list.includes(picture) ? list : [...list, picture]))}
-          className="h-full w-full object-cover"
+          // Not `naturalWidth === 0` as a failure: a BIMI logo (SVG Tiny PS) has a viewBox
+          // and often no width, which some engines report as no natural size at all. An
+          // SVG that cannot be decoded fires `error`, which is the fall-through.
+          onLoad={() => setLoaded(picture)}
+          onError={() => fail(picture)}
+          className={`absolute inset-0 h-full w-full object-cover ${ready ? "" : "opacity-0"}`}
         />
-      ) : (
-        avatarInitial(name, address)
       )}
     </span>
   );
