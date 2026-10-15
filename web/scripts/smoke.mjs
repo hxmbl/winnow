@@ -3912,6 +3912,286 @@ try {
     await brokenCtx.close();
   }
 
+  // ── Sidebar, rail and avatar edge cases ───────────────────────────────────
+  //
+  // Each in its own context, so a failure here cannot leave the main page in a state the
+  // console section then blames on something else.
+  section("sidebar edge cases");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 900 } });
+    const m = await ctx.newPage();
+    const mErrors = [];
+    m.on("pageerror", (error) => mErrors.push(String(error)));
+    m.on("console", (message) => message.type() === "error" && mErrors.push(message.text()));
+    await m.goto(URL, { waitUntil: "networkidle" });
+    await m.waitForSelector("[data-row-count] button[data-message-id]");
+    const mOpen = async () => (await m.locator("[data-sidebar][data-open]").count()) > 0;
+    const waitClosed = () => m.locator("[data-sidebar]").waitFor({ state: "hidden", timeout: 5_000 }).catch(() => undefined);
+    const focusedToggle = () =>
+      m.evaluate(() => {
+        const active = document.activeElement;
+        return active?.hasAttribute("data-sidebar-toggle") && active.getClientRects().length > 0
+          ? active.hasAttribute("data-reader-sidebar-toggle") ? "reader" : "masthead"
+          : (active?.tagName ?? "none");
+      });
+
+    // A medium window with a message open: the list (and the masthead's toggle) gives
+    // way to the reader, which has to carry a toggle of its own.
+    await m.locator("[data-row-count] button[data-message-id]").first().click();
+    await m.waitForSelector("article h1", { timeout: 5_000 });
+    const readerToggle = m.locator("[data-reader-sidebar-toggle]");
+    check(
+      "at 800px with a message open, the reader carries a visible sidebar toggle",
+      (await readerToggle.isVisible()) && !(await m.locator("header [data-sidebar-toggle]").isVisible()),
+    );
+    check(
+      "which is labelled and wired like the masthead's",
+      (await readerToggle.getAttribute("aria-controls")) === "winnow-sidebar" &&
+        (await readerToggle.getAttribute("aria-expanded")) === "false" &&
+        (await readerToggle.getAttribute("aria-label")) === "Open sidebar",
+    );
+    await readerToggle.click();
+    await m.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    check("it opens the sidebar over the reader", await mOpen());
+    await m.keyboard.press("Escape");
+    await waitClosed();
+    check(
+      "Escape closes it, the message stays open, and focus is back on the reader's toggle",
+      !(await mOpen()) && (await m.locator("article h1").count()) === 1 && (await focusedToggle()) === "reader",
+      await focusedToggle(),
+    );
+
+    // Opened at medium width, then the window widens past `lg` while it is open: the
+    // reader's toggle is hidden, so focus has to land on the masthead's, not the body.
+    await readerToggle.click();
+    await m.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await m.setViewportSize({ width: 1440, height: 900 });
+    await m.waitForTimeout(200);
+    check("widening the window keeps the sidebar open", await mOpen());
+    await m.keyboard.press("Escape");
+    await waitClosed();
+    check(
+      "and closing it then gives focus to the toggle that is on screen",
+      (await focusedToggle()) === "masthead",
+      await focusedToggle(),
+    );
+
+    // Desktop to phone while open: one sidebar, the scrim's origin follows the new
+    // width, and the phone's own toggle gets focus back.
+    await m.locator("article h1").count();
+    await m.keyboard.press("Escape"); // close the reader, so the phone bar is shown
+    await m.waitForTimeout(150);
+    await m.locator("header [data-sidebar-toggle]").click();
+    await m.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    const edgeAt = () =>
+      m.evaluate(() => {
+        const scrim = document.querySelector("[data-sidebar-scrim]");
+        const probe = document.createElement("div");
+        probe.style.cssText = "position:fixed;width:0;height:0;left:var(--wn-sidebar-edge);top:var(--wn-sidebar-mid, 50%)";
+        scrim.appendChild(probe);
+        const at = probe.getBoundingClientRect();
+        probe.remove();
+        const side = document.querySelector("[data-sidebar]").getBoundingClientRect();
+        return { x: at.left, y: at.top, right: side.right, mid: side.top + side.height / 2 };
+      });
+    await m.setViewportSize({ width: 390, height: 844 });
+    await m.waitForTimeout(400);
+    const phoneEdge = await edgeAt();
+    check(
+      "shrinking to a phone while open: still exactly one sidebar, still open",
+      (await m.locator("[data-sidebar]").count()) === 1 && (await mOpen()),
+    );
+    check(
+      "and the blur's origin moves with it, to the middle of the sidebar's new right edge",
+      Math.abs(phoneEdge.x - phoneEdge.right) <= 2 && Math.abs(phoneEdge.y - phoneEdge.mid) <= 2,
+      JSON.stringify(phoneEdge),
+    );
+    // A window too short for the panel: it scrolls inside itself, and the origin follows.
+    await m.setViewportSize({ width: 390, height: 300 });
+    await m.waitForTimeout(400);
+    const shortEdge = await edgeAt();
+    check(
+      "a window resize re-measures the origin",
+      Math.abs(shortEdge.y - shortEdge.mid) <= 2,
+      JSON.stringify(shortEdge),
+    );
+    await m.keyboard.press("Escape");
+    await waitClosed();
+    check(
+      "closing on the phone gives focus to the phone's toggle",
+      await m.evaluate(() => {
+        const active = document.activeElement;
+        return Boolean(active?.hasAttribute("data-sidebar-toggle") && active.getClientRects().length > 0);
+      }),
+    );
+    check(
+      "and the app behind it is no longer inert",
+      await m.evaluate(() => ![...document.querySelectorAll("[inert]")].some((node) => !node.hasAttribute("data-sidebar"))),
+    );
+    check(
+      "the sidebar's scroller contains its own overscroll (no rubber-banding the app)",
+      (await m.locator("[data-sidebar-scroll]").evaluate((node) => getComputedStyle(node).overscrollBehaviorY)) === "contain",
+    );
+    await m.setViewportSize({ width: 1440, height: 900 });
+    await m.waitForTimeout(200);
+
+    // A double-click on the toggle: the second click lands on the scrim, and used to
+    // close the sidebar it had just opened.
+    await m.locator("header [data-sidebar-toggle]").dblclick();
+    await m.waitForTimeout(300);
+    check("a double-click on the toggle leaves the sidebar open", await mOpen());
+    await m.mouse.click(1200, 600);
+    await waitClosed();
+    check("and a single click outside still closes it", !(await mOpen()));
+
+    // A drag that starts inside and leaves (selecting, or dragging the scrollbar) is not
+    // walking away: the idle close waits for the button to come up.
+    await m.locator("header [data-sidebar-toggle]").click();
+    await m.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await m.waitForTimeout(350); // the slide-in, so the box below is where it rests
+    const brand = await m.locator("[data-sidebar]").getByText("Winnow", { exact: true }).boundingBox();
+    await m.mouse.move(brand.x + 4, brand.y + brand.height / 2);
+    await m.mouse.down();
+    await m.mouse.move(900, 450, { steps: 5 });
+    await m.waitForTimeout(SIDEBAR_IDLE_MS + 400);
+    check("held mouse button after a press inside: the idle close waits", await mOpen());
+    await m.mouse.up();
+    await m.evaluate(() => document.getSelection()?.removeAllRanges());
+    await m.mouse.move(905, 455);
+    await m.waitForTimeout(SIDEBAR_IDLE_MS + 500);
+    check("released outside: it closes on the idle timer as usual", !(await mOpen()));
+    if (await mOpen()) await m.keyboard.press("Escape");
+    await waitClosed();
+
+    // Reduced transparency (no Playwright option yet, so through CDP): no glass, just
+    // the opaque surface and the plain tint.
+    const cdp = await ctx.newCDPSession(m);
+    await cdp.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-transparency", value: "reduce" }],
+    });
+    await m.locator("header [data-sidebar-toggle]").click();
+    await m.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    const clear = await m.evaluate(() => ({
+      supported: matchMedia("(prefers-reduced-transparency: reduce)").matches,
+      layers: [...document.querySelectorAll("[data-scrim-layer], .wn-sidebar-blur")].every(
+        (node) => getComputedStyle(node).display === "none",
+      ),
+      tint: getComputedStyle(document.querySelector(".wn-scrim-tint")).backgroundImage,
+      panel: getComputedStyle(document.querySelector(".wn-sidebar-tint")).backgroundImage,
+    }));
+    check(
+      "with reduced transparency the blur layers are gone and both tints are flat",
+      !clear.supported || (clear.layers && clear.tint === "none" && clear.panel === "none"),
+      JSON.stringify(clear),
+    );
+    await m.keyboard.press("Escape");
+    await waitClosed();
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+
+    // Forced colours: a Canvas panel with a border, no glass, no scrim paint.
+    await m.emulateMedia({ forcedColors: "active" });
+    await m.locator("header [data-sidebar-toggle]").click();
+    await m.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    const forced = await m.evaluate(() => ({
+      layers: [...document.querySelectorAll("[data-scrim-layer], .wn-sidebar-blur, .wn-scrim-tint")].every(
+        (node) => getComputedStyle(node).display === "none",
+      ),
+      border: getComputedStyle(document.querySelector("[data-sidebar]")).borderTopStyle,
+    }));
+    check("in forced colours the glass and scrim are dropped and the panel keeps a border", forced.layers && forced.border === "solid", JSON.stringify(forced));
+    await m.keyboard.press("Escape");
+    await waitClosed();
+    await m.emulateMedia({ forcedColors: "none" });
+
+    check("no console errors on the sidebar edge-case pass", mErrors.length === 0, mErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
+
+  section("rail and avatar edge cases");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    // Dana's photo answers slowly: the monogram has to hold the place until it lands.
+    let releasePhoto;
+    const photoGate = new Promise((resolve) => (releasePhoto = resolve));
+    await ctx.route("**/demo-avatars/dana.svg", async (route) => {
+      await photoGate;
+      await route.continue();
+    });
+    const r = await ctx.newPage();
+    await r.goto(URL, { waitUntil: "domcontentloaded" });
+    await r.waitForSelector("[data-row-count] [data-row-id]");
+    await r.locator("input[type='search']").first().fill("dana@northwind");
+    await r.waitForTimeout(400);
+    const dana = r
+      .locator("[data-row-count] [data-row-id]")
+      .filter({ has: r.locator("[data-row-sender]", { hasText: "Dana Whitfield" }) })
+      .first()
+      .locator("[data-row-control='avatar'] [data-avatar]");
+    const pending = await dana.evaluate((node) => ({
+      kind: node.getAttribute("data-avatar"),
+      loaded: node.hasAttribute("data-avatar-loaded"),
+      letter: [...node.querySelectorAll("span")].find((span) => span.textContent.trim() === "D")?.checkVisibility() ?? false,
+    }));
+    check(
+      "while a picture is still loading, the avatar shows the monogram, not an empty disc",
+      pending.kind === "photo" && !pending.loaded && pending.letter,
+      JSON.stringify(pending),
+    );
+    releasePhoto();
+    await r.waitForSelector("[data-avatar-loaded]", { timeout: 5_000 }).catch(() => undefined);
+    const landed = await dana.evaluate((node) => ({
+      loaded: node.hasAttribute("data-avatar-loaded"),
+      letterHidden: [...node.querySelectorAll("span")].every((span) => getComputedStyle(span).visibility === "hidden"),
+    }));
+    check("once it lands, the letter is hidden under it", landed.loaded && landed.letterHidden, JSON.stringify(landed));
+    await r.locator("input[type='search']").first().fill("");
+    await r.waitForTimeout(300);
+
+    // The rail: every pill carries its whole label as a title, and labels are capped.
+    const railPills = r.locator("header [data-rail-scroller] button[aria-pressed]");
+    const titles = await railPills.evaluateAll((buttons) =>
+      buttons.map((button) => ({
+        title: button.getAttribute("title") ?? "",
+        label: button.querySelector("[data-pill-label]")?.textContent ?? "",
+        max: getComputedStyle(button.querySelector("[data-pill-label]")).maxWidth,
+      })),
+    );
+    check(
+      "every rail pill has a title naming it, and a capped label",
+      titles.length > 0 && titles.every((item) => item.title.length > 0 && item.max !== "none"),
+      JSON.stringify(titles.slice(0, 2)),
+    );
+    // A label far too long for any pill: truncated, not stretching the rail.
+    const longest = await r.evaluate(() => {
+      const label = document.querySelector("header [data-rail-scroller] [data-pill-label] span:last-child");
+      const before = label.textContent;
+      label.textContent = `From ${"averyveryverylongsendername".repeat(4)}@example.com`;
+      const width = label.closest("button").getBoundingClientRect().width;
+      label.textContent = before;
+      return width;
+    });
+    check("a very long pill label is capped rather than stretching the pill", longest < 300, `${Math.round(longest)}px`);
+
+    // The end fade follows the rail's content: switching a filter on adds "All" at the
+    // start, which grows the rail without changing the scroller's own size.
+    await r.setViewportSize({ width: 1100, height: 900 });
+    await r.waitForTimeout(300);
+    await railPills.nth(0).click();
+    await r.waitForTimeout(300);
+    const edgeMatches = await r.evaluate(() => {
+      const scroller = document.querySelector("header [data-rail-scroller]");
+      const more = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1;
+      return { more, edge: Boolean(document.querySelector("header [data-rail-edge='end']")) };
+    });
+    check(
+      "after a filter goes on, the end fade and step button match whether there is more rail",
+      edgeMatches.more === edgeMatches.edge,
+      JSON.stringify(edgeMatches),
+    );
+    await railPills.nth(0).click();
+    await ctx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");
