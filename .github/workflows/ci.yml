@@ -290,4 +290,6 @@ jobs:
           # Via the environment, not inline: a tag name may contain shell metacharacters.
           REF: ${{ github.ref_name }}
         run: |
-          gh workflow run release.yml -f ref="$REF"
+          # --repo, because this job checks out nothing: gh otherwise resolves the
+          # target from `git remote` and fails with "not a git repository".
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" -f ref="$REF"
