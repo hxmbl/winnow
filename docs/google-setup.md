@@ -87,12 +87,20 @@ only to Google's token endpoint. Anyone who can run code on that page could read
 it, so only run Winnow in the browser on a machine and origin you control. The
 desktop app keeps it in the system keychain instead.
 
-## 5. Paste it into Winnow
+## 5. Import or paste it into Winnow
 
 1. In Winnow, choose **Connect Gmail** (in the demo's status line or the menu), or
    open **Settings → Google account → Set up**.
-2. Paste the **Client ID** (it ends in `.apps.googleusercontent.com`) and, if you
-   have one, the **Client secret**.
+2. Either import the client's JSON file, or paste the two values by hand:
+   - **Import JSON.** On the client's page in Google Cloud, choose **Download
+     JSON** (it saves `client_secret_<id>.json`). In Winnow, choose **Import
+     JSON** and pick the file, drop the file anywhere on the setup sheet, or open
+     the file in a text editor and paste all of its text into the **Client ID**
+     field. Winnow fills in the client ID and secret, shows which Cloud project
+     the client came from, and links straight to the Gmail API and People API
+     pages for that project so you can check both are enabled.
+   - **By hand.** Paste the **Client ID** (it ends in `.apps.googleusercontent.com`)
+     and, if you have one, the **Client secret**.
 3. Choose **Test connection**. Winnow asks Google whether it recognises the client,
    without signing you in. It points at the field to fix if something is wrong.
 4. Choose **Save and connect**. Google's sign-in opens; pick the test user you
@@ -101,6 +109,25 @@ desktop app keeps it in the system keychain instead.
 To change the client later, open **Settings → Google account → Change**. Saving a
 different client signs you out, because Google won't refresh a session under a
 different client. **Remove** forgets the client and signs you out.
+
+### What Import JSON checks
+
+- **The client type has to match the app.** The desktop app needs a **Desktop
+  app** client: it signs in through `http://127.0.0.1:<port>/winnow-oauth` on a
+  random port, which Google allows only for Desktop clients, so a Web
+  application file is refused there. Winnow in the browser needs a **Web
+  application** client, because Google returns to the page's own address, which a
+  Desktop client can't register; a Desktop app file is refused there.
+- **It has to be the client file.** A file that isn't JSON, is over 64 KB, has no
+  `client_id`, has a `client_id` that doesn't end in `.apps.googleusercontent.com`,
+  or is a service account key is refused with a sentence saying what to download
+  instead. A web client file without a `client_secret` is refused too.
+- **Warnings, not refusals.** For a web client, Winnow warns when the file doesn't
+  list the redirect URI it shows (exactly, trailing slash included) or the page's
+  origin. It also warns when the file's `auth_uri` or `token_uri` isn't one of
+  Google's; Winnow always uses Google's own endpoints whatever the file says.
+- **Nothing is saved until you choose Save and connect**, and then it is stored
+  exactly as if you had typed it. The secret is never shown or logged.
 
 ## What to expect from Google
 
@@ -130,5 +157,7 @@ different client. **Remove** forgets the client and signs you out.
 | "Google rejected the client secret" | Old or mistyped secret. Copy it again; you can add a new secret on the client's page. |
 | `redirect_uri_mismatch` (web) | The redirect URI in Cloud Console doesn't exactly match the one Winnow shows. Check the scheme, host, port and trailing slash. |
 | `access_denied` / "app is being tested" | The account you picked isn't listed under **Test users**. |
+| "This is a Web application client, which the desktop app can't use" | You downloaded the JSON of a Web application client. Create a **Desktop app** client and import its JSON. |
+| "This is a Desktop app client, which Winnow in the browser can't use" | Create a **Web application** client for the browser, or use the desktop app. |
 | Contacts suggestions won't connect | The People API isn't enabled, or the two contact scopes aren't on the consent screen. |
 | Signed out every week | Testing mode's 7-day refresh tokens, see above. |

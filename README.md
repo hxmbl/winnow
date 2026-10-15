@@ -128,7 +128,9 @@ the build is a script and not a bare `cargo tauri build`.
 
 Bring your own client. Winnow ships none, so there is nothing to put in
 `.env.local` and no Google secret in any build. Each person creates an OAuth
-client in their own Google Cloud project and pastes it into the setup screen;
+client in their own Google Cloud project and pastes it into the setup screen, or
+imports the `client_secret_….json` Cloud Console downloads (**Import JSON**, drop
+the file on the sheet, or paste its text into Client ID);
 [docs/google-setup.md](docs/google-setup.md) has the step-by-step.
 
 | Build | Client type | Redirect URI | Secret | Stored in |
@@ -159,6 +161,16 @@ Things worth knowing:
   `CredentialStore` for it each time it exchanges or refreshes, so a changed client
   takes effect without a reload. Saving a *different* client signs out first: a
   refresh token belongs to the client that issued it.
+- **Import JSON is strict.** `core/session/clientJson.ts` reads the downloaded
+  file (64 KB cap, BOM and whitespace tolerated) and fills the same two fields,
+  saved by the same Save and connect. It refuses the client type the build can't
+  use: a `web` client on the desktop (the loopback port is random, and only
+  Desktop clients accept any loopback port) and an `installed` client in the
+  browser (Desktop clients can't redirect to a web page). It warns when a web
+  client doesn't register the page's redirect URI or origin, or when the file
+  names endpoints that aren't Google's, and links the Gmail and People API
+  library pages for the file's `project_id`. The secret is never logged or put
+  in a message.
 - **"Test connection" doesn't sign in.** It sends a made-up authorization code to
   Google's token endpoint; Google checks the client before the code, so
   `invalid_grant` means the client is good and `invalid_client` says which half is
