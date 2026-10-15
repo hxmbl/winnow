@@ -162,7 +162,7 @@ describe("flattenSnapshot", () => {
 describe("reviveSnapshot", () => {
   it("round-trips a snapshot and refuses anything else", () => {
     const snapshot: GoogleContactsSnapshot = {
-      version: 2,
+      version: 3,
       saved: { syncToken: "s", people: { "people/c1": { name: "Ada", emails: ["ada@example.com"] } } },
       other: { people: {} },
       syncedAt: 5,
@@ -170,7 +170,7 @@ describe("reviveSnapshot", () => {
     expect(reviveSnapshot(JSON.parse(JSON.stringify(snapshot)))).toEqual(snapshot);
     expect(reviveSnapshot({ version: 3 })).toBeNull();
     expect(reviveSnapshot("nope")).toBeNull();
-    expect(reviveSnapshot({ version: 2, saved: {}, other: { people: {} } })).toBeNull();
+    expect(reviveSnapshot({ version: 3, saved: {}, other: { people: {} } })).toBeNull();
   });
 });
 
@@ -205,7 +205,7 @@ describe("GoogleContactsSync — full, then incremental", () => {
 
   it("asks only for changes next time, and applies deletions", async () => {
     const memory = memoryStore({
-      version: 2,
+      version: 3,
       saved: {
         syncToken: "saved-1",
         people: {
@@ -260,7 +260,7 @@ describe("GoogleContactsSync — full, then incremental", () => {
 describe("GoogleContactsSync — an expired sync token", () => {
   it("falls back to a full listing that replaces the stale copy", async () => {
     const memory = memoryStore({
-      version: 2,
+      version: 3,
       saved: {
         syncToken: "too-old",
         people: {
@@ -306,7 +306,7 @@ describe("GoogleContactsSync — an expired sync token", () => {
 describe("GoogleContactsSync — failures", () => {
   it("leaves the previous copy and token alone when a page fails partway", async () => {
     const before: GoogleContactsSnapshot = {
-      version: 2,
+      version: 3,
       saved: { syncToken: "s1", people: { "people/c1": { name: "Ada", emails: ["ada@example.com"] } } },
       other: { syncToken: "o1", people: {} },
       syncedAt: 1,

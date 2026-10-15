@@ -292,7 +292,7 @@ describe("refreshContacts", () => {
   it("erases the local copy when Google says the grant was revoked", async () => {
     const contacts = memoryContacts();
     await contacts.store.write({
-      version: 2,
+      version: 3,
       saved: { syncToken: "s", people: { "people/c1": { name: "Ada", emails: ["ada@example.com"] } } },
       other: { people: {} },
       syncedAt: 1,
@@ -306,7 +306,7 @@ describe("refreshContacts", () => {
 
   it("is erased on sign-out with the mail", async () => {
     const contacts = memoryContacts();
-    await contacts.store.write({ version: 2, saved: { people: {} }, other: { people: {} }, syncedAt: 1 });
+    await contacts.store.write({ version: 3, saved: { people: {} }, other: { people: {} }, syncedAt: 1 });
     const session = sessionFor("desktop", memoryTokens(signedIn(ALL_SCOPES)).store, { contacts: contacts.store }).session;
     await session.signOut();
     expect(contacts.saved()).toBeNull();

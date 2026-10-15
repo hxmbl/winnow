@@ -52,11 +52,13 @@ type ListingState = {
 
 export type GoogleContactsSnapshot = {
   /**
-   * 2 since photos joined the field mask. A version-1 snapshot is read as nothing, so
-   * the next refresh lists both address books in full — a sync token minted for the
-   * old mask would otherwise never deliver photos for people who did not change.
+   * 2 since photos joined the field mask; 3 since other contacts are read with their
+   * Google profile merged in (`READ_SOURCE_TYPE_PROFILE`). An older snapshot is read as
+   * nothing, so the next refresh lists both address books in full: a sync token minted
+   * for the old request would otherwise never deliver photos for people who did not
+   * change, and Google refuses a token whose other parameters differ.
    */
-  version: 2;
+  version: 3;
   saved: ListingState;
   other: ListingState;
   /** When the last refresh finished, for deciding whether another is worth it. */
@@ -64,7 +66,7 @@ export type GoogleContactsSnapshot = {
 };
 
 export function emptySnapshot(): GoogleContactsSnapshot {
-  return { version: 2, saved: { people: {} }, other: { people: {} }, syncedAt: null };
+  return { version: 3, saved: { people: {} }, other: { people: {} }, syncedAt: null };
 }
 
 /** Where the snapshot lives. `localStorage` on both hosts, like the mail cache. */
@@ -113,7 +115,7 @@ export function localContactsStore(key = "winnow.google.contacts.v1"): GoogleCon
 export function reviveSnapshot(raw: unknown): GoogleContactsSnapshot | null {
   if (!raw || typeof raw !== "object") return null;
   const source = raw as Partial<GoogleContactsSnapshot>;
-  if (source.version !== 2) return null;
+  if (source.version !== 3) return null;
   const listing = (value: unknown): ListingState | null => {
     if (!value || typeof value !== "object") return null;
     const state = value as Partial<ListingState>;
@@ -134,7 +136,7 @@ export function reviveSnapshot(raw: unknown): GoogleContactsSnapshot | null {
   const other = listing(source.other);
   if (!saved || !other) return null;
   return {
-    version: 2,
+    version: 3,
     saved,
     other,
     syncedAt: typeof source.syncedAt === "number" ? source.syncedAt : null,

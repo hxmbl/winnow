@@ -331,6 +331,14 @@ export class PeopleClient {
       pageSize: String(PEOPLE_PAGE_SIZE),
       requestSyncToken: "true",
     });
+    // Other contacts default to the contact source alone, which almost never has a
+    // photo: the picture Gmail shows for someone you've written to is their Google
+    // profile photo, and only `READ_SOURCE_TYPE_PROFILE` merges it in. Saved contacts
+    // already return both sources by default.
+    if (source === "other") {
+      params.append("sources", "READ_SOURCE_TYPE_CONTACT");
+      params.append("sources", "READ_SOURCE_TYPE_PROFILE");
+    }
     if (options.pageToken) params.set("pageToken", options.pageToken);
     if (options.syncToken) params.set("syncToken", options.syncToken);
     const body = await this.get<ListResponse>(`${listing.path}?${params}`);
