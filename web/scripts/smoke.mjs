@@ -998,6 +998,113 @@ try {
   await page.waitForTimeout(300);
   check("Remove forgets the client", (await page.evaluate(() => localStorage.getItem("winnow.google.oauthClient"))) === null);
   check("and leaves the demo usable", (await idInput.inputValue()) === "");
+
+  // Import JSON: the client_secret_….json Google Cloud downloads fills both fields.
+  const IMPORT_SECRET = "smoke-import-secret-value";
+  const clientFile = (section, extra = {}) =>
+    JSON.stringify({
+      [section]: {
+        client_id: VALID_ID,
+        project_id: "winnow-smoke-42",
+        auth_uri: "https://accounts.google.com/o/oauth2/auth",
+        token_uri: "https://oauth2.googleapis.com/token",
+        client_secret: IMPORT_SECRET,
+        redirect_uris: [URL],
+        javascript_origins: [new globalThis.URL(URL).origin],
+        ...extra,
+      },
+    });
+  const importButton = setup.getByRole("button", { name: "Import JSON" });
+  check("an Import JSON button is on the setup sheet", (await importButton.count()) === 1);
+  await importButton.focus();
+  check("and it is keyboard-reachable", await importButton.evaluate((el) => el === document.activeElement));
+
+  const fileInput = setup.locator('input[type="file"]');
+  await fileInput.setInputFiles({
+    name: "client_secret_1234567890-abc123def.apps.googleusercontent.com.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(`\uFEFF${clientFile("web")}\n`),
+  });
+  await setup.locator("[data-imported-project]").waitFor({ timeout: 5_000 }).catch(() => undefined);
+  check(
+    "importing a client file fills the client ID and secret",
+    (await idInput.inputValue()) === VALID_ID && (await secretInput.inputValue()) === IMPORT_SECRET,
+  );
+  check("and names the imported project", (await setup.locator("[data-imported-project]").textContent()) === "winnow-smoke-42");
+  check(
+    "inside a polite live region",
+    (await setup.locator('[data-import-status][aria-live="polite"]').count()) === 1,
+  );
+  const apiLinks = await setup.locator("[data-api-note] a").evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+  check(
+    "with links to enable the Gmail and People APIs for that project",
+    apiLinks.length === 2 &&
+      apiLinks[0] === "https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=winnow-smoke-42" &&
+      apiLinks[1] === "https://console.cloud.google.com/apis/library/people.googleapis.com?project=winnow-smoke-42",
+    JSON.stringify(apiLinks),
+  );
+  check(
+    "focus moves to Save and connect after the import",
+    await page.evaluate(() => document.activeElement?.textContent?.trim() === "Save and connect"),
+  );
+  check("a matching file raises no warnings", (await setup.locator("[data-import-warning]").count()) === 0);
+  check("nothing is stored until it is saved, imported or not", (await page.evaluate(() => localStorage.getItem("winnow.google.oauthClient"))) === null);
+
+  // A Desktop app client can't return to a web page: refused, pointing at the right type.
+  await fileInput.setInputFiles({ name: "client_secret_desktop.json", mimeType: "application/json", buffer: Buffer.from(clientFile("installed")) });
+  await setup.locator("[data-import-error]").waitFor({ timeout: 5_000 }).catch(() => undefined);
+  const wrongType = (await setup.locator('[data-import-error][role="alert"]').textContent()) ?? "";
+  check("a Desktop app client file is refused in the browser, as an alert", /Desktop app client/.test(wrongType) && /Web application/.test(wrongType), wrongType);
+  check("and the error never shows the secret", !wrongType.includes(IMPORT_SECRET));
+  check("focus returns to Import JSON after a refused file", await importButton.evaluate((el) => el === document.activeElement));
+
+  // A file that isn't JSON at all.
+  await fileInput.setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from("client id: abc") });
+  await page.waitForTimeout(200);
+  check("a file that isn't JSON is refused", /isn't a Google client JSON file/.test((await setup.locator("[data-import-error]").textContent()) ?? ""));
+
+  // Pasting the file's text into the client ID field imports it too.
+  await idInput.fill("");
+  await secretInput.fill("");
+  await idInput.focus();
+  await idInput.evaluate((el, text) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", text);
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, `  ${clientFile("web", { redirect_uris: [URL.replace(/\/$/, "")] })}  `);
+  await setup.locator("[data-imported-project]").waitFor({ timeout: 5_000 }).catch(() => undefined);
+  check(
+    "pasting the JSON into Client ID imports it instead of filling the field with JSON",
+    (await idInput.inputValue()) === VALID_ID && (await secretInput.inputValue()) === IMPORT_SECRET,
+    await idInput.inputValue(),
+  );
+  check("the error from the last file is cleared", (await setup.locator("[data-import-error]").count()) === 0);
+  const pasteWarning = (await setup.locator("[data-import-warning]").first().textContent()) ?? "";
+  check("a redirect URI that misses the trailing slash is warned about", /trailing slash/.test(pasteWarning), pasteWarning);
+
+  // Dropping the file onto the sheet.
+  await idInput.fill("");
+  await secretInput.fill("");
+  const dropped = await page.evaluateHandle((text) => {
+    const data = new DataTransfer();
+    data.items.add(new File([text], "client_secret.json", { type: "application/json" }));
+    return data;
+  }, clientFile("web"));
+  const form = setup.locator('[data-testid="google-setup"]');
+  await form.dispatchEvent("dragenter", { dataTransfer: dropped });
+  await setup.locator('[data-testid="google-setup"][data-dragging="true"]').waitFor({ timeout: 2_000 }).catch(() => undefined);
+  check("dragging a file over the sheet highlights it", (await form.getAttribute("data-dragging")) === "true");
+  await form.dispatchEvent("drop", { dataTransfer: dropped });
+  await setup.locator('[data-testid="google-setup"]:not([data-dragging])').waitFor({ timeout: 2_000 }).catch(() => undefined);
+  await page.waitForFunction((id) => document.querySelector('input[name="clientId"]')?.value === id, VALID_ID, { timeout: 2_000 }).catch(() => undefined);
+  check(
+    "dropping the client file onto the sheet imports it",
+    (await idInput.inputValue()) === VALID_ID && (await secretInput.inputValue()) === IMPORT_SECRET && (await form.getAttribute("data-dragging")) === null,
+  );
+  check(
+    "the secret appears nowhere on the sheet as text",
+    !((await setup.textContent()) ?? "").includes(IMPORT_SECRET),
+  );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   check("the demo mailbox is untouched", (await rowTotal()) > 0 && (await setup.count()) === 0);
