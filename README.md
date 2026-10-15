@@ -13,11 +13,10 @@ It runs in a browser and as a desktop app. Same program either way.
 ## What you don't get
 
 - **Gmail and nothing else.** No IMAP, no Outlook, no Fastmail, no self-hosted
-  server. It's the Gmail REST API and its labels all the way down.
-- **No signed installers.** There are [downloads](#download), but nothing is
-  code-signed or notarised, so macOS and Windows both warn you the first time.
-  No `brew install`, no app store, no npm package, no auto-update.
-- **One account.** Not multi-account. Not "coming soon".
+  server (all of those are "yet"). It's the Gmail REST API and its labels all the way down.
+- **You can't start a message.** Reply and forward are there, compose isn't, and `c`
+  is the verification-code shortcut for exactly that reason. Gmail's own drafts aren't
+  fetched either, so nothing half-written is in this app to begin with.
 - **The classifier is wrong sometimes.** It's a pile of rules ported from an old
   Swift app of mine, and some of them look like bugs because they are. I left
   them narrow on purpose. Widening them makes it louder, not better.
@@ -30,15 +29,15 @@ It runs in a browser and as a desktop app. Same program either way.
 ## Download
 
 Every release is on the [Releases page](https://github.com/hxmbl/winnow/releases).
-Take the newest one that isn't marked *Pre-release* unless you want the beta.
+A tag builds the bundles into a **draft** release, so that page is whatever I last
+published by hand; if it's empty or a version behind, the same files are on that
+tag's workflow run as artifacts.
 
 | Platform | File |
 | --- | --- |
 | Linux | `Winnow_<version>_amd64.AppImage` (any distro: `chmod +x`, run it) or `Winnow_<version>_amd64.deb` (`sudo apt install ./Winnow_…deb`) |
 | macOS | `Winnow_<version>_universal.dmg`, Apple silicon and Intel, macOS 10.15+ |
 | Windows | `Winnow_<version>_x64_en-US.msi` or `Winnow_<version>_x64-setup.exe`, when that release has them — the Windows build is best-effort |
-
-**None of it is signed**, which costs money I haven't spent yet. So:
 
 - **macOS** says Winnow "can't be opened because Apple cannot check it for
   malicious software" (or, on newer versions, that it's damaged). Drag it to
@@ -49,35 +48,81 @@ Take the newest one that isn't marked *Pre-release* unless you want the beta.
   ```sh
   xattr -dr com.apple.quarantine /Applications/Winnow.app
   ```
-
 - **Windows** SmartScreen says "Windows protected your PC". Click **More info**,
   then **Run anyway**.
 - **Linux** doesn't care. The AppImage needs FUSE 2 (`libfuse2`) on some
   distros; the `.deb` doesn't.
 
-Winnow doesn't ship a Google sign-in client. To connect Gmail you bring your own:
+To connect Gmail you bring your own Google Cloud credentials:
 create a free OAuth client in your own Google Cloud project and paste it into the
 app (**Connect Gmail**, or **Settings → Google account**).
 [docs/google-setup.md](docs/google-setup.md) walks through it in about ten
 minutes. Because the client is your own unverified project, Google shows its
 "Google hasn't verified this app" screen before consent; that's expected.
 
-## Layout
+## The buckets
 
-```
-web/          The whole app: product logic, UI, and the Gmail client.
-  src/core/     Pure TypeScript. No DOM, no React, no platform.
-  src/platform/ The browser/desktop boundary. Two implementations, one interface.
-  src/ui/       React components.
-native/
-  src-tauri/    Tauri v2 shell. Rust. Native bits only.
-proxy/         Optional render proxy. Separate Node service, see its README.
-```
+Twenty-one, and a message sits in several at once — Important, Action needed and
+Unread is one ordinary Friday. They're filters rather than verdicts: a pill switches
+its filter on and off, **All** clears them, and none of them can be hidden. (Earlier
+builds let you; the list they saved is deleted on launch and those buckets come
+back.) In the list and the reader, a bucket is a word with a tooltip, and the
+tooltip is the reason:
 
-Arrows only ever point inward: `ui` → `platform` → `core`, and `native` is
-reachable from `platform` and nothing else. `core/` doesn't import React, doesn't
-import Tauri, doesn't touch `window`. That's what makes the classifier testable
-without a browser and lets one bundle serve both hosts.
+| Bucket | Why |
+| --- | --- |
+| Important | from someone you read or reply to |
+| Urgent | wants an answer soon |
+| Action needed | needs a reply from you |
+| Security | an alert about your account |
+| Codes | a one-time or verification code |
+| Deliveries | a delivery or an order |
+| Travel | a booking or an itinerary |
+| Events | an invitation or a reminder |
+| Receipts | a receipt or an invoice |
+| Starred | starred by you |
+| Unread | you have not read this yet |
+| Files | has a file attached |
+| New contacts | someone you have not corresponded with |
+| Top contacts | from someone you read most |
+| Quiet contacts | rarely from you |
+| Newsletters | a mailing list |
+| Promos | an advertisement |
+| Read later | nothing is waiting on you |
+| Long reads | long, and not urgent |
+| Social | a social network notification |
+| Unsafe | likely junk or phishing |
+
+Where it learned all that is a screen too: **Settings → How Winnow sorts** lists
+every star, unstar and hidden bucket it has taken as a lesson, with what it had
+predicted at the time, and offers one reset that throws the lot away. A guess that
+learns from you only beats one that doesn't if you can read the ledger.
+
+## Keyboard
+
+It's a keyboard application first; the mouse is the fallback. `?` opens this list
+in the app, rendered from the same table the router reads, so a button can't
+advertise a shortcut that isn't wired.
+
+| Keys | Does |
+| --- | --- |
+| `j` / `k`, `↓` / `↑` | Next / previous message; the arrows scroll an open message instead |
+| `o` or `⏎` | Open the highlighted message |
+| `Esc` | Close the message, a sheet, or the filters |
+| `s` | Star or unstar |
+| `c` | Copy the open message's verification code |
+| `e` | Archive, unarchive, or restore — whichever this mailbox implies |
+| `#` or `⌫` | Move to trash, or delete permanently from Trash |
+| `u` / `m` | Mark read or unread |
+| `r` / `f` | Reply / forward the open message |
+| `/` | Search |
+| `1`–`9` | Toggle the filter pill in that position |
+| `!` | Switch mailbox, or open Settings |
+| `⇧U` | Mark everything in this mailbox read |
+| `,` | Settings |
+
+`⌘`/`⌃`/`⌥` are never touched, and neither is Tab: those belong to the system,
+and swallowing Tab made every `focus-visible` control unreachable.
 
 ## Why there's a Rust process at all
 
@@ -122,7 +167,8 @@ Needs a Rust toolchain and `cargo install tauri-cli --version "^2"`. On Linux it
 also wants WebKitGTK plus `libayatana-appindicator3` and `librsvg2` — the CI
 file lists them, copy it from there. On macOS the `.dmg` needs
 `brew install create-dmg`; the `.app` doesn't. `native/README.md` explains why
-the build is a script and not a bare `cargo tauri build`.
+the build is a script and not a bare `cargo tauri build`. [MAP.md](MAP.md) is an
+annotated map of the tree, if you're here to read the code rather than run it.
 
 ## Gmail setup
 
@@ -182,26 +228,6 @@ Things worth knowing:
   mode otherwise is a sign-in that hangs for five minutes and then blames your
   network.
 
-### Cutting a release
-
-```sh
-# the same plain version in web/package.json, native/src-tauri/tauri.conf.json
-# and native/src-tauri/Cargo.toml (then `cargo check` to update Cargo.lock)
-cd web && node scripts/check-version.mjs     # prints it, or lists the disagreements
-git tag v0.2.0 && git push origin v0.2.0      # or v0.2.0-beta.1 for a pre-release
-```
-
-`.github/workflows/release.yml` first runs the whole CI workflow (secret scan,
-typecheck, lint, unit and smoke tests) and builds nothing if any of it fails. Then
-it checks the tag against the manifests, builds Linux, macOS (universal) and Windows, and attaches the bundles
-to a **draft** release for you to publish. A suffix (`-beta.1`) marks it a
-pre-release; the manifests stay plain `MAJOR.MINOR.PATCH`, because the Windows
-`.msi` refuses anything else. Windows may fail without holding up the other two.
-
-The release needs no repository secrets: there is no Google client to bake in.
-It still fails if a bundle contains a `GOCSPX-` string, as a tripwire against a
-client secret ever ending up in one.
-
 ## The render proxy
 
 `proxy/` fetches a message's images and hands back a self-contained document, so
@@ -219,99 +245,6 @@ cd web && npm run proxy          # http://127.0.0.1:8787
 VITE_RENDER_PROXY=http://127.0.0.1:8787 npm run build
 ```
 
-## Tests
-
-1914 of them, none needing a DOM. 1877 over `web/src`, 37 for the proxy.
-
-Most are ordinary unit tests of ordinary pure functions. Four are worth naming,
-because each exists only because a real bug got out and nothing else would have
-caught it:
-
-- **`platform.test.ts`** pins the names crossing the Rust/TypeScript line. Tauri
-  rewrites *argument* keys from camelCase to snake_case but never rewrites
-  *return values*, so a struct declared `authorize_url` in Rust and read as
-  `authorizeUrl` in TypeScript gave `undefined` and desktop sign-in was
-  impossible — with the screen showing the raw IPC error as though Google had
-  sent it. Rust is read as text rather than linked, so the web suite still runs
-  without a Rust toolchain.
-- **`theme.test.ts`** makes the palettes checkable. A screenshot can't tell you a
-  grey is 3.14:1 on white, which is how `inkSubtle` shipped. It was every
-  section header, every row timestamp and the status line, at 11–13px.
-- **`mapper.test.ts` / `mime.test.ts`** cover both ends of a send. Nothing on the
-  way in or out was tested, so quoted-printable subjects rendered as mojibake and
-  `In-Reply-To` went out as a bare Gmail id. Replies threaded in the sender's
-  Gmail and arrived as new conversations everywhere else.
-- **`contacts/`** folds addresses, so `Ada@Example.com` and `ada@example.com`
-  are one row instead of two that the recipient list will happily offer you.
-
-`npm run smoke` drives the real production build through a browser: boots,
-classifies, keyboard navigation, compose, persist, and logs nothing to the
-console. It starts its own `vite preview` in-process, so the command above is the
-whole command. It also fails the run if anything raises a *native* dialog — the
-discard confirmation used to be `window.confirm`, which Tauri's webviews don't
-reliably implement, so on desktop the question couldn't be asked at all.
-
-## Decisions I'd defend
-
-- **One `derive()` pass.** The store computes profile → signals → bags → list →
-  rail once and hands it to everyone. One answer, so nothing can disagree about
-  what's on screen.
-- **Bulk mail is discounted per message, not per sender.** Someone who forwards
-  one newsletter among six replies is a contact, and discounting the whole sender
-  files them with the retailers. Ties break on the sender name, because a ranking
-  that decides what gets hidden can't be a shuffle.
-- **Recency decays against the newest message in the corpus, not the wall
-  clock.** An inbox that re-sorts itself overnight is impossible to reason about
-  while triaging.
-- **The list sort is a fixed formula; the learned score is not.** So dragging a
-  weight slider can't silently reorder the inbox under you. They share the sender
-  ladder, so they agree about *who* matters and disagree about how much each
-  signal is worth.
-- **Coercion isn't phishing.** The phishing test is binary, and a bucket that
-  cries wolf is the only way to make it useless. Every coercion pattern needs a
-  *demand* alongside the threat, so a real bank notice about a delinquent account
-  doesn't get filed as an attack.
-- **Images load one message at a time.** It used to be a preference, which meant
-  one click under one message turned on sandboxed sender markup for every message
-  after it, forever.
-- **No gravatar.** A third-party request per message is a latency cost and a
-  privacy leak, for decoration. Avatars show a sender's photo only from your own
-  Google contacts (once you opt in to them), and otherwise a monogram.
-- **Brand logos are a separate, off-by-default setting.** **Show brand logos**
-  (Settings) looks up a sender domain's BIMI record (`default._bimi.<domain>`,
-  falling back to the organisational domain) over DNS-over-HTTPS at
-  `cloudflare-dns.com` and shows its `l=` logo — always through `<img>`, https
-  only, never inlined. It isn't tied to the remote-images policy because that one
-  is per message and defaults to asking, which a list avatar can't do, and
-  because this leaks every sender domain in the list to a resolver whether you
-  open the mail or not. Answers are cached locally (a week for a logo, a day for
-  none), rate-limited, and wiped on sign-out or when the setting goes off. The
-  `a=` certificate isn't verified.
-- **Google contacts are a prior, not a ranking.** A saved contact adds a fixed
-  bonus on top of what the mail says, an "other contact" a smaller one. Saved
-  beats other with the same history, and either can surface someone the mail
-  never mentions, but somebody you actually write to every week still outranks a
-  name you saved once in 2019. Synced with People API sync tokens; an expired
-  token means a quiet full re-list, not an error.
-- **Sent is a mailbox.** It's also the only source for "who do I write to". The
-  recipient list is built from both halves of a conversation and sent mail is
-  normally the invisible half.
-- **Every verb has a way back.** `⇧U` restores exactly the messages it touched,
-  and a filed message reappears where it went.
-- **The rail can't be pruned.** A pill switches its filter on and off and "All"
-  clears them; no bucket can be hidden from the rail or the inbox. (Earlier
-  builds could; the list they saved is deleted on launch and those buckets come
-  back.)
-
-## And what isn't true forever
-
-The layout up there is a picture of how the code is right now, not an
-architecture promise. Add a second mail provider or a fourth host and it stops
-being true, and whoever does that will have to redraw it.
-
-If this ever grows a `platform/` interface with three implementations, something
-went wrong.
-
 ## Privacy
 
 The developer runs no servers and
@@ -320,6 +253,16 @@ mail, tokens and OAuth client stay on your device and go only to Google (if you
 turn on **Show brand logos**, sender domains also go to Cloudflare's DNS resolver
 and logos load from the senders' own sites); and you can cut Winnow off at
 [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+
+The mail itself is a mirror in browser storage: `winnow.gmail.cache.messages` holds
+every synced message as plain JSON, bodies included for the 500 newest, kept in
+memory and written to `localStorage` as a sink. On the desktop that's the webview's
+storage — not a database, and not the keychain; only the OAuth tokens and the client
+go in the keychain. Past the origin's ~5 MB quota the write fails, and Winnow asks
+before it keeps the cache and says so when it can't, rather than quietly forgetting.
+Signing out erases the cache and keeps what it learned from you
+(`winnow.learning.v1`, your preferences, your blocked senders), because the learning
+is about you and not about that account.
 
 ## License
 
