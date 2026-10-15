@@ -377,7 +377,6 @@ try {
       };
       const base = parse(getComputedStyle(document.documentElement).getPropertyValue("--wn-surface").trim().replace(/^#(..)(..)(..)$/, (_, r, g, b) => `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`));
       return [...document.querySelectorAll("header [data-rail-scroller] [data-rail-item][data-rail-key]")]
-        .filter((item) => !item.hasAttribute("data-muted"))
         .map((item) => {
           const fill = parse(getComputedStyle(item).backgroundColor);
           const label = item.querySelector("button[aria-pressed] span.grid > span:last-child");
@@ -2333,150 +2332,81 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
 
-  // ── Muting is reversible ───────────────────────────────────────────────────
+  // ── Filters cannot be hidden ──────────────────────────────────────────────
 
-  section("mutes");
+  section("no hiding filters");
 
+  /*
+    A pill switches its filter on and off, and "All" clears them; nothing removes a
+    bucket from the rail or its mail from the inbox. Checked after a hover, because the
+    hide control this replaces only appeared on hover, so a count before it would say
+    nothing.
+  */
   await goTo("Inbox");
   await page.waitForTimeout(300);
   const newsletters = page.locator('header button[aria-label^="Newsletters,"]:visible').first();
-  require("the demo has a Newsletters bucket to mute", (await newsletters.count()) > 0);
-
+  require("the demo has a Newsletters bucket", (await newsletters.count()) > 0);
   await newsletters.hover();
-  await page.waitForTimeout(200);
-  const hideAgain = page.locator('header button[aria-label^="Hide Newsletters"]:visible').first();
-  await hideAgain.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(200);
-  await hideAgain.click({ force: true });
-  await page.waitForTimeout(400);
-
-  /*
-    The mute says what it did, and offers the way back.
-
-    A mute *is* reversible — the pill stays in the rail with a ↺, and Settings lists it
-    — but the muted pill is sorted to the *end* of the rail, because a muted pill is not
-    filterable and leaving it in place would repoint every digit shortcut after it. So the
-    control the user clicked leaves a 27-pill strip they have probably not scrolled, and
-    the whole visible effect of the click was that something disappeared. A browser is
-    the only place that can see that.
-  */
-  const muteNotice = page.locator('[role="status"]:has-text("Hid Newsletters from the inbox")');
-  check("muting says what it hid", (await muteNotice.count()) > 0);
-  check("and offers an undo", (await muteNotice.getByRole("button", { name: /undo/i }).count()) > 0);
-
-  const muted = page.locator('header button[aria-label^="Newsletters, hidden"]:visible').first();
-  check("a muted bucket stays on the rail, struck through", (await muted.count()) > 0);
-  check("and cannot be switched on as a filter", await muted.isDisabled());
-
-  // The restore control is revealed on hover of the pill's group, so it is counted
-  // *after* hovering — before that it is `display: none` and a count of zero would say
-  // nothing about whether the control exists.
-  await muted.locator("xpath=..").hover();
   await page.waitForTimeout(250);
-  const restore = page.locator('header button[aria-label^="Show Newsletters"]:visible').first();
-  check("the muted pill offers a restore control", (await restore.count()) > 0);
+  const hideControls = () =>
+    page.locator(
+      'header [data-rail-scroller] button[aria-label^="Hide "], header [data-rail-scroller] button[aria-label^="Show "]',
+    );
+  check("no pill offers a hide or restore control", (await hideControls().count()) === 0, `${await hideControls().count()}`);
+  const railButtons = await page.evaluate(() =>
+    [...document.querySelectorAll("header [data-rail-scroller] [data-rail-item][data-rail-key]")].map(
+      (item) => item.querySelectorAll("button").length,
+    ),
+  );
+  check(
+    "every pill is a single toggle and nothing else",
+    railButtons.length > 5 && railButtons.every((count) => count === 1),
+    JSON.stringify(railButtons),
+  );
+  check(
+    "and no pill is drawn as hidden",
+    (await page.locator("header [data-rail-item][data-muted], header button[aria-label*=', hidden']").count()) === 0,
+  );
+
+  await page.keyboard.press(",");
+  await page.waitForTimeout(400);
+  const settingsHeadings = await page.locator('[role="dialog"] h2, [role="dialog"] h3').allTextContents();
+  check(
+    "settings has no hidden-buckets section",
+    !settingsHeadings.some((heading) => heading.startsWith("Hidden buckets")),
+    settingsHeadings.join(" | "),
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+
   /*
-   * Scrolled into view first, and this is not incidental tidiness.
-   *
-   * A muted bucket is moved to the *end* of the rail, so its restore control sits at
-   * the far right of a horizontally scrolling strip — measured at x=3025 on a 1440px
-   * window. `force: true` skips Playwright's actionability checks, which includes
-   * scrolling the target into view, so the click was dispatched at a coordinate
-   * outside the viewport and hit nothing. The count assertions after it then reported
-   * a still-muted bucket as though the restore had failed.
-   */
-  await restore.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(200);
-  await restore.click({ force: true });
+    Migration: an earlier build stored the hidden buckets under `winnow.mutedFilters.v1`.
+    Written by hand here, as that build would have left it, then reloaded: the bucket must
+    be back on the rail as a live toggle, its mail back in the inbox, and the key gone.
+  */
+  const inboxRowsBefore = await rowTotal();
+  await page.evaluate(() =>
+    localStorage.setItem("winnow.mutedFilters.v1", JSON.stringify(["newsletters", "receipts"])),
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("[data-message-id]", { timeout: 10_000 });
   await page.waitForTimeout(500);
   check(
-    "restoring brings the bucket back",
-    (await page.locator('header button[aria-label^="Show Newsletters"]:visible').count()) === 0,
-  );
-  check(
-    "and its pill is live again",
+    "a bucket an earlier build hid is back on the rail",
     (await page.locator('header button[aria-label^="Newsletters,"]:visible:not([disabled])').count()) > 0,
   );
+  check("and its mail is back in the inbox", (await rowTotal()) === inboxRowsBefore, `${inboxRowsBefore} → ${await rowTotal()}`);
   check(
-    "and the strip's offer goes away with it, rather than leaving an Undo that does nothing",
-    (await page.locator('[role="status"]:has-text("Hid Newsletters")').count()) === 0,
+    "and the stored hidden list is deleted on load",
+    !("winnow.mutedFilters.v1" in (await storage())),
   );
-
-  // And the other way back: taking the strip's own Undo restores the bucket.
-  await newsletters.hover();
-  await page.waitForTimeout(200);
-  await page.locator('header button[aria-label^="Hide Newsletters"]:visible').first().click();
-  await page.waitForTimeout(400);
-  await page
-    .locator('[role="status"]:has-text("Hid Newsletters from the inbox")')
-    .getByRole("button", { name: /undo/i })
-    .click();
-  await page.waitForTimeout(400);
-  check(
-    "the strip's undo restores the bucket too",
-    (await page.locator('header button[aria-label^="Newsletters,"]:visible:not([disabled])').count()) > 0,
-  );
-
-  // Mute a *second* bucket and leave it muted, so Settings has something to list. The
-  // section is conditional on `mutedFilters.length > 0` — which is right, since an
-  // empty section is noise — but it means this check has to be made with a mute in
-  // place rather than after restoring everything.
-  const receipts = page.locator('header button[aria-label^="Receipts,"]:visible').first();
-  if (await receipts.count()) {
-    await receipts.hover();
-    await page.waitForTimeout(200);
-    await page.locator('header button[aria-label^="Hide Receipts"]:visible').first().click();
-    await page.waitForTimeout(400);
-    check(
-      "a second bucket can be muted too",
-      (await page.locator('header button[aria-label^="Receipts, hidden"]:visible').count()) > 0,
-    );
-
-    await page.keyboard.press(",");
-    await page.waitForTimeout(400);
-    // Matched on the heading, not on `innerText`. The section headings are uppercased
-    // and letterspaced by CSS, so their rendered text is "HIDDEN BUCKETS (1)" — a
-    // regex against the visible text silently misses it, which is exactly what this
-    // check did at first. `textContent` is the DOM's own text, uncased and unspaced.
-    const headings = await page.locator('[role="dialog"] h2, [role="dialog"] h3').allTextContents();
-    check(
-      "settings lists hidden buckets",
-      headings.some((heading) => /^Hidden buckets \(\d+\)$/.test(heading)),
-      headings.join(" | "),
-    );
-    check(
-      "and offers to show one again",
-      (await page.locator('[role="dialog"] button:has-text("Show again")').count()) > 0,
-    );
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(250);
-
-    // Undone from the rail, so the persistence checks below are not perturbed by a
-    // second active filter.
-    const restoreReceipts = page
-      .locator('header button[aria-label^="Receipts, hidden"]:visible')
-      .first();
-    await restoreReceipts.locator("xpath=..").hover();
-    await page.waitForTimeout(250);
-    await page
-      .locator('header button[aria-label^="Show Receipts"]:visible')
-      .first()
-      .click({ force: true });
-    await page.waitForTimeout(400);
-  } else {
-    // No second bucket to mute: assert the section is *absent* when nothing is muted,
-    // which is the behaviour the condition encodes.
-    await page.keyboard.press(",");
-    await page.waitForTimeout(400);
-    const headings = await page.locator('[role="dialog"] h2, [role="dialog"] h3').allTextContents();
-    check(
-      "with nothing muted, settings shows no empty hidden-buckets section",
-      !headings.some((heading) => heading.startsWith("Hidden buckets")),
-      headings.join(" | "),
-    );
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(250);
-  }
+  const revived = page.locator('header button[aria-label^="Newsletters,"]:visible').first();
+  await revived.click();
+  await page.waitForTimeout(300);
+  check("and it switches on as a filter", (await revived.getAttribute("aria-pressed")) === "true");
+  await revived.click();
+  await page.waitForTimeout(300);
+  check("and off again", (await revived.getAttribute("aria-pressed")) === "false");
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
@@ -3232,7 +3162,7 @@ try {
 
     Chromium reports `hover: hover` for this page however narrow the viewport is, so
     nothing above can tell whether a control that only appears on hover exists at all
-    on a phone. The rail's per-pill *hide* control once did not. Hence a second context
+    on a phone. Hence a second context
     with `hasTouch`, which is what makes `(hover: none)` match.
   */
   const touchContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
@@ -3244,34 +3174,26 @@ try {
   await touchPage.goto(URL, { waitUntil: "networkidle" });
   await touchPage.waitForSelector("[data-message-id]", { timeout: 10_000 });
 
-  const touchMutes = touchPage.locator('[data-phone-dock] button[aria-label^="Hide "], [data-phone-dock] button[aria-label^="Show "]');
-  check(
-    "the chip row's hide control exists on a device with no hover",
-    (await touchMutes.count()) > 5,
-    `${await touchMutes.count()} controls`,
+  const touchHides = touchPage.locator(
+    '[data-phone-dock] button[aria-label^="Hide "], [data-phone-dock] button[aria-label^="Show "]',
   );
   check(
-    "and it is visible rather than hover-only",
-    (await touchMutes.first().isVisible()) &&
-      (await touchMutes.first().evaluate((node) => getComputedStyle(node).opacity)) === "1",
-    await touchMutes.first().getAttribute("aria-label"),
+    "the chip row has no hide control on a device with no hover either",
+    (await touchHides.count()) === 0,
+    `${await touchHides.count()} controls`,
   );
-  const touchHideBox = await touchMutes.first().boundingBox();
+  const touchPill = touchPage.locator("[data-phone-dock] [data-rail-key] button[aria-pressed]").first();
+  const touchPillBox = await touchPill.boundingBox();
   check(
-    "and it is tall enough for a thumb",
-    Boolean(touchHideBox) && touchHideBox.height >= MIN_TARGET,
-    JSON.stringify(touchHideBox),
+    "a chip is tall enough for a thumb",
+    Boolean(touchPillBox) && touchPillBox.height >= MIN_TARGET,
+    JSON.stringify(touchPillBox),
   );
-  const touchHideLabel = (await touchMutes.first().getAttribute("aria-label")) ?? "";
-  const touchHidName = touchHideLabel.replace(/^Hide (.+?) from the inbox.*$/, "$1");
-  await touchMutes.first().tap();
-  await touchPage.waitForTimeout(400);
-  const touchNotice = touchPage.locator(`[role="status"]:has-text("Hid ${touchHidName} from the inbox")`);
-  check("and a tap on it hides the bucket", (await touchNotice.count()) > 0, touchHideLabel);
-  if ((await touchNotice.count()) > 0) {
-    await touchNotice.getByRole("button", { name: /undo/i }).tap();
-    await touchPage.waitForTimeout(300);
-  }
+  await touchPill.tap();
+  await touchPage.waitForTimeout(300);
+  check("and a tap switches its filter on", (await touchPill.getAttribute("aria-pressed")) === "true");
+  await touchPill.tap();
+  await touchPage.waitForTimeout(300);
   const starTarget = await touchPage
     .locator('main button[aria-label="Star"], main button[aria-label="Unstar"]')
     .first()
