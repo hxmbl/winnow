@@ -167,8 +167,15 @@ export function retryAfterMs(value: string | null | undefined, now: number = Dat
  * `take` calls are serialised through a promise chain, so two concurrent
  * requests cannot hand each other the same units.
  */
-/** Every type `history` asks for; see `GmailClient.history`. */
-const HISTORY_TYPES = ["messageAdded", "labelsAdded", "labelsRemoved", "messagesDeleted"] as const;
+/**
+ * Every type `history` asks for; see `GmailClient.history`.
+ *
+ * These are the request enum (`HistoryType`), which is singular. The response's
+ * record fields are plural (`messagesAdded`, `labelsAdded`, `labelsRemoved`,
+ * `messagesDeleted`); sending those names here is a 400 "Invalid value at
+ * 'history_types'".
+ */
+export const HISTORY_TYPES = ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"] as const;
 
 export class QuotaBucket {
   private units: number;

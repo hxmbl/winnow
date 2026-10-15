@@ -189,8 +189,19 @@ describe("GmailClient — the queries the sync engine relies on", () => {
     await client(fetchImpl).history("1234");
     const types = new URLSearchParams(calls[0].url.split("?")[1]).getAll("historyTypes");
     expect(types.sort()).toEqual(
-      ["labelsAdded", "labelsRemoved", "messageAdded", "messagesDeleted"].sort(),
+      ["labelAdded", "labelRemoved", "messageAdded", "messageDeleted"].sort(),
     );
+  });
+
+  it("uses Gmail's singular request enum, not the plural response field names", async () => {
+    // `labelsAdded` / `messagesDeleted` are response fields; as `historyTypes` values
+    // Gmail rejects them with 400 "Invalid value at 'history_types'".
+    const { fetchImpl, calls } = stubFetch([{ status: 200 }]);
+    await client(fetchImpl).history("1234");
+    const allowed = new Set(["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"]);
+    for (const type of new URLSearchParams(calls[0].url.split("?")[1]).getAll("historyTypes")) {
+      expect(allowed.has(type)).toBe(true);
+    }
   });
 
   it("sends each history type as its own parameter, never comma-joined", async () => {
