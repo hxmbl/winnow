@@ -4411,6 +4411,177 @@ try {
     await ctx.close();
   }
 
+  // ── Text selection ─────────────────────────────────────────────────────────
+  //
+  // The chrome is `user-select: none`, and readable text opts back in. A report that
+  // "you can't select anything that isn't in an email" is what this guards: the reader
+  // header, an error, and Settings must be selectable; the list rows and the buttons
+  // must not, or a drag across the list paints a selection over it.
+
+  section("text selection");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new globalThis.URL(URL).origin });
+    const t = await ctx.newPage();
+    t.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    t.on("pageerror", (error) => errors.push(String(error)));
+    await t.goto(URL, { waitUntil: "networkidle" });
+    await t.waitForSelector("[data-message-id]", { timeout: 10_000 });
+
+    /** Select an element's contents the way a script (or a triple-click) would, and read it back. */
+    const selectIn = (locator) =>
+      locator.evaluate((el) => {
+        const selection = document.getSelection();
+        selection.removeAllRanges();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        selection.addRange(range);
+        return selection.toString();
+      });
+    const selected = () => t.evaluate(() => document.getSelection()?.toString() ?? "");
+    const clear = () => t.evaluate(() => document.getSelection()?.removeAllRanges());
+    const userSelect = (locator) => locator.evaluate((el) => getComputedStyle(el).userSelect);
+
+    await t.locator("[data-message-id]").first().click();
+    await t.waitForSelector("[data-reader] article h1", { timeout: 5_000 });
+    const reader = t.locator("[data-reader]");
+    const subjectText = ((await reader.locator("[data-reader-subject]").textContent()) ?? "").trim();
+    for (const [name, selector] of [
+      ["subject", "[data-reader-subject]"],
+      ["sender name", "[data-reader-sender]"],
+      ["sender address", "[data-reader-address]"],
+      ["date", "[data-reader-date]"],
+    ]) {
+      const element = reader.locator(selector).first();
+      const text = ((await element.textContent()) ?? "").trim();
+      const got = (await selectIn(element)).trim();
+      check(`the reader's ${name} is selectable`, text.length > 0 && got === text, `${JSON.stringify(got)} vs ${JSON.stringify(text)}`);
+    }
+
+    // A real triple-click, so the CSS is what is tested and not only the Selection API.
+    await reader.locator("[data-reader-subject]").click({ clickCount: 3 });
+    check("triple-clicking the subject selects it", (await selected()).includes(subjectText), await selected());
+
+    // A drag from the subject up across the toolbar stops at the controls.
+    await clear();
+    const subjectBox = await reader.locator("[data-reader-subject]").boundingBox();
+    const toolbarButton = reader.locator("button[aria-label]").filter({ hasNotText: /./ }).first();
+    const avatarBox = await reader.locator("[data-reader-avatar]").boundingBox();
+    await t.mouse.move(subjectBox.x + subjectBox.width - 2, subjectBox.y + subjectBox.height / 2);
+    await t.mouse.down();
+    await t.mouse.move(avatarBox.x + 2, avatarBox.y + 2, { steps: 8 });
+    await t.mouse.up();
+    const bled = await selected();
+    check(
+      "a drag from the subject into the header selects text, not button labels",
+      bled.length > 0 && !/Archive|Trash|Reply|Forward|Sender options/.test(bled),
+      JSON.stringify(bled.slice(0, 120)),
+    );
+
+    // Controls stay chrome, even inside the selectable reader.
+    check("the reader's buttons are not selectable", (await userSelect(toolbarButton)) === "none", await userSelect(toolbarButton));
+    await clear();
+    await reader.locator("[data-reader-avatar]").dblclick();
+    await t.keyboard.press("Escape");
+    await t.waitForTimeout(150);
+    check("double-clicking the avatar button selects nothing", (await selected()) === "", JSON.stringify(await selected()));
+
+    // The list rows: unselectable, so drag-select owns the drag.
+    const row = t.locator("button[data-message-id]").first();
+    check("a list row is not selectable", (await userSelect(row)) === "none" && (await selectIn(row)).trim() === "", await userSelect(row));
+    const pill = t.locator("header button[aria-pressed]:visible").first();
+    check("a filter pill is not selectable", (await userSelect(pill)) === "none" && (await selectIn(pill)).trim() === "");
+    await clear();
+
+    // The browser's own context menu over selected text: nothing in the app cancels it.
+    const menuAllowed = await reader.locator("[data-reader-subject]").evaluate((el) => {
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 10, clientY: 10 });
+      return el.dispatchEvent(event);
+    });
+    check("right-clicking reader text leaves the native menu (Copy) alone", menuAllowed);
+
+    // ⌘A / Ctrl+A selects the reader, not the whole app.
+    await reader.locator("[data-reader-subject]").click();
+    await t.keyboard.press("ControlOrMeta+a");
+    const all = await t.evaluate(() => {
+      const selection = document.getSelection();
+      const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+      return {
+        text: selection.toString(),
+        inReader: Boolean(range && document.querySelector("[data-reader]").contains(range.commonAncestorContainer)),
+      };
+    });
+    check(
+      "Ctrl/⌘+A in the reader selects the reader's text and nothing outside it",
+      all.inReader && all.text.includes(subjectText),
+      JSON.stringify({ inReader: all.inReader, length: all.text.length }),
+    );
+
+    // Ctrl/⌘+C copies; it is not a shortcut, so the reader stays as it was.
+    const rowsBefore = await t.locator("[data-row-count]").getAttribute("data-row-count");
+    await t.keyboard.press("ControlOrMeta+c");
+    await t.waitForTimeout(150);
+    const clip = await t.evaluate(() => navigator.clipboard.readText().catch(() => null));
+    check(
+      "Ctrl/⌘+C copies the selection and triggers no app action",
+      (await t.locator("[data-reader] article h1").count()) === 1 &&
+        (await t.locator("[data-row-count]").getAttribute("data-row-count")) === rowsBefore &&
+        (clip === null || clip.includes(subjectText)),
+      clip === null ? "clipboard unreadable here" : JSON.stringify(clip.slice(0, 80)),
+    );
+    await clear();
+
+    // Settings: its text is selectable, its controls are not, and ⌘A stays inside it.
+    await t.keyboard.press("Escape");
+    await t.waitForTimeout(150);
+    await t.keyboard.press(",");
+    await t.waitForSelector("[data-settings-body]", { timeout: 5_000 });
+    const settings = t.locator("[data-settings-body]");
+    const note = settings.locator("[data-sorting-note]");
+    const noteText = ((await note.textContent()) ?? "").trim();
+    check("a Settings text is selectable", noteText.length > 0 && (await selectIn(note)).trim() === noteText);
+    const clientHint = settings.locator("[data-settings-row]").first().locator("p").nth(1);
+    const clientText = ((await clientHint.textContent()) ?? "").trim();
+    check("the Google client value in Settings is selectable", clientText.length > 0 && (await selectIn(clientHint)).trim() === clientText, clientText);
+    const settingsButton = settings.locator("button").first();
+    check("Settings buttons are not selectable", (await userSelect(settingsButton)) === "none");
+    await clear();
+    await t.keyboard.press("ControlOrMeta+a");
+    const settingsAll = await t.evaluate(() => {
+      const selection = document.getSelection();
+      const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+      return Boolean(range && document.querySelector("[data-settings-body]").contains(range.commonAncestorContainer)) && selection.toString().length > 0;
+    });
+    check("Ctrl/⌘+A in Settings selects the Settings text only", settingsAll);
+    await clear();
+    await t.keyboard.press("Escape");
+    await t.waitForTimeout(150);
+
+    // An error banner: the whole text selectable, with a Copy button that copies all of it.
+    await t.goto(`${URL}?error=access_denied&state=smoke-selection`, { waitUntil: "networkidle" });
+    const banner = t.locator("[data-error-banner]");
+    await banner.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    if (check("a declined sign-in shows the error banner", (await banner.count()) === 1)) {
+      const copyText = banner.locator("[data-error-copy]");
+      const full = ((await copyText.textContent()) ?? "").trim();
+      check("the banner's error is selectable in full", full.length > 0 && (await selectIn(copyText)).trim() === full, full);
+      check("the banner's Dismiss button is not selectable", (await userSelect(banner.getByRole("button", { name: "Dismiss" }))) === "none");
+      await clear();
+      await banner.locator("[data-error-copy-button]").click();
+      await t.waitForTimeout(200);
+      const copied = await t.evaluate(() => navigator.clipboard.readText().catch(() => null));
+      check(
+        "the banner's Copy button copies the whole error",
+        (await banner.locator('[data-error-copy-button][aria-label="Copied the error"]').count()) === 1 &&
+          (copied === null || copied === full),
+        copied === null ? "clipboard unreadable here" : JSON.stringify(copied),
+      );
+    }
+    await ctx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");
