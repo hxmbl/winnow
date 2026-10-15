@@ -332,10 +332,18 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
       contextMenu.current = false;
       return;
     }
-    const release = () => {
+    const release = (event: Event) => {
       if (!pressing.current) return;
       pressing.current = false;
-      if (!pointerInside.current) armIdle();
+      // Where the button came up decides where the pointer is: during a drag-select the
+      // browser sends no pointerleave as the pointer crosses the panel's edge, so the
+      // flag can still say "inside" with the pointer at the far side of the window.
+      const panel = panelRef.current;
+      if (panel && event instanceof PointerEvent && event.pointerType !== "touch") {
+        const under = document.elementFromPoint(event.clientX, event.clientY);
+        pointerInside.current = under !== null && panel.contains(under);
+      }
+      if (!pointerInside.current && (!(event instanceof PointerEvent) || armsIdleClose(event.pointerType))) armIdle();
     };
     const moved = (event: PointerEvent) => {
       if (!contextMenu.current) return;
