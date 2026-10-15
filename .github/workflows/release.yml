@@ -38,7 +38,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || 'main' }}
+          ref: ${{ inputs.ref || 'main' }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           TAG="" PUBLISH=false PRERELEASE=false
           # Use the ref that was passed from CI or manual dispatch
-          REF="${{ github.event.inputs.ref }}"
+          REF="${{ inputs.ref }}"
           if [ -n "$REF" ] && [[ "$REF" == v* ]]; then
             TAG="$REF" PUBLISH=true
             case "$TAG" in *-*) PRERELEASE=true ;; esac
@@ -134,7 +134,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || 'main' }}
+          ref: ${{ inputs.ref || 'main' }}
           persist-credentials: false
 
       - name: Setup Node.js

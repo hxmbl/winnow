@@ -8,7 +8,7 @@ on:
     branches: [main, master]
 
 permissions:
-  contents: write
+  contents: read
   # dorny/paths-filter lists a PR's changed files through the API.
   pull-requests: read
 
@@ -82,17 +82,8 @@ jobs:
       - name: Check versions
         run: node scripts/check-version.mjs
 
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Lint proxy
-        run: npm run lint:proxy
-
-      - name: Run tests
-        run: npm run test
+      - name: Typecheck, lint and test
+        run: npm run check
 
   # Every push to master builds the Rust side; a PR only does when it touches it.
   changes:
