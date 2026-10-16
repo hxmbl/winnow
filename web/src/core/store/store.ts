@@ -447,6 +447,17 @@ export type MailboxView = {
    */
   attention: AttentionSummary;
   selected: Email | null;
+  /**
+   * The row of the open message's conversation in `threads`, or `-1`.
+   *
+   * Matched by thread, not only by representative: a message opened from inside a
+   * thread, or one whose thread gained a newer reply since it was opened, is still read
+   * on that row. `-1` when nothing is open or the open message's conversation is not a
+   * visible row (a filter or search is hiding it, or it has left the mailbox).
+   *
+   * This, not `cursorIndex`, is where the reader *is*; see `readoutIndex`.
+   */
+  selectedIndex: number;
   conversation: Email[];
   unreadCount: number;
   totalCount: number;
@@ -963,6 +974,7 @@ export class WinnowStore {
      * `setMailbox`.
      */
     const selectedRow = threads.find((row) => row.representative.id === state.selectedId) ?? null;
+    const selectedIndex = rowIndexOf(threads, state.selectedId, mailboxEmails);
     const selectedFallback =
       selectedRow === null && state.selectedId !== null
         ? (mailboxEmails.find((email) => email.id === state.selectedId) ?? null)
@@ -990,6 +1002,7 @@ export class WinnowStore {
       inboxThreadCount,
       attention,
       selected,
+      selectedIndex,
       conversation,
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
       totalCount: mailboxEmails.length,
@@ -1051,7 +1064,31 @@ export class WinnowStore {
    */
   private notify(): void {
     this.version += 1;
+    this.followOpenMessage();
     for (const listener of this.listeners) listener();
+  }
+
+  /**
+   * Keep the cursor on the open message's row, whatever moved the rows.
+   *
+   * The cursor is an index and the reader an id, and every change to the list — a sync,
+   * new mail, an archive or delete above, an undo, a filter, a search, a re-sort, the
+   * open thread gaining a reply — shifts indices without touching the id. Patching each
+   * of those paths is how they drifted apart ("4 of 39" over the fifth message, `j`
+   * stepping from a row nobody is on), so the invariant is restored here instead, once,
+   * on every change: while the open message is a visible row, the cursor is that row.
+   *
+   * When it is not a row the cursor is left where it was. That is where the message
+   * *was*, which `stepTarget` steps on from, and the readout shows no number.
+   *
+   * Run between the version bump and the listeners, so the cached view it derives is the
+   * one they read. `derive` does not read `cursorIndex`, so patching it here leaves that
+   * cache valid.
+   */
+  private followOpenMessage(): void {
+    if (this.state.selectedId === null) return;
+    const at = this.deriveCached().selectedIndex;
+    if (at >= 0 && at !== this.state.cursorIndex) this.state = { ...this.state, cursorIndex: at };
   }
 
   /** Wired by `attach`; see `StoreOptions`. */
@@ -1439,6 +1476,12 @@ export class WinnowStore {
     this.set({ selectedId: id });
   }
 
+  /** The visible row message `id` is read on, or `-1`; see `rowIndexOf`. */
+  private rowIndex(id: number): number {
+    const mailboxEmails = this.state.all.filter((email) => email.mailbox === this.state.mailbox);
+    return rowIndexOf(this.view.threads, id, mailboxEmails);
+  }
+
   /** Open the message at the cursor. */
   openCursor(): void {
     // Guarded explicitly, since `threads[-1]` is `undefined` with no cursor.
@@ -1501,23 +1544,9 @@ export class WinnowStore {
    * the user press `o` to fill it is two keystrokes to see what they asked for.
    */
   moveCursor(delta: number): void {
+    const next = this.stepTarget(delta);
+    if (next === null) return;
     const threads = this.view.threads;
-    if (threads.length === 0) return;
-
-    // With no cursor, "next" starts at the top and "previous" at the bottom, which is
-    // what `j` or `k` on a fresh list expects.
-    let next: number;
-    if (this.state.cursorIndex === NO_CURSOR) {
-      next = delta > 0 ? 0 : threads.length - 1;
-    } else if (this.openRowLeftFromUnderCursor()) {
-      // The open message has dropped out of the list (opening it read it, under the
-      // Unread filter) and the next row slid up under the cursor, so that row already
-      // *is* "next": stepping past it would skip a message.
-      next = clampIndex(this.state.cursorIndex + (delta > 0 ? delta - 1 : delta), threads.length);
-    } else {
-      next = clampIndex(this.state.cursorIndex + delta, threads.length);
-    }
-
     this.set({
       cursorIndex: next,
       selectedId: threads[next]?.representative.id ?? null,
@@ -1526,13 +1555,47 @@ export class WinnowStore {
     this.markOpenedRead();
   }
 
-  /** The reader is open on a message that is no longer a row, and the cursor is on a row. */
-  private openRowLeftFromUnderCursor(): boolean {
-    const id = this.state.selectedId;
-    if (id === null) return false;
+  /**
+   * The row `moveCursor(delta)` would land on, or `null` on an empty list.
+   *
+   * Steps from the *open message's* row whenever it is a row — not from the cursor,
+   * which is only a fallback for when nothing is open or the open message is not shown.
+   * `followOpenMessage` keeps the two equal; reading the reader's row here as well means
+   * a step can never start from a stale index even if that invariant were broken.
+   */
+  stepTarget(delta: number): number | null {
     const threads = this.view.threads;
-    const at = threads[this.state.cursorIndex];
-    return at !== undefined && at.representative.id !== id && !threads.some((row) => row.representative.id === id);
+    const length = threads.length;
+    if (length === 0) return null;
+
+    const open = this.state.selectedId !== null ? this.view.selectedIndex : -1;
+    if (open >= 0) return clampIndex(open + delta, length);
+
+    // With no cursor, "next" starts at the top and "previous" at the bottom, which is
+    // what `j` or `k` on a fresh list expects.
+    const cursor = this.state.cursorIndex;
+    if (cursor === NO_CURSOR) return delta > 0 ? 0 : length - 1;
+    const base = Math.min(cursor, length - 1);
+
+    // The open message is not a row any more (opening it read it, under the Unread
+    // filter) and the next row slid up under the cursor, so that row already *is*
+    // "next": stepping past it would skip a message.
+    if (this.state.selectedId !== null && cursor < length) {
+      return clampIndex(base + (delta > 0 ? delta - 1 : delta), length);
+    }
+    return clampIndex(base + delta, length);
+  }
+
+  /**
+   * Whether prev (`-1`) or next (`1`) would go anywhere: false on an empty list, and at
+   * either end, where the step would land on the row already being shown.
+   *
+   * Asked of the same `stepTarget` the move itself uses, so a chevron is enabled exactly
+   * when pressing it does something.
+   */
+  canStep(delta: number): boolean {
+    const target = this.stepTarget(delta);
+    return target !== null && target !== readoutIndex(this.state, this.view);
   }
 
   /** Select and open in one step, for a click on a row. */
@@ -1559,9 +1622,10 @@ export class WinnowStore {
    *     for the jump and the cursor lands on the row.
    */
   focusMessage(id: number): boolean {
-    const visibleAt = this.view.threads.findIndex(
-      (row) => row.representative.id === id,
-    );
+    // Its conversation's row, not only a row it represents: an earlier message of a
+    // visible thread (clicked in the reader) is read on that row, and clearing the
+    // filters to "reveal" it would throw away the user's view for nothing.
+    const visibleAt = this.rowIndex(id);
     if (visibleAt >= 0) {
       this.set({ cursorIndex: visibleAt, selectedId: id, overlay: "none", revealSeq: this.state.revealSeq + 1 });
       this.markOpenedRead();
@@ -1583,7 +1647,7 @@ export class WinnowStore {
 
     // The row index is only known after `set` re-derives the list, so the cursor is
     // placed by looking the id up again.
-    const nowAt = this.view.threads.findIndex((row) => row.representative.id === id);
+    const nowAt = this.rowIndex(id);
     this.set({ cursorIndex: nowAt >= 0 ? nowAt : NO_CURSOR, revealSeq: this.state.revealSeq + 1 });
     this.markOpenedRead();
     return true;
@@ -1833,7 +1897,7 @@ export class WinnowStore {
    */
   markUnreadAndMoveOn(id: number, { phone = false }: { phone?: boolean } = {}): void {
     const threads = this.view.threads;
-    const index = threads.findIndex((row) => row.representative.id === id);
+    const index = this.rowIndex(id);
     const wasOpen = this.state.selectedId === id;
     this.setRead(id, false);
     if (!wasOpen) return;
@@ -2135,7 +2199,7 @@ export class WinnowStore {
      */
     const at = threads[this.state.cursorIndex];
     if (id !== null && at && at.representative.id !== id) {
-      const stillVisible = threads.some((row) => row.representative.id === id);
+      const stillVisible = this.rowIndex(id) >= 0;
       if (!stillVisible && !openMessageSurvives()) {
         this.set({ selectedId: at.representative.id });
         // The row that took the reader's place is now being read.
@@ -2674,4 +2738,47 @@ export function syncNotice(result: { truncated: boolean; cacheUnpersisted?: bool
   // `cacheUnpersisted` is not a note any more: it is a question with two answers, and
   // lives in `storagePrompt` (see `STORAGE_PROMPT`).
   return notes.length > 0 ? notes.join(" ") : null;
+}
+
+/** A message's conversation key, the same one `groupThreads` files it under. */
+function threadKeyOf(email: Email): string {
+  return email.threadId ?? `single-${email.gmailId}`;
+}
+
+/**
+ * The row in `threads` that shows message `id`, or `-1`.
+ *
+ * The row whose representative it is first, and otherwise the row of its conversation —
+ * but only for a message of the mailbox on screen (`mailboxEmails`): a thread's sent
+ * reply shares the inbox row's key, and is not read *on* that row.
+ */
+export function rowIndexOf(
+  threads: readonly ThreadRow[],
+  id: number | null,
+  mailboxEmails: readonly Email[],
+): number {
+  if (id === null) return -1;
+  const direct = threads.findIndex((row) => row.representative.id === id);
+  if (direct >= 0) return direct;
+  const email = mailboxEmails.find((candidate) => candidate.id === id);
+  if (!email) return -1;
+  const key = threadKeyOf(email);
+  return threads.findIndex((row) => row.key === key);
+}
+
+/**
+ * The 0-based row the position readout ("4 of 39") names, or `NO_CURSOR` for none.
+ *
+ * With a message open it is that message's row and nothing else — never the cursor,
+ * which is a separate piece of state and has drifted from the reader before (a sync, an
+ * archive above, an undo, a filter, a re-sort). An open message that is not a visible
+ * row gets no number at all: the neutral readout is honest, a neighbour's number is not.
+ * With nothing open it is the cursor, if that is on a row.
+ */
+export function readoutIndex(
+  state: Pick<StoreState, "selectedId" | "cursorIndex">,
+  view: Pick<MailboxView, "threads" | "selectedIndex">,
+): number {
+  if (state.selectedId !== null) return view.selectedIndex >= 0 ? view.selectedIndex : NO_CURSOR;
+  return state.cursorIndex >= 0 && state.cursorIndex < view.threads.length ? state.cursorIndex : NO_CURSOR;
 }

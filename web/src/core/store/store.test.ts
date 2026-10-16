@@ -5,6 +5,7 @@ import {
   STORAGE_PROMPT,
   STORAGE_SAVE_FAILED,
   WinnowStore,
+  readoutIndex,
   syncFailureSummary,
   syncNotice,
   type MailBackend,
@@ -2053,5 +2054,337 @@ describe("sending a new message", () => {
     const { backend } = fakeBackend();
     const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
     await expect(store.sendNew(draft)).rejects.toThrow(/cannot send new messages/);
+  });
+});
+
+/**
+ * The position readout ("4 of 39") and the prev/next chevrons name the message open in
+ * the reader — never a cursor index that some list change has shifted out from under it.
+ *
+ * Each case is a way the two used to disagree. The assertion is the same every time:
+ * the readout's row is the open message's conversation, the cursor is on it, and `j`
+ * steps to the row after it.
+ */
+describe("the position readout follows the open message", () => {
+  /** A date-sorted demo store, so "above" and "below" do not depend on the scorer. */
+  function sortedStore(backend?: MailBackend) {
+    const store = demoStore();
+    if (backend) store.attach({ backend });
+    store.setSortBy("date");
+    return store;
+  }
+
+  const keyOf = (email: Email) => email.threadId ?? `single-${email.gmailId}`;
+
+  /** The readout names the open message's row, and the cursor agrees. */
+  function expectReadoutOnOpen(store: WinnowStore): number {
+    const snap = store.getSnapshot();
+    const open = snap.all.find((email) => email.id === snap.selectedId)!;
+    expect(open).toBeDefined();
+    const at = readoutIndex(snap, store.view);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(store.view.threads[at].key).toBe(keyOf(open));
+    expect(snap.cursorIndex).toBe(at);
+    return at;
+  }
+
+  /** A one-message row above `before`, so filing it removes the whole row. */
+  function singleAbove(store: WinnowStore, before: number): number {
+    const id = store.view.threads.slice(0, before).find((row) => row.messageCount === 1)?.representative.id;
+    expect(id).toBeDefined();
+    return id!;
+  }
+
+  /** `j` lands on the row straight after the open one. */
+  function expectNextIsBelow(store: WinnowStore, from: number): void {
+    const below = store.view.threads[from + 1].representative.id;
+    store.moveCursor(1);
+    expect(store.getSnapshot().selectedId).toBe(below);
+    expectReadoutOnOpen(store);
+  }
+
+  /** A message newer than everything in the seed, optionally in an existing thread. */
+  function freshMail(template: Email, overrides: Partial<Email> = {}): Email {
+    const newest = Math.max(...DEMO_EMAILS.map((email) => email.receivedAt));
+    return {
+      ...template,
+      id: 900_001,
+      gmailId: "fresh-900001",
+      threadId: undefined,
+      receivedAt: newest + 60_000,
+      unread: true,
+      mailbox: "inbox",
+      ...overrides,
+    };
+  }
+
+  /** A backend whose next sync returns the seed plus `extra`. */
+  function syncingBackend(extra: () => Email[]): MailBackend {
+    const { backend } = fakeBackend();
+    return {
+      ...backend,
+      async sync() {
+        return { emails: [...DEMO_EMAILS, ...extra()], failed: 0, truncated: false };
+      },
+    };
+  }
+
+  it("moves up a row when a row above the open message is archived", () => {
+    const store = sortedStore();
+    store.openRow(4);
+    store.archive(singleAbove(store, 4));
+    expect(expectReadoutOnOpen(store)).toBe(3);
+    expectNextIsBelow(store, 3);
+  });
+
+  it("moves up a row when a row above is binned", () => {
+    const store = sortedStore();
+    store.openRow(4);
+    store.trash(singleAbove(store, 4));
+    expect(expectReadoutOnOpen(store)).toBe(3);
+  });
+
+  it("moves up a row when a row above is deleted for good", () => {
+    const store = sortedStore();
+    // Three one-message rows binned first, so the bin's order is known.
+    const singles = store.view.threads.filter((row) => row.messageCount === 1).slice(0, 3);
+    for (const row of singles) store.trash(row.representative.id);
+    store.setMailbox("trash");
+    expect(store.view.threads.length).toBeGreaterThanOrEqual(3);
+    store.openRow(2);
+    store.deletePermanently(store.view.threads[0].representative.id);
+    expect(expectReadoutOnOpen(store)).toBe(1);
+  });
+
+  it("moves back down when a failed archive above is rolled back", async () => {
+    const fake = fakeBackend();
+    const store = sortedStore(fake.backend);
+    store.openRow(4);
+    fake.failNext();
+    store.archive(singleAbove(store, 4));
+    expect(expectReadoutOnOpen(store)).toBe(3);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getSnapshot().error).not.toBeNull();
+    expect(expectReadoutOnOpen(store)).toBe(4);
+    expectNextIsBelow(store, 4);
+  });
+
+  it("follows the open message through mark-all-read and its undo under Unread", () => {
+    const store = sortedStore();
+    store.setPreferences({ markReadOnOpen: false });
+    store.toggleFilter(builtinFilter("unread"));
+    const last = store.view.threads.length - 1;
+    store.openRow(last);
+    store.markAllRead();
+    expect(readoutIndex(store.getSnapshot(), store.view)).toBe(NO_CURSOR);
+    store.undoLast();
+    expect(expectReadoutOnOpen(store)).toBe(last);
+  });
+
+  it("stays on the open message when a sender above is muted", () => {
+    const store = sortedStore();
+    store.openRow(5);
+    store.muteSender(store.view.threads[0].representative.sender);
+    expectReadoutOnOpen(store);
+  });
+
+  it("moves down a row when new mail arrives at the top", async () => {
+    const template = DEMO_EMAILS.find((email) => !email.threadId && email.mailbox === "inbox")!;
+    const store = sortedStore(syncingBackend(() => [freshMail(template)]));
+    store.openRow(3);
+    await store.refresh();
+    expect(store.view.threads[0].representative.id).toBe(900_001);
+    expect(expectReadoutOnOpen(store)).toBe(4);
+    expectNextIsBelow(store, 4);
+  });
+
+  it("stays on the thread when it gains a reply while open", async () => {
+    // The row's representative becomes the reply; the open message is still read on it.
+    const store = sortedStore();
+    const threaded = store.view.threads.findIndex(
+      (row, index) => index > 0 && row.representative.threadId && row.messageCount > 1,
+    );
+    expect(threaded).toBeGreaterThan(0);
+    const openRow = store.view.threads[threaded];
+    const reply = freshMail(openRow.representative, { threadId: openRow.representative.threadId });
+    store.attach({ backend: syncingBackend(() => [reply]) });
+    store.openRow(threaded);
+    const opened = store.getSnapshot().selectedId;
+    await store.refresh();
+    expect(store.getSnapshot().selectedId).toBe(opened);
+    // The thread is now the newest conversation, so it heads the list.
+    expect(expectReadoutOnOpen(store)).toBe(0);
+    expect(store.canStep(-1)).toBe(false);
+    expectNextIsBelow(store, 0);
+  });
+
+  it("follows the open row when a thread below it regroups above it", async () => {
+    const store = sortedStore();
+    const rows = store.view.threads;
+    const below = rows.findIndex((row, index) => index > 2 && row.representative.threadId);
+    expect(below).toBeGreaterThan(2);
+    const reply = freshMail(rows[below].representative, { threadId: rows[below].representative.threadId });
+    store.attach({ backend: syncingBackend(() => [reply]) });
+    store.openRow(2);
+    await store.refresh();
+    expect(store.view.threads[0].key).toBe(rows[below].key);
+    expect(expectReadoutOnOpen(store)).toBe(3);
+  });
+
+  it("follows the open message through a re-sort", () => {
+    const store = sortedStore();
+    store.openRow(6);
+    store.setSortBy("sender");
+    expectReadoutOnOpen(store);
+    store.setSortBy("score");
+    expectReadoutOnOpen(store);
+  });
+
+  it("follows the open message when a filter narrows the rows above it", () => {
+    const store = sortedStore();
+    store.toggleFilter(builtinFilter("unread"));
+    const last = store.view.threads.length - 1;
+    expect(last).toBeGreaterThan(1);
+    // Read rows above leave the unread list as they are marked read.
+    store.setPreferences({ markReadOnOpen: false });
+    store.openRow(last);
+    store.toggleRead(store.view.threads[0].representative.id);
+    expect(expectReadoutOnOpen(store)).toBe(last - 1);
+  });
+
+  it("shows no number when a filter hides the open message", () => {
+    const store = sortedStore();
+    store.setPreferences({ markReadOnOpen: false });
+    const target = store.view.threads.findIndex((row) => !row.unread);
+    expect(target).toBeGreaterThanOrEqual(0);
+    store.openRow(target);
+    store.toggleFilter(builtinFilter("unread"));
+    expect(store.getSnapshot().selectedId).not.toBeNull();
+    expect(readoutIndex(store.getSnapshot(), store.view)).toBe(NO_CURSOR);
+    // Clearing the filter brings the number back, on the right row.
+    store.clearFilters();
+    expect(expectReadoutOnOpen(store)).toBe(target);
+  });
+
+  it("shows no number when opening it read it out of the Unread list", () => {
+    const store = sortedStore();
+    store.toggleFilter(builtinFilter("unread"));
+    const next = store.view.threads[3].representative.id;
+    store.openRow(2);
+    // Read on open, so it has left the Unread rows; the next one slid up under the cursor.
+    expect(readoutIndex(store.getSnapshot(), store.view)).toBe(NO_CURSOR);
+    store.moveCursor(1);
+    expect(store.getSnapshot().selectedId).toBe(next);
+  });
+
+  it("follows the open message through a search and its clearing", () => {
+    const store = sortedStore();
+    store.openRow(5);
+    const open = store.view.threads[5].representative;
+    store.setSearchQuery(open.subject);
+    expectReadoutOnOpen(store);
+    store.setSearchQuery("");
+    expect(expectReadoutOnOpen(store)).toBe(5);
+  });
+
+  it("numbers a message opened from a search result", () => {
+    const store = sortedStore();
+    const target = store.view.threads[7].representative;
+    store.setSearchQuery(target.subject);
+    expect(store.focusMessage(target.id)).toBe(true);
+    expectReadoutOnOpen(store);
+    store.setSearchQuery("");
+    expect(expectReadoutOnOpen(store)).toBe(7);
+  });
+
+  it("numbers a message opened by a deep link into another mailbox", () => {
+    const store = sortedStore();
+    const target = store.view.threads[1].representative;
+    store.move(target.id, "archive");
+    store.openRow(0);
+    expect(store.focusMessage(target.id)).toBe(true);
+    expect(store.getSnapshot().mailbox).toBe("archive");
+    expectReadoutOnOpen(store);
+  });
+
+  it("numbers a message selected without a cursor move, and steps from it", () => {
+    // `select` (a notification or mailto handing over an id) sets only the reader.
+    const store = sortedStore();
+    store.openRow(1);
+    store.select(store.view.threads[6].representative.id);
+    expect(expectReadoutOnOpen(store)).toBe(6);
+    expectNextIsBelow(store, 6);
+  });
+
+  it("keeps the thread's row when an earlier message in it is opened", () => {
+    // Navigating inside a thread from the reader: the earlier message is not the row's
+    // representative, but it is read on that row, and the filters are left alone.
+    const store = sortedStore();
+    const index = store.view.threads.findIndex((row) => row.messageCount > 1);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const row = store.view.threads[index];
+    const earlier = store.getSnapshot().all.find(
+      (email) => keyOf(email) === row.key && email.id !== row.representative.id && email.mailbox === "inbox",
+    )!;
+    expect(earlier).toBeDefined();
+    store.openRow(index);
+    store.focusMessage(earlier.id);
+    expect(store.getSnapshot().selectedId).toBe(earlier.id);
+    expect(expectReadoutOnOpen(store)).toBe(index);
+    expectNextIsBelow(store, index);
+  });
+
+  it("leaves the filters alone when opening an earlier message of a visible thread", () => {
+    const store = sortedStore();
+    store.toggleFilter(builtinFilter("unread"));
+    store.setPreferences({ markReadOnOpen: false });
+    const index = store.view.threads.findIndex((row) => row.messageCount > 1);
+    if (index < 0) return;
+    const row = store.view.threads[index];
+    const earlier = store.view.emails.find((email) => keyOf(email) === row.key && email.id !== row.representative.id);
+    if (!earlier) return;
+    store.openRow(index);
+    store.focusMessage(earlier.id);
+    expect(store.getSnapshot().activeFilters).toHaveLength(1);
+    expect(expectReadoutOnOpen(store)).toBe(index);
+  });
+
+  it("disables the chevrons exactly at the ends of the list", () => {
+    const store = sortedStore();
+    const last = store.view.threads.length - 1;
+    // A fresh list: both go somewhere (`j` to the top, `k` to the bottom).
+    expect(store.canStep(-1)).toBe(true);
+    expect(store.canStep(1)).toBe(true);
+    store.openRow(0);
+    expect(store.canStep(-1)).toBe(false);
+    expect(store.canStep(1)).toBe(true);
+    store.openRow(last);
+    expect(store.canStep(-1)).toBe(true);
+    expect(store.canStep(1)).toBe(false);
+    // The end moves with the list: archive the row above, and the last row is still last.
+    store.archive(singleAbove(store, last));
+    expect(expectReadoutOnOpen(store)).toBe(last - 1);
+    expect(store.canStep(1)).toBe(false);
+    // And with nothing open, the cursor's own ends.
+    store.closeReader();
+    expect(readoutIndex(store.getSnapshot(), store.view)).toBe(last - 1);
+    expect(store.canStep(1)).toBe(false);
+    expect(store.canStep(-1)).toBe(true);
+  });
+
+  it("disables nothing and moves nowhere on an empty list", () => {
+    const store = new WinnowStore({ seed: [] });
+    expect(store.canStep(-1)).toBe(false);
+    expect(store.canStep(1)).toBe(false);
+    expect(readoutIndex(store.getSnapshot(), store.view)).toBe(NO_CURSOR);
+  });
+
+  it("marking the open message unread moves on to the row below it", () => {
+    const store = sortedStore();
+    store.openRow(2);
+    const below = store.view.threads[3].representative.id;
+    store.markUnreadAndMoveOn(store.getSnapshot().selectedId!);
+    expect(store.getSnapshot().selectedId).toBe(below);
+    expect(expectReadoutOnOpen(store)).toBe(3);
   });
 });
