@@ -2184,6 +2184,212 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
 
+  // ── Composing a new message ─────────────────────────────────────────────────
+  //
+  // Self-contained: it sets the viewport it needs, puts it back, and leaves the inbox on
+  // screen. The demo has no server, so a send is simulated and filed into Sent locally —
+  // which is what lets this prove the whole loop rather than the error path.
+  section("compose");
+  {
+    const viewportBefore = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(300);
+
+    const newSheet = () => page.locator('[role="dialog"][aria-label="New message"]');
+    const newSend = () => newSheet().locator("button", { hasText: /^Send/ }).first();
+    const subjectConfirm = () => page.locator('[role="dialog"][aria-label="Send without a subject?"]');
+    /** Escape until the sheet closes or asks: the To field's suggestion list takes one. */
+    const escapeComposer = async () => {
+      for (let i = 0; i < 3; i += 1) {
+        if ((await newSheet().count()) === 0 || (await confirmDialog().count()) > 0) return;
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(250);
+      }
+    };
+
+    const composeButton = page.locator("[data-compose]:visible");
+    require("the masthead has a Compose button", (await composeButton.count()) === 1);
+    check(
+      "it names its key in the tooltip",
+      (await composeButton.getAttribute("title")) === "Compose (c)",
+      String(await composeButton.getAttribute("title")),
+    );
+    await composeButton.click();
+    await newSheet().waitFor({ state: "visible", timeout: 5_000 });
+    check("Compose opens a sheet titled New message", true);
+    check(
+      "the draft is blank",
+      (await newSheet().locator("[aria-invalid], button[aria-label^='Remove']").count()) === 0 &&
+        (await newSheet().locator('input[aria-label="To"]').inputValue()) === "" &&
+        (await newSheet().locator('input[aria-label="Subject"]').inputValue()) === "" &&
+        (await newSheet().locator('textarea[aria-label="Message"]').inputValue()) === "",
+    );
+    check(
+      "and it starts in To",
+      (await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "To",
+    );
+    check(
+      "From is the account it goes out from",
+      ((await newSheet().locator("[data-composer-from]").textContent()) ?? "").includes("@"),
+      String(await newSheet().locator("[data-composer-from]").textContent()),
+    );
+    check(
+      "Cc and Bcc wait until asked for",
+      (await newSheet().locator('input[aria-label="Cc"]').count()) === 0 &&
+        (await newSheet().locator("[data-show-copies]").count()) === 1,
+    );
+    await newSheet().locator("[data-show-copies]").click();
+    await page.waitForTimeout(200);
+    check(
+      "Cc/Bcc reveals both fields",
+      (await newSheet().locator('input[aria-label="Cc"]').count()) === 1 &&
+        (await newSheet().locator('input[aria-label="Bcc"]').count()) === 1,
+    );
+
+    await escapeComposer();
+    check(
+      "an untouched new message closes on Escape without asking",
+      (await newSheet().count()) === 0 && (await confirmDialog().count()) === 0,
+    );
+
+    // `c` on the list composes.
+    await page.locator("[data-message-id]").first().waitFor({ state: "visible", timeout: 5_000 });
+    await page.locator("body").click({ position: { x: 5, y: 890 } }).catch(() => undefined);
+    await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+    await page.keyboard.press("c");
+    await page.waitForTimeout(300);
+    require("`c` opens a new message", (await newSheet().count()) === 1);
+
+    // Nobody to send to: Send is disabled, and ⌘⏎ says why in place.
+    check("Send is disabled with no recipient", await newSend().isDisabled());
+    // `focus()`, not a click: the To field's suggestion list is open over the body.
+    await newSheet().locator('textarea[aria-label="Message"]').focus();
+    await page.keyboard.type("Are we still on for Thursday?");
+    await page.keyboard.press("Meta+Enter");
+    await page.waitForTimeout(250);
+    check(
+      "a send with no recipient is blocked, and says so",
+      (await newSheet().count()) === 1 &&
+        ((await newSheet().locator('[role="alert"]').allTextContents()).join(" ")).includes("Add at least one recipient"),
+      (await newSheet().locator('[role="alert"]').allTextContents()).join(" | "),
+    );
+
+    // Something that is not an address: a red chip, an inline reason, Send stays off.
+    const newTo = newSheet().locator('input[aria-label="To"]');
+    await newTo.focus();
+    await page.keyboard.type("not an address,");
+    await page.waitForTimeout(200);
+    check(
+      "an invalid recipient is marked and explained",
+      (await newSheet().locator('[aria-invalid="true"]').count()) > 0 &&
+        (await page.locator("#winnow-composer-to-error").count()) === 1,
+    );
+    check("and Send stays disabled", await newSend().isDisabled());
+    check(
+      "the caret stays in To once it has a chip",
+      (await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "To",
+    );
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(150);
+    check(
+      "Backspace in an empty field removes the last chip",
+      (await newSheet().locator('button[aria-label^="Remove"]').count()) === 0,
+    );
+
+    // Esc with something written asks; keep editing.
+    await escapeComposer();
+    check("Escape with a written draft asks before discarding", (await confirmDialog().count()) === 1);
+    await answerDiscard(false);
+    check("declining keeps the new message open", (await newSheet().count()) === 1);
+
+    // A typed, uncommitted address counts: Send is enabled, and takes it along.
+    await newTo.focus();
+    await page.keyboard.type("Ana Kovač <ana@northwind.example>");
+    await page.waitForTimeout(150);
+    check("an address typed but not yet a chip enables Send", !(await newSend().isDisabled()));
+
+    // No subject: asked, as Gmail does.
+    await page.keyboard.press("Meta+Enter");
+    await subjectConfirm().waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check("sending without a subject asks first", (await subjectConfirm().count()) === 1);
+    await subjectConfirm().getByRole("button", { name: "Keep editing" }).click();
+    await page.waitForTimeout(250);
+    check(
+      "and cancelling goes back to the draft, with the typed address now a chip",
+      (await newSheet().count()) === 1 &&
+        (await newSheet().locator('button[aria-label^="Remove"]').count()) === 1,
+    );
+
+    const subject = `Thursday — café at 12? ${Date.now().toString(36)}`;
+    await newSheet().locator('input[aria-label="Subject"]').fill(subject);
+    await newSend().click();
+    await newSheet().waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
+    check("a valid send in the demo closes the composer", (await newSheet().count()) === 0);
+    check(
+      "and confirms it went",
+      ((await page.locator("[data-notice-text]").textContent().catch(() => "")) ?? "").includes("Message sent"),
+      String(await page.locator("[data-notice-text]").textContent().catch(() => "no notice")),
+    );
+    check("and puts up no error", (await page.locator('div[role="alert"]').count()) === 0);
+
+    await goTo("Sent");
+    check(
+      "the message is in Sent",
+      (await page.locator("[data-message-id]", { hasText: subject }).count()) === 1,
+    );
+    await goTo("Inbox");
+
+    if (viewportBefore) await page.setViewportSize(viewportBefore);
+    await page.waitForTimeout(250);
+  }
+
+  // The pencil, on a phone: its own context so the desktop page above is untouched.
+  {
+    const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+    const p = await phoneContext.newPage();
+    p.on("pageerror", (error) => errors.push(String(error)));
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-message-id]", { timeout: 10_000 });
+    const fab = p.locator("[data-compose-fab]");
+    check("the phone shows a compose pencil over the list", (await fab.count()) === 1 && (await fab.isVisible()));
+    const fabBox = await fab.boundingBox();
+    const dockBox = await p.locator("[data-phone-dock]").boundingBox();
+    check(
+      "bottom-right, clear of the dock, and a full touch target",
+      Boolean(fabBox && dockBox) &&
+        fabBox.x + fabBox.width <= 390 - 8 &&
+        fabBox.x > 390 / 2 &&
+        fabBox.y + fabBox.height <= dockBox.y - 4 &&
+        fabBox.width >= 44 &&
+        fabBox.height >= 44,
+      JSON.stringify({ fabBox, dockBox }),
+    );
+    await p.locator("[data-message-id]").first().tap();
+    await p.waitForSelector("article h1", { timeout: 5_000 });
+    check("it is hidden in the reader", (await p.locator("[data-compose-fab]").count()) === 0);
+    await p.locator('button[aria-label="Back to the list"]:visible').first().tap();
+    await p.waitForTimeout(400);
+    check("and back on the list", (await p.locator("[data-compose-fab]").count()) === 1);
+    await p.locator("[data-compose-fab]").tap();
+    const phoneSheet = p.locator('[role="dialog"][aria-label="New message"]');
+    await phoneSheet.waitFor({ state: "visible", timeout: 5_000 });
+    await p.waitForTimeout(400);
+    const sheetBox = await phoneSheet.boundingBox();
+    check(
+      "it opens the composer full-screen",
+      Boolean(sheetBox) && sheetBox.width >= 389 && sheetBox.height >= 840,
+      JSON.stringify(sheetBox),
+    );
+    const phoneSendBox = await phoneSheet.locator("button", { hasText: /^Send$/ }).boundingBox();
+    check(
+      "with Send at the bottom, a full touch target",
+      Boolean(phoneSendBox) && phoneSendBox.height >= 44 && phoneSendBox.y + phoneSendBox.height >= 844 - 16,
+      JSON.stringify(phoneSendBox),
+    );
+    check("and the pencil is gone under it", (await p.locator("[data-compose-fab]").count()) === 0);
+    await phoneContext.close();
+  }
+
   // ── The mailboxes ──────────────────────────────────────────────────────────
 
   section("mailboxes");
