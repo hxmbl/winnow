@@ -11,6 +11,7 @@
  * flag.
  */
 
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { REVOKE_TIMEOUT_MS, TokenManager, revokeGrant, type TokenStore } from "./tokens";
 import { GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL, type TokenSet } from "./dto";
@@ -171,5 +172,20 @@ describe("TokenManager.clear with revoke", () => {
     await expect(manager.clear({ revoke: true })).resolves.toBeUndefined();
     expect(await manager.revocation).toBe("failed");
     expect(peek()).toBeNull();
+  });
+});
+
+describe("the desktop and Android shells", () => {
+  const conf = (name: string) =>
+    JSON.parse(readFileSync(new URL(`../../../../native/src-tauri/${name}`, import.meta.url), "utf8")) as {
+      app?: { security?: { csp?: Record<string, string> } };
+    };
+
+  it("let the webview reach the revoke endpoint", () => {
+    // Native sign-out revokes from the web layer, so the CSP is the only gate.
+    const connect = conf("tauri.conf.json").app?.security?.csp?.["connect-src"] ?? "";
+    expect(connect.split(/\s+/)).toContain(new URL(GOOGLE_REVOKE_URL).origin);
+    // Android merges its file over the desktop one; it must not replace the CSP.
+    expect(conf("tauri.android.conf.json").app?.security?.csp).toBeUndefined();
   });
 });
