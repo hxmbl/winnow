@@ -85,11 +85,14 @@ jobs:
           | Linux | `.AppImage` (any distro) or `.deb` (Debian, Ubuntu) |
           | macOS | `.dmg`, universal (Apple silicon and Intel) |
           | Windows | `.msi` or `-setup.exe`, when the Windows build succeeded |
+          | Android | `_android-universal.apk` (any phone, Android 7+), when the Android build succeeded |
 
           These builds are **not code-signed**. On macOS, right-click the app and choose
           **Open** the first time, or run `xattr -dr com.apple.quarantine /Applications/Winnow.app`.
           On Windows, SmartScreen may say it protected your PC: choose **More info**, then
-          **Run anyway**. See the README for details.
+          **Run anyway**. On Android, Play Protect may warn about an unknown developer:
+          choose **Install anyway**. An APK named `-debug` is signed with a throwaway key,
+          so installing a later one may require uninstalling it first. See the README.
 
           Winnow ships no Google sign-in client. To connect Gmail, create your own OAuth
           client in Google Cloud and paste it into the app; see `docs/google-setup.md`.
@@ -217,3 +220,141 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$TAG" "$RUNNER_TEMP"/bundles/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Android is its own job rather than a matrix row: it needs Java, the SDK and NDK,
+  # four Rust targets and a different CLI subcommand, and none of the desktop steps.
+  android:
+    name: Build (Android)
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    # Best-effort, like Windows: its failure doesn't stop the desktop uploads.
+    continue-on-error: true
+    env:
+      # Pinned so a new NDK on the runner image can't change the build under us.
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${NDK_VERSION}" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+          key: release-android
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install Tauri CLI
+        run: cargo binstall tauri-cli --version "^2" --no-confirm
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      # The active path. With no ANDROID_KEYSTORE_* in the environment, gradle signs
+      # the release APK with the runner's debug key (native/src-tauri/gen/android/app/
+      # build.gradle.kts), so it installs, and "Collect APK" names it `-debug`.
+      - name: Build APK (debug-signed)
+        working-directory: native
+        run: cargo tauri android build --apk
+
+      # ── Release signing: uncomment this step once the four secrets exist. ─────────
+      # It decodes the keystore, rebuilds with it (Rust is cached, so only gradle's
+      # packaging reruns) and marks the APK release-signed, which drops `-debug` from
+      # its name. See native/README.md, "Android signing".
+      # - name: Build APK (release-signed)
+      #   working-directory: native
+      #   env:
+      #     # The .jks keystore file, base64-encoded (`base64 -w0 winnow-release.jks`).
+      #     ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      #     # The password given to keytool for the keystore (-storepass).
+      #     ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      #     # The key's alias inside the keystore (`winnow` if made as documented).
+      #     ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      #     # The password for that key (-keypass); often the same as the store's.
+      #     ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      #   run: |
+      #     set -euo pipefail
+      #     export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/winnow-release.jks"
+      #     printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+      #     cargo tauri android build --apk
+      #     rm -f "$ANDROID_KEYSTORE_PATH"
+      #     echo "ANDROID_RELEASE_SIGNED=true" >> "$GITHUB_ENV"
+      # ── End of release signing ────────────────────────────────────────────────────
+
+      - name: Check no client secret shipped
+        run: |
+          if grep -rIl 'GOCSPX-' web/dist; then
+            echo "::error::The web bundle contains what looks like a Google client secret."
+            exit 1
+          fi
+
+      - name: Collect APK
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          APK="$(find native/src-tauri/gen/android/app/build/outputs/apk -type f -name '*universal*release*.apk' | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "::error::No universal release APK was produced."
+            find native/src-tauri/gen/android/app/build/outputs -type f || true
+            exit 1
+          fi
+          SUFFIX="-debug"
+          if [ "${ANDROID_RELEASE_SIGNED:-}" = "true" ]; then SUFFIX=""; fi
+          mkdir -p "$RUNNER_TEMP/android"
+          cp "$APK" "$RUNNER_TEMP/android/Winnow_${VERSION}_android-universal${SUFFIX}.apk"
+          ls -la "$RUNNER_TEMP/android"
+          # Which key signed it, in the log, so a release is never shipped on a guess.
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)apksigner"
+          "$APKSIGNER" verify --print-certs "$RUNNER_TEMP"/android/*.apk || true
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winnow-${{ needs.prepare.outputs.version }}-android
+          path: ${{ runner.temp }}/android
+          if-no-files-found: error
+
+      - name: Attach to draft release
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/android/*.apk --clobber --repo "$GITHUB_REPOSITORY"

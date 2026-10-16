@@ -203,6 +203,39 @@ jobs:
         working-directory: native
         run: cargo tauri build --debug --no-bundle
 
+  # Type-checks the crate for Android on PRs that touch native code. `cargo check`
+  # needs no NDK or SDK (nothing links), so this costs a Rust target and a cache;
+  # the APK itself is built by release.yml.
+  android-check:
+    name: Android compile check
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: native/src-tauri
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+          key: android-check
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Check (aarch64-linux-android)
+        run: cargo check --target aarch64-linux-android
+
   # The full release bundle (LTO, deb, AppImage) only where an artifact could matter.
   release:
     name: Release build
