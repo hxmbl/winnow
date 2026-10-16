@@ -1945,8 +1945,11 @@ export class WinnowStore {
         ),
         undo: null,
       });
-      for (const id of restore.keys()) {
-        void this.backend?.setRead(id, true).catch(() => undefined);
+      // `setRead(id, read)`: undoing puts each message back as it was, which for a
+      // message that was unread means read = false. This sent `true`, so Gmail kept
+      // them read while the screen showed them unread.
+      for (const [id, wasUnread] of restore) {
+        void this.backend?.setRead(id, !wasUnread).catch(() => undefined);
       }
       void this.applyPlatform();
     };

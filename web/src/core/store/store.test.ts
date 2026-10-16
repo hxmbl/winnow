@@ -572,6 +572,18 @@ describe("mark-all-read and its undo", () => {  function storeWithUnread() {
     expect(pushes.every((call) => call.args[1] === true)).toBe(true);
   });
 
+  it("undo pushes unread back to the server, not read again", async () => {
+    const { store, calls } = storeWithUnread();
+    store.markAllRead();
+    await Promise.resolve();
+    const before = calls.length;
+    store.undoLast();
+    await Promise.resolve();
+    const pushes = calls.slice(before).filter((call) => call.method === "setRead");
+    expect(pushes.length).toBeGreaterThan(0);
+    expect(pushes.every((call) => call.args[1] === false)).toBe(true);
+  });
+
   it("does nothing, and offers nothing, when there is nothing unread", () => {
     const { store } = storeWithUnread();
     store.markAllRead();
