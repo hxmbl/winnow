@@ -5769,6 +5769,206 @@ try {
     await ctx.close();
   }
 
+  // ── Privacy ─────────────────────────────────────────────────────────────────
+  //
+  // From the network's side: what leaves the browser. A signed-in session against a
+  // fake Gmail (every googleapis call is answered here, nothing reaches Google), one
+  // message carrying every remote-content vector a tracking email uses, and a request
+  // log. With images withheld nothing may go anywhere but this origin and the fake API,
+  // in either the inline or the "as sent" form; once the reader allows images only the
+  // images load, with no Referer; and signing out leaves nothing of the account in
+  // storage, the drafts kept on the device included.
+
+  section("privacy");
+  {
+    const origin = new globalThis.URL(URL).origin;
+    const T = "https://t.example/o";
+    const TORTURE = [
+      `<h1>Privacy torture</h1><p>Every way a sender learns you opened this.</p>`,
+      `<img src="${T}/img.gif" width="10" height="10" alt="pixel">`,
+      `<img srcset="${T}/a.gif 1x, ${T}/b.gif 2x" alt="srcset">`,
+      `<table background="${T}/bg.gif"><tr><td background="${T}/td.gif">cell</td></tr></table>`,
+      `<div style="background:url(${T}/css.gif)">css url</div>`,
+      `<div style="background:u\\72l(${T}/esc.gif)">escaped url</div>`,
+      `<div style="background:image-set('${T}/set.gif' 1x)">image-set</div>`,
+      `<style>@import url(${T}/import.css); @font-face{font-family:x;src:url(${T}/font.woff)} .a{background:url(${T}/sheet.gif)}</style>`,
+      `<link rel="stylesheet" href="${T}/link.css"><link rel="prefetch" href="${T}/prefetch">`,
+      `<meta http-equiv="refresh" content="0;url=${T}/refresh">`,
+      `<iframe src="${T}/frame"></iframe>`,
+      `<form action="${T}/form"><input type="image" src="${T}/input.gif"></form>`,
+      `<svg><image href="${T}/svg.gif"/><use href="${T}/sprite.svg#a"/></svg>`,
+      `<video poster="${T}/poster.gif"><source src="${T}/v.mp4"></video>`,
+      `<object data="${T}/obj"></object><embed src="${T}/embed">`,
+      `<a href="https://shop.example/" ping="${T}/ping">a link</a>`,
+    ].join("\n");
+    const b64url = (text) => Buffer.from(text, "utf8").toString("base64url");
+    const headers = [
+      { name: "From", value: "Tracker <news@tracker.example>" },
+      { name: "To", value: "me@winnow.example" },
+      { name: "Subject", value: "Privacy torture" },
+      { name: "Date", value: new Date().toUTCString() },
+      { name: "Message-ID", value: "<m1@tracker.example>" },
+    ];
+    const message = (format) => ({
+      id: "m1",
+      threadId: "t1",
+      labelIds: ["INBOX", "UNREAD"],
+      snippet: "Every way a sender learns you opened this.",
+      internalDate: String(Date.now() - 60_000),
+      sizeEstimate: 4000,
+      payload:
+        format === "full"
+          ? {
+              mimeType: "multipart/alternative",
+              headers,
+              parts: [
+                { partId: "0", mimeType: "text/plain", headers: [], body: { size: 40, data: b64url("Every way a sender learns you opened this.") } },
+                { partId: "1", mimeType: "text/html", headers: [], body: { size: TORTURE.length, data: b64url(TORTURE) } },
+              ],
+            }
+          : { mimeType: "multipart/alternative", headers },
+    });
+    const json = (route, body, status = 200) =>
+      route.fulfill({ status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+    const fakeGmail = (route) => {
+      const request = route.request();
+      if (request.method() === "OPTIONS") {
+        return route.fulfill({
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-headers": "authorization, content-type",
+            "access-control-allow-methods": "GET, POST, PUT, DELETE",
+          },
+        });
+      }
+      const url = new globalThis.URL(request.url());
+      const p = url.pathname.replace("/gmail/v1/users/me", "");
+      if (p === "/profile") return json(route, { emailAddress: "me@winnow.example", historyId: "500", messagesTotal: 1 });
+      if (p === "/messages") {
+        const q = url.searchParams.get("q") ?? "";
+        return json(route, q.includes("in:inbox") && !q.includes("-in:inbox") ? { messages: [{ id: "m1", threadId: "t1" }], resultSizeEstimate: 1 } : { resultSizeEstimate: 0 });
+      }
+      if (p === "/messages/m1") return json(route, message(url.searchParams.get("format") === "full" ? "full" : "metadata"));
+      if (p === "/history") return json(route, { historyId: "500" });
+      if (p === "/drafts" && request.method() === "POST") return json(route, { id: "d1", message: { id: "dm1", threadId: "t1" } });
+      if (p.startsWith("/drafts/") && request.method() === "PUT") return json(route, { id: "d1", message: { id: "dm1", threadId: "t1" } });
+      if (p.startsWith("/drafts/") && request.method() === "DELETE") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } });
+      return json(route, {});
+    };
+
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await ctx.addInitScript(() => {
+      // Init scripts run in every frame, and the message's own frames are sandboxed with
+      // no storage at all: only the app's top-level document is seeded.
+      if (window.top !== window) return;
+      if (sessionStorage.getItem("seeded-privacy")) return;
+      sessionStorage.setItem("seeded-privacy", "1");
+      localStorage.setItem("winnow.google.oauthClient", JSON.stringify({ clientId: "1234567890-abc123def.apps.googleusercontent.com" }));
+      localStorage.setItem(
+        "winnow.gmail.tokens",
+        JSON.stringify({
+          accessToken: "ya29.smoke-access",
+          refreshToken: "1//smoke-refresh",
+          expiresAt: Date.now() + 3_600_000,
+          scope: "https://www.googleapis.com/auth/gmail.modify",
+        }),
+      );
+    });
+    await ctx.route("https://gmail.googleapis.com/**", fakeGmail);
+    await ctx.route("https://oauth2.googleapis.com/**", (route) => json(route, { error: "invalid_grant" }, 400));
+    const trackerHits = [];
+    await ctx.route("https://t.example/**", (route) => {
+      trackerHits.push({ url: route.request().url(), headers: route.request().headers() });
+      return route.fulfill({
+        status: 200,
+        headers: { "content-type": "image/gif" },
+        body: Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64"),
+      });
+    });
+
+    const pv = await ctx.newPage();
+    const pvErrors = [];
+    pv.on("pageerror", (error) => pvErrors.push(String(error)));
+    const external = [];
+    pv.on("request", (request) => {
+      const url = request.url();
+      if (url.startsWith(origin) || url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:")) return;
+      if (url.startsWith("https://gmail.googleapis.com/")) return;
+      external.push(url);
+    });
+    await pv.goto(URL, { waitUntil: "networkidle" });
+    const row = pv.locator("[data-message-id]", { hasText: "Privacy torture" }).first();
+    await row.waitFor({ state: "visible", timeout: 15_000 });
+    check("a signed-in session against the fake Gmail lists the message", true);
+
+    await row.click();
+    await pv.locator("article h1").first().waitFor({ timeout: 5_000 });
+    await pv.locator("[data-wn-email]").first().waitFor({ timeout: 5_000 });
+    await pv.waitForTimeout(800);
+    check("opening it with images withheld sends nothing anywhere", external.length === 0, external.slice(0, 4).join(" | "));
+    check(
+      "and the reader says what it withheld",
+      /remote (thing is|things are) withheld/.test(await pv.locator("[data-reader]").first().innerText()),
+    );
+
+    const more = pv.locator('[data-reader] button[aria-label="More"]:visible').first();
+    const forms = pv.locator('[role="menu"] [role="menuitemradio"]');
+    await more.click();
+    await forms.nth(2).click();
+    await pv.locator('iframe[title="Message as sent"]').waitFor({ timeout: 5_000 });
+    await pv.waitForTimeout(800);
+    check("the original, with the sender's stylesheet, still sends nothing", external.length === 0, external.slice(0, 4).join(" | "));
+    await more.click();
+    await forms.nth(0).click();
+    await pv.waitForTimeout(300);
+
+    const show = pv.getByRole("button", { name: /^Show (it|them) for this message$/ });
+    await show.click();
+    await pv.waitForTimeout(1_000);
+    const loaded = trackerHits.map((hit) => new globalThis.URL(hit.url).pathname);
+    check("allowing images loads the message's images", loaded.some((p) => p.endsWith("/img.gif")), loaded.join(" "));
+    check(
+      "and only images: no stylesheet, font, frame, form, svg, video or ping",
+      !loaded.some((p) => /css|font|import|sheet|link|prefetch|refresh|frame|form|input|svg|sprite|poster|v\.mp4|obj|embed|ping|esc|set\.gif/.test(p)),
+      loaded.join(" "),
+    );
+    check(
+      "with no Referer and no cookie",
+      trackerHits.length > 0 && trackerHits.every((hit) => !hit.headers.referer && !hit.headers.cookie),
+      JSON.stringify(trackerHits.map((hit) => hit.headers.referer ?? null)),
+    );
+    check("and nothing else left the browser", external.every((url) => url.startsWith("https://t.example/")), external.filter((u) => !u.startsWith("https://t.example/")).join(" | "));
+
+    // A reply, so a draft is kept on this device, then sign out with it still open.
+    await pv.keyboard.press("r");
+    const dockBody = pv.locator('[data-composer-dock] textarea[aria-label="Message"]');
+    await dockBody.waitFor({ state: "visible", timeout: 5_000 });
+    await dockBody.focus();
+    await pv.keyboard.type("A private reply.");
+    await pv.waitForTimeout(2_600);
+    const kept = await pv.evaluate(() => localStorage.getItem("winnow.drafts.v1:me@winnow.example") ?? "");
+    check("a written reply is kept on the device while signed in", kept.includes("A private reply."));
+
+    await pv.locator("[data-sidebar-toggle]:visible").first().click();
+    await pv.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await pv.locator('[data-nav-account] button[aria-label^="Account"]').click();
+    await pv.getByRole("menuitem", { name: "Sign out" }).click();
+    await pv.waitForTimeout(800);
+    const left = await pv.evaluate(() => Object.keys(localStorage).filter((key) => /^winnow\.(gmail|drafts|google\.contacts|logos|gravatars)/.test(key)));
+    check("signing out leaves no mail, cursor, token or draft in storage", left.length === 0, left.join(", "));
+    const written = await pv.evaluate(() => Object.values(localStorage).join("\n"));
+    check("and no trace of the message or the reply", !/Privacy torture|A private reply|ya29\.smoke/.test(written));
+    // The autosave was stopped, not just hidden: nothing is written back a moment later.
+    await pv.waitForTimeout(2_600);
+    check(
+      "and nothing is written back afterwards",
+      (await pv.evaluate(() => Object.keys(localStorage).filter((key) => /^winnow\.(gmail|drafts)/.test(key)))).length === 0,
+    );
+    check("no page errors on the privacy pass", pvErrors.length === 0, pvErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");
