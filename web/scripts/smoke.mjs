@@ -180,7 +180,8 @@ try {
   const isOn = async (locator) => (await locator.getAttribute("aria-pressed")) === "true";
   /**
    * The navigation: the sidebar, an overlay on every screen size, opened by the toggle
-   * at the head of the list (desktop) or the top bar's menu button (phone). It is always
+   * at the head of the list (desktop) or a second tap on the dock's Inbox tab (phone,
+   * where it is a bottom sheet). It is always
    * mounted so it can animate out; `data-open` says whether it is open, and closed it is
    * `visibility: hidden` once its slide has finished. It holds no smart filters; those
    * are the rail above.
@@ -195,7 +196,14 @@ try {
     await page
       .waitForFunction(() => !document.querySelector('[role="presentation"]'), null, { timeout: 5_000 })
       .catch(() => undefined);
-    await sidebarToggle().click();
+    const toggle = sidebarToggle();
+    await toggle.click();
+    // On a phone the toggle is the Inbox tab, whose first tap only switches to the inbox
+    // when another mailbox (or Settings) is showing.
+    if (await toggle.evaluate((element) => element.closest("[data-phone-dock]") !== null)) {
+      await page.waitForTimeout(150);
+      if (!(await sidebarOpen())) await toggle.click();
+    }
     await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
     // The slide-in, so boxes measured next are where they settle.
     await page.waitForTimeout(300);
@@ -455,7 +463,12 @@ try {
       probe.remove();
       const origin = { x: Math.round(at.left), y: Math.round(at.top) };
       const sideRect = document.querySelector("[data-sidebar]").getBoundingClientRect();
-      const side = { right: Math.round(sideRect.right), mid: Math.round(sideRect.top + sideRect.height / 2) };
+      const side = {
+        right: Math.round(sideRect.right),
+        mid: Math.round(sideRect.top + sideRect.height / 2),
+        top: Math.round(sideRect.top),
+        centre: Math.round(sideRect.left + sideRect.width / 2),
+      };
       const layers = [...element.querySelectorAll("[data-scrim-layer]")].map((layer) => {
         const style = getComputedStyle(layer);
         const mask = style.maskImage || style.webkitMaskImage;
@@ -2847,10 +2860,10 @@ try {
   /*
     The phone layout.
 
-    Below 640px the masthead is replaced, not squeezed: a top bar (the mark, search, and
-    the menu button), the list, and one dock at the bottom edge holding the swipeable
-    smart filter chips above four tabs; folders and the account are in the overflow
-    menu the menu button opens. The reader brings its own action bar to the
+    Below 640px the masthead is replaced, not squeezed: a top bar (the mark, the list's
+    name and search), the list, and one dock at the bottom edge holding the swipeable
+    smart filter chips above four tabs; folders, the account and Mark all read are in
+    the menu, a bottom sheet that a second tap on Inbox raises. The reader brings its own action bar to the
     same edge. What is claimed here is the ergonomics — that the controls a thumb uses
     most are at the bottom, that every one is a real touch target, and that nothing the
     desktop could do is unreachable.
@@ -2867,25 +2880,34 @@ try {
   check("and the masthead is gone rather than hidden", (await page.locator("header").count()) === 1);
 
   const logoBox = await box(topBar.locator("[data-phone-mark]").first());
-  const accountBox = await box(topBar.locator('button[aria-label="Open menu"]'));
   check(
-    "the mark sits top-left and the account/menu circle top-right",
-    Boolean(logoBox && accountBox) && logoBox.x < 40 && accountBox.x + accountBox.width > 350,
-    JSON.stringify({ logoBox, accountBox }),
+    "the mark sits top-left, at touch size",
+    Boolean(logoBox) && logoBox.x < 40 && Math.min(logoBox.width, logoBox.height) >= MIN_TARGET,
+    JSON.stringify(logoBox),
+  );
+  // The top bar is where you are and search, nothing else: no prev/next chevrons, no
+  // Mark all read tick and no menu button (the menu is a second tap on Inbox).
+  const topBarButtons = await topBar.locator("button").evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("aria-label") ?? node.textContent),
   );
   check(
-    "both circles are touch-sized",
-    Boolean(logoBox && accountBox) &&
-      Math.min(logoBox.width, logoBox.height, accountBox.width, accountBox.height) >= MIN_TARGET,
-    JSON.stringify({ logoBox, accountBox }),
+    "no chevrons, tick or menu button in the phone top bar",
+    topBarButtons.length === 0 &&
+      (await topBar.locator(
+        '[aria-label="Previous message"], [aria-label="Next message"], [aria-label="Mark all read"], [aria-label="Open menu"], [data-sidebar-toggle]',
+      ).count()) === 0,
+    JSON.stringify(topBarButtons),
   );
 
-  const searchBox = await page.locator("#winnow-search").boundingBox();
+  const searchBox = await page.locator("[data-phone-search]").boundingBox();
   check(
-    "search is on screen, not collapsed to nothing",
-    Boolean(searchBox) && searchBox.width > 120,
+    "search has its own full-width row under the title, at touch height",
+    Boolean(searchBox && logoBox) && searchBox.y >= logoBox.y + logoBox.height &&
+      Math.abs(searchBox.x - logoBox.x) <= 1 && searchBox.x + searchBox.width >= 390 - logoBox.x - 1 &&
+      searchBox.height >= MIN_TARGET,
     JSON.stringify(searchBox),
   );
+  check("the list's name is in the top bar", (await listTitle())?.trim() === "Inbox", await listTitle());
   const overflow = await page.evaluate(() => {
     const row = document.querySelector("[data-phone-topbar] > div");
     return row ? Math.round(row.scrollWidth - row.clientWidth) : null;
@@ -2947,9 +2969,46 @@ try {
   await page.waitForTimeout(300);
   check("and All clears it", (await rowTotal()) === beforeChip, `${await rowTotal()} rows`);
 
-  // The overflow menu, from the top bar's menu button: Inbox, folders, the account and
-  // Settings. No smart filters (they are the chips) and so no quick filter either.
-  await openDrawer();
+  /*
+    The menu, from the dock: the Inbox tab is the toggle once it is the current tab. From
+    another mailbox the first tap only switches to the inbox; the second raises the menu
+    as a bottom sheet resting on the tabs, and the third closes it.
+  */
+  const inboxTab = tabs.filter({ hasText: "Inbox" });
+  await tabs.filter({ hasText: "Sent" }).click();
+  await page.waitForTimeout(250);
+  const inboxTabState = () =>
+    inboxTab.evaluate((tab) => ({
+      label: tab.getAttribute("aria-label"),
+      popup: tab.getAttribute("aria-haspopup"),
+      expanded: tab.getAttribute("aria-expanded"),
+      controls: tab.getAttribute("aria-controls"),
+      current: tab.getAttribute("aria-current"),
+    }));
+  const awayState = await inboxTabState();
+  check(
+    "away from the inbox, the Inbox tab is plainly a tab",
+    awayState.popup === null && awayState.expanded === null && !/Activate again/.test(awayState.label ?? ""),
+    JSON.stringify(awayState),
+  );
+  await inboxTab.click();
+  await page.waitForTimeout(300);
+  const firstTap = await inboxTabState();
+  check(
+    "the first Inbox tap switches to the inbox and does not open the menu",
+    !(await sidebarOpen()) && (await listTitle())?.trim() === "Inbox" && firstTap.current === "page",
+    JSON.stringify({ title: await listTitle(), open: await sidebarOpen() }),
+  );
+  check(
+    "then it tells a screen reader a second activation opens the menu",
+    firstTap.popup === "dialog" && firstTap.expanded === "false" && firstTap.controls === "winnow-sidebar" &&
+      /^Inbox(, \d+ unread)?\. Activate again for mailboxes and account$/.test(firstTap.label ?? ""),
+    JSON.stringify(firstTap),
+  );
+  await inboxTab.click();
+  await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+  await page.waitForTimeout(400);
+  check("the second Inbox tap opens the menu", await sidebarOpen());
   const menu = overflowMenu();
   const menuShape = await menu.evaluate((panel) => ({
     filter: Boolean(panel.querySelector("#winnow-nav-filter")),
@@ -2958,48 +3017,90 @@ try {
     folders: [...panel.querySelectorAll("[data-nav-folder]")].map((b) => b.getAttribute("data-nav-folder")),
     account: panel.querySelector("[data-nav-account]")?.textContent ?? "",
     settings: Boolean(panel.querySelector('[data-nav-account] button[aria-label="Settings"]')),
+    markAllRead: panel.querySelector('[data-nav-action="mark-all-read"]')?.getAttribute("aria-label") ?? null,
   }));
   check(
-    "the menu button opens one sheet: Inbox, Mail, the account and Settings, and no categories",
+    "the menu is one sheet: Mark all read, Inbox, Mail, the account and Settings, and no categories",
     !menuShape.filter && menuShape.inbox && menuShape.categories === 0 &&
       ["sent", "archive", "trash", "spam"].every((id) => menuShape.folders.includes(id)) &&
-      menuShape.account.includes("Demo account") && menuShape.settings,
+      menuShape.account.includes("Demo account") && menuShape.settings &&
+      menuShape.markAllRead === "Mark all read in Inbox",
     JSON.stringify(menuShape),
   );
-  const menuTargets = await menu.locator('button[data-nav-folder], button[data-nav="inbox"]').evaluateAll((nodes) =>
+  const menuTargets = await menu.locator('button[data-nav-folder], button[data-nav="inbox"], button[data-nav-action]').evaluateAll((nodes) =>
     nodes.map((node) => Math.round(node.getBoundingClientRect().height)),
   );
   check("its rows are touch-sized", menuTargets.every((h) => h >= MIN_TARGET), JSON.stringify(menuTargets));
   const phoneSide = await page.evaluate(() => {
     const side = document.querySelector("[data-sidebar]").getBoundingClientRect();
+    const tabsRow = document.querySelector('[data-phone-dock] nav[aria-label="Primary"]').getBoundingClientRect();
     const scrim = document.querySelector("[data-sidebar-scrim]");
+    const chips = document.querySelector("[data-phone-dock] [data-rail-scroller]");
     return {
       left: Math.round(side.left),
       right: Math.round(side.right),
+      top: Math.round(side.top),
+      bottom: Math.round(side.bottom),
+      tabsTop: Math.round(tabsRow.top),
       window: innerWidth,
+      height: innerHeight,
+      radius: getComputedStyle(document.querySelector("[data-sidebar]")).borderTopLeftRadius,
       scrim: getComputedStyle(scrim).visibility,
       layers: scrim.querySelectorAll("[data-scrim-layer]").length,
       dockInert: Boolean(document.querySelector("[data-phone-dock]")?.closest("[inert]")),
+      chipsAside: Boolean(chips?.closest("[inert]")) && getComputedStyle(chips).visibility === "hidden",
+      listInert: Boolean(document.querySelector("[data-row-count]")?.closest("[inert]")),
+      focusInside: document.querySelector("[data-sidebar]").contains(document.activeElement),
     };
   });
   check(
-    "on a phone it is the same sidebar from the left edge, a strip of the app left showing under a lighter blur",
-    phoneSide.left === 8 && phoneSide.right < phoneSide.window - 40 && phoneSide.scrim === "visible" &&
-      phoneSide.layers >= 2 && phoneSide.layers < 4 && phoneSide.dockInert,
+    "on a phone it is a bottom sheet: full width, resting on the tabs near the bottom edge, rounded on top",
+    phoneSide.left === 0 && phoneSide.right === phoneSide.window &&
+      Math.abs(phoneSide.bottom - phoneSide.tabsTop) <= 1 && phoneSide.bottom >= phoneSide.height - 120 &&
+      phoneSide.top >= phoneSide.height * 0.2 - 1 && phoneSide.radius !== "0px",
     JSON.stringify(phoneSide),
+  );
+  check(
+    "the app behind it is blurred and inert, the tabs stay live and the chip row is set aside",
+    phoneSide.scrim === "visible" && phoneSide.layers >= 2 && phoneSide.layers < 4 && phoneSide.listInert &&
+      !phoneSide.dockInert && phoneSide.chipsAside && phoneSide.focusInside,
+    JSON.stringify(phoneSide),
+  );
+  const openTab = await inboxTabState();
+  check(
+    "and the Inbox tab says it is expanded, and that activating it again closes the menu",
+    openTab.expanded === "true" && /Activate again to close/.test(openTab.label ?? ""),
+    JSON.stringify(openTab),
   );
   const phoneRadial = await scrimFalloff();
   check(
-    "and its blur spreads from the middle of its right edge, falling off evenly in every direction",
-    Math.abs(phoneRadial.origin.x - phoneRadial.side.right) <= 1 &&
-      Math.abs(phoneRadial.origin.y - phoneRadial.side.mid) <= 1 && phoneRadial.ok,
+    "its blur spreads from the middle of its top edge, falling off evenly in every direction",
+    Math.abs(phoneRadial.origin.x - phoneRadial.side.centre) <= 1 &&
+      Math.abs(phoneRadial.origin.y - phoneRadial.side.top) <= 1 && phoneRadial.ok,
     JSON.stringify({ origin: phoneRadial.origin, side: phoneRadial.side, samples: phoneRadial.samples }),
   );
-  // A tap on the strip of app it leaves closes it.
-  await page.mouse.click(phoneSide.window - 15, 400);
+  await inboxTab.click();
+  await waitSidebarClosed().catch(() => undefined);
+  check(
+    "the third Inbox tap closes it, and focus is back on the Inbox tab",
+    !(await sidebarOpen()) &&
+      (await inboxTab.evaluate((tab) => document.activeElement === tab)) &&
+      (await inboxTabState()).expanded === "false",
+  );
+  // A tap on the app above it closes it too.
+  await openDrawer();
+  await page.mouse.click(phoneSide.window / 2, 120);
   await waitSidebarClosed().catch(() => undefined);
   check("a tap outside it closes it on a phone", !(await sidebarOpen()) && (await page.locator("article h1").count()) === 0);
   await closeDrawer();
+  // Escape closes it, and focus goes back to the tab.
+  await openDrawer();
+  await page.keyboard.press("Escape");
+  await waitSidebarClosed().catch(() => undefined);
+  check(
+    "Escape closes it and gives focus back to the Inbox tab",
+    !(await sidebarOpen()) && (await inboxTab.evaluate((tab) => document.activeElement === tab)),
+  );
 
   // The tabs switch mailbox and open Settings.
   await tabs.filter({ hasText: "Sent" }).click();
@@ -3044,7 +3145,7 @@ try {
   await page.waitForTimeout(300);
   check("and the Inbox tab comes back", (await listTitle())?.trim() === "Inbox", await listTitle());
 
-  // Trash and Spam have no tab; the account circle's drawer still reaches them.
+  // Trash and Spam have no tab; the menu still reaches them.
   await openDrawer();
   check(
     "the drawer still lists every mailbox",
@@ -3203,6 +3304,24 @@ try {
     "a row's star is a full touch target on a touch device",
     Boolean(starTarget) && starTarget.width >= MIN_TARGET && starTarget.height >= MIN_TARGET,
     JSON.stringify(starTarget),
+  );
+  // Mark all read on a phone: the top bar has no tick, so it is in the menu (two taps on
+  // Inbox), and it marks the list on screen and closes the sheet.
+  const touchInbox = touchPage.locator('[data-phone-dock] nav[aria-label="Primary"] button').first();
+  const unreadRows = () =>
+    touchPage.locator("[data-row-count] button[data-message-id]").evaluateAll((rows) =>
+      rows.filter((row) => /, unread,/.test(row.getAttribute("aria-label") ?? "")).length,
+    );
+  const unreadBefore = await unreadRows();
+  await touchInbox.tap();
+  await touchPage.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+  const touchMarkAll = touchPage.locator('[data-sidebar] [data-nav-action="mark-all-read"]');
+  await touchMarkAll.tap();
+  await touchPage.locator("[data-sidebar]").waitFor({ state: "hidden", timeout: 5_000 }).catch(() => undefined);
+  check(
+    "on a phone, Mark all read is in the menu, marks the list read and closes the sheet",
+    unreadBefore > 0 && (await unreadRows()) === 0 && (await touchPage.locator("[data-sidebar][data-open]").count()) === 0,
+    `${unreadBefore} → ${await unreadRows()} unread rows`,
   );
   await touchContext.close();
 
@@ -4331,7 +4450,15 @@ try {
         const at = probe.getBoundingClientRect();
         probe.remove();
         const side = document.querySelector("[data-sidebar]").getBoundingClientRect();
-        return { x: at.left, y: at.top, right: side.right, mid: side.top + side.height / 2 };
+        return {
+          x: at.left,
+          y: at.top,
+          right: side.right,
+          mid: side.top + side.height / 2,
+          top: side.top,
+          centre: side.left + side.width / 2,
+          bottom: side.bottom,
+        };
       });
     await m.setViewportSize({ width: 390, height: 844 });
     await m.waitForTimeout(400);
@@ -4341,8 +4468,9 @@ try {
       (await m.locator("[data-sidebar]").count()) === 1 && (await mOpen()),
     );
     check(
-      "and the blur's origin moves with it, to the middle of the sidebar's new right edge",
-      Math.abs(phoneEdge.x - phoneEdge.right) <= 2 && Math.abs(phoneEdge.y - phoneEdge.mid) <= 2,
+      "and it becomes the bottom sheet, its blur's origin moving to the middle of its top edge",
+      Math.abs(phoneEdge.x - phoneEdge.centre) <= 2 && Math.abs(phoneEdge.y - phoneEdge.top) <= 2 &&
+        phoneEdge.bottom > 844 - 120,
       JSON.stringify(phoneEdge),
     );
     // A window too short for the panel: it scrolls inside itself, and the origin follows.
@@ -4350,8 +4478,8 @@ try {
     await m.waitForTimeout(400);
     const shortEdge = await edgeAt();
     check(
-      "a window resize re-measures the origin",
-      Math.abs(shortEdge.y - shortEdge.mid) <= 2,
+      "a window resize re-measures the origin, and the sheet stays inside the window",
+      Math.abs(shortEdge.y - shortEdge.top) <= 2 && shortEdge.top >= 0,
       JSON.stringify(shortEdge),
     );
     await m.keyboard.press("Escape");
