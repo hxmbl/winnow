@@ -5879,6 +5879,13 @@ try {
     }, FAKE_SMOKE_TOKEN);
     await ctx.route("https://gmail.googleapis.com/**", fakeGmail);
     await ctx.route("https://oauth2.googleapis.com/**", (route) => json(route, { error: "invalid_grant" }, 400));
+    // Sign-out revokes the grant at Google. Registered after the catch-all, so it wins.
+    const revokes = [];
+    await ctx.route("https://oauth2.googleapis.com/revoke", (route) => {
+      const request = route.request();
+      revokes.push({ url: request.url(), method: request.method(), body: request.postData() ?? "" });
+      return route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*" }, contentType: "application/json", body: "{}" });
+    });
     const trackerHits = [];
     await ctx.route("https://t.example/**", (route) => {
       trackerHits.push({ url: route.request().url(), headers: route.request().headers() });
@@ -5957,6 +5964,14 @@ try {
     await pv.locator('[data-nav-account] button[aria-label^="Account"]').click();
     await pv.getByRole("menuitem", { name: "Sign out" }).click();
     await pv.waitForTimeout(800);
+    check(
+      "signing out revokes the grant at Google once, with the refresh token in the body and not the URL",
+      revokes.length === 1 &&
+        revokes[0].method === "POST" &&
+        !revokes[0].url.includes("token=") &&
+        new globalThis.URLSearchParams(revokes[0].body).get("token") === "1//smoke-refresh",
+      JSON.stringify(revokes.map((r) => ({ url: r.url, method: r.method, hasToken: r.body.includes("token=") }))),
+    );
     const left = await pv.evaluate(() => Object.keys(localStorage).filter((key) => /^winnow\.(gmail|drafts|google\.contacts|logos|gravatars)/.test(key)));
     check("signing out leaves no mail, cursor, token or draft in storage", left.length === 0, left.join(", "));
     const written = await pv.evaluate(() => Object.values(localStorage).join("\n"));
