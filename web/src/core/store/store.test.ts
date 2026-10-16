@@ -1468,6 +1468,28 @@ describe("body retention", () => {
     expect(store.getSnapshot().view.selected?.bodyHtml).toContain("fetched body");
   });
 
+  it("forgets resident bodies on sign-out", async () => {
+    // The account's mail must not stay in the heap of a signed-out app.
+    const { store } = await storeOver(20);
+    const any = store.getSnapshot().all[0]!;
+    expect(store.hasLoadedBody(any.id)).toBe(true);
+    await store.signOut();
+    const inner = store as unknown as { bodies: Map<number, string>; bodyChecked: Set<number> };
+    expect(inner.bodies.size).toBe(0);
+    expect(inner.bodyChecked.size).toBe(0);
+  });
+
+  it("drops a body that arrives after sign-out", async () => {
+    const { store } = await storeOver(600);
+    const target = oldestOf(store);
+    const loading = store.loadBody(target.id);
+    await store.signOut();
+    await loading;
+    const inner = store as unknown as { bodies: Map<number, string>; bodyChecked: Set<number> };
+    expect(inner.bodies.size).toBe(0);
+    expect(inner.bodyChecked.has(target.id)).toBe(false);
+  });
+
   it("asks once for the same message, however many times", async () => {
     const { store, calls } = await storeOver(600);
     const target = oldestOf(store);

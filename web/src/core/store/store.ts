@@ -2348,11 +2348,14 @@ export class WinnowStore {
       try {
         if (whole) {
           const loaded = await this.bodyQueue.push(() => backend.loadMessage!(email.gmailId), priority);
+          // Signed out (or switched account) while it was on the wire: not ours to keep.
+          if (this.backend !== backend) return;
           this.bodyChecked.add(id);
           if (loaded.bodyHtml !== undefined) this.bodies.set(id, loaded.bodyHtml);
           this.applyLoadedBody(id, loaded, priority === "high");
         } else {
           const bodyHtml = await this.bodyQueue.push(() => backend.fetchBody(email.gmailId), priority);
+          if (this.backend !== backend) return;
           this.bodyChecked.add(id);
           if (bodyHtml !== undefined) this.bodies.set(id, bodyHtml);
         }
@@ -2586,6 +2589,12 @@ export class WinnowStore {
     this.pendingConnect = null;
     this.undoAction = null;
     this.dropBodyWork();
+    // The resident bodies are the account's mail in memory. A sync would replace them on
+    // the next sign-in, but until then they would sit in the heap of a signed-out app.
+    this.bodies = new Map();
+    this.bodyChecked = new Set();
+    this.bodyFailed = new Set();
+    this.bodyInFlight = new Map();
 
     // Park the background ticker *before* dropping the backend: on the desktop it is a
     // Rust thread that would otherwise keep firing every minute, calling `refresh` with
