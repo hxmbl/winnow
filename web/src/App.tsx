@@ -2095,6 +2095,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           canLoadRemoteContent
           imagePolicy={preferences.imagePolicy}
           onImagePolicy={(imagePolicy) => store.setPreferences({ imagePolicy })}
+          markReadOnOpen={preferences.markReadOnOpen}
+          onMarkReadOnOpen={(value) => store.setPreferences({ markReadOnOpen: value })}
           brandLogos={preferences.brandLogos}
           onBrandLogos={(value) => store.setPreferences({ brandLogos: value })}
           gravatars={preferences.gravatars}

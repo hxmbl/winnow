@@ -224,6 +224,9 @@ export type SettingsProps = {
   /** The standing answer about remote images. See `IMAGE_POLICY_CHOICES`. */
   imagePolicy: ImagePolicy;
   onImagePolicy: (value: ImagePolicy) => void;
+  /** Read on open. On by default; see `Preferences.markReadOnOpen`. */
+  markReadOnOpen: boolean;
+  onMarkReadOnOpen: (value: boolean) => void;
   /** Brand logos from BIMI in avatars. Off by default; see `Preferences.brandLogos`. */
   brandLogos: boolean;
   onBrandLogos: (value: boolean) => void;
@@ -347,6 +350,13 @@ export function Settings(props: SettingsProps) {
               </button>
             ))}
           </div>
+        </Row>
+
+        <Row
+          label="Mark as read when opened"
+          hint="Opening a message or conversation marks it read. Off, mail stays unread until you mark it."
+        >
+          <Toggle checked={props.markReadOnOpen} onChange={props.onMarkReadOnOpen} label="Mark as read when opened" />
         </Row>
 
         {/*
