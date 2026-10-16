@@ -5868,7 +5868,7 @@ try {
       localStorage.setItem(
         "winnow.gmail.tokens",
         JSON.stringify({
-          accessToken: "ya29.smoke-access",
+          accessToken: "fake-smoke-access-token",
           refreshToken: "1//smoke-refresh",
           expiresAt: Date.now() + 3_600_000,
           scope: "https://www.googleapis.com/auth/gmail.modify",
@@ -5958,7 +5958,7 @@ try {
     const left = await pv.evaluate(() => Object.keys(localStorage).filter((key) => /^winnow\.(gmail|drafts|google\.contacts|logos|gravatars)/.test(key)));
     check("signing out leaves no mail, cursor, token or draft in storage", left.length === 0, left.join(", "));
     const written = await pv.evaluate(() => Object.values(localStorage).join("\n"));
-    check("and no trace of the message or the reply", !/Privacy torture|A private reply|ya29\.smoke/.test(written));
+    check("and no trace of the message or the reply", !/Privacy torture|A private reply|fake-smoke-access-token/.test(written));
     // The autosave was stopped, not just hidden: nothing is written back a moment later.
     await pv.waitForTimeout(2_600);
     check(
