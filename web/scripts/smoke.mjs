@@ -84,6 +84,25 @@ async function ensureBuilt() {
   await build({ root: ROOT, logLevel: "warn" });
 }
 
+/**
+ * Open one Settings category: its tab in the desktop list, or on a phone its row in the
+ * category list (stepping back out of an open category first). Settings opens on Reading.
+ */
+async function openSettingsCategory(p, id) {
+  const dialog = p.locator('[role="dialog"][aria-label="Settings"]');
+  await dialog.waitFor({ timeout: 5_000 });
+  const tab = dialog.locator(`[role="tab"][data-category="${id}"]`);
+  if ((await tab.count()) > 0) {
+    await tab.click();
+  } else {
+    if ((await dialog.locator('[data-settings-page="category"]').count()) > 0) {
+      await dialog.locator("[data-settings-back]").click();
+    }
+    await dialog.locator(`[data-category="${id}"]`).click();
+  }
+  await p.waitForTimeout(120);
+}
+
 async function openServer() {
   if (EXTERNAL) {
     console.log(`· using ${URL} (WINNOW_URL) — not starting a server`);
@@ -1001,6 +1020,7 @@ try {
 
   // Settings → Google account shows it, and can remove it.
   await page.keyboard.press(",");
+  await openSettingsCategory(page, "google");
   await page.waitForSelector("text=Your Google OAuth client", { timeout: 5_000 });
   check("Settings has a Google account section", (await page.getByText("Your Google OAuth client").count()) === 1);
   check("which shows the client, shortened", (await page.getByText(/123456….*\.apps\.googleusercontent\.com/).count()) > 0);
@@ -2836,6 +2856,7 @@ try {
   // to reset appearance, sort order and everything else, on the next launch.
   await page.keyboard.press(",");
   await page.waitForTimeout(400);
+  await openSettingsCategory(page, "privacy");
   /*
    * The image setting is a radio group of three, not a switch.
    *
@@ -2881,6 +2902,7 @@ try {
    * `index.css` fallbacks paint on their own: the frame a user sees before the app loads.
    */
   await page.keyboard.press(",");
+  await openSettingsCategory(page, "appearance");
   await page.waitForSelector('[role="radiogroup"][data-picker="winnow-theme-mode"]', { timeout: 5_000 });
   const modeGroup = page.locator('[role="radiogroup"][data-picker="winnow-theme-mode"]');
   const accentGroup = page.locator('[role="radiogroup"][data-picker="winnow-theme-accent"]');
@@ -3016,6 +3038,7 @@ try {
 
   // Put the world back: the rest of the run assumes the default theme.
   await page.keyboard.press(",");
+  await openSettingsCategory(page, "appearance");
   await page.waitForSelector('[role="radiogroup"][data-picker="winnow-theme-mode"]', { timeout: 5_000 });
   await modeRadios.filter({ hasText: "System" }).click();
   await accentRadios.filter({ hasText: "Space" }).click();
@@ -3489,6 +3512,7 @@ try {
     (await page.locator('[role="dialog"][aria-label="Settings"]').count()) === 1,
   );
   // Google account setup, on a phone: the whole screen, with touch-sized fields.
+  await openSettingsCategory(page, "google");
   await page.locator('[role="dialog"][aria-label="Settings"]').getByRole("button", { name: "Set up" }).click();
   const phoneSetup = page.locator('[role="dialog"][aria-label="Google account"]');
   await phoneSetup.waitFor({ timeout: 5_000 }).catch(() => undefined);
@@ -4604,6 +4628,7 @@ try {
     await on.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
     await on.keyboard.press(",");
     await on.waitForTimeout(300);
+    await openSettingsCategory(on, "privacy");
     const toggle = on.locator('[aria-label="Show brand logos"]');
     check("Settings has a Show brand logos switch", (await toggle.count()) === 1);
     if ((await toggle.count()) === 1) {
@@ -4668,16 +4693,20 @@ try {
     await gd.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
     await gd.keyboard.press(",");
     await gd.waitForTimeout(300);
+    await openSettingsCategory(gd, "privacy");
     const gDefaultToggle = gd.locator('[aria-label="Gravatar photos"]');
     check("Settings has a Gravatar photos switch", (await gDefaultToggle.count()) === 1);
     check("which is off by default", (await gDefaultToggle.getAttribute("aria-checked")) === "false");
+    await gd.locator('[data-setting="gravatars"]').hover();
+    await gd.waitForTimeout(100);
     check(
-      "beside Show brand logos, with a hint that a hashed address goes to Gravatar",
+      "beside Show brand logos, explained as sending a hashed address to Gravatar",
       await gd.evaluate(() => {
-        const text = document.body.innerText;
+        const text = document.querySelector('[data-settings-body]')?.innerText ?? "";
         const logos = text.indexOf("Show brand logos");
         const grav = text.indexOf("Gravatar photos");
-        return logos >= 0 && grav > logos && /hashed copy of each sender's address to Gravatar/.test(text);
+        const about = document.querySelector("[data-settings-explain]")?.textContent ?? "";
+        return logos >= 0 && grav > logos && /hashed copy of each sender's address/.test(about);
       }),
     );
     await gDefaultCtx.close();
@@ -4728,6 +4757,7 @@ try {
     await g.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
     await g.keyboard.press(",");
     await g.waitForTimeout(300);
+    await openSettingsCategory(g, "privacy");
     const gToggle = g.locator('[aria-label="Gravatar photos"]');
     check("the Gravatar switch shows on", (await gToggle.getAttribute("aria-checked")) === "true");
     await gToggle.click();
@@ -5161,7 +5191,8 @@ try {
     const note = settings.locator("[data-sorting-note]");
     const noteText = ((await note.textContent()) ?? "").trim();
     check("a Settings text is selectable", noteText.length > 0 && (await selectIn(note)).trim() === noteText);
-    const clientHint = settings.locator("[data-settings-row]").first().locator("p").nth(1);
+    await openSettingsCategory(t, "google");
+    const clientHint = settings.locator('[data-setting="oauthClient"] [data-settings-row] p').first();
     const clientText = ((await clientHint.textContent()) ?? "").trim();
     check("the Google client value in Settings is selectable", clientText.length > 0 && (await selectIn(clientHint)).trim() === clientText, clientText);
     const settingsButton = settings.locator("button").first();
@@ -5489,6 +5520,252 @@ try {
       "the switch is saved with the other preferences",
       await r.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").markReadOnOpen === false),
     );
+    await ctx.close();
+  }
+
+  // ── Settings layout ────────────────────────────────────────────────────────
+  //
+  // Three columns on a desktop (categories, controls, an explanation of the last setting
+  // pointed at), a (?) popover per setting below 1200px, and on a phone a category list
+  // that opens one category page at a time above the dock.
+
+  section("settings layout");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const s = await ctx.newPage();
+    s.on("pageerror", (error) => errors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    await s.waitForSelector("[data-row-count] [data-row-id]");
+    await s.keyboard.press(",");
+    const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
+    await dialog.waitFor({ timeout: 5_000 });
+    await s.waitForTimeout(300);
+    check("Settings is three columns at 1440px", (await s.locator('[data-settings-layout="three"]').count()) === 1);
+    const columns = await s.evaluate(() =>
+      ["nav", "content", "explain"].map((name) => {
+        const element = document.querySelector(`[data-settings-column="${name}"]`);
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return { x: Math.round(rect.x), width: Math.round(rect.width), height: Math.round(rect.height), border: style.borderRightWidth };
+      }),
+    );
+    check(
+      "about 27%, 45% and 28% of the window, left to right, full height",
+      columns.every(Boolean) &&
+        Math.abs(columns[0].width - 389) <= 12 && Math.abs(columns[1].width - 648) <= 12 && Math.abs(columns[2].width - 403) <= 12 &&
+        columns[0].x === 0 && columns[1].x > columns[0].x && columns[2].x > columns[1].x &&
+        columns.every((column) => column.height === 900),
+      JSON.stringify(columns),
+    );
+    check("separated by hairlines, not bars", columns[0]?.border === "1px" && columns[1]?.border === "1px", JSON.stringify(columns.map((c) => c?.border)));
+    const tabs = dialog.locator('[role="tablist"][aria-orientation="vertical"] [role="tab"]');
+    const tabLabels = await tabs.allTextContents();
+    check(
+      "the categories, Reading first and selected",
+      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About"]) &&
+        (await tabs.first().getAttribute("aria-selected")) === "true",
+      JSON.stringify(tabLabels),
+    );
+    const backBox = await dialog.locator("[data-settings-back]").boundingBox();
+    check("Back is at the top left", Boolean(backBox) && backBox.x < 40 && backBox.y < 40, JSON.stringify(backBox));
+    const title = () => dialog.locator("[data-settings-title]").textContent();
+    const explain = s.locator("[data-settings-explain]");
+    check("the explanation column is a polite live region", (await explain.getAttribute("aria-live")) === "polite");
+    check("before anything is pointed at it introduces the category", (await explain.getAttribute("data-settings-explain")) === "intro");
+
+    // Arrow keys move through the categories, and the middle column follows.
+    await tabs.first().focus();
+    await s.keyboard.press("ArrowDown");
+    await s.waitForTimeout(80);
+    check(
+      "ArrowDown selects and focuses the next category",
+      (await title()) === "Appearance" &&
+        (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "appearance",
+    );
+    await s.keyboard.press("End");
+    await s.waitForTimeout(80);
+    check("End jumps to the last", (await title()) === "About");
+    await s.keyboard.press("ArrowDown");
+    await s.waitForTimeout(80);
+    check("and ArrowDown wraps round to the first", (await title()) === "Reading");
+    await s.keyboard.press("ArrowDown");
+    await s.keyboard.press("ArrowDown");
+    await s.waitForTimeout(80);
+    check("Privacy shows its own settings", (await title()) === "Privacy" && (await dialog.locator('[data-setting="brandLogos"]').count()) === 1);
+    check("with no (?) buttons, since the column explains them", (await dialog.locator("[data-setting-info]").count()) === 0);
+    check("and no explanation copy under the rows", !((await dialog.locator("[data-settings-body]").innerText()).includes("Cloudflare")));
+
+    // Hover: the column describes the row, and keeps it after the pointer leaves.
+    await dialog.locator('[data-setting="brandLogos"]').hover();
+    await s.waitForTimeout(80);
+    check(
+      "hovering a setting explains it in the right column",
+      (await explain.getAttribute("data-explains")) === "brandLogos" && /Cloudflare's DNS-over-HTTPS/.test((await explain.textContent()) ?? ""),
+    );
+    await s.mouse.move(700, 850);
+    await s.waitForTimeout(80);
+    check("and the explanation stays after the pointer leaves", (await explain.getAttribute("data-explains")) === "brandLogos");
+    await dialog.locator('[data-setting="gravatars"]').hover();
+    await s.waitForTimeout(80);
+    check(
+      "the next hover replaces it",
+      (await explain.getAttribute("data-explains")) === "gravatars" && /hashed copy of each sender's address/.test((await explain.textContent()) ?? ""),
+    );
+    await s.mouse.move(700, 850);
+
+    // Keyboard focus does the same, with no pointer involved.
+    await dialog.locator('[role="switch"][aria-label="Show brand logos"]').focus();
+    await s.waitForTimeout(80);
+    check("keyboard focus entering a setting explains it", (await explain.getAttribute("data-explains")) === "brandLogos");
+    await s.keyboard.press("Tab");
+    await s.waitForTimeout(80);
+    check("and Tab to the next setting moves the explanation", (await explain.getAttribute("data-explains")) === "gravatars");
+
+    // Choosing another category starts on its intro.
+    await openSettingsCategory(s, "reading");
+    check("a new category starts on its intro", (await explain.getAttribute("data-settings-explain")) === "intro" && ((await explain.textContent()) ?? "").includes("Reading"));
+    // Every setting row in every category explains itself.
+    let unexplained = [];
+    for (const id of ["reading", "appearance", "privacy", "sync", "google", "senders", "shortcuts", "about"]) {
+      await openSettingsCategory(s, id);
+      for (const block of await dialog.locator("[data-setting]").all()) {
+        const setting = await block.getAttribute("data-setting");
+        await block.hover();
+        const body = (await explain.locator("p").nth(1).textContent()) ?? "";
+        if ((await explain.getAttribute("data-explains")) !== setting || body.trim().length < 40) unexplained.push(`${id}/${setting}`);
+      }
+    }
+    check("every setting row has explanation copy", unexplained.length === 0, unexplained.join(", "));
+
+    // Back and Escape both return to the mail.
+    await dialog.locator("[data-settings-back]").click();
+    await s.waitForTimeout(200);
+    check("Back returns to the mail", (await s.locator('[role="dialog"]').count()) === 0 && (await s.locator("[data-row-count] [data-row-id]").count()) > 0);
+    await s.keyboard.press(",");
+    await dialog.waitFor({ timeout: 5_000 });
+    await s.keyboard.press("Escape");
+    await s.waitForTimeout(200);
+    check("and so does Escape", (await s.locator('[role="dialog"]').count()) === 0);
+    await ctx.close();
+  }
+  {
+    // Below 1200px: two columns, and a (?) per setting instead of the third column.
+    const ctx = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+    const s = await ctx.newPage();
+    s.on("pageerror", (error) => errors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    await s.waitForSelector("[data-row-count] [data-row-id]");
+    await s.keyboard.press(",");
+    const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
+    await openSettingsCategory(s, "privacy");
+    check("at 1024px Settings is two columns, with no explanation column", (await s.locator('[data-settings-layout="two"]').count()) === 1 && (await s.locator("[data-settings-explain]").count()) === 0);
+    const infos = dialog.locator("[data-setting-info]");
+    const labels = await infos.evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-label")));
+    check(
+      "every setting has a (?) named for it",
+      JSON.stringify(labels) === JSON.stringify(["About Remote images", "About Show brand logos", "About Gravatar photos"]),
+      JSON.stringify(labels),
+    );
+    check("and the explanations are not printed under the rows", !((await dialog.innerText()).includes("Cloudflare")));
+    const info = dialog.locator('[data-setting-info="brandLogos"]');
+    const tip = s.locator('[role="tooltip"][data-setting-popover="brandLogos"]');
+    check("closed, it says so", (await info.getAttribute("aria-expanded")) === "false" && (await tip.count()) === 0);
+    await info.hover();
+    await s.waitForTimeout(150);
+    const tipId = await tip.getAttribute("id").catch(() => null);
+    check(
+      "hovering the (?) shows the same copy as the column",
+      (await tip.isVisible()) && /Cloudflare's DNS-over-HTTPS/.test((await tip.textContent()) ?? "") &&
+        (await info.getAttribute("aria-expanded")) === "true" && (await info.getAttribute("aria-describedby")) === tipId,
+    );
+    const tipBox = await tip.boundingBox();
+    check(
+      "inside the viewport",
+      Boolean(tipBox) && tipBox.x >= 0 && tipBox.y >= 0 && tipBox.x + tipBox.width <= 1024 && tipBox.y + tipBox.height <= 768,
+      JSON.stringify(tipBox),
+    );
+    await s.mouse.move(900, 700);
+    await s.waitForTimeout(100);
+    check("and hides when the pointer leaves it", (await tip.count()) === 0);
+    await info.click();
+    await s.mouse.move(900, 700);
+    await s.waitForTimeout(100);
+    check("a click pins it open", await tip.isVisible());
+    await s.keyboard.press("Escape");
+    await s.waitForTimeout(100);
+    check("Escape closes the popover and leaves Settings open", (await tip.count()) === 0 && (await dialog.count()) === 1);
+    await dialog.locator('[data-setting-info="gravatars"]').focus();
+    await s.waitForTimeout(100);
+    check("keyboard focus on the (?) shows it", await s.locator('[data-setting-popover="gravatars"]').isVisible());
+    await s.keyboard.press("Shift+Tab");
+    await s.waitForTimeout(100);
+    check("and moving focus away hides it", (await s.locator('[data-setting-popover="gravatars"]').count()) === 0);
+    await dialog.locator("[data-settings-back]").click();
+    await s.waitForTimeout(200);
+    check("Back returns to the mail here too", (await s.locator('[role="dialog"]').count()) === 0);
+    await ctx.close();
+  }
+  {
+    // Phone: a category list, then one category's page with a back arrow, above the dock.
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const s = await ctx.newPage();
+    s.on("pageerror", (error) => errors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    await s.waitForSelector("[data-row-count] [data-row-id]");
+    const tabsNav = s.locator('[data-phone-dock] nav[aria-label="Primary"] button');
+    await tabsNav.filter({ hasText: "Settings" }).tap();
+    const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
+    await dialog.waitFor({ timeout: 5_000 });
+    await s.waitForTimeout(300);
+    check("a phone opens Settings on its category list", (await s.locator('[data-settings-layout="phone"][data-settings-page="list"]').count()) === 1);
+    check("with every category", (await dialog.locator("button[data-category]").count()) === 8);
+    const settingsTab = tabsNav.filter({ hasText: "Settings" });
+    const dockBox = await s.locator("[data-phone-dock] nav").boundingBox();
+    const dialogBox = await dialog.boundingBox();
+    check(
+      "above the dock, whose Settings tab stays visible and current",
+      (await settingsTab.getAttribute("aria-current")) === "page" && Boolean(dockBox && dialogBox) &&
+        dialogBox.y + dialogBox.height <= dockBox.y + 1 && (await settingsTab.isVisible()),
+      JSON.stringify({ dockBox, dialogBox }),
+    );
+    await dialog.locator('button[data-category="privacy"]').tap();
+    await s.waitForTimeout(200);
+    check(
+      "tapping a category opens its page, titled, with a back arrow",
+      (await s.locator('[data-settings-page="category"]').count()) === 1 &&
+        (await dialog.locator("[data-settings-title]").textContent()) === "Privacy" &&
+        (await dialog.locator('[data-settings-back][aria-label="Back to Settings"]').count()) === 1,
+    );
+    check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 3 && !((await dialog.innerText()).includes("Cloudflare")));
+    await dialog.locator('[data-setting-info="gravatars"]').tap();
+    await s.waitForTimeout(150);
+    const tip = s.locator('[data-setting-popover="gravatars"]');
+    const tipBox = await tip.boundingBox();
+    check(
+      "a tap opens the explanation, inside the screen",
+      Boolean(tipBox) && tipBox.x >= 0 && tipBox.x + tipBox.width <= 390 && tipBox.y >= 0 && tipBox.y + tipBox.height <= 844 &&
+        /hashed copy of each sender's address/.test((await tip.textContent()) ?? ""),
+      JSON.stringify(tipBox),
+    );
+    await dialog.locator("[data-settings-title]").tap();
+    await s.waitForTimeout(150);
+    check("a tap elsewhere closes it", (await tip.count()) === 0);
+    await dialog.locator('[data-setting-info="gravatars"]').tap();
+    await s.waitForTimeout(100);
+    await dialog.locator('[data-setting-info="gravatars"]').tap();
+    await s.waitForTimeout(100);
+    check("and a second tap on the (?) closes it too", (await tip.count()) === 0);
+    await dialog.locator("[data-settings-back]").tap();
+    await s.waitForTimeout(200);
+    check(
+      "back returns to the list, focus on the category it came from",
+      (await s.locator('[data-settings-page="list"]').count()) === 1 &&
+        (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "privacy",
+    );
+    await tabsNav.filter({ hasText: "Inbox" }).tap();
+    await s.waitForTimeout(250);
+    check("the Inbox tab returns to the mail", (await s.locator('[role="dialog"]').count()) === 0);
     await ctx.close();
   }
 
