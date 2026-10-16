@@ -1628,6 +1628,9 @@ export function App({ store }: Props) {
         selectRegion(
           selectAllScope([
             document.activeElement === document.body ? null : document.activeElement,
+            // Focus on a control beside the scope in the same sheet (Settings' category
+            // list): the sheet answers with the one scope it holds.
+            document.activeElement?.closest('[role="dialog"]') ?? null,
             lastPressRef.current,
             document.getSelection()?.anchorNode?.parentElement ?? null,
           ]) as Element | null,
