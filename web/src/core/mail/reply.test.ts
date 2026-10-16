@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  withReplyAll,
   attributionLine,
   buildForward,
   buildReply,
@@ -151,6 +152,33 @@ describe("subjects", () => {
 
   it("keeps an already-prefixed subject's own casing", () => {
     expect(replySubject("RE: the plan")).toBe("RE: the plan");
+  });
+});
+
+describe("withReplyAll — the composer's Reply / Reply all toggle", () => {
+  const thread = [
+    email({ sender: "a@x.com" }),
+    email({ sender: "b@x.com", receivedAt: 1 }),
+    email({ sender: "me@northwind.example", receivedAt: 2 }),
+    email({ sender: "c@x.com", receivedAt: 3 }),
+  ];
+  const self = "me@northwind.example";
+
+  it("switches To between the last sender and everyone, never yourself", () => {
+    const all = buildReply(thread[3], thread, { replyAll: true, selfAddress: self });
+    expect(all.to.sort()).toEqual(["a@x.com", "b@x.com", "c@x.com"]);
+    const one = withReplyAll(all, thread[3], thread, false, self);
+    expect(one.to).toEqual(["c@x.com"]);
+    const back = withReplyAll(one, thread[3], thread, true, self);
+    expect(back.to.sort()).toEqual(["a@x.com", "b@x.com", "c@x.com"]);
+    expect(back.to).not.toContain(self);
+  });
+
+  it("keeps everything the user wrote", () => {
+    const all = buildReply(thread[3], thread, { replyAll: true, selfAddress: self });
+    const written = { ...all, body: "Sounds good.", cc: ["d@x.com"], subject: "Re: changed" };
+    const one = withReplyAll(written, thread[3], thread, false, self);
+    expect(one).toEqual({ ...written, to: ["c@x.com"] });
   });
 });
 

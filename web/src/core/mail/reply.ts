@@ -137,3 +137,21 @@ export function buildForward(
     prefilled: body,
   };
 }
+
+/**
+ * Switch a reply between Reply and Reply all, keeping everything the user wrote.
+ *
+ * Only `to` changes, and it is recomputed by `buildReply` itself so the toggle and a fresh
+ * reply can never disagree about who is on it — including the exclusion of the user's own
+ * address, which `buildReply`'s tests pin.
+ */
+export function withReplyAll(
+  draft: Draft,
+  original: Email,
+  conversation: readonly Email[],
+  replyAll: boolean,
+  selfAddress?: string,
+): Draft {
+  const { to } = buildReply(original, conversation, { replyAll, selfAddress });
+  return { ...draft, to };
+}
