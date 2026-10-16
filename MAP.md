@@ -287,7 +287,7 @@ to its range, and records a `FeedbackEvent`.
 | File | Job |
 | --- | --- |
 | `dto.ts` | The API's JSON and nothing else, plus `GMAIL_API`, `GOOGLE_TOKEN_URL`, `GOOGLE_AUTH_URL`, the base64url codec, `GMAIL_SCOPE`, and `LABEL`. API changes land here and in `mapper.ts`, nowhere else. |
-| `client.ts` | The typed `fetch` wrapper. Owns quota pacing and retries. Every verb Winnow uses: `profile`, `list`, `message`, `messageBodyHtml`, `history`, `addLabels`/`removeLabels`, `archive`, `markRead`, `setStarred`, `trash`, `restore`, `markNotSpam`, `deletePermanently`, `send`, `attachment`, `draft`, `listDrafts`. |
+| `client.ts` | The typed `fetch` wrapper. Owns quota pacing and retries. Every verb Winnow uses: `profile`, `list`, `message`, `messageBodyHtml`, `history`, `addLabels`/`removeLabels`, `archive`, `markRead`, `setStarred`, `trash`, `restore`, `markNotSpam`, `deletePermanently`, `send`, `attachment`, `draft`, `listDrafts`, `createDraft`, `updateDraft`, `sendDraft`, `deleteDraft`. |
 | `sync.ts` | `GmailSyncEngine`: full vs incremental, the cursor, the five capped views, batching, partial publishing. Also defines the two interfaces everything else is written against: `MailboxCache` and `CursorStore`. |
 | `mapper.ts` | Gmail message → `Email`. Parses `From` rather than trusting it, prefers plain text over HTML, keeps attachments as metadata, and uses `internalDate` over the `Date:` header. |
 | `mime.ts` | RFC 822 out: `buildMime`, `messageIdFor`, `replyReferences`. Getting `Message-ID` / `In-Reply-To` / `References` wrong threads the reply in the sender's account and nowhere else. |
@@ -470,7 +470,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. |
 | `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other four mailboxes in `MAILBOX_ORDER`, an account footer carrying Settings, and the progressive scrim blur. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
 | `SettingsPanel.tsx` | Settings. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. |
-| `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send and Discard. |
+| `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send and Discard, the Reply / Reply all toggle and the draft status. Three layouts: docked at the bottom of the reader pane (desktop reply and forward, not modal, its own Escape), a centred sheet (desktop new message), full screen (phone, everything). |
 | `GoogleSetup.tsx` | Paste, import by file, drop or paste-into-field; test; save; connect. |
 | `ComposeFab.tsx` | The phone's round compose pencil, measured to sit above the dock. Rendered from `App.tsx`, not the phone chrome; shown only over the list. |
 | `RecipientField.tsx` | The composer's To, Cc and Bcc fields: chips plus an ARIA 1.2 editable combobox. Nothing is highlighted until an arrow key, Tab only accepts after navigation (WCAG 2.1.1), Escape is consumed only while the list is open. |
@@ -505,7 +505,8 @@ plus OS, applied as CSS custom properties), and **the layout**.
 
 ### 7.3 What lives in `App.tsx` instead of the store
 
-Composer and its discard confirmation; the open menu (`kind`, id, ids, anchor,
+Composer, its autosave and its discard confirmation (a desktop reply docked in the
+reader is parked as a draft when the selection moves, rather than asking); the open menu (`kind`, id, ids, anchor,
 trigger); the sidebar; the per-message remote-image grant; the sign-in and setup
 flow's local state. Overlays (`shortcuts`, `settings`, `navigation`) *are* in the
 store, because the keyboard router has to see them.
@@ -615,6 +616,7 @@ judged as IPv4.
 | `winnow.learning.v1` | Weights + the 400-event log | never, by design |
 | `winnow.activeFilters.v1` | The active filter set | sign-out |
 | `winnow.mailbox.v1` | Which mailbox was last open | — |
+| `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
 | `winnow.gmail.cache.messages` | The mailbox, as plain JSON | sign-out |
 | `winnow.gmail.cache.cursor` | Gmail `historyId` | sign-out |
 | `winnow.google.contacts.v1` | The People API snapshot | sign-out, revocation |
@@ -714,8 +716,10 @@ is hard to see.
 - **No component tests.** The layers that are hard to get right (classification,
   the wire, sanitising, the store) are pure and heavily tested; the components
   are covered by the smoke pass against a real browser instead.
-- **No drafts.** The composer asks before it throws one away; Gmail's own drafts
-  are excluded from sync.
+- **No Drafts mailbox.** The composer autosaves to Gmail drafts (`core/mail/drafts.ts`,
+  `DraftAutosaver`: device copy at once, Gmail ~2 s after typing stops, one id per
+  draft, `drafts.send` on Send, `drafts.delete` on Discard), but Gmail's own drafts
+  are excluded from sync, so there is nothing to browse them in yet.
 - **No path aliases, no router, no state library, no CSS framework beyond
   Tailwind, no date library, no component library.** Each absence is a decision
   recorded in the file that would otherwise have imported it.

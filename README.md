@@ -14,9 +14,10 @@ It runs in a browser and as a desktop app. Same program either way.
 
 - **Gmail and nothing else.** No IMAP, no Outlook, no Fastmail, no self-hosted
   server (all of those are "yet"). It's the Gmail REST API and its labels all the way down.
-- **No drafts.** Compose, reply and forward are plain text with no attachments, and
-  Gmail's own drafts aren't fetched, so nothing half-written is in this app to begin
-  with. Closing a written message asks first, because nothing is kept.
+- **Drafts, but no Drafts folder.** Compose, reply and forward are plain text with
+  no attachments. What you write is saved to your Gmail drafts as you type (and kept
+  on this device, so a reload brings it back), but Winnow has no Drafts mailbox to
+  browse them in yet: Gmail's own drafts aren't fetched.
 - **The classifier is wrong sometimes.** It's a pile of rules ported from an old
   Swift app of mine, and some of them look like bugs because they are. I left
   them narrow on purpose. Widening them makes it louder, not better.
@@ -213,11 +214,14 @@ Data access):
 
 | Scope | Asked for | Why |
 | --- | --- | --- |
-| `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, send |
+| `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, send, drafts |
 | `https://www.googleapis.com/auth/contacts.readonly` | later, opt-in | saved contacts in recipient suggestions, and their photos in avatars |
 | `https://www.googleapis.com/auth/contacts.other.readonly` | later, opt-in | "other contacts" (people you've written to) |
 
-Sign-in only ever asks for `gmail.modify`. The two contact scopes are requested
+Sign-in only ever asks for `gmail.modify`, which also covers saving drafts, so
+autosave needs nothing more. (A grant without it — narrowed outside Winnow — makes
+the composer say "Drafts need permission" and offer to ask for `gmail.compose` the
+same incremental way; until then the draft stays on the device.) The two contact scopes are requested
 through incremental consent (`include_granted_scopes=true`) when someone chooses
 **Settings → Google contacts → Contact photos and suggestions → Connect**, or
 **Show contact photos** in a sender's menu, on both builds, and under the

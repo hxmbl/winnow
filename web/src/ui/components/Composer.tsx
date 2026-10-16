@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { RecipientField } from "./RecipientField";
 import { normaliseRecipients, recipientProblem } from "../../core/mail/compose";
+import { draftStatusLabel, type DraftSaveStatus } from "../../core/mail/drafts";
 import type { ContactIndex } from "../../core/contacts/index";
 
 /** What the composer can change in its draft. */
@@ -66,7 +67,81 @@ export type ComposerProps = {
    * bottom edge — which, with the keyboard up, is directly above it.
    */
   phone?: boolean;
+  /**
+   * Docked at the bottom of the reader pane (desktop reply and forward) instead of a
+   * centred sheet: the conversation above stays readable and scrollable while writing.
+   * Not modal — no backdrop, no focus trap — so its Escape is handled here.
+   */
+  docked?: boolean;
+  /** Reply all (default) or Reply. With `onReplyAllChange`, a reply shows the toggle. */
+  replyAll?: boolean;
+  onReplyAllChange?: (replyAll: boolean) => void;
+  /** The autosave's state, said in the header. */
+  saveStatus?: DraftSaveStatus;
+  /** "Drafts need permission": ask for it (incremental consent). */
+  onAllowDrafts?: (() => void) | null;
+  allowingDrafts?: boolean;
 };
+
+/** Reply / Reply all: two pressed-state buttons, because both choices are always visible. */
+function ReplyAllToggle({ replyAll, onChange }: { replyAll: boolean; onChange: (replyAll: boolean) => void }) {
+  const option = (value: boolean, label: string) => (
+    <button
+      type="button"
+      aria-pressed={replyAll === value}
+      data-reply-all={value ? "all" : "one"}
+      onClick={() => onChange(value)}
+      className={`rounded-ctl px-2 py-0.5 text-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-9 ${
+        replyAll === value ? "bg-surface-active text-ink" : "text-ink-subtle hover:bg-surface-hover hover:text-ink-body"
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="group" aria-label="Reply to" className="flex shrink-0 items-center gap-0.5 rounded-ctl border border-hairline p-0.5">
+      {option(false, "Reply")}
+      {option(true, "Reply all")}
+    </div>
+  );
+}
+
+/** "Saving…", "Saved", "Couldn't save", or "Drafts need permission" with its button. */
+function DraftStatus({
+  status,
+  onAllow,
+  allowing,
+}: {
+  status: DraftSaveStatus;
+  onAllow?: (() => void) | null;
+  allowing?: boolean;
+}) {
+  const label = draftStatusLabel(status);
+  return (
+    <span className="ml-auto flex min-w-0 items-center gap-1.5 text-meta">
+      <span
+        data-draft-status={status.kind}
+        role="status"
+        aria-live="polite"
+        title={status.kind === "error" ? status.message : undefined}
+        className={`truncate ${status.kind === "error" ? "font-medium text-danger" : "text-ink-subtle"}`}
+      >
+        {label}
+      </span>
+      {status.kind === "permission" && onAllow && (
+        <button
+          type="button"
+          data-allow-drafts=""
+          onClick={onAllow}
+          disabled={allowing}
+          className="shrink-0 rounded-ctl px-1.5 py-0.5 font-medium text-accent underline-offset-2 hover:underline disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          {allowing ? "Waiting for Google…" : "Allow"}
+        </button>
+      )}
+    </span>
+  );
+}
 
 export function Composer({
   mode,
@@ -85,6 +160,12 @@ export function Composer({
   onDiscard,
   onClose,
   phone = false,
+  docked = false,
+  replyAll = true,
+  onReplyAllChange,
+  saveStatus = { kind: "idle" },
+  onAllowDrafts = null,
+  allowingDrafts = false,
 }: ComposerProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLInputElement>(null);
@@ -157,11 +238,17 @@ export function Composer({
   const [startsInTo] = useState(() => mode === "forward" || (mode === "new" && to.length === 0));
 
   useEffect(() => {
-    if (placed.current || startsInTo) return;
+    if (placed.current) return;
+    if (startsInTo) {
+      // The sheet's `initialFocus` places a forward's caret; docked there is no sheet.
+      if (docked) toRef.current?.focus();
+      placed.current = true;
+      return;
+    }
     placed.current = true;
     bodyRef.current?.focus();
     bodyRef.current?.setSelectionRange(0, 0);
-  }, [startsInTo]);
+  }, [startsInTo, docked]);
 
   const title = mode === "reply" ? "Reply" : mode === "forward" ? "Forward" : "New message";
   /*
@@ -197,25 +284,10 @@ export function Composer({
     </button>
   );
 
-  return (
-    <Sheet
-      label={title}
-      onClose={onClose}
-      // The composer is not dismissable by clicking away from it. A click just
-      // outside a 640px dialog is not "I have decided to abandon this", and it used to
-      // destroy a typed reply with no confirmation and no draft kept. Escape and the
-      // close button still work, and both go through `onClose`, which *may* confirm.
-      dismissOnBackdrop={false}
-      initialFocus={startsInTo ? toRef : bodyRef}
-      placement={phone ? "fill" : "center"}
-      className={
-        phone
-          ? "flex h-[calc(100dvh-var(--wn-keyboard,0px))] w-full flex-col overflow-hidden bg-chrome"
-          : "flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
-      }
-    >
-      <SheetHeader title={title} onClose={onClose} touch={phone} />
+  const content = (
+    <>
       <div
+        data-composer={mode}
         className={`thin-scroll min-h-0 flex-1 overflow-y-auto ${phone ? "flex flex-col" : ""}`}
         onKeyDown={(event) => {
           /*
@@ -334,7 +406,7 @@ export function Composer({
           onChange={(event) => onChange({ body: event.target.value })}
           // Shorter on a new message, which has From and may have Cc and Bcc above it, so
           // Send stays inside the sheet on a 900px window rather than below its fold.
-          rows={phone ? 8 : mode === "new" ? 12 : 16}
+          rows={phone ? 8 : docked ? 6 : mode === "new" ? 12 : 16}
           spellCheck
           className={`selectable thin-scroll w-full rounded-ctl border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-none focus-visible:border-accent ${
             // 16px on a phone: iOS zooms into any focused field smaller than that.
@@ -414,6 +486,75 @@ export function Composer({
           </button>
         </div>
       )}
+    </>
+  );
+
+  const headerControls = (
+    <>
+      {mode === "reply" && onReplyAllChange && <ReplyAllToggle replyAll={replyAll} onChange={onReplyAllChange} />}
+      <DraftStatus status={saveStatus} onAllow={onAllowDrafts} allowing={allowingDrafts} />
+    </>
+  );
+
+  if (docked) {
+    return (
+      <section
+        data-composer-dock=""
+        aria-label={title}
+        // Docked under the conversation: at most half the pane, scrolling inside itself,
+        // so the message above keeps its own scroll and stays readable while writing.
+        className="flex max-h-[50%] min-h-0 shrink-0 flex-col border-t border-hairline bg-chrome shadow-lift"
+        onKeyDown={(event) => {
+          // Not a modal, so no `Sheet` handles Escape: closing goes through `onClose`,
+          // which asks when there is something to lose. A recipient list that is open
+          // consumed its own Escape already (`RecipientField`).
+          if (event.key === "Escape" && !event.defaultPrevented) {
+            event.stopPropagation();
+            event.preventDefault();
+            onClose();
+          }
+        }}
+      >
+        <div className="flex shrink-0 items-center gap-3 border-b border-hairline px-4 py-2">
+          <h2 className="shrink-0 text-ui font-semibold text-ink">{title}</h2>
+          <div className="flex min-w-0 flex-1 items-center gap-2">{headerControls}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={`Close ${title}`}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+        {content}
+      </section>
+    );
+  }
+
+  return (
+    <Sheet
+      label={title}
+      onClose={onClose}
+      // The composer is not dismissable by clicking away from it. A click just
+      // outside a 640px dialog is not "I have decided to abandon this", and it used to
+      // destroy a typed reply with no confirmation and no draft kept. Escape and the
+      // close button still work, and both go through `onClose`, which *may* confirm.
+      dismissOnBackdrop={false}
+      initialFocus={startsInTo ? toRef : bodyRef}
+      placement={phone ? "fill" : "center"}
+      className={
+        phone
+          ? "flex h-[calc(100dvh-var(--wn-keyboard,0px))] w-full flex-col overflow-hidden bg-chrome"
+          : "flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+      }
+    >
+      <SheetHeader title={title} onClose={onClose} touch={phone}>
+        {headerControls}
+      </SheetHeader>
+      {content}
     </Sheet>
   );
 }

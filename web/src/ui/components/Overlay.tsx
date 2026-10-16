@@ -305,6 +305,7 @@ export function SheetHeader({
   id,
   onClose,
   touch = false,
+  children,
 }: {
   title: string;
   /** Wired to the panel's `aria-labelledby` when the panel has no `aria-label`. */
@@ -312,6 +313,8 @@ export function SheetHeader({
   onClose: () => void;
   /** A 44px close target and room for the status bar, for the phone layout. */
   touch?: boolean;
+  /** Controls between the title and the close button (the composer's toggle and status). */
+  children?: React.ReactNode;
 }) {
   return (
     <div
@@ -319,9 +322,10 @@ export function SheetHeader({
         touch ? "pb-1.5 pl-5 pr-3 pt-[max(0.375rem,env(safe-area-inset-top))]" : "px-5 py-3.5"
       }`}
     >
-      <h2 id={id} className="text-read font-semibold text-ink">
+      <h2 id={id} className="shrink-0 text-read font-semibold text-ink">
         {title}
       </h2>
+      {children && <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>}
       <button
         type="button"
         onClick={onClose}

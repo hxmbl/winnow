@@ -36,7 +36,14 @@ import {
   NAVIGATION_ITEMS,
 } from "./core/model/signals";
 import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
-import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
+import { buildForward, buildReply, stripQuote, withReplyAll } from "./core/mail/reply";
+import {
+  DraftAutosaver,
+  LocalDrafts,
+  draftContextKey,
+  type DraftSaveStatus,
+  type LocalDraft,
+} from "./core/mail/drafts";
 import {
   buildNewDraft,
   draftFromMailto,
@@ -44,10 +51,12 @@ import {
   needsSubjectConfirmation,
 } from "./core/mail/compose";
 import { attentionSentence } from "./core/classify/attention";
+import { formatRelative } from "./core/mail/datetime";
 import { resolveImageConsent } from "./core/mail/imageConsent";
-import type { Draft } from "./core/model/email";
+import type { Draft, GmailId } from "./core/model/email";
 import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
+import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
 import { platform, type PlatformInfo } from "./platform";
 import { useStore } from "./ui/useStore";
@@ -152,7 +161,44 @@ type ComposerState = {
    * so closing an untouched one does not ask. Replies and forwards judge by the body.
    */
   initial?: Pick<Draft, "to" | "cc" | "bcc" | "subject">;
+  /** The message a reply or forward answers: where it docks, and what it threads on. */
+  replyTo?: GmailId;
+  /** Reply all (the default) or Reply, for a reply. */
+  replyAll?: boolean;
+  /** Which draft this is, for the autosave and the device copy. See `draftContextKey`. */
+  context: string;
+  /** What the autosave last said. */
+  status: DraftSaveStatus;
 };
+
+/** What `startComposer` is given: the composer, less the state it owns itself. */
+type ComposerStart = Omit<ComposerState, "sending" | "error" | "status">;
+
+/** A blank new message's recipients and subject, the baseline for "untouched". */
+const BLANK_INITIAL: NonNullable<ComposerState["initial"]> = { to: [], cc: [], bcc: [], subject: "" };
+
+/** How long "Draft saved." stays up after a half-written reply is put away, in ms. */
+const DRAFT_NOTICE_MS = 4000;
+
+/** `localStorage`, or `null` where reading it throws (storage disabled). */
+function deviceStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The user's own address, for leaving it off a reply-all: the demo's is its seeded account. */
+function selfAddressOf(snap: Pick<Snapshot, "contactsAccess" | "account">): string | undefined {
+  return snap.account?.email ?? (snap.contactsAccess === "demo" ? DEMO_ACCOUNT.email : undefined);
+}
+
+/** Whose drafts these are: the signed-in address, `demo`, or `null` before either. */
+function draftAccount(snap: Pick<Snapshot, "contactsAccess" | "account">): string | null {
+  if (snap.contactsAccess === "demo") return "demo";
+  return snap.account?.email ?? null;
+}
 
 /** How long "Message sent." stays up before it clears itself, in ms. */
 const SENT_NOTICE_MS = 6000;
@@ -606,6 +652,11 @@ export function App({ store }: Props) {
           } else if (completed.contacts === "not_granted") {
             store.setNotice(HALF_GRANT_MESSAGE);
           }
+          // Back from the drafts opt-in: the draft itself comes back through the restore
+          // offer, from the copy kept on this device.
+          if (completed.drafts === "declined") {
+            store.setNotice(completed.draftsMessage ?? "Drafts were not allowed.");
+          }
           void syncGoogleContacts(completed.contacts === "granted").then((problem) => {
             // Just granted, and it still cannot read them: say so now, not only in Settings.
             if (problem && completed.contacts === "granted") store.setNotice(problem.message);
@@ -974,23 +1025,116 @@ export function App({ store }: Props) {
     storeRef.current.toggleStar(messageId);
   }, []);
 
+  /** The autosave for the open composer. One at a time, like the composer itself. */
+  const saverRef = useRef<DraftAutosaver | null>(null);
+  /**
+   * Whether the grant allows Gmail drafts, read from the token when an account connects.
+   * `null` until known; the sign-in scope allows drafts, so it is `granted` for a normal
+   * session and this exists for a grant narrowed outside Winnow.
+   */
+  const [draftsAccess, setDraftsAccess] = useState<DraftsAccess | null>(null);
+  const draftsAccessRef = useRef(draftsAccess);
+  draftsAccessRef.current = draftsAccess;
+
+  /** The device copy for whoever is signed in (or the demo). */
+  const localDrafts = useCallback((): LocalDrafts | null => {
+    const account = draftAccount(storeRef.current.getSnapshot());
+    return account ? new LocalDrafts(deviceStorage(), account) : null;
+  }, []);
+
+  /**
+   * Put the open composer away: `park` keeps what was written (Gmail draft and device
+   * copy, with a "Draft saved." notice), `discard` deletes both. An untouched composer is
+   * always discarded — there is nothing to keep.
+   */
+  const retireComposer = useCallback((current: ComposerState, how: "park" | "discard") => {
+    const saver = saverRef.current;
+    saverRef.current = null;
+    if (!saver) return;
+    if (how === "discard" || isUntouchedDraft(current.draft, current.initial)) {
+      void saver.discard();
+      return;
+    }
+    void saver.park();
+    const s = storeRef.current;
+    const message = "Draft saved.";
+    s.setNotice(message);
+    setTimeout(() => {
+      if (s.getSnapshot().notice === message) s.dismissNotice();
+    }, DRAFT_NOTICE_MS);
+  }, []);
+
+  /**
+   * Open the composer, with its autosave.
+   *
+   * One composer at a time: one already open is parked first (kept as a draft), so
+   * replying to another message never silently loses a half-written reply. A context
+   * with a draft kept on this device opens with it, unless `restore` is `false` (a
+   * `mailto:` link, which is its own message).
+   */
+  const startComposer = useCallback(
+    (start: ComposerStart, restore?: LocalDraft | false) => {
+      const previous = composerRef.current;
+      if (previous) retireComposer(previous, "park");
+      const local = localDrafts();
+      const kept = restore === false ? null : (restore ?? local?.get(start.context) ?? null);
+      const api = storeRef.current.draftsApi();
+      const saver: DraftAutosaver = new DraftAutosaver({
+        context: start.context,
+        mode: start.mode,
+        replyTo: start.replyTo,
+        api,
+        local,
+        draftId: kept?.gmailDraftId ?? null,
+        permissionMissing: api !== null && draftsAccessRef.current === "not_granted",
+        onStatus: (status) => {
+          // A parked saver finishing its last save must not speak for the next composer.
+          if (saverRef.current !== saver) return;
+          setComposer((current) => (current ? { ...current, status } : current));
+        },
+      });
+      saverRef.current = saver;
+      const next: ComposerState = {
+        ...start,
+        ...(kept
+          ? { draft: kept.draft, replyAll: kept.replyAll ?? start.replyAll, initial: kept.initial ?? start.initial }
+          : {}),
+        sending: false,
+        error: null,
+        status: saver.currentStatus,
+      };
+      composerRef.current = next;
+      setComposer(next);
+      void syncGoogleContacts();
+    },
+    [localDrafts, retireComposer, syncGoogleContacts],
+  );
+
+  /** Put the caret back in the open composer's message, for a second `r` on the same draft. */
+  const focusComposer = useCallback(() => {
+    document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus();
+  }, []);
+
   /**
    * Open the composer on a reply.
    *
    * Reply-all by default: the person who needs to answer is usually not the one who wrote
    * last, and reply-all with a visible, editable To field is undoable in a way
    * reply-to-one is not. `buildReply`'s tests pin the exclusion of the user's own address.
+   * The composer's Reply / Reply all toggle switches it.
    */
   const openReply = useCallback(() => {
     const snap = snapshotRef.current;
-    if (!snap.view.selected) return;
-    const draft = buildReply(snap.view.selected, snap.view.conversation, {
+    const selected = snap.view.selected;
+    if (!selected) return;
+    const context = draftContextKey("reply", selected.gmailId);
+    if (composerRef.current?.context === context) return focusComposer();
+    const draft = buildReply(selected, snap.view.conversation, {
       replyAll: true,
-      selfAddress: snap.account?.email,
+      selfAddress: selfAddressOf(snap),
     });
-    setComposer({ draft, sending: false, error: null, mode: "reply" });
-    void syncGoogleContacts();
-  }, [syncGoogleContacts]);
+    startComposer({ draft, mode: "reply", replyTo: selected.gmailId, replyAll: true, context });
+  }, [startComposer, focusComposer]);
 
   /**
    * Open the composer on a forward.
@@ -1002,11 +1146,13 @@ export function App({ store }: Props) {
    */
   const openForward = useCallback(() => {
     const snap = snapshotRef.current;
-    if (!snap.view.selected) return;
-    const draft = buildForward(snap.view.selected, snap.view.conversation, []);
-    setComposer({ draft, sending: false, error: null, mode: "forward" });
-    void syncGoogleContacts();
-  }, [syncGoogleContacts]);
+    const selected = snap.view.selected;
+    if (!selected) return;
+    const context = draftContextKey("forward", selected.gmailId);
+    if (composerRef.current?.context === context) return focusComposer();
+    const draft = buildForward(selected, snap.view.conversation, []);
+    startComposer({ draft, mode: "forward", replyTo: selected.gmailId, context });
+  }, [startComposer, focusComposer]);
 
   /**
    * Reply, reply all or forward a row from its context menu: open it, then compose.
@@ -1020,41 +1166,52 @@ export function App({ store }: Props) {
       s.focusMessage(id);
       const view = s.view;
       if (!view.selected) return;
+      const kind = mode === "forward" ? "forward" : "reply";
+      const context = draftContextKey(kind, view.selected.gmailId);
+      if (composerRef.current?.context === context) return focusComposer();
+      const replyAll = mode === "replyAll";
       const draft =
         mode === "forward"
           ? buildForward(view.selected, view.conversation, [])
           : buildReply(view.selected, view.conversation, {
-              replyAll: mode === "replyAll",
-              selfAddress: s.getSnapshot().account?.email,
+              replyAll,
+              selfAddress: selfAddressOf(s.getSnapshot()),
             });
-      setComposer({ draft, sending: false, error: null, mode: mode === "forward" ? "forward" : "reply" });
-      void syncGoogleContacts();
+      startComposer({
+        draft,
+        mode: kind,
+        replyTo: view.selected.gmailId,
+        replyAll: kind === "reply" ? replyAll : undefined,
+        context,
+      });
     },
-    [syncGoogleContacts],
+    [startComposer, focusComposer],
   );
 
   /**
    * Open a blank composer, or one filled from a `mailto:` link.
    *
-   * One composer at a time: with a draft already open this does nothing, and the open
-   * draft keeps its own discard question. In practice every entry point is behind the
-   * open sheet anyway (the `c` key routes to the composer while it is up, and the
-   * Compose buttons are under its backdrop), so this is the backstop, not the rule.
+   * A blank one picks up the new message kept on this device, if there is one. With a
+   * sheet already open this does nothing — the open draft keeps its own discard
+   * question, and every entry point is behind its backdrop anyway. A docked reply is not
+   * a sheet: it is parked (kept as a draft) and the new message opens.
    */
   const openCompose = useCallback(
     (from?: Draft) => {
-      if (composerRef.current) return;
+      const current = composerRef.current;
+      if (current && (current.mode === "new" || phoneRef.current)) return;
       const draft = from ?? buildNewDraft();
-      setComposer({
-        draft,
-        sending: false,
-        error: null,
-        mode: "new",
-        initial: { to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject },
-      });
-      void syncGoogleContacts();
+      startComposer(
+        {
+          draft,
+          mode: "new",
+          context: draftContextKey("new"),
+          initial: { to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject },
+        },
+        from ? false : undefined,
+      );
     },
-    [syncGoogleContacts],
+    [startComposer],
   );
 
   /** A `mailto:` link in a message: Winnow's own composer, filled from the link. */
@@ -1084,6 +1241,16 @@ export function App({ store }: Props) {
     async (recipients?: Pick<Draft, "to" | "cc" | "bcc">, confirmedNoSubject = false) => {
       if (!composer || composer.sending) return;
       const draft = { ...composer.draft, ...(recipients ?? {}) };
+      const saver = saverRef.current;
+      /** Send the saved Gmail draft when there is one, so no orphan is left in Drafts. */
+      const settledDraftId = async (): Promise<string | undefined> =>
+        (saver ? await saver.settle().catch(() => null) : null) ?? undefined;
+      /** The message went out: the device copy goes, and the autosave stops. */
+      const sent = () => {
+        saver?.finish();
+        if (saverRef.current === saver) saverRef.current = null;
+        setComposer(null);
+      };
 
       if (composer.mode === "new") {
         if (!confirmedNoSubject && needsSubjectConfirmation(draft)) {
@@ -1092,8 +1259,8 @@ export function App({ store }: Props) {
         }
         setComposer({ ...composer, draft, sending: true, error: null });
         try {
-          const { simulated } = await storeRef.current.sendNew(draft);
-          setComposer(null);
+          const { simulated } = await storeRef.current.sendNew(draft, await settledDraftId());
+          sent();
           // Said, because a closing sheet alone does not say whether it went. The demo
           // says what it did: nothing left the device.
           const message = simulated ? "Message sent (demo: saved to Sent on this device only)." : "Message sent.";
@@ -1114,11 +1281,12 @@ export function App({ store }: Props) {
       }
 
       const snap = snapshotRef.current;
-      if (!snap.view.selected) return;
+      const inReplyTo = composer.replyTo ?? snap.view.selected?.gmailId;
+      if (!inReplyTo) return;
       setComposer({ ...composer, draft, sending: true, error: null });
       try {
-        await storeRef.current.sendReply(draft, snap.view.selected.gmailId);
-        setComposer(null);
+        await storeRef.current.sendReply(draft, inReplyTo, await settledDraftId());
+        sent();
       } catch (error) {
         setComposer({
           ...composer,
@@ -1145,20 +1313,167 @@ export function App({ store }: Props) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const closeComposer = useCallback((force = false) => {
-    setComposer((current) => {
-      if (!current) return null;
-      if (force || isUntouchedDraft(current.draft, current.initial)) return null;
-      // There is something to lose: ask, and leave the composer exactly as it is
-      // — including focus — if the answer is no.
-      setConfirmDiscard(true);
-      return current;
-    });
-  }, []);
+    const current = composerRef.current;
+    if (!current) return;
+    if (force || isUntouchedDraft(current.draft, current.initial)) {
+      // Discarding deletes the saved draft too: Gmail's and this device's.
+      retireComposer(current, "discard");
+      setComposer(null);
+      return;
+    }
+    // There is something to lose: ask, and leave the composer exactly as it is
+    // — including focus — if the answer is no.
+    setConfirmDiscard(true);
+  }, [retireComposer]);
 
   /** Both buttons of the confirmation, in one place so neither can miss. */
   const resolveDiscard = useCallback((discard: boolean) => {
     setConfirmDiscard(false);
-    if (discard) setComposer(null);
+    const current = composerRef.current;
+    if (discard && current) {
+      retireComposer(current, "discard");
+      setComposer(null);
+    }
+  }, [retireComposer]);
+
+  /**
+   * The autosave follows the draft. An untouched composer is not saved — opening a reply
+   * and closing it again must not leave a draft in Gmail — and nothing is saved while a
+   * send is in flight, which would race `drafts.send` with an update.
+   */
+  const composerDraft = composer?.draft;
+  const composerReplyAll = composer?.replyAll;
+  useEffect(() => {
+    const current = composerRef.current;
+    const saver = saverRef.current;
+    if (!current || !saver || current.sending) return;
+    if (isUntouchedDraft(current.draft, current.initial) && !saver.hasSaved) return;
+    saver.change(current.draft, { replyAll: current.replyAll, initial: current.initial });
+  }, [composerDraft, composerReplyAll]);
+
+  /** Drafts need permission → the opt-in, by incremental consent like contacts. */
+  const [allowingDrafts, setAllowingDrafts] = useState(false);
+  const allowDrafts = useCallback(async () => {
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    setAllowingDrafts(true);
+    try {
+      const access = await bridge.grantDrafts();
+      setDraftsAccess(access);
+      const api = storeRef.current.draftsApi();
+      if (access === "granted" && api) saverRef.current?.grant(api);
+      else storeRef.current.setNotice("Drafts were not allowed. Your draft is kept on this device instead.");
+    } catch (error) {
+      storeRef.current.setNotice(error instanceof Error ? error.message : "Drafts were not allowed.");
+    } finally {
+      setAllowingDrafts(false);
+    }
+  }, []);
+
+  /** The grant's drafts access, read off the token whenever the account changes. */
+  const accountEmail = snapshot.account?.email ?? null;
+  useEffect(() => {
+    const bridge = sessionRef.current;
+    if (!bridge || !accountEmail) {
+      setDraftsAccess(null);
+      return;
+    }
+    let live = true;
+    bridge.draftsAccess().then(
+      (access) => {
+        if (live) setDraftsAccess(access);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [accountEmail]);
+
+  /**
+   * The docked reply belongs to the message it answers. Moving to another message (or
+   * closing the reader) parks it — kept as a draft, in Gmail and on this device, with a
+   * "Draft saved." notice — rather than asking on every j/k, or losing it. Opening the
+   * reply again on that message picks it up.
+   */
+  const selectedGmailId = view.selected?.gmailId ?? null;
+  useEffect(() => {
+    const current = composerRef.current;
+    if (!current || phone || current.mode === "new" || current.sending) return;
+    if (current.replyTo === selectedGmailId) return;
+    retireComposer(current, "park");
+    composerRef.current = null;
+    setComposer(null);
+  }, [selectedGmailId, phone, retireComposer]);
+
+  /** Reply and forward dock in the reader on a wide layout; everything else is a sheet. */
+  const docked =
+    composer !== null &&
+    !phone &&
+    composer.mode !== "new" &&
+    composer.replyTo !== undefined &&
+    composer.replyTo === selectedGmailId;
+  const dockedRef = useRef(docked);
+  dockedRef.current = docked;
+
+  /**
+   * On launch (and after signing in), offer the newest draft kept on this device — the
+   * one a reload, a crash or the drafts opt-in's trip to Google left behind.
+   */
+  const [restoreOffer, setRestoreOffer] = useState<LocalDraft | null>(null);
+  const restoreOfferedFor = useRef<string | null>(null);
+  const draftOwner = draftAccount(snapshot);
+  useEffect(() => {
+    if (snapshot.status !== "ready" || !draftOwner || restoreOfferedFor.current === draftOwner) return;
+    restoreOfferedFor.current = draftOwner;
+    if (composerRef.current) return;
+    const latest = localDrafts()?.latest() ?? null;
+    if (latest) setRestoreOffer(latest);
+  }, [snapshot.status, draftOwner, localDrafts]);
+
+  /** Restore: a reply or forward reopens on its message; one whose message is gone becomes a new message. */
+  const restoreDraft = useCallback(
+    (entry: LocalDraft) => {
+      setRestoreOffer(null);
+      const s = storeRef.current;
+      const email = entry.replyTo ? s.getSnapshot().all.find((e) => e.gmailId === entry.replyTo) : undefined;
+      if (entry.mode !== "new" && email) {
+        s.focusMessage(email.id);
+        startComposer(
+          {
+            draft: entry.draft,
+            mode: entry.mode,
+            replyTo: s.view.selected?.gmailId ?? entry.replyTo,
+            replyAll: entry.replyAll,
+            context: entry.context,
+          },
+          entry,
+        );
+        return;
+      }
+      if (entry.mode !== "new") localDrafts()?.remove(entry.context);
+      const draft = { ...entry.draft, inReplyTo: undefined, quoteBlock: undefined, prefilled: undefined };
+      const initial = entry.initial ?? BLANK_INITIAL;
+      startComposer(
+        { draft, mode: "new", context: draftContextKey("new"), initial },
+        { ...entry, context: draftContextKey("new"), mode: "new", draft, initial },
+      );
+    },
+    [startComposer, localDrafts],
+  );
+
+  /** The toggle: recompute To from the message being answered, keep the rest. */
+  const setReplyAll = useCallback((replyAll: boolean) => {
+    const snap = snapshotRef.current;
+    const selected = snap.view.selected;
+    setComposer((current) => {
+      if (!current || !selected || current.replyTo !== selected.gmailId) return current;
+      return {
+        ...current,
+        replyAll,
+        draft: withReplyAll(current.draft, selected, snap.view.conversation, replyAll, selfAddressOf(snap)),
+      };
+    });
   }, []);
 
   /**
@@ -1352,6 +1667,7 @@ export function App({ store }: Props) {
         check.
       */
       const target = event.target as HTMLElement | null;
+      const inDock = target instanceof Element && target.closest("[data-composer-dock]") !== null;
       const textEditing =
         target?.tagName === "INPUT" ||
         target?.tagName === "TEXTAREA" ||
@@ -1365,8 +1681,10 @@ export function App({ store }: Props) {
         // `ready` because the composer is a text field *and* a modal: its Escape closes
         // the sheet, where a plain field's blurs, and the two need to be
         // distinguishable for that to work.
-        ready: snap.status === "ready" && open === null,
-        composerOpen: open !== null,
+        // A docked reply is not modal: with focus outside it the reader's shortcuts work
+        // as usual; inside it, it owns the keyboard like the sheet does.
+        ready: snap.status === "ready" && (open === null || (dockedRef.current && !inDock)),
+        composerOpen: open !== null && (!dockedRef.current || inDock),
         // `textEditing` deliberately excludes "the composer is open": it means *this
         // keypress landed in a field*, while the composer's own state is `composerOpen`.
         // With the composer open and focus on its body, both are true — and the router
@@ -1661,6 +1979,81 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
 */
 const listSelectedId = phone ? null : snapshot.selectedId;
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
+
+  /**
+   * The composer, built once and placed by layout: docked in the reader pane for a
+   * desktop reply or forward, a sheet (or the phone's full screen) for everything else.
+   */
+  const composerElement = composer ? (
+        <Composer
+          mode={composer.mode}
+          to={composer.draft.to}
+          cc={composer.draft.cc}
+          bcc={composer.draft.bcc}
+          from={composer.mode === "new" ? (snapshot.account?.email ?? DEMO_ACCOUNT.email) : null}
+          subject={composer.draft.subject}
+          body={composer.draft.body}
+          sending={composer.sending}
+          error={composer.error}
+          contacts={view.contacts}
+          /*
+            The opt-in, offered where it is wanted — but only on the desktop. The desktop
+            asks Google in the system browser and comes straight back to this draft; the
+            web build has to navigate the page away, which would throw the draft out, so
+            there the same action lives in Settings instead.
+          */
+          improveSuggestions={
+            snapshot.contactsAccess === "not_granted" && info?.nativeOAuth
+              ? {
+                  busy: contactsBusy,
+                  error: contactsError,
+                  onClick: onImproveSuggestions,
+                }
+              : null
+          }
+          onChange={(patch) =>
+            setComposer((current) =>
+              current
+                ? {
+                    ...current,
+                    draft: {
+                      ...current.draft,
+                      ...patch,
+                      // The quote is stripped only while it is still an untouched
+                      // suffix, so a reply that never touched the original sends the
+                      // user's words alone — and one that *did* edit the quote keeps
+                      // it, because at that point it is their message.
+                      // `!== undefined`, not truthiness: clearing the body is an edit too,
+                      // and treating "" as "no change" put the last character back.
+                      body:
+                        patch.body !== undefined
+                          ? stripQuote(patch.body, current.draft.quoteBlock)
+                          : current.draft.body,
+                    },
+                  }
+                : current,
+            )
+          }
+          phone={phone}
+          docked={docked}
+          replyAll={composer.replyAll ?? true}
+          onReplyAllChange={
+            composer.mode === "reply" && composer.replyTo !== undefined && composer.replyTo === selectedGmailId
+              ? setReplyAll
+              : undefined
+          }
+          saveStatus={composer.status}
+          onAllowDrafts={sessionRef.current ? () => void allowDrafts() : null}
+          allowingDrafts={allowingDrafts}
+          onSend={(recipients) => {
+            void sendDraft(recipients);
+          }}
+          // Discard is the button that already says the word, so it does not ask.
+          onDiscard={() => closeComposer(true)}
+          // Escape and the close button ask if there is anything to lose.
+          onClose={() => closeComposer()}
+        />
+  ) : null;
 
   return (
     <SenderPicturesContext.Provider value={senderPictures}>
@@ -2150,6 +2543,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 onSaveAttachment: saveAttachment,
               }}
             />
+            {/* The docked reply: under the conversation, inside this pane. */}
+            {docked && composerElement}
           </div>
         )}
       </main>
@@ -2451,64 +2846,18 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         );
       })()}
 
-      {composer && (
-        <Composer
-          mode={composer.mode}
-          to={composer.draft.to}
-          cc={composer.draft.cc}
-          bcc={composer.draft.bcc}
-          from={composer.mode === "new" ? (snapshot.account?.email ?? DEMO_ACCOUNT.email) : null}
-          subject={composer.draft.subject}
-          body={composer.draft.body}
-          sending={composer.sending}
-          error={composer.error}
-          contacts={view.contacts}
-          /*
-            The opt-in, offered where it is wanted — but only on the desktop. The desktop
-            asks Google in the system browser and comes straight back to this draft; the
-            web build has to navigate the page away, which would throw the draft out, so
-            there the same action lives in Settings instead.
-          */
-          improveSuggestions={
-            snapshot.contactsAccess === "not_granted" && info?.nativeOAuth
-              ? {
-                  busy: contactsBusy,
-                  error: contactsError,
-                  onClick: onImproveSuggestions,
-                }
-              : null
-          }
-          onChange={(patch) =>
-            setComposer((current) =>
-              current
-                ? {
-                    ...current,
-                    draft: {
-                      ...current.draft,
-                      ...patch,
-                      // The quote is stripped only while it is still an untouched
-                      // suffix, so a reply that never touched the original sends the
-                      // user's words alone — and one that *did* edit the quote keeps
-                      // it, because at that point it is their message.
-                      // `!== undefined`, not truthiness: clearing the body is an edit too,
-                      // and treating "" as "no change" put the last character back.
-                      body:
-                        patch.body !== undefined
-                          ? stripQuote(patch.body, current.draft.quoteBlock)
-                          : current.draft.body,
-                    },
-                  }
-                : current,
-            )
-          }
-          phone={phone}
-          onSend={(recipients) => {
-            void sendDraft(recipients);
-          }}
-          // Discard is the button that already says the word, so it does not ask.
-          onDiscard={() => closeComposer(true)}
-          // Escape and the close button ask if there is anything to lose.
-          onClose={() => closeComposer()}
+      {composer && !docked && composerElement}
+
+      {restoreOffer && !composer && (
+        <ConfirmDialog
+          title="Restore your unsent draft?"
+          body={`${restoreOffer.draft.subject.trim() || "(no subject)"}${
+            restoreOffer.draft.to.length > 0 ? ` — to ${restoreOffer.draft.to.join(", ")}` : ""
+          }. Saved on this device ${formatRelative(restoreOffer.savedAt, Date.now())}.`}
+          confirmLabel="Restore"
+          destructive={false}
+          onConfirm={() => restoreDraft(restoreOffer)}
+          onCancel={() => setRestoreOffer(null)}
         />
       )}
 
@@ -2530,7 +2879,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       {confirmDiscard && (
         <ConfirmDialog
           title="Discard this draft?"
-          body="What you have written will be lost, and nothing is kept."
+          body="What you have written will be lost, and the saved draft is deleted."
           confirmLabel="Discard"
           onConfirm={() => resolveDiscard(true)}
           onCancel={() => resolveDiscard(false)}
