@@ -154,6 +154,11 @@ export class LocalDrafts {
     this.write(rest);
   }
 
+  /** Forget every kept draft for this account (sign-out). */
+  clear(): void {
+    this.write([]);
+  }
+
   private write(entries: LocalDraft[]): void {
     if (!this.storage) return;
     try {
@@ -288,7 +293,9 @@ export class DraftAutosaver {
       this.timers.clear(this.timer);
       this.timer = null;
     }
-    if (this.dirty && this.latest) {
+    // Closed is closed: a saver that was finished, discarded or parked never writes
+    // again, whoever asks (a sign-out stops the open composer this way).
+    if (this.dirty && this.latest && !this.closed) {
       const draft = this.latest;
       this.dirty = false;
       this.chain = this.chain.then(() => this.save(draft));

@@ -232,6 +232,35 @@ describe("DraftAutosaver — discard and send", () => {
   });
 });
 
+describe("LocalDrafts — sign-out", () => {
+  it("clear forgets every kept draft for the account, and only that account", () => {
+    const storage = memoryStorage();
+    const mine = new LocalDrafts(storage, "me@example.com");
+    const theirs = new LocalDrafts(storage, "them@example.com");
+    mine.put({ context: "new", mode: "new", draft: draft("a"), savedAt: 1 });
+    mine.put({ context: "reply:g1", mode: "reply", replyTo: "g1", draft: draft("b"), savedAt: 2 });
+    theirs.put({ context: "new", mode: "new", draft: draft("c"), savedAt: 3 });
+    mine.clear();
+    expect(mine.all()).toEqual([]);
+    expect(theirs.all()).toHaveLength(1);
+  });
+
+  it("a stopped autosaver writes nothing after it is finished", async () => {
+    const timers = manualTimers();
+    const local = new LocalDrafts(memoryStorage(), "me@example.com");
+    const { api, calls } = fakeApi();
+    const saver = new DraftAutosaver({ context: "new", mode: "new", api, local, timers });
+    saver.change(draft("half written"));
+    saver.finish();
+    local.clear();
+    saver.change(draft("more"));
+    timers.fire();
+    await saver.settle();
+    expect(calls).toEqual([]);
+    expect(local.all()).toEqual([]);
+  });
+});
+
 describe("DraftAutosaver — failures and permission", () => {
   it("a failed save says Couldn't save and keeps the device copy", async () => {
     const timers = manualTimers();

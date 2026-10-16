@@ -491,6 +491,8 @@ export function App({ store }: Props) {
   const onConnectContactPhotos = useCallback(() => void improveSuggestions(true), [improveSuggestions]);
 
   const [restoringSession, setRestoringSession] = useState(false);
+  /** Set beside the drafts code below; `signOut` is declared before it. */
+  const forgetDraftsRef = useRef<() => void>(() => undefined);
   const [signingIn, setSigningIn] = useState(false);
   /** Set from the URL on mount, and applied once a session exists. */
   const launchLink = useRef<Record<string, string> | null>(null);
@@ -564,6 +566,9 @@ export function App({ store }: Props) {
    * screen after someone pressed "sign out" is worse than leaving a token behind.
    */
   const signOut = useCallback(async () => {
+    // The composer and the drafts kept on this device are the account's words: they go
+    // first, while the snapshot still says whose they are. See `forgetDeviceDrafts`.
+    forgetDraftsRef.current();
     // Brand logos are cached per sender domain: a list of who mails this account.
     logoCache.clear();
     gravatarCache.clear();
@@ -1437,6 +1442,23 @@ export function App({ store }: Props) {
     const latest = localDrafts()?.latest() ?? null;
     if (latest) setRestoreOffer(latest);
   }, [snapshot.status, draftOwner, localDrafts]);
+
+  /**
+   * Signing out forgets this account's drafts on the device: the open composer stops
+   * autosaving (its Gmail draft, if one was saved, stays in Gmail's Drafts), the restore
+   * offer goes, and so does every copy kept for restoring. Only an explicit sign-out: a
+   * session that merely expired keeps them, so a draft survives signing back in.
+   */
+  const forgetDeviceDrafts = useCallback(() => {
+    const saver = saverRef.current;
+    saverRef.current = null;
+    saver?.finish();
+    composerRef.current = null;
+    setComposer(null);
+    setRestoreOffer(null);
+    localDrafts()?.clear();
+  }, [localDrafts]);
+  forgetDraftsRef.current = forgetDeviceDrafts;
 
   /** Restore: a reply or forward reopens on its message; one whose message is gone becomes a new message. */
   const restoreDraft = useCallback(
