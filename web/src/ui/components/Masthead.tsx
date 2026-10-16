@@ -36,7 +36,12 @@ export type MastheadProps = {
   total: number;
   /** "Inbox", "From ada@example.com", or "Filtered". Answerable: 40 of what? */
   listTitle: string;
-  cursorIndex: number;
+  /**
+   * Whether prev/next would move. From the store's `canStep`, which asks the same
+   * question the move does, so a chevron is never live at an end or dead mid-list.
+   */
+  canPrev: boolean;
+  canNext: boolean;
   onPrev: () => void;
   onNext: () => void;
   /**
@@ -55,8 +60,9 @@ export type MastheadProps = {
 };
 
 /**
- * Where you are in the list: "12 of 39" once the cursor is on something, and just the
- * total before. It used to be "— / 39" — a dash standing in for a number, then a slash
+ * Where you are in the list: "12 of 39" for the open message's row (or, with nothing
+ * open, the cursor's), and just the total when there is no such row — before the first
+ * move, or while the open message is not in the visible list. It used to be "— / 39" — a dash standing in for a number, then a slash
  * that read like a fraction. `data-position` is for the smoke test, which asserts that
  * an untouched list does not claim a row.
  */
@@ -95,7 +101,8 @@ export function Masthead({
   position,
   total,
   listTitle,
-  cursorIndex,
+  canPrev,
+  canNext,
   onPrev,
   onNext,
   onMarkAllRead,
@@ -171,7 +178,7 @@ export function Masthead({
               type="button"
               onClick={onPrev}
               aria-label="Previous message"
-              disabled={cursorIndex <= 0}
+              disabled={!canPrev}
               className="ml-1 flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronLeft size={17} />
@@ -180,7 +187,7 @@ export function Masthead({
               type="button"
               onClick={onNext}
               aria-label="Next message"
-              disabled={total === 0 || cursorIndex >= total - 1}
+              disabled={!canNext}
               className="flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronRight size={17} />

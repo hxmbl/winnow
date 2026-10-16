@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LogIn, RefreshCw, X } from "lucide-react";
 import {
   NO_CURSOR,
+  readoutIndex,
   STORAGE_PROMPT,
   STORAGE_SAVE_FAILED,
   WinnowStore,
@@ -1996,12 +1997,17 @@ export function App({ store }: Props) {
   /*
   Where you are in the list.
 
-  `null` before the first move, rendered as an em dash. The cursor is `NO_CURSOR` until the
-  user touches the keyboard, and rendering that as `0` produced "Inbox 0 of 38" — which
-  reads as an empty mailbox and is wrong on every count. The em dash says the honest thing:
-  there is a list, and you are not on anything in it yet.
+  `null` before the first move, rendered as just the total. The cursor is `NO_CURSOR` until
+  the user touches the keyboard, and rendering that as `0` produced "Inbox 0 of 38" — which
+  reads as an empty mailbox and is wrong on every count.
+
+  From `readoutIndex`, never from `cursorIndex` alone: with a message open the number is
+  that message's row, and an open message that is not a visible row gets no number. The
+  cursor is a separate index that every list change can shift; numbering from it put
+  "4 of 39" over the fifth message after an archive above it or a sync.
 */
-const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorIndex + 1;
+const readout = readoutIndex(snapshot, view);
+const position = readout === NO_CURSOR ? null : readout + 1;
 
 /*
   The list's notion of a "current" message, which only the desktop has.
@@ -2013,7 +2019,11 @@ const position = snapshot.cursorIndex === NO_CURSOR ? null : snapshot.cursorInde
   is given no selection and no cursor at all — the store still tracks both, because the
   reader and the keyboard need them, but none of it reaches the list.
 */
-const listSelectedId = phone ? null : snapshot.selectedId;
+// The row's own message, which is not the open one when an earlier message of the
+// conversation is being read, or the thread has had a reply since it was opened.
+const listSelectedId = phone
+  ? null
+  : (view.threads[view.selectedIndex]?.representative.id ?? snapshot.selectedId);
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   /**
@@ -2332,7 +2342,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               position={position}
               total={view.threads.length}
               listTitle={store.listTitle()}
-              cursorIndex={snapshot.cursorIndex}
+              canPrev={store.canStep(-1)}
+              canNext={store.canStep(1)}
               onPrev={() => store.moveCursor(-1)}
               onNext={() => store.moveCursor(1)}
               onMarkAllRead={store.markAllRead.bind(store)}
