@@ -349,6 +349,40 @@ html[data-resizing] iframe {
     visibility 0s;
 }
 
+/*
+ * The phone's bottom sheet has no root edge to grow its glass from, so its blur and
+ * tint are even across it, at the strength the side panel has at its root.
+ */
+.wn-sidebar-panel[data-sheet] .wn-sidebar-blur {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+@supports (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-sidebar-panel[data-sheet] .wn-sidebar-tint {
+    background: color-mix(in srgb, var(--wn-surface) 84%, transparent);
+  }
+}
+
+/* The phone's bottom sheet rises from the dock's tabs rather than sliding in sideways. */
+.wn-sidebar-panel[data-sheet] {
+  transform: translateY(calc(100% + 1rem));
+  opacity: 0;
+  transition:
+    transform 160ms cubic-bezier(0.4, 0, 1, 1),
+    opacity 120ms ease-in 40ms,
+    visibility 0s linear 160ms;
+}
+
+.wn-sidebar-panel[data-sheet][data-open] {
+  transform: none;
+  opacity: 1;
+  transition:
+    transform 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 120ms ease-out,
+    visibility 0s;
+}
+
 .wn-scrim {
   visibility: hidden;
   pointer-events: none;
@@ -431,7 +465,8 @@ html[data-resizing] iframe {
     display: none;
   }
 
-  .wn-sidebar-tint {
+  .wn-sidebar-tint,
+  .wn-sidebar-panel[data-sheet] .wn-sidebar-tint {
     background: var(--wn-surface);
   }
 

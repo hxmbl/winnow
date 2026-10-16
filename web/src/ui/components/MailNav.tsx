@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
+import { CheckCheck, LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { Avatar } from "./Avatar";
 import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
@@ -32,6 +32,7 @@ import {
   idleCloseAllowed,
   scrimClickCloses,
   scrimMidpoint,
+  scrimSheetTop,
   isEditingElement,
   SCRIM_ORIGIN,
   scrimLayers,
@@ -246,8 +247,16 @@ export type SidebarProps = NavProps & {
   open: boolean;
   /** Close it: outside click, Escape, a destination chosen, or the idle timer. */
   onClose: () => void;
-  /** Touch-sized rows and a width that leaves a strip of the app showing, on a phone. */
+  /**
+   * On a phone: touch-sized rows, and the sidebar is a bottom sheet that rises from the
+   * dock's tabs (sitting on `--wn-phone-tabs`) instead of sliding in from the left.
+   */
   touch: boolean;
+  /**
+   * Mark all read for the list on screen, as a row at the top of the menu. Given on a
+   * phone, whose top bar has no button for it; the desktop keeps the masthead's.
+   */
+  markAllRead?: { listTitle: string; disabled: boolean; onRun: () => void };
 };
 
 /** Elements that can hold focus, for the Tab trap. */
@@ -268,9 +277,14 @@ const FOCUSABLE =
  * current destination) and back to whatever opened it on close.
  *
  * Always mounted, so it can animate out as well as in: closed, it is translated off the
- * left edge, `visibility: hidden` once the slide has finished, and `inert`.
+ * left edge (on a phone, down behind the dock), `visibility: hidden` once the slide has
+ * finished, and `inert`.
+ *
+ * On a phone it is a bottom sheet: full width, rounded at the top like the dock, resting
+ * on the dock's tab row so it is under the thumb that opened it, at most about 80% of
+ * the screen tall, and its blur spreads from the middle of its top edge.
  */
-export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
+export function Sidebar({ open, onClose, touch, markAllRead, ...props }: SidebarProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   /** Whatever had focus when the sidebar opened, so it can be given back. */
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -427,8 +441,9 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     [onClose],
   );
 
-  // Where the sidebar's right edge is, for the scrim's masks.
-  const edge = touch ? "calc(0.5rem + min(18rem, 100vw - 4rem))" : "calc(0.5rem + 15rem)";
+  // Where the blur spreads from, across: the sidebar's right edge, or on a phone the
+  // middle of the sheet's top edge.
+  const edge = touch ? "50%" : "calc(0.5rem + 15rem)";
 
   // And the height of its middle: the panel is only as tall as its contents, so this is
   // measured rather than worked out, and kept current as the panel grows or the window
@@ -440,7 +455,8 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     if (!panel || !scrim) return;
     let last: string | null | undefined;
     const measure = () => {
-      const mid = scrimMidpoint(panel.getBoundingClientRect());
+      const rect = panel.getBoundingClientRect();
+      const mid = touch ? scrimSheetTop(rect) : scrimMidpoint(rect);
       // Written only when it changes: a style write invalidates the scrim's masks, and a
       // resize drag fires this every frame with the same answer.
       if (mid === last) return;
@@ -537,10 +553,11 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
           contextMenu.current = true;
           clearIdle();
         }}
-        className={`wn-sidebar-panel fixed left-2 z-50 flex flex-col overflow-hidden rounded-pane border border-hairline outline-none ${
+        data-sheet={touch ? "" : undefined}
+        className={`wn-sidebar-panel fixed z-50 flex flex-col overflow-hidden border border-hairline outline-none ${
           touch
-            ? "top-[max(0.5rem,env(safe-area-inset-top))] max-h-[calc(100dvh-1rem-env(safe-area-inset-top))] w-[min(18rem,calc(100vw-4rem))]"
-            : "top-2 max-h-[calc(100dvh-1rem)] w-60"
+            ? "inset-x-0 bottom-[var(--wn-phone-tabs,env(safe-area-inset-bottom))] max-h-[min(80dvh,calc(100dvh-var(--wn-phone-tabs,0px)-max(0.5rem,env(safe-area-inset-top))))] rounded-t-pane border-b-0"
+            : "left-2 top-2 max-h-[calc(100dvh-1rem)] w-60 rounded-pane"
         }`}
       >
         {/* The progressive blur, root (left) to tip (right), then the tint over it. */}
@@ -557,6 +574,23 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
             <span className="text-read font-semibold text-ink">Winnow</span>
           </div>
           <div data-sidebar-scroll="" className="thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 pb-2">
+            {markAllRead && (
+              <button
+                type="button"
+                data-nav-action="mark-all-read"
+                aria-label={`Mark all read in ${markAllRead.listTitle}`}
+                disabled={markAllRead.disabled}
+                onClick={() => {
+                  markAllRead.onRun();
+                  onClose();
+                }}
+                className="mb-1 flex min-h-11 w-full items-center gap-2.5 rounded-ctl px-3 py-2 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <CheckCheck size={17} className="shrink-0 text-ink-icon" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">Mark all read</span>
+                <span className="shrink-0 truncate text-meta text-ink-subtle">{markAllRead.listTitle}</span>
+              </button>
+            )}
             <NavSections {...props} touch={touch} onNavigate={onClose} />
           </div>
           <AccountFooter {...props} touch={touch} onNavigate={onClose} />

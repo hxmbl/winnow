@@ -6,6 +6,7 @@ import {
   idleCloseAllowed,
   scrimClickCloses,
   scrimMidpoint,
+  scrimSheetTop,
   isEditingElement,
   SCRIM_ORIGIN,
   scrimBlurAt,
@@ -198,5 +199,16 @@ describe("the scrim's measured origin", () => {
   it("ignores a measurement that is not a number", () => {
     expect(scrimMidpoint({ top: Number.NaN, height: 200 })).toBeNull();
     expect(scrimMidpoint({ top: 8, height: Number.POSITIVE_INFINITY })).toBeNull();
+  });
+});
+
+describe("scrimSheetTop", () => {
+  it("is the phone sheet's top edge, rounded to a pixel", () => {
+    expect(scrimSheetTop({ top: 301.6, height: 420 })).toBe("302px");
+  });
+
+  it("is null for a sheet that is not laid out", () => {
+    expect(scrimSheetTop({ top: 300, height: 0 })).toBeNull();
+    expect(scrimSheetTop({ top: Number.NaN, height: 200 })).toBeNull();
   });
 });

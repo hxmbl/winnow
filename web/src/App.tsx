@@ -663,7 +663,8 @@ export function App({ store }: Props) {
    * Whether the sidebar is open.
    *
    * The sidebar is an overlay on every screen (`Sidebar` in `MailNav.tsx`), opened from
-   * the masthead's toggle on the desktop and the top bar's menu button on a phone.
+   * the masthead's toggle on the desktop and a second tap on the dock's Inbox tab on a
+   * phone, where it rises from the dock as a bottom sheet.
    * Local state rather than a store `overlay`, because the sidebar handles its own
    * Escape and must not inherit the keyboard router's: two Escape handlers on one
    * keypress is how a sheet closes the reader *and* itself.
@@ -672,6 +673,7 @@ export function App({ store }: Props) {
   const sidebarOpenRef = useRef(sidebarOpen);
   sidebarOpenRef.current = sidebarOpen;
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), []);
 
   /**
@@ -1556,9 +1558,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   return (
     <SenderPicturesContext.Provider value={senderPictures}>
-    <div inert={sidebarOpen} className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
+    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
       {/*
-        The chrome. On a phone, the top bar (search and the menu button). On the desktop,
+        Everything but the phone's dock is inert while the sidebar is open. The dock stays
+        live (and above the scrim) so the Inbox tab that opened the menu can close it;
+        the two `contents` wrappers keep the column's layout exactly as it was.
+      */}
+      <div inert={sidebarOpen} className="contents">
+      {/*
+        The chrome. On a phone, the top bar (where you are, and search). On the desktop,
         search, where-you-are, the filter rail and the sidebar toggle head the list column
         (see `Masthead` below), and the email actions live in the reader. The sidebar
         itself is an overlay on both, rendered after everything else.
@@ -1589,16 +1597,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             searchQuery={snapshot.searchQuery}
             onSearchChange={store.setSearchQuery.bind(store)}
             searchRef={searchRef}
-            accountEmail={snapshot.account?.email ?? null}
-            onOpenNavigation={toggleSidebar}
-            navigationOpen={sidebarOpen}
             listTitle={store.listTitle()}
             position={null}
             total={view.threads.length}
-            cursorIndex={snapshot.cursorIndex}
-            onPrev={() => store.moveCursor(-1)}
-            onNext={() => store.moveCursor(1)}
-            onMarkAllRead={store.markAllRead.bind(store)}
           />
           </div>
         )
@@ -2049,6 +2050,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         The phone's dock: the smart filter chips above the four tabs, on one surface at
         the bottom edge. Not while reading — the reader brings its own action bar.
       */}
+      </div>
+
       {phone && !selected && (
         <PhoneDock
           pills={pills}
@@ -2063,8 +2066,13 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           }}
           settingsOpen={snapshot.overlay === "settings"}
           onOpenSettings={() => store.setOverlay("settings")}
+          menuOpen={sidebarOpen}
+          onOpenMenu={openSidebar}
+          onCloseMenu={closeSidebar}
         />
       )}
+
+      <div inert={sidebarOpen} className="contents">
 
       {snapshot.overlay === "shortcuts" && (
         <ShortcutSheet onClose={() => store.setOverlay("none")} />
@@ -2386,13 +2394,25 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onCancel={() => resolveDiscard(false)}
         />
       )}
+      </div>
     </div>
 
     {/*
       The sidebar: an overlay on every screen, outside the app's root so that root can be
       made `inert` while it is open.
     */}
-    <Sidebar {...navProps} open={sidebarOpen} onClose={closeSidebar} touch={phone} />
+    <Sidebar
+      {...navProps}
+      open={sidebarOpen}
+      onClose={closeSidebar}
+      touch={phone}
+      // On a phone the top bar has no Mark all read button, so the menu carries it.
+      markAllRead={
+        phone
+          ? { listTitle: store.listTitle(), disabled: view.threads.length === 0, onRun: store.markAllRead.bind(store) }
+          : undefined
+      }
+    />
     </SenderPicturesContext.Provider>
   );
 }

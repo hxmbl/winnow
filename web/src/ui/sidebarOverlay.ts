@@ -102,6 +102,16 @@ export function scrimMidpoint(rect: { top: number; height: number }): string | n
   return `${Math.round(rect.top + rect.height / 2)}px`;
 }
 
+/**
+ * `--wn-sidebar-mid` for the phone's bottom sheet: the height of its top edge in px,
+ * which is where its blur spreads from (across, it is the middle of the window). `null`
+ * for a panel that is not laid out, as for `scrimMidpoint`.
+ */
+export function scrimSheetTop(rect: { top: number; height: number }): string | null {
+  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) return null;
+  return `${Math.round(rect.top)}px`;
+}
+
 /** A text field, a select, or an editable region: somewhere typing is happening. */
 export function isEditingElement(element: Element | null): boolean {
   if (!element) return false;
