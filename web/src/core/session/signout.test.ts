@@ -8,7 +8,7 @@
  * of the mailbox in `localStorage`, for whoever used the browser next.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GmailSession, gatedCache, localCache } from "./session";
 import type { GoogleContactsSnapshot, GoogleContactsStore } from "../contacts/google";
 import type { TokenSet } from "../gmail/dto";
@@ -76,8 +76,11 @@ const engineCache = (session: GmailSession) =>
 let storage: Map<string, string>;
 beforeEach(() => {
   storage = installLocalStorage();
+  // Sign-out revokes the grant at Google; these tests are about the disk, not the wire.
+  vi.stubGlobal("fetch", async () => new Response("{}", { status: 200 }));
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   Reflect.deleteProperty(globalThis, "localStorage");
 });
 

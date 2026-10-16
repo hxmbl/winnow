@@ -40,8 +40,11 @@ export type SessionBridge = {
     gmailId: string,
     attachmentId: string,
   ): Promise<{ bytes: Uint8Array; filename: string; mimeType: string }>;
-  /** End the session and wipe the cached mail. */
-  signOut(): Promise<void>;
+  /**
+   * End the session and wipe the cached mail, and ask Google to revoke the grant (best
+   * effort, never waited on). `revoke: false` skips the revoke, for the demo.
+   */
+  signOut(options?: { revoke?: boolean }): Promise<void>;
   /** Whether the grant includes Google contacts. */
   contactsAccess(): Promise<ContactsAccess>;
   /**
@@ -105,8 +108,8 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
     fetchAttachment: (gmailId, attachmentId) =>
       session.backend().fetchAttachment(gmailId, attachmentId),
 
-    async signOut() {
-      await session.signOut();
+    async signOut(options) {
+      await session.signOut(options);
       await store.signOut();
     },
 

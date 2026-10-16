@@ -23,7 +23,7 @@ import {
   type OAuthClientCredentials,
 } from "./credentials";
 import { GmailSession } from "./session";
-import { GMAIL_SCOPE, GOOGLE_TOKEN_URL, GmailError, type TokenSet } from "../gmail/dto";
+import { GMAIL_SCOPE, GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL, GmailError, type TokenSet } from "../gmail/dto";
 import { NO_CLIENT_MESSAGE, TokenManager, type TokenStore } from "../gmail/tokens";
 import type { CursorStore, MailboxCache } from "../gmail/sync";
 import type { Platform, PlatformInfo, SignInResult } from "../../platform/types";
@@ -299,14 +299,25 @@ function harness(initial: OAuthClientCredentials | null, tokens: TokenSet | null
 
 const SESSION: TokenSet = { accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 3_600_000, scope: GMAIL_SCOPE };
 
+let revoked: string[] = [];
+
 describe("GmailSession with the user's own client", () => {
   beforeEach(() => {
     Object.defineProperty(globalThis, "sessionStorage", {
       configurable: true,
       value: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     });
+    revoked = [];
+    // A sign-out revokes the grant: recorded here, never sent.
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (String(url) === GOOGLE_REVOKE_URL) revoked.push(new URLSearchParams(String(init?.body)).get("token") ?? "");
+      return new Response("{}", { status: 200 });
+    });
   });
-  afterEach(() => Reflect.deleteProperty(globalThis, "sessionStorage"));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(globalThis, "sessionStorage");
+  });
 
   it("refuses to sign in before setup, and opens nothing", async () => {
     const { session, opened } = harness(null);
@@ -336,12 +347,15 @@ describe("GmailSession with the user's own client", () => {
     expect(await session.saveCredentials({ clientId: other })).toEqual({ signedOut: true });
     expect(tokens()).toBeNull();
     expect(cleared.cache).toBe(1);
+    // The old client's grant is ended at Google too, once.
+    expect(revoked).toEqual([SESSION.refreshToken]);
   });
 
   it("saving the same client again keeps the session", async () => {
     const { session, tokens } = harness({ clientId: ID }, SESSION);
     expect(await session.saveCredentials({ clientId: ID })).toEqual({ signedOut: false });
     expect(tokens()).not.toBeNull();
+    expect(revoked).toEqual([]);
   });
 
   it("removing the client signs out, wipes the cache and forgets the client", async () => {

@@ -558,9 +558,13 @@ export function App({ store }: Props) {
    * Sign out for real.
    *
    * Through the bridge, not straight to `store.signOut`: the store half clears the
-   * screen, but the bridge half is what revokes the tokens in the OS keychain and wipes
-   * the cached mail. Calling only the store left a working refresh token behind — on a
-   * shared machine, "signed out, but the next person can read your mail".
+   * screen, but the bridge half is what deletes the tokens (OS keychain on desktop and
+   * Android, `localStorage` on the web), wipes the cached mail and asks Google to revoke
+   * the grant. Calling only the store left a working refresh token behind — on a shared
+   * machine, "signed out, but the next person can read your mail".
+   *
+   * The revoke is best effort and never waited on, so a slow or offline Google cannot
+   * hold the sign-out up. The demo revokes nothing: it has no grant of its own.
    *
    * The store is still cleared if the bridge half fails: leaving a populated inbox on
    * screen after someone pressed "sign out" is worse than leaving a token behind.
@@ -575,7 +579,7 @@ export function App({ store }: Props) {
     const bridge = sessionRef.current;
     try {
       if (bridge) {
-        await bridge.signOut();
+        await bridge.signOut({ revoke: store.getSnapshot().contactsAccess !== "demo" });
         return;
       }
     } catch (error) {

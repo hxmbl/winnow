@@ -943,12 +943,18 @@ export class GmailSession {
     globalThis.history?.replaceState(null, "", `${location.pathname}${rest}${location.hash}`);
   }
 
-  /** Forget the session. The cache is wiped too: it is the user's mail. */
-  async signOut(): Promise<void> {
+  /**
+   * Forget the session. The cache is wiped too: it is the user's mail.
+   *
+   * The grant is revoked at Google as well, best effort and not awaited (see
+   * `TokenManager.clear`), unless `revoke: false` — the demo, which has no grant of its
+   * own to end.
+   */
+  async signOut(options: { revoke?: boolean } = {}): Promise<void> {
     // First, before anything is erased: a sync or contacts refresh still running from
     // before this moment must not write the account back.
     this.writable = false;
-    await this.tokens.clear();
+    await this.tokens.clear({ revoke: options.revoke ?? true });
     // The address book is the user's data in the same sense the mail is.
     await this.contacts.clear().catch(() => undefined);
     // Any half-finished web sign-in goes too. A verifier left in
