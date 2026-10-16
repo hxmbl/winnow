@@ -15,6 +15,9 @@ export const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 /** Google's token endpoint, shared by the installed-app and web flows. */
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
+/** Google's revocation endpoint: takes one token in a form body and ends its grant. */
+export const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
+
 /** Where the user is sent to approve access. */
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 

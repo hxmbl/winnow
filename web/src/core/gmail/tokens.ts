@@ -12,9 +12,14 @@
  *
  * Stored lifetime is floored at `max(expires_in, 65)`; without this, a tiny
  * `expires_in` can make every API call refresh (rate-limit problem).
+ *
+ * Signing out also asks Google to revoke the grant (`clear({ revoke: true })`), best
+ * effort and never awaited: the local wipe is what sign-out promises, the revoke is
+ * what makes a copied refresh token useless too. See `revokeGrant`.
  */
 
 import {
+  GOOGLE_REVOKE_URL,
   GOOGLE_TOKEN_URL,
   GmailError,
   type AuthErrorKind,
@@ -63,6 +68,60 @@ export type TokenManagerOptions = {
   fetchImpl?: FetchLike;
 };
 
+/** How long a sign-out's revoke may take before it is abandoned. */
+export const REVOKE_TIMEOUT_MS = 5_000;
+
+/**
+ * What became of a revoke. Only tests read it: sign-out never waits for one.
+ *
+ * - `revoked`: Google ended the grant.
+ * - `already_invalid`: Google answered 400 `invalid_token`; the grant was gone anyway.
+ * - `failed`: anything else — offline, timed out, blocked, a 5xx. Swallowed.
+ */
+export type RevokeOutcome = "revoked" | "already_invalid" | "failed";
+
+/**
+ * Ask Google to revoke a grant. Never throws, never logs.
+ *
+ * The token goes in an `application/x-www-form-urlencoded` body and never in the URL,
+ * where it would end up in proxy and history logs. A refresh token is the one to send:
+ * revoking it ends the whole grant, access tokens included. The request is abandoned
+ * after `timeoutMs`, and `keepalive` lets it outlive a page that closes right after
+ * signing out. It is a CORS "simple" request (a form POST), so it reaches Google even
+ * where the answer cannot be read.
+ */
+export async function revokeGrant(
+  token: string,
+  fetchImpl: FetchLike,
+  timeoutMs: number = REVOKE_TIMEOUT_MS,
+): Promise<RevokeOutcome> {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = setTimeout(() => controller?.abort(), timeoutMs);
+  try {
+    const request = fetchImpl(GOOGLE_REVOKE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token }).toString(),
+      keepalive: true,
+      signal: controller?.signal,
+    });
+    // A fetch that ignores its signal still stops being waited on at the deadline.
+    const deadline = new Promise<null>((resolve) => controller?.signal.addEventListener("abort", () => resolve(null)));
+    const response = await Promise.race([request, deadline]);
+    if (!response) return "failed";
+    if (response.ok) return "revoked";
+    if (response.status === 400) {
+      const text = await response.text().catch(() => "");
+      if (text.includes("invalid_token")) return "already_invalid";
+    }
+    return "failed";
+  } catch {
+    return "failed";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Thrown when no OAuth client has been set up. */
 export const NO_CLIENT_MESSAGE =
   "Google sign-in isn't set up yet. Add your own Google OAuth client first.";
@@ -75,6 +134,8 @@ export class TokenManager {
   /** Bumped on adopt and clear; a refresh that spans a bump is discarded. */
   private generation = 0;
   private loadError: string | null = null;
+  /** The last sign-out's revoke, for tests. Nothing in the app waits on it. */
+  revocation: Promise<RevokeOutcome> | null = null;
 
   constructor(private readonly options: TokenManagerOptions) {}
 
@@ -153,14 +214,36 @@ export class TokenManager {
     }
   }
 
-  /** Forget the session. Any in-flight read or refresh is invalidated by the bump. */
-  async clear(): Promise<void> {
+  /**
+   * Forget the session. Any in-flight read or refresh is invalidated by the bump.
+   *
+   * With `revoke`, the grant is also revoked at Google: the refresh token (or the
+   * access token when there is none) is captured first, the request is fired and not
+   * awaited, and the local wipe goes ahead regardless. Only a sign-out the user asked
+   * for passes it. The `invalid_grant` path below does not: Google already said the
+   * grant is gone.
+   */
+  async clear(options: { revoke?: boolean } = {}): Promise<void> {
+    let revocable: string | undefined;
+    if (options.revoke) {
+      await this.ensureLoaded();
+      revocable = this.tokens?.refreshToken || this.tokens?.accessToken || undefined;
+    }
     this.generation += 1;
     this.tokens = null;
     // Marked loaded so a read already in flight does not re-derive state from
     // the store on its way out; its result is discarded by the generation check.
     this.loaded = true;
     this.loadError = null;
+    if (revocable) {
+      let fetchImpl: FetchLike | null = null;
+      try {
+        fetchImpl = this.fetchImpl;
+      } catch {
+        // No fetch at all: nothing to revoke with, and sign-out carries on.
+      }
+      this.revocation = fetchImpl ? revokeGrant(revocable, fetchImpl) : Promise.resolve("failed");
+    }
     await this.options.store.clear().catch(() => undefined);
   }
 
