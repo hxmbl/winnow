@@ -27,11 +27,11 @@ function cargoVersion(path) {
   return pkg?.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? null;
 }
 
-/** Cargo.lock's version for our own `winnow` crate (the one with no `source`). */
+/** Cargo.lock's version for our own `winnow-app` crate (the one with no `source`). */
 function cargoLockVersion(path) {
   const block = read(path)
     .split(/^\[\[package\]\]$/m)
-    .find((b) => /^name = "winnow"$/m.test(b) && !/^source = /m.test(b));
+    .find((b) => /^name = "winnow-app"$/m.test(b) && !/^source = /m.test(b));
   return block?.match(/^version = "([^"]+)"$/m)?.[1] ?? null;
 }
 
