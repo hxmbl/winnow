@@ -34,6 +34,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   }
   if (typeof source.brandLogos === "boolean") out.brandLogos = source.brandLogos;
   if (typeof source.gravatars === "boolean") out.gravatars = source.gravatars;
+  if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
   if (typeof source.notificationsEnabled === "boolean") {
     out.notificationsEnabled = source.notificationsEnabled;
   }

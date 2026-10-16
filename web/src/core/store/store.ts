@@ -227,6 +227,11 @@ export type Preferences = {
    * address in the list to Gravatar, opened or not.
    */
   gravatars: boolean;
+  /**
+   * Mark a message read when it is opened in the reader, as Gmail does. On by default.
+   * Off restores the old behaviour, where mail stays unread until the user says so.
+   */
+  markReadOnOpen: boolean;
   notificationsEnabled: boolean;
   /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
   appearance: Appearance;
@@ -251,6 +256,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   imagePolicy: "ask",
   brandLogos: false,
   gravatars: false,
+  markReadOnOpen: true,
   notificationsEnabled: false,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
@@ -1423,7 +1429,38 @@ export class WinnowStore {
       return;
     }
     const row = this.view.threads[this.state.cursorIndex];
-    if (row) this.set({ selectedId: row.representative.id });
+    if (!row) return;
+    this.set({ selectedId: row.representative.id });
+    this.markOpenedRead();
+  }
+
+  /**
+   * The message that has just been opened, read — with the rest of its conversation.
+   *
+   * Every route into the reader calls this after it sets `selectedId`: a click, `Enter`,
+   * `j`/`k`, a deep link, and the next row taking over after the open one leaves. Only
+   * those: a checked row in select mode or a search match is not an open, and nothing
+   * here watches `selectedId` generically, so they cannot trip it.
+   *
+   * Through `setReadMany`, so it is optimistic, queued offline and rolled back on a
+   * failure exactly as the read toggle is — and, like the toggle, it offers no undo.
+   * Marking the open message unread moves the reader on (`markUnreadAndMoveOn`), so the
+   * unread flag is not undone here; re-opening the message later is a new open and
+   * marks it read again.
+   */
+  private markOpenedRead(): void {
+    if (!this.state.preferences.markReadOnOpen) return;
+    const id = this.state.selectedId;
+    if (id === null) return;
+    const opened = this.state.all.find((email) => email.id === id);
+    if (!opened) return;
+    // The whole thread, as Gmail does: the row's unread weight is "any message unread",
+    // so marking only the newest would leave the row looking untouched.
+    const key = opened.threadId ?? `single-${opened.gmailId}`;
+    const ids = this.state.all
+      .filter((email) => email.unread && (email.threadId ?? `single-${email.gmailId}`) === key)
+      .map((email) => email.id);
+    if (ids.length > 0) this.setReadMany(ids, true);
   }
 
   /**
@@ -1454,6 +1491,11 @@ export class WinnowStore {
     let next: number;
     if (this.state.cursorIndex === NO_CURSOR) {
       next = delta > 0 ? 0 : threads.length - 1;
+    } else if (this.openRowLeftFromUnderCursor()) {
+      // The open message has dropped out of the list (opening it read it, under the
+      // Unread filter) and the next row slid up under the cursor, so that row already
+      // *is* "next": stepping past it would skip a message.
+      next = clampIndex(this.state.cursorIndex + (delta > 0 ? delta - 1 : delta), threads.length);
     } else {
       next = clampIndex(this.state.cursorIndex + delta, threads.length);
     }
@@ -1463,6 +1505,16 @@ export class WinnowStore {
       selectedId: threads[next]?.representative.id ?? null,
       revealSeq: this.state.revealSeq + 1,
     });
+    this.markOpenedRead();
+  }
+
+  /** The reader is open on a message that is no longer a row, and the cursor is on a row. */
+  private openRowLeftFromUnderCursor(): boolean {
+    const id = this.state.selectedId;
+    if (id === null) return false;
+    const threads = this.view.threads;
+    const at = threads[this.state.cursorIndex];
+    return at !== undefined && at.representative.id !== id && !threads.some((row) => row.representative.id === id);
   }
 
   /** Select and open in one step, for a click on a row. */
@@ -1470,6 +1522,7 @@ export class WinnowStore {
     const row = this.view.threads[index];
     if (!row) return;
     this.set({ cursorIndex: index, selectedId: row.representative.id });
+    this.markOpenedRead();
   }
 
   /**
@@ -1493,6 +1546,7 @@ export class WinnowStore {
     );
     if (visibleAt >= 0) {
       this.set({ cursorIndex: visibleAt, selectedId: id, overlay: "none", revealSeq: this.state.revealSeq + 1 });
+      this.markOpenedRead();
       return true;
     }
 
@@ -1513,6 +1567,7 @@ export class WinnowStore {
     // placed by looking the id up again.
     const nowAt = this.view.threads.findIndex((row) => row.representative.id === id);
     this.set({ cursorIndex: nowAt >= 0 ? nowAt : NO_CURSOR, revealSeq: this.state.revealSeq + 1 });
+    this.markOpenedRead();
     return true;
   }
 
@@ -1752,8 +1807,9 @@ export class WinnowStore {
    *   - **Phone** goes back to the list, with no current row, at the scroll position it
    *     was left at — the same exit as Back.
    *
-   * Opening a message never marks it read in Winnow, so moving on cannot quietly undo
-   * the unread flag; the tests pin that.
+   * Moving on is also what keeps "mark as read when opened" from undoing the flag: the
+   * reader leaves the message rather than re-opening it, and the next row it lands on is
+   * an open like any other. The tests pin both.
    *
    * A message that is not the open one is simply marked unread.
    */
@@ -1775,6 +1831,7 @@ export class WinnowStore {
         selectedId: next.representative.id,
         revealSeq: this.state.revealSeq + 1,
       });
+      this.markOpenedRead();
     } else {
       this.set({ selectedId: null });
     }
@@ -2058,7 +2115,11 @@ export class WinnowStore {
     const at = threads[this.state.cursorIndex];
     if (id !== null && at && at.representative.id !== id) {
       const stillVisible = threads.some((row) => row.representative.id === id);
-      if (!stillVisible && !openMessageSurvives()) this.set({ selectedId: at.representative.id });
+      if (!stillVisible && !openMessageSurvives()) {
+        this.set({ selectedId: at.representative.id });
+        // The row that took the reader's place is now being read.
+        this.markOpenedRead();
+      }
     }
   }
 

@@ -94,8 +94,23 @@ describe("marking the open message unread", () => {
     expect(snap.all.find((e) => e.id === id)!.unread).toBe(true);
   });
 
-  it("opening the next message never marks the unread one read again", () => {
+  it("moving on never marks the unread one read again; only going back to it does", () => {
     const store = demoStore();
+    const index = readRowIndex(store);
+    const id = store.view.threads[index]!.representative.id;
+    store.openRow(index);
+    store.markUnreadAndMoveOn(id);
+    store.moveCursor(1);
+    expect(store.getSnapshot().all.find((e) => e.id === id)!.unread).toBe(true);
+    // Back onto it is a new open, and an open reads it.
+    store.moveCursor(-2);
+    expect(store.getSnapshot().selectedId).toBe(id);
+    expect(store.getSnapshot().all.find((e) => e.id === id)!.unread).toBe(false);
+  });
+
+  it("with read-on-open off, nothing it lands on is marked read", () => {
+    const store = demoStore();
+    store.setPreferences({ markReadOnOpen: false });
     const index = readRowIndex(store);
     const id = store.view.threads[index]!.representative.id;
     store.openRow(index);
