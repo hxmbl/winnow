@@ -388,6 +388,47 @@ export async function requestPersistentStorage(
   }
 }
 
+/**
+ * A mailbox cache that ignores writes while `open()` says no.
+ *
+ * Sign-out wipes the cache, but work started before it does not stop: a sync that is
+ * forty pages in still has responses on the wire, and each one it gets back is upserted,
+ * and then flushed, into the cache that was just erased. Signing out halfway through a
+ * first sync used to leave that half of the mailbox on disk. Reads still go through (they
+ * see the empty cache), and `clear` is never gated.
+ */
+export function gatedCache<C extends MailboxCache & CursorStore>(cache: C, open: () => boolean): C {
+  const gate =
+    <A extends unknown[]>(write: (...args: A) => Promise<void>) =>
+    async (...args: A): Promise<void> => {
+      if (open()) await write(...args);
+    };
+  return {
+    ...cache,
+    all: () => cache.all(),
+    gmailIds: () => cache.gmailIds(),
+    read: () => cache.read(),
+    clear: () => cache.clear(),
+    upsert: gate((emails: readonly Email[]) => cache.upsert(emails)),
+    remove: gate((ids: readonly string[]) => cache.remove(ids)),
+    keepOnly: gate((ids: readonly string[]) => cache.keepOnly(ids)),
+    replace: gate((emails: readonly Email[]) => cache.replace(emails)),
+    write: gate((historyId: string) => cache.write(historyId)),
+    ...(cache.flush ? { flush: gate(() => cache.flush!()) } : {}),
+  };
+}
+
+/** The same gate for the address book: a contacts refresh can outlive a sign-out too. */
+export function gatedContacts(store: GoogleContactsStore, open: () => boolean): GoogleContactsStore {
+  return {
+    read: () => store.read(),
+    clear: () => store.clear(),
+    write: async (snapshot) => {
+      if (open()) await store.write(snapshot);
+    },
+  };
+}
+
 /** The session: a token manager, a client, a sync engine, and a backend. */
 export class GmailSession {
   readonly tokens: TokenManager;
@@ -397,12 +438,25 @@ export class GmailSession {
   /** The user's own OAuth client. See `credentials.ts`. */
   readonly credentials: CredentialStore;
 
+  /**
+   * Whether work may still write to this account's storage. Closed by `signOut` before
+   * anything is erased and opened again by the next successful code exchange, so a sync
+   * or contacts refresh still in flight from before the sign-out cannot put back what it
+   * erased. See `gatedCache`.
+   */
+  private writable = true;
+
+  /** The cache as everything except `signOut` sees it: writes dropped while signed out. */
+  private readonly cache: MailboxCache & CursorStore;
+
   constructor(
     private readonly platform: Platform,
     /** Kept on the instance: the backend needs it to resolve a numeric id. */
-    private readonly cache: MailboxCache & CursorStore,
+    private readonly rawCache: MailboxCache & CursorStore,
     contactsStore: GoogleContactsStore = localContactsStore(),
   ) {
+    this.cache = gatedCache(rawCache, () => this.writable);
+    contactsStore = gatedContacts(contactsStore, () => this.writable);
     this.credentials = platform.credentialStore();
     this.tokens = new TokenManager({
       store: platform.tokenStore(),
@@ -420,7 +474,7 @@ export class GmailSession {
       },
     );
 
-    this.sync = new GmailSyncEngine({ client: this.client, cache, cursor: cursorOf(cache) });
+    this.sync = new GmailSyncEngine({ client: this.client, cache: this.cache, cursor: cursorOf(this.cache) });
 
     // The same tokens and one-refresh-after-401 rule; its own quota bucket.
     const people = new PeopleClient(() => this.tokens.validAccessToken(), {
@@ -713,6 +767,7 @@ export class GmailSession {
       // instead — see `LOOPBACK_REDIRECT_URI` and `desktop.ts`'s `redirectUriIn`.
       redirectUri: outcome.redirectUri ?? redirectUri,
     });
+    this.writable = true;
   }
 
   /**
@@ -840,6 +895,7 @@ export class GmailSession {
       verifier: pending.verifier,
       redirectUri: pending.redirectUri,
     });
+    this.writable = true;
 
     this.scrubAddressBar();
 
@@ -889,6 +945,9 @@ export class GmailSession {
 
   /** Forget the session. The cache is wiped too: it is the user's mail. */
   async signOut(): Promise<void> {
+    // First, before anything is erased: a sync or contacts refresh still running from
+    // before this moment must not write the account back.
+    this.writable = false;
     await this.tokens.clear();
     // The address book is the user's data in the same sense the mail is.
     await this.contacts.clear().catch(() => undefined);
@@ -899,10 +958,10 @@ export class GmailSession {
     // The cache is the user's mail on disk. Wiping it on sign-out is not
     // tidiness: it is the difference between "signed out" and "signed out, but
     // the next person at this keyboard can read your inbox".
-    await this.cache.clear();
+    await this.rawCache.clear();
     // And the cursor with it: a cursor left over an empty cache makes the next
     // sign-in sync incrementally — changes only — into an empty mailbox.
-    await cursorOf(this.cache).clear().catch(() => undefined);
+    await cursorOf(this.rawCache).clear().catch(() => undefined);
   }
 
   /** A `MailBackend` the store can drive. */
