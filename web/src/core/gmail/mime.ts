@@ -50,18 +50,33 @@ function base64Utf8(value: string): string {
  *
  * Only encodes when it has to: a plain ASCII subject is left alone for
  * readability when debugging a send.
+ *
+ * Split on *character* boundaries, never inside one: RFC 2047 §5 requires each
+ * encoded word to hold whole characters. Cutting the base64 every N characters cut
+ * multi-byte UTF-8 sequences in half, and a strict decoder shows each half as `�` —
+ * a CJK or emoji subject arrived with holes in it.
  */
 function encodeMimeHeader(value: string): string {
   if (isAsciiPrintable(value)) return value;
-  const encoded = base64Utf8(value);
-  const chunks: string[] = [];
-  // 75 is the RFC limit for an encoded word including its delimiters; the
-  // payload is base64, so 4 base64 chars per 3 bytes.
-  const perChunk = 36;
-  for (let i = 0; i < encoded.length; i += perChunk) {
-    chunks.push(`=?UTF-8?B?${encoded.slice(i, i + perChunk)}?=`);
+  // 45 bytes is 60 base64 characters; with `=?UTF-8?B?` and `?=` that is 72, under 75.
+  const maxBytes = 45;
+  const encoder = new TextEncoder();
+  const words: string[] = [];
+  let current = "";
+  let currentBytes = 0;
+  // `for…of` walks code points, so a surrogate pair is never split either.
+  for (const char of value) {
+    const size = encoder.encode(char).length;
+    if (currentBytes + size > maxBytes && current.length > 0) {
+      words.push(current);
+      current = "";
+      currentBytes = 0;
+    }
+    current += char;
+    currentBytes += size;
   }
-  return chunks.join(CRLF + " ");
+  if (current.length > 0) words.push(current);
+  return words.map((word) => `=?UTF-8?B?${base64Utf8(word)}?=`).join(CRLF + " ");
 }
 
 /** What to put in a header, and what the reply is answering. */
