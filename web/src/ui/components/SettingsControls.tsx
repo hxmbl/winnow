@@ -1,32 +1,200 @@
 /**
- * The building blocks of Settings: a section, a labelled row, a radio-card group and a
- * switch. Moved out of `SettingsPanel.tsx` unchanged.
+ * The building blocks of Settings: a section, a labelled row, a radio-card group, a
+ * switch, and the hover/focus wiring and (?) popover that explain each setting.
  */
 
-import { useRef } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { CircleHelp } from "lucide-react";
+import { SETTINGS, type SettingId } from "../settingsCatalog";
+import { SettingsExplain } from "../settingsExplainContext";
+import { placePopover, type PopoverPlacement } from "../settingsView";
 
-export function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function Section({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <section className="border-b border-hairline-soft px-5 py-4 last:border-b-0">
-      <h3 className="text-meta font-semibold text-ink-subtle">
-        {title}
-      </h3>
-      <div className="mt-3 flex flex-col gap-3">{children}</div>
+    <section className="border-b border-hairline-soft py-4 first:pt-0 last:border-b-0">
+      {title && <h3 className="mb-3 text-meta font-semibold text-ink-subtle">{title}</h3>}
+      <div className="flex flex-col gap-1">{children}</div>
     </section>
   );
 }
 
-/** A labelled row: a name, an explanation, and a control. */
+/**
+ * The area a setting owns: pointing at it (hover, or keyboard focus entering it) makes it
+ * the one the explanation column describes. Leaving does nothing, on purpose: the column
+ * keeps the last one, so moving the pointer across to read it does not clear it.
+ */
+export function SettingBlock({
+  setting,
+  className = "",
+  children,
+}: {
+  setting: SettingId;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const { point, mode, pointed } = useContext(SettingsExplain);
+  // The row the explanation column is describing, so the two read as a pair.
+  const explained = mode === "panel" && pointed === setting;
+  return (
+    <div
+      data-setting={setting}
+      data-explained={explained ? "" : undefined}
+      onPointerEnter={() => point(setting)}
+      onFocus={() => point(setting)}
+      className={`-mx-3 rounded-ctl px-3 py-2.5 transition-colors ${explained ? "bg-surface-hover" : ""} ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A setting's name, with its (?) button below 1200px. */
+export function SettingLabel({ setting, id }: { setting: SettingId; id?: string }) {
+  const { mode } = useContext(SettingsExplain);
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <span id={id} className="text-ui font-medium text-ink-body">
+        {SETTINGS[setting].label}
+      </span>
+      {mode === "popover" && <InfoButton setting={setting} />}
+    </span>
+  );
+}
+
+/**
+ * The (?) beside a setting's name below 1200px, and the popover it opens.
+ *
+ * Hover (a mouse) and focus show it; a click or tap pins it; Escape, a second press or a
+ * tap anywhere else closes it. Escape is caught on the window in the capture phase so it
+ * closes the popover rather than Settings. The popover is portalled to the body (so a
+ * transformed ancestor cannot move a fixed box) and placed by `placePopover`, which keeps
+ * it inside the viewport.
+ */
+export function InfoButton({ setting }: { setting: SettingId }) {
+  const { info, dispatchInfo } = useContext(SettingsExplain);
+  const open = info.open === setting;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<PopoverPlacement | null>(null);
+  const tipId = `winnow-about-${setting}`;
+  const definition = SETTINGS[setting];
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const button = buttonRef.current;
+      if (!button) return;
+      const rect = button.getBoundingClientRect();
+      const height = tipRef.current?.offsetHeight ?? 120;
+      setPlace(
+        placePopover(
+          { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+          height,
+          { width: window.innerWidth, height: window.innerHeight },
+        ),
+      );
+    };
+    measure();
+    // Once more after the first placement: the height depends on the width just set.
+    const frame = requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+      setPlace(null);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      event.preventDefault();
+      dispatchInfo({ type: "escape" });
+    };
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && (buttonRef.current?.contains(target) || tipRef.current?.contains(target))) return;
+      dispatchInfo({ type: "outside" });
+    };
+    window.addEventListener("keydown", onKey, true);
+    document.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [open, dispatchInfo]);
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        data-setting-info={setting}
+        aria-label={`About ${definition.label}`}
+        aria-expanded={open}
+        aria-describedby={open ? tipId : undefined}
+        onPointerEnter={(event) => {
+          if (event.pointerType === "mouse") dispatchInfo({ type: "hover", setting });
+        }}
+        onPointerLeave={(event) => {
+          if (event.pointerType === "mouse") dispatchInfo({ type: "unhover", setting });
+        }}
+        onFocus={() => dispatchInfo({ type: "focus", setting })}
+        onBlur={() => dispatchInfo({ type: "blur", setting })}
+        onClick={() => dispatchInfo({ type: "press", setting })}
+        className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-2.5 after:content-['']"
+      >
+        <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={tipRef}
+            id={tipId}
+            role="tooltip"
+            data-setting-popover={setting}
+            className="fixed z-[60] rounded-pane border border-hairline bg-chrome p-3 shadow-lift"
+            style={{
+              top: place?.top ?? 0,
+              left: place?.left ?? 0,
+              width: place?.width ?? Math.min(320, window.innerWidth - 16),
+              visibility: place ? "visible" : "hidden",
+            }}
+          >
+            <p className="text-meta font-semibold text-ink">{definition.label}</p>
+            <p className="mt-1 text-meta leading-relaxed text-ink-muted">{definition.explanation}</p>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * A labelled row: a name, an optional status line, and a control.
+ *
+ * With `setting`, the name comes from the catalog, the row reports hover and focus to the
+ * explanation column, and below 1200px it carries a (?) button. Without, it is a plain
+ * row (a hidden sender's address beside its Unhide button).
+ */
 export function Row({
+  setting,
   label,
   hint,
   children,
 }: {
-  label: string;
+  setting?: SettingId;
+  label?: string;
+  /** A short, live status line (the client in use, whether contacts are connected). */
   hint?: string;
   children: React.ReactNode;
 }) {
-  return (
+  const row = (
     /*
       Wraps rather than squeezes. The label wants at least 14rem; a control that will not
       fit beside that (a segmented control on a phone) drops to its own line under the
@@ -35,12 +203,17 @@ export function Row({
     */
     <div data-settings-row="" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <div className="min-w-0 flex-[1_1_14rem]">
-        <p className="text-ui font-medium text-ink-body">{label}</p>
+        {setting ? (
+          <SettingLabel setting={setting} />
+        ) : (
+          <p className="text-ui font-medium text-ink-body">{label}</p>
+        )}
         {hint && <p className="text-meta text-ink-subtle">{hint}</p>}
       </div>
       <div data-settings-control="" className="max-w-full shrink-0">{children}</div>
     </div>
   );
+  return setting ? <SettingBlock setting={setting}>{row}</SettingBlock> : row;
 }
 
 /**
@@ -49,20 +222,18 @@ export function Row({
  * A real radio group to assistive technology and to the keyboard: one tab stop (the
  * checked option), arrow keys move the choice and the focus together, Home and End jump
  * to the ends — the behaviour a screen-reader user expects from `role="radiogroup"`.
- * The label is a visible heading the group points at, not an `aria-label` only a screen
- * reader would hear.
+ * The label is the setting's visible name the group points at, not an `aria-label` only
+ * a screen reader would hear.
  */
 export function RadioCards<T extends string>({
   id,
-  label,
-  hint,
+  setting,
   options,
   value,
   onChange,
 }: {
   id: string;
-  label: string;
-  hint?: string;
+  setting: SettingId;
   options: readonly { value: T; label: string; swatch?: string }[];
   value: T;
   onChange: (value: T) => void;
@@ -74,21 +245,11 @@ export function RadioCards<T extends string>({
     refs.current[next]?.focus();
   };
   return (
-    <div className="flex flex-col gap-2">
-      <div>
-        <p id={`${id}-label`} className="text-ui font-medium text-ink-body">
-          {label}
-        </p>
-        {hint && (
-          <p id={`${id}-hint`} className="text-meta text-ink-subtle">
-            {hint}
-          </p>
-        )}
-      </div>
+    <SettingBlock setting={setting} className="flex flex-col gap-2">
+      <SettingLabel setting={setting} id={`${id}-label`} />
       <div
         role="radiogroup"
         aria-labelledby={`${id}-label`}
-        aria-describedby={hint ? `${id}-hint` : undefined}
         data-picker={id}
         className="grid gap-1.5"
         style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
@@ -133,7 +294,7 @@ export function RadioCards<T extends string>({
           );
         })}
       </div>
-    </div>
+    </SettingBlock>
   );
 }
 

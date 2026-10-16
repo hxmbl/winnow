@@ -25,7 +25,8 @@ export const MIN_BACKGROUND_POLL_SECONDS = 30;
 
 const WEB_INFO: PlatformInfo = {
   name: "Winnow",
-  version: "0.1.0",
+  // Injected by `vite.config.ts` from package.json; absent under vitest.
+  version: typeof __WINNOW_VERSION__ === "string" ? __WINNOW_VERSION__ : "0.0.0",
   os: "browser",
   arch: "unknown",
   kind: "web",

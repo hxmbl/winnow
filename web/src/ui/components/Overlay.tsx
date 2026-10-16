@@ -58,6 +58,12 @@ type Props = {
    * in the middle of the window says "dialog".
    */
   placement?: "center" | "left" | "fill";
+  /**
+   * Stop the backdrop this far above the window's bottom edge, leaving what is there
+   * (the phone dock) visible and live. Settings on a phone uses it so the Settings tab
+   * stays on screen.
+   */
+  bottomInset?: string;
   className?: string;
   children: React.ReactNode;
 };
@@ -93,6 +99,7 @@ export function Sheet({
   label,
   activeDescendant,
   placement = "center",
+  bottomInset,
   className = "max-w-[520px]",
   children,
 }: Props) {
@@ -192,6 +199,7 @@ export function Sheet({
               "items-start justify-stretch"
             : "items-center justify-center p-4"
       } bg-scrim`}
+      style={bottomInset ? { bottom: bottomInset } : undefined}
       // A click handler on a div, which is only acceptable because this div is
       // genuinely a backdrop and genuinely dismissable — and it is *optional*, which is
       // the part that was missing. `onMouseDown` rather than `onClick` so a drag that

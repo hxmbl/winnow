@@ -181,6 +181,13 @@ const BLANK_INITIAL: NonNullable<ComposerState["initial"]> = { to: [], cc: [], b
 const DRAFT_NOTICE_MS = 4000;
 
 /** `localStorage`, or `null` where reading it throws (storage disabled). */
+/** Where this Winnow runs, for Settings → About: "Desktop app · linux x86_64", "Browser". */
+function platformLabel(info: PlatformInfo): string {
+  if (info.kind === "web") return "Browser";
+  if (info.os === "android") return "Android app";
+  return `Desktop app · ${info.os}${info.arch && info.arch !== "unknown" ? ` ${info.arch}` : ""}`;
+}
+
 function deviceStorage(): Storage | null {
   try {
     return globalThis.localStorage ?? null;
@@ -2669,6 +2676,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           contactsProblem={contactsProblem}
           onOpenContactsHelp={(url) => void platform.openExternal(url)}
           onImproveSuggestions={onImproveSuggestions}
+          version={info ? `${info.name} ${info.version}` : null}
+          platformLabel={info ? platformLabel(info) : null}
           onClose={() => store.setOverlay("none")}
         />
       )}

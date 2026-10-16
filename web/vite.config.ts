@@ -1,5 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
+
+/** The app's version, for Settings → About in the browser build (the desktop build asks Tauri). */
+const version = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 /**
  * One build target for two hosts.
@@ -18,6 +22,7 @@ import react from "@vitejs/plugin-react";
  */
 export default defineConfig({
   plugins: [react()],
+  define: { __WINNOW_VERSION__: JSON.stringify(version) },
   base: "./",
   server: {
     host: "0.0.0.0",

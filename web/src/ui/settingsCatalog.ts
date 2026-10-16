@@ -1,0 +1,221 @@
+/**
+ * What Settings contains: its categories, the settings in each, and the plain-English
+ * explanation of every one.
+ *
+ * The explanation lives here, beside the definition, rather than in the component, so
+ * a setting cannot be added without its copy: `SettingsPanel.tsx` renders rows by id
+ * from this table, the type of `SETTINGS` requires an `explanation`, and
+ * `settingsCatalog.test.ts` fails if one is empty, too long, or never rendered.
+ *
+ * Copy rules: two to four sentences, what it does, the trade-off, and what leaves the
+ * device (if anything). Plain English, no marketing, no promises the code does not keep.
+ */
+
+export type CategoryId =
+  | "reading"
+  | "appearance"
+  | "privacy"
+  | "sync"
+  | "google"
+  | "senders"
+  | "shortcuts"
+  | "about";
+
+export type SettingsCategory = {
+  id: CategoryId;
+  label: string;
+  /** What the explanation panel says before anything in the category is pointed at. */
+  intro: string;
+};
+
+/** In the order the category list shows them. */
+export const CATEGORIES: readonly SettingsCategory[] = [
+  {
+    id: "reading",
+    label: "Reading",
+    intro:
+      "How your mail is ordered and what happens when you open it. Winnow learns from what you star and hide, and you can see or undo what it has learned here.",
+  },
+  {
+    id: "appearance",
+    label: "Appearance",
+    intro:
+      "Light, dark or true black, and the one accent colour Winnow uses. These only change how Winnow looks on this device.",
+  },
+  {
+    id: "privacy",
+    label: "Privacy",
+    intro:
+      "What Winnow fetches from outside your mailbox. Each of these can tell someone else that you read or received mail, so each one is your choice, and the two picture sources are off until you turn them on.",
+  },
+  {
+    id: "sync",
+    label: "Notifications & sync",
+    intro:
+      "When Winnow tells you about new mail, and how often it checks. Checking more often means more requests to Google, nothing else.",
+  },
+  {
+    id: "google",
+    label: "Google account",
+    intro:
+      "Winnow talks to Gmail through a Google client you create in your own Google Cloud project; it ships none of its own. Your mail goes between this device and Google only.",
+  },
+  {
+    id: "senders",
+    label: "Hidden & muted senders",
+    intro:
+      "Senders you have hidden or muted from the sender menu. Hidden mail is kept out of Winnow; muted mail stays in your inbox but never interrupts you.",
+  },
+  {
+    id: "shortcuts",
+    label: "Keyboard shortcuts",
+    intro:
+      "Every key Winnow answers to. This list is built from the same table the keyboard uses, so it is always the real set. Press ? anywhere for the short version.",
+  },
+  {
+    id: "about",
+    label: "About",
+    intro: "Which Winnow this is, and the terms it comes under.",
+  },
+];
+
+export type SettingDefinition = {
+  category: CategoryId;
+  /** The row's name, as the row and the explanation panel both show it. */
+  label: string;
+  explanation: string;
+};
+
+/**
+ * Every setting, by id. `satisfies` keeps the ids literal (so `SettingId` is a closed
+ * union and a row cannot name one that does not exist) while checking every entry has
+ * its category, label and explanation.
+ */
+export const SETTINGS = {
+  sortBy: {
+    category: "reading",
+    label: "Sort messages by",
+    explanation:
+      "Date shows the newest mail first, Sender groups mail by who sent it, and Smart Score puts what Winnow thinks matters most at the top. Smart Score is worked out on this device from what you star and hide; nothing is sent anywhere to rank your mail.",
+  },
+  markReadOnOpen: {
+    category: "reading",
+    label: "Mark as read when opened",
+    explanation:
+      "Opening a message or conversation marks it read in Gmail, so it also shows as read on your other devices. Turn this off if you use unread as a to-do list: mail then stays unread until you mark it yourself.",
+  },
+  resetSorting: {
+    category: "reading",
+    label: "Reset sorting",
+    explanation:
+      "Winnow adjusts its sorting each time you star a message or hide a bucket. Reset forgets those adjustments and goes back to the default sorting; it asks first, and the record of what happened is kept. Nothing about this leaves your device.",
+  },
+  learningHistory: {
+    category: "reading",
+    label: "What Winnow has learned",
+    explanation:
+      "A list of the stars and hides Winnow has learned from, newest first, with what it predicted at the time. It is there so you can check why mail is sorted the way it is. The list is stored on this device only.",
+  },
+  themeMode: {
+    category: "appearance",
+    label: "Mode",
+    explanation:
+      "System follows your device between light and dark. OLED is dark on true black, which saves power on OLED screens but makes edges harder to see. This is saved on this device only.",
+  },
+  accent: {
+    category: "appearance",
+    label: "Accent",
+    explanation:
+      "The one colour Winnow uses for unread mail, the selection and the main action. Each accent is checked for contrast in light and dark. It changes nothing but colour.",
+  },
+  remoteImages: {
+    category: "privacy",
+    label: "Remote images",
+    explanation:
+      "Images in mail are often tracking pixels: loading one tells the sender you opened the message, when, and roughly where from your IP address. Ask each time shows a button on each message; Always loads them without asking; Never keeps them blocked. Messages with images allowed are shown in a sandbox that runs none of the sender's code.",
+  },
+  brandLogos: {
+    category: "privacy",
+    label: "Show brand logos",
+    explanation:
+      "Shows a company's logo beside its mail, from the logo it publishes for email (BIMI). To find it, Winnow looks up each sender's domain with Cloudflare's DNS-over-HTTPS resolver, for every sender in your list whether you open the mail or not, then loads the logo from the sender's own site. Off by default for that reason; logos are not certificate-verified.",
+  },
+  gravatars: {
+    category: "privacy",
+    label: "Gravatar photos",
+    explanation:
+      "Shows a sender's Gravatar picture when they are not in your contacts. Winnow sends Gravatar a hashed copy of each sender's address, not the address itself, but a hash of a common address can be guessed, so Gravatar can still learn who mails you. Off by default.",
+  },
+  notifications: {
+    category: "sync",
+    label: "Notify me about new mail",
+    explanation:
+      "Shows a system notification for messages that arrived since the last sync, never for older mail, and never for senders you have muted. Your device asks for permission the first time; if you decline, this switches itself back off.",
+  },
+  backgroundSync: {
+    category: "sync",
+    label: "Keep syncing while closed",
+    explanation:
+      "Winnow stays in the system tray after you close the window and keeps checking for mail on a timer, so notifications still arrive. Off, it only syncs while a window is open, which uses less battery and fewer requests to Google.",
+  },
+  syncInterval: {
+    category: "sync",
+    label: "Check every",
+    explanation:
+      "How often background sync asks Gmail for new mail while the window is closed. More often means quicker notifications but more requests to Google and a little more battery. While a window is open Winnow checks more often regardless.",
+  },
+  oauthClient: {
+    category: "google",
+    label: "Your Google OAuth client",
+    explanation:
+      "The client ID (and secret, if it has one) from your own Google Cloud project that Winnow signs in with. On desktop it is kept in your system keychain; in the browser it is kept in this browser's storage. Change replaces or removes it; your mail itself never passes through anyone but Google.",
+  },
+  googleContacts: {
+    category: "google",
+    label: "Contact photos and suggestions",
+    explanation:
+      "An extra, read-only permission to your Google contacts, asked for only when you press Connect. It shows your contacts' photos beside their mail and suggests them as recipients. It needs the People API turned on in your Cloud project; Winnow says so if it is off.",
+  },
+  hiddenSenders: {
+    category: "senders",
+    label: "Hidden senders",
+    explanation:
+      "Mail from these senders is kept out of every Winnow list. It is not deleted and stays in Gmail, so Unhide brings it straight back. The list is stored on this device.",
+  },
+  mutedSenders: {
+    category: "senders",
+    label: "Muted senders",
+    explanation:
+      "Mail from these senders stays in your inbox, but never notifies you and is not counted on the unread badge. Unmute puts them back to normal. The list is stored on this device.",
+  },
+  shortcutList: {
+    category: "shortcuts",
+    label: "Shortcuts",
+    explanation:
+      "The keys Winnow answers to while you are not typing in a field. They cannot be changed yet. The list is generated from the keyboard handler itself, so it cannot fall out of date.",
+  },
+  version: {
+    category: "about",
+    label: "Version",
+    explanation:
+      "The version of Winnow you are running and where it is running. Winnow does not check for updates by itself; new desktop and Android builds are published on the project's Releases page.",
+  },
+  licence: {
+    category: "about",
+    label: "Licence",
+    explanation:
+      "Winnow is open-source software under the MIT licence. You can use, change and share it freely; it comes with no warranty.",
+  },
+} as const satisfies Record<string, SettingDefinition>;
+
+export type SettingId = keyof typeof SETTINGS;
+
+export const SETTING_IDS = Object.keys(SETTINGS) as SettingId[];
+
+export function categoryOf(id: CategoryId): SettingsCategory {
+  return CATEGORIES.find((category) => category.id === id) ?? CATEGORIES[0];
+}
+
+export function settingsIn(category: CategoryId): SettingId[] {
+  return SETTING_IDS.filter((id) => SETTINGS[id].category === category);
+}
