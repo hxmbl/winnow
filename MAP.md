@@ -291,7 +291,7 @@ to its range, and records a `FeedbackEvent`.
 | `sync.ts` | `GmailSyncEngine`: full vs incremental, the cursor, the five capped views, batching, partial publishing. Also defines the two interfaces everything else is written against: `MailboxCache` and `CursorStore`. |
 | `mapper.ts` | Gmail message → `Email`. Parses `From` rather than trusting it, prefers plain text over HTML, keeps attachments as metadata, and uses `internalDate` over the `Date:` header. |
 | `mime.ts` | RFC 822 out: `buildMime`, `messageIdFor`, `replyReferences`. Getting `Message-ID` / `In-Reply-To` / `References` wrong threads the reply in the sender's account and nowhere else. |
-| `tokens.ts` | `TokenManager` over a `TokenStore`. Single-flight refresh, a generation counter so a refresh landing after sign-out is dropped, and `invalid_grant` handled as re-auth rather than retry. |
+| `tokens.ts` | `TokenManager` over a `TokenStore`. Single-flight refresh, a generation counter so a refresh landing after sign-out is dropped, and `invalid_grant` handled as re-auth rather than retry. Sign-out also revokes the grant at Google (`revokeGrant`): fire and forget with a 5 s timeout, never on an `invalid_grant` clear or in the demo. |
 | `pkce.ts` | RFC 7636 PKCE plus `state`, `buildAuthorizeUrl`, `parseRedirect`, `stateMatches`. The verifier never leaves the app; only the challenge does. |
 | `pool.ts` | `mapPool` and `TaskQueue` — bounded concurrency, in place of Gmail's `/batch` endpoint (a pool reuses the ordinary request path, including the quota bucket). |
 | `people.ts` | The People API client for the two contact listings, with its own quota bucket (60/min) and typed errors: `ExpiredSyncToken`, `PeopleScopeMissing`, `PeopleApiDisabled`. |
@@ -623,9 +623,9 @@ judged as IPv4.
 | `winnow.brandLogos.v1` | Cached BIMI answers | sign-out, setting off |
 | `winnow.gravatars.v1` | Cached Gravatar answers, by sender address | sign-out, setting off |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
-| `winnow.gmail.tokens` | Tokens (web only) | sign-out |
+| `winnow.gmail.tokens` | Tokens (web only) | sign-out, which also revokes the grant at Google |
 | `winnow.pendingAuth`, `winnow.pendingState` | PKCE verifier, sign-in state (`sessionStorage`) | read, or 15 min |
-| keychain `gmail.tokens`, `google.oauth-client` | The same two, on the desktop | sign-out / setup |
+| keychain `gmail.tokens`, `google.oauth-client` | The same two, on desktop and Android | sign-out (revoked at Google first, from the web layer) / setup |
 | `winnow.mutedFilters.v1` | Retired — deleted on launch | — |
 
 ---

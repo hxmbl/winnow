@@ -46,7 +46,7 @@ export const CATEGORIES: readonly SettingsCategory[] = [
     id: "privacy",
     label: "Privacy",
     intro:
-      "What Winnow fetches from outside your mailbox. Each of these can tell someone else that you read or received mail, so each one is your choice, and the two picture sources are off until you turn them on.",
+      "What Winnow fetches from outside your mailbox. Each of these can tell someone else that you read or received mail, so each one is your choice, and the two picture sources are off until you turn them on. Signing out erases your mail and sign-in from this device and also asks Google to revoke Winnow's access, so no copy of that sign-in keeps working.",
   },
   {
     id: "sync",

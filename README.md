@@ -291,7 +291,10 @@ go in the keychain. Past the origin's ~5 MB quota the write fails, and Winnow as
 before it keeps the cache and says so when it can't, rather than quietly forgetting.
 Signing out erases the cache and keeps what it learned from you
 (`winnow.learning.v1`, your preferences, your blocked senders), because the learning
-is about you and not about that account.
+is about you and not about that account. It also deletes the tokens and asks Google to
+revoke Winnow's access, so a copy of the refresh token stops working too. That request
+is best effort: sign-out never waits for it, so if you were offline, remove Winnow at
+the permissions page above.
 
 ## License
 
