@@ -5860,7 +5860,7 @@ try {
     };
 
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    await ctx.addInitScript(() => {
+    await ctx.addInitScript((accessToken) => {
       // Init scripts run in every frame, and the message's own frames are sandboxed with
       // no storage at all: only the app's top-level document is seeded.
       if (window.top !== window) return;
@@ -5870,13 +5870,13 @@ try {
       localStorage.setItem(
         "winnow.gmail.tokens",
         JSON.stringify({
-          accessToken: FAKE_SMOKE_TOKEN,
+          accessToken,
           refreshToken: "1//smoke-refresh",
           expiresAt: Date.now() + 3_600_000,
           scope: "https://www.googleapis.com/auth/gmail.modify",
         }),
       );
-    });
+    }, FAKE_SMOKE_TOKEN);
     await ctx.route("https://gmail.googleapis.com/**", fakeGmail);
     await ctx.route("https://oauth2.googleapis.com/**", (route) => json(route, { error: "invalid_grant" }, 400));
     const trackerHits = [];
