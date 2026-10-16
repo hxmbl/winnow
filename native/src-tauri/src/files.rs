@@ -56,28 +56,57 @@ pub async fn save_attachment(
         return Ok(None);
     };
 
-    let target = path
-        .into_path()
-        .map_err(|e| format!("could not resolve the chosen location: {e}"))?;
+    // Android's save picker answers with a `content://` URI, not a path. The fs
+    // plugin opens it through the platform's ContentResolver and hands back an
+    // ordinary file descriptor, so the bytes go down the same way.
+    #[cfg(target_os = "android")]
+    {
+        use std::io::Write;
+        use tauri_plugin_fs::{FsExt, OpenOptions};
 
-    // The write itself is blocking I/O on a file the size of an email attachment.
-    // Cheap, but off the async runtime's threads it is not, so it is pushed onto
-    // the blocking pool where a slow disk cannot stall another command.
-    //
-    // The two `?`s are the point of the expression — a failed write is reported,
-    // not swallowed, and the path is only returned once the bytes are down. Binding
-    // the result and then discarding it said the same thing and tripped clippy's
-    // `let_unit_value`, which is the correct complaint.
-    let target_for_task = target.clone();
-    tokio::task::spawn_blocking(move || {
-        std::fs::write(&target_for_task, &bytes).map_err(|e| {
-            format!("could not write {}: {e}", target_for_task.display())
+        let shown = path.to_string();
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        let mut file = app
+            .fs()
+            .open(path, options)
+            .map_err(|e| format!("could not open {shown}: {e}"))?;
+        tokio::task::spawn_blocking(move || {
+            file.write_all(&bytes)
+                .and_then(|()| file.sync_all())
+                .map_err(|e| format!("could not write {shown}: {e}"))
+                .map(|()| shown)
         })
-    })
-    .await
-    .map_err(|e| format!("the write task failed: {e}"))??;
+        .await
+        .map_err(|e| format!("the write task failed: {e}"))?
+        .map(Some)
+    }
 
-    Ok(Some(target.to_string_lossy().into_owned()))
+    #[cfg(not(target_os = "android"))]
+    {
+        let target = path
+            .into_path()
+            .map_err(|e| format!("could not resolve the chosen location: {e}"))?;
+
+        // The write itself is blocking I/O on a file the size of an email attachment.
+        // Cheap, but off the async runtime's threads it is not, so it is pushed onto
+        // the blocking pool where a slow disk cannot stall another command.
+        //
+        // The two `?`s are the point of the expression — a failed write is reported,
+        // not swallowed, and the path is only returned once the bytes are down. Binding
+        // the result and then discarding it said the same thing and tripped clippy's
+        // `let_unit_value`, which is the correct complaint.
+        let target_for_task = target.clone();
+        tokio::task::spawn_blocking(move || {
+            std::fs::write(&target_for_task, &bytes).map_err(|e| {
+                format!("could not write {}: {e}", target_for_task.display())
+            })
+        })
+        .await
+        .map_err(|e| format!("the write task failed: {e}"))??;
+
+        Ok(Some(target.to_string_lossy().into_owned()))
+    }
 }
 
 /// Strip path separators and NULs from a sender-supplied file name.

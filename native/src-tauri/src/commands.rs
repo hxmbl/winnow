@@ -11,7 +11,10 @@
 
 use crate::oauth::{AuthOutcome, Sessions};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
+// Only the macOS dock badge reaches for a window by label.
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -64,9 +67,14 @@ pub fn app_info(app: AppHandle) -> AppInfo {
         // keychain, `scheduler.rs` has the ticker, `files.rs` has the save dialog.
         // The web layer reads them to decide what to show, so a `false` here is a
         // statement about the build rather than a default.
+        //
+        // On Android `background_sync` is false: the ticker only wakes the
+        // webview, and Android pauses a backgrounded webview, so the ticks would
+        // land nowhere. (Saving still works there: `files.rs` writes to the
+        // `content://` URI the system save picker returns.)
         native_oauth: true,
         native_secrets: true,
-        background_sync: true,
+        background_sync: cfg!(desktop),
         save_files: true,
     }
 }
@@ -367,6 +375,11 @@ pub fn set_unread_badge(app: AppHandle, count: i64) -> Result<()> {
             .map_err(|e| format!("could not set the dock badge: {e}"))?;
     }
 
+    // No tray on Android, and no launcher badge API Tauri exposes there.
+    #[cfg(not(desktop))]
+    let _ = (&app, count);
+
+    #[cfg(desktop)]
     if let Some(tray) = app.tray_by_id(crate::tray::TRAY_ID) {
         let label = match count {
             0 => "Winnow".to_string(),

@@ -52,6 +52,9 @@ pub fn register(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Runtime registration is a desktop concept. On Android a scheme is declared
+    // in the manifest at build time, and `register` only returns "unsupported".
+    #[cfg(desktop)]
     for scheme in SCHEMES {
         // A registration failure is not fatal: the app still works, it just will
         // not be reachable from a link in another program.
@@ -88,7 +91,10 @@ mod tests {
 
     #[test]
     fn every_scheme_is_winnow_owned() {
-        for scheme in SCHEMES {
+        // Runtime registration is a desktop concept. On Android a scheme is declared
+    // in the manifest at build time, and `register` only returns "unsupported".
+    #[cfg(desktop)]
+    for scheme in SCHEMES {
             assert!(
                 scheme.starts_with("winnow"),
                 "{scheme} would let another app claim our links"

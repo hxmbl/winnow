@@ -1,4 +1,4 @@
-//! Winnow desktop shell.
+//! Winnow native shell: desktop (macOS, Windows, Linux) and Android.
 //!
 //! The product lives in `web/` — every screen, every piece of classification
 //! logic and the whole Gmail client are TypeScript, and the same bundle runs in
@@ -14,6 +14,10 @@
 //! | Writing attachments to disk | [`files`] |
 //! | Deep links, autostart, window state | plugins, [`deep_link`] |
 //!
+//! On Android the tray, autostart, single-instance and window-state pieces are
+//! compiled out (`#[cfg(desktop)]`); there is no tray and the OS owns the window.
+//! Secrets go to the Android Keystore instead of `keyring` (see [`secrets`]).
+//!
 //! Nothing here re-implements product behaviour. If a command could be written
 //! in TypeScript, it belongs in `web/`.
 
@@ -23,11 +27,18 @@ pub mod files;
 pub mod oauth;
 pub mod scheduler;
 pub mod secrets;
+#[cfg(desktop)]
 pub mod tray;
 
-use tauri::{Emitter, Manager};
+#[cfg(desktop)]
+use tauri::Emitter;
+use tauri::Manager;
 
-/// Build and run the Winnow desktop application.
+/// Build and run the Winnow application.
+///
+/// On Android this is the library's entry point, called by the generated
+/// `MainActivity` through Tauri's mobile glue.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // `single_instance` has to be registered *first*, before any other plugin.
     // Tauri requires it: it must be able to detect and forward a second launch
@@ -63,6 +74,11 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
+    // Android only: `files.rs` needs it to write to the save picker's content URI.
+    // No capability grants its JS API, so the webview cannot reach it directly.
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_fs::init());
+
     builder
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
@@ -89,11 +105,15 @@ pub fn run() {
             // Skipped when launched with `--minimized`, which is how the autostart
             // entry point starts it: a login item that opens a window over
             // whatever the user is doing is exactly the behaviour people disable.
+            #[cfg(desktop)]
             if payload.event() == tauri::webview::PageLoadEvent::Finished
                 && !std::env::args().any(|arg| arg == "--minimized")
             {
                 tray::reveal(window.app_handle());
             }
+            // On Android the activity owns the one window and shows it itself.
+            #[cfg(not(desktop))]
+            let _ = (window, payload);
         })
         .setup(|app| {
             // Autostart is *registered* here and *enabled* by the user from the
@@ -110,6 +130,7 @@ pub fn run() {
 
             app.manage(oauth::Sessions::default());
             deep_link::register(app.handle())?;
+            #[cfg(desktop)]
             tray::build(app.handle())?;
             scheduler::install(app.handle());
 
@@ -118,18 +139,17 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Closing the window hides to the tray rather than quitting: an
             // inbox client that syncs in the background should keep syncing.
+            // Android has no close button to intercept, so nothing to do there.
+            #[cfg(desktop)]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                #[cfg(desktop)]
-                {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-                #[cfg(not(desktop))]
-                let _ = api;
+                api.prevent_close();
+                let _ = window.hide();
             }
+            #[cfg(not(desktop))]
+            let _ = (window, event);
         })
         .build(tauri::generate_context!())
-        .expect("failed to start the Winnow desktop application")
+        .expect("failed to start the Winnow application")
         .run(|app, event| {
             // Clicking a macOS notification activates the app without any payload,
             // and `tauri-plugin-notification` offers no desktop click callback to
