@@ -60,6 +60,36 @@ export function base64UrlDecode(text: string): Uint8Array | null {
  */
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 
+/**
+ * The narrowest scope that allows drafts (`users.drafts.*`): what the drafts opt-in asks
+ * for when a grant lacks every scope in `DRAFT_SCOPES`.
+ */
+export const COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
+
+/**
+ * Any one of these lets Winnow create, update, send and delete drafts. The sign-in grant
+ * (`gmail.modify`) is one of them, so a normal session never needs to ask.
+ */
+export const DRAFT_SCOPES: readonly string[] = [
+  COMPOSE_SCOPE,
+  GMAIL_SCOPE,
+  "https://mail.google.com/",
+];
+
+/**
+ * Whether a token's `scope` string allows drafts.
+ *
+ * A token with no `scope` recorded counts as allowed: every Winnow sign-in asks for
+ * `gmail.modify`, Google grants a single requested scope whole or not at all, and a
+ * grant that turns out not to carry it is caught where it matters — the API answers 403
+ * and the composer says "Drafts need permission" (see `DraftsScopeMissing`).
+ */
+export function hasDraftScopes(scope: string | undefined | null): boolean {
+  if (scope === undefined || scope === null) return true;
+  const granted = new Set(scope.split(/\s+/).filter(Boolean));
+  return DRAFT_SCOPES.some((wanted) => granted.has(wanted));
+}
+
 /** Gmail's own labels, which are how the sync engine buckets messages. */
 export const LABEL = {
   inbox: "INBOX",
@@ -123,6 +153,12 @@ export type GmailMessage = {
 export type GmailAttachmentResponse = {
   size: number;
   data?: string;
+};
+
+/** A `users.drafts` resource, as create, update and get return it. */
+export type GmailDraft = {
+  id: string;
+  message?: { id?: string; threadId?: string; labelIds?: string[] };
 };
 
 export type GmailSendResponse = {
@@ -190,6 +226,22 @@ export class GmailError extends Error {
 }
 
 /** A message that could not be fetched, with enough context to retry it. */
+/**
+ * The grant does not allow drafts: Google answered 403 with an insufficient-scope
+ * reason, or the token's own scope list says so. The composer offers the opt-in.
+ */
+export class DraftsScopeMissing extends GmailError {
+  constructor(message = "Drafts need permission.") {
+    super(message, 403, "unknown");
+    this.name = "DraftsScopeMissing";
+  }
+}
+
+/** Whether an API refusal is about the grant's scopes rather than anything else. */
+export function isInsufficientScope(status: number, body: string): boolean {
+  return status === 403 && /insufficient(Permissions|_?scope)|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(body);
+}
+
 export class GmailHttpError extends GmailError {
   readonly body: string;
 

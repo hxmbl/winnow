@@ -28,9 +28,10 @@ interface PendingAuth {
   at: number;
   /**
    * Why the trip to Google was made. Absent for a sign-in; `contacts` for the Google
-   * contacts opt-in, whose decline must not read as a failed sign-in on the way back.
+   * contacts opt-in and `drafts` for the drafts opt-in, whose decline must not read as a
+   * failed sign-in on the way back.
    */
-  purpose?: "contacts";
+  purpose?: "contacts" | "drafts";
   /** For the contacts opt-in: the account that asked, so a different one can be refused. */
   expectEmail?: string;
 }

@@ -25,6 +25,7 @@ import {
   LABEL,
   base64UrlEncode,
   type GmailAttachmentResponse,
+  type GmailDraft,
   type GmailHistoryResponse,
   type GmailListResponse,
   type GmailMessage,
@@ -96,6 +97,9 @@ const realSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms
  */
 export function costOf(path: string, method: string): number {
   if (method === "POST" && path.endsWith("/send")) return 100;
+  // drafts.create 10, drafts.update 15 — the usage-limits table's numbers.
+  if (method === "POST" && path === "/users/me/drafts") return 10;
+  if (method === "PUT" && path.startsWith("/users/me/drafts/")) return 15;
   if (method === "DELETE") return 10;
   if (path.includes("/attachments/")) return 20;
   // A get of one message or draft, i.e. the `?format=full` requests.
@@ -500,11 +504,50 @@ export class GmailClient {
     return this.request<GmailMessage>(`/users/me/drafts/${encodeURIComponent(id)}?format=full`);
   }
 
+  /**
+   * Save a new draft. The raw message is base64url-encoded here for the same reason as
+   * `send`; `threadId` files a reply's draft on its conversation.
+   */
+  async createDraft(raw: string, threadId?: string): Promise<GmailDraft> {
+    return this.request<GmailDraft>("/users/me/drafts", { method: "POST", body: { message: draftMessage(raw, threadId) } });
+  }
+
+  /** Replace a draft's content, keeping its id. */
+  async updateDraft(id: string, raw: string, threadId?: string): Promise<GmailDraft> {
+    return this.request<GmailDraft>(`/users/me/drafts/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: { id, message: draftMessage(raw, threadId) },
+    });
+  }
+
+  /**
+   * Send a draft, with its latest content. Gmail removes the draft as it sends, so
+   * nothing is left behind in Drafts.
+   */
+  async sendDraft(id: string, raw: string, threadId?: string): Promise<GmailSendResponse> {
+    return this.request<GmailSendResponse>("/users/me/drafts/send", {
+      method: "POST",
+      body: { id, message: draftMessage(raw, threadId) },
+    });
+  }
+
+  /** Delete a draft for good (`drafts.delete` does not go through Trash). */
+  async deleteDraft(id: string): Promise<void> {
+    await this.request(`/users/me/drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
   async listDrafts(maxResults: number, pageToken?: string): Promise<GmailListResponse> {
     const params = new URLSearchParams({ maxResults: String(maxResults) });
     if (pageToken) params.set("pageToken", pageToken);
     return this.request<GmailListResponse>(`/users/me/drafts?${params}`);
   }
+}
+
+/** The `message` half of a draft request. */
+function draftMessage(raw: string, threadId?: string): Record<string, unknown> {
+  const message: Record<string, unknown> = { raw: base64UrlEncode(new TextEncoder().encode(raw)) };
+  if (threadId) message.threadId = threadId;
+  return message;
 }
 
 /**

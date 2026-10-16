@@ -63,6 +63,7 @@ import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
 import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
+import type { DraftsApi } from "../mail/drafts";
 import type { SignalWeights } from "../classify/weights";
 import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
 import type { SyncProgress, SyncStage } from "../gmail/sync";
@@ -490,13 +491,22 @@ export interface MailBackend {
   moveToMailbox(id: number, mailbox: Mailbox): Promise<void>;
   setRead(id: number, read: boolean): Promise<void>;
   deletePermanently(id: number): Promise<void>;
-  sendReply(draft: unknown, inReplyTo: string): Promise<void>;
+  /**
+   * Send a reply. With `draftId`, the composer's saved Gmail draft is what is sent
+   * (`drafts.send`), so nothing is left behind in Drafts.
+   */
+  sendReply(draft: unknown, inReplyTo: string, draftId?: string): Promise<void>;
   /**
    * Send a new message: no `In-Reply-To`, no `References`, no thread. Optional so a
    * backend written before composing existed (and every test fake) still type-checks;
    * the store reports a backend without it as unable to send.
    */
-  sendNew?(draft: Draft): Promise<void>;
+  sendNew?(draft: Draft, draftId?: string): Promise<void>;
+  /**
+   * Gmail drafts, for the composer's autosave. Optional for the same reason as
+   * `sendNew`; without it the composer keeps its draft on the device only.
+   */
+  drafts?: DraftsApi;
   /**
    * Download one attachment's bytes.
    *
@@ -2182,7 +2192,7 @@ export class WinnowStore {
    * composer that no longer works with no explanation. So the failure lands in the
    * same channel as every other optimistic-action rollback, and the sheet renders it.
    */
-  async sendReply(draft: unknown, inReplyTo: string): Promise<void> {
+  async sendReply(draft: unknown, inReplyTo: string, draftId?: string): Promise<void> {
     /*
       A demo session has nowhere to send to.
 
@@ -2201,7 +2211,8 @@ export class WinnowStore {
       );
     }
     try {
-      await this.backend.sendReply(draft, inReplyTo);
+      if (draftId) await this.backend.sendReply(draft, inReplyTo, draftId);
+      else await this.backend.sendReply(draft, inReplyTo);
       this.set({ error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Couldn't send that reply.";
@@ -2224,7 +2235,7 @@ export class WinnowStore {
    * message depends on a server-side thread — so the demo files it into Sent locally,
    * where it can be opened like any other sent message, and nothing leaves the device.
    */
-  async sendNew(draft: Draft): Promise<{ simulated: boolean }> {
+  async sendNew(draft: Draft, draftId?: string): Promise<{ simulated: boolean }> {
     if (!this.backend) {
       const now = Math.max(this.state.now, Date.now());
       const gmailId = `local-sent-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2255,7 +2266,8 @@ export class WinnowStore {
       throw new Error("This build cannot send new messages.");
     }
     try {
-      await this.backend.sendNew(draft);
+      if (draftId) await this.backend.sendNew(draft, draftId);
+      else await this.backend.sendNew(draft);
       this.set({ error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Couldn't send that message.";
@@ -2269,6 +2281,11 @@ export class WinnowStore {
       // message reaches Sent at the next one.
     });
     return { simulated: false };
+  }
+
+  /** Gmail drafts for the composer, or `null` in the demo (which keeps drafts on the device). */
+  draftsApi(): DraftsApi | null {
+    return this.backend?.drafts ?? null;
   }
 
   setSortBy(sortBy: SortBy): void {

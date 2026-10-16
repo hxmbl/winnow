@@ -36,7 +36,17 @@ import {
   takePendingAuth,
 } from "./pendingAuth";
 import { parseRedirect, readOwnParams, stripRedirect } from "./redirect";
-import { GOOGLE_AUTH_URL, GMAIL_SCOPE, GmailError, LABEL } from "../gmail/dto";
+import {
+  COMPOSE_SCOPE,
+  DraftsScopeMissing,
+  GOOGLE_AUTH_URL,
+  GMAIL_SCOPE,
+  GmailError,
+  GmailHttpError,
+  LABEL,
+  hasDraftScopes,
+  isInsufficientScope,
+} from "../gmail/dto";
 import { buildAuthorizeUrl, createPkcePair, describeAuthError, stateMatches } from "../gmail/pkce";
 import type { PlatformInfo } from "../../platform/types";
 import { NO_CLIENT_MESSAGE, TokenManager } from "../gmail/tokens";
@@ -51,7 +61,7 @@ import {
 } from "../contacts/google";
 import { buildMime } from "../gmail/mime";
 import { base64UrlDecode } from "../gmail/dto";
-import { keepLoadedBody, withLoadedBody, type Email, type GmailId, type Mailbox } from "../model/email";
+import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
 import { loadedBodyOf, mailboxFor } from "../gmail/mapper";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
@@ -300,6 +310,9 @@ export function localCache(
  */
 export type ContactsAccess = "unavailable" | "not_granted" | "granted";
 
+/** Whether the grant allows Gmail drafts. Same three states as contacts. */
+export type DraftsAccess = "unavailable" | "not_granted" | "granted";
+
 /** A finished web redirect, with what it was for when it was not a plain sign-in. */
 export type CompletedWebRedirect = {
   email: string;
@@ -311,17 +324,23 @@ export type CompletedWebRedirect = {
   contacts?: ContactsAccess | "declined";
   /** Why it was declined, in words, when it was. */
   contactsMessage?: string;
+  /** Set when the redirect was the drafts opt-in, the same way as `contacts`. */
+  drafts?: DraftsAccess | "declined";
+  draftsMessage?: string;
 };
 
 /** The refusal for a contacts consent approved for a different Google account. */
-function wrongAccountMessage(actual: string, expected: string): string {
-  return `Google contacts were approved for ${actual}, but Winnow is signed in as ${expected}. Choose ${expected} on Google's screen.`;
+function wrongAccountMessage(actual: string, expected: string, what = "Google contacts were"): string {
+  return `${what} approved for ${actual}, but Winnow is signed in as ${expected}. Choose ${expected} on Google's screen.`;
 }
 
 /** Google's refusal, worded for what was being asked. */
-function describeOAuthError(error: string, purpose?: "contacts"): string {
+function describeOAuthError(error: string, purpose?: "contacts" | "drafts"): string {
   if (purpose === "contacts" && error === "access_denied") {
     return "Google contacts were not connected. Suggestions keep coming from your mail.";
+  }
+  if (purpose === "drafts" && error === "access_denied") {
+    return "Drafts were not allowed. Your draft is kept on this device instead.";
   }
   return describeAuthError(error);
 }
@@ -474,6 +493,41 @@ export class GmailSession {
     return this.contactsAccess();
   }
 
+  /**
+   * Whether the stored grant allows drafts. Read from the token, not asked. The sign-in
+   * scope (`gmail.modify`) does, so this is `granted` for every normal session; the
+   * check exists for a grant that was narrowed outside Winnow.
+   */
+  async draftsAccess(): Promise<DraftsAccess> {
+    const current = await this.tokens.current();
+    if (!current) return "unavailable";
+    return hasDraftScopes(current.scope) ? "granted" : "not_granted";
+  }
+
+  /**
+   * Ask for `gmail.compose` on top of the existing grant: the contacts opt-in's
+   * incremental consent, with the same wrong-account refusal. On the web the page
+   * navigates away; the composer's device copy restores the draft on the way back.
+   */
+  async grantDrafts(): Promise<DraftsAccess> {
+    const before = await this.tokens.current();
+    if (!before) {
+      throw new GmailError("Sign in to Gmail before allowing drafts.", 401, "reauth_required");
+    }
+    const expected = (await this.client.profile()).emailAddress;
+    await this.authorize(
+      COMPOSE_SCOPE,
+      { include_granted_scopes: "true", login_hint: expected },
+      { purpose: "drafts", expectEmail: expected },
+    );
+    const actual = (await this.client.profile()).emailAddress;
+    if (actual.toLowerCase() !== expected.toLowerCase()) {
+      await this.tokens.adopt(before);
+      throw new GmailError(wrongAccountMessage(actual, expected, "Drafts were"), 0, "declined");
+    }
+    return this.draftsAccess();
+  }
+
   /** The stored OAuth client, or `null` when the user has not set one up. */
   async storedCredentials(): Promise<OAuthClientCredentials | null> {
     try {
@@ -577,7 +631,7 @@ export class GmailSession {
   private async authorize(
     scope: string,
     extra: Record<string, string> = {},
-    intent: { purpose?: "contacts"; expectEmail?: string } = {},
+    intent: { purpose?: "contacts" | "drafts"; expectEmail?: string } = {},
   ): Promise<void> {
     const clientId = (await this.storedCredentials())?.clientId;
     if (!clientId) throw new GmailError(NO_CLIENT_MESSAGE, 0, "config");
@@ -726,6 +780,16 @@ export class GmailSession {
       // A decline still carries the state we issued, so the stash can be dropped
       // rather than left to expire.
       const declined = redirect.state ? takePendingAuth(redirect.state) : null;
+      if (declined?.purpose === "drafts" && (await this.tokens.hasSession())) {
+        this.scrubAddressBar();
+        const profile = await this.client.profile();
+        return {
+          email: profile.emailAddress,
+          view: shared,
+          drafts: "declined",
+          draftsMessage: describeOAuthError(redirect.error, "drafts"),
+        };
+      }
       if (declined?.purpose === "contacts" && (await this.tokens.hasSession())) {
         // Declining the contacts opt-in is not a failed sign-in: the Gmail session is
         // untouched, so the app comes back exactly as it was, minus the code in the URL.
@@ -769,7 +833,7 @@ export class GmailSession {
     }
 
     // Kept so a contacts opt-in approved for the wrong account can be undone.
-    const before = pending.purpose === "contacts" ? await this.tokens.current() : null;
+    const before = pending.purpose ? await this.tokens.current() : null;
 
     await this.tokens.exchangeCode({
       code: redirect.code,
@@ -780,6 +844,19 @@ export class GmailSession {
     this.scrubAddressBar();
 
     const profile = await this.client.profile();
+    if (pending.purpose === "drafts") {
+      const expectedEmail = pending.expectEmail;
+      if (expectedEmail && before && profile.emailAddress.toLowerCase() !== expectedEmail.toLowerCase()) {
+        await this.tokens.adopt(before);
+        return {
+          email: expectedEmail,
+          view: shared,
+          drafts: "declined",
+          draftsMessage: wrongAccountMessage(profile.emailAddress, expectedEmail, "Drafts were"),
+        };
+      }
+      return { email: profile.emailAddress, view: shared, drafts: await this.draftsAccess() };
+    }
     if (pending.purpose !== "contacts") return { email: profile.emailAddress, view: shared };
 
     const expected = pending.expectEmail;
@@ -859,6 +936,58 @@ export class GmailSession {
       return cached.gmailId;
     };
 
+    /**
+     * The raw message for a draft or a send, and the thread it belongs on.
+     *
+     * With `replyTo`, the message it answers: `In-Reply-To`, `References` over the
+     * whole exchange, and its thread id. A send insists on having that message
+     * (`strict`); a draft save does not, and saves unthreaded rather than not at all.
+     */
+    const rawFor = async (
+      draft: Draft,
+      replyTo?: GmailId,
+      strict = false,
+    ): Promise<{ raw: string; threadId?: string }> => {
+      // A reply needs a `From`, and the only address Gmail will accept as one is the
+      // account's own.
+      const account = await client.profile();
+      const from = { address: account.emailAddress, name: account.emailAddress.split("@")[0] };
+      if (!replyTo) return { raw: buildMime(draft, { from }), threadId: draft.threadId };
+      const all = await loadCache();
+      const email = all.find((candidate) => candidate.gmailId === replyTo);
+      if (!email) {
+        if (strict) {
+          throw new GmailError(
+            "Cannot reply: the original Gmail message is no longer cached. Refresh and try again.",
+            404,
+            "unknown",
+          );
+        }
+        return { raw: buildMime(draft, { from }), threadId: draft.threadId };
+      }
+      // `References` accumulates the whole exchange, oldest first, so that a client
+      // threading this by references sees the same thread Gmail does.
+      const conversation = email.threadId
+        ? all.filter((candidate) => candidate.threadId === email.threadId)
+        : [email];
+      return {
+        raw: buildMime(draft, { from, inReplyTo: email, references: conversation }),
+        threadId: email.threadId,
+      };
+    };
+
+    /** A drafts request, with a scope refusal turned into the error the composer reads. */
+    const draftCall = async <T>(call: () => Promise<T>): Promise<T> => {
+      try {
+        return await call();
+      } catch (error) {
+        if (error instanceof GmailHttpError && isInsufficientScope(error.status, error.body)) {
+          throw new DraftsScopeMissing();
+        }
+        throw error;
+      }
+    };
+
     return {
       async sync(options) {
         // Progress is threaded from the store rather than invented here, so the
@@ -922,39 +1051,33 @@ export class GmailSession {
       async deletePermanently(id) {
         await client.deletePermanently(await gmailIdFor(id));
       },
-      async sendReply(draft, inReplyTo) {
-        const all = await loadCache();
-        const email = all.find((candidate) => candidate.gmailId === inReplyTo);
-        if (!email) {
-          throw new GmailError(
-            "Cannot reply: the original Gmail message is no longer cached. Refresh and try again.",
-            404,
-            "unknown",
-          );
-        }
-        // A reply needs a `From`, and the only address Gmail will accept as
-        // one is the account's own.
-        const account = await client.profile();
-        // `References` accumulates the whole exchange, oldest first, so that a
-        // client threading this by references sees the same thread Gmail does.
-        const conversation = email.threadId
-          ? all.filter((candidate) => candidate.threadId === email.threadId)
-          : [email];
-        const raw = buildMime(draft as Parameters<typeof buildMime>[0], {
-          from: { address: account.emailAddress, name: account.emailAddress.split("@")[0] },
-          inReplyTo: email,
-          references: conversation,
-        });
-        await client.send(raw, email.threadId);
+      async sendReply(draft, inReplyTo, draftId) {
+        const { raw, threadId } = await rawFor(draft as Draft, inReplyTo, true);
+        // A composer with a saved draft sends *that* draft, with its latest content, so
+        // Gmail removes it as it sends and no orphan is left in Drafts.
+        if (draftId) await draftCall(() => client.sendDraft(draftId, raw, threadId));
+        else await client.send(raw, threadId);
       },
-      async sendNew(draft) {
+      async sendNew(draft, draftId) {
         // The same `From` and the same builder as a reply, with no message to answer:
         // no `In-Reply-To`, no `References`, and no thread id for Gmail to file it under.
-        const account = await client.profile();
-        const raw = buildMime(draft, {
-          from: { address: account.emailAddress, name: account.emailAddress.split("@")[0] },
-        });
-        await client.send(raw);
+        const { raw } = await rawFor(draft);
+        if (draftId) await draftCall(() => client.sendDraft(draftId, raw));
+        else await client.send(raw);
+      },
+
+      drafts: {
+        async create(draft, replyTo) {
+          const { raw, threadId } = await rawFor(draft, replyTo);
+          return (await draftCall(() => client.createDraft(raw, threadId))).id;
+        },
+        async update(id, draft, replyTo) {
+          const { raw, threadId } = await rawFor(draft, replyTo);
+          return (await draftCall(() => client.updateDraft(id, raw, threadId))).id ?? id;
+        },
+        async delete(id) {
+          await draftCall(() => client.deleteDraft(id));
+        },
       },
 
       async fetchAttachment(gmailId, attachmentId) {

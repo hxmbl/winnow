@@ -2001,6 +2001,32 @@ describe("sending a new message", () => {
     expect(store.getSnapshot().error).toBe("network down");
   });
 
+  it("sends the composer's saved Gmail draft when it has one, for replies and new mail", async () => {
+    const { backend } = fakeBackend();
+    const calls: unknown[][] = [];
+    backend.sendNew = async (...args) => void calls.push(["new", ...args]);
+    backend.sendReply = async (...args) => void calls.push(["reply", ...args]);
+    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
+    await store.sendNew(draft, "d-1");
+    await store.sendReply(draft, "g-1", "d-2");
+    await store.sendReply(draft, "g-1");
+    expect(calls).toEqual([
+      ["new", draft, "d-1"],
+      ["reply", draft, "g-1", "d-2"],
+      ["reply", draft, "g-1"],
+    ]);
+  });
+
+  it("offers Gmail drafts only when the backend has them; the demo has none", () => {
+    const demo = new WinnowStore({ seed: DEMO_EMAILS });
+    demo.markDemoMode();
+    expect(demo.draftsApi()).toBeNull();
+    const { backend } = fakeBackend();
+    expect(new WinnowStore({ seed: DEMO_EMAILS, backend }).draftsApi()).toBeNull();
+    const drafts = { create: async () => "d", update: async () => "d", delete: async () => {} };
+    expect(new WinnowStore({ seed: DEMO_EMAILS, backend: { ...backend, drafts } }).draftsApi()).toBe(drafts);
+  });
+
   it("refuses on a backend that cannot send new mail", async () => {
     const { backend } = fakeBackend();
     const store = new WinnowStore({ seed: DEMO_EMAILS, backend });

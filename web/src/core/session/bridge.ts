@@ -2,7 +2,13 @@
  * Bridge between UI and signed-in Gmail account.
  */
 
-import { GmailSession, localCache, type CompletedWebRedirect, type ContactsAccess } from "./session";
+import {
+  GmailSession,
+  localCache,
+  type CompletedWebRedirect,
+  type ContactsAccess,
+  type DraftsAccess,
+} from "./session";
 import type { Platform } from "../../platform/types";
 import type { MailBackend, WinnowStore } from "../store/store";
 import type { GoogleContact } from "../contacts/google";
@@ -43,6 +49,10 @@ export type SessionBridge = {
    * away and never resolves; the outcome arrives through `completeWebRedirect`.
    */
   grantContacts(): Promise<ContactsAccess>;
+  /** Whether the grant allows Gmail drafts. */
+  draftsAccess(): Promise<DraftsAccess>;
+  /** Ask for drafts through incremental consent; on the web this navigates away. */
+  grantDrafts(): Promise<DraftsAccess>;
   /** The address book as last stored, without the network. */
   cachedContacts(): Promise<GoogleContact[]>;
   /** Fetch what changed. `null` when there is no grant. */
@@ -103,6 +113,10 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
     contactsAccess: () => session.contactsAccess(),
 
     grantContacts: () => session.grantContacts(),
+
+    draftsAccess: () => session.draftsAccess(),
+
+    grantDrafts: () => session.grantDrafts(),
 
     cachedContacts: () => session.contacts.cached(),
 
