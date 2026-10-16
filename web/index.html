@@ -24,6 +24,12 @@
       right backdrop before the bundle has loaded. See the file for why.
     -->
     <script src="/theme-boot.js"></script>
+    <!--
+      No Referer on anything this document loads or links to: a remote image the reader
+      allowed, a background, a logo. Every Winnow request that needs an identity carries
+      a token instead, and the app's address is nobody else's business.
+    -->
+    <meta name="referrer" content="no-referrer" />
     <title>Winnow</title>
   </head>
   <body>

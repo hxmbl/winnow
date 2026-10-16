@@ -1130,7 +1130,10 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
           if (resolved.url) {
             attrs.push(`src="${escapeAttribute(resolved.url)}"`);
             // Lazy, so forty images do not open forty sockets before any is seen.
-            attrs.push('loading="lazy"', 'decoding="async"');
+            // No Referer: the app's own address (`http://tauri.localhost`, or wherever
+            // the web build is hosted) is not the sender's business, and an allowed image
+            // is still a request to a stranger's server.
+            attrs.push('loading="lazy"', 'decoding="async"', 'referrerpolicy="no-referrer"');
           } else if (resolved.blocked) {
             // The element survives with its address in a data attribute, so it keeps
             // its `alt` and the reader can account for it.
@@ -1389,6 +1392,9 @@ export function emailDocument(body: string, stylesheets: readonly string[] = [])
     '<html><head><meta charset="utf-8">',
     // Without this a white newsletter renders as a white block on a black pane.
     '<meta name="color-scheme" content="light">',
+    // A `srcdoc` frame inherits the app's referrer policy, and the frame's own
+    // `referrerpolicy` attribute covers only its navigation, not what its document loads.
+    '<meta name="referrer" content="no-referrer">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     sender ? `<style>${sender}</style>` : "",
     `<style>${emailDocumentCss()}</style>`,
