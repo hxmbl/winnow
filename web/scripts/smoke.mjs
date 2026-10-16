@@ -5986,6 +5986,211 @@ try {
     await ctx.close();
   }
 
+  // ── The position readout follows the open message ─────────────────────────
+
+  // "4 of 39" was the cursor's index, a separate number from the open message, and every
+  // change to the rows (an archive above, new mail at the top, a re-sort on read) shifted
+  // one without the other. Against a fake Gmail, so mail can genuinely arrive.
+  section("position readout");
+  {
+    const FAKE_POSITION_TOKEN = ["fake", "position", "access"].join("-");
+    const b64url = (text) => Buffer.from(text, "utf8").toString("base64url");
+    const base = Date.now() - 30 * 60_000;
+    // p1 newest .. p8 oldest; p0 is the mail that arrives later, newer than all of them.
+    const labels = new Map();
+    const subjects = new Map();
+    const dates = new Map();
+    for (let i = 0; i <= 8; i += 1) {
+      labels.set(`p${i}`, i <= 4 ? ["INBOX", "UNREAD"] : ["INBOX"]);
+      subjects.set(`p${i}`, `Position check ${i}`);
+      dates.set(`p${i}`, i === 0 ? Date.now() - 5_000 : base - i * 3_600_000);
+    }
+    let arrived = false;
+    let delivered = false;
+    const touched = new Set();
+    const listed = () => [...labels.keys()].filter((id) => id !== "p0" || arrived);
+    const message = (id, format) => {
+      const headers = [
+        { name: "From", value: `Sender ${id} <${id}@position.example>` },
+        { name: "To", value: "me@winnow.example" },
+        { name: "Subject", value: subjects.get(id) },
+        { name: "Date", value: new Date(dates.get(id)).toUTCString() },
+        { name: "Message-ID", value: `<${id}@position.example>` },
+      ];
+      const text = `Body of ${subjects.get(id)}.`;
+      return {
+        id,
+        threadId: `t-${id}`,
+        labelIds: labels.get(id),
+        snippet: text,
+        internalDate: String(dates.get(id)),
+        sizeEstimate: 400,
+        payload:
+          format === "full"
+            ? { mimeType: "text/plain", headers, body: { size: text.length, data: b64url(text) } }
+            : { mimeType: "text/plain", headers },
+      };
+    };
+    const json = (route, body, status = 200) =>
+      route.fulfill({ status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+    const fakeGmail = (route) => {
+      const request = route.request();
+      if (request.method() === "OPTIONS") {
+        return route.fulfill({
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-headers": "authorization, content-type",
+            "access-control-allow-methods": "GET, POST, PUT, DELETE",
+          },
+        });
+      }
+      const url = new globalThis.URL(request.url());
+      const p = url.pathname.replace("/gmail/v1/users/me", "");
+      if (p === "/profile") return json(route, { emailAddress: "me@winnow.example", historyId: "500", messagesTotal: listed().length });
+      if (p === "/messages") {
+        const q = url.searchParams.get("q") ?? "";
+        const inbox = q.includes("in:inbox") && !q.includes("-in:inbox");
+        const ids = listed().filter((id) => (inbox ? labels.get(id).includes("INBOX") : !labels.get(id).includes("INBOX")));
+        return json(route, ids.length ? { messages: ids.map((id) => ({ id, threadId: `t-${id}` })), resultSizeEstimate: ids.length } : { resultSizeEstimate: 0 });
+      }
+      const modify = /^\/messages\/(p\d)\/modify$/.exec(p);
+      if (modify && request.method() === "POST") {
+        const body = JSON.parse(request.postData() ?? "{}");
+        const id = modify[1];
+        const next = new Set(labels.get(id));
+        for (const label of body.addLabelIds ?? []) next.add(label);
+        for (const label of body.removeLabelIds ?? []) next.delete(label);
+        labels.set(id, [...next]);
+        touched.add(id);
+        return json(route, { id, labelIds: labels.get(id) });
+      }
+      const one = /^\/messages\/(p\d)$/.exec(p);
+      if (one && (one[1] !== "p0" || arrived)) return json(route, message(one[1], url.searchParams.get("format") === "full" ? "full" : "metadata"));
+      if (p === "/history") {
+        if (!arrived || delivered) return json(route, { historyId: delivered ? "501" : "500" });
+        delivered = true;
+        return json(route, {
+          history: [
+            { id: "501", messagesAdded: [{ message: { id: "p0", threadId: "t-p0" } }] },
+            ...[...touched].map((id) => ({ id: "501", labelsRemoved: [{ message: { id, threadId: `t-${id}` }, labelIds: ["INBOX"] }] })),
+          ],
+          historyId: "501",
+        });
+      }
+      return json(route, {});
+    };
+
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await ctx.addInitScript((accessToken) => {
+      if (window.top !== window) return;
+      if (sessionStorage.getItem("seeded-position")) return;
+      sessionStorage.setItem("seeded-position", "1");
+      localStorage.setItem("winnow.google.oauthClient", JSON.stringify({ clientId: "1234567890-abc123def.apps.googleusercontent.com" }));
+      localStorage.setItem(
+        "winnow.gmail.tokens",
+        JSON.stringify({
+          accessToken,
+          refreshToken: "1//smoke-refresh",
+          expiresAt: Date.now() + 3_600_000,
+          scope: "https://www.googleapis.com/auth/gmail.modify",
+        }),
+      );
+    }, FAKE_POSITION_TOKEN);
+    await ctx.route("https://gmail.googleapis.com/**", fakeGmail);
+    await ctx.route("https://oauth2.googleapis.com/**", (route) => json(route, { error: "invalid_grant" }, 400));
+
+    const pp = await ctx.newPage();
+    const ppErrors = [];
+    pp.on("pageerror", (error) => ppErrors.push(String(error)));
+    await pp.goto(URL, { waitUntil: "networkidle" });
+    const listRows = pp.locator("[data-row-count] button[data-message-id]");
+    await pp.locator("[data-message-id]", { hasText: "Position check 8" }).first().waitFor({ state: "visible", timeout: 15_000 });
+
+    /** The readout, the open message and the list, read in one pass. */
+    const readState = () =>
+      pp.evaluate(() => {
+        const readout = document.querySelector("header [data-position]")?.textContent?.trim() ?? "";
+        const match = /^(\d+)\s*of\s*(\d+)$/.exec(readout);
+        const rows = [...document.querySelectorAll("[data-row-count] button[data-message-id]")];
+        const subjectOf = (row) => /Position check \d/.exec(row?.textContent ?? "")?.[0] ?? null;
+        const open = /Position check \d/.exec(document.querySelector("article h1")?.textContent ?? "")?.[0] ?? null;
+        const position = match ? Number(match[1]) : null;
+        const total = match ? Number(match[2]) : Number(readout);
+        return {
+          readout,
+          position,
+          total,
+          open,
+          atPosition: position ? subjectOf(rows[position - 1]) : null,
+          openRow: rows.findIndex((row) => subjectOf(row) === open) + 1,
+          current: rows.findIndex((row) => row.getAttribute("aria-current") === "true") + 1,
+          rows: rows.map(subjectOf),
+          prevDisabled: document.querySelector('header [aria-label="Previous message"]')?.disabled ?? null,
+          nextDisabled: document.querySelector('header [aria-label="Next message"]')?.disabled ?? null,
+        };
+      });
+    const agrees = (s) =>
+      s.open !== null &&
+      s.position === s.openRow &&
+      s.atPosition === s.open &&
+      s.current === s.position &&
+      s.prevDisabled === (s.position === 1) &&
+      s.nextDisabled === (s.position === s.total);
+
+    await listRows.nth(4).click();
+    await pp.locator("article h1").first().waitFor({ timeout: 5_000 });
+    await pp.waitForTimeout(400);
+    const opened = await readState();
+    check("the readout names the row that was opened", agrees(opened) && opened.position === 5, JSON.stringify(opened));
+
+    // Archive a row above the open one, from its menu, without opening it.
+    const aboveIndex = opened.rows.findIndex((subject, index) => index < opened.position - 1 && subject !== opened.open);
+    await listRows.nth(aboveIndex).click({ button: "right" });
+    await pp.locator("[data-menu='row'] [data-menu-item='archive']").click();
+    await pp.waitForTimeout(500);
+    const archived = await readState();
+    check(
+      "after a row above it is archived, the readout still names the open message",
+      agrees(archived) && archived.open === opened.open && archived.position === opened.position - 1 && archived.total === opened.total - 1,
+      JSON.stringify(archived),
+    );
+
+    // `j` steps from the open message, not from a cursor left where it used to be.
+    const below = archived.rows[archived.position];
+    await pp.keyboard.press("j");
+    await pp.waitForTimeout(400);
+    const stepped = await readState();
+    check("j then opens the row straight below it", agrees(stepped) && stepped.open === below, JSON.stringify(stepped));
+
+    // New mail arrives on the next foreground poll, at the top of the list.
+    arrived = true;
+    await pp.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await pp.locator("[data-message-id]", { hasText: "Position check 0" }).first().waitFor({ state: "visible", timeout: 20_000 });
+    await pp.waitForTimeout(500);
+    const fresh = await readState();
+    const freshRow = fresh.rows.indexOf("Position check 0") + 1;
+    check(
+      "after new mail arrives above it, the readout still names the open message",
+      agrees(fresh) && fresh.open === stepped.open && fresh.total === stepped.total + 1 && freshRow < fresh.position && fresh.position === stepped.position + 1,
+      JSON.stringify({ ...fresh, freshRow }),
+    );
+
+    // The chevrons' ends are the open message's ends.
+    await pp.locator('header [aria-label="Previous message"]').click();
+    await pp.waitForTimeout(300);
+    const prev = await readState();
+    check("the previous chevron steps up from the open message", agrees(prev) && prev.position === fresh.position - 1, JSON.stringify(prev));
+    for (let i = 0; i < 12 && !(await readState()).prevDisabled; i += 1) {
+      await pp.locator('header [aria-label="Previous message"]').click();
+      await pp.waitForTimeout(150);
+    }
+    const top = await readState();
+    check("and is disabled on the first row, with next still live", agrees(top) && top.position === 1 && top.nextDisabled === false, JSON.stringify(top));
+    check("no page errors on the position pass", ppErrors.length === 0, ppErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");
