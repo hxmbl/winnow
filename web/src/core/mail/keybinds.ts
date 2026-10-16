@@ -36,6 +36,7 @@ export type Command =
   | { type: "markAllRead" }
   | { type: "focusReply" }
   | { type: "forward" }
+  | { type: "compose" }
   | { type: "focusSearch" }
   | { type: "toggleFilter"; railIndex: number }
   | { type: "clearFilters" }
@@ -82,6 +83,11 @@ export type KeyContext = {
   /** The composer is up. A modal world that happens to contain a text field. */
   composerOpen: boolean;
   viewerOpen: boolean;
+  /**
+   * The open message carries a one-time code, so `c` copies it instead of composing.
+   * Optional so a caller that never shows codes need not say so.
+   */
+  codeAvailable?: boolean;
   /** A modal sheet — settings, the shortcut list — is up. */
   overlayVisible: boolean;
   navigationVisible: boolean;
@@ -235,13 +241,20 @@ export const BINDINGS: readonly Binding[] = [
     command: { type: "toggleStar" },
   },
   {
-    // `c` is free: Winnow has no compose shortcut (new mail is not a feature yet), so
-    // nothing here collides with Gmail's "c to compose" habit.
+    /*
+      One row, two meanings, because one key: `c` is Gmail's compose, and it also copies
+      the code of an open message that has one. A message with a code is the only place
+      the copy is wanted, and there a new message is a button away — so the code wins
+      there and compose wins everywhere else.
+    */
     keys: "c",
-    help: "Copy the open message's verification code",
+    help: "Compose a new message (copies the code when the open message has one)",
     matches: { keys: ["c"] },
-    when: ({ context, event }) => context.viewerOpen && event.shiftKey !== true,
-    command: { type: "copyCode" },
+    when: ({ event }) => event.shiftKey !== true,
+    command: ({ context }) =>
+      context.viewerOpen && context.codeAvailable === true
+        ? { type: "copyCode" }
+        : { type: "compose" },
   },
   {
     // `e` is context-sensitive: archive, move back, or restore, following
@@ -474,6 +487,7 @@ export function shortcutHint(label: string, command: Command["type"]): string {
 const PROBE: readonly KeyContext[] = [
   DEFAULT_CONTEXT,
   { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true, railCount: 9 },
+  { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true, codeAvailable: true },
   { ...DEFAULT_CONTEXT, overlayVisible: true, filtersActive: true },
 ];
 

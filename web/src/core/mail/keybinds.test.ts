@@ -3,6 +3,7 @@ import {
   BINDINGS,
   DEFAULT_CONTEXT,
   commandForKey,
+  shortcutFor,
   shouldSwallow,
   specMatches,
   type Binding,
@@ -81,6 +82,7 @@ const REACHABLE_CONTEXTS: readonly KeyContext[] = [
   DEFAULT_CONTEXT,
   context({ hasActionTarget: true }),
   context({ viewerOpen: true, hasActionTarget: true }),
+  context({ viewerOpen: true, hasActionTarget: true, codeAvailable: true }),
   context({ railCount: 9, hasActionTarget: true }),
   context({ filtersActive: true, hasActionTarget: true, railCount: 9 }),
   context({ overlayVisible: true, hasActionTarget: true, railCount: 9 }),
@@ -470,6 +472,7 @@ describe("the cheat sheet", () => {
       "markAllRead",
       "focusReply",
       "forward",
+      "compose",
       "focusSearch",
       "toggleFilter",
       "clearFilters",
@@ -550,11 +553,40 @@ describe("the cheat sheet", () => {
 });
 
 describe("copying a code", () => {
-  it("is c, with the reader open, and does not take Shift+C", () => {
-    expect(commandForKey("c", { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true })).toEqual({ type: "copyCode" });
-    expect(commandForKey("c", { ...DEFAULT_CONTEXT, viewerOpen: false, hasActionTarget: true })).toBeNull();
-    expect(commandForKey("C", { ...DEFAULT_CONTEXT, viewerOpen: true }, { shiftKey: true })).toBeNull();
-    // Nothing else claims `c`, compose included (there is no compose shortcut).
+  it("is c, with an open message that has a code, and does not take Shift+C", () => {
+    expect(
+      commandForKey("c", { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true, codeAvailable: true }),
+    ).toEqual({ type: "copyCode" });
+    expect(commandForKey("C", { ...DEFAULT_CONTEXT, viewerOpen: true, codeAvailable: true }, { shiftKey: true })).toBeNull();
+    // One row owns `c`; its meaning is computed from the context.
     expect(BINDINGS.filter((binding) => binding.matches.keys?.includes("c"))).toHaveLength(1);
+  });
+});
+
+describe("composing", () => {
+  it("is c on the list, and in an open message without a code", () => {
+    expect(commandForKey("c", DEFAULT_CONTEXT)).toEqual({ type: "compose" });
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, hasActionTarget: true })).toEqual({ type: "compose" });
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true })).toEqual({
+      type: "compose",
+    });
+  });
+
+  it("never fires in a text field, the composer, a sheet or the palette", () => {
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, textEditing: true })).toBeNull();
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, composerOpen: true })).toBeNull();
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, overlayVisible: true })).toBeNull();
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, navigationVisible: true })).toBeNull();
+    expect(commandForKey("c", { ...DEFAULT_CONTEXT, ready: false })).toBeNull();
+  });
+
+  it("leaves Shift+C and the system modifiers alone", () => {
+    expect(commandForKey("C", DEFAULT_CONTEXT, { shiftKey: true })).toBeNull();
+    expect(commandForKey("c", DEFAULT_CONTEXT, { metaKey: true })).toBeNull();
+    expect(commandForKey("c", DEFAULT_CONTEXT, { ctrlKey: true })).toBeNull();
+  });
+
+  it("is what the toolbar advertises", () => {
+    expect(shortcutFor("compose")).toBe("c");
   });
 });

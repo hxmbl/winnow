@@ -1954,3 +1954,56 @@ describe("the demo's clock", () => {
     }
   });
 });
+
+describe("sending a new message", () => {
+  const draft = {
+    to: ["dana@northwind.example"],
+    cc: ["sam@northwind.example"],
+    bcc: [],
+    subject: "Lunch?",
+    body: "Thursday works for me.",
+  };
+
+  it("is simulated in the demo, and lands in Sent", async () => {
+    const store = new WinnowStore({ seed: DEMO_EMAILS });
+    store.markDemoMode();
+    const before = store.getSnapshot().all.length;
+    await expect(store.sendNew(draft)).resolves.toEqual({ simulated: true });
+    const all = store.getSnapshot().all;
+    expect(all.length).toBe(before + 1);
+    const sent = all.find((email) => email.subject === "Lunch?")!;
+    expect(sent.mailbox).toBe("sent");
+    expect(sent.threadId).toBeUndefined();
+    expect(sent.to).toEqual([{ address: "dana@northwind.example" }]);
+    expect(sent.cc).toEqual([{ address: "sam@northwind.example" }]);
+    expect(sent.body).toBe("Thursday works for me.");
+    expect(store.getSnapshot().error).toBeNull();
+  });
+
+  it("goes through the backend when signed in", async () => {
+    const { backend } = fakeBackend();
+    const sent: unknown[] = [];
+    backend.sendNew = async (d) => {
+      sent.push(d);
+    };
+    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
+    await expect(store.sendNew(draft)).resolves.toEqual({ simulated: false });
+    expect(sent).toEqual([draft]);
+  });
+
+  it("reports a failure once, and throws so the composer keeps the draft", async () => {
+    const { backend } = fakeBackend();
+    backend.sendNew = async () => {
+      throw new Error("network down");
+    };
+    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
+    await expect(store.sendNew(draft)).rejects.toThrow("network down");
+    expect(store.getSnapshot().error).toBe("network down");
+  });
+
+  it("refuses on a backend that cannot send new mail", async () => {
+    const { backend } = fakeBackend();
+    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
+    await expect(store.sendNew(draft)).rejects.toThrow(/cannot send new messages/);
+  });
+});

@@ -41,6 +41,12 @@ import type { GoogleContact } from "../contacts/google";
  */
 export const DEMO_NOW = Date.UTC(2026, 4, 9, 18, 0, 0);
 
+/**
+ * The demo user: the `From` of the seeded sent mail, and of anything the demo
+ * "sends" (see `Store.sendNew`).
+ */
+export const DEMO_ACCOUNT = { email: "alex@northwind.example", name: "Alex Moreau" } as const;
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;

@@ -947,6 +947,15 @@ export class GmailSession {
         });
         await client.send(raw, email.threadId);
       },
+      async sendNew(draft) {
+        // The same `From` and the same builder as a reply, with no message to answer:
+        // no `In-Reply-To`, no `References`, and no thread id for Gmail to file it under.
+        const account = await client.profile();
+        const raw = buildMime(draft, {
+          from: { address: account.emailAddress, name: account.emailAddress.split("@")[0] },
+        });
+        await client.send(raw);
+      },
 
       async fetchAttachment(gmailId, attachmentId) {
         const all = await loadCache();

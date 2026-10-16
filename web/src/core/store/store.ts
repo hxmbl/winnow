@@ -24,10 +24,12 @@ import {
   isBodyLoaded,
   withLoadedBody,
   withCode,
+  type Draft,
   type Email,
   type LoadedBody,
   type Mailbox,
 } from "../model/email";
+import { hashId } from "../model/ids";
 import {
   catalogIndex,
   FILTER_LABELS,
@@ -62,7 +64,7 @@ import { LearningModel } from "../learn/learning";
 import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
 import type { SignalWeights } from "../classify/weights";
-import { DEMO_NOW } from "../data/demo";
+import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
 import type { SyncProgress, SyncStage } from "../gmail/sync";
 import {
   DEFAULT_ACCENT_THEME,
@@ -489,6 +491,12 @@ export interface MailBackend {
   setRead(id: number, read: boolean): Promise<void>;
   deletePermanently(id: number): Promise<void>;
   sendReply(draft: unknown, inReplyTo: string): Promise<void>;
+  /**
+   * Send a new message: no `In-Reply-To`, no `References`, no thread. Optional so a
+   * backend written before composing existed (and every test fake) still type-checks;
+   * the store reports a backend without it as unable to send.
+   */
+  sendNew?(draft: Draft): Promise<void>;
   /**
    * Download one attachment's bytes.
    *
@@ -2203,6 +2211,64 @@ export class WinnowStore {
       this.set({ error: message });
       throw error instanceof Error ? error : new Error(message);
     }
+  }
+
+  /**
+   * Send a new message.
+   *
+   * Live: through the backend, then a refresh, so the message shows in Sent as soon as
+   * Gmail has filed it rather than at the next scheduled sync.
+   *
+   * Demo: simulated, and said so by the return value. Composing is a whole feature the
+   * demo would otherwise be unable to show, and unlike a reply nothing about a new
+   * message depends on a server-side thread — so the demo files it into Sent locally,
+   * where it can be opened like any other sent message, and nothing leaves the device.
+   */
+  async sendNew(draft: Draft): Promise<{ simulated: boolean }> {
+    if (!this.backend) {
+      const now = Math.max(this.state.now, Date.now());
+      const gmailId = `local-sent-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const contacts = (addresses: readonly string[]) => addresses.map((address) => ({ address }));
+      const sent: Email = withCode({
+        id: hashId(gmailId),
+        gmailId,
+        sender: DEMO_ACCOUNT.email,
+        address: DEMO_ACCOUNT.email,
+        name: DEMO_ACCOUNT.name,
+        to: contacts(draft.to),
+        cc: contacts(draft.cc),
+        bcc: contacts(draft.bcc),
+        mailbox: "sent",
+        receivedAt: now,
+        subject: draft.subject,
+        body: draft.body,
+        category: "primary",
+        starred: false,
+        unread: false,
+        urgent: false,
+        attachments: [],
+      });
+      this.set({ all: [sent, ...this.state.all] });
+      return { simulated: true };
+    }
+    if (!this.backend.sendNew) {
+      throw new Error("This build cannot send new messages.");
+    }
+    try {
+      await this.backend.sendNew(draft);
+      this.set({ error: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Couldn't send that message.";
+      // As with a reply: surfaced app-wide too, because a failed send is the network's
+      // problem and will recur on the next message.
+      this.set({ error: message });
+      throw error instanceof Error ? error : new Error(message);
+    }
+    void this.refresh().catch(() => {
+      // The send succeeded; a failed refresh is reported by the sync itself, and the
+      // message reaches Sent at the next one.
+    });
+    return { simulated: false };
   }
 
   setSortBy(sortBy: SortBy): void {
