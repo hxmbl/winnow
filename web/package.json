@@ -14,6 +14,7 @@
     "typecheck": "tsc -b",
     "check": "npm run typecheck && npm run lint && npm run lint:proxy && npm run test",
     "smoke": "npm run build && node scripts/smoke.mjs",
+    "leaks": "npm run build && node scripts/leaks.mjs",
     "tauri:dev": "cd ../native && cargo tauri dev",
     "tauri:build": "node scripts/bundle.mjs",
     "proxy": "node --experimental-strip-types ../proxy/server.ts",
