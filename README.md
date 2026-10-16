@@ -38,6 +38,7 @@ tag's workflow run as artifacts.
 | Linux | `Winnow_<version>_amd64.AppImage` (any distro: `chmod +x`, run it) or `Winnow_<version>_amd64.deb` (`sudo apt install ./Winnow_…deb`) |
 | macOS | `Winnow_<version>_universal.dmg`, Apple silicon and Intel, macOS 10.15+ |
 | Windows | `Winnow_<version>_x64_en-US.msi` or `Winnow_<version>_x64-setup.exe`, when that release has them — the Windows build is best-effort |
+| Android | `Winnow_<version>_android-universal.apk` (or `…-debug.apk`), any phone on Android 7+, when that release has one — the Android build is best-effort |
 
 - **macOS** says Winnow "can't be opened because Apple cannot check it for
   malicious software" (or, on newer versions, that it's damaged). Drag it to
@@ -52,6 +53,29 @@ tag's workflow run as artifacts.
   then **Run anyway**.
 - **Linux** doesn't care. The AppImage needs FUSE 2 (`libfuse2`) on some
   distros; the `.deb` doesn't.
+
+### Android
+
+Download the `.apk` on your phone from the
+[Releases page](https://github.com/hxmbl/winnow/releases) and open it. Only
+install Winnow APKs from that page (hxmbl/winnow's own Releases): an APK from
+anywhere else could be anything with Winnow's name on it.
+
+- Android asks you to allow installs from your browser or file manager the first
+  time. Allow it for that app, install, then you can turn it back off.
+- **Play Protect** may say "Unsafe app blocked" or that the app is from an
+  unknown developer, because these builds aren't from the Play Store. Choose
+  **More details → Install anyway**. That's expected for these builds.
+- **Updates** install over the old version only if both were signed with the same
+  key. An APK whose name ends in `-debug` is signed with a throwaway key, so to
+  move to a newer one (or to a non-`-debug` one) you may have to uninstall Winnow
+  first, which also signs you out.
+
+Sign-in on Android uses the same **Desktop app** OAuth client as the desktop
+builds: Winnow opens Google in your browser and catches the answer on your own
+phone. When the browser says you're signed in, switch back to Winnow. Mail syncs
+while the app is open; there's no background sync or new-mail notifications
+while it's closed yet.
 
 To connect Gmail you bring your own Google Cloud credentials:
 create a free OAuth client in your own Google Cloud project and paste it into the
