@@ -4878,6 +4878,121 @@ try {
     await ctx.close();
   }
 
+  // ── Read on open ───────────────────────────────────────────────────────────
+
+  section("read on open");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const r = await ctx.newPage();
+    r.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    r.on("pageerror", (error) => errors.push(String(error)));
+    await r.goto(URL, { waitUntil: "networkidle" });
+    await r.waitForSelector("[data-row-count] [data-row-id]");
+
+    const rowButtons = r.locator("[data-row-count] button[data-message-id]");
+    // The Inbox row's `data-unread`, read off the DOM whether or not the sidebar is
+    // showing: absent means zero, as everywhere else.
+    const inboxUnread = () =>
+      r.evaluate(() => Number(document.querySelector('button[data-nav="inbox"]')?.getAttribute("data-unread") ?? "0"));
+    /** A row's read state as the list paints it: the label, the dot, and the weight. */
+    const rowState = (id) =>
+      r.evaluate((id) => {
+        const button = document.querySelector(`[data-row-count] button[data-message-id="${id}"]`);
+        const row = button?.closest("[data-row-id]");
+        if (!button || !row) return null;
+        return {
+          labelUnread: /, unread,/.test(button.getAttribute("aria-label") ?? ""),
+          dot: row.querySelector(":scope > span[aria-hidden]")?.className.includes("bg-accent") ?? false,
+          weight: Number(getComputedStyle(row.querySelector("[data-row-sender]")).fontWeight),
+        };
+      }, id);
+    const isUnreadPainted = (st) => st !== null && st.labelUnread && st.dot && st.weight >= 600;
+    const isReadPainted = (st) => st !== null && !st.labelUnread && !st.dot && st.weight === 400;
+    /** Ids of unread rows, in list order. */
+    const unreadIds = () =>
+      r.evaluate(() =>
+        [...document.querySelectorAll("[data-row-count] button[data-message-id]")]
+          .filter((b) => /, unread,/.test(b.getAttribute("aria-label") ?? ""))
+          .map((b) => b.getAttribute("data-message-id")),
+      );
+    const openRow = async (id) => {
+      await r.locator(`[data-row-count] button[data-message-id="${id}"]`).click();
+      await r.waitForTimeout(200);
+    };
+
+    // A click.
+    const startUnread = await unreadIds();
+    require("the demo inbox has unread rows to open", startUnread.length >= 4, `${startUnread.length}`);
+    const countBefore = await inboxUnread();
+    const first = startUnread[0];
+    check("an unread row shows its dot and weight before it is opened", isUnreadPainted(await rowState(first)), JSON.stringify(await rowState(first)));
+    await openRow(first);
+    check("opening an unread row clears its dot and weight", isReadPainted(await rowState(first)), JSON.stringify(await rowState(first)));
+    check("and the inbox count drops", (await inboxUnread()) === countBefore - 1, `${countBefore} → ${await inboxUnread()}`);
+    check("with no undo offer for it", (await r.getByText(/^Undo$/).count()) === 0);
+
+    // j onto the next row is an open too.
+    await openRow(startUnread[1]);
+    await r.keyboard.press("Escape");
+    await r.waitForTimeout(150);
+    const afterSecond = await unreadIds();
+    const nextUnread = afterSecond[0];
+    const nextIndex = await rowButtons.evaluateAll((els, id) => els.findIndex((e) => e.getAttribute("data-message-id") === id), nextUnread);
+    await rowButtons.nth(nextIndex - 1).click();
+    await r.waitForTimeout(150);
+    await r.keyboard.press("j");
+    await r.waitForTimeout(200);
+    check("j onto an unread row reads it", isReadPainted(await rowState(nextUnread)), JSON.stringify(await rowState(nextUnread)));
+
+    // Mark unread moves on and does not bounce back to read; a later open reads it again.
+    await openRow(first);
+    await r.keyboard.press("u");
+    await r.waitForTimeout(250);
+    const openAfterU = await r.locator('[data-row-count] button[aria-current="true"]').getAttribute("data-message-id").catch(() => null);
+    check("marking the open message unread moves on", openAfterU !== first, `${openAfterU}`);
+    await r.waitForTimeout(300);
+    check("and it stays unread", isUnreadPainted(await rowState(first)), JSON.stringify(await rowState(first)));
+    await openRow(first);
+    check("re-opening it later reads it again", isReadPainted(await rowState(first)), JSON.stringify(await rowState(first)));
+
+    // Checking a row in select mode is not an open.
+    const toCheck = (await unreadIds())[0];
+    await r.locator(`[data-row-count] [data-row-id="${toCheck}"] [data-row-control='avatar']`).click();
+    await r.waitForTimeout(120);
+    await r.locator("[data-menu-item='sender-select']").click();
+    await r.waitForTimeout(150);
+    check("Select checks the row", (await r.locator(`[data-row-count] [data-row-id="${toCheck}"][data-checked]`).count()) === 1);
+    check("and leaves it unread", isUnreadPainted(await rowState(toCheck)), JSON.stringify(await rowState(toCheck)));
+    await r.keyboard.press("Escape");
+    await r.waitForTimeout(150);
+
+    // The switch: on by default, and off keeps an opened message unread.
+    await r.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await r.keyboard.press(",");
+    await r.waitForSelector('[role="dialog"][aria-label="Settings"]', { timeout: 5_000 });
+    const toggle = r.locator('[role="switch"][aria-label="Mark as read when opened"]');
+    check("Settings has a Mark as read when opened switch", (await toggle.count()) === 1);
+    check("which is on by default", (await toggle.getAttribute("aria-checked")) === "true");
+    await toggle.click();
+    await r.waitForTimeout(150);
+    check("and turns off", (await toggle.getAttribute("aria-checked")) === "false");
+    await r.keyboard.press("Escape");
+    await r.waitForTimeout(250);
+    const offTarget = (await unreadIds())[0];
+    const countOff = await inboxUnread();
+    await openRow(offTarget);
+    await r.waitForTimeout(200);
+    check("with it off, opening an unread row leaves it unread", isUnreadPainted(await rowState(offTarget)), JSON.stringify(await rowState(offTarget)));
+    check("and the inbox count holds", (await inboxUnread()) === countOff, `${countOff} → ${await inboxUnread()}`);
+    check(
+      "the switch is saved with the other preferences",
+      await r.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").markReadOnOpen === false),
+    );
+    await ctx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");
