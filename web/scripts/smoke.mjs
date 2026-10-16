@@ -147,6 +147,7 @@ try {
    * either way.
    */
   const confirmDialog = () => page.locator('[role="dialog"][aria-label="Discard this draft?"]');
+  const confirmDialogIn = (p) => p.locator('[role="dialog"][aria-label="Discard this draft?"]');
   const answerDiscard = async (accept) => {
     const dialog = confirmDialog();
     await dialog.waitFor({ state: "visible", timeout: 5_000 });
@@ -1768,7 +1769,7 @@ try {
   // is typing into.
   check(
     "the Send button advertises the shortcut",
-    (await page.locator('[role="dialog"] button:has-text("Send") kbd').count()) > 0,
+    (await page.locator('[data-composer] button:has-text("Send") kbd').count()) > 0,
   );
   await page.keyboard.press("Meta+Enter");
   await page.waitForTimeout(500);
@@ -1778,7 +1779,7 @@ try {
   // used to be reported twice — "Cannot send: not signed in." inside the sheet and
   // "Signing in to Gmail is required to send." in the app-wide strip above it — so one
   // failed send produced two banners saying different things about the same event.
-  const composerError = page.locator('[role="dialog"][role="dialog"], [role="dialog"] [role="alert"]');
+  const composerError = page.locator('[data-composer] [role="alert"]');
   check(
     "the composer reports why it could not send",
     (await composerError.count()) > 0 &&
@@ -1851,10 +1852,10 @@ try {
   // in the UI called it, so a message could be replied to but not forwarded.
   await openMessage();
   await page.locator('button[aria-label="Forward"]').first().click();
-  await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
+  await page.waitForSelector('[data-composer-dock]', { timeout: 5_000 });
   check(
-    "Forward opens a sheet titled Forward",
-    (await page.locator('[role="dialog"][aria-label="Forward"]').count()) > 0,
+    "Forward opens docked in the reader, titled Forward",
+    (await page.locator('section[data-composer-dock][aria-label="Forward"]').count()) > 0,
   );
   check(
     "it focuses the To field first, not the body",
@@ -1862,7 +1863,7 @@ try {
   );
   check(
     "Send is disabled with no recipient",
-    await page.locator('[role="dialog"] button:has-text("Send")').first().isDisabled(),
+    await page.locator('[data-composer] button:has-text("Send")').first().isDisabled(),
   );
 
   // An untouched forward closes on Escape with no question. It used to ask: the
@@ -1880,13 +1881,13 @@ try {
   check(
     "Escape over an open suggestion list closes the list, not the composer",
     (await page.locator('[role="listbox"]').count()) === 0 &&
-      (await page.locator('[role="dialog"][aria-label="Forward"]').count()) > 0,
+      (await page.locator('section[data-composer-dock][aria-label="Forward"]').count()) > 0,
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
   check(
     "an empty forward closes without asking",
-    (await page.locator('[role="dialog"][aria-label="Forward"]').count()) === 0,
+    (await page.locator('section[data-composer-dock][aria-label="Forward"]').count()) === 0,
   );
   check("and asks nothing", (await confirmDialog().count()) === 0);
 
@@ -1896,7 +1897,7 @@ try {
   await page.waitForTimeout(400);
   check(
     "`f` opens the forward composer",
-    (await page.locator('[role="dialog"][aria-label="Forward"]').count()) > 0,
+    (await page.locator('section[data-composer-dock][aria-label="Forward"]').count()) > 0,
   );
   // …and a forward whose body the user has added to is a written draft, so it asks.
   // Filling in a recipient is deliberately *not* enough: the body is Winnow's, and
@@ -1912,7 +1913,9 @@ try {
   await openMessage();
   await page.keyboard.press("f");
   await page.waitForTimeout(300);
-  await page.locator('textarea[aria-label="Message"]').click();
+  // Focused rather than clicked: docked, the six-row body sits under the To field's open
+  // suggestion list, which a click would land on.
+  await page.locator('textarea[aria-label="Message"]').focus();
   await page.keyboard.type("Worth a look.");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(250);
@@ -1932,8 +1935,8 @@ try {
 
   const toField = page.locator('input[aria-label="To"]');
   const suggestions = page.locator('[role="listbox"] [role="option"]');
-  const chips = page.locator('[role="dialog"] button[aria-label^="Remove"]');
-  const sendButton = page.locator('[role="dialog"] button:has-text("Send")').first();
+  const chips = page.locator('[data-composer] button[aria-label^="Remove"]');
+  const sendButton = page.locator('[data-composer] button:has-text("Send")').first();
 
   await page.keyboard.press("f");
   await page.waitForSelector('input[aria-label="To"]', { timeout: 5_000 });
@@ -2012,7 +2015,7 @@ try {
   await page.waitForTimeout(300);
   check(
     "a committed chip can be invalid",
-    (await page.locator('[role="dialog"] [aria-invalid="true"]').count()) > 0,
+    (await page.locator('[data-composer] [aria-invalid="true"]').count()) > 0,
   );
   check("Send is disabled while one is", await sendButton.isDisabled());
   check(
@@ -2388,6 +2391,168 @@ try {
     );
     check("and the pencil is gone under it", (await p.locator("[data-compose-fab]").count()) === 0);
     await phoneContext.close();
+  }
+
+  // ── Inline reply and drafts ─────────────────────────────────────────────────
+  //
+  // A desktop reply docks at the bottom of the reader, under the conversation, which
+  // keeps its own scroll; Reply / Reply all switches who it goes to; the draft is saved
+  // (in the demo, on this device), survives moving away and a reload, and Discard
+  // clears it. A phone keeps the full-screen composer. Its own contexts, so the saved
+  // drafts cannot reach any other section's reloads.
+  section("inline reply and drafts");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const d = await ctx.newPage();
+    d.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    d.on("pageerror", (error) => errors.push(String(error)));
+    d.on("dialog", (dialog) => {
+      errors.push(`native ${dialog.type()} dialog: ${dialog.message()}`);
+      void dialog.dismiss();
+    });
+    await d.goto(URL, { waitUntil: "networkidle" });
+    await d.waitForSelector("[data-message-id]", { timeout: 10_000 });
+
+    const dockEl = d.locator("[data-composer-dock]");
+    const body = d.locator('[data-composer-dock] textarea[aria-label="Message"]');
+    const toNames = () =>
+      d.locator('[data-composer] button[aria-label^="Remove"]').evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
+    const status = d.locator("[data-draft-status]");
+    const storedDrafts = () => d.evaluate(() => localStorage.getItem("winnow.drafts.v1:demo") ?? "");
+    const openThread = async () => {
+      await d.locator("[data-message-id]", { hasText: "the migration plan" }).first().click();
+      await d.waitForSelector("article h1", { timeout: 5_000 });
+    };
+
+    await openThread();
+    await d.keyboard.press("r");
+    await dockEl.waitFor({ state: "visible", timeout: 5_000 });
+    await d.waitForTimeout(300);
+    check("a desktop reply opens docked, not as a sheet", (await d.locator('[role="dialog"][aria-label="Reply"]').count()) === 0);
+    const pane = await d.locator("[data-reader-pane]").boundingBox();
+    const dockBox = await dockEl.boundingBox();
+    check(
+      "inside the reader pane, at its bottom",
+      Boolean(pane && dockBox) &&
+        dockBox.x >= pane.x - 1 &&
+        dockBox.x + dockBox.width <= pane.x + pane.width + 1 &&
+        dockBox.y >= pane.y &&
+        Math.abs(dockBox.y + dockBox.height - (pane.y + pane.height)) <= 2,
+      JSON.stringify({ pane, dockBox }),
+    );
+    check(
+      "and no taller than about half of it",
+      Boolean(pane && dockBox) && dockBox.height <= pane.height * 0.52,
+      JSON.stringify({ pane: pane?.height, dock: dockBox?.height }),
+    );
+    check(
+      "with the caret in the body",
+      (await d.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Message",
+    );
+    const scrolled = await d.evaluate(() => {
+      const scroller = [...document.querySelectorAll("[data-reader] .overflow-y-auto")].find(
+        (el) => !el.closest("[data-composer-dock]"),
+      );
+      if (!scroller) return null;
+      scroller.scrollTop = 0;
+      scroller.scrollTop = 160;
+      return { top: scroller.scrollTop, sh: scroller.scrollHeight, ch: scroller.clientHeight };
+    });
+    check(
+      "the conversation above still scrolls on its own",
+      Boolean(scrolled) && scrolled.top > 0 && scrolled.ch > 100,
+      JSON.stringify(scrolled),
+    );
+
+    const allNames = await toNames();
+    check("Reply all is the default and leaves you off", allNames.length === 2 && !allNames.some((n) => n.includes("Alex")), JSON.stringify(allNames));
+    await d.locator('[data-reply-all="one"]').click();
+    await d.waitForTimeout(150);
+    const oneNames = await toNames();
+    check("Reply switches To to the last sender", oneNames.length === 1, JSON.stringify(oneNames));
+    check("and says which is on", (await d.locator('[data-reply-all="one"]').getAttribute("aria-pressed")) === "true");
+    await d.locator('[data-reply-all="all"]').click();
+    await d.waitForTimeout(150);
+    check("Reply all puts everyone back", (await toNames()).length === 2);
+
+    await body.focus();
+    await d.keyboard.type("Thursday works. j k e", { delay: 10 });
+    check(
+      "reader shortcuts do not fire while typing",
+      (await body.inputValue()).startsWith("Thursday works. j k e") && (await dockEl.count()) === 1,
+    );
+    await d.waitForTimeout(2600);
+    check("typing shows Saved (the demo saves on this device)", (await status.textContent()) === "Saved on this device", (await status.textContent()) ?? "");
+    check("and the device copy holds the text", (await storedDrafts()).includes("Thursday works."));
+
+    // Moving to another message keeps the half-written reply rather than losing it.
+    await d.locator("[data-message-id]", { hasText: "Your verification code" }).first().click();
+    await d.waitForTimeout(400);
+    check("moving to another message puts the reply away", (await dockEl.count()) === 0 && (await confirmDialogIn(d).count()) === 0);
+    check("and says it was kept", (await d.locator("text=Draft saved.").count()) > 0);
+    await openThread();
+    await d.keyboard.press("r");
+    await dockEl.waitFor({ state: "visible", timeout: 5_000 });
+    check("replying again picks the draft back up", (await body.inputValue()).startsWith("Thursday works."));
+
+    // A reload (or a crash) offers it back.
+    await d.reload({ waitUntil: "networkidle" });
+    await d.waitForSelector("[data-message-id]", { timeout: 10_000 });
+    const offer = d.locator('[role="dialog"][aria-label="Restore your unsent draft?"]');
+    await offer.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check("after a reload, the unsent draft is offered back", (await offer.count()) === 1);
+    await offer.getByRole("button", { name: "Restore" }).click();
+    await dockEl.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check(
+      "Restore reopens it docked on its message, with the text",
+      (await dockEl.count()) === 1 && (await body.inputValue()).startsWith("Thursday works.") && (await d.locator("article h1").count()) === 1,
+    );
+
+    // Escape asks; Discard clears.
+    await body.focus();
+    await d.keyboard.press("Escape");
+    await d.waitForTimeout(250);
+    check("Escape in the docked reply asks before discarding", (await confirmDialogIn(d).count()) === 1);
+    await confirmDialogIn(d).getByRole("button", { name: "Keep editing" }).click();
+    await d.waitForTimeout(200);
+    check("and keeping it keeps it", (await dockEl.count()) === 1);
+    await dockEl.getByRole("button", { name: "Discard", exact: true }).click();
+    await d.waitForTimeout(300);
+    check("Discard closes it", (await dockEl.count()) === 0);
+    check("and clears the saved copy", !(await storedDrafts()).includes("Thursday works."));
+    await d.reload({ waitUntil: "networkidle" });
+    await d.waitForSelector("[data-message-id]", { timeout: 10_000 });
+    await d.waitForTimeout(500);
+    check("so nothing is offered after a reload", (await offer.count()) === 0);
+
+    // A new message is still a sheet on the desktop.
+    await d.keyboard.press("c");
+    await d.waitForTimeout(300);
+    check("Compose stays a sheet on the desktop", (await d.locator('[role="dialog"][aria-label="New message"]').count()) === 1);
+    await d.keyboard.press("Escape");
+    await ctx.close();
+
+    // The phone keeps the full-screen composer for a reply.
+    const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+    const p = await phoneCtx.newPage();
+    p.on("pageerror", (error) => errors.push(String(error)));
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-message-id]", { timeout: 10_000 });
+    await p.locator("[data-message-id]").first().tap();
+    await p.waitForSelector("article h1", { timeout: 5_000 });
+    await p.locator('[data-reader-dock] button[aria-label^="Reply"]').first().tap();
+    const phoneReply = p.locator('[role="dialog"][aria-label="Reply"]');
+    await phoneReply.waitFor({ state: "visible", timeout: 5_000 });
+    await p.waitForTimeout(400);
+    const phoneBox = await phoneReply.boundingBox();
+    check(
+      "a phone reply is still the full-screen composer, never docked",
+      Boolean(phoneBox) && phoneBox.width >= 389 && phoneBox.height >= 840 && (await p.locator("[data-composer-dock]").count()) === 0,
+      JSON.stringify(phoneBox),
+    );
+    await phoneCtx.close();
   }
 
   // ── The mailboxes ──────────────────────────────────────────────────────────
