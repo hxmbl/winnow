@@ -469,7 +469,8 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next/mark-all-read, Compose, and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
 | `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. |
 | `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other four mailboxes in `MAILBOX_ORDER`, an account footer carrying Settings, and the progressive scrim blur. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
-| `SettingsPanel.tsx` | Settings **and** Composer in one file, because they share the sheet chrome and Escape handling. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. |
+| `SettingsPanel.tsx` | Settings. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. |
+| `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send and Discard. |
 | `GoogleSetup.tsx` | Paste, import by file, drop or paste-into-field; test; save; connect. |
 | `ComposeFab.tsx` | The phone's round compose pencil, measured to sit above the dock. Rendered from `App.tsx`, not the phone chrome; shown only over the list. |
 | `RecipientField.tsx` | The composer's To, Cc and Bcc fields: chips plus an ARIA 1.2 editable combobox. Nothing is highlighted until an arrow key, Tab only accepts after navigation (WCAG 2.1.1), Escape is consumed only while the list is open. |
