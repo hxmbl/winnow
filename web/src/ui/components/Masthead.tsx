@@ -9,8 +9,8 @@
  * toggle at the head of this row opens.
  */
 
-import { Check, ChevronLeft, ChevronRight, PanelLeft, Search } from "lucide-react";
-import { shortcutFor } from "../../core/mail/keybinds";
+import { Check, ChevronLeft, ChevronRight, PanelLeft, Search, SquarePen } from "lucide-react";
+import { shortcutFor, shortcutHint } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { FilterId } from "../../core/model/signals";
 
@@ -49,6 +49,8 @@ export type MastheadProps = {
    * inverse is the undo strip, and the strip only appears *after* it has been pressed.
    */
   onMarkAllRead: () => void;
+  /** Open a blank composer. Absent, the button is not drawn. */
+  onCompose?: () => void;
 };
 
 /**
@@ -96,6 +98,7 @@ export function Masthead({
   onPrev,
   onNext,
   onMarkAllRead,
+  onCompose,
 }: MastheadProps) {
   return (
     // No `border-b`, no `bg-chrome`: the header is the same surface as the list below
@@ -194,6 +197,25 @@ export function Masthead({
             </button>
           </div>
         </div>
+        {/*
+          Compose, at the row's far end: the one action here that makes something rather
+          than looking at what is there. Accent-filled like Send, which is where it leads.
+          The label drops below `lg`, where the list column is narrow and the icon and its
+          tooltip say the same.
+        */}
+        {onCompose && (
+          <button
+            type="button"
+            data-compose=""
+            onClick={onCompose}
+            aria-label="Compose"
+            title={shortcutHint("Compose", "compose")}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-2.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:px-3.5"
+          >
+            <SquarePen size={16} strokeWidth={2} aria-hidden="true" />
+            <span className="hidden lg:inline">Compose</span>
+          </button>
+        )}
       </div>
 
       {/*

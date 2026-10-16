@@ -37,10 +37,16 @@ import {
 } from "./core/model/signals";
 import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
 import { buildForward, buildReply, stripQuote } from "./core/mail/reply";
+import {
+  buildNewDraft,
+  draftFromMailto,
+  isUntouchedNewDraft,
+  needsSubjectConfirmation,
+} from "./core/mail/compose";
 import { attentionSentence } from "./core/classify/attention";
 import { resolveImageConsent } from "./core/mail/imageConsent";
 import type { Draft } from "./core/model/email";
-import { demoMailbox } from "./core/data/demo";
+import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import { readOwnParams } from "./core/session/redirect";
 import { platform, type PlatformInfo } from "./platform";
@@ -50,6 +56,7 @@ import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
 import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
+import { ComposeFab } from "./ui/components/ComposeFab";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
@@ -138,8 +145,16 @@ type ComposerState = {
   draft: Draft;
   sending: boolean;
   error: string | null;
-  mode: "reply" | "forward";
+  mode: "reply" | "forward" | "new";
+  /**
+   * A new message's recipients and subject as it opened (blank, or from a `mailto:`),
+   * so closing an untouched one does not ask. Replies and forwards judge by the body.
+   */
+  initial?: Pick<Draft, "to" | "cc" | "bcc" | "subject">;
 };
+
+/** How long "Message sent." stays up before it clears itself, in ms. */
+const SENT_NOTICE_MS = 6000;
 
 /**
  * Whether discarding this draft would lose anything the user wrote.
@@ -152,7 +167,8 @@ type ComposerState = {
  * "written", so opening one with `f` and pressing Escape asked whether to throw away text
  * Winnow had just put there — which trains people to click through confirmations.
  */
-function isUntouchedDraft(draft: Draft): boolean {
+function isUntouchedDraft(draft: Draft, initial?: ComposerState["initial"]): boolean {
+  if (initial) return isUntouchedNewDraft(draft, initial);
   const written = stripQuote(draft.body, draft.quoteBlock).trim();
   return written === (draft.prefilled ?? "").trim();
 }
@@ -198,6 +214,9 @@ export function App({ store }: Props) {
   const searchRef = useRef<HTMLInputElement>(null);
   const [scrollStep, setScrollStep] = useState(0);
   const [composer, setComposer] = useState<ComposerState | null>(null);
+  /** The composer as of this render, for the keyboard handler and `openCompose`. */
+  const composerRef = useRef<ComposerState | null>(null);
+  composerRef.current = composer;
 
   /**
    * What the sync line and button say. Derived in one place (see `syncStatus`) so a
@@ -1013,22 +1032,103 @@ export function App({ store }: Props) {
     [syncGoogleContacts],
   );
 
-  const sendReply = useCallback(async () => {
-    if (!composer) return;
-    const snap = snapshotRef.current;
-    if (!snap.view.selected) return;
-    setComposer({ ...composer, sending: true, error: null });
-    try {
-      await storeRef.current.sendReply(composer.draft, snap.view.selected.gmailId);
-      setComposer(null);
-    } catch (error) {
+  /**
+   * Open a blank composer, or one filled from a `mailto:` link.
+   *
+   * One composer at a time: with a draft already open this does nothing, and the open
+   * draft keeps its own discard question. In practice every entry point is behind the
+   * open sheet anyway (the `c` key routes to the composer while it is up, and the
+   * Compose buttons are under its backdrop), so this is the backstop, not the rule.
+   */
+  const openCompose = useCallback(
+    (from?: Draft) => {
+      if (composerRef.current) return;
+      const draft = from ?? buildNewDraft();
       setComposer({
-        ...composer,
+        draft,
         sending: false,
-        error: error instanceof Error ? error.message : "Couldn't send that reply.",
+        error: null,
+        mode: "new",
+        initial: { to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject },
       });
-    }
-  }, [composer]);
+      void syncGoogleContacts();
+    },
+    [syncGoogleContacts],
+  );
+
+  /** A `mailto:` link in a message: Winnow's own composer, filled from the link. */
+  const openMailto = useCallback(
+    (url: string) => {
+      const draft = draftFromMailto(url);
+      if (draft) openCompose(draft);
+      else void platform.openExternal(url);
+    },
+    [openCompose],
+  );
+
+  /** "Send without a subject?" is up, holding the recipients Send was pressed with. */
+  const [confirmNoSubject, setConfirmNoSubject] = useState<Pick<Draft, "to" | "cc" | "bcc"> | null>(null);
+
+  /**
+   * Send what the composer holds.
+   *
+   * `recipients` is what the composer counted, including an address typed and not yet a
+   * chip — the state update that adds it may not have landed when ⌘⏎ fires.
+   *
+   * A reply goes out on its thread. A new message goes out on its own, and is asked
+   * about first when it has no subject — Gmail's "send without a subject?", because a
+   * blank subject is almost always a slip and the recipient's list shows nothing.
+   */
+  const sendDraft = useCallback(
+    async (recipients?: Pick<Draft, "to" | "cc" | "bcc">, confirmedNoSubject = false) => {
+      if (!composer || composer.sending) return;
+      const draft = { ...composer.draft, ...(recipients ?? {}) };
+
+      if (composer.mode === "new") {
+        if (!confirmedNoSubject && needsSubjectConfirmation(draft)) {
+          setConfirmNoSubject({ to: draft.to, cc: draft.cc, bcc: draft.bcc });
+          return;
+        }
+        setComposer({ ...composer, draft, sending: true, error: null });
+        try {
+          const { simulated } = await storeRef.current.sendNew(draft);
+          setComposer(null);
+          // Said, because a closing sheet alone does not say whether it went. The demo
+          // says what it did: nothing left the device.
+          const message = simulated ? "Message sent (demo: saved to Sent on this device only)." : "Message sent.";
+          const s = storeRef.current;
+          s.setNotice(message);
+          setTimeout(() => {
+            if (s.getSnapshot().notice === message) s.dismissNotice();
+          }, SENT_NOTICE_MS);
+        } catch (error) {
+          setComposer({
+            ...composer,
+            draft,
+            sending: false,
+            error: error instanceof Error ? error.message : "Couldn't send that message.",
+          });
+        }
+        return;
+      }
+
+      const snap = snapshotRef.current;
+      if (!snap.view.selected) return;
+      setComposer({ ...composer, draft, sending: true, error: null });
+      try {
+        await storeRef.current.sendReply(draft, snap.view.selected.gmailId);
+        setComposer(null);
+      } catch (error) {
+        setComposer({
+          ...composer,
+          draft,
+          sending: false,
+          error: error instanceof Error ? error.message : "Couldn't send that reply.",
+        });
+      }
+    },
+    [composer],
+  );
 
   /**
    * Close the composer, or ask before throwing the draft away.
@@ -1046,7 +1146,7 @@ export function App({ store }: Props) {
   const closeComposer = useCallback((force = false) => {
     setComposer((current) => {
       if (!current) return null;
-      if (force || isUntouchedDraft(current.draft)) return null;
+      if (force || isUntouchedDraft(current.draft, current.initial)) return null;
       // There is something to lose: ask, and leave the composer exactly as it is
       // — including focus — if the answer is no.
       setConfirmDiscard(true);
@@ -1160,14 +1260,14 @@ export function App({ store }: Props) {
     openers are computed below, and a `useRef` initialised from a not-yet-declared `const`
     is a temporal-dead-zone error.
   */
-  const composerRef = useRef<ComposerState | null>(null);
-  composerRef.current = composer;
   const pillsRef = useRef(pills);
   pillsRef.current = pills;
   const openReplyRef = useRef(openReply);
   openReplyRef.current = openReply;
   const openForwardRef = useRef(openForward);
   openForwardRef.current = openForward;
+  const openComposeRef = useRef(openCompose);
+  openComposeRef.current = openCompose;
   const closeComposerRef = useRef(closeComposer);
   closeComposerRef.current = closeComposer;
 
@@ -1272,6 +1372,8 @@ export function App({ store }: Props) {
         // checks `composerOpen` first, so the composer's Escape wins.
         textEditing,
         viewerOpen: snap.view.selected !== null,
+        // `c` copies an open message's code and composes everywhere else.
+        codeAvailable: Boolean(snap.view.selected?.code),
         overlayVisible: snap.overlay === "shortcuts" || snap.overlay === "settings",
         navigationVisible: snap.overlay === "navigation",
         filtersActive: snap.activeFilters.length > 0,
@@ -1366,6 +1468,9 @@ export function App({ store }: Props) {
           break;
         case "forward":
           openForwardRef.current();
+          break;
+        case "compose":
+          openComposeRef.current();
           break;
         case "focusSearch":
           searchRef.current?.focus();
@@ -1801,6 +1906,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               onPrev={() => store.moveCursor(-1)}
               onNext={() => store.moveCursor(1)}
               onMarkAllRead={store.markAllRead.bind(store)}
+              onCompose={() => openCompose()}
             />
           )}
           {!phone && selection.size > 0 ? (
@@ -1946,6 +2052,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             }`}
           >
             <Reader
+              onMailto={openMailto}
               email={selected}
               conversation={view.conversation}
               signals={selected ? (view.signals.get(selected.id) ?? null) : null}
@@ -2073,6 +2180,19 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       )}
 
       <div inert={sidebarOpen} className="contents">
+      {/*
+        The phone's compose button, over the list and nothing else: not in the reader
+        (which has its own bar), and not under the composer, Settings, the palette, the
+        shortcut sheet or the sidebar, each of which is the thing being looked at. Not
+        during a multi-selection either, whose bar has taken over the screen's actions.
+      */}
+      {phone &&
+        !selected &&
+        composer === null &&
+        snapshot.overlay === "none" &&
+        !sidebarOpen &&
+        selection.size === 0 &&
+        snapshot.status === "ready" && <ComposeFab onCompose={() => openCompose()} />}
 
       {snapshot.overlay === "shortcuts" && (
         <ShortcutSheet onClose={() => store.setOverlay("none")} />
@@ -2334,6 +2454,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         <Composer
           mode={composer.mode}
           to={composer.draft.to}
+          cc={composer.draft.cc}
+          bcc={composer.draft.bcc}
+          from={composer.mode === "new" ? (snapshot.account?.email ?? DEMO_ACCOUNT.email) : null}
           subject={composer.draft.subject}
           body={composer.draft.body}
           sending={composer.sending}
@@ -2366,22 +2489,40 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                       // suffix, so a reply that never touched the original sends the
                       // user's words alone — and one that *did* edit the quote keeps
                       // it, because at that point it is their message.
-                      body: patch.body
-                        ? stripQuote(patch.body, current.draft.quoteBlock)
-                        : current.draft.body,
+                      // `!== undefined`, not truthiness: clearing the body is an edit too,
+                      // and treating "" as "no change" put the last character back.
+                      body:
+                        patch.body !== undefined
+                          ? stripQuote(patch.body, current.draft.quoteBlock)
+                          : current.draft.body,
                     },
                   }
                 : current,
             )
           }
           phone={phone}
-          onSend={() => {
-            void sendReply();
+          onSend={(recipients) => {
+            void sendDraft(recipients);
           }}
           // Discard is the button that already says the word, so it does not ask.
           onDiscard={() => closeComposer(true)}
           // Escape and the close button ask if there is anything to lose.
           onClose={() => closeComposer()}
+        />
+      )}
+
+      {confirmNoSubject && (
+        <ConfirmDialog
+          title="Send without a subject?"
+          body="This message has no subject. Recipients see a blank line in their list."
+          confirmLabel="Send anyway"
+          destructive={false}
+          onConfirm={() => {
+            const recipients = confirmNoSubject;
+            setConfirmNoSubject(null);
+            void sendDraft(recipients, true);
+          }}
+          onCancel={() => setConfirmNoSubject(null)}
         />
       )}
 

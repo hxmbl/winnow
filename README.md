@@ -14,9 +14,9 @@ It runs in a browser and as a desktop app. Same program either way.
 
 - **Gmail and nothing else.** No IMAP, no Outlook, no Fastmail, no self-hosted
   server (all of those are "yet"). It's the Gmail REST API and its labels all the way down.
-- **You can't start a message.** Reply and forward are there, compose isn't, and `c`
-  is the verification-code shortcut for exactly that reason. Gmail's own drafts aren't
-  fetched either, so nothing half-written is in this app to begin with.
+- **No drafts.** Compose, reply and forward are plain text with no attachments, and
+  Gmail's own drafts aren't fetched, so nothing half-written is in this app to begin
+  with. Closing a written message asks first, because nothing is kept.
 - **The classifier is wrong sometimes.** It's a pile of rules ported from an old
   Swift app of mine, and some of them look like bugs because they are. I left
   them narrow on purpose. Widening them makes it louder, not better.
@@ -134,7 +134,7 @@ advertise a shortcut that isn't wired.
 | `o` or `⏎` | Open the highlighted message |
 | `Esc` | Close the message, a sheet, or the filters |
 | `s` | Star or unstar |
-| `c` | Copy the open message's verification code |
+| `c` | Compose a new message (copies the code when the open message has one) |
 | `e` | Archive, unarchive, or restore — whichever this mailbox implies |
 | `#` or `⌫` | Move to trash, or delete permanently from Trash |
 | `u` / `m` | Mark read or unread |

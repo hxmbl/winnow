@@ -466,12 +466,13 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips. At most one signal word per row. |
 | `Reader.tsx` | The message pane: back bar, header (avatar → sender menu, sender `h2`, subject as the document `h1`), filter tags with their reasons, the three-way image offer, body, attachments, the conversation, and the phone dock. |
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
-| `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next/mark-all-read, and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
+| `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next/mark-all-read, Compose, and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
 | `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. |
 | `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other four mailboxes in `MAILBOX_ORDER`, an account footer carrying Settings, and the progressive scrim blur. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
 | `SettingsPanel.tsx` | Settings **and** Composer in one file, because they share the sheet chrome and Escape handling. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. |
 | `GoogleSetup.tsx` | Paste, import by file, drop or paste-into-field; test; save; connect. |
-| `RecipientField.tsx` | The composer's To field: chips plus an ARIA 1.2 editable combobox. Nothing is highlighted until an arrow key, Tab only accepts after navigation (WCAG 2.1.1), Escape is consumed only while the list is open. |
+| `ComposeFab.tsx` | The phone's round compose pencil, measured to sit above the dock. Rendered from `App.tsx`, not the phone chrome; shown only over the list. |
+| `RecipientField.tsx` | The composer's To, Cc and Bcc fields: chips plus an ARIA 1.2 editable combobox. Nothing is highlighted until an arrow key, Tab only accepts after navigation (WCAG 2.1.1), Escape is consumed only while the list is open. |
 | `Overlay.tsx` | `Sheet`, `ConfirmDialog`, `SheetHeader`. Focus moved in and restored on unmount, Tab trapped by `getClientRects()` (because `offsetParent` is null for a fixed element). `ConfirmDialog` exists because `window.confirm` is unimplemented in a Tauri webview. |
 | `Menu.tsx` | The WAI-ARIA menu pattern, including submenus. Every other key is swallowed so the app's global shortcuts cannot fire while a menu is open. |
 | `menuPlacement.ts` | `placeMenu` and `MenuAnchor` as pure geometry, kept out of the component module so they test without React. |
@@ -706,8 +707,9 @@ is hard to see.
 
 - **No second platform implementation.** Three of `Platform` means a rule was
   wrong.
-- **No compose.** Reply and forward exist; starting a message does not, which is
-  why `c` is the verification-code shortcut.
+- **No attachments on outgoing mail, and no rich text.** Compose, reply and forward
+  send `text/plain` through one builder (`core/gmail/mime.ts`); `core/mail/compose.ts`
+  is the new-message half: the blank draft, the recipient check, `mailto:`.
 - **No component tests.** The layers that are hard to get right (classification,
   the wire, sanitising, the store) are pure and heavily tested; the components
   are covered by the smoke pass against a real browser instead.

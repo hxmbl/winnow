@@ -41,6 +41,19 @@ export type RecipientFieldProps = {
   /** Where focus goes when the composer opens on a forward. */
   inputRef: React.RefObject<HTMLInputElement | null>;
   id: string;
+  /** The field's name, on its label and its combobox: "To", "Cc" or "Bcc". */
+  label?: string;
+  /**
+   * The text typed but not yet a chip, when the parent needs it.
+   *
+   * Controlled from the composer so Send can count — and send to — an address that was
+   * typed and never committed with a comma or Enter. Without it, typing an address and
+   * pressing ⌘⏎ left Send refusing a message that visibly had a recipient.
+   */
+  query?: string;
+  onQueryChange?: (query: string) => void;
+  /** Something at the right end of the label row, such as the composer's "Cc/Bcc". */
+  trailing?: React.ReactNode;
 };
 
 /** Chip height, and the touch target inside it. 28px clears WCAG 2.5.8's 24px floor. */
@@ -52,8 +65,20 @@ export function RecipientField({
   contacts,
   inputRef,
   id,
+  label = "To",
+  query: controlledQuery,
+  onQueryChange,
+  trailing,
 }: RecipientFieldProps) {
-  const [query, setQuery] = useState("");
+  const [ownQuery, setOwnQuery] = useState("");
+  const query = controlledQuery ?? ownQuery;
+  const setQuery = useCallback(
+    (next: string) => {
+      setOwnQuery(next);
+      onQueryChange?.(next);
+    },
+    [onQueryChange],
+  );
   const [focused, setFocused] = useState(false);
   /** Set by Escape so the list stays down until the query changes. */
   const [dismissed, setDismissed] = useState(false);
@@ -92,7 +117,7 @@ export function RecipientField({
       }
       if (next.length !== recipients.length) onChange(next);
     },
-    [recipients, onChange],
+    [recipients, onChange, setQuery],
   );
 
   const removeAt = useCallback(
@@ -119,6 +144,20 @@ export function RecipientField({
       if (event.key === "Backspace" && query === "" && recipients.length > 0) {
         event.preventDefault();
         removeAt(recipients.length - 1);
+        return;
+      }
+
+      // Enter finishes a typed address, unless it is picking a highlighted suggestion.
+      // ⌘⏎ is left alone: it is the composer's Send, which takes typed text with it.
+      if (
+        event.key === "Enter" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !(open && active >= 0) &&
+        query.trim() !== ""
+      ) {
+        event.preventDefault();
+        commit(query);
         return;
       }
 
@@ -181,7 +220,7 @@ export function RecipientField({
   return (
     <div className="flex items-start gap-2 text-meta">
       <label htmlFor={id} className="w-12 shrink-0 pt-1.5 text-ink-subtle">
-        To
+        {label}
       </label>
 
       <div className="relative min-w-0 flex-1">
@@ -228,7 +267,7 @@ export function RecipientField({
             id={id}
             type="text"
             role="combobox"
-            aria-label="To"
+            aria-label={label}
             aria-autocomplete="list"
             aria-expanded={open}
             aria-controls={listboxId}
@@ -240,7 +279,12 @@ export function RecipientField({
             placeholder={recipients.length === 0 ? "name@example.com, another@example.com" : ""}
             value={query}
             onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
+            onBlur={() => {
+              setFocused(false);
+              // Leaving the field finishes what was typed, as every mail client does: an
+              // address typed and tabbed away from is a recipient, not a half-thought.
+              if (query.trim() !== "") commit(query);
+            }}
             onChange={(event) => {
               setQuery(event.target.value);
               setActive(-1);
@@ -323,6 +367,7 @@ export function RecipientField({
           </p>
         )}
       </div>
+      {trailing}
     </div>
   );
 }

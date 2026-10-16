@@ -466,6 +466,11 @@ function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, has
 }
 
 type Props = {
+  /**
+   * A `mailto:` link in the message, which opens Winnow's own composer rather than
+   * whatever the OS calls its mail client. Absent, the link goes to the OS like any other.
+   */
+  onMailto?: (url: string) => void;
   email: Email | null;
   conversation: readonly Email[];
   signals: EmailSignals | null;
@@ -540,6 +545,7 @@ export function Reader({
   codeBar = null,
   sidebarOpen = false,
   onToggleSidebar,
+  onMailto,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -796,7 +802,10 @@ export function Reader({
           <MessageBody
             email={email}
             imagesAllowed={imagesAllowed}
-            onOpenLink={(url) => void platform.openExternal(url)}
+            onOpenLink={(url) => {
+              if (onMailto && /^mailto:/i.test(url)) onMailto(url);
+              else void platform.openExternal(url);
+            }}
             view={view}
           />
 
