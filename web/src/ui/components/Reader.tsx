@@ -21,7 +21,6 @@ import {
   ImageOff,
   Mail,
   MailOpen,
-  PanelLeft,
   MoreHorizontal,
   Paperclip,
   RotateCcw,
@@ -61,6 +60,7 @@ function firstLine(body: string): string {
 import { formatBytes } from "../../core/gmail/mime";
 import type { Mailbox } from "../../core/model/email";
 import { DOCK_SURFACE } from "./PhoneChrome";
+import { AppMark } from "../AppMark";
 
 /**
  * A smart filter that applies to the open message.
@@ -624,9 +624,12 @@ export function Reader({
             aria-haspopup="dialog"
             aria-label="Open sidebar"
             title="Sidebar"
-            className={ICON_BUTTON}
+            // The app mark, as on the masthead's toggle, with the same quiet tint on
+            // hover and press. The artwork sits small in its square, so it is drawn
+            // close to the button's own size.
+            className="flex h-7 w-7 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            <PanelLeft size={16} strokeWidth={1.8} aria-hidden="true" />
+            <AppMark size={26} />
           </button>
         )}
         <button

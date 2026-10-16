@@ -9,7 +9,8 @@
  * toggle at the head of this row opens.
  */
 
-import { Check, ChevronLeft, ChevronRight, PanelLeft, Search, SquarePen } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Search, SquarePen } from "lucide-react";
+import { AppMark } from "../AppMark";
 import { shortcutFor, shortcutHint } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { FilterId } from "../../core/model/signals";
@@ -105,7 +106,12 @@ export function Masthead({
     // it, separated by nothing but the change in what the two contain.
     <header data-masthead="" className="relative z-20 shrink-0">
       <div className="flex h-14 min-w-0 items-center gap-3 px-4">
-        {/* The sidebar's toggle, at the edge the sidebar slides in from. */}
+        {/*
+          The sidebar's toggle, at the edge the sidebar slides in from. It wears the app
+          mark (the one the phone's top bar shows) rather than a generic panel icon, so
+          the corner says whose app this is; hover and press are a quiet surface tint
+          behind the mark, never a recolour of it.
+        */}
         <button
           type="button"
           data-sidebar-toggle=""
@@ -115,9 +121,9 @@ export function Masthead({
           aria-haspopup="dialog"
           aria-label="Open sidebar"
           title="Sidebar"
-          className="-ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="-ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <PanelLeft size={18} strokeWidth={1.8} aria-hidden="true" />
+          <AppMark size={32} />
         </button>
         {/* Search takes the width; where-you-are keeps its own. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
