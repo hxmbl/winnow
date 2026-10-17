@@ -339,7 +339,18 @@ jobs:
           # -storepass:env reads the password from the environment, never the argv.
           if ! CERT_INFO="$(keytool -list -v -keystore "$KEYSTORE" -alias "$ANDROID_KEY_ALIAS" \
                 -storepass:env ANDROID_KEYSTORE_PASSWORD 2>&1)"; then
-            echo "::error::Could not open the release keystore. Check ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS."
+            # keytool's own reason (wrong password, unknown alias, not a keystore) names
+            # no secret value; GitHub masks the alias if it appears.
+            REASON="$(printf '%s\n' "$CERT_INFO" | grep -m1 -i 'error\|exception\|does not exist\|incorrect' || true)"
+            echo "::error::Could not open the release keystore with ANDROID_KEY_ALIAS: ${REASON:-keytool gave no reason}"
+            # If the password opens the keystore, the alias is the problem: show which exist.
+            if ALIASES="$(keytool -list -keystore "$KEYSTORE" -storepass:env ANDROID_KEYSTORE_PASSWORD 2>/dev/null \
+                  | awk -F, '/PrivateKeyEntry/ { print $1 }')"; then
+              COUNT="$(printf '%s\n' "$ALIASES" | grep -c . || true)"
+              echo "::error::The keystore opens with ANDROID_KEYSTORE_PASSWORD and holds $COUNT key alias(es): $(printf '%s' "$ALIASES" | paste -sd, -). Set ANDROID_KEY_ALIAS to one of them."
+            else
+              echo "::error::ANDROID_KEYSTORE_PASSWORD does not open the keystore (or ANDROID_KEYSTORE_BASE64 is not the .jks file)."
+            fi
             exit 1
           fi
           CERT_SHA256="$(printf '%s\n' "$CERT_INFO" | awk '$1 == "SHA256:" { print $2; exit }')"
