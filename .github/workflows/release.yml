@@ -92,7 +92,11 @@ jobs:
           On Windows, SmartScreen may say it protected your PC: choose **More info**, then
           **Run anyway**. On Android, Play Protect may warn about an unknown developer:
           choose **Install anyway**. An APK named `-debug` is signed with a throwaway key,
-          so installing a later one may require uninstalling it first. See the README.
+          so installing a later one may require uninstalling it first. If you have an
+          earlier `-debug` APK installed, uninstall it once before installing a signed
+          one (no `-debug`): Android refuses an update signed with a different key. The
+          APK's SHA-256 and signing certificate are in the release run's summary.
+          See the README.
 
           Winnow ships no Google sign-in client. To connect Gmail, create your own OAuth
           client in Google Cloud and paste it into the app; see `docs/google-setup.md`.
@@ -291,36 +295,63 @@ jobs:
         working-directory: web
         run: npm ci
 
-      # The active path. With no ANDROID_KEYSTORE_* in the environment, gradle signs
-      # the release APK with the runner's debug key (native/src-tauri/gen/android/app/
-      # build.gradle.kts), so it installs, and "Collect APK" names it `-debug`.
-      - name: Build APK (debug-signed)
+      # Release signing, from four repository secrets (native/README.md, "Android
+      # signing"). With all four set, the keystore is decoded into RUNNER_TEMP, gradle
+      # signs the APK and the AAB with it (gen/android/app/build.gradle.kts), and the
+      # file is deleted when the step ends, however it ends. With any of them unset
+      # (a fork, or before they've been added), gradle falls back to the debug key,
+      # the APK keeps its `-debug` name, and the job summary says so. Never fails on
+      # missing secrets. The secrets reach only this step, through env, and nothing
+      # here echoes them; GitHub masks them in the log regardless.
+      - name: Build APK
+        id: android-build
         working-directory: native
-        run: cargo tauri android build --apk
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          for NAME in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!NAME:-}" ]; then MISSING="${MISSING:+$MISSING, }$NAME"; fi
+          done
 
-      # ── Release signing: uncomment this step once the four secrets exist. ─────────
-      # It decodes the keystore, rebuilds with it (Rust is cached, so only gradle's
-      # packaging reruns) and marks the APK release-signed, which drops `-debug` from
-      # its name. See native/README.md, "Android signing".
-      # - name: Build APK (release-signed)
-      #   working-directory: native
-      #   env:
-      #     # The .jks keystore file, base64-encoded (`base64 -w0 winnow-release.jks`).
-      #     ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      #     # The password given to keytool for the keystore (-storepass).
-      #     ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      #     # The key's alias inside the keystore (`winnow` if made as documented).
-      #     ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      #     # The password for that key (-keypass); often the same as the store's.
-      #     ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      #   run: |
-      #     set -euo pipefail
-      #     export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/winnow-release.jks"
-      #     printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
-      #     cargo tauri android build --apk
-      #     rm -f "$ANDROID_KEYSTORE_PATH"
-      #     echo "ANDROID_RELEASE_SIGNED=true" >> "$GITHUB_ENV"
-      # ── End of release signing ────────────────────────────────────────────────────
+          if [ -n "$MISSING" ]; then
+            # Partial secrets must not half-configure gradle: clear them all.
+            unset ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD
+            echo "::notice title=Android APK is debug-signed::Release signing secrets not set (missing: $MISSING). Building the -debug APK instead."
+            printf 'signed=false\nmissing=%s\n' "$MISSING" >> "$GITHUB_OUTPUT"
+            cargo tauri android build --apk
+            exit 0
+          fi
+
+          KEYSTORE="$RUNNER_TEMP/winnow-release.jks"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          # Tolerates line-wrapped or CRLF base64 (base64 without -w0, PowerShell).
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \r\n' | base64 --decode > "$KEYSTORE"
+          unset ANDROID_KEYSTORE_BASE64
+          chmod 600 "$KEYSTORE"
+          export ANDROID_KEYSTORE_PATH="$KEYSTORE"
+
+          # The certificate the keystore holds, to check the APK against below.
+          # -storepass:env reads the password from the environment, never the argv.
+          if ! CERT_INFO="$(keytool -list -v -keystore "$KEYSTORE" -alias "$ANDROID_KEY_ALIAS" \
+                -storepass:env ANDROID_KEYSTORE_PASSWORD 2>&1)"; then
+            echo "::error::Could not open the release keystore. Check ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS."
+            exit 1
+          fi
+          CERT_SHA256="$(printf '%s\n' "$CERT_INFO" | awk '$1 == "SHA256:" { print $2; exit }')"
+          if [ -z "$CERT_SHA256" ]; then
+            echo "::error::Could not read the release certificate's SHA-256 fingerprint from the keystore."
+            exit 1
+          fi
+
+          # The AAB rides along for a future Play Store listing: Rust is already built
+          # for the APK, so it only adds gradle's bundle task.
+          cargo tauri android build --apk --aab
+          printf 'signed=true\ncert_sha256=%s\n' "$CERT_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Check no client secret shipped
         run: |
@@ -329,25 +360,85 @@ jobs:
             exit 1
           fi
 
-      - name: Collect APK
+      - name: Collect, verify and fingerprint
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
+          SIGNED: ${{ steps.android-build.outputs.signed }}
+          MISSING: ${{ steps.android-build.outputs.missing }}
+          CERT_SHA256: ${{ steps.android-build.outputs.cert_sha256 }}
         run: |
           set -euo pipefail
-          APK="$(find native/src-tauri/gen/android/app/build/outputs/apk -type f -name '*universal*release*.apk' | head -n 1)"
+          OUT=native/src-tauri/gen/android/app/build/outputs
+          APK="$(find "$OUT/apk" -type f -name '*universal*release*.apk' | head -n 1)"
           if [ -z "$APK" ]; then
             echo "::error::No universal release APK was produced."
-            find native/src-tauri/gen/android/app/build/outputs -type f || true
+            find "$OUT" -type f || true
             exit 1
           fi
           SUFFIX="-debug"
-          if [ "${ANDROID_RELEASE_SIGNED:-}" = "true" ]; then SUFFIX=""; fi
-          mkdir -p "$RUNNER_TEMP/android"
-          cp "$APK" "$RUNNER_TEMP/android/Winnow_${VERSION}_android-universal${SUFFIX}.apk"
-          ls -la "$RUNNER_TEMP/android"
-          # Which key signed it, in the log, so a release is never shipped on a guess.
-          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)apksigner"
-          "$APKSIGNER" verify --print-certs "$RUNNER_TEMP"/android/*.apk || true
+          if [ "$SIGNED" = "true" ]; then SUFFIX=""; fi
+          DEST="$RUNNER_TEMP/android"
+          mkdir -p "$DEST"
+          NAME="Winnow_${VERSION}_android-universal${SUFFIX}"
+          cp "$APK" "$DEST/$NAME.apk"
+
+          # Gradle installs build-tools on demand; install one if it didn't.
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1 || true)"
+          if [ -z "$BT" ]; then
+            sdkmanager --install "build-tools;35.0.0" > /dev/null
+            BT="$ANDROID_HOME/build-tools/35.0.0"
+          fi
+          CERTS="$("$BT/apksigner" verify --verbose --print-certs "$DEST/$NAME.apk")"
+          printf '%s\n' "$CERTS"
+          APK_CERT="$(printf '%s\n' "$CERTS" | awk -F': ' '/^Signer #1 certificate SHA-256 digest:/ { print $2; exit }')"
+          APK_DN="$(printf '%s\n' "$CERTS" | awk -F': ' '/^Signer #1 certificate DN:/ { print $2; exit }')"
+          # apksigner prints lowercase hex, keytool colon-separated uppercase.
+          norm() { tr -d ':' | tr '[:upper:]' '[:lower:]'; }
+
+          AAB_LINE=""
+          if [ "$SIGNED" = "true" ]; then
+            if [ "$(printf '%s' "$APK_CERT" | norm)" != "$(printf '%s' "$CERT_SHA256" | norm)" ]; then
+              echo "::error::The APK is not signed with the release keystore's certificate (got: $APK_DN)."
+              exit 1
+            fi
+            AAB="$(find "$OUT/bundle" -type f -name '*universal*elease*.aab' | head -n 1)"
+            if [ -n "$AAB" ]; then
+              cp "$AAB" "$DEST/$NAME.aab"
+              AAB_CERT="$(keytool -printcert -jarfile "$DEST/$NAME.aab" | awk '$1 == "SHA256:" { print $2; exit }')"
+              if [ "$(printf '%s' "$AAB_CERT" | norm)" != "$(printf '%s' "$CERT_SHA256" | norm)" ]; then
+                echo "::error::The AAB is not signed with the release keystore's certificate."
+                exit 1
+              fi
+              AAB_LINE="| \`$NAME.aab\` (app stores only; phones install the APK) | \`$(sha256sum "$DEST/$NAME.aab" | cut -d' ' -f1)\` |"
+            else
+              echo "::warning::No AAB was produced; shipping the APK only."
+            fi
+          fi
+          ls -la "$DEST"
+
+          {
+            echo "## Android"
+            echo
+            if [ "$SIGNED" = "true" ]; then
+              echo "Release-signed, verified with apksigner against the release keystore."
+            else
+              echo "> [!WARNING]"
+              echo "> **Debug-signed.** The release signing secrets are not set (missing: ${MISSING:-unknown}),"
+              echo "> so this APK is signed with the runner's throwaway debug key and named \`-debug\`."
+              echo "> See native/README.md, \"Android signing\", to turn release signing on."
+            fi
+            echo
+            echo "| File | SHA-256 |"
+            echo "| --- | --- |"
+            echo "| \`$NAME.apk\` | \`$(sha256sum "$DEST/$NAME.apk" | cut -d' ' -f1)\` |"
+            if [ -n "$AAB_LINE" ]; then echo "$AAB_LINE"; fi
+            echo
+            echo "Signing certificate SHA-256: \`$APK_CERT\`"
+            echo
+            echo "Signing certificate DN: \`$APK_DN\`"
+            echo
+            echo "Check a download with \`apksigner verify --print-certs <file>.apk\` (or \`sha256sum\`)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
