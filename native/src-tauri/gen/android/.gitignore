@@ -18,3 +18,7 @@ keystore.properties
 
 /.tauri
 /tauri.settings.gradle
+# Release signing: the keystore and its passwords never belong in the repo.
+keystore.properties
+*.jks
+*.keystore

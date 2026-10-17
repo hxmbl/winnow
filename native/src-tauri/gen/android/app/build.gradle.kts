@@ -14,16 +14,36 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// Release signing, from the environment (CI secrets), never from a file in the repo.
+// Release signing: never from a value or a keystore committed to the repo.
 //
-// All four set: the release APK is signed with that keystore, and every later
-// release must use the same one or Android refuses the update. Any of them unset:
-// the release APK is signed with the local debug key instead, so it still installs;
-// CI names that APK `-debug`. See native/README.md, "Android signing".
-val releaseKeystore: String? = System.getenv("ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
-val releaseKeystorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")?.takeIf { it.isNotEmpty() }
-val releaseKeyAlias: String? = System.getenv("ANDROID_KEY_ALIAS")?.takeIf { it.isNotBlank() }
-val releaseKeyPassword: String? = System.getenv("ANDROID_KEY_PASSWORD")?.takeIf { it.isNotEmpty() }
+// CI sets ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and
+// ANDROID_KEY_PASSWORD from repository secrets. A local build can instead use an
+// untracked gen/android/keystore.properties, the layout Tauri's docs suggest:
+//
+//   storeFile=/absolute/path/to/winnow-release.jks
+//   password=<keystore password>
+//   keyAlias=winnow
+//   keyPassword=<key password; optional, defaults to password>
+//
+// The environment wins over the file. All four values present: the release build
+// is signed with that keystore, and every later release must use the same one or
+// Android refuses the update. Any missing: the release build is signed with the
+// local debug key instead, so it still installs; CI names that APK `-debug`.
+// See native/README.md, "Android signing".
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+fun signingValue(env: String, property: String): String? =
+    System.getenv(env)?.takeIf { it.isNotEmpty() }
+        ?: keystoreProperties.getProperty(property)?.takeIf { it.isNotEmpty() }
+
+val releaseKeystore: String? = signingValue("ANDROID_KEYSTORE_PATH", "storeFile")?.takeIf { it.isNotBlank() }
+val releaseKeystorePassword: String? = signingValue("ANDROID_KEYSTORE_PASSWORD", "password")
+val releaseKeyAlias: String? = signingValue("ANDROID_KEY_ALIAS", "keyAlias")?.takeIf { it.isNotBlank() }
+val releaseKeyPassword: String? = signingValue("ANDROID_KEY_PASSWORD", "keyPassword") ?: releaseKeystorePassword
 val hasReleaseSigning = releaseKeystore != null && releaseKeystorePassword != null &&
     releaseKeyAlias != null && releaseKeyPassword != null
 
@@ -65,7 +85,7 @@ android {
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
-                logger.warn("Winnow: ANDROID_KEYSTORE_* not set; signing the release APK with the debug key.")
+                logger.warn("Winnow: no release keystore configured; signing the release build with the debug key.")
                 signingConfigs.getByName("debug")
             }
             optimization {
