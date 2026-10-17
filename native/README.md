@@ -123,43 +123,70 @@ touch `native/`).
 
 ### Android signing
 
-Signing an APK is free; it only needs a keystore you make yourself. Until there is
-one, CI signs the release APK with the runner's **debug key** and names it
-`…_android-universal-debug.apk`. It installs fine, but the key changes between
-runs, so moving from one debug APK to the next may need an uninstall.
+`release.yml` signs the Android build with a release keystore whenever four
+repository secrets exist, and needs no edit to turn it on. Until they do (and on
+forks, which never see them), it falls back to the runner's **debug key**, names
+the APK `…_android-universal-debug.apk`, and says so in the job summary; the
+build doesn't fail. With them, it ships `Winnow_<version>_android-universal.apk`
+and puts a signed `.aab` (for a future Play Store listing) in the workflow
+artifact. Either way the job summary lists each file's SHA-256 and the signing
+certificate's SHA-256, so a download can be checked with
+`apksigner verify --print-certs` or `sha256sum`.
 
-`gen/android/app/build.gradle.kts` already has the release signing config, live:
-it signs with your keystore when **all four** of `ANDROID_KEYSTORE_PATH`,
-`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` are
-set, and falls back to the debug key otherwise. So turning release signing on is
-one edit, in `.github/workflows/release.yml` only:
+`gen/android/app/build.gradle.kts` reads the signing values from the environment
+(`ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD`) or, for a local build, from an untracked
+`gen/android/keystore.properties` (`storeFile`, `password`, `keyAlias`,
+`keyPassword`); nothing is hardcoded, and keystores are gitignored.
 
-1. Make a keystore, once, and keep it out of the repo:
+To turn it on, once:
+
+1. Make the keystore, outside the repo (JDK 17+ `keytool`; it asks for a password):
 
    ```sh
-   keytool -genkeypair -v -keystore winnow-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias winnow
+   keytool -genkeypair -v -keystore winnow-release.jks -storetype PKCS12 \
+     -keyalg RSA -keysize 4096 -validity 10950 -alias winnow
    ```
 
-2. Base64 it for the secret: `base64 -w0 winnow-release.jks` (Linux) or
-   `base64 -i winnow-release.jks` (macOS).
-3. Add four repository secrets (Settings → Secrets and variables → Actions):
+   A PKCS12 keystore has one password for the store and the key, so the key
+   password is the same as the keystore password.
+
+2. Base64 it for the secret:
+
+   ```sh
+   base64 -w0 winnow-release.jks > winnow-release.jks.b64    # Linux
+   base64 -i winnow-release.jks -o winnow-release.jks.b64    # macOS
+   ```
+
+   ```powershell
+   # Windows PowerShell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\winnow-release.jks")) | Set-Content -NoNewline winnow-release.jks.b64
+   ```
+
+3. Add four repository secrets (**Settings → Secrets and variables → Actions →
+   New repository secret**), then delete the `.b64` file:
 
    | Secret | Value |
    | --- | --- |
-   | `ANDROID_KEYSTORE_BASE64` | The base64 text from step 2 |
-   | `ANDROID_KEYSTORE_PASSWORD` | The keystore password you gave keytool |
+   | `ANDROID_KEYSTORE_BASE64` | The contents of `winnow-release.jks.b64` |
+   | `ANDROID_KEYSTORE_PASSWORD` | The password you gave keytool |
    | `ANDROID_KEY_ALIAS` | `winnow` (the `-alias` above) |
-   | `ANDROID_KEY_PASSWORD` | The key's password (keytool's default makes it the same as the keystore's) |
+   | `ANDROID_KEY_PASSWORD` | The same password as `ANDROID_KEYSTORE_PASSWORD` |
 
-4. In `release.yml`, uncomment the **Build APK (release-signed)** step in the
-   `android` job (between the "Release signing" markers). It decodes the keystore
-   to a temp file, points `ANDROID_KEYSTORE_PATH` at it, rebuilds, and the APK
-   loses its `-debug` suffix.
+   The next `v*` tag builds a signed APK. GitHub masks every secret's value in
+   logs, so with the alias `winnow` a lowercase "winnow" in the Android job's log
+   shows as `***`; that's cosmetic.
 
-**Back up the keystore and its passwords** somewhere that isn't this repo or only
-GitHub. Android only installs an update signed with the same key as the installed
-app; lose the keystore and every user has to uninstall and reinstall to get a new
-version. Never commit it.
+**Back up the keystore and its password** somewhere that isn't this repo and isn't
+only GitHub (secrets can't be read back out). Android only installs an update
+signed with the same key as the installed app: lose either and no existing install
+can ever be updated in place again; every user would have to uninstall and
+reinstall. Never commit the keystore or paste it anywhere public.
+
+**Moving from the debug APK:** anyone who installed an earlier `-debug` APK must
+uninstall Winnow once before installing the first signed one, because the
+signatures don't match (uninstalling signs them out). After that, signed updates
+install over each other.
 
 ## The command surface
 

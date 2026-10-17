@@ -68,9 +68,11 @@ anywhere else could be anything with Winnow's name on it.
   unknown developer, because these builds aren't from the Play Store. Choose
   **More details → Install anyway**. That's expected for these builds.
 - **Updates** install over the old version only if both were signed with the same
-  key. An APK whose name ends in `-debug` is signed with a throwaway key, so to
-  move to a newer one (or to a non-`-debug` one) you may have to uninstall Winnow
-  first, which also signs you out.
+  key. Release APKs (no `-debug` in the name) all share one key and update in
+  place. An APK whose name ends in `-debug` is signed with a throwaway key, so to
+  move to a newer one, or from it to a release APK, uninstall Winnow first, which
+  also signs you out. Each release's workflow summary lists the APK's SHA-256 and
+  signing certificate if you want to check a download.
 
 Sign-in on Android uses the same **Desktop app** OAuth client as the desktop
 builds: Winnow opens Google in your browser and catches the answer on your own
