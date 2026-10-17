@@ -401,9 +401,11 @@ jobs:
           fi
           CERTS="$("$BT/apksigner" verify --verbose --print-certs "$DEST/$NAME.apk")"
           printf '%s\n' "$CERTS"
-          APK_CERT="$(printf '%s\n' "$CERTS" | awk -F': ' '/^Signer #1 certificate SHA-256 digest:/ { print $2; exit }')"
-          APK_DN="$(printf '%s\n' "$CERTS" | awk -F': ' '/^Signer #1 certificate DN:/ { print $2; exit }')"
-          # apksigner prints lowercase hex, keytool colon-separated uppercase.
+          APK_CERT="$(printf '%s\n' "$CERTS" | awk -F': ' '/certificate SHA-256 digest:/ { print $NF; exit }')"
+          APK_DN="$(printf '%s\n' "$CERTS" | sed -n 's/.*certificate DN: //p' | head -n1)"
+          # apksigner names the signer by scheme ("Signer #1" for v1, "V2 Signer" when
+          # minSdk skips v1), so match the field, not the prefix. It prints lowercase
+          # hex; keytool prints colon-separated uppercase.
           norm() { tr -d ':' | tr '[:upper:]' '[:lower:]'; }
 
           AAB_LINE=""
