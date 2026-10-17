@@ -46,8 +46,15 @@ pub const PORT_PLACEHOLDER: &str = "__WINNOW_LOOPBACK_PORT__";
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuthOutcome {
-    Code { code: String, state: String },
-    Error { error: String, description: String, state: String },
+    Code {
+        code: String,
+        state: String,
+    },
+    Error {
+        error: String,
+        description: String,
+        state: String,
+    },
 }
 
 /// State shared between the command layer and the listener thread.
@@ -210,8 +217,11 @@ fn answer_bad_request(request: tiny_http::Request) {
         tiny_http::Response::from_string("Bad request")
             .with_status_code(400)
             .with_header(
-                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..])
-                    .unwrap(),
+                tiny_http::Header::from_bytes(
+                    &b"Content-Type"[..],
+                    &b"text/plain; charset=utf-8"[..],
+                )
+                .unwrap(),
             ),
     );
 }
@@ -354,15 +364,15 @@ fn serve(
         };
 
         let Some(outcome) = outcome else {
-            let _ = request.respond(
-                tiny_http::Response::from_string("").with_status_code(204),
-            );
+            let _ = request.respond(tiny_http::Response::from_string("").with_status_code(204));
             continue;
         };
 
         let (status, body) = match &outcome {
             AuthOutcome::Code { .. } => (200, SUCCESS_PAGE.to_string()),
-            AuthOutcome::Error { error, description, .. } => (
+            AuthOutcome::Error {
+                error, description, ..
+            } => (
                 400,
                 ERROR_PAGE
                     .replace("{ERROR}", error)
@@ -379,8 +389,11 @@ fn serve(
             tiny_http::Response::from_string(body)
                 .with_status_code(status)
                 .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
-                        .unwrap(),
+                    tiny_http::Header::from_bytes(
+                        &b"Content-Type"[..],
+                        &b"text/html; charset=utf-8"[..],
+                    )
+                    .unwrap(),
                 )
                 .with_header(
                     tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap(),
@@ -448,9 +461,7 @@ mod tests {
         let redirect = std::thread::spawn(move || {
             for _ in 0..50 {
                 std::thread::sleep(Duration::from_millis(20));
-                if let Ok(mut stream) =
-                    std::net::TcpStream::connect(("127.0.0.1", port))
-                {
+                if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
                     use std::io::Write;
                     let _ = stream.write_all(
                         b"GET /?state=xyz&code=abc123 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
@@ -475,7 +486,10 @@ mod tests {
             }
             other => panic!("expected a code, got {other:?}"),
         }
-        assert!(body.contains("200 OK"), "expected an HTML response, got: {body}");
+        assert!(
+            body.contains("200 OK"),
+            "expected an HTML response, got: {body}"
+        );
         assert!(body.contains("Signed in to Winnow"));
     }
 
@@ -498,7 +512,9 @@ mod tests {
         });
 
         match block_on(session.take_receiver().unwrap()).expect("an error should have been sent") {
-            AuthOutcome::Error { error, description, .. } => {
+            AuthOutcome::Error {
+                error, description, ..
+            } => {
                 assert_eq!(error, "access_denied");
                 assert_eq!(description, "User said no");
             }
@@ -590,8 +606,9 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
             if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
                 use std::io::{Read, Write};
-                let request =
-                    format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+                let request = format!(
+                    "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+                );
                 if stream.write_all(request.as_bytes()).is_err() {
                     return String::new();
                 }
@@ -616,15 +633,20 @@ mod tests {
         // The request runs on its own thread because the listener only sends once it
         // has received something; awaiting the receiver first would deadlock against
         // a test that can only pass by making the request.
-        let browser =
-            std::thread::spawn(move || request_once(port, "/winnow-oauth?state=s1&code=the-real-code".into()));
+        let browser = std::thread::spawn(move || {
+            request_once(port, "/winnow-oauth?state=s1&code=the-real-code".into())
+        });
 
-        let outcome = block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent");
+        let outcome =
+            block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent");
         let body = browser.join().unwrap();
 
         match outcome {
             AuthOutcome::Code { code, state } => {
-                assert_eq!(code, "the-real-code", "the code must survive the path split");
+                assert_eq!(
+                    code, "the-real-code",
+                    "the code must survive the path split"
+                );
                 assert_eq!(state, "s1");
             }
             other => panic!("expected a code, got {other:?}"),
@@ -641,10 +663,12 @@ mod tests {
         let mut session = begin(AUTH_URL.into()).unwrap();
         let port = session.port;
 
-        let browser =
-            std::thread::spawn(move || request_once(port, "/winnow-oauth?state=s&code=a%2Bb%2Fc".into()));
+        let browser = std::thread::spawn(move || {
+            request_once(port, "/winnow-oauth?state=s&code=a%2Bb%2Fc".into())
+        });
 
-        match block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent") {
+        match block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent")
+        {
             AuthOutcome::Code { code, .. } => assert_eq!(code, "a+b/c"),
             other => panic!("expected a code, got {other:?}"),
         }
@@ -716,7 +740,8 @@ mod tests {
             )
         });
 
-        let outcome = block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent");
+        let outcome =
+            block_on(session.take_receiver().unwrap()).expect("an outcome should have been sent");
         let body = browser.join().unwrap();
 
         match &outcome {

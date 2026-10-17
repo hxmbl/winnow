@@ -422,7 +422,11 @@ mod tests {
         for good in ["https://example.com", "https://mail.google.com/x?y=1"] {
             assert_eq!(url::Url::parse(good).unwrap().scheme(), "https");
         }
-        for bad in ["file:///etc/passwd", "javascript:alert(1)", "http://localhost"] {
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "http://localhost",
+        ] {
             assert_ne!(url::Url::parse(bad).unwrap().scheme(), "https");
         }
     }
@@ -435,13 +439,12 @@ mod tests {
         // declared. `message_ids` + `#[serde(default)]` therefore deserialised
         // successfully with an empty vec — no error, no log, and the ids silently
         // gone on every notification.
-        let parsed: NewMail =
-            serde_json::from_value(serde_json::json!({
-                "title": "Ada Lovelace",
-                "body": "Re: the migration plan",
-                "messageIds": [7, 9],
-            }))
-            .expect("a camelCase payload must deserialise");
+        let parsed: NewMail = serde_json::from_value(serde_json::json!({
+            "title": "Ada Lovelace",
+            "body": "Re: the migration plan",
+            "messageIds": [7, 9],
+        }))
+        .expect("a camelCase payload must deserialise");
 
         assert_eq!(parsed.message_ids, vec![7, 9]);
 
@@ -477,7 +480,12 @@ mod tests {
         })
         .unwrap();
 
-        for key in ["nativeOAuth", "nativeSecrets", "backgroundSync", "saveFiles"] {
+        for key in [
+            "nativeOAuth",
+            "nativeSecrets",
+            "backgroundSync",
+            "saveFiles",
+        ] {
             assert_eq!(
                 json.get(key),
                 Some(&serde_json::Value::Bool(true)),
@@ -503,7 +511,9 @@ mod tests {
         // "httpsomething://" must not slip through a `starts_with("https")`.
         let sneaky = "httpsomething://evil.example".replace("httpsomething", "https");
         assert_eq!(url::Url::parse(&sneaky).unwrap().scheme(), "https");
-        assert_ne!(url::Url::parse("httpsx://evil.example").unwrap().scheme(), "https");
+        assert_ne!(
+            url::Url::parse("httpsx://evil.example").unwrap().scheme(),
+            "https"
+        );
     }
 }
-

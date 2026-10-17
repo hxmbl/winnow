@@ -98,9 +98,8 @@ pub async fn save_attachment(
         // `let_unit_value`, which is the correct complaint.
         let target_for_task = target.clone();
         tokio::task::spawn_blocking(move || {
-            std::fs::write(&target_for_task, &bytes).map_err(|e| {
-                format!("could not write {}: {e}", target_for_task.display())
-            })
+            std::fs::write(&target_for_task, &bytes)
+                .map_err(|e| format!("could not write {}: {e}", target_for_task.display()))
         })
         .await
         .map_err(|e| format!("the write task failed: {e}"))??;

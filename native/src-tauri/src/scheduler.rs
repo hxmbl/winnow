@@ -75,7 +75,8 @@ impl Scheduler {
         self.retire();
 
         let stop = Arc::new(AtomicBool::new(false));
-        let interval = Duration::from_secs(interval_secs.clamp(MIN_INTERVAL_SECS, MAX_INTERVAL_SECS));
+        let interval =
+            Duration::from_secs(interval_secs.clamp(MIN_INTERVAL_SECS, MAX_INTERVAL_SECS));
 
         let Ok(handle) = std::thread::Builder::new()
             .name("winnow-sync".into())
@@ -175,7 +176,10 @@ mod tests {
         let elapsed = started.elapsed();
         waker.join().unwrap();
 
-        assert!(stopped, "the flag was set mid-sleep, so this should report a stop");
+        assert!(
+            stopped,
+            "the flag was set mid-sleep, so this should report a stop"
+        );
         assert!(
             elapsed < Duration::from_secs(5),
             "should have woken within a second or two, took {elapsed:?}"
