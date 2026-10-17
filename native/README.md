@@ -188,6 +188,22 @@ uninstall Winnow once before installing the first signed one, because the
 signatures don't match (uninstalling signs them out). After that, signed updates
 install over each other.
 
+## Cutting a release
+
+Run **Actions → Cut release → Run workflow** on `master`. Pick `patch`, `minor`,
+`major` or an exact version, optionally a pre-release suffix (`beta.1` tags
+`v1.2.0-beta.1` and publishes it as a pre-release), and leave **publish** on.
+
+It runs `web/scripts/bump-version.mjs` to set the version in all six manifests,
+commits `Release vX.Y.Z` to `master`, tags it, and dispatches CI on the tag. A push
+made with `GITHUB_TOKEN` triggers no workflows, so the dispatch replaces the usual
+tag push. When CI passes it hands off to `release.yml`, which builds the draft. Its
+last job publishes the draft only if all six bundles are attached and the APK is
+release-signed. Anything missing (Windows and Android are allowed to fail) leaves
+the draft for you to finish or publish by hand.
+
+Pushing a `v*` tag by hand still works, and it stops at a draft as before.
+
 ## The command surface
 
 Every command in `commands.rs` has a binding in `web/src/platform/desktop.ts`

@@ -44,7 +44,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       data/         The demo mailbox seed.
     platform/       The boundary. Two implementations (web.ts, desktop.ts), one interface.
     ui/             React components and the pure helpers beside them.
-  scripts/          check-version.mjs, smoke.mjs, bundle.mjs — see §11.
+  scripts/          check-version.mjs, bump-version.mjs, smoke.mjs, bundle.mjs — see §11.
 native/src-tauri/   Tauri v2 shell. Rust. Native bits only. README.md there explains
                    the IPC naming rule, the loopback port and why the build is a
                    script.
@@ -645,6 +645,9 @@ judged as IPv4.
   `package-lock.json` twice, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock`), all
   plain `MAJOR.MINOR.PATCH`, because a suffix lives only in the tag and WiX
   rejects anything else. `tauri.conf.json` is the authority.
+- `bump-version.mjs` — sets one version in all six manifests (`patch`, `minor`,
+  `major` or exact), editing in place so formatting survives, then re-runs
+  `check-version.mjs`. Used by the Cut release workflow.
 - `bundle.mjs` — bundle kinds are named per host (asking macOS for a `deb`
   declines quietly rather than erroring), and success is asserted by looking for
   the file. Preflights `hdiutil` and `create-dmg` so a missing one is a sentence

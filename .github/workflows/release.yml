@@ -11,6 +11,11 @@ on:
         description: 'Tag or branch to build'
         required: false
         type: string
+      publish:
+        description: 'Publish the release once every build is attached (tags only)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -466,3 +471,54 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$TAG" "$RUNNER_TEMP"/android/*.apk --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Cut release (or a manual run with publish) takes the draft live, but only when
+  # every bundle is attached and the APK is release-signed. Anything missing leaves
+  # the draft for a look, rather than shipping a release without Windows or Android.
+  publish:
+    name: Publish release
+    needs: [prepare, build, android]
+    if: ${{ !cancelled() && needs.prepare.outputs.publish == 'true' && inputs.publish }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check every bundle is attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          printf 'Attached:\n%s\n' "$ASSETS"
+          MISSING=""
+          for SUFFIX in amd64.AppImage amd64.deb universal.dmg x64-setup.exe x64_en-US.msi android-universal.apk; do
+            NAME="Winnow_${VERSION}_${SUFFIX}"
+            printf '%s\n' "$ASSETS" | grep -qxF "$NAME" || MISSING="$MISSING $NAME"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Not publishing: missing$MISSING. The draft is left for you to finish or publish by hand."
+            exit 1
+          fi
+          if printf '%s\n' "$ASSETS" | grep -q -- '-debug\.apk$'; then
+            echo "::error::Not publishing: a debug-signed APK is attached."
+            exit 1
+          fi
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # A pre-release stays a pre-release and never becomes "Latest".
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = "true" ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
+          URL="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+          echo "Published $URL"
+          echo "Published [Winnow $TAG]($URL)." >> "$GITHUB_STEP_SUMMARY"
