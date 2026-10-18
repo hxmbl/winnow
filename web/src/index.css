@@ -850,3 +850,35 @@ div[data-row-count] {
     border: 1px solid CanvasText;
   }
 }
+
+/*
+ * The logo's version toggle (`logoVersion.ts`): the bar's middle holds the search field
+ * and "Winnow 1.2.2" stacked in one grid cell, and crossfades between them. The hidden
+ * one is `visibility: hidden` once its fade is over, so it takes no taps and no Tab, but
+ * it stays mounted: search keeps its query. Reduced motion swaps them instantly.
+ */
+.wn-logo-swap {
+  display: grid;
+  align-items: center;
+}
+.wn-logo-swap > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  transition:
+    opacity 180ms var(--wn-glass-ease),
+    visibility 0s linear 0s;
+}
+.wn-logo-swap > :not([data-shown]) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 180ms var(--wn-glass-ease),
+    visibility 0s linear 180ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wn-logo-swap > *,
+  .wn-logo-swap > :not([data-shown]) {
+    transition: none;
+  }
+}

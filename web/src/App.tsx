@@ -20,6 +20,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { LogIn, RefreshCw, X } from "lucide-react";
 import {
   NO_CURSOR,
@@ -71,6 +72,7 @@ import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
 import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
+import { logoViewAfter, type LogoView } from "./ui/logoVersion";
 import { PullRefresh } from "./ui/components/PullRefresh";
 import { scrollListToTop } from "./ui/listScroll";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
@@ -288,6 +290,14 @@ export function App({ store }: Props) {
    * the note on `Masthead`'s `searchRef` prop.
    */
   const searchRef = useRef<HTMLInputElement>(null);
+  /**
+   * The logo's version toggle (`logoVersion.ts`), shared by the phone's top bar and the
+   * desktop's floating bar: the mark swaps search for "Winnow <version>" and back. Held
+   * here because `/` has to bring search back before it can focus it.
+   */
+  const [logoView, setLogoView] = useState<LogoView>("search");
+  const toggleLogo = useCallback(() => setLogoView((view) => logoViewAfter(view, "logo")), []);
+  const showSearch = useCallback(() => setLogoView((view) => logoViewAfter(view, "focusSearch")), []);
   const [scrollStep, setScrollStep] = useState(0);
   const [composer, setComposer] = useState<ComposerState | null>(null);
   /** The composer as of this render, for the keyboard handler and `openCompose`. */
@@ -2158,6 +2168,9 @@ export function App({ store }: Props) {
           openComposeRef.current();
           break;
         case "focusSearch":
+          // Search first, synchronously, if the logo had swapped it for the version: a
+          // hidden field cannot take focus.
+          flushSync(() => setLogoView((view) => logoViewAfter(view, "focusSearch")));
           searchRef.current?.focus();
           // `select()` as well as focus, so a second `/` re-selects an existing
           // query rather than appending to it.
@@ -2881,6 +2894,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               searchQuery={snapshot.searchQuery}
               onSearchChange={store.setSearchQuery.bind(store)}
               searchRef={searchRef}
+              version={info?.version ?? null}
+              logoView={logoView}
+              onToggleLogo={toggleLogo}
+              onSearchFocus={showSearch}
               sidebarOpen={sidebarOpen}
               onToggleSidebar={toggleSidebar}
               pills={pills}

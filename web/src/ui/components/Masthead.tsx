@@ -16,8 +16,9 @@
  * toggle at the head of this row opens.
  */
 
-import { ChevronLeft, ChevronRight, Search, SquarePen } from "lucide-react";
+import { ChevronLeft, ChevronRight, PanelLeft, Search, SquarePen } from "lucide-react";
 import { AppMark } from "../AppMark";
+import { VERSION_TOGGLE_LABEL, logoPressed, versionText, type LogoView } from "../logoVersion";
 import { shortcutHint } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { FilterId } from "../../core/model/signals";
@@ -32,6 +33,14 @@ export type MastheadProps = {
    * exact element. If the two diverge, `/` silently does nothing.
    */
   searchRef: React.RefObject<HTMLInputElement | null>;
+  /** The build's version, from the platform; null until it has said. */
+  version: string | null;
+  /** Whether the bar shows search or the version (`logoVersion.ts`). */
+  logoView: LogoView;
+  /** The mark was clicked. */
+  onToggleLogo: () => void;
+  /** Search was focused some other way: it shows search again. */
+  onSearchFocus: () => void;
   /** Whether the sidebar overlay is open, for the toggle's `aria-expanded`. */
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -94,6 +103,10 @@ export function Masthead({
   searchQuery,
   onSearchChange,
   searchRef,
+  version,
+  logoView,
+  onToggleLogo,
+  onSearchFocus,
   sidebarOpen,
   onToggleSidebar,
   pills,
@@ -118,10 +131,9 @@ export function Masthead({
         className="wn-glass wn-glass-bar pointer-events-auto flex h-[52px] min-w-0 items-center gap-3 rounded-full pl-2 pr-2"
       >
         {/*
-          The sidebar's toggle, at the edge the sidebar slides in from. It wears the app
-          mark (the one the phone's top bar shows) rather than a generic panel icon, so
-          the corner says whose app this is; hover and press are a quiet surface tint
-          behind the mark, never a recolour of it.
+          The sidebar's toggle, at the edge the sidebar slides in from: a panel icon now,
+          since the mark beside it has a job of its own. Hover and press are a quiet
+          surface tint, never a recolour.
         */}
         <button
           type="button"
@@ -132,14 +144,31 @@ export function Masthead({
           aria-haspopup="dialog"
           aria-label="Open sidebar"
           title="Sidebar"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <AppMark size={32} />
+          <PanelLeft size={17} strokeWidth={1.9} aria-hidden="true" />
+        </button>
+        {/*
+          The mark is the version toggle (`logoVersion.ts`): a click swaps search for
+          "Winnow 1.2.2", a second click (or `/`, or focusing search) brings it back.
+        */}
+        <button
+          type="button"
+          data-version-toggle=""
+          aria-pressed={logoPressed(logoView)}
+          aria-label={VERSION_TOGGLE_LABEL}
+          title={VERSION_TOGGLE_LABEL}
+          onClick={onToggleLogo}
+          className="-ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          <AppMark size={30} />
         </button>
         {/* Search takes the width; where-you-are keeps its own. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div data-masthead-swap="" data-logo-view={logoView} className="wn-logo-swap min-w-0 flex-1">
           <label
             htmlFor="winnow-search"
+            data-shown={logoView === "search" ? "" : undefined}
             /*
               Focus is drawn on the *label*, not the input, via `focus-within`: the
               input is a bare text box inside a rounded field, so an outline on it would
@@ -160,10 +189,20 @@ export function Masthead({
               type="search"
               value={searchQuery}
               onChange={(event) => onSearchChange(event.target.value)}
+              onFocus={onSearchFocus}
               placeholder="Search"
               className="min-w-0 flex-1 bg-transparent text-ui font-medium text-ink outline-none placeholder:text-ink-placeholder"
             />
           </label>
+          <p
+            data-version-text=""
+            data-shown={logoView === "version" ? "" : undefined}
+            aria-live="polite"
+            className="truncate px-1 text-ui font-semibold text-ink"
+          >
+            {logoView === "version" ? versionText(version) : ""}
+          </p>
+          </div>
 
           {/*
             The position cluster. Unboxed: the number is a readout and the arrows are the
