@@ -253,7 +253,8 @@ void platform
     const stopClock = store.startClock();
 
     // Presses on new-mail notifications, and replies a phone kept while it could not
-    // send: saved to Drafts once signed in, and again whenever the app comes back.
+    // send: saved to Drafts once signed in, and again whenever the app or the network
+    // comes back.
     const unlistenNotifications = wireNotifications(store, platform);
     let wasReady = false;
     const unsubscribeKept = store.subscribe(() => {
@@ -265,11 +266,16 @@ void platform
       if (globalThis.document?.visibilityState === "visible") void saveKeptReplies(store, platform);
     };
     globalThis.document?.addEventListener("visibilitychange", onVisible);
+    // A reply kept because the phone was offline is most likely to save the moment the
+    // network is back, which is when the offline queue replays too.
+    const onOnline = () => void saveKeptReplies(store, platform);
+    globalThis.addEventListener?.("online", onOnline);
 
     globalThis.addEventListener?.("pagehide", () => {
       unlistenNotifications();
       unsubscribeKept();
       globalThis.document?.removeEventListener("visibilitychange", onVisible);
+      globalThis.removeEventListener?.("online", onOnline);
       unlistenTick();
       foreground.stop();
       stopClock();

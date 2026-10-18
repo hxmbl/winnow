@@ -77,7 +77,20 @@ export function wireNotifications(store: WinnowStore, platform: Platform): () =>
  * Gmail has it. One that cannot be saved yet (still offline) stays on the phone for the
  * next try: nothing typed is ever dropped on the way.
  */
-export async function saveKeptReplies(store: WinnowStore, platform: Platform): Promise<void> {
+export function saveKeptReplies(store: WinnowStore, platform: Platform): Promise<void> {
+  // Ready, visible and online can all fire together. Two runs would both read the same
+  // kept replies before either released them, and save each one to Drafts twice.
+  if (!saving) {
+    saving = saveKeptRepliesOnce(store, platform).finally(() => {
+      saving = null;
+    });
+  }
+  return saving;
+}
+
+let saving: Promise<void> | null = null;
+
+async function saveKeptRepliesOnce(store: WinnowStore, platform: Platform): Promise<void> {
   if (!platform.keptReplies || !platform.releaseKeptReplies) return;
   if (store.getSnapshot().status !== "ready") return;
   const raw = await platform.keptReplies().catch(() => []);
