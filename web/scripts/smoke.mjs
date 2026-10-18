@@ -787,8 +787,8 @@ try {
     nav: Boolean(side.querySelector("nav")),
   }));
   check(
-    "top to bottom: Winnow, Inbox, Mail (Sent, Archive, Trash…), the demo account and a gear",
-    sideText.brand && JSON.stringify(sideText.sections) === JSON.stringify(["Mail"]) &&
+    "top to bottom: Winnow, Inbox, Mail (Sent, Archive, Trash…), the demo's Labels, the demo account and a gear",
+    sideText.brand && JSON.stringify(sideText.sections) === JSON.stringify(["Mail", "Labels"]) &&
       ["sent", "archive", "trash"].every((id) => sideText.folders.includes(id)) &&
       sideText.account.includes("Demo account") && sideText.gear && sideText.nav,
     JSON.stringify(sideText),
