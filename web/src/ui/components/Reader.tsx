@@ -25,6 +25,7 @@ import {
   Paperclip,
   RotateCcw,
   Star,
+  Tag,
   Trash2,
   Undo2,
   X,
@@ -96,6 +97,8 @@ type Actions = {
   onNotSpam: () => void;
   onShowOriginal: () => void;
   onBlockSender: () => void;
+  /** Open "Label as…" for this message. Absent where labels cannot be set. */
+  onLabelAs?: () => void;
   /** Turn image loading on for this message only. */
   onLoadRemoteContent: () => void;
   /** Load images from now on, for every message. */
@@ -230,6 +233,7 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
         hasHtml={hasHtml}
         senderName={senderName}
         onBlockSender={actions.onBlockSender}
+        onLabelAs={actions.onLabelAs}
         buttonClass={ICON_BUTTON}
       />
     </div>
@@ -244,12 +248,13 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
  * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
  * hands focus back to its button so the keyboard is not stranded.
  */
-function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, buttonClass, phone, buttonContent }: {
+function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onLabelAs, buttonClass, phone, buttonContent }: {
   view: BodyView;
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
   senderName: string;
   onBlockSender: () => void;
+  onLabelAs?: () => void;
   buttonClass: string;
   /**
    * The phone reader's version: the menu opens *upward* from the action bar, its rows
@@ -367,6 +372,12 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, butt
             </button>
           ))}
           <div className="my-1 h-px bg-divider" aria-hidden="true" />
+          {onLabelAs && (
+            <button type="button" role="menuitem" data-reader-label-as="" onClick={() => choose(onLabelAs)} className={ITEM}>
+              <Tag size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <span className="flex-1">Label as…</span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -452,6 +463,7 @@ function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, has
         hasHtml={hasHtml}
         senderName={senderName}
         onBlockSender={actions.onBlockSender}
+        onLabelAs={actions.onLabelAs}
         buttonClass={BUTTON}
         phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead }}
         buttonContent={

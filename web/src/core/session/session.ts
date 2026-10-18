@@ -64,6 +64,7 @@ import { base64UrlDecode } from "../gmail/dto";
 import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
 import { loadedBodyOf, mailboxFor, toDraftEmail } from "../gmail/mapper";
 import { mapPool } from "../gmail/pool";
+import { isUserLabelId } from "../mail/labels";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
 
@@ -1122,6 +1123,20 @@ export class GmailSession {
       },
       async deletePermanently(id) {
         await client.deletePermanently(await gmailIdFor(id));
+      },
+      async listLabels() {
+        const labels = await client.labels();
+        return labels
+          .filter((label) => label.type === "user" || (label.type === undefined && isUserLabelId(label.id)))
+          .map(({ id, name }) => ({ id, name }));
+      },
+      async createLabel(name) {
+        const { id, name: created } = await client.createLabel(name);
+        return { id, name: created };
+      },
+      async modifyLabels(ids, add, remove) {
+        const gmailIds = await Promise.all(ids.map((id) => gmailIdFor(id)));
+        await client.batchModify(gmailIds, [...add], [...remove]);
       },
       async sendReply(draft, inReplyTo, draftId) {
         const { raw, threadId } = await rawFor(draft as Draft, inReplyTo, true);

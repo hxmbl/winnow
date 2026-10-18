@@ -20,7 +20,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { WinnowStore } from "./core/store/store";
-import { DEMO_CONTACTS, DEMO_TRASH, demoMailbox } from "./core/data/demo";
+import { DEMO_CONTACTS, DEMO_LABELS, DEMO_TRASH, demoMailbox } from "./core/data/demo";
 import { desktopPlatformExtras, isTauri, platform } from "./platform";
 import { filterKey, parseFilterKey } from "./core/model/signals";
 import { MAILBOX_ORDER } from "./core/store/store";
@@ -151,6 +151,7 @@ const store = new WinnowStore({
   seed: demo.emails,
   seedTrash: DEMO_TRASH,
   seedDrafts: demo.drafts,
+  seedLabels: DEMO_LABELS,
   // The demo address book, so the composer shows Google contacts merged in with no network.
   seedContacts: DEMO_CONTACTS,
   // The seed's own reference instant, moved onto the real clock (`demoMailbox`), so the

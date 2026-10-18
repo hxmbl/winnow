@@ -33,9 +33,22 @@ describe("the row context menu", () => {
 
   it("never offers what Winnow cannot do", () => {
     const all = JSON.stringify(buildRowMenu(rowInput()));
-    for (const missing of ["Snooze", "Add to tasks", "Forward as attachment", "Label as"]) {
+    for (const missing of ["Snooze", "Add to tasks", "Forward as attachment"]) {
       expect(all).not.toContain(missing);
     }
+  });
+
+  it("offers Label as… after Move to, for one message or a selection, when labels can be set", () => {
+    const labelAs = () => undefined;
+    const single = buildRowMenu(rowInput({ actions: { ...rowInput().actions, labelAs } }));
+    expect(ids(single).slice(8, 11)).toEqual(["move", "label-as", "mute-sender"]);
+    const item = single.find((e) => e.kind === "item" && e.id === "label-as");
+    expect(item && item.kind === "item" && item.label).toBe("Label as…");
+    const many = buildRowMenu(
+      rowInput({ count: 3, sender: undefined, subject: undefined, actions: { ...rowInput().actions, labelAs } }),
+    );
+    expect(ids(many)).toContain("label-as");
+    expect(ids(buildRowMenu(rowInput()))).not.toContain("label-as");
   });
 
   it("hides single-message items for a multi-selection and counts the rest", () => {

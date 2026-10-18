@@ -8,14 +8,15 @@
  *
  *   Reply · Reply all · Forward
  *   Archive · Delete · Mark as read/unread
- *   Move to ▸ · Mute sender
+ *   Move to ▸ · Label as… · Mute sender
  *   Find emails from … · Find emails with this subject
  *   Open in Gmail
  *
  * Left out, deliberately: *Forward as attachment* (the composer sends text only), *Snooze*
- * and *Add to tasks* (no snooze store and no Tasks scope), *Label as* (Winnow has
- * mailboxes, not labels). Gmail's *Mute* mutes a conversation; Winnow has no thread mute,
- * so the slot is *Mute sender*, the same local mute the avatar menu offers.
+ * and *Add to tasks* (no snooze store and no Tasks scope). Gmail's *Mute* mutes a
+ * conversation; Winnow has no thread mute, so the slot is *Mute sender*, the same local
+ * mute the avatar menu offers. *Label as…* opens a picker of the user's own Gmail labels
+ * rather than a submenu, because it sets several at once and can make a new one.
  */
 
 import {
@@ -40,6 +41,7 @@ import {
   Search,
   ShieldAlert,
   SquareCheck,
+  Tag,
   Trash2,
   UserPlus,
   UserX,
@@ -85,6 +87,8 @@ export type RowMenuInput = {
     trash: () => void;
     setRead: (read: boolean) => void;
     move: (mailbox: Mailbox) => void;
+    /** Open the "Label as…" picker for the targets. Absent where labels cannot be set. */
+    labelAs?: () => void;
     toggleMuteSender: () => void;
     findFrom: () => void;
     findSubject: () => void;
@@ -193,6 +197,9 @@ export function buildRowMenu(input: RowMenuInput): MenuEntry[] {
       })),
     },
   );
+  if (actions.labelAs) {
+    entries.push({ kind: "item", id: "label-as", label: "Label as…", icon: Tag, onSelect: actions.labelAs });
+  }
 
   if (single && input.sender) {
     entries.push({

@@ -82,6 +82,7 @@ import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer } from "./ui/components/Composer";
 import { SendingStrip } from "./ui/components/SendingStrip";
+import { LabelPicker } from "./ui/components/LabelPicker";
 import { Settings } from "./ui/components/SettingsPanel";
 import { ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
@@ -1332,6 +1333,25 @@ export function App({ store }: Props) {
     },
     [startComposer, focusComposer, localDrafts],
   );
+
+  /**
+   * "Label as…" is open for these messages. The labels are listed each time it opens,
+   * cheaply, in case one was made in Gmail meanwhile.
+   */
+  const [labelPicker, setLabelPicker] = useState<number[] | null>(null);
+  const openLabelPicker = useCallback((ids: readonly number[]) => {
+    if (ids.length === 0) return;
+    setLabelPicker([...ids]);
+    void storeRef.current.loadLabels();
+  }, []);
+  const labelTargets = useMemo(() => {
+    if (!labelPicker) return [];
+    const wanted = new Set(labelPicker);
+    return snapshot.all.filter((email) => wanted.has(email.id));
+    // The picker reads the labels as it opened; a sync landing underneath must not
+    // reset the boxes the user is ticking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labelPicker]);
 
   /** "Send without a subject?" is up, holding the recipients Send was pressed with. */
   const [confirmNoSubject, setConfirmNoSubject] = useState<Pick<Draft, "to" | "cc" | "bcc"> | null>(null);
@@ -2593,6 +2613,26 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         affordance is unreliable — but waits for an explicit dismissal, a different action,
         or a navigation.
       */}
+      {labelPicker && labelTargets.length > 0 && (
+        <LabelPicker
+          labels={snapshot.userLabels}
+          loading={snapshot.labelsLoading}
+          targets={labelTargets}
+          onCreate={(name) => store.createLabel(name)}
+          onApply={(add, remove) => {
+            store.applyLabels(labelPicker, add, remove);
+            setLabelPicker(null);
+            const message =
+              labelPicker.length === 1 ? "Labels updated." : `Labels updated on ${labelPicker.length} messages.`;
+            store.setNotice(message);
+            setTimeout(() => {
+              if (storeRef.current.getSnapshot().notice === message) storeRef.current.dismissNotice();
+            }, DRAFT_NOTICE_MS);
+          }}
+          onClose={() => setLabelPicker(null)}
+        />
+      )}
+
       {sendWait && <SendingStrip deadline={sendWait.deadline} onUndo={undoSend} onSendNow={sendWaitingNow} />}
 
       {snapshot.undo && (
@@ -2905,6 +2945,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     s.closeReader({ dropCursor: phoneRef.current });
                   }
                 }),
+                onLabelAs: () => {
+                  if (selected) openLabelPicker([selected.id]);
+                },
                 onLoadRemoteContent: act((_store, snap) => {
                 // Not a preference change: this message only. See `remoteFor`.
                 if (snap.view.selected) setRemoteFor(snap.view.selected.id);
@@ -3260,6 +3303,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   else store.setReadMany(menu.ids, read);
                 },
                 move: (target) => runOn((s, ids) => s.moveMany(ids, target)),
+                labelAs: () => openLabelPicker(menu.ids),
                 toggleMuteSender: toggleMute,
                 findFrom: showAll,
                 findSubject: () => {

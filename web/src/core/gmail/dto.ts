@@ -159,6 +159,18 @@ export type GmailAttachmentResponse = {
 };
 
 /** A `users.drafts` resource, as create, update and get return it. */
+/** One entry of `labels.list` / the answer to `labels.create`. */
+export type GmailLabel = {
+  id: string;
+  name: string;
+  /** `system` for Gmail's own (INBOX, CATEGORY_*…), `user` for the user's. */
+  type?: "system" | "user";
+};
+
+export type GmailLabelList = {
+  labels?: GmailLabel[];
+};
+
 export type GmailDraft = {
   id: string;
   message?: { id?: string; threadId?: string; labelIds?: string[] };
