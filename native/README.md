@@ -106,6 +106,7 @@ What differs from desktop:
 | Background sync | Off (`backgroundSync: false`): Android pauses a backgrounded webview, so ticks would land nowhere. Sync runs while the app is open |
 | Saving attachments | The system save picker returns a `content://` URI; `files.rs` writes it through `tauri-plugin-fs` (Android only) |
 | Unread badge | No-op |
+| Back button | The webview takes Back over (`onBackButtonPress`, in `desktopPlatformExtras.onBackButton`) only while something is open, and closes the topmost layer: a popover or menu, a sheet, the composer (parked as a draft), the sidebar, Settings, the open message. At the bare list it hands Back to Android, which leaves the app as usual; `capabilities/android.json` grants `exit` for a press that lands as the last layer closes. The order is `web/src/ui/backLayers.ts` |
 | System bars | `MainActivity.kt` pads the content view by the status bar, gesture bar, cutout and keyboard, because the WebView reports no `safe-area-inset-*` under Android 15's forced edge-to-edge |
 
 Building locally needs JDK 17+, the Android SDK and NDK (`ANDROID_HOME`,

@@ -440,7 +440,8 @@ Supporting files:
   no server to push from, and an empty incremental sync costs 2 quota units. The
   same code runs in both hosts because a Tauri webview fires the same DOM events.
 - `web.ts` adds `readRedirectFromLocation()` and `pendingSignInState()`;
-  `desktop.ts` adds `onDeepLink()` and `onTrayAction()`.
+  `desktop.ts` adds `onDeepLink()`, `onTrayAction()`, and Android's `onBackButton()` /
+  `exitApp()`.
 
 **The IPC naming rule, which has cost real time.** Tauri rewrites *argument* keys
 from camelCase to snake_case but never rewrites *return values*. So `AppInfo` has
@@ -501,6 +502,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `senderPictures.ts` / `avatar.ts` / `demoPictures.ts` | Avatar sourcing as a context, plus the pure hash that gives a sender a stable tone. |
 | `sidebarOverlay.ts` | The idle-close policy (all seven conditions must be false) and the scrim recipe. |
 | `menus.ts` | Both menus' contents as data, so the rules are unit-tested rather than trapped in JSX. |
+| `backLayers.ts` | Android's Back as data: which layer one press closes (popover → sheet → composer → sidebar → Settings → message → leave), so the order is a test, not whichever handler ran first. |
 | `readerSplit.ts` | The reader's share of the width as a fraction (default 0.38, saved under `winnow.readerSplit.v1`), its 280 px list / 360 px reader minimums resolved per width, and the handle's key steps. |
 | `useStore.ts` / `useOnline.ts` / `usePhoneLayout.ts` | The three hooks. `useStore` caches the snapshot against the store's key; `usePhoneLayout` publishes the on-screen-keyboard inset as `--wn-keyboard`. |
 

@@ -61,7 +61,8 @@ import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
-import { platform, type PlatformInfo } from "./platform";
+import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
+import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
 import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
@@ -1978,6 +1979,96 @@ export function App({ store }: Props) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // ── Android Back ─────────────────────────────────────────────────────────
+
+  /**
+   * One press of Android's Back: close the topmost layer (`ui/backLayers.ts` has the
+   * order and the reasons). Popovers and sheets are found in the DOM and closed with
+   * the Escape they already answer, so a sheet added later is covered without being
+   * listed here; the composer, sidebar, Settings and the reader are this component's
+   * state and are closed directly. The composer is parked — kept as a draft, like a
+   * docked reply the selection leaves — never discarded and never asked about.
+   */
+  const backRef = useRef<() => void>(() => {});
+  backRef.current = () => {
+    const s = storeRef.current;
+    const snap = s.getSnapshot();
+    const popover = document.querySelector(POPOVER_SELECTOR);
+    const sheets = [...document.querySelectorAll('[aria-modal="true"]')].filter(isSheetElement);
+    const sheet = sheets[sheets.length - 1] ?? null;
+    const state: BackState = {
+      popover: menu !== null || popover !== null,
+      sheet: sheet !== null,
+      composer: composerRef.current !== null,
+      sidebar: sidebarOpen,
+      settings: snap.overlay === "settings",
+      message: snap.selectedId !== null,
+    };
+    /** Escape on the element (or what has focus inside it), where its own handler is. */
+    const escapeIn = (element: Element) => {
+      const active = document.activeElement;
+      const target = active && element.contains(active) ? active : element;
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    };
+    switch (backTarget(state)) {
+      case "popover":
+        if (menu) setMenu(null);
+        else if (popover) escapeIn(popover);
+        return;
+      case "sheet":
+        if (sheet) escapeIn(sheet);
+        return;
+      case "composer": {
+        const current = composerRef.current;
+        if (!current || current.sending) return;
+        retireComposer(current, "park");
+        composerRef.current = null;
+        setComposer(null);
+        return;
+      }
+      case "sidebar":
+        setSidebarOpen(false);
+        return;
+      case "settings": {
+        // A phone's category page steps back to the category list first, like its arrow.
+        const back = document.querySelector<HTMLButtonElement>(
+          '[data-settings-page="category"] button[aria-label="Back to Settings"]',
+        );
+        if (back) back.click();
+        else s.setOverlay("none");
+        return;
+      }
+      case "message":
+        s.closeReader({ dropCursor: phoneRef.current });
+        return;
+      case "exit":
+        // Only reached when a press lands between the last layer closing and Back being
+        // handed back to Android below.
+        void desktopPlatformExtras.exitApp();
+    }
+  };
+
+  /**
+   * Whether anything is open that Back should close. At the bare list Back belongs to
+   * Android, which leaves the app the way every other app does (to the background,
+   * rather than killing it), so the handler is only registered while this is true.
+   */
+  const backHasWork =
+    menu !== null ||
+    composer !== null ||
+    sidebarOpen ||
+    snapshot.overlay !== "none" ||
+    snapshot.selectedId !== null ||
+    setupOpen ||
+    confirmDiscard ||
+    confirmNoSubject !== null ||
+    restoreOffer !== null;
+  const android = info?.os === "android";
+  useEffect(() => {
+    if (!android || !backHasWork) return;
+    return desktopPlatformExtras.onBackButton(() => backRef.current());
+  }, [android, backHasWork]);
 
   // ── Render ───────────────────────────────────────────────────────────────
 

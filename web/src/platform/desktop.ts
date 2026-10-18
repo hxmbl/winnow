@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { exit, onBackButtonPress } from "@tauri-apps/api/app";
 import type { TokenSet } from "../core/gmail/dto";
 import type { TokenStore } from "../core/gmail/tokens";
 import {
@@ -213,6 +214,35 @@ export const desktopPlatformExtras = {
       cancelled = true;
       unlisten?.();
     };
+  },
+
+  /**
+   * Android's Back button, while `handler` is registered (`onBackButtonPress`).
+   *
+   * Registering takes the press over entirely — the webview no longer goes back or
+   * leaves the app on its own — so the app registers only while it has a layer to
+   * close, and the returned function hands Back to Android again at the root list. A
+   * no-op everywhere but Android, where the event never fires.
+   */
+  onBackButton(handler: () => void): () => void {
+    let cancelled = false;
+    let unregister: (() => void) | null = null;
+    void onBackButtonPress(() => handler())
+      .then((listener) => {
+        const stop = () => void listener.unregister().catch(() => undefined);
+        if (cancelled) stop();
+        else unregister = stop;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unregister?.();
+    };
+  },
+
+  /** Leave the app (Android's Back at the root, when the press reached the app anyway). */
+  async exitApp(): Promise<void> {
+    await exit(0).catch(() => undefined);
   },
 
   onTrayAction(handler: (action: string) => void): () => void {

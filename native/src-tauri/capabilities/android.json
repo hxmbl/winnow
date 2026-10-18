@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "android",
+  "description": "Android-only additions to `default`: leaving the app from Back. The webview takes Back over (`onBackButtonPress`, allowed by `core:default`) only while it has a layer to close; `exit` covers a press that lands as the last layer closes. Never granted to the desktop, which has no Back.",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": ["core:app:allow-exit"]
+}
