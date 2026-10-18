@@ -588,6 +588,11 @@ try {
   );
   check("and the app behind it is inert", openState.appInert, JSON.stringify(openState));
 
+  // The slide in can still be settling on a busy machine (a left of 7.98 rather than 8),
+  // so the shape is read once it has landed.
+  await page
+    .waitForFunction(() => document.querySelector("[data-sidebar]")?.getBoundingClientRect().left === 8, null, { timeout: 2_000 })
+    .catch(() => undefined);
   const sideShape = await page.evaluate(() => {
     const side = document.querySelector("[data-sidebar]");
     const style = getComputedStyle(side);
