@@ -33,7 +33,7 @@ import {
   Forward,
   ListChecks,
   Inbox,
-  Mail,
+  Send,
   MailOpen,
   MailMinus,
   Reply,
@@ -115,12 +115,13 @@ export function moveTargets(mailbox: Mailbox): Mailbox[] {
   return (["inbox", "archive", "spam", "trash"] as const).filter((m) => m !== mailbox);
 }
 
-const MAILBOX_ICON: Record<Mailbox, LucideIcon> = {
+/** One icon per mailbox: "Move to" here, and the rows of the phone's menu panel. */
+export const MAILBOX_ICON: Record<Mailbox, LucideIcon> = {
   inbox: Inbox,
   archive: Archive,
   spam: ShieldAlert,
   trash: Trash2,
-  sent: Mail,
+  sent: Send,
   drafts: FilePen,
 };
 

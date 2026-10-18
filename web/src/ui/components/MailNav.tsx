@@ -14,16 +14,22 @@
  * root (the left edge): three stacked `backdrop-filter` layers (2/6/14px), each masked
  * by a left→right gradient. No shadow; a hairline edge.
  *
+ * **On a phone it grows out of the dock's pill** instead: the same position and width,
+ * opened upward, in the dock's light frost (`.wn-glass`), with icon rows and the current
+ * mailbox on a pill (after Linear's Android menu).
+ *
  * Every destination is a button in a `nav` list and the one you are on carries
  * `aria-current`.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
+import { ChevronsUpDown, LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { Avatar } from "./Avatar";
 import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
 import { anchorFromElement } from "../menuPlacement";
+import { MAILBOX_ICON } from "../menus";
+import { panelOrder } from "../phoneDock";
 import type { Mailbox } from "../../core/model/email";
 import {
   SIDEBAR_IDLE_CLOSE_MS,
@@ -32,7 +38,6 @@ import {
   idleCloseAllowed,
   scrimClickCloses,
   scrimMidpoint,
-  scrimSheetTop,
   isEditingElement,
   SCRIM_ORIGIN,
   scrimLayers,
@@ -93,22 +98,32 @@ function NavSections({
   touch,
   onNavigate,
 }: SectionsProps) {
-  const row = `${touch ? "min-h-11 px-3 py-2" : "px-2.5 py-1.5"} flex w-full items-center gap-2 rounded-ctl text-left text-ui transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`;
-  const idle = "text-ink-body hover:bg-surface-hover";
-  const on = "bg-surface-active font-medium text-ink";
+  // On the phone's panel: 48px rows, an icon and a larger label, and the current one on
+  // a pill, as in the reference (Linear's Android menu). The desktop's rows are as before.
+  const row = touch
+    ? "flex min-h-12 items-center gap-3.5 rounded-full px-3.5 py-2 text-left text-read transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+    : "px-2.5 py-1.5 flex items-center gap-2 rounded-ctl text-left text-ui transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  const idle = touch ? "text-ink-body active:bg-sheen" : "text-ink-body hover:bg-surface-hover";
+  const on = touch
+    ? "bg-[color-mix(in_srgb,var(--wn-ink)_10%,transparent)] font-medium text-ink"
+    : "bg-surface-active font-medium text-ink";
   const count = "ml-auto shrink-0 text-meta tabular-nums";
+  const icon = (id: Mailbox, current: boolean) => {
+    if (!touch) return null;
+    const Icon = MAILBOX_ICON[id];
+    return <Icon size={20} strokeWidth={current ? 2.1 : 1.8} aria-hidden="true" className="shrink-0" />;
+  };
 
   const inboxCurrent = mailbox === "inbox" && !filtering;
 
-  // On the phone's bottom sheet the whole list is upside down, so the thumb that opened
-  // it from the dock finds Inbox right above the tabs and the rarer folders further up:
-  // the "Mail" group (Spam first, Archive last) under its heading, then Inbox. The
-  // desktop sidebar reads top-down as before.
+  // On the phone's panel the whole list is upside down, so the thumb that opened it from
+  // the dock finds Inbox at the bottom, on the pill's line, and the rarer folders further
+  // up: Spam first, Archive last, then Inbox. The desktop sidebar reads top-down as before.
   const reversed = touch;
   const headingId = touch ? "nav-mail-touch" : "nav-mail";
 
   const inbox = (
-    <ul className={`flex flex-col ${reversed ? "mt-3" : ""}`}>
+    <ul className="flex flex-col">
         <li>
           <button
             type="button"
@@ -120,8 +135,11 @@ function NavSections({
               onInbox();
               onNavigate?.();
             }}
-            className={`${row} ${inboxCurrent ? on : idle}`}
+            // On the phone the row stops a pill's cell short of the right edge: the dock's
+            // Expand chevron sits there, on top of the panel, in the place it opened from.
+            className={`${row} ${inboxCurrent ? on : idle} ${touch ? "w-2/3" : "w-full"}`}
           >
+            {icon("inbox", inboxCurrent)}
             <span className="min-w-0 flex-1 truncate">Inbox</span>
             <span className={`${count} ${inboxCurrent ? "text-accent" : "text-ink-subtle"}`}>{inboxCount}</span>
           </button>
@@ -133,12 +151,14 @@ function NavSections({
         <>
           <h3
             id={headingId}
-            className={`text-meta font-medium text-ink-subtle ${touch ? `px-3 pb-1 ${reversed ? "pt-2" : "pt-4"}` : "px-2.5 pb-1 pt-4"}`}
+            // The phone's panel has no group heading on screen (the divider under the
+            // account does that job); it stays for a screen reader.
+            className={touch ? "sr-only" : "px-2.5 pb-1 pt-4 text-meta font-medium text-ink-subtle"}
           >
             Mail
           </h3>
           <ul aria-labelledby={headingId} className="flex flex-col">
-            {(reversed ? [...folders].reverse() : folders).map((folder) => {
+            {(reversed ? panelOrder(folders) : folders).map((folder) => {
 
               const current = mailbox === folder.id;
               return (
@@ -153,8 +173,9 @@ function NavSections({
                       onSelectMailbox(folder.id);
                       onNavigate?.();
                     }}
-                    className={`${row} ${current ? on : idle}`}
+                    className={`${row} ${current ? on : idle} w-full`}
                   >
+                    {icon(folder.id, current)}
                     <span className="min-w-0 flex-1 truncate">{folder.label}</span>
                     {folder.unread > 0 && (
                       <span className={`${count} ${current ? "text-accent" : "text-ink-subtle"}`}>{folder.unread}</span>
@@ -216,9 +237,9 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
   return (
     <div
       data-nav-account=""
-      // On the phone's sheet the account row is at the top (the list is reversed, Inbox
+      // On the phone's panel the account row is at the top (the list is reversed, Inbox
       // nearest the dock), so its hairline is underneath it rather than above.
-      className={`flex shrink-0 items-center gap-2 border-hairline ${props.touch ? "border-b px-2 pb-2 pt-2" : "border-t px-1.5 pb-1.5 pt-2"}`}
+      className={`flex shrink-0 items-center gap-2 border-hairline ${props.touch ? "mx-3 border-b pb-3 pt-3" : "border-t px-1.5 pb-1.5 pt-2"}`}
     >
       <button
         ref={trigger}
@@ -236,6 +257,8 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
           <span className="block truncate text-ui font-medium text-ink">{name}</span>
           <span className="block truncate text-meta text-ink-subtle">{detail}</span>
         </span>
+        {/* The account switcher's chevron, as in the reference: this row opens a menu. */}
+        {props.touch && <ChevronsUpDown size={16} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-ink-subtle" />}
       </button>
       <button
         type="button"
@@ -246,11 +269,13 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
         aria-label="Settings"
         aria-current={props.settingsOpen ? "page" : undefined}
         title="Settings (,)"
-        className={`flex shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-          props.touch ? "h-11 w-11" : "h-8 w-8"
+        className={`flex shrink-0 items-center justify-center text-ink-icon transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+          props.touch
+            ? "h-12 w-12 rounded-full bg-[color-mix(in_srgb,var(--wn-ink)_8%,transparent)] active:bg-[color-mix(in_srgb,var(--wn-ink)_14%,transparent)]"
+            : "h-8 w-8 rounded-ctl hover:bg-surface-hover"
         }`}
       >
-        <Settings size={17} strokeWidth={1.8} aria-hidden="true" />
+        <Settings size={props.touch ? 20 : 17} strokeWidth={1.8} aria-hidden="true" />
       </button>
       {anchor && (
         <Menu
@@ -271,8 +296,9 @@ export type SidebarProps = NavProps & {
   /** Close it: outside click, Escape, a destination chosen, or the idle timer. */
   onClose: () => void;
   /**
-   * On a phone: touch-sized rows, and the sidebar is a bottom sheet that rises from the
-   * dock's tabs (sitting on `--wn-phone-tabs`) instead of sliding in from the left.
+   * On a phone: touch-sized rows, and the sidebar is a panel that grows upward out of
+   * the dock's pill (anchored at its position, `--wn-dock-*` in `index.css`) instead of
+   * sliding in from the left.
    */
   touch: boolean;
 };
@@ -298,11 +324,12 @@ const FOCUSABLE =
  * left edge (on a phone, down behind the dock), `visibility: hidden` once the slide has
  * finished, and `inert`.
  *
- * On a phone it is a bottom sheet: full width, rounded at the top like the dock, resting
- * on the dock's tab row so it is under the thumb that opened it, at most about 80% of
- * the screen tall. It has no app-name header, its list is reversed (the account and
- * Settings gear on top, Inbox at the bottom by the tabs), and the same blur as the
- * desktop's spreads from the middle of its top edge.
+ * On a phone it is the dock's pill, grown: the same left edge, width and bottom as the
+ * pill, revealed upward by a `clip-path` that starts as the pill's own shape, in the
+ * same light frost (`.wn-glass`). It has no app-name header, its list is reversed (the
+ * account and Settings gear on top, Inbox at the bottom on the pill's line, beside the
+ * Expand chevron that the dock keeps on top of it), and the desktop's progressive blur
+ * spreads over the rest of the app from the middle of its right edge, as on the desktop.
  */
 export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -396,7 +423,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     };
   }, [open, armIdle]);
 
-  /** The sheet's scroller, kept at its bottom on a phone so Inbox is in reach. */
+  /** The scroller, kept at its bottom on a phone so Inbox is in reach. */
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Focus in on open; back out on close.
@@ -433,7 +460,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     back?.focus({ preventScroll: true });
   }, [open, clearIdle]);
 
-  // The phone's list is reversed: if it ever outgrows the sheet, start at the end that
+  // The phone's list is reversed: if it ever outgrows the panel, start at the end that
   // holds Inbox, next to the thumb, rather than at Spam. Its own effect, so a breakpoint
   // change while open does not re-run the focus hand-off above.
   useEffect(() => {
@@ -472,9 +499,9 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     [onClose],
   );
 
-  // Where the blur spreads from, across: the sidebar's right edge, or on a phone the
-  // middle of the sheet's top edge.
-  const edge = touch ? "50%" : "calc(0.5rem + 15rem)";
+  // Where the blur spreads from, across: the sidebar's right edge, on a phone the
+  // panel's (which is the pill's).
+  const edge = touch ? "calc(var(--wn-dock-left) + var(--wn-dock-pill-w))" : "calc(0.5rem + 15rem)";
 
   // And the height of its middle: the panel is only as tall as its contents, so this is
   // measured rather than worked out, and kept current as the panel grows or the window
@@ -487,7 +514,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     let last: string | null | undefined;
     const measure = () => {
       const rect = panel.getBoundingClientRect();
-      const mid = touch ? scrimSheetTop(rect) : scrimMidpoint(rect);
+      const mid = scrimMidpoint(rect);
       // Written only when it changes: a style write invalidates the scrim's masks, and a
       // resize drag fires this every frame with the same answer.
       if (mid === last) return;
@@ -584,11 +611,9 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
           contextMenu.current = true;
           clearIdle();
         }}
-        data-sheet={touch ? "" : undefined}
+        data-morph={touch ? "" : undefined}
         className={`wn-sidebar-panel fixed z-50 flex flex-col overflow-hidden border border-hairline outline-none ${
-          touch
-            ? "inset-x-0 bottom-[var(--wn-phone-tabs,env(safe-area-inset-bottom))] max-h-[min(80dvh,calc(100dvh-var(--wn-phone-tabs,0px)-max(0.5rem,env(safe-area-inset-top))))] rounded-t-pane border-b-0"
-            : "left-2 top-2 max-h-[calc(100dvh-1rem)] w-60 rounded-pane"
+          touch ? "wn-glass" : "left-2 top-2 max-h-[calc(100dvh-1rem)] w-60 rounded-pane"
         }`}
       >
         {/* The progressive blur, root (left) to tip (right), then the tint over it. */}
@@ -599,12 +624,12 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
 
         {/*
           One tree for both layouts, so crossing the breakpoint while open keeps the
-          scroller (and what has focus in it) mounted. On the phone's sheet there is no
+          scroller (and what has focus in it) mounted. On the phone's panel there is no
           app-name header (the dock and the list already say where you are) and the list
           is reversed: the account and its Settings gear at the top, Inbox at the bottom
           by the tabs. The desktop keeps the header on top and the account at the foot.
         */}
-        <div className="relative flex min-h-0 flex-col">
+        <div className="wn-morph-content relative flex min-h-0 flex-col">
           {!touch && (
             <div className="flex shrink-0 items-center gap-2.5 px-3 pb-2 pt-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline">
@@ -617,7 +642,8 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
           <div
             ref={scrollRef}
             data-sidebar-scroll=""
-            className={`thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 pb-2 ${touch ? "pt-1" : ""}`}
+            // On the phone the bottom padding puts the Inbox row's middle on the pill's.
+            className={`thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 ${touch ? "pb-[5px] pt-2" : "pb-2"}`}
           >
             <NavSections {...props} touch={touch} onNavigate={onClose} />
           </div>

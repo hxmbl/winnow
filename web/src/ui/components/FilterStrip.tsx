@@ -37,13 +37,14 @@ type Props = {
    */
   leading?: React.ReactNode;
   /**
-   * Touch sizing, for the phone dock: 44px pills, so the rail
-   * that carries the product can be worked with a thumb.
+   * The phone's floating rail: 44px pills for a thumb, each one its own frosted glass
+   * chip (`.wn-chip-glass`) with no band behind the rail, so the list scrolls visibly
+   * underneath. Inset at the sides like the dock's pill, and swiped, never stepped.
    */
   touch?: boolean;
   /**
-   * The colour the rail sits on, which its edge fades dissolve into: the canvas in the
-   * phone dock, the list's surface above the desktop list.
+   * The colour the rail sits on, which its desktop edge fades dissolve into. The phone's
+   * floating rail sits on nothing and has no fades.
    */
   tone?: "canvas" | "surface";
   className?: string;
@@ -220,7 +221,14 @@ export const FilterStrip = memo(function FilterStrip({
         data-rail-scroller=""
         onFocus={onFocus}
         onWheel={touch ? undefined : onWheel}
-        className={`no-scrollbar flex items-center overflow-x-auto ${touch ? "gap-1.5 pr-1.5" : "gap-1"}`}
+        // Touch: the rail is transparent and lets taps between the chips through to the
+        // list; the vertical padding keeps the chips' shadows from being clipped by the
+        // scroller, and the side padding matches the dock's insets.
+        className={`no-scrollbar flex items-center overflow-x-auto ${
+          touch
+            ? "pointer-events-none gap-2 py-2 pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
+            : "gap-1"
+        }`}
       >
         {/*
           The mark, pinned. `z-10` so it paints above the pills travelling behind it;
@@ -243,7 +251,7 @@ export const FilterStrip = memo(function FilterStrip({
             type="button"
             data-rail-item=""
             onClick={onClear}
-            className={`${touch ? "h-11 px-3.5" : "h-7 px-2.5"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+            className={`${touch ? "wn-glass h-11 px-4" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             All
           </button>
@@ -263,7 +271,7 @@ export const FilterStrip = memo(function FilterStrip({
             data-on={on ? "" : undefined}
             // The pill's identity only; the mode's recipe turns it into a fill.
             style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}
-            className="wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150"
+            className={`wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150 ${touch ? "wn-chip-glass" : ""}`}
           >
             <button
               type="button"
@@ -276,8 +284,8 @@ export const FilterStrip = memo(function FilterStrip({
               // Always set: a long label is truncated, and this is where it is whole.
               title={digit ? `${label} (${digit})` : label}
               aria-keyshortcuts={digit ?? undefined}
-              className={`relative flex ${tabHeight} items-center gap-1.5 rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                touch ? "px-3.5" : "px-2.5"
+              className={`relative flex ${tabHeight} items-center rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                touch ? "gap-2 px-4" : "gap-1.5 px-2.5"
               }`}
             >
               {/*
@@ -305,24 +313,8 @@ export const FilterStrip = memo(function FilterStrip({
       })}
       </div>
 
-      {/* Fades, drawn over the scroll container. `pointer-events-none` because a
-          gradient that eats clicks at the edge would make the last pill unclickable,
-          which is the single worst possible bug in a filter rail. On the phone dock that
-          is all there is: the rail is swiped. */}
-      {touch && overflow.start && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-0 w-6"
-          style={{ background: `linear-gradient(to right, ${fade}, transparent)` }}
-        />
-      )}
-      {touch && overflow.end && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 w-6"
-          style={{ background: `linear-gradient(to left, ${fade}, transparent)` }}
-        />
-      )}
+      {/* The phone's rail has no fades: it sits on nothing, and a chip running off the
+          screen's edge says "swipe for more" by itself. */}
 
       {/*
         On the desktop each end that has more past it gets a wide fade and, on its solid

@@ -70,7 +70,6 @@ import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
 import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
-import { ComposeFab } from "./ui/components/ComposeFab";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
@@ -2489,7 +2488,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
       {/*
         Everything but the phone's dock is inert while the sidebar is open. The dock stays
-        live (and above the scrim) so the Inbox tab that opened the menu can close it;
+        live (and above the scrim) so the Expand chevron that opened the menu can close it;
         the two `contents` wrappers keep the column's layout exactly as it was.
       */}
       <div inert={sidebarOpen} className="contents">
@@ -3017,8 +3016,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       </main>
 
       {/*
-        The phone's dock: the smart filter chips above the three tabs, on one surface at
-        the bottom edge. Not while reading — the reader brings its own action bar.
+        The phone's dock: a floating pill (Inbox, Sent, Expand) with the compose button
+        beside it and the smart-filter chips floating above, over the list. Not while
+        reading — the reader brings its own action bar.
       */}
       </div>
 
@@ -3038,24 +3038,22 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           menuOpen={sidebarOpen}
           onOpenMenu={openSidebar}
           onCloseMenu={closeSidebar}
+          // Compose is offered over the list and nothing else: not under the composer,
+          // Settings, the palette or the shortcut sheet, each of which is the thing being
+          // looked at, and not during a multi-selection, whose bar has taken over the
+          // screen's actions. It stays beside the menu panel, as in the reference.
+          onCompose={
+            composer === null &&
+            snapshot.overlay === "none" &&
+            selection.size === 0 &&
+            snapshot.status === "ready"
+              ? () => openCompose()
+              : null
+          }
         />
       )}
 
       <div inert={sidebarOpen} className="contents">
-      {/*
-        The phone's compose button, over the list and nothing else: not in the reader
-        (which has its own bar), and not under the composer, Settings, the palette, the
-        shortcut sheet or the sidebar, each of which is the thing being looked at. Not
-        during a multi-selection either, whose bar has taken over the screen's actions.
-      */}
-      {phone &&
-        !selected &&
-        composer === null &&
-        snapshot.overlay === "none" &&
-        !sidebarOpen &&
-        selection.size === 0 &&
-        snapshot.status === "ready" && <ComposeFab onCompose={() => openCompose()} />}
-
       {snapshot.overlay === "shortcuts" && (
         <ShortcutSheet onClose={() => store.setOverlay("none")} />
       )}

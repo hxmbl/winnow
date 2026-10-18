@@ -2,30 +2,34 @@
  * The phone layout's chrome: a top bar and a bottom dock.
  *
  * Below `sm` the masthead is replaced rather than squeezed. Everything a thumb does often
- * — narrowing by a smart filter, switching mailbox, opening the menu — is at the bottom
- * of the screen: the swipeable filter chips sit just above the three tabs (Inbox, Sent,
- * Archive), and a second tap on Inbox raises the menu (`MailNav.tsx`, every folder and
- * the account, whose gear is the way into Settings) as a sheet from the dock.
+ * — narrowing by a smart filter, switching mailbox, opening the menu, composing — is at
+ * the bottom of the screen, floating over the list rather than taking a bar from it
+ * (after Linear's Android app): a rounded glass pill of icon-only tabs (Inbox, Sent)
+ * ending in an Expand chevron, the compose button as its own circle beside it, and the
+ * smart-filter chips floating one by one just above. Expand grows the pill upward into
+ * the menu panel (`MailNav.tsx`: every folder and the account, whose gear is the way
+ * into Settings).
  * The top is one row: the mark and, beside it, search, whose placeholder names the list
  * ("Search Inbox"); the list's name and count are a visually hidden heading.
  *
- * Flat on purpose, the same way the desktop chrome is: the bars are the canvas tone and
- * the list is the surface tone, so the boundary is a change in value with no rule, no
- * outline and no shadow. Every control is sized for a thumb, and nothing is revealed by
- * hover.
+ * The top bar is flat, the canvas tone over the list's surface tone. The floating
+ * bottom chrome is the one raised thing: light frost, a hairline and a soft shadow
+ * (`glass.ts`), with the list scrolling visibly underneath. Every control is sized for
+ * a thumb, and nothing is revealed by hover.
  */
 
 import { useLayoutEffect, useRef } from "react";
-import { Archive, Inbox, Search, Send } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, Inbox, Search, Send } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import { PositionReadout } from "./Masthead";
 import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
-import { PHONE_TABS_VAR, inboxTabAction, inboxTabLabel } from "../phoneDock";
+import { ComposeButton } from "./ComposeFab";
+import { DOCK_TABS, EXPAND_LABEL, PHONE_DOCK_VAR, PHONE_TABS_VAR, badgeText, tabAction, tabLabel } from "../phoneDock";
 
-/** The canvas-toned sheet both bottom bars sit on: this dock and the reader's. */
+/** The canvas-toned sheet the reader's bottom bar sits on. */
 export const DOCK_SURFACE =
   "relative z-20 shrink-0 rounded-t-pane border-t border-edge bg-canvas pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-2";
 
@@ -58,7 +62,7 @@ export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle,
         said by the dock's current tab, by search's own placeholder ("Search Inbox"), and
         to a screen reader by the visually hidden heading below, which carries the list's
         name and count. No list-wide buttons up here: the phone list has no cursor to step
-        through, there is no Mark all read, and the menu is a second tap on Inbox.
+        through, there is no Mark all read, and the menu is the dock's Expand button.
         The name is a `span[title]` inside that heading, as in the masthead.
       */}
       <h1 className="sr-only">
@@ -96,15 +100,16 @@ export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle,
 // ── Dock ────────────────────────────────────────────────────────────────────
 
 /**
- * The three tabs. Trash, Spam and Drafts are in the menu, and so is Settings, behind the
- * gear on the account row: it is opened rarely, so it does not earn a tab, and Compose
- * already has its own button over the list.
+ * The two tabs. Archive, Trash, Spam and Drafts are in the panel behind Expand, and so
+ * is Settings, behind the gear on the account row: opened rarely, so none earns a tab.
  */
-const TABS: readonly { id: Mailbox; label: string; Icon: LucideIcon }[] = [
-  { id: "inbox", label: "Inbox", Icon: Inbox },
-  { id: "sent", label: "Sent", Icon: Send },
-  { id: "archive", label: "Archive", Icon: Archive },
-];
+const TAB_ICON: Record<(typeof DOCK_TABS)[number], { label: string; Icon: LucideIcon }> = {
+  inbox: { label: "Inbox", Icon: Inbox },
+  sent: { label: "Sent", Icon: Send },
+};
+
+/** The soft circle under the current tab, and under Expand while the panel is open. */
+const HIGHLIGHT = "bg-[color-mix(in_srgb,var(--wn-ink)_9%,transparent)]";
 
 export type PhoneDockProps = {
   pills: PillItem[];
@@ -112,16 +117,23 @@ export type PhoneDockProps = {
   onToggleFilter: (id: FilterId) => void;
   onClearFilters: () => void;
   mailbox: Mailbox;
-  /** Unread per mailbox, for the tab's accessible name and its quiet count. */
+  /** Unread per mailbox, for the tab's accessible name and its badge. */
   unread: Partial<Record<Mailbox, number>>;
   onSelectMailbox: (mailbox: Mailbox) => void;
   /** Settings is open over the list: no mailbox tab is the current page then. */
   settingsOpen: boolean;
-  /** The menu (the sidebar), which the Inbox tab opens on its second tap. */
+  /** The menu panel, which Expand grows out of the pill. */
   menuOpen: boolean;
   onOpenMenu: () => void;
   onCloseMenu: () => void;
+  /** Compose, or null while composing makes no sense (a selection, Settings, a sheet). */
+  onCompose: (() => void) | null;
 };
+
+/** The phone list's scroller. One on screen at a time below `sm`. */
+function listScroller(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-row-count]");
+}
 
 export function PhoneDock({
   pills,
@@ -135,118 +147,181 @@ export function PhoneDock({
   menuOpen,
   onOpenMenu,
   onCloseMenu,
+  onCompose,
 }: PhoneDockProps) {
   const dockRef = useRef<HTMLDivElement>(null);
-  const tabsRef = useRef<HTMLElement>(null);
+  const pillRef = useRef<HTMLElement>(null);
+  const chipsRef = useRef<HTMLDivElement>(null);
 
-  // Publish where the tabs start, measured from the window's bottom edge, for the menu
-  // sheet to sit on. Watched, because the safe area and the chip row's height can both
-  // change without a re-render.
+  // Publish, measured from the window's bottom edge: where the pill starts (Settings'
+  // sheet stops there) and where the floating chrome starts (the list pads its end by
+  // that much). Watched, because the safe area and the chip row can both change without
+  // a re-render.
   useLayoutEffect(() => {
     const dock = dockRef.current;
-    const tabs = tabsRef.current;
-    if (!dock || !tabs) return;
+    const pill = pillRef.current;
+    if (!dock || !pill) return;
     const root = document.documentElement;
     let last = "";
     const measure = () => {
-      const value = `${Math.max(0, Math.round(window.innerHeight - tabs.getBoundingClientRect().top))}px`;
-      if (value === last) return;
-      last = value;
-      root.style.setProperty(PHONE_TABS_VAR, value);
+      const height = window.innerHeight;
+      const pillTop = pill.getBoundingClientRect().top;
+      const chips = chipsRef.current;
+      const chromeTop = chips && chips.getClientRects().length > 0 ? chips.getBoundingClientRect().top : pillTop;
+      const tabs = `${Math.max(0, Math.round(height - pillTop))}px`;
+      const chrome = `${Math.max(0, Math.round(height - chromeTop))}px`;
+      if (`${tabs}|${chrome}` === last) return;
+      last = `${tabs}|${chrome}`;
+      root.style.setProperty(PHONE_TABS_VAR, tabs);
+      root.style.setProperty(PHONE_DOCK_VAR, chrome);
     };
     measure();
     window.addEventListener("resize", measure);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(dock);
-    observer?.observe(tabs);
+    observer?.observe(pill);
+    if (chipsRef.current) observer?.observe(chipsRef.current);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
       root.style.removeProperty(PHONE_TABS_VAR);
+      root.style.removeProperty(PHONE_DOCK_VAR);
     };
   }, []);
 
+  const scrollToTop = () => {
+    const scroller = listScroller();
+    if (!scroller) return;
+    const reduce = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    scroller.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+  };
+
   return (
     /*
-      One surface. The filter chips and the tabs are not two bars stacked on each other:
-      they share a single canvas-toned sheet with rounded top corners, and the only thing
-      between them is spacing.
+      Floating over the list, not a bar under it: the dock itself is transparent and lets
+      touches through (`pointer-events-none`); only the chips, the pill and the compose
+      button take them. The list runs all the way to the bottom edge and scrolls visibly
+      underneath, padded at its end by `--wn-phone-dock`.
 
-      While the menu is open the dock stays above the scrim and live, so the tab that
-      opened the menu is the one that closes it; the menu sheet covers the chip row,
-      which is set aside (hidden and inert) until it closes.
+      While the menu is open the dock rises over the scrim and the panel (z 55), and of
+      the pill only Expand stays, sitting in the panel's bottom row where it was, so the
+      chevron that opened the panel is the one that closes it. The chips are set aside
+      (hidden and inert) until it closes.
     */
     <div
       ref={dockRef}
       data-phone-dock=""
       data-menu-open={menuOpen ? "" : undefined}
-      className={DOCK_SURFACE}
-      // Over the scrim (z-40), under the sheet (z-50).
-      style={menuOpen ? { zIndex: 45 } : undefined}
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
+      style={menuOpen ? { zIndex: 55 } : undefined}
     >
-      {/* The smart filters, just above the tabs where a thumb rests. */}
-      <div inert={menuOpen} className={menuOpen ? "invisible" : undefined}>
+      {/* The smart filters, floating just above the pill where a thumb rests. */}
+      <div
+        ref={chipsRef}
+        data-phone-chips=""
+        inert={menuOpen || settingsOpen}
+        className={`mb-1 ${menuOpen || settingsOpen ? "invisible" : ""}`}
+      >
         <FilterStrip
           pills={pills}
           activeFilters={activeFilters}
           onToggle={onToggleFilter}
           onClear={onClearFilters}
           touch
-          className="px-3"
         />
       </div>
 
-      <nav ref={tabsRef} aria-label="Primary" className="mt-1.5 grid grid-cols-3 gap-1 px-2">
-        {TABS.map(({ id, label, Icon }) => {
-          const current = !settingsOpen && mailbox === id;
-          const count = unread[id] ?? 0;
-          const isInbox = id === "inbox";
-          // Inbox is two things: the mailbox on the first tap, and once it is the
-          // current tab, the menu's toggle.
-          const toggles = isInbox && (current || menuOpen);
-          const onClick = () => {
-            if (isInbox) {
-              const action = inboxTabAction(current, menuOpen);
-              if (action === "close-menu") onCloseMenu();
-              else if (action === "open-menu") onOpenMenu();
-              else onSelectMailbox("inbox");
-              return;
-            }
-            if (menuOpen) onCloseMenu();
-            onSelectMailbox(id);
-          };
-          return (
-            <button
-              key={id}
-              type="button"
-              // Where focus goes back to when the menu closes (see `Sidebar`).
-              data-sidebar-toggle={isInbox ? "" : undefined}
-              aria-current={current ? "page" : undefined}
-              aria-label={isInbox ? inboxTabLabel(count, current, menuOpen) : count > 0 ? `${label}, ${count} unread` : label}
-              aria-haspopup={toggles ? "dialog" : undefined}
-              aria-expanded={toggles ? menuOpen : undefined}
-              aria-controls={toggles ? "winnow-sidebar" : undefined}
-              onClick={onClick}
-              className={`flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-pane px-1 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                current ? "bg-sheen text-ink" : "text-ink-muted active:bg-sheen"
+      <div className="flex items-end gap-[var(--wn-dock-gap)] pb-[var(--wn-dock-bottom)] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)]">
+        <nav
+          ref={pillRef}
+          aria-label="Primary"
+          data-phone-pill=""
+          data-expanded={menuOpen ? "" : undefined}
+          className="wn-glass pointer-events-auto grid h-[var(--wn-dock-h)] min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200"
+        >
+          {DOCK_TABS.map((id) => {
+            const { label, Icon } = TAB_ICON[id];
+            const current = !settingsOpen && mailbox === id;
+            const count = unread[id] ?? 0;
+            const badge = badgeText(count);
+            const onClick = () => {
+              if (tabAction(current) === "scroll-top") scrollToTop();
+              else onSelectMailbox(id);
+            };
+            return (
+              <button
+                key={id}
+                type="button"
+                data-dock-tab={id}
+                aria-current={current ? "page" : undefined}
+                aria-label={tabLabel(label, count)}
+                tabIndex={menuOpen ? -1 : undefined}
+                onClick={onClick}
+                className={`group flex min-h-12 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                  menuOpen ? "invisible" : ""
+                }`}
+              >
+                <span
+                  className={`relative flex h-12 w-16 items-center justify-center rounded-full transition-colors ${
+                    current ? `${HIGHLIGHT} text-ink` : "text-ink-muted group-active:bg-sheen"
+                  }`}
+                >
+                  <Icon size={22} strokeWidth={current ? 2.2 : 1.9} aria-hidden="true" />
+                  {badge && (
+                    <span
+                      aria-hidden="true"
+                      data-dock-badge=""
+                      className="absolute right-1.5 top-1 min-w-[1.15rem] rounded-full bg-accent px-1 text-center text-meta font-semibold leading-[1.15rem] tabular-nums text-on-accent"
+                    >
+                      {badge}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            data-dock-expand=""
+            // Where focus goes back to when the menu closes (see `Sidebar`).
+            data-sidebar-toggle=""
+            aria-label={EXPAND_LABEL}
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
+            aria-controls="winnow-sidebar"
+            onClick={menuOpen ? onCloseMenu : onOpenMenu}
+            className="group pointer-events-auto flex min-h-12 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            <span
+              className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${
+                menuOpen ? `${HIGHLIGHT} text-ink` : "text-ink-muted group-active:bg-sheen"
               }`}
             >
-              <span className="relative">
-                <Icon size={20} strokeWidth={current ? 2.1 : 1.8} aria-hidden="true" />
-                {count > 0 && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute -right-3 -top-1.5 min-w-[1.1rem] rounded-ctl bg-surface px-1 text-center text-meta font-semibold leading-[1.45] tabular-nums text-ink-body"
-                  >
-                    {count > 99 ? "99+" : count}
-                  </span>
-                )}
-              </span>
-              <span className={`text-meta ${current ? "font-semibold" : "font-medium"}`}>{label}</span>
-            </button>
-          );
-        })}
-      </nav>
+              {menuOpen ? (
+                <ChevronsDownUp size={22} strokeWidth={1.9} aria-hidden="true" />
+              ) : (
+                <ChevronsUpDown size={22} strokeWidth={1.9} aria-hidden="true" />
+              )}
+            </span>
+          </button>
+        </nav>
+
+        {/*
+          The compose button, its own circle beside the pill, the pill's height. When
+          composing makes no sense the space stays, so the pill (and the panel it grows
+          into) keeps one width.
+        */}
+        {onCompose ? (
+          <ComposeButton
+            onCompose={() => {
+              if (menuOpen) onCloseMenu();
+              onCompose();
+            }}
+          />
+        ) : (
+          <span aria-hidden="true" className="h-[var(--wn-dock-h)] w-[var(--wn-dock-h)] shrink-0" />
+        )}
+      </div>
     </div>
   );
 }

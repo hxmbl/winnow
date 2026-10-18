@@ -1,27 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { inboxTabAction, inboxTabLabel } from "./phoneDock";
+import { DOCK_TABS, EXPAND_LABEL, badgeText, panelOrder, tabAction, tabLabel } from "./phoneDock";
 
-describe("the Inbox tab", () => {
-  it("switches to the inbox on the first tap", () => {
-    expect(inboxTabAction(false, false)).toBe("select");
+describe("the phone dock", () => {
+  it("has two tabs, Inbox then Sent; Archive and the rest are behind Expand", () => {
+    expect(DOCK_TABS).toEqual(["inbox", "sent"]);
+    expect(EXPAND_LABEL).toBe("More mailboxes");
   });
 
-  it("opens the menu on a tap while it is the current tab", () => {
-    expect(inboxTabAction(true, false)).toBe("open-menu");
+  it("switches mailbox on a tap, and scrolls to the top on a tap of the current tab", () => {
+    expect(tabAction(false)).toBe("select");
+    expect(tabAction(true)).toBe("scroll-top");
   });
 
-  it("closes the menu on the next tap, current or not", () => {
-    expect(inboxTabAction(true, true)).toBe("close-menu");
-    expect(inboxTabAction(false, true)).toBe("close-menu");
+  it("never opens the menu from a tab", () => {
+    expect(["select", "scroll-top"]).toContain(tabAction(true));
+    expect(["select", "scroll-top"]).toContain(tabAction(false));
   });
 
-  it("is plainly Inbox until a second activation would open the menu", () => {
-    expect(inboxTabLabel(6, false, false)).toBe("Inbox, 6 unread");
-    expect(inboxTabLabel(0, false, false)).toBe("Inbox");
+  it("names a tab by its mailbox, with the unread count when there is one", () => {
+    expect(tabLabel("Inbox", 6)).toBe("Inbox, 6 unread");
+    expect(tabLabel("Inbox", 0)).toBe("Inbox");
+    expect(tabLabel("Sent", 0)).toBe("Sent");
   });
 
-  it("says a second activation opens the menu, and then that it closes it", () => {
-    expect(inboxTabLabel(6, true, false)).toBe("Inbox, 6 unread. Activate again for mailboxes and account");
-    expect(inboxTabLabel(0, true, true)).toBe("Inbox. Activate again to close mailboxes and account");
+  it("badges unread counts, capped at 99+", () => {
+    expect(badgeText(0)).toBeNull();
+    expect(badgeText(7)).toBe("7");
+    expect(badgeText(120)).toBe("99+");
+  });
+
+  it("lists the panel's folders reversed, so the last one sits nearest the thumb", () => {
+    const folders = [{ id: "archive" }, { id: "sent" }, { id: "drafts" }, { id: "trash" }, { id: "spam" }] as const;
+    expect(panelOrder(folders).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "sent", "archive"]);
+    // A copy: the caller's order is left alone.
+    expect(folders[0].id).toBe("archive");
   });
 });

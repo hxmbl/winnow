@@ -6,7 +6,6 @@ import {
   idleCloseAllowed,
   scrimClickCloses,
   scrimMidpoint,
-  scrimSheetTop,
   isEditingElement,
   SCRIM_ORIGIN,
   scrimBlurAt,
@@ -80,7 +79,7 @@ describe("the progressive blur", () => {
     });
   }
 
-  it("is the desktop sidebar's blur on the phone's sheet too: one recipe, four layers", () => {
+  it("is the desktop sidebar's blur on the phone's panel too: one recipe, four layers", () => {
     // The phone used to get three lighter layers, which read as a weaker, different
     // effect. Now both share the recipe and differ only in where it spreads from.
     expect(scrimLayers()).toEqual([
@@ -111,9 +110,10 @@ describe("the progressive blur", () => {
     // A 1440 × 900 window with the origin at (248, 450), the middle of the sidebar's
     // right edge: the farthest corner is top right.
     { name: "on the desktop", corner: Math.hypot(1440 - 248, 450) },
-    // A 390 × 844 phone with the sheet's top edge at 420: the origin is (195, 420), the
-    // middle of that edge, and the farthest corners are the bottom two.
-    { name: "on a phone", corner: Math.hypot(195, 844 - 420) },
+    // A 390 × 844 phone with the panel grown from the pill (12px to 312px across, 400px
+    // to 772px down): the origin is (312, 586), the middle of its right edge, and the
+    // farthest corner is the top left.
+    { name: "on a phone", corner: Math.hypot(312, 586) },
   ]) {
     const layers = scrimLayers();
 
@@ -212,13 +212,3 @@ describe("the scrim's measured origin", () => {
   });
 });
 
-describe("scrimSheetTop", () => {
-  it("is the phone sheet's top edge, rounded to a pixel", () => {
-    expect(scrimSheetTop({ top: 301.6, height: 420 })).toBe("302px");
-  });
-
-  it("is null for a sheet that is not laid out", () => {
-    expect(scrimSheetTop({ top: 300, height: 0 })).toBeNull();
-    expect(scrimSheetTop({ top: Number.NaN, height: 200 })).toBeNull();
-  });
-});

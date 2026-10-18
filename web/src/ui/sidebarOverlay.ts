@@ -102,16 +102,6 @@ export function scrimMidpoint(rect: { top: number; height: number }): string | n
   return `${Math.round(rect.top + rect.height / 2)}px`;
 }
 
-/**
- * `--wn-sidebar-mid` for the phone's bottom sheet: the height of its top edge in px,
- * which is where its blur spreads from (across, it is the middle of the window). `null`
- * for a panel that is not laid out, as for `scrimMidpoint`.
- */
-export function scrimSheetTop(rect: { top: number; height: number }): string | null {
-  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) return null;
-  return `${Math.round(rect.top)}px`;
-}
-
 /** A text field, a select, or an editable region: somewhere typing is happening. */
 export function isEditingElement(element: Element | null): boolean {
   if (!element) return false;
@@ -128,7 +118,7 @@ export function isEditingElement(element: Element | null): boolean {
  * One layer of the progressive blur.
  *
  * The blur is radial: it spreads from one point, the middle of the sidebar's right edge
- * or, for the phone's bottom sheet, the middle of its top edge (`SCRIM_ORIGIN`), and falls off evenly in every direction, so a spot above or below
+ * (on a phone, the right edge of the panel grown from the dock's pill; `SCRIM_ORIGIN`), and falls off evenly in every direction, so a spot above or below
  * the sidebar is as clear as a spot the same distance to its right.
  *
  * `reach` is where the layer has faded to nothing, as a share of the distance from that
@@ -144,10 +134,10 @@ export type ScrimLayer = { blur: number; reach: number };
  * content is unreadable glass; a little further out only the weaker ones are left; at
  * the window's farthest corner nothing is.
  *
- * One recipe for every screen. The phone's bottom sheet used to get three lighter
- * layers, which read as a different, weaker effect from the desktop sidebar's; it now
- * has the same four, spreading from the middle of the sheet's top edge instead of the
- * sidebar's right edge (`--wn-sidebar-edge` / `--wn-sidebar-mid`, set by `Sidebar`).
+ * One recipe for every screen. The phone's menu used to get three lighter layers,
+ * which read as a different, weaker effect from the desktop sidebar's; it now has the
+ * same four, spreading from the middle of its panel's right edge just as the desktop's
+ * do (`--wn-sidebar-edge` / `--wn-sidebar-mid`, set by `Sidebar`).
  */
 const LAYERS: readonly ScrimLayer[] = [
   { blur: 16, reach: 0.12 },

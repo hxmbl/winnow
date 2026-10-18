@@ -24,6 +24,7 @@ import {
   type AccentTheme,
   type Appearance,
 } from "../core/model/appearance";
+import { glassProperties } from "./glass";
 
 /** WCAG relative luminance of an `#RRGGBB` colour, 0–1. */
 export function relativeLuminance(hex: string): number {
@@ -500,6 +501,9 @@ export function applyTheme(
   root.style.setProperty("--wn-pill-ink", palette.color[pill.ink]);
   root.style.setProperty("--wn-pill-inkOn", palette.color[pill.inkOn]);
   root.style.setProperty("--wn-pill-count", palette.color[pill.count]);
+  for (const [key, value] of Object.entries(glassProperties(scheme, palette.color))) {
+    root.style.setProperty(key, value);
+  }
   // Drives native form controls, scrollbars, and the OS `color-scheme`, so a dark
   // app does not flash white before first paint. OLED is a dark scheme to the browser.
   root.style.colorScheme = scheme === "light" ? "light" : "dark";

@@ -226,8 +226,8 @@ try {
   const isOn = async (locator) => (await locator.getAttribute("aria-pressed")) === "true";
   /**
    * The navigation: the sidebar, an overlay on every screen size, opened by the toggle
-   * at the head of the list (desktop) or a second tap on the dock's Inbox tab (phone,
-   * where it is a bottom sheet). It is always
+   * at the head of the list (desktop) or the dock's Expand chevron (phone, where it is
+   * the dock's pill grown into a panel). It is always
    * mounted so it can animate out; `data-open` says whether it is open, and closed it is
    * `visibility: hidden` once its slide has finished. It holds no smart filters; those
    * are the rail above.
@@ -242,14 +242,7 @@ try {
     await page
       .waitForFunction(() => !document.querySelector('[role="presentation"]'), null, { timeout: 5_000 })
       .catch(() => undefined);
-    const toggle = sidebarToggle();
-    await toggle.click();
-    // On a phone the toggle is the Inbox tab, whose first tap only switches to the inbox
-    // when another mailbox (or Settings) is showing.
-    if (await toggle.evaluate((element) => element.closest("[data-phone-dock]") !== null)) {
-      await page.waitForTimeout(150);
-      if (!(await sidebarOpen())) await toggle.click();
-    }
+    await sidebarToggle().click();
     await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
     // The slide-in, so boxes measured next are where they settle.
     await page.waitForTimeout(300);
@@ -2556,18 +2549,19 @@ try {
     await p.goto(URL, { waitUntil: "networkidle" });
     await p.waitForSelector("[data-message-id]", { timeout: 10_000 });
     const fab = p.locator("[data-compose-fab]");
-    check("the phone shows a compose pencil over the list", (await fab.count()) === 1 && (await fab.isVisible()));
+    check("the phone shows a compose pencil in the dock", (await fab.count()) === 1 && (await fab.isVisible()) && (await fab.evaluate((button) => Boolean(button.closest("[data-phone-dock]")))));
     const fabBox = await fab.boundingBox();
-    const dockBox = await p.locator("[data-phone-dock]").boundingBox();
+    const pillBox = await p.locator("[data-phone-pill]").boundingBox();
     check(
-      "bottom-right, clear of the dock, and a full touch target",
-      Boolean(fabBox && dockBox) &&
+      "bottom-right, beside the dock's pill and level with it, and a full touch target",
+      Boolean(fabBox && pillBox) &&
         fabBox.x + fabBox.width <= 390 - 8 &&
-        fabBox.x > 390 / 2 &&
-        fabBox.y + fabBox.height <= dockBox.y - 4 &&
-        fabBox.width >= 44 &&
-        fabBox.height >= 44,
-      JSON.stringify({ fabBox, dockBox }),
+        fabBox.x >= pillBox.x + pillBox.width &&
+        Math.abs(fabBox.y + fabBox.height / 2 - (pillBox.y + pillBox.height / 2)) <= 1 &&
+        fabBox.y + fabBox.height <= 844 - 8 &&
+        fabBox.width >= 48 &&
+        fabBox.height >= 48,
+      JSON.stringify({ fabBox, pillBox }),
     );
     await p.locator("[data-message-id]").first().tap();
     await p.waitForSelector("article h1", { timeout: 5_000 });
@@ -3451,10 +3445,10 @@ try {
     The phone layout.
 
     Below 640px the masthead is replaced, not squeezed: a top bar (the mark, the list's
-    name and search), the list, and one dock at the bottom edge holding the swipeable
-    smart filter chips above three tabs; folders, the account and its Settings gear are in
-    the menu, a bottom sheet that a second tap on Inbox raises. The reader brings its own action bar to the
-    same edge. What is claimed here is the ergonomics — that the controls a thumb uses
+    name and search), the list, and floating over its bottom a glass pill of two tabs and
+    an Expand chevron, the compose button beside it and the swipeable smart filter chips
+    above; folders, the account and its Settings gear are in the menu panel Expand grows
+    the pill into. The reader brings its own action bar to the bottom edge. What is claimed here is the ergonomics — that the controls a thumb uses
     most are at the bottom, that every one is a real touch target, and that nothing the
     desktop could do is unreachable.
   */
@@ -3476,7 +3470,7 @@ try {
     JSON.stringify(logoBox),
   );
   // The top bar is where you are and search, nothing else: no prev/next chevrons, no
-  // tick and no menu button (the menu is a second tap on Inbox).
+  // tick and no menu button (the menu is the dock's Expand button).
   const topBarButtons = await topBar.locator("button").evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute("aria-label") ?? node.textContent),
   );
@@ -3525,43 +3519,115 @@ try {
   });
   check("the top bar does not need a sideways scroll", overflow !== null && overflow <= 1, `${overflow}px past`);
 
-  const dockBox = await box(dock);
+  /*
+    The dock floats over the list, after Linear's Android app: a rounded glass pill of
+    icon-only tabs (Inbox, Sent) and an Expand chevron, inset from the edges and clear of
+    the gesture bar, with the compose button as its own circle beside it and the smart
+    filter chips floating one by one above. The list scrolls underneath all of it.
+  */
+  const pill = dock.locator("[data-phone-pill]");
+  const pillBox = await box(pill);
   check(
-    "the dock sits on the bottom edge",
-    Boolean(dockBox) && Math.abs(dockBox.y + dockBox.height - 844) <= 1,
-    JSON.stringify(dockBox),
+    "the dock is a floating pill: inset from the left edge and above the bottom edge, fully rounded",
+    Boolean(pillBox) && pillBox.x >= 8 && pillBox.y + pillBox.height <= 844 - 8 && pillBox.height >= 52 &&
+      (await pill.evaluate((nav) => parseFloat(getComputedStyle(nav).borderTopLeftRadius))) >= pillBox.height / 2 - 1,
+    JSON.stringify(pillBox),
+  );
+  const pillGlass = await pill.evaluate((nav) => {
+    const style = getComputedStyle(nav);
+    return { filter: style.backdropFilter || style.webkitBackdropFilter, background: style.backgroundColor, shadow: style.boxShadow };
+  });
+  check(
+    "in light frost: a modest blur over a translucent tint, with a shadow",
+    /blur\(12px\)/.test(pillGlass.filter) && /saturate\(1\.3\)/.test(pillGlass.filter) &&
+      /\/ 0\.[5-8]\d*\)|, 0\.[5-8]\d*\)/.test(pillGlass.background) && pillGlass.shadow !== "none",
+    JSON.stringify(pillGlass),
   );
 
-  const tabs = dock.locator('nav[aria-label="Primary"] button');
-  const tabLabels = (await tabs.allTextContents()).map((t) => t.replace(/\d+/g, "").trim());
+  const tabs = dock.locator("nav[aria-label='Primary'] button[data-dock-tab]");
+  const tab = (id) => dock.locator(`button[data-dock-tab="${id}"]`);
+  const expand = dock.locator("button[data-dock-expand]");
+  const fab = dock.locator("[data-compose-fab]");
+  const tabNames = await tabs.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")));
   check(
-    "three tabs: Inbox, Sent, Archive — no Settings tab and no Compose in its place",
-    JSON.stringify(tabLabels) === JSON.stringify(["Inbox", "Sent", "Archive"]) &&
-      (await dock.locator('nav[aria-label="Primary"] [aria-label="Settings"], nav[aria-label="Primary"] [data-compose]').count()) === 0,
-    JSON.stringify(tabLabels),
+    "two icon-only tabs, Inbox and Sent, then Expand: no Archive, no Settings, no labels on screen",
+    tabNames.length === 2 && /^Inbox(, \d+ unread)?$/.test(tabNames[0] ?? "") && tabNames[1] === "Sent" &&
+      (await expand.getAttribute("aria-label")) === "More mailboxes" &&
+      (await pill.locator('[aria-label^="Archive"], [aria-label="Settings"], [data-compose-fab]').count()) === 0 &&
+      (await pill.evaluate((nav) => nav.innerText.replace(/\d+\+?/g, "").trim())) === "",
+    JSON.stringify(tabNames),
   );
-  const tabColumns = await dock.locator('nav[aria-label="Primary"]').evaluate(
-    (nav) => getComputedStyle(nav).gridTemplateColumns.split(" ").length,
-  );
-  check("and the tab row is a three-column grid", tabColumns === 3, `${tabColumns} columns`);
-  const tabBoxes = await Promise.all((await tabs.all()).map((tab) => tab.boundingBox()));
   check(
-    "every tab is a full touch target",
-    tabBoxes.every((b) => b && b.width >= MIN_TARGET && b.height >= MIN_TARGET),
+    "the current tab says so, and Expand says it is collapsed",
+    (await tab("inbox").getAttribute("aria-current")) === "page" && (await tab("sent").getAttribute("aria-current")) === null &&
+      (await expand.getAttribute("aria-expanded")) === "false",
+  );
+  const inboxBadge = await tab("inbox").locator("[data-dock-badge]").count();
+  check("the Inbox tab keeps its unread badge", inboxBadge === 1 && /unread/.test(tabNames[0] ?? ""), tabNames[0]);
+  const tabBoxes = await Promise.all([...(await tabs.all()), expand].map((target) => target.boundingBox()));
+  check(
+    "every tab and Expand is a 48px touch target",
+    tabBoxes.every((b) => b && b.width >= 48 && b.height >= 48),
     JSON.stringify(tabBoxes.map((b) => b && [Math.round(b.width), Math.round(b.height)])),
   );
+  const fabBox = await box(fab);
+  check(
+    "the compose button is a separate circle beside the pill, aligned with it, at the right inset",
+    Boolean(fabBox && pillBox) && fabBox.x >= pillBox.x + pillBox.width + 4 && fabBox.x + fabBox.width <= 390 - 8 &&
+      Math.abs(fabBox.y + fabBox.height / 2 - (pillBox.y + pillBox.height / 2)) <= 1 &&
+      Math.abs(fabBox.width - fabBox.height) <= 1 && fabBox.width >= 48,
+    JSON.stringify({ fabBox, pillBox }),
+  );
+  const fabFill = await fab.evaluate((button) => getComputedStyle(button).backgroundColor);
+  const accentFill = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.className = "bg-accent";
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return colour;
+  });
+  check("and keeps the accent", fabFill === accentFill, `${fabFill} / ${accentFill}`);
 
-  const dockChips = dock.locator("button[aria-pressed]");
+  const dockChips = dock.locator("[data-rail-key] button[aria-pressed]");
   const chipBox = await box(dockChips);
   check(
-    "the smart filter chips sit in the dock, above the tabs, at thumb size",
-    (await dockChips.count()) > 3 && Boolean(chipBox) && chipBox.y < tabBoxes[0].y && chipBox.height >= MIN_TARGET,
+    "the smart filter chips float above the pill, at thumb size",
+    (await dockChips.count()) > 3 && Boolean(chipBox) && chipBox.y + chipBox.height <= pillBox.y && chipBox.height >= MIN_TARGET,
     JSON.stringify(chipBox),
   );
-  const chipRow = await dock.locator("[data-rail-scroller]").evaluate((element) => ({
-    swipeable: getComputedStyle(element).overflowX === "auto" && element.scrollWidth > element.clientWidth,
-  }));
-  check("and the chip row swipes sideways", chipRow.swipeable, JSON.stringify(chipRow));
+  const chipRow = await dock.locator("[data-rail-scroller]").evaluate((element) => {
+    const chip = element.querySelector("[data-rail-key]");
+    const chipStyle = getComputedStyle(chip);
+    const bands = [];
+    for (let node = element; node && !node.matches("[data-phone-dock]"); node = node.parentElement) {
+      const bg = getComputedStyle(node).backgroundColor;
+      if (bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") bands.push(bg);
+    }
+    const dockBg = getComputedStyle(element.closest("[data-phone-dock]")).backgroundColor;
+    return {
+      swipeable: getComputedStyle(element).overflowX === "auto" && element.scrollWidth > element.clientWidth,
+      bands,
+      dockBg,
+      chipFilter: chipStyle.backdropFilter || chipStyle.webkitBackdropFilter,
+      chipShadow: chipStyle.boxShadow,
+      chipBorder: chipStyle.borderTopWidth,
+      firstLeft: Math.round(chip.getBoundingClientRect().left),
+      gap: parseFloat(getComputedStyle(element).columnGap),
+    };
+  });
+  check(
+    "each chip is its own frosted pill with a hairline and a shadow; no band behind the rail",
+    chipRow.bands.length === 0 && (chipRow.dockBg === "rgba(0, 0, 0, 0)" || chipRow.dockBg === "transparent") &&
+      /blur\(12px\)/.test(chipRow.chipFilter) && chipRow.chipShadow !== "none" && chipRow.chipBorder === "1px" &&
+      chipRow.gap >= 8,
+    JSON.stringify(chipRow),
+  );
+  check(
+    "the rail swipes sideways and starts at the pill's inset",
+    chipRow.swipeable && Math.abs(chipRow.firstLeft - pillBox.x) <= 1,
+    JSON.stringify({ firstLeft: chipRow.firstLeft, pill: pillBox.x }),
+  );
   check(
     "and the sidebar starts closed on a phone",
     !(await sidebarOpen()) && (await page.locator("[data-sidebar]").isHidden()),
@@ -3571,9 +3637,55 @@ try {
     (await topBar.locator("button[aria-pressed]").count()) === 0,
   );
 
+  // The list scrolls under the floating chrome, and its end clears all of it.
+  const underneath = await page.evaluate(async () => {
+    const scroller = document.querySelector("[data-row-count]");
+    const scrollerRect = scroller.getBoundingClientRect();
+    scroller.scrollTop = scroller.scrollHeight;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const rows = [...scroller.querySelectorAll("[data-row-id]")];
+    const last = rows.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0].getBoundingClientRect();
+    const chips = document.querySelector("[data-phone-chips]").getBoundingClientRect();
+    const pillTop = document.querySelector("[data-phone-pill]").getBoundingClientRect().top;
+    const fabRect = document.querySelector("[data-compose-fab]").getBoundingClientRect();
+    const result = {
+      scrollerBottom: Math.round(scrollerRect.bottom),
+      height: innerHeight,
+      lastBottom: Math.round(last.bottom),
+      chipsTop: Math.round(chips.top),
+      pillTop: Math.round(pillTop),
+      fabTop: Math.round(fabRect.top),
+    };
+    scroller.scrollTop = 0;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return result;
+  });
+  check(
+    "the list runs to the bottom edge, under the chips and the dock",
+    underneath.scrollerBottom >= underneath.height - 1,
+    JSON.stringify(underneath),
+  );
+  check(
+    "and scrolled to its end, the last row sits above the chips, the pill and the compose button",
+    underneath.lastBottom <= underneath.chipsTop && underneath.lastBottom <= underneath.pillTop && underneath.lastBottom <= underneath.fabTop,
+    JSON.stringify(underneath),
+  );
+  // The compose button no longer floats over the rows: the old position covered the end
+  // of whichever row was passing under it. At rest, every row it could touch is above it.
+  const fabOverlap = await page.evaluate(() => {
+    const fabRect = document.querySelector("[data-compose-fab]").getBoundingClientRect();
+    const chipsTop = document.querySelector("[data-phone-chips]").getBoundingClientRect().top;
+    return { fabTop: Math.round(fabRect.top), chipsTop: Math.round(chipsTop) };
+  });
+  check(
+    "the compose button is part of the dock row, below the chips, not floating over the list's rows",
+    fabOverlap.fabTop > fabOverlap.chipsTop,
+    JSON.stringify(fabOverlap),
+  );
+
   // A chip filters the list, from the dock.
   const beforeChip = await rowTotal();
-  const firstLive = dock.locator("button[aria-pressed]:not([disabled])").first();
+  const firstLive = dock.locator("[data-rail-key] button[aria-pressed]:not([disabled])").first();
   await firstLive.click();
   await page.waitForTimeout(300);
   check(
@@ -3586,45 +3698,49 @@ try {
   check("and All clears it", (await rowTotal()) === beforeChip, `${await rowTotal()} rows`);
 
   /*
-    The menu, from the dock: the Inbox tab is the toggle once it is the current tab. From
-    another mailbox the first tap only switches to the inbox; the second raises the menu
-    as a bottom sheet resting on the tabs, and the third closes it.
+    Inbox is only ever the inbox. From another mailbox a tap switches to it; once it is
+    the current tab, a tap takes the list back to its top and never opens the menu.
   */
-  const inboxTab = tabs.filter({ hasText: "Inbox" });
-  await tabs.filter({ hasText: "Sent" }).click();
+  await tab("sent").click();
   await page.waitForTimeout(250);
-  const inboxTabState = () =>
-    inboxTab.evaluate((tab) => ({
-      label: tab.getAttribute("aria-label"),
-      popup: tab.getAttribute("aria-haspopup"),
-      expanded: tab.getAttribute("aria-expanded"),
-      controls: tab.getAttribute("aria-controls"),
-      current: tab.getAttribute("aria-current"),
-    }));
-  const awayState = await inboxTabState();
-  check(
-    "away from the inbox, the Inbox tab is plainly a tab",
-    awayState.popup === null && awayState.expanded === null && !/Activate again/.test(awayState.label ?? ""),
-    JSON.stringify(awayState),
-  );
-  await inboxTab.click();
+  await tab("inbox").click();
   await page.waitForTimeout(300);
-  const firstTap = await inboxTabState();
   check(
-    "the first Inbox tap switches to the inbox and does not open the menu",
-    !(await sidebarOpen()) && (await listTitle())?.trim() === "Inbox" && firstTap.current === "page",
+    "the Inbox tab switches to the inbox and does not open the menu",
+    !(await sidebarOpen()) && (await listTitle())?.trim() === "Inbox" && (await tab("inbox").getAttribute("aria-current")) === "page",
     JSON.stringify({ title: await listTitle(), open: await sidebarOpen() }),
   );
+  const scrolled = await page.evaluate(() => {
+    const scroller = document.querySelector("[data-row-count]");
+    scroller.scrollTop = 600;
+    return Math.round(scroller.scrollTop);
+  });
+  await tab("inbox").click();
+  await page.waitForFunction(() => document.querySelector("[data-row-count]").scrollTop === 0, null, { timeout: 3_000 }).catch(() => undefined);
+  await page.waitForTimeout(200);
   check(
-    "then it tells a screen reader a second activation opens the menu",
-    firstTap.popup === "dialog" && firstTap.expanded === "false" && firstTap.controls === "winnow-sidebar" &&
-      /^Inbox(, \d+ unread)?\. Activate again for mailboxes and account$/.test(firstTap.label ?? ""),
-    JSON.stringify(firstTap),
+    "tapping Inbox on Inbox scrolls the list to the top, and does not open the menu",
+    scrolled > 0 && (await page.evaluate(() => document.querySelector("[data-row-count]").scrollTop)) === 0 && !(await sidebarOpen()),
+    `from ${scrolled}px`,
   );
-  await inboxTab.click();
+  check(
+    "and the Inbox tab is plainly a tab: no popup, no expanded state",
+    (await tab("inbox").getAttribute("aria-haspopup")) === null && (await tab("inbox").getAttribute("aria-expanded")) === null,
+  );
+
+  /*
+    Expand grows the pill upward into the menu panel: the same left edge, width and
+    bottom, frosted glass, the account and gear on top, the folders reversed with Inbox
+    at the bottom on the pill's line, and the chevron still where it was.
+  */
+  await expand.click();
   await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
-  await page.waitForTimeout(400);
-  check("the second Inbox tap opens the menu", await sidebarOpen());
+  await page.waitForTimeout(450);
+  check("Expand opens the menu", await sidebarOpen());
+  check(
+    "and says so: aria-expanded, controlling the menu",
+    (await expand.getAttribute("aria-expanded")) === "true" && (await expand.getAttribute("aria-controls")) === "winnow-sidebar",
+  );
   const menu = overflowMenu();
   const menuShape = await menu.evaluate((panel) => ({
     filter: Boolean(panel.querySelector("#winnow-nav-filter")),
@@ -3633,116 +3749,149 @@ try {
     folders: [...panel.querySelectorAll("[data-nav-folder]")].map((b) => b.getAttribute("data-nav-folder")),
     account: panel.querySelector("[data-nav-account]")?.textContent ?? "",
     settings: Boolean(panel.querySelector('[data-nav-account] button[aria-label="Settings"]')),
+    gearRound: (() => {
+      const gear = panel.querySelector('[data-nav-account] button[aria-label="Settings"]');
+      if (!gear) return false;
+      const rect = gear.getBoundingClientRect();
+      return rect.width >= 44 && parseFloat(getComputedStyle(gear).borderTopLeftRadius) >= rect.width / 2 - 1;
+    })(),
     markAllRead: panel.querySelectorAll('[data-nav-action="mark-all-read"], [aria-label^="Mark all read"]').length,
+    icons: [...panel.querySelectorAll("[data-nav-folder], [data-nav=inbox]")].every((row) => row.querySelector("svg")),
     // Top to bottom, as drawn: the account row, then every destination.
-    order: [...panel.querySelectorAll("[data-nav-account], h3, [data-nav-folder], [data-nav=inbox]")]
+    order: [...panel.querySelectorAll("[data-nav-account], [data-nav-folder], [data-nav=inbox]")]
       .filter((node) => node.getClientRects().length > 0)
       .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
-      .map((node) =>
-        node.matches("[data-nav-account]") ? "account" :
-        node.matches("h3") ? `# ${node.textContent.trim()}` :
-        node.getAttribute("data-nav-folder") ?? node.getAttribute("data-nav")),
+      .map((node) => (node.matches("[data-nav-account]") ? "account" : node.getAttribute("data-nav-folder") ?? node.getAttribute("data-nav"))),
+    current: (() => {
+      const row = panel.querySelector('[aria-current="page"][data-nav], [aria-current="page"][data-nav-folder]');
+      return row ? { id: row.getAttribute("data-nav") ?? row.getAttribute("data-nav-folder"), radius: parseFloat(getComputedStyle(row).borderTopLeftRadius), height: row.getBoundingClientRect().height, bg: getComputedStyle(row).backgroundColor } : null;
+    })(),
     header: [...panel.querySelectorAll("span")].some((node) => node.textContent.trim() === "Winnow"),
   }));
   check(
-    "the menu is one sheet: Inbox, Mail, the account and Settings, no categories and no Mark all read",
+    "the panel holds Inbox, the folders, the account and Settings, no categories and no Mark all read",
     !menuShape.filter && menuShape.inbox && menuShape.categories === 0 &&
-      ["sent", "archive", "trash", "spam"].every((id) => menuShape.folders.includes(id)) &&
-      menuShape.account.includes("Demo account") && menuShape.settings &&
-      menuShape.markAllRead === 0,
+      ["sent", "archive", "trash", "spam", "drafts"].every((id) => menuShape.folders.includes(id)) &&
+      menuShape.account.includes("Demo account") && menuShape.settings && menuShape.markAllRead === 0,
     JSON.stringify(menuShape),
   );
   check(
-    "the phone sheet is the list reversed: account and gear on top, then Mail (Spam … Archive), Inbox at the bottom",
-    JSON.stringify(menuShape.order) ===
-      JSON.stringify(["account", "# Mail", "spam", "trash", "drafts", "sent", "archive", "inbox"]),
+    "reversed: account and gear on top, then Spam, Trash, Drafts, Sent, Archive, and Inbox last",
+    JSON.stringify(menuShape.order) === JSON.stringify(["account", "spam", "trash", "drafts", "sent", "archive", "inbox"]),
     JSON.stringify(menuShape.order),
+  );
+  check(
+    "every row has an icon, the gear is a round button, and the current mailbox is on a pill",
+    menuShape.icons && menuShape.gearRound && menuShape.current?.id === "inbox" &&
+      menuShape.current.radius >= menuShape.current.height / 2 - 1 && menuShape.current.bg !== "rgba(0, 0, 0, 0)",
+    JSON.stringify({ icons: menuShape.icons, gear: menuShape.gearRound, current: menuShape.current }),
   );
   check("and it has no Winnow name-and-icon header", !menuShape.header, JSON.stringify(menuShape.header));
   const menuTargets = await menu.locator('button[data-nav-folder], button[data-nav="inbox"], button[data-nav-action]').evaluateAll((nodes) =>
     nodes.map((node) => Math.round(node.getBoundingClientRect().height)),
   );
-  check("its rows are touch-sized", menuTargets.every((h) => h >= MIN_TARGET), JSON.stringify(menuTargets));
+  check("its rows are touch-sized", menuTargets.every((h) => h >= 48), JSON.stringify(menuTargets));
   const phoneSide = await page.evaluate(() => {
-    const side = document.querySelector("[data-sidebar]").getBoundingClientRect();
-    const tabsRow = document.querySelector('[data-phone-dock] nav[aria-label="Primary"]').getBoundingClientRect();
+    const panel = document.querySelector("[data-sidebar]");
+    const side = panel.getBoundingClientRect();
+    const pillRect = document.querySelector("[data-phone-pill]").getBoundingClientRect();
+    const expandRect = document.querySelector("[data-dock-expand]").getBoundingClientRect();
+    const inboxRow = panel.querySelector("[data-nav=inbox]").getBoundingClientRect();
+    const fabRect = document.querySelector("[data-compose-fab]").getBoundingClientRect();
     const scrim = document.querySelector("[data-sidebar-scrim]");
     const chips = document.querySelector("[data-phone-dock] [data-rail-scroller]");
+    const style = getComputedStyle(panel);
+    const under = document.elementFromPoint(expandRect.left + expandRect.width / 2, expandRect.top + expandRect.height / 2);
     return {
-      left: Math.round(side.left),
-      right: Math.round(side.right),
-      top: Math.round(side.top),
-      bottom: Math.round(side.bottom),
-      tabsTop: Math.round(tabsRow.top),
-      window: innerWidth,
+      side: { left: Math.round(side.left), right: Math.round(side.right), top: Math.round(side.top), bottom: Math.round(side.bottom) },
+      pill: { left: Math.round(pillRect.left), right: Math.round(pillRect.right), bottom: Math.round(pillRect.bottom) },
+      inboxRow: { right: Math.round(inboxRow.right), mid: Math.round(inboxRow.top + inboxRow.height / 2) },
+      expand: { left: Math.round(expandRect.left), mid: Math.round(expandRect.top + expandRect.height / 2) },
+      expandOnTop: Boolean(under?.closest("[data-dock-expand]")),
+      fabVisible: fabRect.width > 0 && getComputedStyle(document.querySelector("[data-compose-fab]")).visibility === "visible",
       height: innerHeight,
-      radius: getComputedStyle(document.querySelector("[data-sidebar]")).borderTopLeftRadius,
+      radius: parseFloat(style.borderTopLeftRadius),
+      clip: style.clipPath,
+      filter: style.backdropFilter || style.webkitBackdropFilter,
+      background: style.backgroundColor,
       scrim: getComputedStyle(scrim).visibility,
-      layers: scrim.querySelectorAll("[data-scrim-layer]").length,
       blurs: [...scrim.querySelectorAll("[data-scrim-layer]")].map((layer) => Number(layer.getAttribute("data-scrim-layer"))),
       dockInert: Boolean(document.querySelector("[data-phone-dock]")?.closest("[inert]")),
       chipsAside: Boolean(chips?.closest("[inert]")) && getComputedStyle(chips).visibility === "hidden",
       listInert: Boolean(document.querySelector("[data-row-count]")?.closest("[inert]")),
-      focusInside: document.querySelector("[data-sidebar]").contains(document.activeElement),
+      focusInside: panel.contains(document.activeElement),
     };
   });
   check(
-    "on a phone it is a bottom sheet: full width, resting on the tabs near the bottom edge, rounded on top",
-    phoneSide.left === 0 && phoneSide.right === phoneSide.window &&
-      Math.abs(phoneSide.bottom - phoneSide.tabsTop) <= 1 && phoneSide.bottom >= phoneSide.height - 120 &&
-      phoneSide.top >= phoneSide.height * 0.2 - 1 && phoneSide.radius !== "0px",
+    "the panel is the pill grown upward: same left edge, width and bottom, a tall rounded panel",
+    Math.abs(phoneSide.side.left - phoneSide.pill.left) <= 1 && Math.abs(phoneSide.side.right - phoneSide.pill.right) <= 1 &&
+      Math.abs(phoneSide.side.bottom - phoneSide.pill.bottom) <= 1 && phoneSide.side.top < phoneSide.height * 0.75 &&
+      phoneSide.radius >= 20 && /inset\(0(px)?( 0(px)?)*/.test(phoneSide.clip),
     JSON.stringify(phoneSide),
   );
   check(
-    "the app behind it is blurred (the desktop sidebar's four-layer blur) and inert, the tabs stay live and the chip row is set aside",
-    phoneSide.scrim === "visible" && phoneSide.listInert &&
-      !phoneSide.dockInert && phoneSide.chipsAside && phoneSide.focusInside &&
+    "in the same light frost as the dock",
+    /blur\(12px\)/.test(phoneSide.filter) && /saturate\(1\.3\)/.test(phoneSide.filter) && !/, 1\)$/.test(phoneSide.background),
+    JSON.stringify({ filter: phoneSide.filter, background: phoneSide.background }),
+  );
+  check(
+    "Inbox is the bottom row, on the pill's line, with the chevron on top of the panel beside it, and compose stays",
+    Math.abs(phoneSide.inboxRow.mid - phoneSide.expand.mid) <= 3 && phoneSide.inboxRow.right <= phoneSide.expand.left &&
+      phoneSide.expandOnTop && phoneSide.fabVisible,
+    JSON.stringify({ inbox: phoneSide.inboxRow, expand: phoneSide.expand, onTop: phoneSide.expandOnTop, fab: phoneSide.fabVisible }),
+  );
+  check(
+    "the app behind it is blurred (the desktop sidebar's four-layer blur) and inert, the dock stays live and the chips are set aside",
+    phoneSide.scrim === "visible" && phoneSide.listInert && !phoneSide.dockInert && phoneSide.chipsAside && phoneSide.focusInside &&
       JSON.stringify(phoneSide.blurs) === JSON.stringify([16, 8, 4, 1.5]),
     JSON.stringify(phoneSide),
   );
-  const openTab = await inboxTabState();
-  check(
-    "and the Inbox tab says it is expanded, and that activating it again closes the menu",
-    openTab.expanded === "true" && /Activate again to close/.test(openTab.label ?? ""),
-    JSON.stringify(openTab),
-  );
   const phoneRadial = await scrimFalloff();
   check(
-    "its blur spreads from the middle of its top edge, falling off evenly in every direction",
-    Math.abs(phoneRadial.origin.x - phoneRadial.side.centre) <= 1 &&
-      Math.abs(phoneRadial.origin.y - phoneRadial.side.top) <= 1 && phoneRadial.ok,
+    "its blur spreads from the middle of the panel's right edge, falling off evenly in every direction",
+    Math.abs(phoneRadial.origin.x - phoneRadial.side.right) <= 1 &&
+      Math.abs(phoneRadial.origin.y - phoneRadial.side.mid) <= 1 && phoneRadial.ok,
     JSON.stringify({ origin: phoneRadial.origin, side: phoneRadial.side, samples: phoneRadial.samples }),
   );
-  await inboxTab.click();
+
+  // It closes: the chevron again, a tap outside, Escape (Android Back is the same layer,
+  // covered with the back stack below), and choosing a mailbox.
+  await expand.click();
   await waitSidebarClosed().catch(() => undefined);
   check(
-    "the third Inbox tap closes it, and focus is back on the Inbox tab",
-    !(await sidebarOpen()) &&
-      (await inboxTab.evaluate((tab) => document.activeElement === tab)) &&
-      (await inboxTabState()).expanded === "false",
+    "the chevron again closes it, and focus is back on Expand",
+    !(await sidebarOpen()) && (await expand.evaluate((button) => document.activeElement === button)) &&
+      (await expand.getAttribute("aria-expanded")) === "false",
   );
-  // A tap on the app above it closes it too.
   await openDrawer();
-  await page.mouse.click(phoneSide.window / 2, 120);
+  await page.mouse.click(390 - 20, 120);
   await waitSidebarClosed().catch(() => undefined);
   check("a tap outside it closes it on a phone", !(await sidebarOpen()) && (await page.locator("article h1").count()) === 0);
   await closeDrawer();
-  // Escape closes it, and focus goes back to the tab.
   await openDrawer();
   await page.keyboard.press("Escape");
   await waitSidebarClosed().catch(() => undefined);
   check(
-    "Escape closes it and gives focus back to the Inbox tab",
-    !(await sidebarOpen()) && (await inboxTab.evaluate((tab) => document.activeElement === tab)),
+    "Escape closes it and gives focus back to Expand",
+    !(await sidebarOpen()) && (await expand.evaluate((button) => document.activeElement === button)),
   );
+  await openDrawer();
+  await menu.locator('button[data-nav-folder="archive"]').click();
+  await waitSidebarClosed().catch(() => undefined);
+  check(
+    "choosing a mailbox in it goes there and closes it",
+    !(await sidebarOpen()) && (await listTitle())?.trim() === "Archive",
+    await listTitle(),
+  );
+  await tab("inbox").click();
+  await page.waitForTimeout(300);
 
   // The tabs switch mailbox; Settings is the gear on the menu's account row.
-  await tabs.filter({ hasText: "Sent" }).click();
+  await tab("sent").click();
   await page.waitForTimeout(300);
   check(
     "the Sent tab opens Sent",
-    (await listTitle())?.trim() === "Sent" &&
-      (await tabs.filter({ hasText: "Sent" }).getAttribute("aria-current")) === "page",
+    (await listTitle())?.trim() === "Sent" && (await tab("sent").getAttribute("aria-current")) === "page",
     await listTitle(),
   );
   await openDrawer();
@@ -3786,7 +3935,7 @@ try {
   await page.waitForTimeout(200);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
-  await tabs.filter({ hasText: "Inbox" }).click();
+  await tab("inbox").click();
   await page.waitForTimeout(300);
   check("and the Inbox tab comes back", (await listTitle())?.trim() === "Inbox", await listTitle());
 
@@ -3950,15 +4099,15 @@ try {
     Boolean(starTarget) && starTarget.width >= MIN_TARGET && starTarget.height >= MIN_TARGET,
     JSON.stringify(starTarget),
   );
-  // No Mark all read on a phone either: the menu (two taps on Inbox) has no such row, and
-  // opening and closing it leaves the list's unread rows exactly as they were.
-  const touchInbox = touchPage.locator('[data-phone-dock] nav[aria-label="Primary"] button').first();
+  // No Mark all read on a phone either: the menu (behind the dock's Expand) has no such
+  // row, and opening and closing it leaves the list's unread rows exactly as they were.
+  const touchExpand = touchPage.locator("[data-phone-dock] button[data-dock-expand]");
   const unreadRows = () =>
     touchPage.locator("[data-row-count] button[data-message-id]").evaluateAll((rows) =>
       rows.filter((row) => /, unread,/.test(row.getAttribute("aria-label") ?? "")).length,
     );
   const unreadBefore = await unreadRows();
-  await touchInbox.tap();
+  await touchExpand.tap();
   await touchPage.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
   const touchMarkAll = await touchPage.locator('[data-sidebar] [data-nav-action="mark-all-read"], [data-sidebar] [aria-label^="Mark all read"]').count();
   await touchPage.keyboard.press("Escape");
@@ -5408,9 +5557,9 @@ try {
       (await m.locator("[data-sidebar]").count()) === 1 && (await mOpen()),
     );
     check(
-      "and it becomes the bottom sheet, its blur's origin moving to the middle of its top edge",
-      Math.abs(phoneEdge.x - phoneEdge.centre) <= 2 && Math.abs(phoneEdge.y - phoneEdge.top) <= 2 &&
-        phoneEdge.bottom > 844 - 120,
+      "and it becomes the dock's panel, low on the screen, its blur's origin at the middle of its right edge",
+      Math.abs(phoneEdge.x - phoneEdge.right) <= 2 && Math.abs(phoneEdge.y - phoneEdge.mid) <= 2 &&
+        phoneEdge.bottom > 844 - 40 && phoneEdge.right < 390 - 40,
       JSON.stringify(phoneEdge),
     );
     // A window too short for the panel: it scrolls inside itself, and the origin follows.
@@ -5418,8 +5567,8 @@ try {
     await m.waitForTimeout(400);
     const shortEdge = await edgeAt();
     check(
-      "a window resize re-measures the origin, and the sheet stays inside the window",
-      Math.abs(shortEdge.y - shortEdge.top) <= 2 && shortEdge.top >= 0,
+      "a window resize re-measures the origin, and the panel stays inside the window",
+      Math.abs(shortEdge.y - shortEdge.mid) <= 2 && shortEdge.top >= 0,
       JSON.stringify(shortEdge),
     );
     await m.keyboard.press("Escape");
@@ -6271,9 +6420,9 @@ try {
     s.on("pageerror", (error) => errors.push(String(error)));
     await s.goto(URL, { waitUntil: "networkidle" });
     await s.waitForSelector("[data-row-count] [data-row-id]");
-    const tabsNav = s.locator('[data-phone-dock] nav[aria-label="Primary"] button');
-    // No Settings tab: a second tap on Inbox raises the menu, whose account row has the gear.
-    await tabsNav.filter({ hasText: "Inbox" }).tap();
+    const tabsNav = s.locator('[data-phone-dock] nav[aria-label="Primary"] button[data-dock-tab]');
+    // No Settings tab: Expand raises the menu, whose account row has the gear.
+    await s.locator("[data-phone-dock] button[data-dock-expand]").tap();
     await s.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
     await s.waitForTimeout(300);
     await s.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').tap();
@@ -6282,11 +6431,11 @@ try {
     await s.waitForTimeout(300);
     check("a phone opens Settings on its category list", (await s.locator('[data-settings-layout="phone"][data-settings-page="list"]').count()) === 1);
     check("with every category", (await dialog.locator("button[data-category]").count()) === 8);
-    const dockBox = await s.locator("[data-phone-dock] nav").boundingBox();
+    const dockBox = await s.locator("[data-phone-dock] [data-phone-pill]").boundingBox();
     const dialogBox = await dialog.boundingBox();
     const currentTabs = await tabsNav.evaluateAll((tabs) => tabs.filter((tab) => tab.getAttribute("aria-current") === "page").length);
     check(
-      "above the dock, whose tabs stay visible (none of them current) to leave Settings by",
+      "above the dock's pill, whose tabs stay visible (none of them current) to leave Settings by",
       currentTabs === 0 && Boolean(dockBox && dialogBox) &&
         dialogBox.y + dialogBox.height <= dockBox.y + 1 && (await tabsNav.first().isVisible()),
       JSON.stringify({ dockBox, dialogBox, currentTabs }),
@@ -6325,7 +6474,7 @@ try {
       (await s.locator('[data-settings-page="list"]').count()) === 1 &&
         (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "privacy",
     );
-    await tabsNav.filter({ hasText: "Inbox" }).tap();
+    await s.locator('[data-phone-dock] button[data-dock-tab="inbox"]').tap();
     await s.waitForTimeout(250);
     check("the Inbox tab returns to the mail", (await s.locator('[role="dialog"]').count()) === 0);
     await ctx.close();

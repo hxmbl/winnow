@@ -358,40 +358,6 @@ html[data-resizing] iframe {
     visibility 0s;
 }
 
-/*
- * The phone's bottom sheet has no root edge to grow its glass from, so its blur and
- * tint are even across it, at the strength the side panel has at its root.
- */
-.wn-sidebar-panel[data-sheet] .wn-sidebar-blur {
-  -webkit-mask-image: none;
-  mask-image: none;
-}
-
-@supports (background: color-mix(in srgb, red 50%, transparent)) {
-  .wn-sidebar-panel[data-sheet] .wn-sidebar-tint {
-    background: color-mix(in srgb, var(--wn-surface) 84%, transparent);
-  }
-}
-
-/* The phone's bottom sheet rises from the dock's tabs rather than sliding in sideways. */
-.wn-sidebar-panel[data-sheet] {
-  transform: translateY(calc(100% + 1rem));
-  opacity: 0;
-  transition:
-    transform 160ms cubic-bezier(0.4, 0, 1, 1),
-    opacity 120ms ease-in 40ms,
-    visibility 0s linear 160ms;
-}
-
-.wn-sidebar-panel[data-sheet][data-open] {
-  transform: none;
-  opacity: 1;
-  transition:
-    transform 240ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 120ms ease-out,
-    visibility 0s;
-}
-
 .wn-scrim {
   visibility: hidden;
   pointer-events: none;
@@ -474,8 +440,7 @@ html[data-resizing] iframe {
     display: none;
   }
 
-  .wn-sidebar-tint,
-  .wn-sidebar-panel[data-sheet] .wn-sidebar-tint {
+  .wn-sidebar-tint {
     background: var(--wn-surface);
   }
 
@@ -509,5 +474,236 @@ html[data-resizing] iframe {
 @media (forced-colors: active) {
   [data-rail-edge] button {
     background: Canvas;
+  }
+}
+
+/*
+ * The phone's floating dock (`PhoneDock` in `PhoneChrome.tsx`) and the menu panel it
+ * grows into (`Sidebar` in `MailNav.tsx`, on a phone).
+ *
+ * Geometry, in one place so the dock, the panel and the chip rail agree without
+ * measuring each other: the pill is inset from the left edge and stops a gap short of
+ * the compose button, a circle as tall as the pill at the right inset. Everything sits
+ * clear of the safe area at the bottom (the Android gesture bar, the iOS home bar).
+ */
+:root {
+  --wn-dock-inset: 12px;
+  --wn-dock-h: 60px;
+  --wn-dock-gap: 10px;
+  --wn-dock-left: calc(var(--wn-dock-inset) + env(safe-area-inset-left, 0px));
+  --wn-dock-right: calc(var(--wn-dock-inset) + env(safe-area-inset-right, 0px));
+  --wn-dock-bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+  --wn-dock-pill-w: calc(100vw - var(--wn-dock-left) - var(--wn-dock-right) - var(--wn-dock-h) - var(--wn-dock-gap));
+}
+
+/*
+ * Light frost (`glass.ts` has the numbers and why). The tint is the mode's glass base at
+ * `--wn-glass-text` opacity on the dock and the panel, both of which carry icons or words
+ * across their whole face; a chip is frost at `--wn-glass-rim` with a plate at the text
+ * opacity behind its label. A hairline edge and an inner highlight on top, and a soft
+ * shadow in the mode's scrim colour, so it reads as raised in every mode.
+ */
+.wn-glass {
+  background: var(--wn-glass-base, var(--wn-surface));
+  border: 1px solid var(--wn-hairline);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 1px 2px var(--wn-scrim),
+    0 8px 24px -8px var(--wn-scrim);
+}
+:root[data-theme="light"] .wn-glass {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.7),
+    0 1px 2px rgb(16 12 52 / 0.08),
+    0 8px 24px -8px rgb(16 12 52 / 0.22);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+  (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-glass {
+    background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    backdrop-filter: blur(12px) saturate(1.3);
+  }
+}
+/* No blur to read through: the same tint, nearly opaque. */
+@supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and
+  (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-glass {
+    background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
+  }
+}
+
+/*
+ * A smart-filter chip, floating on its own above the dock. Its colour is still
+ * `.wn-pill`'s tint (identity hue, the mode's recipe), laid over the glass rather than
+ * over a band: the rail has no background at all, and the list scrolls visibly
+ * underneath. The plate behind the label is a horizontal band of the stronger text
+ * tint that fades out over the chip's rounded ends, where the frost stays light.
+ */
+.wn-pill.wn-chip-glass {
+  --wn-chip-plate: var(--wn-glass-text, 72%);
+  border: 1px solid var(--wn-hairline);
+  background-color: var(--wn-glass-base, var(--wn-surface));
+  background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest)));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 1px 2px var(--wn-scrim),
+    0 6px 16px -8px var(--wn-scrim);
+}
+.wn-pill.wn-chip-glass[data-on] {
+  --wn-chip-plate: var(--wn-glass-text-on, 76%);
+  background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on)));
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
+    0 1px 2px var(--wn-scrim),
+    0 6px 16px -8px var(--wn-scrim);
+}
+:root[data-theme="light"] .wn-pill.wn-chip-glass {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.7),
+    0 1px 2px rgb(16 12 52 / 0.08),
+    0 6px 16px -8px rgb(16 12 52 / 0.24);
+}
+:root[data-theme="light"] .wn-pill.wn-chip-glass[data-on] {
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
+    0 1px 2px rgb(16 12 52 / 0.08),
+    0 6px 16px -8px rgb(16 12 52 / 0.24);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+  (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-pill.wn-chip-glass {
+    --wn-chip-frost: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-rim, 62%), transparent);
+    --wn-chip-text: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-chip-plate), transparent);
+    background-color: transparent;
+    background-image:
+      linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest))),
+      linear-gradient(to right, var(--wn-chip-frost), var(--wn-chip-text) 14px, var(--wn-chip-text) calc(100% - 14px), var(--wn-chip-frost));
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    backdrop-filter: blur(12px) saturate(1.3);
+  }
+  .wn-pill.wn-chip-glass[data-on] {
+    background-image:
+      linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on))),
+      linear-gradient(to right, var(--wn-chip-frost), var(--wn-chip-text) 14px, var(--wn-chip-text) calc(100% - 14px), var(--wn-chip-frost));
+  }
+}
+@supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and
+  (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-pill.wn-chip-glass {
+    background-color: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
+  }
+}
+.wn-pill.wn-chip-glass:hover {
+  filter: brightness(1.04);
+}
+/* "All", on the rail beside the chips: plain glass, no hue. */
+.wn-chip-plain {
+  border-radius: 999px;
+}
+
+/*
+ * The list scrolls under the floating chrome, so its end is padded by the chrome's
+ * height (`--wn-phone-dock`, published by the dock) and its last row can scroll clear
+ * of the chips, the pill and the compose button. `div[...]` to outrank the scroller's
+ * own `pb-4` utility; with no dock on screen the variable is unset and this is that 1rem.
+ */
+div[data-row-count] {
+  padding-bottom: calc(var(--wn-phone-dock, 0px) + 1rem);
+  scroll-padding-bottom: calc(var(--wn-phone-dock, 0px) + 0.5rem);
+}
+
+/*
+ * The menu panel on a phone grows out of the pill: anchored at the pill's left and
+ * bottom, as wide as it, and revealed upward by a `clip-path` that starts as the pill's
+ * own rounded rectangle and opens to the panel's. Its contents fade in once it has room.
+ * `visibility` flips only after the collapse, so a closed panel is out of the paint and
+ * the tab order. Reduced motion: the global rule above makes both instant.
+ */
+.wn-sidebar-panel[data-morph] {
+  left: var(--wn-dock-left);
+  bottom: var(--wn-dock-bottom);
+  width: var(--wn-dock-pill-w);
+  max-height: calc(100dvh - var(--wn-dock-bottom) - max(1rem, env(safe-area-inset-top, 0px)));
+  border-radius: 28px;
+  transform: none;
+  opacity: 1;
+  clip-path: inset(calc(100% - var(--wn-dock-h)) 0 0 0 round calc(var(--wn-dock-h) / 2));
+  transition:
+    clip-path 200ms cubic-bezier(0.4, 0, 1, 1),
+    visibility 0s linear 200ms;
+}
+.wn-sidebar-panel[data-morph][data-open] {
+  clip-path: inset(0 0 0 0 round 28px);
+  transition:
+    clip-path 300ms cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s;
+}
+.wn-sidebar-panel[data-morph] .wn-morph-content {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 100ms ease-in,
+    transform 160ms ease-in;
+}
+.wn-sidebar-panel[data-morph][data-open] .wn-morph-content {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 180ms ease-out 60ms,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1) 40ms;
+}
+/* The panel is frosted by `.wn-glass` itself; the desktop's layered blur steps aside. */
+.wn-sidebar-panel[data-morph] .wn-sidebar-blur,
+.wn-sidebar-panel[data-morph] .wn-sidebar-tint {
+  display: none;
+}
+
+/* The dock's pill, while the panel it grew into is open: only Expand stays on it. */
+:root .wn-glass[data-phone-pill][data-expanded] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Raised but solid: the compose button beside the pill, in the accent. */
+.wn-raised {
+  box-shadow:
+    0 1px 2px var(--wn-scrim),
+    0 8px 24px -8px var(--wn-scrim);
+}
+:root[data-theme="light"] .wn-raised {
+  box-shadow:
+    0 1px 2px rgb(16 12 52 / 0.1),
+    0 8px 24px -8px rgb(16 12 52 / 0.3);
+}
+
+/* Reduced transparency: the floating glass is solid, the chips keep only their tint. */
+@media (prefers-reduced-transparency: reduce) {
+  .wn-glass,
+  .wn-pill.wn-chip-glass {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background-color: var(--wn-glass-base, var(--wn-surface)) !important;
+  }
+  .wn-glass {
+    background-image: none !important;
+  }
+  .wn-pill.wn-chip-glass {
+    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest))) !important;
+  }
+  .wn-pill.wn-chip-glass[data-on] {
+    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on))) !important;
+  }
+}
+@media (forced-colors: active) {
+  .wn-glass,
+  .wn-pill.wn-chip-glass {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: Canvas;
+    border: 1px solid CanvasText;
   }
 }
