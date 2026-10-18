@@ -6887,6 +6887,212 @@ try {
     }
   }
 
+  {
+    /*
+      The phone with an account: no briefing strip, and a pull down from the top of the
+      list syncs (the same action as Sync now) through a small glass indicator. A fake
+      Gmail answers everything; each sync asks it for /history, which is what is counted.
+    */
+    const FAKE_PULL_TOKEN = ["fake", "pull", "access"].join("-");
+    const b64 = (text) => Buffer.from(text, "utf8").toString("base64url");
+    const ids = Array.from({ length: 30 }, (_, i) => `q${i}`);
+    let historyCalls = 0;
+    const json = (route, body, status = 200) =>
+      route.fulfill({ status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+    const fake = (route) => {
+      const request = route.request();
+      if (request.method() === "OPTIONS") {
+        return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, PUT, DELETE" } });
+      }
+      const url = new globalThis.URL(request.url());
+      const p = url.pathname.replace("/gmail/v1/users/me", "");
+      if (p === "/profile") return json(route, { emailAddress: "me@winnow.example", historyId: "900", messagesTotal: ids.length });
+      if (p === "/messages") {
+        const q = url.searchParams.get("q") ?? "";
+        return json(route, q.includes("in:inbox") && !q.includes("-in:inbox") ? { messages: ids.map((id) => ({ id, threadId: `t-${id}` })), resultSizeEstimate: ids.length } : { resultSizeEstimate: 0 });
+      }
+      const one = /^\/messages\/(q\d+)$/.exec(p);
+      if (one) {
+        const n = Number(one[1].slice(1));
+        const headers = [
+          { name: "From", value: `Sender ${n} <s${n}@pull.example>` },
+          { name: "To", value: "me@winnow.example" },
+          { name: "Subject", value: `Pull check ${n}` },
+          { name: "Date", value: new Date(Date.now() - n * 3_600_000).toUTCString() },
+        ];
+        return json(route, {
+          id: one[1], threadId: `t-${one[1]}`, labelIds: ["INBOX"], snippet: `Pull check ${n}`,
+          internalDate: String(Date.now() - n * 3_600_000), sizeEstimate: 900,
+          payload: { mimeType: "text/plain", headers, body: { size: 10, data: b64(`Pull check ${n}`) } },
+        });
+      }
+      if (p === "/history") {
+        historyCalls += 1;
+        return json(route, { historyId: "900" });
+      }
+      return json(route, {});
+    };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    await ctx.addInitScript((accessToken) => {
+      if (window.top !== window) return;
+      if (sessionStorage.getItem("seeded-pull")) return;
+      sessionStorage.setItem("seeded-pull", "1");
+      localStorage.setItem("winnow.google.oauthClient", JSON.stringify({ clientId: "1234567890-abc123def.apps.googleusercontent.com" }));
+      localStorage.setItem("winnow.gmail.tokens", JSON.stringify({ accessToken, refreshToken: "1//smoke-refresh", expiresAt: Date.now() + 3_600_000, scope: "https://www.googleapis.com/auth/gmail.modify" }));
+    }, FAKE_PULL_TOKEN);
+    await ctx.route("https://gmail.googleapis.com/**", fake);
+    await ctx.route("https://oauth2.googleapis.com/**", (route) => json(route, { error: "invalid_grant" }, 400));
+    await ctx.route("https://people.googleapis.com/**", (route) => json(route, {}));
+    const q = await ctx.newPage();
+    q.on("pageerror", (error) => errors.push(String(error)));
+    await q.goto(URL, { waitUntil: "networkidle" });
+    await q.locator("[data-message-id]", { hasText: "Pull check 3" }).first().waitFor({ state: "visible", timeout: 15_000 });
+    await q.waitForFunction(() => !document.querySelector("[data-sync-status='busy']"), null, { timeout: 10_000 }).catch(() => undefined);
+    await q.waitForTimeout(800);
+    const cdp = await ctx.newCDPSession(q);
+    const indicator = () => q.evaluate(() => document.querySelector("[data-pull-indicator]")?.getAttribute("data-pull-indicator") ?? null);
+    /** A finger: down at (x, y), through `path` ([dx, dy] steps), optionally held, then up. */
+    const drag = async (x, y, path, { holdAt = null } = {}) => {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      let seen = null;
+      for (const [dx, dy] of path) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + dx, y: y + dy }] });
+        await q.waitForTimeout(16);
+      }
+      if (holdAt) seen = await holdAt();
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await q.waitForTimeout(120);
+      return seen;
+    };
+    const down = (total, steps = 16) => Array.from({ length: steps }, (_, i) => [0, Math.round((total * (i + 1)) / steps)]);
+    const start = await q.evaluate(() => {
+      const row = document.querySelector("[data-row-count] [data-row-id]").getBoundingClientRect();
+      return { x: Math.round(row.left + 200), y: Math.round(row.top + row.height / 2) };
+    });
+
+    const shape = await q.evaluate(() => ({
+      strip: document.querySelectorAll("[data-briefing]").length,
+      syncButton: document.querySelectorAll("[data-sync-button]").length,
+      overscroll: getComputedStyle(document.querySelector("[data-row-count]")).overscrollBehaviorY,
+      indicator: document.querySelector("[data-pull-indicator]")?.getAttribute("data-pull-indicator") ?? null,
+    }));
+    check(
+      "a phone with an account has no briefing strip and no Sync button; the list contains its overscroll, and the pull indicator waits, idle",
+      shape.strip === 0 && shape.syncButton === 0 && shape.overscroll === "contain" && shape.indicator === "idle",
+      JSON.stringify(shape),
+    );
+
+    // Short of the line: the indicator follows and turns, and letting go does nothing.
+    const before = historyCalls;
+    const short = await drag(start.x, start.y, down(100), {
+      holdAt: () => q.evaluate(() => {
+        const el = document.querySelector("[data-pull-indicator]");
+        const icon = el.querySelector("svg");
+        return { phase: el.getAttribute("data-pull-indicator"), y: el.getBoundingClientRect().top, turn: icon?.style.transform ?? "", glass: el.querySelector(".wn-glass") !== null };
+      }),
+    });
+    await q.waitForTimeout(400);
+    check(
+      "a short pull shows the glass indicator, turning with the pull, and letting go short of the line does not sync",
+      short?.phase === "pulling" && /rotate\((?!0deg)/.test(short.turn) && short.glass && historyCalls === before && (await indicator()) === "idle",
+      JSON.stringify({ short, calls: historyCalls - before }),
+    );
+
+    // A horizontal start is a swipe, never a pull, however far down it then goes.
+    await drag(start.x, start.y, [[14, 2], [30, 4], [40, 30], [44, 80], [46, 160], [46, 220]]);
+    await q.waitForTimeout(400);
+    check("a touch that locks horizontal (a row swipe) never becomes a pull", historyCalls === before && (await indicator()) === "idle", `${historyCalls - before} syncs`);
+
+    // Past the line: armed while held, then a spinner, a sync, the result, and back.
+    const held = await drag(start.x, start.y, down(220), { holdAt: indicator });
+    const spinning = await indicator();
+    await q.waitForFunction(() => document.querySelector("[data-pull-indicator]")?.getAttribute("data-pull-indicator") === "done", null, { timeout: 8_000 }).catch(() => undefined);
+    const resultText = (await q.locator("[data-pull-result]").textContent().catch(() => "")) ?? "";
+    check(
+      "past ~70px it arms, and letting go syncs (the Sync now action) with a spinner, then says so",
+      held === "armed" && ["syncing", "done"].includes(spinning) && historyCalls === before + 1 && /^Synced just now/.test(resultText.trim()),
+      JSON.stringify({ held, spinning, calls: historyCalls - before, resultText }),
+    );
+    await q.waitForFunction(() => document.querySelector("[data-pull-indicator]")?.getAttribute("data-pull-indicator") === "idle", null, { timeout: 4_000 }).catch(() => undefined);
+    check("and then it retracts", (await indicator()) === "idle");
+
+    // Not from anywhere but the top.
+    await q.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 240));
+    await q.waitForTimeout(250);
+    const mid = await q.evaluate(() => {
+      const rows = [...document.querySelectorAll("[data-row-count] [data-row-id]")].map((r) => r.getBoundingClientRect());
+      const r = rows.find((rect) => rect.top > 150 && rect.bottom < 500);
+      return { x: Math.round(r.left + 200), y: Math.round(r.top + r.height / 2) };
+    });
+    const callsMid = historyCalls;
+    await drag(mid.x, mid.y, down(220));
+    await q.waitForTimeout(400);
+    check("a pull with the list scrolled down is just a scroll", historyCalls === callsMid && (await indicator()) === "idle");
+    await q.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+    await q.waitForTimeout(250);
+
+    // Not during a selection.
+    const avatar = await q.evaluate(() => {
+      const r = document.querySelector("[data-row-count] [data-row-control='avatar']").getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await q.touchscreen.tap(avatar.x, avatar.y);
+    await q.waitForTimeout(200);
+    await q.locator("[data-menu='sender'] [data-menu-item='sender-select']").tap();
+    await q.waitForTimeout(300);
+    const selStart = await q.evaluate(() => {
+      const row = document.querySelector("[data-row-count] [data-row-id]").getBoundingClientRect();
+      return { x: Math.round(row.left + 200), y: Math.round(row.top + row.height / 2) };
+    });
+    const callsSel = historyCalls;
+    const selPhase = await drag(selStart.x, selStart.y, down(220), { holdAt: indicator });
+    await q.waitForTimeout(400);
+    check(
+      "a pull during a multi-selection does nothing",
+      (await q.locator("[data-selection-bar='phone']").count()) === 1 && selPhase === "idle" && historyCalls === callsSel,
+      JSON.stringify({ selPhase, calls: historyCalls - callsSel }),
+    );
+    await q.locator("[data-selection-bar='phone'] button[aria-label='Clear selection']").tap();
+    await q.waitForTimeout(250);
+
+    // Not with the dock's panel open (the list is behind the scrim and inert).
+    await q.locator("[data-phone-dock] button[data-dock-expand]").tap();
+    await q.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await q.waitForTimeout(300);
+    const callsPanel = historyCalls;
+    const panelPhase = await drag(start.x, start.y, down(220), { holdAt: indicator });
+    check("nor with the dock's panel expanded", panelPhase === "idle" && historyCalls === callsPanel, JSON.stringify({ panelPhase }));
+    await ctx.close();
+  }
+  {
+    // The demo keeps one compact line, so Connect Gmail is in reach; there is nothing to
+    // sync, so a pull does nothing.
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const q = await ctx.newPage();
+    q.on("pageerror", (error) => errors.push(String(error)));
+    await q.goto(URL, { waitUntil: "networkidle" });
+    await q.waitForSelector("[data-row-count] [data-row-id]");
+    const demo = await q.evaluate(() => {
+      const strip = document.querySelector("[data-briefing]");
+      const button = strip ? [...strip.querySelectorAll("button")].find((b) => b.textContent.includes("Connect Gmail")) : null;
+      const r = button?.getBoundingClientRect();
+      const under = r ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+      return {
+        kind: strip?.getAttribute("data-briefing") ?? null,
+        height: strip ? Math.round(strip.getBoundingClientRect().height) : null,
+        connect: Boolean(button) && Boolean(under?.closest("button") === button),
+        target: r ? Math.round(r.height) : 0,
+        indicator: document.querySelectorAll("[data-pull-indicator]").length,
+      };
+    });
+    check(
+      "in the demo the phone keeps a compact one-line strip whose Connect Gmail is a reachable touch target, and no pull",
+      demo.kind === "compact" && demo.height <= 56 && demo.connect && demo.target >= 44 && demo.indicator === 0,
+      JSON.stringify(demo),
+    );
+    await ctx.close();
+  }
+
   // ── Privacy ─────────────────────────────────────────────────────────────────
   //
   // From the network's side: what leaves the browser. A signed-in session against a

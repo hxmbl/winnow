@@ -71,6 +71,7 @@ import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
 import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
+import { PullRefresh } from "./ui/components/PullRefresh";
 import { scrollListToTop } from "./ui/listScroll";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
@@ -371,6 +372,10 @@ export function App({ store }: Props) {
       listChromeObserver.current.observe(element);
     }
   }, []);
+  /** The list's pane, where the phone's pull to refresh listens. */
+  const listPaneRef = useRef<HTMLDivElement | null>(null);
+  /** What is waiting on you, for the pull's result; null when nothing is. */
+  const attentionRef = useRef<string | null>(null);
   /** A wheel over the floating header scrolls the list under it, except over the rail. */
   const forwardChromeWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest("[data-rail-scroller], [role='menu'], [role='dialog']")) return;
@@ -2515,6 +2520,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
   ) : null;
 
+  {
+    const sentence = attentionSentence(view.attention);
+    attentionRef.current = snapshot.mailbox === "inbox" && sentence !== "Nothing needs you right now" ? sentence : null;
+  }
   /** What the inbox needs from you, the sync line, and the demo's Connect Gmail. */
   const briefing = (
           <div data-briefing="" className="flex items-center justify-between gap-3 px-4 pb-2 pt-3">
@@ -2570,6 +2579,33 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               </button>
             )}
           </div>
+  );
+  /**
+   * The phone's demo line: where you are and Connect Gmail, on one compact row. With an
+   * account the phone has no strip at all (pull to refresh instead).
+   */
+  const compactBriefing = (
+    <div data-briefing="compact" className="flex min-h-12 items-center justify-between gap-3 px-4 py-1">
+      <p
+        data-sync-status={sync.tone}
+        role="status"
+        aria-live="polite"
+        className={`selectable min-w-0 truncate text-meta ${sync.tone === "error" ? "text-danger" : "text-ink-subtle"}`}
+      >
+        {sync.line}
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          void connectFromDemo();
+        }}
+        disabled={signingIn}
+        className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
+        {signingIn ? "Waiting for Google…" : "Connect Gmail"}
+      </button>
+    </div>
   );
   const connectNotice = connectError ? (
     <div role="alert" className="px-4 pb-2 text-meta font-medium text-danger">
@@ -2807,6 +2843,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           because there the reader is a pane beside the list rather than a replacement.
         */}
         <div
+          ref={listPaneRef}
           className={`${
             selected ? "hidden lg:flex" : "flex"
           } relative min-h-0 min-w-0 flex-1 flex-col bg-surface`}
@@ -2883,8 +2920,32 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             read over moving rows and Connect Gmail is a scroll (or Home) away. The
             Connect action is also in the sidebar's account menu.
           */}
-          {phone && briefing}
+          {/*
+            On a phone with an account there is no strip: a pull down from the top syncs
+            (`PullRefresh`), and what is waiting on you rides along in its result. The demo
+            keeps one compact line, so Connect Gmail stays in reach.
+          */}
+          {phone && snapshot.account === null && compactBriefing}
           {phone && connectNotice}
+          {phone && snapshot.account !== null && (
+            <PullRefresh
+              containerRef={listPaneRef}
+              context={{
+                connected: true,
+                menuOpen: sidebarOpen,
+                selecting: selection.size > 0,
+                overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || labelPicker !== null,
+              }}
+              syncing={sync.busy}
+              onRefresh={() => storeRef.current.refresh()}
+              result={() => {
+                const after = storeRef.current.getSnapshot();
+                if (after.error) return { ok: false, text: after.error };
+                const waiting = attentionRef.current;
+                return { ok: true, text: waiting ? `Synced just now · ${waiting}` : "Synced just now" };
+              }}
+            />
+          )}
           <MessageList
             threads={view.threads}
             signals={view.signals}
