@@ -20,6 +20,12 @@ export type EmailSignals = {
   longRead: boolean;
   spamLikelihood: number;
   importanceScore: number;
+  /**
+   * Set only by what the user taught "Change smart filters…" (`learn/filterLearning.ts`):
+   * true puts the message in Important, false takes it out, whatever the score says.
+   * Absent everywhere else.
+   */
+  importantOverride?: boolean;
 };
 
 export const UNSAFE_THRESHOLD = 0.4;
@@ -33,6 +39,7 @@ export function isUnsafe(signals: EmailSignals): boolean {
  */
 export function isImportant(email: Email, signals: EmailSignals): boolean {
   if (isUnsafe(signals)) return false;
+  if (signals.importantOverride !== undefined) return signals.importantOverride;
   if (signals.newsletter) return false;
   if (signals.promotional && !email.urgent) return false;
   return signals.importanceScore >= IMPORTANT_THRESHOLD || signals.needsAction;
