@@ -609,13 +609,31 @@ button.wn-glass:active,
   .wn-pill.wn-chip-glass::before {
     content: "";
     position: absolute;
-    inset: calc(-1 * var(--wn-glass-reach));
+    inset: calc(-1 * var(--wn-glass-reach)) calc(-1 * var(--wn-glass-reach-x, var(--wn-glass-reach)));
     z-index: -1;
     pointer-events: none;
     -webkit-backdrop-filter: var(--wn-glass-filter);
     backdrop-filter: var(--wn-glass-filter);
-    clip-path: inset(var(--wn-glass-reach) round var(--wn-glass-radius, 9999px));
+    clip-path: inset(var(--wn-glass-reach) var(--wn-glass-reach-x, var(--wn-glass-reach)) round var(--wn-glass-radius, 9999px));
   }
+}
+/*
+ * The layer is paint only, but it still counts as layout overflow. Inside the chip rail
+ * (a sideways scroller) a layer reaching past the last chip would lengthen the rail's
+ * scroll, so there it reaches only up and down: a chip's rounded ends are where text
+ * crosses it least. And the floating chrome clips the layers sideways, at the screen's
+ * (or the pane's) edges, so they never widen the page; up and down they stay free.
+ */
+[data-rail-scroller] > .wn-glass,
+[data-rail-scroller] > .wn-chip-glass {
+  --wn-glass-reach-x: 0px;
+}
+[data-phone-chrome],
+[data-phone-dock],
+[data-list-chrome],
+[data-sticky-day],
+[data-pull-indicator] {
+  overflow-x: clip;
 }
 /* No blur to read through: the same tint, nearly opaque. */
 @supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and

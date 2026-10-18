@@ -133,14 +133,22 @@ describe("the frost layer reaches past each pill", () => {
 
   it("puts the filter on the oversized ::before, clipped back to the pill, not on the pill", () => {
     const before = /\.wn-glass:not\(\.wn-sidebar-panel\)::before,\s*\.wn-pill\.wn-chip-glass::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    expect(before).toMatch(/inset:\s*calc\(-1 \* var\(--wn-glass-reach\)\)/);
+    expect(before).toMatch(/inset:\s*calc\(-1 \* var\(--wn-glass-reach\)\) calc\(-1 \* var\(--wn-glass-reach-x, var\(--wn-glass-reach\)\)\)/);
     expect(before).toMatch(/backdrop-filter:\s*var\(--wn-glass-filter\)/);
-    expect(before).toMatch(/clip-path:\s*inset\(var\(--wn-glass-reach\)/);
+    expect(before).toMatch(/clip-path:\s*inset\(var\(--wn-glass-reach\) var\(--wn-glass-reach-x, var\(--wn-glass-reach\)\)/);
     expect(before).toMatch(/z-index:\s*-1/);
     // The chip's own rule no longer carries a backdrop-filter: it would make the chip a
     // backdrop root, and its frost layer would see nothing.
     const chip = /\.wn-pill\.wn-chip-glass \{\s*--wn-chip-frost[^}]*\}/.exec(css)?.[0] ?? "";
     expect(chip).not.toMatch(/backdrop-filter/);
+  });
+
+  it("never lengthens the chip rail's scroll, nor widens the page: in the rail it reaches only up and down, and the chrome clips it sideways", () => {
+    expect(css).toMatch(/\[data-rail-scroller\] > \.wn-glass,\s*\[data-rail-scroller\] > \.wn-chip-glass\s*\{\s*--wn-glass-reach-x:\s*0px;/);
+    const clipped = /((?:\[data-[a-z-]+\],?\s*)+)\{\s*overflow-x:\s*clip;/.exec(css)?.[1] ?? "";
+    for (const chrome of ["[data-phone-chrome]", "[data-phone-dock]", "[data-list-chrome]", "[data-sticky-day]", "[data-pull-indicator]"]) {
+      expect(clipped).toContain(chrome);
+    }
   });
 
   it("never puts a filter on a glass pill (hover is a sheen), which would cut its frost off", () => {

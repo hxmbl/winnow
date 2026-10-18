@@ -3299,7 +3299,11 @@ try {
         const scroller = document.querySelector("header [data-rail-scroller]");
         const search = document.querySelector("#winnow-search")?.closest("label");
         if (!scroller || !search) return null;
-        const rail = scroller.getBoundingClientRect();
+        // The rail's own band: the scroller pads itself above and below by the glass's
+        // frost reach (paint only, no events), which is not the rail reaching the field.
+        const outer = scroller.getBoundingClientRect();
+        const pad = getComputedStyle(scroller);
+        const rail = { left: outer.left, right: outer.right, top: outer.top + parseFloat(pad.paddingTop), bottom: outer.bottom - parseFloat(pad.paddingBottom) };
         const field = search.getBoundingClientRect();
         const tabs = [...scroller.querySelectorAll("[data-rail-item]")].map((item) => item.getBoundingClientRect());
         const edge = document.querySelector('header [data-rail-edge="end"]')?.getBoundingClientRect() ?? null;
@@ -3521,8 +3525,14 @@ try {
   check("so the top bar is one row tall and the mail starts higher", phoneTitle.barHeight <= 72, `${phoneTitle.barHeight}px`);
   check("the list's name is in the top bar", (await listTitle())?.trim() === "Inbox", await listTitle());
   const overflow = await page.evaluate(() => {
+    // What it holds against its own width: the mark and search, by their boxes (each
+    // glass's frost layer is paint only and clipped to it, so it is not counted).
     const row = document.querySelector("[data-phone-topbar] > div");
-    return row ? Math.round(row.scrollWidth - row.clientWidth) : null;
+    if (!row) return null;
+    const box = row.getBoundingClientRect();
+    const right = Math.max(...[...row.children].map((child) => child.getBoundingClientRect().right));
+    const page = document.querySelector("#root > div") ?? document.body;
+    return Math.max(Math.round(right - box.right), Math.round(page.scrollWidth - page.clientWidth));
   });
   check("the top bar does not need a sideways scroll", overflow !== null && overflow <= 1, `${overflow}px past`);
 
@@ -7776,6 +7786,26 @@ try {
         `${kind}: the chip rail's row keeps the chips' box despite the frost padding`,
         railRow !== null && railRow.row <= railRow.chip + 17 && railRow.chipTop - railRow.rowTop <= 9,
         JSON.stringify(railRow),
+      );
+
+      // Paint only: the frost layers neither lengthen the rail's scroll nor widen the page.
+      const extent = await g.evaluate(() => {
+        const scroller = document.querySelector(".wn-chip-glass")?.closest("[data-rail-scroller]");
+        const items = [...scroller.children].filter((el) => el.getClientRects().length > 0);
+        const box = scroller.getBoundingClientRect();
+        const end = Math.max(...items.map((el) => el.getBoundingClientRect().right)) - box.left + scroller.scrollLeft;
+        const page = document.querySelector("#root > div") ?? document.body;
+        return {
+          scroll: scroller.scrollWidth,
+          contentEnd: Math.round(end + parseFloat(getComputedStyle(scroller).paddingRight)),
+          pageExtra: page.scrollWidth - page.clientWidth,
+          docExtra: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      });
+      check(
+        `${kind}: the frost layers lengthen no scroll: the rail ends at its last chip, and the page is no wider than the screen`,
+        extent.scroll <= extent.contentEnd + 1 && extent.pageExtra <= 0 && extent.docExtra <= 0,
+        JSON.stringify(extent),
       );
 
       // The real thing, measured: text under the glass loses its detail to the frost.
