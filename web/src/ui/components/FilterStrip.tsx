@@ -297,7 +297,7 @@ export const FilterStrip = memo(function FilterStrip({
             onClick={onClear}
             className={`${touch ? "wn-glass h-11 px-4" : floating ? "wn-glass h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
-            All
+            <span>All</span>
           </button>
         )}
 

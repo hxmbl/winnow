@@ -1,16 +1,20 @@
 /**
- * The filter strip's motion: a smoothed wheel with a rubber band at the ends, and the same
- * rubber band under a finger. The numbers live in `railMotion.ts`; this wires them to the DOM.
+ * The filter strip's motion: a smoothed wheel with a rubber band at the ends, the same
+ * rubber band under a finger, and a subtle motion blur while the list scrolls under it.
+ * The numbers live in `railMotion.ts`; this wires them to the DOM.
  *
- * Everything here writes straight to the elements (scrollLeft, a transform) from
- * animation frames and never sets React state, so none of it re-renders the strip.
+ * Everything here writes straight to the elements (scrollLeft, a transform, one custom
+ * property) from animation frames and never sets React state, so none of it re-renders
+ * the strip, and a list scroll costs one property write per frame at most.
  *
  * Reduced motion: the wheel moves the strip at once with no glide and no rubber band,
- * and nothing else changes.
+ * and there is no blur.
  */
 
 import { useEffect, type RefObject } from "react";
 import {
+  blurForVelocity,
+  nextVelocity,
   rubberBand,
   smoothStep,
   splitOvershoot,
@@ -20,6 +24,8 @@ import {
 
 /** After this long without a wheel event the strip springs back from an end. */
 const WHEEL_IDLE_MS = 90;
+/** After this long without a list scroll event the list counts as slowing down. */
+const LIST_IDLE_MS = 120;
 
 const reducedMotion = (): boolean =>
   globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -135,21 +141,69 @@ export function useRailMotion(
       spring();
     };
 
+    // ── Motion blur while the list scrolls. One capture listener on the document, so
+    //    it survives the list remounting; it only records, and the frame does the write.
+    let velocity = 0;
+    let lastTop: number | null = null;
+    let lastTime = 0;
+    let blur = 0;
+    let blurFrame = 0;
+    const writeBlur = (value: number) => {
+      if (value === blur) return;
+      blur = value;
+      if (value === 0) {
+        delete scroller.dataset.railMoving;
+        scroller.style.removeProperty("--wn-rail-blur");
+      } else {
+        scroller.style.setProperty("--wn-rail-blur", `${value}px`);
+        scroller.dataset.railMoving = "";
+      }
+    };
+    const blurTick = (now: number) => {
+      blurFrame = 0;
+      // The list has stopped sending scroll events: let the speed fall away smoothly.
+      if (now - lastTime > LIST_IDLE_MS) velocity *= 0.6;
+      const value = reducedMotion() ? 0 : blurForVelocity(velocity);
+      writeBlur(value);
+      const idle = now - lastTime > LIST_IDLE_MS;
+      if (value !== 0 || Math.abs(velocity) > 0.05 || !idle) blurFrame = requestAnimationFrame(blurTick);
+      else {
+        // Stopped: the next scroll starts a fresh reading rather than measuring the jump
+        // from wherever the list was left.
+        velocity = 0;
+        lastTop = null;
+      }
+    };
+    const onListScroll = (event: Event) => {
+      const list = event.target;
+      if (!(list instanceof HTMLElement) || !list.hasAttribute("data-row-count")) return;
+      const now = performance.now();
+      const top = list.scrollTop;
+      if (lastTop !== null) velocity = nextVelocity(velocity, top - lastTop, now - lastTime);
+      lastTop = top;
+      lastTime = now;
+      if (!blurFrame) blurFrame = requestAnimationFrame(blurTick);
+    };
+
     root.addEventListener("wheel", onWheel, { passive: false });
     scroller.addEventListener("touchstart", onTouchStart, { passive: true });
     scroller.addEventListener("touchmove", onTouchMove, { passive: true });
     scroller.addEventListener("touchend", onTouchEnd, { passive: true });
     scroller.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    document.addEventListener("scroll", onListScroll, { capture: true, passive: true });
     return () => {
       root.removeEventListener("wheel", onWheel);
       scroller.removeEventListener("touchstart", onTouchStart);
       scroller.removeEventListener("touchmove", onTouchMove);
       scroller.removeEventListener("touchend", onTouchEnd);
       scroller.removeEventListener("touchcancel", onTouchEnd);
+      document.removeEventListener("scroll", onListScroll, { capture: true });
       cancelAnimationFrame(springFrame);
       cancelAnimationFrame(glideFrame);
+      cancelAnimationFrame(blurFrame);
       window.clearTimeout(idleTimer);
       scroller.style.transform = "";
+      scroller.style.removeProperty("--wn-rail-blur");
     };
   }, [rootRef, scrollerRef]);
 }

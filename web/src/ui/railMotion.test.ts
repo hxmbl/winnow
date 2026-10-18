@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  BLUR_MAX,
   RUBBER_MAX,
   SPRING_BACK_MS,
+  blurForVelocity,
+  nextVelocity,
   rubberBand,
   smoothStep,
   splitOvershoot,
@@ -60,6 +63,27 @@ describe("splitOvershoot", () => {
     expect(splitOvershoot(530, 500)).toEqual({ scroll: 500, overshoot: 30 });
     expect(splitOvershoot(200, 500)).toEqual({ scroll: 200, overshoot: 0 });
     expect(splitOvershoot(10, -5)).toEqual({ scroll: 0, overshoot: 10 });
+  });
+});
+
+describe("blurForVelocity", () => {
+  it("is crisp at rest and at a slow scroll", () => {
+    expect(blurForVelocity(0)).toBe(0);
+    expect(blurForVelocity(0.3)).toBe(0);
+    expect(blurForVelocity(Number.NaN)).toBe(0);
+  });
+  it("grows with speed, either direction, capped and subtle", () => {
+    expect(blurForVelocity(2)).toBeGreaterThan(0);
+    expect(blurForVelocity(-2)).toBe(blurForVelocity(2));
+    expect(blurForVelocity(50)).toBe(BLUR_MAX);
+    expect(BLUR_MAX).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("nextVelocity", () => {
+  it("smooths one uneven reading and ignores a zero-length frame", () => {
+    expect(nextVelocity(0, 160, 16)).toBeCloseTo(6, 5);
+    expect(nextVelocity(2, 10, 0)).toBe(2);
   });
 });
 

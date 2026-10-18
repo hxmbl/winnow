@@ -1038,3 +1038,20 @@ div[data-row-count] {
 .wn-rail-scroller {
   overscroll-behavior: contain;
 }
+
+/*
+ * Motion blur while the list scrolls under the strip: on the chips' words and counts
+ * only, never on a chip itself, because a filter on the chip would make it a backdrop
+ * root and its frost (the chip's `::before`) would stop blurring the mail behind it.
+ * Off at rest (no `filter` at all, so no layers), and never under reduced motion.
+ */
+.wn-rail-scroller[data-rail-moving] > [data-rail-item] > button > *,
+.wn-rail-scroller[data-rail-moving] > button[data-rail-item] > * {
+  filter: blur(var(--wn-rail-blur, 0px));
+}
+@media (prefers-reduced-motion: reduce) {
+  .wn-rail-scroller[data-rail-moving] > [data-rail-item] > button > *,
+  .wn-rail-scroller[data-rail-moving] > button[data-rail-item] > * {
+    filter: none;
+  }
+}
