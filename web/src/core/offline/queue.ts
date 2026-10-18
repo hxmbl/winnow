@@ -45,6 +45,8 @@
 
 import type { Draft, Email, Mailbox } from "../model/email";
 import { applyLabelChange } from "../mail/labels";
+import { forDeviceCopy } from "../mail/attachments";
+import { labelTargets } from "../store/labelView";
 import type { MailBackend, SyncOutcome } from "../store/store";
 
 export const OFFLINE_QUEUE_KEY = "winnow.offlineQueue.v1";
@@ -152,7 +154,9 @@ export function overlay(emails: Email[], actions: readonly QueuedAction[]): Emai
   let out = emails;
   for (const action of actions) {
     if (action.kind === "send") continue;
-    const ids = action.kind === "labels" ? new Set(action.ids) : new Set([action.id]);
+    // A label change covers the whole conversation, as the store applied it and as Gmail
+    // will (`threads.modify`), so a reply on the thread keeps the change too.
+    const ids = action.kind === "labels" ? labelTargets(out, action.ids) : new Set([action.id]);
     out = out.map((email) => {
       if (!ids.has(email.id)) return email;
       switch (action.kind) {
@@ -524,7 +528,7 @@ export class OfflineQueue {
         JSON.stringify({
           v: 1,
           account: this.account,
-          entries: this.entries.map(({ action, attempted }) => ({ action, attempted })),
+          entries: this.entries.map(({ action, attempted }) => ({ action: forStorage(action), attempted })),
         }),
       );
     } catch {
@@ -558,6 +562,20 @@ export class OfflineQueue {
     this.entries = [...restored, ...this.entries];
     this.persist();
   }
+}
+
+/**
+ * What of an action is written to storage. A send's files go through the drafts' own
+ * device-copy budget (`forDeviceCopy`): `localStorage` is ~5 MB for the whole origin, and
+ * one 25 MB attachment would make the write throw and leave nothing queued saved. This
+ * session's entry keeps every byte; a send restored after a reload without a file's bytes
+ * resolves it from its Gmail source, or fails with "Attach it again" and is reported.
+ */
+function forStorage(action: QueuedAction): QueuedAction {
+  if (action.kind !== "send" || !action.draft.attachments) return action;
+  const { attachments: all, ...rest } = action.draft;
+  const attachments = forDeviceCopy(all);
+  return { ...action, draft: attachments ? { ...rest, attachments } : rest };
 }
 
 function isAction(value: unknown): value is QueuedAction {

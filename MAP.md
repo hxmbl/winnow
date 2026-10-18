@@ -429,7 +429,10 @@ star/read/move of a message replaces the older one. 404/410 drop quietly; 401 an
 through, never on a timer. A raw `messages.send` whose answer was lost is never replayed
 (it is reported, and a new message reopens in the composer); a `drafts.send` is, since a second try on
 a sent draft is a 404. Every sync result has the queue laid over it, so a fresh reading
-cannot undo a waiting change on screen. Permanent delete is not queued. Sign-out clears
+cannot undo a waiting change on screen; a waiting label change is laid over its whole
+conversation, as `threads.modify` (§ labels) applies it. A waiting send's files are written
+under the drafts' device-copy budget (`forDeviceCopy`), so one big file cannot overflow
+`localStorage` and leave the queue unsaved; this session keeps every byte. Permanent delete is not queued. Sign-out clears
 it; a queue saved for another account is discarded. `ui/components/OfflineIndicator.tsx`
 is the "Offline: N changes waiting" line (`ui/offlineStatus.ts`).
 

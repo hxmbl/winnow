@@ -449,6 +449,44 @@ describe("overlay", () => {
     expect(out[0].starred).toBe(true);
     expect(overlay(mail, [])).toBe(mail);
   });
+
+  it("lays a label change over the whole conversation, as threads.modify applies it", () => {
+    const mail = [email(1, { threadId: "t1" }), email(2, { threadId: "t1" }), email(3, { threadId: "t2" })];
+    const out = overlay(mail, [{ kind: "labels", ids: [1], add: ["Label_7"], remove: [] }]);
+    expect(out.map((e) => e.labels ?? [])).toEqual([["Label_7"], ["Label_7"], []]);
+  });
+});
+
+describe("queued sends with files", () => {
+  it("keeps every byte for this session but writes only the device-copy budget to storage", async () => {
+    const { wrapped, fake, queue, net, storage } = setup({ online: false });
+    const big = "A".repeat(3_000_000);
+    const withFiles: Draft = {
+      ...draft("files"),
+      attachments: [
+        { id: "a", filename: "small.txt", mimeType: "text/plain", size: 3, data: "aGkh" },
+        { id: "b", filename: "big.bin", mimeType: "application/octet-stream", size: 2_250_000, data: big },
+      ],
+    };
+    const sent: Draft[] = [];
+    const inner = fake.backend.sendNew!;
+    fake.backend.sendNew = async (d, id) => {
+      sent.push(d);
+      return inner(d, id);
+    };
+    await wrapped.sendNew!(withFiles, "d1");
+    const saved = JSON.parse(storage.data.get(OFFLINE_QUEUE_KEY)!);
+    const files = saved.entries[0].action.draft.attachments;
+    expect(files.map((f: { filename: string }) => f.filename)).toEqual(["small.txt", "big.bin"]);
+    expect(files[0].data).toBe("aGkh");
+    expect(files[1].data).toBeUndefined();
+    expect(storage.data.get(OFFLINE_QUEUE_KEY)!.length).toBeLessThan(100_000);
+    net.online = true;
+    queue.kick();
+    await settle();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].attachments![1].data).toBe(big);
+  });
 });
 
 describe("the store behind the queue", () => {
