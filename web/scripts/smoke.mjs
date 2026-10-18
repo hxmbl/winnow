@@ -3525,6 +3525,15 @@ try {
     account: panel.querySelector("[data-nav-account]")?.textContent ?? "",
     settings: Boolean(panel.querySelector('[data-nav-account] button[aria-label="Settings"]')),
     markAllRead: panel.querySelectorAll('[data-nav-action="mark-all-read"], [aria-label^="Mark all read"]').length,
+    // Top to bottom, as drawn: the account row, then every destination.
+    order: [...panel.querySelectorAll("[data-nav-account], h3, [data-nav-folder], [data-nav=inbox]")]
+      .filter((node) => node.getClientRects().length > 0)
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+      .map((node) =>
+        node.matches("[data-nav-account]") ? "account" :
+        node.matches("h3") ? `# ${node.textContent.trim()}` :
+        node.getAttribute("data-nav-folder") ?? node.getAttribute("data-nav")),
+    header: [...panel.querySelectorAll("span")].some((node) => node.textContent.trim() === "Winnow"),
   }));
   check(
     "the menu is one sheet: Inbox, Mail, the account and Settings, no categories and no Mark all read",
@@ -3534,6 +3543,13 @@ try {
       menuShape.markAllRead === 0,
     JSON.stringify(menuShape),
   );
+  check(
+    "the phone sheet is the list reversed: account and gear on top, then Mail (Spam … Archive), Inbox at the bottom",
+    JSON.stringify(menuShape.order) ===
+      JSON.stringify(["account", "# Mail", "spam", "trash", "drafts", "sent", "archive", "inbox"]),
+    JSON.stringify(menuShape.order),
+  );
+  check("and it has no Winnow name-and-icon header", !menuShape.header, JSON.stringify(menuShape.header));
   const menuTargets = await menu.locator('button[data-nav-folder], button[data-nav="inbox"], button[data-nav-action]').evaluateAll((nodes) =>
     nodes.map((node) => Math.round(node.getBoundingClientRect().height)),
   );
@@ -3554,6 +3570,7 @@ try {
       radius: getComputedStyle(document.querySelector("[data-sidebar]")).borderTopLeftRadius,
       scrim: getComputedStyle(scrim).visibility,
       layers: scrim.querySelectorAll("[data-scrim-layer]").length,
+      blurs: [...scrim.querySelectorAll("[data-scrim-layer]")].map((layer) => Number(layer.getAttribute("data-scrim-layer"))),
       dockInert: Boolean(document.querySelector("[data-phone-dock]")?.closest("[inert]")),
       chipsAside: Boolean(chips?.closest("[inert]")) && getComputedStyle(chips).visibility === "hidden",
       listInert: Boolean(document.querySelector("[data-row-count]")?.closest("[inert]")),
@@ -3568,9 +3585,10 @@ try {
     JSON.stringify(phoneSide),
   );
   check(
-    "the app behind it is blurred and inert, the tabs stay live and the chip row is set aside",
-    phoneSide.scrim === "visible" && phoneSide.layers >= 2 && phoneSide.layers < 4 && phoneSide.listInert &&
-      !phoneSide.dockInert && phoneSide.chipsAside && phoneSide.focusInside,
+    "the app behind it is blurred (the desktop sidebar's four-layer blur) and inert, the tabs stay live and the chip row is set aside",
+    phoneSide.scrim === "visible" && phoneSide.listInert &&
+      !phoneSide.dockInert && phoneSide.chipsAside && phoneSide.focusInside &&
+      JSON.stringify(phoneSide.blurs) === JSON.stringify([16, 8, 4, 1.5]),
     JSON.stringify(phoneSide),
   );
   const openTab = await inboxTabState();

@@ -128,7 +128,7 @@ export function isEditingElement(element: Element | null): boolean {
  * One layer of the progressive blur.
  *
  * The blur is radial: it spreads from one point, the middle of the sidebar's right edge
- * (`SCRIM_ORIGIN`), and falls off evenly in every direction, so a spot above or below
+ * or, for the phone's bottom sheet, the middle of its top edge (`SCRIM_ORIGIN`), and falls off evenly in every direction, so a spot above or below
  * the sidebar is as clear as a spot the same distance to its right.
  *
  * `reach` is where the layer has faded to nothing, as a share of the distance from that
@@ -142,23 +142,22 @@ export type ScrimLayer = { blur: number; reach: number };
  *
  * Stacked, so they compound: right at the sidebar's edge all of them are on and the
  * content is unreadable glass; a little further out only the weaker ones are left; at
- * the window's farthest corner nothing is. The phone gets three lighter layers instead
- * of four, because a full-screen backdrop blur is paid for per frame and a phone's GPU is
- * the one that notices.
+ * the window's farthest corner nothing is.
+ *
+ * One recipe for every screen. The phone's bottom sheet used to get three lighter
+ * layers, which read as a different, weaker effect from the desktop sidebar's; it now
+ * has the same four, spreading from the middle of the sheet's top edge instead of the
+ * sidebar's right edge (`--wn-sidebar-edge` / `--wn-sidebar-mid`, set by `Sidebar`).
  */
-export function scrimLayers(compact: boolean): ScrimLayer[] {
-  return compact
-    ? [
-        { blur: 10, reach: 0.2 },
-        { blur: 5, reach: 0.5 },
-        { blur: 2, reach: 1 },
-      ]
-    : [
-        { blur: 16, reach: 0.12 },
-        { blur: 8, reach: 0.3 },
-        { blur: 4, reach: 0.55 },
-        { blur: 1.5, reach: 1 },
-      ];
+const LAYERS: readonly ScrimLayer[] = [
+  { blur: 16, reach: 0.12 },
+  { blur: 8, reach: 0.3 },
+  { blur: 4, reach: 0.55 },
+  { blur: 1.5, reach: 1 },
+];
+
+export function scrimLayers(): ScrimLayer[] {
+  return LAYERS.map((layer) => ({ ...layer }));
 }
 
 /**

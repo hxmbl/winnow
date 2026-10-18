@@ -62,9 +62,9 @@ describe("the idle close", () => {
 });
 
 describe("the progressive blur", () => {
-  for (const compact of [false, true]) {
-    const layers = scrimLayers(compact);
-    const name = compact ? "on a phone" : "on the desktop";
+  {
+    const layers = scrimLayers();
+    const name = "on every screen";
 
     it(`${name}: strongest at the sidebar, each weaker layer reaching further`, () => {
       expect(layers.length).toBeGreaterThanOrEqual(3);
@@ -80,11 +80,17 @@ describe("the progressive blur", () => {
     });
   }
 
-  it("is lighter on a phone: fewer layers, and a weaker strongest one", () => {
-    const phone = scrimLayers(true);
-    const desktop = scrimLayers(false);
-    expect(phone.length).toBeLessThan(desktop.length);
-    expect(phone[0].blur).toBeLessThan(desktop[0].blur);
+  it("is the desktop sidebar's blur on the phone's sheet too: one recipe, four layers", () => {
+    // The phone used to get three lighter layers, which read as a weaker, different
+    // effect. Now both share the recipe and differ only in where it spreads from.
+    expect(scrimLayers()).toEqual([
+      { blur: 16, reach: 0.12 },
+      { blur: 8, reach: 0.3 },
+      { blur: 4, reach: 0.55 },
+      { blur: 1.5, reach: 1 },
+    ]);
+    // A fresh copy each call, so a caller cannot edit the shared recipe.
+    expect(scrimLayers()).not.toBe(scrimLayers());
   });
 
   it("masks each layer as a circle around the origin, fading to nothing at its reach", () => {
@@ -101,11 +107,15 @@ describe("the progressive blur", () => {
     expect(SCRIM_ORIGIN).toBe("var(--wn-sidebar-edge) var(--wn-sidebar-mid, 50%)");
   });
 
-  for (const compact of [false, true]) {
-    const layers = scrimLayers(compact);
-    const name = compact ? "on a phone" : "on the desktop";
-    // A 1440 × 900 window with the origin at (248, 450): the farthest corner is top right.
-    const corner = Math.hypot(1440 - 248, 450);
+  for (const { name, corner } of [
+    // A 1440 × 900 window with the origin at (248, 450), the middle of the sidebar's
+    // right edge: the farthest corner is top right.
+    { name: "on the desktop", corner: Math.hypot(1440 - 248, 450) },
+    // A 390 × 844 phone with the sheet's top edge at 420: the origin is (195, 420), the
+    // middle of that edge, and the farthest corners are the bottom two.
+    { name: "on a phone", corner: Math.hypot(195, 844 - 420) },
+  ]) {
+    const layers = scrimLayers();
 
     it(`${name}: weaker further away, the same at the same distance in any direction`, () => {
       let previous = Infinity;

@@ -100,9 +100,15 @@ function NavSections({
 
   const inboxCurrent = mailbox === "inbox" && !filtering;
 
-  return (
-    <nav aria-label="Mailbox navigation" data-mail-nav="" className="flex flex-col">
-      <ul className="flex flex-col">
+  // On the phone's bottom sheet the whole list is upside down, so the thumb that opened
+  // it from the dock finds Inbox right above the tabs and the rarer folders further up:
+  // the "Mail" group (Spam first, Archive last) under its heading, then Inbox. The
+  // desktop sidebar reads top-down as before.
+  const reversed = touch;
+  const headingId = touch ? "nav-mail-touch" : "nav-mail";
+
+  const inbox = (
+    <ul className={`flex flex-col ${reversed ? "mt-3" : ""}`}>
         <li>
           <button
             type="button"
@@ -120,18 +126,19 @@ function NavSections({
             <span className={`${count} ${inboxCurrent ? "text-accent" : "text-ink-subtle"}`}>{inboxCount}</span>
           </button>
         </li>
-      </ul>
+    </ul>
+  );
 
-      {folders.length > 0 && (
+  const mail = folders.length > 0 && (
         <>
           <h3
-            id={touch ? "nav-mail-touch" : "nav-mail"}
-            className={`text-meta font-medium text-ink-subtle ${touch ? "px-3 pb-1 pt-4" : "px-2.5 pb-1 pt-4"}`}
+            id={headingId}
+            className={`text-meta font-medium text-ink-subtle ${touch ? `px-3 pb-1 ${reversed ? "pt-2" : "pt-4"}` : "px-2.5 pb-1 pt-4"}`}
           >
             Mail
           </h3>
-          <ul aria-labelledby={touch ? "nav-mail-touch" : "nav-mail"} className="flex flex-col">
-            {folders.map((folder) => {
+          <ul aria-labelledby={headingId} className="flex flex-col">
+            {(reversed ? [...folders].reverse() : folders).map((folder) => {
 
               const current = mailbox === folder.id;
               return (
@@ -157,6 +164,20 @@ function NavSections({
               );
             })}
           </ul>
+        </>
+  );
+
+  return (
+    <nav aria-label="Mailbox navigation" data-mail-nav="" data-reversed={reversed ? "" : undefined} className="flex flex-col">
+      {reversed ? (
+        <>
+          {mail}
+          {inbox}
+        </>
+      ) : (
+        <>
+          {inbox}
+          {mail}
         </>
       )}
     </nav>
@@ -195,7 +216,9 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
   return (
     <div
       data-nav-account=""
-      className={`flex shrink-0 items-center gap-2 border-t border-hairline ${props.touch ? "px-2 pb-2 pt-2" : "px-1.5 pb-1.5 pt-2"}`}
+      // On the phone's sheet the account row is at the top (the list is reversed, Inbox
+      // nearest the dock), so its hairline is underneath it rather than above.
+      className={`flex shrink-0 items-center gap-2 border-hairline ${props.touch ? "border-b px-2 pb-2 pt-2" : "border-t px-1.5 pb-1.5 pt-2"}`}
     >
       <button
         ref={trigger}
@@ -277,7 +300,9 @@ const FOCUSABLE =
  *
  * On a phone it is a bottom sheet: full width, rounded at the top like the dock, resting
  * on the dock's tab row so it is under the thumb that opened it, at most about 80% of
- * the screen tall, and its blur spreads from the middle of its top edge.
+ * the screen tall. It has no app-name header, its list is reversed (the account and
+ * Settings gear on top, Inbox at the bottom by the tabs), and the same blur as the
+ * desktop's spreads from the middle of its top edge.
  */
 export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -371,6 +396,9 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     };
   }, [open, armIdle]);
 
+  /** The sheet's scroller, kept at its bottom on a phone so Inbox is in reach. */
+  const scrollRef = useRef<HTMLDivElement>(null);
+
   // Focus in on open; back out on close.
   useEffect(() => {
     const panel = panelRef.current;
@@ -404,6 +432,14 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
         : firstVisible(document.querySelectorAll<HTMLElement>("[data-sidebar-toggle]"));
     back?.focus({ preventScroll: true });
   }, [open, clearIdle]);
+
+  // The phone's list is reversed: if it ever outgrows the sheet, start at the end that
+  // holds Inbox, next to the thumb, rather than at Spam. Its own effect, so a breakpoint
+  // change while open does not re-run the focus hand-off above.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (open && touch && scroller) scroller.scrollTop = scroller.scrollHeight;
+  }, [open, touch]);
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -496,7 +532,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
           if (scrimClickCloses(event.detail)) onClose();
         } : undefined}
       >
-        {scrimLayers(touch).map((layer) => {
+        {scrimLayers().map((layer) => {
           const mask = scrimMask(layer, SCRIM_ORIGIN);
           return (
             <div
@@ -561,17 +597,31 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
         <div aria-hidden="true" className="wn-sidebar-blur wn-sidebar-blur-3" />
         <div aria-hidden="true" className="wn-sidebar-tint" />
 
+        {/*
+          One tree for both layouts, so crossing the breakpoint while open keeps the
+          scroller (and what has focus in it) mounted. On the phone's sheet there is no
+          app-name header (the dock and the list already say where you are) and the list
+          is reversed: the account and its Settings gear at the top, Inbox at the bottom
+          by the tabs. The desktop keeps the header on top and the account at the foot.
+        */}
         <div className="relative flex min-h-0 flex-col">
-          <div className="flex shrink-0 items-center gap-2.5 px-3 pb-2 pt-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline">
-              <AppMark size={22} />
-            </span>
-            <span className="text-read font-semibold text-ink">Winnow</span>
-          </div>
-          <div data-sidebar-scroll="" className="thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 pb-2">
+          {!touch && (
+            <div className="flex shrink-0 items-center gap-2.5 px-3 pb-2 pt-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline">
+                <AppMark size={22} />
+              </span>
+              <span className="text-read font-semibold text-ink">Winnow</span>
+            </div>
+          )}
+          {touch && <AccountFooter {...props} touch={touch} onNavigate={onClose} />}
+          <div
+            ref={scrollRef}
+            data-sidebar-scroll=""
+            className={`thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 pb-2 ${touch ? "pt-1" : ""}`}
+          >
             <NavSections {...props} touch={touch} onNavigate={onClose} />
           </div>
-          <AccountFooter {...props} touch={touch} onNavigate={onClose} />
+          {!touch && <AccountFooter {...props} touch={touch} onNavigate={onClose} />}
         </div>
       </div>
     </>

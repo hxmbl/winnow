@@ -470,7 +470,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
 | `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next, Compose (no Mark all read anywhere: opening a message marks it read), and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
 | `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. |
-| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other five mailboxes in `MAILBOX_ORDER` (Drafts among them), an account footer carrying Settings, and the progressive scrim blur. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
+| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other five mailboxes in `MAILBOX_ORDER` (Drafts among them), an account footer carrying Settings, and the progressive scrim blur. On a phone it is a bottom sheet with no app-name header and the list reversed (account + Settings gear on top, then Mail from Spam to Archive, Inbox last by the dock); the scrim uses the same four-layer recipe as the desktop, spreading from the middle of the sheet's top edge. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
 | `SettingsPanel.tsx` | Settings. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. |
 | `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send and Discard, the Reply / Reply all toggle and the draft status. Three layouts: docked at the bottom of the reader pane (desktop reply and forward, not modal, its own Escape), a centred sheet (desktop new message), full screen (phone, everything). |
 | `GoogleSetup.tsx` | Paste, import by file, drop or paste-into-field; test; save; connect. |
@@ -500,7 +500,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `bodyViews.ts` | Which "Show as" options exist for this message — two instead of four when there is no HTML part. |
 | `filterColors.ts` / `filterIcons.tsx` | A hue and saturation per bucket (never a finished colour), and one icon + one reason. `important` is a Bookmark, not a star, because the row's star is a control. |
 | `senderPictures.ts` / `avatar.ts` / `demoPictures.ts` | Avatar sourcing as a context, plus the pure hash that gives a sender a stable tone. |
-| `sidebarOverlay.ts` | The idle-close policy (all seven conditions must be false) and the scrim recipe. |
+| `sidebarOverlay.ts` | The idle-close policy (all seven conditions must be false) and the scrim recipe (one recipe for the desktop sidebar and the phone sheet; only the origin differs). |
 | `menus.ts` | Both menus' contents as data, so the rules are unit-tested rather than trapped in JSX. |
 | `backLayers.ts` | Android's Back as data: which layer one press closes (popover → sheet → composer → sidebar → Settings → message → leave), so the order is a test, not whichever handler ran first. |
 | `readerSplit.ts` | The reader's share of the width as a fraction (default 0.38, saved under `winnow.readerSplit.v1`), its 280 px list / 360 px reader minimums resolved per width, and the handle's key steps. |
