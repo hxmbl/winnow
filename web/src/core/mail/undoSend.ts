@@ -18,13 +18,27 @@
  * Pure: the timers are handed in, so the window is testable without waiting.
  */
 
-/** The delays Settings offers, in seconds. `0` is Off: Send sends at once. */
-export const UNDO_SEND_CHOICES = [0, 5, 10, 20, 30] as const;
+/**
+ * The delays Settings → Compose → "Undo send window" offers, in seconds. `0` is Off:
+ * Send sends at once. 10 s by default: long enough to notice a wrong recipient.
+ */
+export const UNDO_SEND_CHOICES = [0, 5, 10, 20] as const;
 export type UndoSendSeconds = (typeof UNDO_SEND_CHOICES)[number];
-export const DEFAULT_UNDO_SEND_SECONDS: UndoSendSeconds = 5;
+export const DEFAULT_UNDO_SEND_SECONDS: UndoSendSeconds = 10;
 
 export function isUndoSendSeconds(value: unknown): value is UndoSendSeconds {
   return typeof value === "number" && (UNDO_SEND_CHOICES as readonly number[]).includes(value);
+}
+
+/**
+ * A saved delay, read back. Builds up to 1.2.2 also offered 30 s; someone who chose
+ * the longest wait keeps the longest one there is now rather than dropping to the
+ * default. Anything else unknown is `null`, so the default applies.
+ */
+export function reviveUndoSendSeconds(value: unknown): UndoSendSeconds | null {
+  if (isUndoSendSeconds(value)) return value;
+  if (value === 30) return 20;
+  return null;
 }
 
 /** What a choice reads as in Settings: `Off`, `5s`. */

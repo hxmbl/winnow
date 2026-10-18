@@ -42,9 +42,9 @@ function fakeTimers() {
 }
 
 describe("undo send choices", () => {
-  it("offers Off, 5, 10, 20 and 30 seconds, defaulting to 5", () => {
-    expect([...UNDO_SEND_CHOICES]).toEqual([0, 5, 10, 20, 30]);
-    expect(DEFAULT_UNDO_SEND_SECONDS).toBe(5);
+  it("offers Off, 5, 10 and 20 seconds, defaulting to 10", () => {
+    expect([...UNDO_SEND_CHOICES]).toEqual([0, 5, 10, 20]);
+    expect(DEFAULT_UNDO_SEND_SECONDS).toBe(10);
   });
 
   it("accepts only those values", () => {
