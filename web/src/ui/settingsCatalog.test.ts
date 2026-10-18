@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CATEGORIES, SETTINGS, SETTING_IDS, settingsIn } from "./settingsCatalog";
 
 /** The Settings components, read as text: every row names its setting by id. */
-const source = ["components/SettingsPanel.tsx", "components/SettingsControls.tsx"]
+const source = ["components/SettingsPanel.tsx", "components/SettingsControls.tsx", "components/SmartFilterSettings.tsx"]
   .map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
   .join("\n");
 
