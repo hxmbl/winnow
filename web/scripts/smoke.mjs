@@ -22,7 +22,7 @@
  * about pixels belongs in a component test, and there are none on purpose.
  */
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -7601,6 +7601,276 @@ try {
     check("no page errors in Label as", lErrors.length === 0, lErrors.slice(0, 3).join(" | "));
     await ctx.close();
   }
+
+  // ── Glass over the list, and the logo's version toggle (1.2.3) ─────────────
+  // BEGIN glass-and-version
+  {
+    section("glass over the list, and the logo's version toggle");
+    const pkgVersion = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+    const VERSION_TEXT = `Winnow ${pkgVersion}`;
+
+    /*
+      How much fine detail a screen region holds: the summed brightness step between
+      neighbouring pixels, over a screenshot decoded in a blank page's canvas. Sharp text
+      is full of steps; text seen through a real frost has almost none.
+    */
+    const detail = async (ctx, png, rect, scale) => {
+      const probe = await ctx.newPage();
+      const value = await probe.evaluate(
+        async ({ data, rect, scale }) => {
+          const img = new Image();
+          img.src = `data:image/png;base64,${data}`;
+          await img.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const c = canvas.getContext("2d");
+          c.drawImage(img, 0, 0);
+          const x = Math.round(rect.x * scale), y = Math.round(rect.y * scale);
+          const w = Math.round(rect.width * scale), h = Math.round(rect.height * scale);
+          const px = c.getImageData(x, y, w, h).data;
+          const lum = (i) => 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+          let sum = 0;
+          for (let j = 0; j < h - 1; j += 1)
+            for (let i = 0; i < w - 1; i += 1) {
+              const k = (j * w + i) * 4;
+              sum += Math.abs(lum(k) - lum(k + 4)) + Math.abs(lum(k) - lum(k + w * 4));
+            }
+          return sum / (w * h);
+        },
+        { data: png.toString("base64"), rect, scale },
+      );
+      await probe.close();
+      return value;
+    };
+    // The frost on, then off (and the pills' tint off in both, so only the blur differs).
+    const NO_TINT = ".wn-glass,.wn-chip-glass{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
+    const NO_FROST = ".wn-glass::before,.wn-chip-glass::before{display:none!important}";
+    const frostRatio = async (p, ctx, rect) => {
+      const tint = await p.addStyleTag({ content: NO_TINT });
+      await p.waitForTimeout(250);
+      const frosted = await detail(ctx, await p.screenshot(), rect, 1);
+      const off = await p.addStyleTag({ content: NO_FROST });
+      await p.waitForTimeout(250);
+      const plain = await detail(ctx, await p.screenshot(), rect, 1);
+      await off.evaluate((el) => el.remove());
+      await tint.evaluate((el) => el.remove());
+      await p.waitForTimeout(250);
+      return { frosted: Math.round(frosted * 100) / 100, plain: Math.round(plain * 100) / 100, ratio: plain > 0 ? frosted / plain : 1 };
+    };
+    // Nothing between a pill's frost layer and the page may cut it off from the list.
+    const GLASS_AUDIT = () => {
+      const roots = [];
+      const pills = [...document.querySelectorAll(".wn-glass:not(.wn-sidebar-panel), .wn-chip-glass")].filter((el) => el.getClientRects().length > 0);
+      for (const pill of pills) {
+        const own = getComputedStyle(pill);
+        if ((own.backdropFilter && own.backdropFilter !== "none") || own.filter !== "none") roots.push(`${pill.className.slice(0, 40)}: on itself`);
+        for (let el = pill.parentElement; el && el !== document.documentElement; el = el.parentElement) {
+          const s = getComputedStyle(el);
+          const why = [
+            s.opacity !== "1" && `opacity ${s.opacity}`,
+            s.filter !== "none" && "filter",
+            (s.maskImage || s.webkitMaskImage || "none") !== "none" && "mask",
+            s.clipPath !== "none" && "clip-path",
+            s.backdropFilter && s.backdropFilter !== "none" && "backdrop-filter",
+            /opacity|filter|mask|clip-path/.test(s.willChange) && `will-change ${s.willChange}`,
+          ].filter(Boolean);
+          if (why.length) roots.push(`${el.tagName}.${[...el.classList].slice(0, 3).join(".")} over ${pill.className.slice(0, 30)}: ${why.join(", ")}`);
+        }
+      }
+      const layer = pills.map((pill) => {
+        const b = getComputedStyle(pill, "::before");
+        return { inset: parseFloat(b.top), clip: b.clipPath, filter: b.backdropFilter || b.webkitBackdropFilter, z: b.zIndex };
+      });
+      const rails = [...document.querySelectorAll("[data-rail-scroller]")].filter((el) => el.querySelector(".wn-chip-glass")).map((el) => parseFloat(getComputedStyle(el).paddingTop));
+      return { count: pills.length, roots, layer, rails };
+    };
+
+    for (const kind of ["phone", "desktop"]) {
+      const phone = kind === "phone";
+      const ctx = await browser.newContext(
+        phone ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width: 1440, height: 900 } },
+      );
+      await ctx.addInitScript(() => {
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ appearance: "dark" }));
+        window.__vibrations = [];
+        navigator.vibrate = (ms) => (window.__vibrations.push(ms), true);
+      });
+      const g = await ctx.newPage();
+      g.on("pageerror", (error) => errors.push(String(error)));
+      await g.goto(URL, { waitUntil: "networkidle" });
+      await g.waitForSelector("[data-row-count] [data-row-id]");
+      if (!phone) {
+        await g.locator("[data-row-count] button[data-message-id]").first().click();
+        await g.waitForTimeout(400);
+      }
+      const barSel = phone ? "[data-phone-topbar]" : "[data-masthead-bar]";
+      const geometry = () =>
+        g.evaluate((barSel) => {
+          const bar = document.querySelector(barSel);
+          const barRect = bar.getBoundingClientRect();
+          const scroller = document.querySelector("[data-row-count]");
+          const rows = [...scroller.querySelectorAll("[data-row-id]")].map((r) => r.getBoundingClientRect());
+          const search = document.querySelector(barSel === "[data-phone-topbar]" ? "[data-phone-search]" : "[data-masthead-bar] label");
+          const sr = search.getBoundingClientRect();
+          const under = document.elementFromPoint(sr.left + sr.width * 0.6, sr.top + sr.height / 2);
+          const chrome = document.querySelector("[data-phone-chrome]");
+          const day = document.querySelector("[data-sticky-day]");
+          return {
+            barBottom: Math.round(barRect.bottom),
+            chromeFloats: chrome ? getComputedStyle(chrome).position === "absolute" : null,
+            band: getComputedStyle(bar).backgroundColor,
+            scrollTop: Math.round(scroller.scrollTop),
+            padTop: parseFloat(getComputedStyle(scroller).paddingTop),
+            firstRowTop: rows.length ? Math.round(rows[0].top) : null,
+            rowUnderBar: rows.some((r) => r.top < barRect.bottom - 4 && r.bottom > barRect.top + 4),
+            searchTakesTap: Boolean(under?.closest("label, [data-phone-search]")),
+            day: day
+              ? { floating: day.hasAttribute("data-floating"), glass: Boolean(day.querySelector(".wn-glass")), bg: getComputedStyle(day).backgroundColor, fade: Boolean(document.querySelector("[data-sticky-fade]")) }
+              : null,
+          };
+        }, barSel);
+
+      const rest = await geometry();
+      check(
+        `${kind}: at rest the top bar floats over the list with no band, and the first row clears it`,
+        rest.scrollTop === 0 && (rest.band === "rgba(0, 0, 0, 0)" || !phone) && (phone ? rest.chromeFloats === true : true) &&
+          rest.padTop >= rest.barBottom - 1 && rest.firstRowTop !== null && rest.firstRowTop >= rest.barBottom - 1 && !rest.rowUnderBar,
+        JSON.stringify(rest),
+      );
+      await g.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 600));
+      await g.waitForTimeout(500);
+      const scrolled = await geometry();
+      check(
+        `${kind}: scrolled, rows run under the top bar, which still takes taps`,
+        scrolled.scrollTop === 600 && scrolled.rowUnderBar && scrolled.searchTakesTap,
+        JSON.stringify(scrolled),
+      );
+      check(
+        `${kind}: the pinned day is a small glass pill, not an opaque strip with a fade`,
+        scrolled.day !== null && scrolled.day.floating && scrolled.day.glass && scrolled.day.bg === "rgba(0, 0, 0, 0)" && !scrolled.day.fade,
+        JSON.stringify(scrolled.day),
+      );
+
+      const audit = await g.evaluate(GLASS_AUDIT);
+      check(
+        `${kind}: every glass pill's frost is an oversized ::before clipped back to it, and nothing above cuts it off from the list`,
+        audit.count >= 3 && audit.roots.length === 0 &&
+          audit.layer.every((l) => l.inset <= -40 && /^inset\(4\dpx/.test(l.clip) && /blur\(22px\)/.test(l.filter) && l.z === "-1") &&
+          audit.rails.every((pad) => pad >= 44),
+        JSON.stringify({ count: audit.count, roots: audit.roots.slice(0, 4), layer: audit.layer.slice(0, 2), rails: audit.rails }),
+      );
+
+      // The real thing, measured: text under the glass loses its detail to the frost.
+      const regions = await g.evaluate((phone) => {
+        const rect = (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          // Inside the rounded ends, clear of the hairline.
+          return { x: r.left + r.height / 2, y: r.top + 3, width: r.width - r.height, height: r.height - 6, name: sel };
+        };
+        return (phone
+          ? [rect("[data-phone-search]"), rect("[data-phone-pill]"), rect("[data-phone-chips] [data-rail-key]")]
+          : [rect("[data-masthead-bar]"), rect("header [data-rail-key]")]
+        ).filter(Boolean);
+      }, phone);
+      for (const region of regions) {
+        const r = await frostRatio(g, ctx, region);
+        check(
+          `${kind}: row text under ${region.name} is really blurred (detail ${r.frosted} frosted vs ${r.plain} bare)`,
+          r.plain > 0.5 && r.ratio < 0.5,
+          JSON.stringify(r),
+        );
+      }
+
+      // ── The version toggle ──
+      const mark = g.locator(phone ? "[data-phone-topbar] button[data-version-toggle]" : "[data-masthead-bar] button[data-version-toggle]");
+      const state = () =>
+        g.evaluate(() => {
+          const button = document.querySelector("button[data-version-toggle]");
+          const text = document.querySelector("[data-version-text]");
+          const input = document.querySelector("#winnow-search");
+          const field = input.closest("label");
+          return {
+            pressed: button.getAttribute("aria-pressed"),
+            name: button.getAttribute("aria-label"),
+            text: text.textContent,
+            textShown: getComputedStyle(text).visibility === "visible",
+            searchShown: getComputedStyle(field).visibility === "visible",
+            searchTransition: parseFloat(getComputedStyle(field).transitionDuration),
+            query: input.value,
+            focused: document.activeElement === input,
+            rows: Number(document.querySelector("[data-row-count]").getAttribute("data-row-count")),
+            vibrations: window.__vibrations.length,
+          };
+        });
+      await g.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+      const search = g.locator("#winnow-search");
+      await search.fill("a");
+      await g.waitForTimeout(300);
+      await search.blur();
+      const before = await state();
+      check(
+        `${kind}: the mark is a labelled toggle, not pressed, with search showing`,
+        before.pressed === "false" && /version/i.test(before.name ?? "") && before.searchShown && !before.textShown,
+        JSON.stringify(before),
+      );
+      if (phone) await mark.tap();
+      else {
+        await mark.focus();
+        await g.keyboard.press("Enter");
+      }
+      await g.waitForTimeout(400);
+      const on = await state();
+      check(
+        `${kind}: ${phone ? "a tap" : "Enter"} on the mark swaps search for "${VERSION_TEXT}", pressed, with a crossfade${phone ? " and a haptic tick" : ""}`,
+        on.pressed === "true" && on.text === VERSION_TEXT && on.textShown && !on.searchShown && on.searchTransition >= 0.15 &&
+          (phone ? on.vibrations === before.vibrations + 1 : on.vibrations === before.vibrations),
+        JSON.stringify(on),
+      );
+      check(`${kind}: and the search keeps its query and its results`, on.query === "a" && on.rows === before.rows, JSON.stringify(on));
+      if (phone) await mark.tap();
+      else await g.keyboard.press("Space");
+      await g.waitForTimeout(400);
+      const back = await state();
+      check(
+        `${kind}: a second ${phone ? "tap" : "press"} brings search back, query intact`,
+        back.pressed === "false" && back.searchShown && !back.textShown && back.query === "a",
+        JSON.stringify(back),
+      );
+      if (!phone) {
+        await mark.click();
+        await g.waitForTimeout(300);
+        await g.locator("[data-reader-pane]").first().click({ position: { x: 5, y: 600 } }).catch(() => undefined);
+        await g.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+        await g.keyboard.press("/");
+        await g.waitForTimeout(300);
+        const slash = await state();
+        check("desktop: / with the version showing brings search back and focuses it", slash.pressed === "false" && slash.searchShown && slash.focused && slash.query === "a", JSON.stringify(slash));
+        check("desktop: the sidebar still has its own toggle beside the mark", (await g.locator("[data-masthead-bar] button[data-sidebar-toggle]").count()) === 1);
+      }
+      await search.fill("");
+      await ctx.close();
+    }
+
+    // Reduced motion: the swap is instant.
+    {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
+      const g = await ctx.newPage();
+      g.on("pageerror", (error) => errors.push(String(error)));
+      await g.goto(URL, { waitUntil: "networkidle" });
+      await g.waitForSelector("[data-row-count] [data-row-id]");
+      await g.locator("[data-phone-topbar] button[data-version-toggle]").tap();
+      const instant = await g.evaluate(() => ({
+        text: getComputedStyle(document.querySelector("[data-version-text]")).transitionDuration,
+        visible: getComputedStyle(document.querySelector("[data-version-text]")).visibility,
+      }));
+      check("with reduced motion the logo's swap is instant", instant.visible === "visible" && instant.text.split(",").every((d) => parseFloat(d) < 0.01), JSON.stringify(instant));
+      await ctx.close();
+    }
+  }
+  // END glass-and-version
 
   // ── Console ────────────────────────────────────────────────────────────────
 
