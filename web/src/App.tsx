@@ -92,7 +92,7 @@ import { Composer } from "./ui/components/Composer";
 import { SendingStrip } from "./ui/components/SendingStrip";
 import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
 import { WhyHere } from "./ui/components/WhyHere";
-import { movedNotice } from "./ui/smartFilterPicker";
+import { changeNotice } from "./ui/smartFilterPicker";
 import { Settings } from "./ui/components/SettingsPanel";
 import { ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
@@ -2866,8 +2866,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           reasons={filterPicker.length === 1 ? store.explainSmartFilters(filterPicker[0]) : []}
           status={filterPickerStatus}
           onChange={(filter, into) => {
-            store.changeSmartFilters(filterPicker, [{ filter, into }]);
-            setFilterPickerStatus(movedNotice(FILTER_LABELS[filter], into, filterPicker.length));
+            const [outcome] = store.changeSmartFilters(filterPicker, [{ filter, into }]);
+            setFilterPickerStatus(
+              changeNotice(FILTER_LABELS[filter], outcome ?? { into, moved: 0, unsafe: 0, already: 0 }, filterPicker.length),
+            );
           }}
           onClose={() => setFilterPicker(null)}
         />
