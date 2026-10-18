@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GLASS, WORST_BACKDROPS, glassProperties } from "./glass";
+import { readFileSync } from "node:fs";
+import { GLASS, GLASS_BLUR, GLASS_REACH, WORST_BACKDROPS, blurRadius, glassProperties, reachCoversBlur } from "./glass";
 import { FILTER_HUES, senderHue } from "./filterColors";
 import { MODES, PALETTES, composite, contrastRatio, pillFill, type ThemeName } from "./theme";
 
@@ -106,4 +107,43 @@ describe("the floating glass", () => {
       expect(props["--wn-glass-bar"]).toBe(`${Math.round(GLASS[scheme].bar * 100)}%`);
     });
   }
+});
+
+describe("the frost layer reaches past each pill", () => {
+  const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+  const strip = readFileSync(new URL("./components/FilterStrip.tsx", import.meta.url), "utf8");
+
+  it("reads the blur radius out of a filter", () => {
+    expect(blurRadius(GLASS_BLUR)).toBe(22);
+    expect(blurRadius("saturate(2)")).toBe(0);
+    expect(blurRadius("blur( 8.5px ) saturate(1.2)")).toBe(8.5);
+  });
+
+  it("reaches at least two blur radii, so text across a thin pill is smeared, not just tinted", () => {
+    expect(reachCoversBlur(GLASS_REACH, GLASS_BLUR)).toBe(true);
+    expect(reachCoversBlur(20, GLASS_BLUR)).toBe(false);
+  });
+
+  it("is the same number in the stylesheet, the TypeScript and the chip rail's padding", () => {
+    expect(css).toContain(`--wn-glass-filter: ${GLASS_BLUR};`);
+    expect(css).toContain(`--wn-glass-reach: ${GLASS_REACH}px;`);
+    // The rail takes back exactly the reach it pads itself by, touch and floating.
+    expect(strip.match(new RegExp(`-my-\\[${GLASS_REACH}px\\]`, "g"))?.length).toBe(2);
+  });
+
+  it("puts the filter on the oversized ::before, clipped back to the pill, not on the pill", () => {
+    const before = /\.wn-glass:not\(\.wn-sidebar-panel\)::before,\s*\.wn-pill\.wn-chip-glass::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(before).toMatch(/inset:\s*calc\(-1 \* var\(--wn-glass-reach\)\)/);
+    expect(before).toMatch(/backdrop-filter:\s*var\(--wn-glass-filter\)/);
+    expect(before).toMatch(/clip-path:\s*inset\(var\(--wn-glass-reach\)/);
+    expect(before).toMatch(/z-index:\s*-1/);
+    // The chip's own rule no longer carries a backdrop-filter: it would make the chip a
+    // backdrop root, and its frost layer would see nothing.
+    const chip = /\.wn-pill\.wn-chip-glass \{\s*--wn-chip-frost[^}]*\}/.exec(css)?.[0] ?? "";
+    expect(chip).not.toMatch(/backdrop-filter/);
+  });
+
+  it("never puts a filter on a glass pill (hover is a sheen), which would cut its frost off", () => {
+    expect(css).not.toMatch(/\.wn-chip-glass:hover\s*\{[^}]*\bfilter:/);
+  });
 });

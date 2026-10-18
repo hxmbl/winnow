@@ -3539,7 +3539,7 @@ try {
   );
   const pillGlass = await pill.evaluate((nav) => {
     const style = getComputedStyle(nav);
-    return { filter: style.backdropFilter || style.webkitBackdropFilter, background: style.backgroundColor, shadow: style.boxShadow };
+    return { filter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(nav, "::before")), background: style.backgroundColor, shadow: style.boxShadow };
   });
   check(
     "in light frost: a modest blur over a translucent tint, with a shadow",
@@ -3613,7 +3613,7 @@ try {
       swipeable: getComputedStyle(element).overflowX === "auto" && element.scrollWidth > element.clientWidth,
       bands,
       dockBg,
-      chipFilter: chipStyle.backdropFilter || chipStyle.webkitBackdropFilter,
+      chipFilter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(chip, "::before")),
       chipShadow: chipStyle.boxShadow,
       chipBorder: chipStyle.borderTopWidth,
       firstLeft: Math.round(chip.getBoundingClientRect().left),
@@ -6626,7 +6626,7 @@ try {
             width: innerWidth,
             aboveChips: rect.bottom <= chips.top + 1,
             overlapsChrome: Boolean(overlaps(rect, pillRect) || overlaps(rect, fab)),
-            filter: style.backdropFilter || style.webkitBackdropFilter,
+            filter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(button, "::before")),
             scrollTop: Math.round(scroller.scrollTop),
             screen: scroller.clientHeight,
             lastClear: last ? last.bottom <= rect.top + 1 : null,
@@ -6738,7 +6738,7 @@ try {
           const scroller = document.querySelector("[data-row-count]");
           const rail = document.querySelector("header [data-rail-scroller]");
           const chips = rail ? [...rail.querySelectorAll("[data-rail-key]")] : [];
-          const filterOf = (el) => { const st = getComputedStyle(el); return st.backdropFilter || st.webkitBackdropFilter; };
+          const filterOf = (el) => ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(el, "::before"));
           const rows = [...scroller.querySelectorAll("[data-row-id]")].map((r) => r.getBoundingClientRect());
           const briefing = scroller.querySelector("[data-briefing]");
           const connect = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Connect Gmail");
@@ -6850,7 +6850,7 @@ try {
       await d.waitForTimeout(200);
       const bar = d.locator("header [data-selection-bar='desktop']");
       const selBox = await bar.boundingBox();
-      const selFilter = await bar.evaluate((el) => getComputedStyle(el).backdropFilter || getComputedStyle(el).webkitBackdropFilter).catch(() => "");
+      const selFilter = await bar.evaluate((el) => ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(el, "::before"))).catch(() => "");
       check(
         "a selection's bar floats in the chips' place, in the same glass, and the header keeps its height",
         Boolean(selBox) && /blur\(22px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
@@ -6873,9 +6873,9 @@ try {
         const st = (el) => getComputedStyle(el);
         return {
           matches: matchMedia("(prefers-reduced-transparency: reduce)").matches,
-          bar: st(bar).backdropFilter || st(bar).webkitBackdropFilter,
+          bar: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(bar, "::before")),
           barBg: st(bar).backgroundColor,
-          chip: st(chip).backdropFilter || st(chip).webkitBackdropFilter,
+          chip: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(chip, "::before")),
         };
       });
       check(

@@ -571,8 +571,50 @@ button.wn-glass:active,
   (background: color-mix(in srgb, red 50%, transparent)) {
   .wn-glass {
     background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
+  }
+  /* The sidebar panel is large and clips its own overflow: its frost stays on itself. */
+  .wn-glass.wn-sidebar-panel {
     -webkit-backdrop-filter: var(--wn-glass-filter);
     backdrop-filter: var(--wn-glass-filter);
+  }
+}
+
+/*
+ * The frost itself, on an oversized layer behind each pill.
+ *
+ * A backdrop-filter only samples what is directly behind its own box and clamps at the
+ * edges, so on a pill a few dozen pixels tall a 22px blur hardly smears anything that
+ * runs across it: a line of row text under the chips, the dock or the top bar stayed
+ * readable and sharp through the glass while avatars (big soft shapes) looked frosted.
+ * So the filter lives on `::before`, reaching `--wn-glass-reach` past the pill on every
+ * side so the blur has real pixels to pull from, then clipped back to the pill's own
+ * rounded shape. It sits at z-index -1 with the pill not a stacking context, so it
+ * paints under the pill's tint and hairline, which lie over it as before.
+ *
+ * Nothing between it and the list may be a backdrop root (opacity < 1, filter, mask,
+ * clip-path, backdrop-filter, or will-change of those): the chip's hover is a sheen,
+ * not `filter: brightness`, for that reason. A scroller clips it, so the chip rail
+ * pads itself by the reach (`FilterStrip`).
+ */
+:root {
+  --wn-glass-reach: 44px;
+}
+.wn-glass:not(.wn-sidebar-panel),
+.wn-pill.wn-chip-glass {
+  position: relative;
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+  (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-glass:not(.wn-sidebar-panel)::before,
+  .wn-pill.wn-chip-glass::before {
+    content: "";
+    position: absolute;
+    inset: calc(-1 * var(--wn-glass-reach));
+    z-index: -1;
+    pointer-events: none;
+    -webkit-backdrop-filter: var(--wn-glass-filter);
+    backdrop-filter: var(--wn-glass-filter);
+    clip-path: inset(var(--wn-glass-reach) round var(--wn-glass-radius, 9999px));
   }
 }
 /* No blur to read through: the same tint, nearly opaque. */
@@ -626,8 +668,6 @@ button.wn-glass:active,
     background-image:
       linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest))),
       linear-gradient(to right, var(--wn-chip-frost), var(--wn-chip-text) 14px, var(--wn-chip-text) calc(100% - 14px), var(--wn-chip-frost));
-    -webkit-backdrop-filter: var(--wn-glass-filter);
-    backdrop-filter: var(--wn-glass-filter);
   }
   .wn-pill.wn-chip-glass[data-on] {
     background-image:
@@ -641,8 +681,19 @@ button.wn-glass:active,
     background-color: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
   }
 }
+/* Hover is a sheen over the tint: a `filter` here would cut the frost off from the list. */
 .wn-pill.wn-chip-glass:hover {
-  filter: brightness(1.04);
+  box-shadow:
+    inset 0 0 0 999px var(--wn-sheen),
+    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-lift);
+}
+.wn-pill.wn-chip-glass[data-on]:hover {
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
+    inset 0 0 0 999px var(--wn-sheen),
+    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-lift);
 }
 /* "All", on the rail beside the chips: plain glass, no hue. */
 .wn-chip-plain {
@@ -766,6 +817,10 @@ div[data-row-count] {
 
 /* Reduced transparency: the floating glass is solid, the chips keep only their tint. */
 @media (prefers-reduced-transparency: reduce) {
+  .wn-glass:not(.wn-sidebar-panel)::before,
+  .wn-pill.wn-chip-glass::before {
+    display: none;
+  }
   .wn-glass,
   .wn-pill.wn-chip-glass {
     -webkit-backdrop-filter: none !important;
@@ -783,6 +838,10 @@ div[data-row-count] {
   }
 }
 @media (forced-colors: active) {
+  .wn-glass:not(.wn-sidebar-panel)::before,
+  .wn-pill.wn-chip-glass::before {
+    display: none;
+  }
   .wn-glass,
   .wn-pill.wn-chip-glass {
     -webkit-backdrop-filter: none;

@@ -236,11 +236,15 @@ export const FilterStrip = memo(function FilterStrip({
         // Touch: the rail is transparent and lets taps between the chips through to the
         // list; the vertical padding keeps the chips' shadows from being clipped by the
         // scroller, and the side padding matches the dock's insets.
+        // Glass (touch and floating): the scroller would clip each chip's frost layer,
+        // which reaches 44px past the chip (`--wn-glass-reach` in `index.css`) so the blur
+        // has the rows around it to pull from. So the rail pads itself by that much more
+        // and takes it back with a negative margin: it lays out exactly as before.
         className={`no-scrollbar flex items-center overflow-x-auto ${
           touch
-            ? "pointer-events-none gap-2 py-2 pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
+            ? "pointer-events-none -my-[44px] gap-2 py-[52px] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
             : floating
-              ? "pointer-events-none gap-1.5 px-0.5 py-1.5 [&>*]:pointer-events-auto"
+              ? "pointer-events-none -my-[44px] gap-1.5 px-0.5 py-[50px] [&>*]:pointer-events-auto"
               : "gap-1"
         }`}
 

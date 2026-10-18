@@ -43,6 +43,26 @@ export type GlassRecipe = {
 
 export const GLASS_BLUR = "blur(22px) saturate(1.8)";
 
+/**
+ * How far the frost layer (`::before`, `--wn-glass-reach` in `index.css`) reaches past
+ * each pill, in px. A backdrop-filter samples only what lies behind its own box, so a
+ * pill no taller than the blur left a line of text across it nearly sharp; reaching two
+ * blur radii past the edge gives the blur real pixels on every side. The chip rail pads
+ * itself by the same amount (`FilterStrip`), since a scroller would clip the layer.
+ */
+export const GLASS_REACH = 44;
+
+/** The blur radius, in px, of a `backdrop-filter` value such as `GLASS_BLUR`. */
+export function blurRadius(filter: string): number {
+  const match = /blur\(\s*([\d.]+)px\s*\)/.exec(filter);
+  return match ? Number(match[1]) : 0;
+}
+
+/** Whether a frost layer reaching `reach` px is enough for `filter`: two blur radii. */
+export function reachCoversBlur(reach: number, filter: string): boolean {
+  return reach >= 2 * blurRadius(filter);
+}
+
 export const GLASS: Record<ThemeName, GlassRecipe> = {
   // Dark ink on a pale tint: the worst backdrop is something dark (the accent, an avatar).
   light: { base: "surface", rim: 0.62, text: 0.72, textOn: 0.76, bar: 0.72, fallback: 0.94 },
