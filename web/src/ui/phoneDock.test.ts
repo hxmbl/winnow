@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCK_TABS, EXPAND_LABEL, badgeText, PANEL_ORDER, panelOrder, tabAction, tabLabel } from "./phoneDock";
+import { BACK_TO_TOP_LABEL, BACK_TO_TOP_SCREENS, backToTopVisible, DOCK_TABS, EXPAND_LABEL, badgeText, PANEL_ORDER, panelOrder, tabAction, tabLabel } from "./phoneDock";
 
 describe("the phone dock", () => {
   it("has two tabs, Inbox then Sent; Archive and the rest are behind Expand", () => {
@@ -38,5 +38,29 @@ describe("the phone dock", () => {
     expect(panelOrder(shuffled).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
     // A copy: the caller's order is left alone.
     expect(folders[0].id).toBe("archive");
+  });
+
+  describe("the back-to-top pill", () => {
+    const at = (scrollTop: number, extra: Partial<Parameters<typeof backToTopVisible>[0]> = {}) =>
+      backToTopVisible({ scrollTop, viewportHeight: 700, allowed: true, menuOpen: false, ...extra });
+
+    it("is named for what it does, and waits for a screen's worth of scrolling", () => {
+      expect(BACK_TO_TOP_LABEL).toBe("Back to top");
+      expect(BACK_TO_TOP_SCREENS).toBe(1);
+    });
+
+    it("hides at the top and within the first screen, shows past it", () => {
+      expect(at(0)).toBe(false);
+      expect(at(350)).toBe(false);
+      expect(at(700)).toBe(false);
+      expect(at(701)).toBe(true);
+      expect(at(5000)).toBe(true);
+    });
+
+    it("never shows over the expanded panel, a selection or an overlay, or for a hidden list", () => {
+      expect(at(2000, { menuOpen: true })).toBe(false);
+      expect(at(2000, { allowed: false })).toBe(false);
+      expect(at(2000, { viewportHeight: 0 })).toBe(false);
+    });
   });
 });

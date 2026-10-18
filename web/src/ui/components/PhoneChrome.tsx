@@ -6,7 +6,8 @@
  * the bottom of the screen, floating over the list rather than taking a bar from it
  * (after Linear's Android app): a rounded glass pill of icon-only tabs (Inbox, Sent)
  * ending in an Expand chevron, the compose button as its own circle beside it, and the
- * smart-filter chips floating one by one just above. Expand grows the pill upward into
+ * smart-filter chips floating one by one just above, and, once the list is a screen
+ * down, a small "Top" pill centred above those. Expand grows the pill upward into
  * the menu panel (`MailNav.tsx`: every folder and the account, whose gear is the way
  * into Settings).
  * The top is one row: the mark and, beside it, search, whose placeholder names the list
@@ -18,8 +19,8 @@
  * a thumb, and nothing is revealed by hover.
  */
 
-import { useLayoutEffect, useRef } from "react";
-import { ChevronsDownUp, ChevronsUpDown, Inbox, Search, Send } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowUp, ChevronsDownUp, ChevronsUpDown, Inbox, Search, Send } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { FilterStrip, type PillItem } from "./FilterStrip";
@@ -28,7 +29,17 @@ import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 import { ComposeButton } from "./ComposeFab";
 import { listScroller, scrollListToTop } from "../listScroll";
-import { DOCK_TABS, EXPAND_LABEL, PHONE_DOCK_VAR, PHONE_TABS_VAR, badgeText, tabAction, tabLabel } from "../phoneDock";
+import {
+  BACK_TO_TOP_LABEL,
+  DOCK_TABS,
+  EXPAND_LABEL,
+  PHONE_DOCK_VAR,
+  PHONE_TABS_VAR,
+  backToTopVisible,
+  badgeText,
+  tabAction,
+  tabLabel,
+} from "../phoneDock";
 
 /** The canvas-toned sheet the reader's bottom bar sits on. */
 export const DOCK_SURFACE =
@@ -129,6 +140,12 @@ export type PhoneDockProps = {
   onCloseMenu: () => void;
   /** Compose, or null while composing makes no sense (a selection, Settings, a sheet). */
   onCompose: (() => void) | null;
+  /**
+   * Whether the back-to-top pill may show at all: not during a multi-selection, an
+   * overlay (Settings, the palette, the shortcut sheet) or the composer. The panel being
+   * expanded is the dock's own `menuOpen`.
+   */
+  backToTopAllowed?: boolean;
 };
 
 
@@ -145,10 +162,44 @@ export function PhoneDock({
   onOpenMenu,
   onCloseMenu,
   onCompose,
+  backToTopAllowed = true,
 }: PhoneDockProps) {
   const dockRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLElement>(null);
   const chipsRef = useRef<HTMLDivElement>(null);
+  const topSlotRef = useRef<HTMLDivElement>(null);
+
+  /*
+    The back-to-top pill follows the list's scroll. One capturing listener on the
+    document rather than one on the scroller, because the scroller is replaced whenever
+    the empty state comes and goes; re-read when the mailbox or filters change the list
+    under it, and when the window resizes.
+  */
+  const [listDown, setListDown] = useState(false);
+  const showTop = listDown && backToTopAllowed && !menuOpen && !settingsOpen;
+  const showTopRef = useRef(showTop);
+  showTopRef.current = showTop;
+  const filterSignature = activeFilters.join("|");
+  useEffect(() => {
+    const read = () => {
+      const scroller = listScroller();
+      setListDown(
+        scroller !== null &&
+          backToTopVisible({ scrollTop: scroller.scrollTop, viewportHeight: scroller.clientHeight, allowed: true, menuOpen: false }),
+      );
+    };
+    const onScroll = (event: Event) => {
+      if (event.target instanceof HTMLElement && event.target.matches("[data-row-count]")) read();
+    };
+    read();
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    window.addEventListener("resize", read);
+    return () => {
+      document.removeEventListener("scroll", onScroll, { capture: true });
+      window.removeEventListener("resize", read);
+    };
+  }, [mailbox, filterSignature]);
+  const measureRef = useRef<() => void>(() => undefined);
 
   // Publish, measured from the window's bottom edge: where the pill starts (Settings'
   // sheet stops there) and where the floating chrome starts (the list pads its end by
@@ -164,7 +215,15 @@ export function PhoneDock({
       const height = window.innerHeight;
       const pillTop = pill.getBoundingClientRect().top;
       const chips = chipsRef.current;
-      const chromeTop = chips && chips.getClientRects().length > 0 ? chips.getBoundingClientRect().top : pillTop;
+      // While the back-to-top pill shows, the floating chrome starts at its slot, so the
+      // last row scrolls clear of it too; hidden, it covers nothing and counts for nothing.
+      const slot = topSlotRef.current;
+      const chromeTop =
+        showTopRef.current && slot
+          ? slot.getBoundingClientRect().top
+          : chips && chips.getClientRects().length > 0
+            ? chips.getBoundingClientRect().top
+            : pillTop;
       const tabs = `${Math.max(0, Math.round(height - pillTop))}px`;
       const chrome = `${Math.max(0, Math.round(height - chromeTop))}px`;
       if (`${tabs}|${chrome}` === last) return;
@@ -173,6 +232,7 @@ export function PhoneDock({
       root.style.setProperty(PHONE_DOCK_VAR, chrome);
     };
     measure();
+    measureRef.current = measure;
     window.addEventListener("resize", measure);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(dock);
@@ -187,6 +247,11 @@ export function PhoneDock({
   }, []);
 
   const scrollToTop = scrollListToTop;
+
+  // The clearance follows the pill showing and hiding.
+  useLayoutEffect(() => {
+    measureRef.current();
+  }, [showTop]);
 
   return (
     /*
@@ -207,6 +272,28 @@ export function PhoneDock({
       className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
       style={menuOpen ? { zIndex: 55 } : undefined}
     >
+      {/*
+        Back to top: a small glass pill centred above the chips, once the list is a screen
+        down. The slot always holds its place (so showing it never nudges the chips) but
+        takes no taps; hidden, the pill is `visibility: hidden` and out of the tab order,
+        and it fades and rises in (`.wn-back-to-top`, instant under reduced motion).
+      */}
+      <div ref={topSlotRef} data-back-to-top-slot="" className="flex justify-center pb-1.5">
+        <button
+          type="button"
+          data-back-to-top=""
+          data-shown={showTop ? "" : undefined}
+          aria-label={BACK_TO_TOP_LABEL}
+          title={BACK_TO_TOP_LABEL}
+          tabIndex={showTop ? undefined : -1}
+          onClick={scrollToTop}
+          className="wn-glass wn-back-to-top flex h-9 items-center gap-1.5 rounded-full pl-3 pr-3.5 text-ui font-semibold text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          <ArrowUp size={16} strokeWidth={2.2} aria-hidden="true" />
+          <span aria-hidden="true">Top</span>
+        </button>
+      </div>
+
       {/* The smart filters, floating just above the pill where a thumb rests. */}
       <div
         ref={chipsRef}

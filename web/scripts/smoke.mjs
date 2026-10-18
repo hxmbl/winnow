@@ -6573,6 +6573,141 @@ try {
     await ctx.close();
   }
 
+  {
+    /*
+      Back to top: a small glass pill centred above the chips, shown only once the list
+      is more than a screen down, never over the expanded panel, a selection or Settings,
+      taking no taps while hidden, and the last row still clears it.
+    */
+    for (const reduced of [false, true]) {
+      const ctx = await browser.newContext({
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        isMobile: true,
+        reducedMotion: reduced ? "reduce" : "no-preference",
+      });
+      const b = await ctx.newPage();
+      b.on("pageerror", (error) => errors.push(String(error)));
+      await b.goto(URL, { waitUntil: "networkidle" });
+      await b.waitForSelector("[data-row-count] [data-row-id]");
+      const pill = b.locator("[data-phone-dock] button[data-back-to-top]");
+      const scrollTo = async (y) => {
+        await b.evaluate((top) => {
+          const scroller = document.querySelector("[data-row-count]");
+          scroller.scrollTop = top === "end" ? scroller.scrollHeight : top;
+        }, y);
+        await b.waitForTimeout(450);
+      };
+      const state = () =>
+        b.evaluate(() => {
+          const button = document.querySelector("[data-phone-dock] button[data-back-to-top]");
+          const rect = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          const under = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          const chips = document.querySelector("[data-phone-chips]").getBoundingClientRect();
+          const pillRect = document.querySelector("[data-phone-pill]").getBoundingClientRect();
+          const fab = document.querySelector("[data-compose-fab]")?.getBoundingClientRect() ?? null;
+          const scroller = document.querySelector("[data-row-count]");
+          const rows = [...scroller.querySelectorAll("[data-row-id]")];
+          const last = rows.length ? rows[rows.length - 1].getBoundingClientRect() : null;
+          const overlaps = (a, c) => c && a.left < c.right && c.left < a.right && a.top < c.bottom && c.top < a.bottom;
+          return {
+            shown: button.hasAttribute("data-shown"),
+            visibility: style.visibility,
+            events: style.pointerEvents,
+            takesTap: Boolean(under?.closest("[data-back-to-top]")),
+            name: button.getAttribute("aria-label"),
+            label: button.textContent.trim(),
+            centre: Math.round(rect.left + rect.width / 2),
+            width: innerWidth,
+            aboveChips: rect.bottom <= chips.top + 1,
+            overlapsChrome: Boolean(overlaps(rect, pillRect) || overlaps(rect, fab)),
+            filter: style.backdropFilter || style.webkitBackdropFilter,
+            scrollTop: Math.round(scroller.scrollTop),
+            screen: scroller.clientHeight,
+            lastClear: last ? last.bottom <= rect.top + 1 : null,
+            atEnd: Math.abs(scroller.scrollTop + scroller.clientHeight - scroller.scrollHeight) < 2,
+          };
+        });
+      const tag = reduced ? " (reduced motion)" : "";
+
+      const atTop = await state();
+      check(
+        `back to top is hidden at the top, and takes no taps there${tag}`,
+        !atTop.shown && atTop.visibility === "hidden" && atTop.events === "none" && !atTop.takesTap,
+        JSON.stringify(atTop),
+      );
+      await scrollTo(Math.round(atTop.screen * 0.8));
+      const within = await state();
+      check(`and stays hidden within the first screen${tag}`, !within.shown && !within.takesTap, JSON.stringify(within));
+      await scrollTo(Math.round(atTop.screen * 1.5));
+      const past = await state();
+      if (!reduced) {
+        check(
+          "past a screen it shows: a frosted pill named Back to top, labelled Top, centred above the chips, clear of the dock and compose",
+          past.shown && past.visibility === "visible" && past.takesTap && past.name === "Back to top" && past.label === "Top" &&
+            Math.abs(past.centre - past.width / 2) <= 2 && past.aboveChips && !past.overlapsChrome &&
+            /blur\(12px\)/.test(past.filter) && /saturate\(1\.3\)/.test(past.filter),
+          JSON.stringify(past),
+        );
+      } else {
+        check("under reduced motion it shows too, without the slide", past.shown && past.takesTap, JSON.stringify(past));
+      }
+      // Twice: the pill appearing grows the list's end padding, and so its extent.
+      await scrollTo("end");
+      await scrollTo("end");
+      const end = await state();
+      check(`at the end of the list the last row clears it${tag}`, end.atEnd && end.shown && end.lastClear === true, JSON.stringify(end));
+
+      if (!reduced) {
+        // Not over the expanded panel, nor over Settings, nor during a selection.
+        await b.locator("[data-phone-dock] button[data-dock-expand]").tap();
+        await b.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+        await b.waitForTimeout(400);
+        const panel = await state();
+        check("it hides while the dock panel is expanded", !panel.shown && !panel.takesTap, JSON.stringify(panel));
+        await b.locator("[data-phone-dock] button[data-dock-expand]").tap();
+        await b.waitForTimeout(450);
+        check("and comes back when the panel closes", (await state()).shown);
+
+        // An avatar in the middle of the screen (the mounted window reaches past it).
+        const avatar = await b.evaluate(() => {
+          const all = [...document.querySelectorAll("[data-row-count] [data-row-control='avatar']")].map((el) => el.getBoundingClientRect());
+          const r = all.find((rect) => rect.top > 200 && rect.bottom < 600);
+          return { x: r.left, y: r.top, width: r.width, height: r.height };
+        });
+        await b.touchscreen.tap(avatar.x + avatar.width / 2, avatar.y + avatar.height / 2);
+        await b.waitForTimeout(200);
+        await b.locator("[data-menu='sender'] [data-menu-item='sender-select']").tap();
+        await b.waitForTimeout(300);
+        const selecting = await state();
+        check(
+          "it hides during a multi-selection",
+          (await b.locator("[data-selection-bar='phone']").count()) === 1 && !selecting.shown && !selecting.takesTap,
+          JSON.stringify(selecting),
+        );
+        await b.locator("[data-selection-bar='phone'] button[aria-label='Clear selection']").tap();
+        await b.waitForTimeout(300);
+        check("and comes back once the selection is cleared", (await state()).shown);
+      }
+
+      const box = await pill.boundingBox();
+      await b.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+      if (reduced) {
+        await b.waitForTimeout(80);
+        check("with reduced motion a tap jumps straight to the top", (await state()).scrollTop === 0);
+      } else {
+        const mid = await b.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(Math.round(document.querySelector("[data-row-count]").scrollTop))))));
+        await b.waitForFunction(() => document.querySelector("[data-row-count]").scrollTop === 0, null, { timeout: 3_000 }).catch(() => undefined);
+        await b.waitForTimeout(350);
+        const after = await state();
+        check("a tap smooth-scrolls the list to the top", mid > 0 && after.scrollTop === 0, JSON.stringify({ mid, after: after.scrollTop }));
+        check("and the pill hides again there", !after.shown && !after.takesTap);
+      }
+      await ctx.close();
+    }
+  }
+
   // ── Privacy ─────────────────────────────────────────────────────────────────
   //
   // From the network's side: what leaves the browser. A signed-in session against a

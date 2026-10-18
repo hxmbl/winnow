@@ -668,6 +668,39 @@ div[data-row-count] {
   backdrop-filter: none;
 }
 
+/*
+ * The phone's back-to-top pill, centred above the chips. Hidden it takes no taps and is
+ * out of the paint and the tab order (`visibility` flips after the fade); shown it fades
+ * in and rises 8px. Reduced motion: no slide, and the global rule makes the fade instant.
+ */
+.wn-back-to-top {
+  opacity: 0;
+  transform: translateY(8px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease-in,
+    transform 180ms ease-in,
+    visibility 0s linear 180ms;
+}
+.wn-back-to-top[data-shown] {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 180ms ease-out,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wn-back-to-top,
+  .wn-back-to-top[data-shown] {
+    transform: none;
+    transition: none;
+  }
+}
+
 /* Raised but solid: the compose button beside the pill, in the accent. */
 .wn-raised {
   box-shadow:

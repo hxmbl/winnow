@@ -67,3 +67,30 @@ export function panelOrder<T extends { id: Mailbox }>(folders: readonly T[]): T[
   const named = reversed.filter((folder) => rank(folder.id) >= 0).sort((a, b) => rank(a.id) - rank(b.id));
   return [...other, ...named];
 }
+
+/** The back-to-top pill's accessible name; its visible label is "Top". */
+export const BACK_TO_TOP_LABEL = "Back to top";
+
+/** How far down, in screens of the list, before the back-to-top pill appears. */
+export const BACK_TO_TOP_SCREENS = 1;
+
+/** What decides whether the back-to-top pill shows. */
+export type BackToTopState = {
+  /** The list's scroll offset and its own visible height, in px. */
+  scrollTop: number;
+  viewportHeight: number;
+  /** Nothing else has the screen: no multi-selection, overlay, sheet or composer. */
+  allowed: boolean;
+  /** The dock's panel is expanded (the chips are set aside then too). */
+  menuOpen: boolean;
+};
+
+/**
+ * Whether the back-to-top pill shows: only once the list is more than a screen down,
+ * and never over the expanded panel, a selection, Settings or a sheet. A list with no
+ * height (hidden behind the reader) has nowhere to go back to.
+ */
+export function backToTopVisible({ scrollTop, viewportHeight, allowed, menuOpen }: BackToTopState): boolean {
+  if (!allowed || menuOpen || viewportHeight <= 0) return false;
+  return scrollTop > viewportHeight * BACK_TO_TOP_SCREENS;
+}

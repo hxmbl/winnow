@@ -3055,6 +3055,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               ? () => openCompose()
               : null
           }
+          // Back to top, likewise, only over the plain list.
+          backToTopAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !labelPicker}
         />
       )}
 
