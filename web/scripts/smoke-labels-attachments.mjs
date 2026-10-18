@@ -203,16 +203,34 @@ export async function labelsAndAttachments({ browser, url, check, section }) {
       String(download?.suggestedFilename()),
     );
 
+    // A browser with a PDF viewer shows the blob in the new tab; one without (the headless
+    // shell CI runs) turns the tab's navigation into a download, closes the tab, and
+    // Playwright reports the download on the page that opened it. Either is Open working:
+    // the file went to a new tab on its blob URL. Downloads are listened for before the
+    // click, and the tab's URL is read once it has navigated, not when it appears.
+    const tabDownloads = [];
+    const onDownload = (d) => tabDownloads.push(d);
+    const onTab = (tab) => tab.on("download", onDownload);
+    ctx.on("page", onTab);
+    p.on("download", onDownload);
     const popupPromise = ctx.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
-    const pdfDownload = p.waitForEvent("download", { timeout: 5_000 }).catch(() => null);
     await p.locator('[data-attachment="annual-return-2025.pdf"] [data-attachment-open]').click();
     const popup = await popupPromise;
+    if (popup) {
+      await popup.waitForURL(/^blob:/, { timeout: 5_000 }).catch(() => undefined);
+      for (let i = 0; i < 20 && !(!popup.isClosed() && /^blob:/.test(popup.url())) && tabDownloads.length === 0; i++) {
+        await p.waitForTimeout(100);
+      }
+    }
+    ctx.off("page", onTab);
+    p.off("download", onDownload);
+    const tabUrl = popup && !popup.isClosed() ? popup.url() : "";
+    const tabDownload = tabDownloads.find((d) => /^blob:/.test(d.url())) ?? null;
     check(
-      "Open shows a PDF in a new tab (the browser's viewer)",
-      popup !== null && /^blob:/.test(popup.url() || (await popup.evaluate(() => location.href).catch(() => ""))),
-      popup ? popup.url() : "no tab",
+      "Open puts a PDF in a new tab on its blob URL (the browser's viewer, or its download where there is none)",
+      popup !== null && (/^blob:/.test(tabUrl) || tabDownload !== null),
+      popup ? JSON.stringify({ tab: tabUrl, download: tabDownload?.url() ?? null }) : "no tab",
     );
-    void pdfDownload;
     check("no page errors in attachments", errors.length === 0, errors.slice(0, 3).join(" | "));
     await ctx.close();
   }
