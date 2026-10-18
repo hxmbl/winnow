@@ -60,7 +60,7 @@ import {
   type GoogleContact,
   type GoogleContactsStore,
 } from "../contacts/google";
-import { buildMime } from "../gmail/mime";
+import { buildMime, type OutgoingAttachment } from "../gmail/mime";
 import { base64UrlDecode } from "../gmail/dto";
 import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
 import { loadedBodyOf, mailboxFor, toDraftEmail } from "../gmail/mapper";
@@ -1037,6 +1037,34 @@ export class GmailSession {
      * whole exchange, and its thread id. A send insists on having that message
      * (`strict`); a draft save does not, and saves unthreaded rather than not at all.
      */
+    /**
+     * Bytes of files a reopened draft names by Gmail id, kept for this session: a draft's
+     * message id (and so its attachment ids) changes on every save, so the first save
+     * after reopening is the last time those ids can be read.
+     */
+    const sourceBytes = new Map<string, Uint8Array>();
+    const SOURCE_BYTES_KEPT = 40;
+    const attachmentsFor = async (draft: Draft): Promise<OutgoingAttachment[] | undefined> => {
+      const files = draft.attachments ?? [];
+      if (files.length === 0) return undefined;
+      return Promise.all(
+        files.map(async (file): Promise<OutgoingAttachment> => {
+          if (file.data !== undefined) return { filename: file.filename, mimeType: file.mimeType, base64: file.data };
+          const source = file.source;
+          if (!source) throw new GmailError(`${file.filename} is no longer available. Attach it again.`, 400, "unknown");
+          const key = `${source.gmailId}:${source.attachmentId}`;
+          let bytes = sourceBytes.get(key);
+          if (!bytes) {
+            const response = await client.attachment(source.gmailId, source.attachmentId);
+            bytes = base64UrlDecode(response.data ?? "") ?? new Uint8Array(0);
+            sourceBytes.set(key, bytes);
+            while (sourceBytes.size > SOURCE_BYTES_KEPT) sourceBytes.delete(sourceBytes.keys().next().value!);
+          }
+          return { filename: file.filename, mimeType: file.mimeType, bytes };
+        }),
+      );
+    };
+
     const rawFor = async (
       draft: Draft,
       replyTo?: GmailId,
@@ -1046,7 +1074,8 @@ export class GmailSession {
       // account's own.
       const account = await client.profile();
       const from = { address: account.emailAddress, name: account.emailAddress.split("@")[0] };
-      if (!replyTo) return { raw: buildMime(draft, { from }), threadId: draft.threadId };
+      const attachments = await attachmentsFor(draft);
+      if (!replyTo) return { raw: buildMime(draft, { from, attachments }), threadId: draft.threadId };
       const all = await loadCache();
       const email = all.find((candidate) => candidate.gmailId === replyTo);
       if (!email) {
@@ -1057,7 +1086,7 @@ export class GmailSession {
             "unknown",
           );
         }
-        return { raw: buildMime(draft, { from }), threadId: draft.threadId };
+        return { raw: buildMime(draft, { from, attachments }), threadId: draft.threadId };
       }
       // `References` accumulates the whole exchange, oldest first, so that a client
       // threading this by references sees the same thread Gmail does.
@@ -1065,7 +1094,7 @@ export class GmailSession {
         ? all.filter((candidate) => candidate.threadId === email.threadId)
         : [email];
       return {
-        raw: buildMime(draft, { from, inReplyTo: email, references: conversation }),
+        raw: buildMime(draft, { from, inReplyTo: email, references: conversation, attachments }),
         threadId: email.threadId,
       };
     };

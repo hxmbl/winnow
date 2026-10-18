@@ -611,7 +611,11 @@ Company: Northwind Analytics Ltd Period ended: 31 December 2025 Filed: 14 April 
 
 No further action is required. A copy is attached for your records.`),
     category: "updates",
-    attachments: [{ filename: "annual-return-2025.pdf", mimeType: "application/pdf", size: 184_320 }],
+    // Real bytes in `demoAttachments.ts`, so the demo's files preview, open and save.
+    attachments: [
+      { filename: "annual-return-2025.pdf", mimeType: "application/pdf", size: 696 },
+      { filename: "filing-receipt.png", mimeType: "image/png", size: 221 },
+    ],
     demonstrates: "attachments",
   },
 

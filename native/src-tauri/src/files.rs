@@ -108,6 +108,78 @@ pub async fn save_attachment(
     }
 }
 
+/// Extensions `open_attachment` will hand to the system's default app. A viewer for a
+/// document, never something that runs: an attachment named `invoice.pdf.exe` is a
+/// sender's choice, and "open" must not mean "execute".
+#[cfg_attr(target_os = "android", allow(dead_code))]
+const VIEWABLE_EXTENSIONS: &[&str] = &["pdf"];
+
+/// Whether `name` (already sanitised) is something `open_attachment` may open.
+#[cfg_attr(target_os = "android", allow(dead_code))]
+fn is_viewable(name: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, ext)| VIEWABLE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
+/// Write an attachment to Winnow's own folder in the temp directory and open it in the
+/// system's default viewer (a PDF in Preview, Acrobat, Evince…).
+///
+/// Only viewable documents (`VIEWABLE_EXTENSIONS`): the name is the sender's. Each file
+/// goes in a fresh numbered folder so two attachments with one name never overwrite each
+/// other while open. Async for the same reason as `save_attachment`: the write is kept
+/// off the main thread.
+#[cfg(not(target_os = "android"))]
+pub async fn open_attachment(
+    app: &AppHandle,
+    suggested_name: &str,
+    bytes_base64: &str,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let safe_name = sanitise_name(suggested_name);
+    if !is_viewable(&safe_name) {
+        return Err(format!(
+            "Winnow only opens PDFs in another app; save {safe_name} instead"
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(bytes_base64)
+        .map_err(|e| format!("attachment payload was not valid base64: {e}"))?;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let folder = std::env::temp_dir()
+        .join("winnow-attachments")
+        .join(format!("{}-{nanos}", std::process::id()));
+    let target = folder.join(&safe_name);
+    let target_for_task = target.clone();
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&folder)
+            .and_then(|()| std::fs::write(&target_for_task, &bytes))
+            .map_err(|e| format!("could not write {}: {e}", target_for_task.display()))
+    })
+    .await
+    .map_err(|e| format!("the write task failed: {e}"))??;
+
+    let shown = target.to_string_lossy().into_owned();
+    app.opener()
+        .open_path(shown.clone(), None::<&str>)
+        .map_err(|e| format!("could not open {shown}: {e}"))
+}
+
+/// Android has no default-app hand-off for a file Winnow writes; the web layer saves
+/// through the system picker instead and never calls this there.
+#[cfg(target_os = "android")]
+pub async fn open_attachment(
+    _app: &AppHandle,
+    _suggested_name: &str,
+    _bytes_base64: &str,
+) -> Result<(), String> {
+    Err("opening attachments in another app is not available on Android".to_string())
+}
+
 /// Strip path separators and NULs from a sender-supplied file name.
 ///
 /// A message body controls this string, so `../../.ssh/authorized_keys` must
@@ -140,7 +212,17 @@ fn sanitise_name(suggested_name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitise_name;
+    use super::{is_viewable, sanitise_name};
+
+    #[test]
+    fn only_documents_are_opened_never_programs() {
+        assert!(is_viewable("return.pdf"));
+        assert!(is_viewable("SCAN.PDF"));
+        assert!(!is_viewable("invoice.pdf.exe"));
+        assert!(!is_viewable("run.sh"));
+        assert!(!is_viewable("pdf"));
+        assert!(!is_viewable("attachment"));
+    }
 
     #[test]
     fn traversal_segments_lose_their_separators() {

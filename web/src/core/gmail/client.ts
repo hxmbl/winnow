@@ -20,6 +20,7 @@
 
 import {
   GMAIL_API,
+  GMAIL_UPLOAD_API,
   GmailError,
   GmailHttpError,
   LABEL,
@@ -311,25 +312,40 @@ export class GmailClient {
    */
   private async request<T>(
     path: string,
-    init: { method?: string; body?: unknown; allowRetry?: boolean } = {},
+    init: {
+      method?: string;
+      body?: unknown;
+      allowRetry?: boolean;
+      /**
+       * Send to the media upload endpoint (`/upload/gmail/v1`) with this body as is,
+       * rather than JSON to the API. See `uploadBody`.
+       */
+      upload?: { contentType: string; body: string };
+    } = {},
   ): Promise<T> {
     const token = await this.tokenProvider();
     if (!token) {
       throw new GmailError("Not signed in to Gmail.", 401, "reauth_required");
     }
 
-    const url = `${GMAIL_API}${path}`;
+    const url = `${init.upload ? GMAIL_UPLOAD_API : GMAIL_API}${path}`;
     const method = init.method ?? "GET";
+    // An upload is charged as the call it uploads for: `?uploadType=` is not part of it.
+    const costPath = init.upload ? path.replace(/\?uploadType=[a-z]+$/, "") : path;
     const send = async (bearer: string) => {
       for (let attempt = 0; ; attempt += 1) {
-        await this.bucket.take(costOf(path, method));
+        await this.bucket.take(costOf(costPath, method));
         const response = await this.fetchImpl(url, {
           method,
           headers: {
             Authorization: `Bearer ${bearer}`,
-            ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+            ...(init.upload
+              ? { "Content-Type": init.upload.contentType }
+              : init.body === undefined
+                ? {}
+                : { "Content-Type": "application/json" }),
           },
-          body: init.body === undefined ? undefined : JSON.stringify(init.body),
+          body: init.upload ? init.upload.body : init.body === undefined ? undefined : JSON.stringify(init.body),
         });
         const text = await response.text();
         const limited = isRateLimited(response.status, text);
@@ -497,6 +513,12 @@ export class GmailClient {
    * belongs at the wire so a caller cannot forget it.
    */
   async send(raw: string, threadId?: string): Promise<GmailSendResponse> {
+    if (needsUpload(raw)) {
+      return this.request<GmailSendResponse>("/users/me/messages/send?uploadType=multipart", {
+        method: "POST",
+        upload: uploadBody(threadId ? { threadId } : {}, raw),
+      });
+    }
     const body: Record<string, unknown> = { raw: base64UrlEncode(new TextEncoder().encode(raw)) };
     if (threadId) body.threadId = threadId;
     return this.request<GmailSendResponse>("/users/me/messages/send", { method: "POST", body });
@@ -518,11 +540,23 @@ export class GmailClient {
    * `send`; `threadId` files a reply's draft on its conversation.
    */
   async createDraft(raw: string, threadId?: string): Promise<GmailDraft> {
+    if (needsUpload(raw)) {
+      return this.request<GmailDraft>("/users/me/drafts?uploadType=multipart", {
+        method: "POST",
+        upload: uploadBody({ message: threadId ? { threadId } : {} }, raw),
+      });
+    }
     return this.request<GmailDraft>("/users/me/drafts", { method: "POST", body: { message: draftMessage(raw, threadId) } });
   }
 
   /** Replace a draft's content, keeping its id. */
   async updateDraft(id: string, raw: string, threadId?: string): Promise<GmailDraft> {
+    if (needsUpload(raw)) {
+      return this.request<GmailDraft>(`/users/me/drafts/${encodeURIComponent(id)}?uploadType=multipart`, {
+        method: "PUT",
+        upload: uploadBody({ id, message: threadId ? { threadId } : {} }, raw),
+      });
+    }
     return this.request<GmailDraft>(`/users/me/drafts/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: { id, message: draftMessage(raw, threadId) },
@@ -534,6 +568,12 @@ export class GmailClient {
    * nothing is left behind in Drafts.
    */
   async sendDraft(id: string, raw: string, threadId?: string): Promise<GmailSendResponse> {
+    if (needsUpload(raw)) {
+      return this.request<GmailSendResponse>("/users/me/drafts/send?uploadType=multipart", {
+        method: "POST",
+        upload: uploadBody({ id, message: threadId ? { threadId } : {} }, raw),
+      });
+    }
     return this.request<GmailSendResponse>("/users/me/drafts/send", {
       method: "POST",
       body: { id, message: draftMessage(raw, threadId) },
@@ -593,6 +633,42 @@ export class GmailClient {
       body: { addLabelIds, removeLabelIds },
     });
   }
+}
+
+/**
+ * Past this many bytes of raw message, a send or draft save goes through the media
+ * upload endpoint. The JSON endpoints carry the message base64url-encoded inside the
+ * request body, which Gmail caps well under the 25 MB attachments allow (and which grows
+ * the payload by a third); the upload endpoint takes the RFC 822 message as it is, up to
+ * 35 MB.
+ */
+export const UPLOAD_THRESHOLD = 4 * 1024 * 1024;
+
+function needsUpload(raw: string): boolean {
+  return raw.length > UPLOAD_THRESHOLD;
+}
+
+/**
+ * A `multipart/related` upload: the JSON metadata (thread, draft id), then the message.
+ * The boundary is checked against the message, which is all base64 and headers, so a
+ * collision is impossible in practice and refused in principle.
+ */
+export function uploadBody(metadata: Record<string, unknown>, raw: string): { contentType: string; body: string } {
+  let boundary = "winnow_upload_boundary";
+  while (raw.includes(boundary)) boundary += "_";
+  const body = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    "Content-Type: message/rfc822",
+    "",
+    raw,
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  return { contentType: `multipart/related; boundary=${boundary}`, body };
 }
 
 /** `messages.batchModify` takes at most this many message ids per request. */

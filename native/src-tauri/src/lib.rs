@@ -91,6 +91,7 @@ pub fn run() {
             commands::notify_new_mail,
             commands::open_external,
             commands::save_attachment,
+            commands::open_attachment,
             commands::set_unread_badge,
             commands::set_background_sync,
             commands::request_notification_permission,

@@ -347,6 +347,13 @@ pub async fn save_attachment(
     crate::files::save_attachment(&app, &filename, &bytes_base64).await
 }
 
+/// Open an attachment (a PDF) in the system's default viewer. Desktop only; Android
+/// saves through the picker instead, and the web layer does not call this there.
+#[tauri::command]
+pub async fn open_attachment(app: AppHandle, filename: String, bytes_base64: String) -> Result<()> {
+    crate::files::open_attachment(&app, &filename, &bytes_base64).await
+}
+
 // ── Dock / tray badge ───────────────────────────────────────────────────────
 
 /// Show how many unread messages are waiting.

@@ -16,7 +16,8 @@
  * the call sequence is testable with fakes.
  */
 
-import type { Contact, Draft, Email, GmailId } from "../model/email";
+import type { Contact, Draft, DraftAttachment, Email, GmailId } from "../model/email";
+import { forDeviceCopy, restorableAttachments } from "./attachments";
 
 /** What the composer is for. Matches `Composer`'s `mode`. */
 export type DraftMode = "reply" | "forward" | "new";
@@ -366,10 +367,15 @@ export class DraftAutosaver {
 
   private writeLocal(): void {
     if (!this.latest || !this.opts.local) return;
+    // Files past the device budget are kept by name only: the Gmail draft has them, and
+    // a `localStorage` write that overflows would lose the text as well.
+    const attachments = forDeviceCopy(this.latest.attachments);
+    const { attachments: _all, ...rest } = this.latest;
+    void _all;
     this.opts.local.put({
       context: this.opts.context,
       mode: this.opts.mode,
-      draft: this.latest,
+      draft: attachments ? { ...rest, attachments } : rest,
       replyTo: this.opts.replyTo,
       gmailDraftId: this.id ?? undefined,
       ...this.meta,
@@ -467,12 +473,21 @@ export function reopenDraft(email: Email, all: readonly Email[]): DraftReopen | 
   if (!gmailDraft) return null;
   const addresses = (contacts: readonly Contact[] | undefined) =>
     (contacts ?? []).map((contact) => contact.address);
+  // Its files, by where Gmail holds them: read when the draft is next saved or sent.
+  const attachments: DraftAttachment[] = (email.attachments ?? []).map((attachment, index) => ({
+    id: `gmail-${index}-${attachment.id}`,
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    source: { gmailId: email.gmailId, attachmentId: attachment.id },
+  }));
   const draft: Draft = {
     to: addresses(email.to),
     cc: addresses(email.cc),
     bcc: addresses(email.bcc),
     subject: email.subject,
     body: email.body,
+    ...(attachments.length > 0 ? { attachments } : {}),
   };
   const context = gmailDraftContext(gmailDraft.id);
   const others = all.filter((candidate) => candidate.mailbox !== "drafts" && candidate.gmailId !== email.gmailId);
@@ -530,4 +545,23 @@ export function draftRowFrom(
     body: draft.body,
     receivedAt: now,
   };
+}
+
+/**
+ * A device copy, as the composer reopens it: the files that can still be sent, and the
+ * names of any that were too big to keep here (they have to be attached again, unless the
+ * Gmail draft is reopened from Drafts instead).
+ */
+export function restoreLocalDraft(kept: LocalDraft): { draft: Draft; lost: string[] } {
+  if (!kept.draft.attachments) return { draft: kept.draft, lost: [] };
+  const { kept: attachments, lost } = restorableAttachments(kept.draft.attachments);
+  const { attachments: _all, ...rest } = kept.draft;
+  void _all;
+  return { draft: attachments.length > 0 ? { ...rest, attachments } : rest, lost };
+}
+
+/** What the composer says about files a restored draft could not bring back. */
+export function lostAttachmentsMessage(lost: readonly string[]): string | null {
+  if (lost.length === 0) return null;
+  return `${lost.join(", ")} ${lost.length === 1 ? "was" : "were"} too big to keep on this device. Attach ${lost.length === 1 ? "it" : "them"} again.`;
 }
