@@ -7,6 +7,8 @@ import {
   clientTypeFor,
   initialSetupStep,
   originOf,
+  pasteStepOf,
+  setupSteps,
 } from "./googleSetupSteps";
 
 describe("the Google setup walkthrough", () => {
@@ -49,5 +51,22 @@ describe("the Google setup walkthrough", () => {
     expect(originOf("https://mail.example.com/winnow/")).toBe("https://mail.example.com");
     expect(originOf("")).toBe("");
     expect(originOf("not a url")).toBe("");
+  });
+});
+
+describe("the Android walkthrough", () => {
+  const android = setupSteps(true);
+
+  it("adds the optional native sign-in step just before the paste step", () => {
+    expect(android.map((step) => step.id)).toEqual(["project", "apis", "consent", "client", "android", "paste"]);
+    expect(pasteStepOf(android)).toBe(5);
+    expect(setupSteps(false)).toBe(SETUP_STEPS);
+  });
+
+  it("opens on, and clamps to, its own paste step", () => {
+    expect(initialSetupStep(true, android)).toBe(5);
+    expect(initialSetupStep(false, android)).toBe(0);
+    expect(clampStep(9, android)).toBe(5);
+    expect(clampStep(4, android)).toBe(4);
   });
 });

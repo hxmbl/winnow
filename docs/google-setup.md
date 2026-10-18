@@ -157,6 +157,36 @@ and signs you out.
 - **Nothing is saved until you choose Save and connect**, and then it is stored
   exactly as if you had typed it. The secret is never shown or logged.
 
+### Optional on Android: sign in without the browser
+
+The Android app adds one optional step before the paste step. With it, Winnow signs
+you in with Google's own account picker (Google Play services) instead of opening a
+browser. Skip it and nothing changes: sign-in goes through the browser, in a Custom
+Tab over the app.
+
+It needs two more clients in the **same** project:
+
+1. An **Android** client: **Create client → Android**, with the package name
+   (`app.winnow.android`) and the **SHA-1 certificate fingerprint** the step shows.
+   Both are read from the app on your phone, so they are the ones Google checks.
+2. A **Web application** client, with no origins or redirect URIs. Paste its client
+   ID and secret into the step. Google issues the sign-in code to this client, and
+   Winnow uses its secret to finish signing in and to stay signed in.
+
+Winnow still needs the Desktop app client from step 4: whenever the account picker
+can't be used (no Google Play services, Google refusing the app, no network) it
+quietly signs in through the browser with that client instead. Closing the picker
+cancels the sign-in.
+
+**"The package name and fingerprint are already in use."** Google lets each package
+name and signing certificate pair belong to one Cloud project in the world, and every
+copy of the official APK carries the same certificate. If someone registered it first,
+the console refuses yours. Either skip the step (the browser sign-in works the same),
+or build Winnow yourself with your own keystore (`native/README.md`, "Android
+signing"): your build has a certificate nobody else has, and the step shows its SHA-1.
+A self-built APK can't update the official one, or the other way round, because
+Android refuses an update signed with a different key.
+
 ## What to expect from Google
 
 - **"Google hasn't verified this app."** Your project is unverified, so Google shows

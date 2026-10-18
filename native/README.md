@@ -124,6 +124,15 @@ touch `native/`).
 
 ### Android signing
 
+**Native Google sign-in and your own key.** The setup guide's optional Android step
+registers an Android OAuth client for `app.winnow.android` and the APK's signing
+certificate. Google accepts each package name and certificate pair in one Cloud
+project only, so with the official release key only the first person to register it
+can use native sign-in. A build signed with your own keystore (below, or
+`keystore.properties` for a local `cargo tauri android build --apk`) has a
+certificate only you hold, and the step shows its SHA-1. Everyone else signs in
+through the browser, which needs none of this.
+
 `release.yml` signs the Android build with a release keystore whenever four
 repository secrets exist, and needs no edit to turn it on. Until they do (and on
 forks, which never see them), it falls back to the runner's **debug key**, names
