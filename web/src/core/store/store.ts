@@ -62,6 +62,7 @@ import {
 import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
 import { DEFAULT_UNDO_SEND_SECONDS, type UndoSendSeconds } from "../mail/undoSend";
 import { applyLabelChange, sortLabels, type UserLabel } from "../mail/labels";
+import { inLabelView, labelTargets } from "./labelView";
 import { LearningModel } from "../learn/learning";
 import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
@@ -346,6 +347,11 @@ export type StoreState = {
   userLabels: UserLabel[];
   /** A labels listing is in flight. */
   labelsLoading: boolean;
+  /**
+   * A user label being browsed as a mailbox (its id), or `null`. While set, the list is
+   * that label's messages (`inLabelView`) and `mailbox` is where leaving it goes back to.
+   */
+  labelView: string | null;
   /** The messages in the current mailbox, newest first. */
   mailbox: Mailbox;
 
@@ -796,6 +802,7 @@ export class WinnowStore {
       draftsLoading: false,
       userLabels: options.backend ? [] : sortLabels(options.seedLabels ?? []),
       labelsLoading: false,
+      labelView: null,
       mailbox: "inbox",
       activeFilters: [],
       searchQuery: "",
@@ -975,8 +982,7 @@ export class WinnowStore {
     const visible = state.all.filter((email) => !blocked.has(email.sender.toLowerCase()));
     // Drafts are their own list (see `StoreState.drafts`), never filtered by sender: the
     // sender of every draft is the user.
-    const mailboxEmails =
-      state.mailbox === "drafts" ? state.drafts : visible.filter((email) => email.mailbox === state.mailbox);
+    const mailboxEmails = this.listedIn(visible);
 
     // The profile is built from the *inbox*, not the current mailbox: learning "who you
     // read" from an archive or a bin would teach it the wrong thing. Memoised; see
@@ -991,9 +997,11 @@ export class WinnowStore {
     // a rule about what belongs in your inbox. It is also the honest answer — a trashed
     // message is not "quiet personal mail", it is mail already dealt with.
     const signals =
-      state.mailbox === "inbox"
-        ? inboxSignals
-        : neutralSignalsFor(mailboxEmails);
+      state.labelView !== null
+        ? labelSignals(mailboxEmails, inboxSignals)
+        : state.mailbox === "inbox"
+          ? inboxSignals
+          : neutralSignalsFor(mailboxEmails);
 
     // Only when a search is running. See `searchBags`: the pipeline builds a bag on
     // demand, so the unsearched case is a fast path, not a different code path.
@@ -1081,7 +1089,8 @@ export class WinnowStore {
       conversation,
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
       totalCount: mailboxEmails.length,
-      otherMailboxCount: state.mailbox === "drafts" ? visible.length : visible.length - mailboxEmails.length,
+      otherMailboxCount:
+        state.mailbox === "drafts" && state.labelView === null ? visible.length : visible.length - mailboxEmails.length,
       contacts: this.contacts(),
     };
   }
@@ -1290,6 +1299,7 @@ export class WinnowStore {
       // Nor its labels: this account's are listed when "Label as…" opens.
       userLabels: [],
       labelsLoading: false,
+      labelView: null,
     });
     this.draftsGeneration += 1;
     if (this.state.mailbox === "drafts") void this.refreshDrafts();
@@ -1613,7 +1623,7 @@ export class WinnowStore {
     const blocked = new Set(this.state.preferences.blockedSenders.map((s) => s.toLowerCase()));
     const mutedUnread = this.state.all.filter((email) => {
       const sender = email.sender.toLowerCase();
-      return email.unread && email.mailbox === this.state.mailbox && keys.has(sender) && !blocked.has(sender);
+      return email.unread && this.isListed(email) && keys.has(sender) && !blocked.has(sender);
     }).length;
     return Math.max(0, this.view.unreadCount - mutedUnread);
   }
@@ -1636,7 +1646,7 @@ export class WinnowStore {
   // ── Selection and navigation ──────────────────────────────────────────────
 
   setMailbox(mailbox: Mailbox): void {
-    if (this.state.mailbox === mailbox) return;
+    if (this.state.mailbox === mailbox && this.state.labelView === null) return;
     // Switching mailbox drops the reader and the cursor: a selection from the inbox
     // means nothing in the bin. Filters go too — a bucket pinned in the inbox means
     // nothing in the archive — and both are persisted together, since "which mailbox
@@ -1645,11 +1655,38 @@ export class WinnowStore {
     // The undo offer goes with them: its label names a mailbox, and it is about to stop
     // being true. Letting it go is what a draft discard waits for, so that runs now.
     this.settleUndo();
-    this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [], undo: null }, {
+    this.set({ mailbox, labelView: null, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [], undo: null }, {
       mailbox,
       activeFilters: [],
     });
     if (mailbox === "drafts") void this.refreshDrafts();
+  }
+
+  /**
+   * Browse a user label as a mailbox, or `null` to stop. Like a mailbox change it drops
+   * the reader, the cursor, the filters and the undo offer. Not persisted: a reload opens
+   * the mailbox it was browsed from.
+   */
+  setLabelView(labelId: string | null): void {
+    if (this.state.labelView === labelId) return;
+    this.settleUndo();
+    this.set({ labelView: labelId, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [], undo: null });
+  }
+
+  /** The messages the list draws from (before filters and search): a label's, or a mailbox's. */
+  private listedIn(visible: readonly Email[]): Email[] {
+    const state = this.state;
+    if (state.labelView !== null) {
+      const label = state.labelView;
+      return visible.filter((email) => inLabelView(email, label));
+    }
+    return state.mailbox === "drafts" ? state.drafts : visible.filter((email) => email.mailbox === state.mailbox);
+  }
+
+  /** Whether a message (not a draft) is in what the list draws from. */
+  private isListed(email: Email): boolean {
+    if (this.state.labelView !== null) return inLabelView(email, this.state.labelView);
+    return email.mailbox === this.state.mailbox;
   }
 
   select(id: number | null): void {
@@ -1658,10 +1695,7 @@ export class WinnowStore {
 
   /** The visible row message `id` is read on, or `-1`; see `rowIndexOf`. */
   private rowIndex(id: number): number {
-    const mailboxEmails =
-      this.state.mailbox === "drafts"
-        ? this.state.drafts
-        : this.state.all.filter((email) => email.mailbox === this.state.mailbox);
+    const mailboxEmails = this.listedIn(this.state.all);
     return rowIndexOf(this.view.threads, id, mailboxEmails);
   }
 
@@ -1820,7 +1854,7 @@ export class WinnowStore {
 
     // Clear what is hiding it, but keep the mailbox if the message is in it — switching
     // to where it lives is the point of following a link.
-    if (email.mailbox !== this.state.mailbox) this.set({ mailbox: email.mailbox });
+    if (!this.isListed(email)) this.set({ mailbox: email.mailbox, labelView: null });
     this.set({
       activeFilters: [],
       searchQuery: "",
@@ -1957,6 +1991,13 @@ export class WinnowStore {
     this.setLearning(learning);
   }
 
+  /** The name of the label being browsed, or `null` when the list is a mailbox. */
+  labelViewName(): string | null {
+    const id = this.state.labelView;
+    if (id === null) return null;
+    return this.state.userLabels.find((label) => label.id === id)?.name ?? "Label";
+  }
+
   /**
    * The title of the list, for the header and the window title.
    *
@@ -1966,7 +2007,7 @@ export class WinnowStore {
    */
   listTitle(): string {
     const filters = this.state.activeFilters;
-    if (filters.length === 0) return MAILBOX_LABEL[this.state.mailbox];
+    if (filters.length === 0) return this.labelViewName() ?? MAILBOX_LABEL[this.state.mailbox];
     if (filters.length === 1) {
       const only = filters[0];
       return only.kind === "sender" ? `From ${only.sender}` : FILTER_LABELS[only.id];
@@ -2367,7 +2408,9 @@ export class WinnowStore {
    */
   applyLabels(ids: readonly number[], add: readonly string[], remove: readonly string[]): void {
     if (ids.length === 0 || (add.length === 0 && remove.length === 0)) return;
-    const targets = new Set(ids);
+    // The whole conversation, as Gmail applies it (`threads.modify`), so a reply on the
+    // thread does not show the old labels until the next sync.
+    const targets = labelTargets(this.state.all, ids);
     const before = new Map<number, string[] | undefined>();
     for (const email of this.state.all) if (targets.has(email.id)) before.set(email.id, email.labels);
     if (before.size === 0) return;
@@ -2379,7 +2422,7 @@ export class WinnowStore {
     const backend = this.backend;
     if (!backend) return;
     const call = backend.modifyLabels
-      ? backend.modifyLabels([...before.keys()], add, remove)
+      ? backend.modifyLabels(ids.filter((id) => before.has(id)), add, remove)
       : Promise.reject(new Error("Labels can't be changed from here."));
     call.catch((error: unknown) => {
       if (this.backend !== backend) return;
@@ -2496,10 +2539,10 @@ export class WinnowStore {
     const id = this.state.selectedId;
     const openMessageSurvives = (): boolean => {
       if (id === null) return false;
-      if (this.state.mailbox === "drafts") return this.state.drafts.some((email) => email.id === id);
-      return this.state.all.some(
-        (email) => email.id === id && email.mailbox === this.state.mailbox,
-      );
+      if (this.state.mailbox === "drafts" && this.state.labelView === null) {
+        return this.state.drafts.some((email) => email.id === id);
+      }
+      return this.state.all.some((email) => email.id === id && this.isListed(email));
     };
 
     // No cursor, so nothing to reconcile. A message can still have been selected by a
@@ -3058,6 +3101,16 @@ export class WinnowStore {
  * copied per message: it has no mutable fields, and a map of a few thousand identical
  * references costs nothing next to a few thousand copies.
  */
+/**
+ * A label's messages, from every mailbox: the inbox's own classification for the ones in
+ * the inbox, and neutral for the rest — the same answer each would get in its mailbox.
+ */
+function labelSignals(emails: readonly Email[], inboxSignals: SignalMap): SignalMap {
+  const map = new Map<number, EmailSignals>();
+  for (const email of emails) map.set(email.id, inboxSignals.get(email.id) ?? NEUTRAL_SIGNALS);
+  return map;
+}
+
 function neutralSignalsFor(emails: readonly Email[]): SignalMap {
   const map = new Map<number, EmailSignals>();
   for (const email of emails) map.set(email.id, NEUTRAL_SIGNALS);

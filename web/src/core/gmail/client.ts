@@ -112,6 +112,8 @@ export function costOf(path: string, method: string): number {
   // messages.batchModify 50, labels.list 1 (labels.create is the default 5).
   if (path === "/users/me/messages/batchModify") return 50;
   if (method === "GET" && path === "/users/me/labels") return 1;
+  // threads.modify is 10.
+  if (/^\/users\/me\/threads\/[^/]+\/modify$/.test(path)) return 10;
   if (path.startsWith("/users/me/profile")) return 1;
   return 5;
 }
@@ -576,6 +578,20 @@ export class GmailClient {
         body: { ids: ids.slice(start, start + BATCH_MODIFY_MAX), addLabelIds, removeLabelIds },
       });
     }
+  }
+
+  /**
+   * Add and remove labels on a whole conversation (`threads.modify`), the way Gmail's own
+   * "Label as" works: every message on the thread, including ones that arrive later
+   * under the label's filter, carries it.
+   */
+  async modifyThread(threadId: string, addLabelIds: string[], removeLabelIds: string[]): Promise<void> {
+    refuseFixedLabels([...addLabelIds, ...removeLabelIds]);
+    if (addLabelIds.length === 0 && removeLabelIds.length === 0) return;
+    await this.request(`/users/me/threads/${encodeURIComponent(threadId)}/modify`, {
+      method: "POST",
+      body: { addLabelIds, removeLabelIds },
+    });
   }
 }
 

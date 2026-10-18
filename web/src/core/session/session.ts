@@ -1159,8 +1159,22 @@ export class GmailSession {
         return { id, name: created };
       },
       async modifyLabels(ids, add, remove) {
-        const gmailIds = await Promise.all(ids.map((id) => gmailIdFor(id)));
-        await client.batchModify(gmailIds, [...add], [...remove]);
+        // By conversation (`threads.modify`), as Gmail's own Label as does; a message
+        // with no thread id (an old cache row) goes by message id instead.
+        const all = await loadCache();
+        const byId = new Map(all.map((email) => [email.id, email]));
+        const threads = new Set<string>();
+        const loose: string[] = [];
+        for (const id of ids) {
+          const email = byId.get(id);
+          if (!email) {
+            throw new GmailError("That message is no longer cached. Refresh and try again.", 404, "unknown");
+          }
+          if (email.threadId) threads.add(email.threadId);
+          else loose.push(email.gmailId);
+        }
+        await mapPool([...threads], 4, (threadId) => client.modifyThread(threadId, [...add], [...remove]));
+        if (loose.length > 0) await client.batchModify(loose, [...add], [...remove]);
       },
       async sendReply(draft, inReplyTo, draftId) {
         const { raw, threadId } = await rawFor(draft as Draft, inReplyTo, true);
