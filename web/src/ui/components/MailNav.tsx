@@ -44,6 +44,17 @@ import {
   scrimMask,
 } from "../sidebarOverlay";
 
+/**
+ * Keyboard focus in the sidebar: a real `outline`, drawn 2px *inside* the button.
+ *
+ * Not Tailwind's `ring` (a box-shadow built from custom properties, which MAP.md and the
+ * focus rule in `index.css` explain is the wrong primitive here), and not outside the
+ * button either: the panel and its scroller clip their overflow, so an outline offset
+ * outward was cut off at the panel's edges and on the first and last rows.
+ */
+export const SIDEBAR_FOCUS =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring";
+
 export type NavFolder = { id: Mailbox; label: string; unread: number };
 
 export type NavProps = {
@@ -101,8 +112,8 @@ function NavSections({
   // On the phone's panel: 48px rows, an icon and a larger label, and the current one on
   // a pill, as in the reference (Linear's Android menu). The desktop's rows are as before.
   const row = touch
-    ? "flex min-h-12 items-center gap-3.5 rounded-full px-3.5 py-2 text-left text-read transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-    : "px-2.5 py-1.5 flex items-center gap-2 rounded-ctl text-left text-ui transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+    ? `flex min-h-12 items-center gap-3.5 rounded-full px-3.5 py-2 text-left text-read transition-colors ${SIDEBAR_FOCUS}`
+    : `px-2.5 py-1.5 flex items-center gap-2 rounded-ctl text-left text-ui transition-colors ${SIDEBAR_FOCUS}`;
   const idle = touch ? "text-ink-body active:bg-sheen" : "text-ink-body hover:bg-surface-hover";
   const on = touch
     ? "bg-[color-mix(in_srgb,var(--wn-ink)_10%,transparent)] font-medium text-ink"
@@ -243,7 +254,7 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
         aria-expanded={anchor !== null}
         aria-label={`Account: ${name}, ${detail}`}
         onClick={(event) => setAnchor(anchorFromElement(event.currentTarget))}
-        className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-ctl px-1.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+        className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-ctl px-1.5 text-left transition-colors hover:bg-surface-hover ${SIDEBAR_FOCUS} ${
           props.touch ? "min-h-12 py-1" : "py-1"
         }`}
       >
@@ -264,7 +275,7 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
         aria-label="Settings"
         aria-current={props.settingsOpen ? "page" : undefined}
         title="Settings (,)"
-        className={`flex shrink-0 items-center justify-center text-ink-icon transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+        className={`flex shrink-0 items-center justify-center text-ink-icon transition-colors hover:text-ink ${SIDEBAR_FOCUS} ${
           props.touch
             ? "h-12 w-12 rounded-full bg-[color-mix(in_srgb,var(--wn-ink)_8%,transparent)] active:bg-[color-mix(in_srgb,var(--wn-ink)_14%,transparent)]"
             : "h-8 w-8 rounded-ctl hover:bg-surface-hover"

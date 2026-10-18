@@ -235,7 +235,7 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     check("Escape still closes it", (await p.locator("[data-sidebar][data-open]").count()) === 0);
 
     // ── The sidebar shortcut, and its focus outline.
-    section("sidebar shortcut");
+    section("sidebar shortcut and focus");
     await p.locator("[data-row-count]").click({ position: { x: 5, y: 400 } }).catch(() => undefined);
     await p.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
     await p.keyboard.press("[");
@@ -243,6 +243,17 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     await settle(p, 300);
     const keyOpen = await p.evaluate(() => document.querySelector("[data-sidebar]").contains(document.activeElement));
     check("[ opens the sidebar, focus inside it", keyOpen);
+    await p.keyboard.press("Tab");
+    const ring = await p.evaluate(() => {
+      const el = document.activeElement;
+      const s = getComputedStyle(el);
+      return { inside: Boolean(el.closest("[data-sidebar]")), style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset, shadow: s.boxShadow, visible: el.matches(":focus-visible") };
+    });
+    check(
+      "keyboard focus in the sidebar is a 2px outline drawn inside the button, not a ring shadow",
+      ring.inside && ring.visible && ring.style === "solid" && ring.width === "2px" && ring.offset === "-2px" && ring.shadow === "none",
+      JSON.stringify(ring),
+    );
     await p.keyboard.press("[");
     await settle(p, 300);
     check("[ again closes it", (await p.locator("[data-sidebar][data-open]").count()) === 0);
