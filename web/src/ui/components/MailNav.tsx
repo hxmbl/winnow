@@ -30,6 +30,7 @@ import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
 import { anchorFromElement } from "../menuPlacement";
 import { MAILBOX_ICON } from "../menus";
 import { panelOrder } from "../phoneDock";
+import { LabelNavSection, type NavLabel } from "./LabelNav";
 import type { Mailbox } from "../../core/model/email";
 import {
   SIDEBAR_IDLE_CLOSE_MS,
@@ -68,6 +69,11 @@ export type NavProps = {
   onRefresh: () => void;
   settingsOpen: boolean;
   onOpenSettings: () => void;
+  /** The user's labels, each browsable as a mailbox. Absent or empty: no Labels section. */
+  labels?: readonly NavLabel[];
+  /** The label being browsed, which is then the current page rather than a mailbox. */
+  currentLabel?: string | null;
+  onSelectLabel?: (id: string) => void;
 };
 
 /** The account, as the footer names it. */
@@ -97,6 +103,9 @@ function NavSections({
   onSelectMailbox,
   touch,
   onNavigate,
+  labels = [],
+  currentLabel = null,
+  onSelectLabel,
 }: SectionsProps) {
   // On the phone's panel: 48px rows, an icon and a larger label, and the current one on
   // a pill, as in the reference (Linear's Android menu). The desktop's rows are as before.
@@ -114,7 +123,7 @@ function NavSections({
     return <Icon size={20} strokeWidth={current ? 2.1 : 1.8} aria-hidden="true" className="shrink-0" />;
   };
 
-  const inboxCurrent = mailbox === "inbox" && !filtering;
+  const inboxCurrent = mailbox === "inbox" && !filtering && currentLabel === null;
 
   // On the phone's panel the whole list is upside down, so the thumb that opened it from
   // the dock finds Inbox at the bottom, on the pill's line, and the rarer folders further
@@ -160,7 +169,7 @@ function NavSections({
           <ul aria-labelledby={headingId} className="flex flex-col">
             {(reversed ? panelOrder(folders) : folders).map((folder) => {
 
-              const current = mailbox === folder.id;
+              const current = mailbox === folder.id && currentLabel === null;
               return (
                 <li key={folder.id}>
                   <button
@@ -188,10 +197,21 @@ function NavSections({
         </>
   );
 
+  const labelSection = onSelectLabel ? (
+    <LabelNavSection
+      labels={reversed ? [...labels].reverse() : labels}
+      current={currentLabel}
+      onSelect={onSelectLabel}
+      touch={touch}
+      onNavigate={onNavigate}
+    />
+  ) : null;
+
   return (
     <nav aria-label="Mailbox navigation" data-mail-nav="" data-reversed={reversed ? "" : undefined} className="flex flex-col">
       {reversed ? (
         <>
+          {labelSection}
           {mail}
           {inbox}
         </>
@@ -199,6 +219,7 @@ function NavSections({
         <>
           {inbox}
           {mail}
+          {labelSection}
         </>
       )}
     </nav>

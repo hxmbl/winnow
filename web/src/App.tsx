@@ -119,6 +119,7 @@ import { contactsFailureNotice } from "./core/gmail/people";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import type { OfflineQueue } from "./core/offline/queue";
 import { OfflineIndicator } from "./ui/components/OfflineIndicator";
+import { LabelNamesContext, type LabelNames } from "./ui/labelNames";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -836,6 +837,21 @@ export function App({ store }: Props) {
    * count is the unfiltered inbox list's own number of conversations. The smart filters
    * are not here; they are the rail (`FilterStrip`).
    */
+  /** The user's labels for the sidebar, each with its unread count outside Trash and Spam. */
+  const navLabels = useMemo(() => {
+    const unread = new Map<string, number>();
+    for (const email of snapshot.all) {
+      if (!email.unread || !email.labels || email.mailbox === "trash" || email.mailbox === "spam") continue;
+      for (const id of email.labels) unread.set(id, (unread.get(id) ?? 0) + 1);
+    }
+    return snapshot.userLabels.map((label) => ({ ...label, unread: unread.get(label.id) ?? 0 }));
+  }, [snapshot.all, snapshot.userLabels]);
+  /** Label names for the chips on rows and in the reader. */
+  const labelNames = useMemo<LabelNames>(
+    () => ({ names: new Map(snapshot.userLabels.map((label) => [label.id, label.name])), hidden: snapshot.labelView }),
+    [snapshot.userLabels, snapshot.labelView],
+  );
+
   const navProps: NavProps = {
     inboxCount: view.inboxThreadCount,
     inboxUnread: mailboxes.find((mailbox) => mailbox.id === "inbox")?.unread ?? 0,
@@ -870,6 +886,12 @@ export function App({ store }: Props) {
     },
     settingsOpen: snapshot.overlay === "settings",
     onOpenSettings: () => store.setOverlay("settings"),
+    labels: navLabels,
+    currentLabel: snapshot.labelView,
+    onSelectLabel: (id) => {
+      store.setOverlay("none");
+      store.setLabelView(id);
+    },
   };
 
   const paletteUnread = useMemo(
@@ -1746,6 +1768,14 @@ export function App({ store }: Props) {
 
   /** The grant's drafts access, read off the token whenever the account changes. */
   const accountEmail = snapshot.account?.email ?? null;
+  // The account's labels, for the chips and the sidebar: once it connects, and again
+  // whenever the sidebar opens (cheap, one unit), in case one was made in Gmail.
+  useEffect(() => {
+    if (accountEmail) void storeRef.current.loadLabels();
+  }, [accountEmail]);
+  useEffect(() => {
+    if (sidebarOpen && storeRef.current.getSnapshot().account) void storeRef.current.loadLabels();
+  }, [sidebarOpen]);
   useEffect(() => {
     const bridge = sessionRef.current;
     if (!bridge || !accountEmail) {
@@ -2659,6 +2689,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   return (
     <SenderPicturesContext.Provider value={senderPictures}>
+    <LabelNamesContext.Provider value={labelNames}>
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
       {/*
         Everything but the phone's dock is inert while the sidebar is open. The dock stays
@@ -2907,6 +2938,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+                    onLabel={snapshot.mailbox === "drafts" && snapshot.labelView === null ? undefined : () => openLabelPicker([...selection])}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
                 </div>
@@ -2917,7 +2949,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onSearchChange={store.setSearchQuery.bind(store)}
                     searchRef={searchRef}
                     listTitle={store.listTitle()}
-                    mailboxName={MAILBOX_LABEL[snapshot.mailbox]}
+                    mailboxName={store.labelViewName() ?? MAILBOX_LABEL[snapshot.mailbox]}
                     position={null}
                     total={view.threads.length}
                     version={info?.version ?? null}
@@ -2969,6 +3001,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+                    onLabel={snapshot.mailbox === "drafts" && snapshot.labelView === null ? undefined : () => openLabelPicker([...selection])}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
                 ) : undefined
@@ -3113,7 +3146,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               email={selected}
               conversation={view.conversation}
               signals={selected ? (view.signals.get(selected.id) ?? null) : null}
-              mailbox={snapshot.mailbox}
+              // Browsing a label, the message's own mailbox decides what Archive means.
+              mailbox={snapshot.labelView !== null && selected ? selected.mailbox : snapshot.mailbox}
               // Either the global preference, or this one message the reader's own
               // escape hatch has been used on. See `remoteFor`.
               imagesAllowed={imagesAllowed}
@@ -3612,6 +3646,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       onClose={closeSidebar}
       touch={phone}
     />
+    </LabelNamesContext.Provider>
     </SenderPicturesContext.Provider>
   );
 }

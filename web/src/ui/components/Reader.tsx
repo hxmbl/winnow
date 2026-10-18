@@ -59,6 +59,7 @@ function firstLine(body: string): string {
   return "";
 }
 import { formatBytes } from "../../core/gmail/mime";
+import { LabelChips } from "./LabelChips";
 import type { Mailbox } from "../../core/model/email";
 import { DOCK_SURFACE } from "./PhoneChrome";
 import { AppMark } from "../AppMark";
@@ -227,6 +228,18 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
       >
         <Trash2 size={15} strokeWidth={1.9} />
       </button>
+      {actions.onLabelAs && (
+        <button
+          type="button"
+          onClick={actions.onLabelAs}
+          aria-label="Label as…"
+          title="Label as…"
+          data-reader-toolbar-label=""
+          className={ICON_BUTTON}
+        >
+          <Tag size={15} strokeWidth={1.9} />
+        </button>
+      )}
       <MoreMenu
         view={view}
         onViewChange={onViewChange}
@@ -731,6 +744,8 @@ export function Reader({
             </time>
             {isOwnMessage && " · sent by you"}
           </p>
+
+          <LabelChips ids={email.labels} all className="mt-2 flex-wrap" />
 
           {filters.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">

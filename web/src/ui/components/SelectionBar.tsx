@@ -8,7 +8,7 @@
  */
 
 import { useRef, useState } from "react";
-import { Archive, ArchiveRestore, FolderInput, MailMinus, MailOpen, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, FolderInput, MailMinus, MailOpen, Tag, Trash2, X } from "lucide-react";
 import type { Mailbox } from "../../core/model/email";
 import { MAILBOX_LABEL } from "../../core/model/email";
 import { archiveLabel, moveTargets } from "../menus";
@@ -24,10 +24,12 @@ type Props = {
   onTrash: () => void;
   onSetRead: (read: boolean) => void;
   onMove: (mailbox: Mailbox) => void;
+  /** "Label as…" for the selection. Absent where labels do not apply (Drafts). */
+  onLabel?: () => void;
   onClear: () => void;
 };
 
-export function SelectionBar({ count, mailbox, anyUnread, phone, onArchive, onTrash, onSetRead, onMove, onClear }: Props) {
+export function SelectionBar({ count, mailbox, anyUnread, phone, onArchive, onTrash, onSetRead, onMove, onLabel, onClear }: Props) {
   const archive = archiveLabel(mailbox);
   const moveButton = useRef<HTMLButtonElement>(null);
   const [moveAnchor, setMoveAnchor] = useState<MenuAnchor | null>(null);
@@ -98,6 +100,18 @@ export function SelectionBar({ count, mailbox, anyUnread, phone, onArchive, onTr
         <FolderInput size={iconSize} strokeWidth={1.9} aria-hidden="true" />
         {label("Move to")}
       </button>
+      {onLabel && (
+        <button
+          type="button"
+          onClick={onLabel}
+          aria-label={phone ? "Label as" : undefined}
+          data-selection-label=""
+          className={button}
+        >
+          <Tag size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+          {label("Label")}
+        </button>
+      )}
       {moveAnchor && (
         <Menu
           label="Move to"
