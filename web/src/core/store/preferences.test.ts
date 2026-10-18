@@ -126,15 +126,19 @@ describe("Gravatar preference", () => {
 });
 
 describe("undo send delay", () => {
-  it("defaults to five seconds", () => {
-    expect(DEFAULT_PREFERENCES.undoSendSeconds).toBe(5);
-    expect(demoStore().getSnapshot().preferences.undoSendSeconds).toBe(5);
+  it("defaults to ten seconds", () => {
+    expect(DEFAULT_PREFERENCES.undoSendSeconds).toBe(10);
+    expect(demoStore().getSnapshot().preferences.undoSendSeconds).toBe(10);
   });
 
   it("survives a restart, Off included", () => {
-    for (const value of [0, 5, 10, 20, 30]) {
+    for (const value of [0, 5, 10, 20]) {
       expect(revivePreferences({ undoSendSeconds: value })?.undoSendSeconds).toBe(value);
     }
+  });
+
+  it("reads the retired 30 s choice as the longest one left, 20 s", () => {
+    expect(revivePreferences({ undoSendSeconds: 30 })?.undoSendSeconds).toBe(20);
   });
 
   it("drops a delay Settings does not offer, so the default applies", () => {

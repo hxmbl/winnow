@@ -13,6 +13,7 @@
 
 export type CategoryId =
   | "reading"
+  | "compose"
   | "appearance"
   | "privacy"
   | "sync"
@@ -35,6 +36,12 @@ export const CATEGORIES: readonly SettingsCategory[] = [
     label: "Reading",
     intro:
       "How your mail is ordered and what happens when you open it. Winnow learns from what you star and hide, and you can see or undo what it has learned here.",
+  },
+  {
+    id: "compose",
+    label: "Compose",
+    intro:
+      "What happens when you write and send. Drafts are saved as you type, on this device at once and to Gmail's Drafts a moment later, so a closed window loses nothing.",
   },
   {
     id: "appearance",
@@ -111,8 +118,8 @@ export const SETTINGS = {
       "On a phone, swipe a message left to move it to the Trash, with Undo, or right to mark it read or unread. In Drafts a left swipe discards the draft, and in the Trash it restores the message to the Inbox. The same actions stay in the selection bar and the message's own menu, so turning this off only takes away the gesture.",
   },
   undoSend: {
-    category: "reading",
-    label: "Undo send",
+    category: "compose",
+    label: "Undo send window",
     explanation:
       "After you press Send, the message waits this long with an Undo button before it goes, and Undo brings it back to the composer as it was. Nothing is recalled: the message simply has not left yet. If Winnow closes during the wait, the message is not sent but kept as a draft, in Gmail and on this device, and offered back next time. Off sends at once.",
   },

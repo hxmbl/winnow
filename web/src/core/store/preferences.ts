@@ -7,7 +7,7 @@
  */
 
 import { isAccentTheme, isAppearance } from "../model/appearance";
-import { isUndoSendSeconds } from "../mail/undoSend";
+import { reviveUndoSendSeconds } from "../mail/undoSend";
 import type { Preferences } from "./store";
 
 /** Preferences, keeping only the keys and values the current build knows about. */
@@ -37,9 +37,11 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.gravatars === "boolean") out.gravatars = source.gravatars;
   if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
   if (typeof source.swipeActions === "boolean") out.swipeActions = source.swipeActions;
-  // Only a delay Settings offers: anything else (a newer build's choice, a hand edit)
-  // falls back to the default rather than being rounded to a neighbour.
-  if (isUndoSendSeconds(source.undoSendSeconds)) out.undoSendSeconds = source.undoSendSeconds;
+  // Only a delay Settings offers (or the retired 30 s, read as 20 s): anything else (a
+  // newer build's choice, a hand edit) falls back to the default rather than being
+  // rounded to a neighbour.
+  const undoSendSeconds = reviveUndoSendSeconds(source.undoSendSeconds);
+  if (undoSendSeconds !== null) out.undoSendSeconds = undoSendSeconds;
   if (typeof source.notificationsEnabled === "boolean") {
     out.notificationsEnabled = source.notificationsEnabled;
   }

@@ -452,6 +452,29 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
   switch (category) {
     case "reading":
       return <ReadingSettings props={props} />;
+    case "compose":
+      return (
+        <Section>
+          <Row setting="undoSend">
+            <div data-undo-send-choices="" className="flex gap-1 rounded-ctl border border-hairline p-0.5">
+              {UNDO_SEND_CHOICES.map((seconds) => (
+                <button
+                  key={seconds}
+                  type="button"
+                  onClick={() => props.onUndoSendSeconds(seconds)}
+                  aria-pressed={props.undoSendSeconds === seconds}
+                  aria-label={seconds === 0 ? "Undo send off" : `Wait ${seconds} seconds`}
+                  className={`rounded-ctl px-2 py-1 text-meta font-semibold tabular-nums transition-colors ${
+                    props.undoSendSeconds === seconds ? "bg-surface-active text-ink" : "text-ink-muted hover:text-ink-body"
+                  }`}
+                >
+                  {undoSendLabel(seconds)}
+                </button>
+              ))}
+            </div>
+          </Row>
+        </Section>
+      );
     case "appearance":
       return (
         <Section>
@@ -629,24 +652,6 @@ function ReadingSettings({ props }: { props: SettingsProps }) {
             <Toggle checked={props.swipeActions} onChange={props.onSwipeActions} label="Swipe actions" />
           </Row>
         )}
-        <Row setting="undoSend">
-          <div data-undo-send-choices="" className="flex gap-1 rounded-ctl border border-hairline p-0.5">
-            {UNDO_SEND_CHOICES.map((seconds) => (
-              <button
-                key={seconds}
-                type="button"
-                onClick={() => props.onUndoSendSeconds(seconds)}
-                aria-pressed={props.undoSendSeconds === seconds}
-                aria-label={seconds === 0 ? "Undo send off" : `Wait ${seconds} seconds`}
-                className={`rounded-ctl px-2 py-1 text-meta font-semibold tabular-nums transition-colors ${
-                  props.undoSendSeconds === seconds ? "bg-surface-active text-ink" : "text-ink-muted hover:text-ink-body"
-                }`}
-              >
-                {undoSendLabel(seconds)}
-              </button>
-            ))}
-          </div>
-        </Row>
       </Section>
 
       <Section title="How Winnow sorts">

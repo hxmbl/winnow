@@ -2504,7 +2504,7 @@ try {
     await newSheet().waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
     check("a valid send in the demo closes the composer", (await newSheet().count()) === 0);
 
-    // Undo send (5s by default): the message waits under a "Sending… Undo" strip, and
+    // Undo send (10s by default): the message waits under a "Sending… Undo" strip, and
     // Undo brings it back to the composer exactly as it was — nothing has left.
     const sendingStrip = page.locator("[data-send-pending]");
     check("and holds the message under a Sending… Undo strip", (await sendingStrip.count()) === 1,
@@ -6226,16 +6226,18 @@ try {
       await r.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").markReadOnOpen === false),
     );
 
-    // Undo send sits beside it: Off, 5, 10, 20 or 30 seconds, 5 by default.
+    // Undo send has its own category, Compose: Off, 5, 10 or 20 seconds, 10 by default.
     await r.keyboard.press(",");
     await r.waitForSelector('[role="dialog"][aria-label="Settings"]', { timeout: 5_000 });
+    await openSettingsCategory(r, "compose");
     const undoChoices = r.locator("[data-undo-send-choices] button");
     check(
-      "Settings offers Undo send as Off, 5s, 10s, 20s and 30s",
-      (await undoChoices.allTextContents()).join("|") === "Off|5s|10s|20s|30s",
+      "Settings → Compose offers the Undo send window as Off, 5s, 10s and 20s",
+      (await undoChoices.allTextContents()).join("|") === "Off|5s|10s|20s" &&
+        ((await r.locator('[data-setting="undoSend"]').first().textContent()) ?? "").includes("Undo send window"),
       (await undoChoices.allTextContents()).join("|"),
     );
-    check("with 5s chosen by default", (await r.locator("[data-undo-send-choices] button[aria-pressed='true']").textContent()) === "5s");
+    check("with 10s chosen by default", (await r.locator("[data-undo-send-choices] button[aria-pressed='true']").textContent()) === "10s");
     await r.locator("[data-undo-send-choices] button", { hasText: "Off" }).click();
     await r.waitForTimeout(150);
     check(
@@ -6287,7 +6289,7 @@ try {
     const tabLabels = await tabs.allTextContents();
     check(
       "the categories, Reading first and selected",
-      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About"]) &&
+      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Compose", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About"]) &&
         (await tabs.first().getAttribute("aria-selected")) === "true",
       JSON.stringify(tabLabels),
     );
@@ -6304,8 +6306,8 @@ try {
     await s.waitForTimeout(80);
     check(
       "ArrowDown selects and focuses the next category",
-      (await title()) === "Appearance" &&
-        (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "appearance",
+      (await title()) === "Compose" &&
+        (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "compose",
     );
     await s.keyboard.press("End");
     await s.waitForTimeout(80);
@@ -6313,6 +6315,7 @@ try {
     await s.keyboard.press("ArrowDown");
     await s.waitForTimeout(80);
     check("and ArrowDown wraps round to the first", (await title()) === "Reading");
+    await s.keyboard.press("ArrowDown");
     await s.keyboard.press("ArrowDown");
     await s.keyboard.press("ArrowDown");
     await s.waitForTimeout(80);
