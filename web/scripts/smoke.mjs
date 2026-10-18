@@ -6459,7 +6459,7 @@ try {
     await ctx.close();
   }
   {
-    // Phone: a category list, then one category's page with a back arrow, above the dock.
+    // Phone: a category list, then one category's page with a back arrow, behind the dock.
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const s = await ctx.newPage();
     s.on("pageerror", (error) => errors.push(String(error)));
@@ -6480,9 +6480,10 @@ try {
     const dialogBox = await dialog.boundingBox();
     const currentTabs = await tabsNav.evaluateAll((tabs) => tabs.filter((tab) => tab.getAttribute("aria-current") === "page").length);
     check(
-      "above the dock's pill, whose tabs stay visible (none of them current) to leave Settings by",
+      "to the screen's bottom behind the dock's pill, whose tabs stay visible on top (none of them current) to leave Settings by",
       currentTabs === 0 && Boolean(dockBox && dialogBox) &&
-        dialogBox.y + dialogBox.height <= dockBox.y + 1 && (await tabsNav.first().isVisible()),
+        dialogBox.y + dialogBox.height >= 843 && (await tabsNav.first().isVisible()) &&
+        (await s.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest("[data-phone-dock]")), { x: dockBox.x + dockBox.width / 2, y: dockBox.y + dockBox.height / 2 })),
       JSON.stringify({ dockBox, dialogBox, currentTabs }),
     );
     await dialog.locator('button[data-category="privacy"]').tap();

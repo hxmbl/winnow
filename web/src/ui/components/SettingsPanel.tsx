@@ -214,6 +214,13 @@ function useSettingsLayout(): SettingsLayout {
   return phone ? "phone" : wide ? "three" : "two";
 }
 
+/**
+ * How far the phone sheet's scrollers pad their ends: past the floating dock (its top
+ * edge's height above the screen's bottom, published by the dock) plus a little air, so
+ * the last setting scrolls clear of the pill. The safe area is inside that height.
+ */
+const PHONE_SETTINGS_END = "calc(var(--wn-phone-tabs, env(safe-area-inset-bottom, 0px)) + 1rem)";
+
 const BACK_BUTTON =
   "inline-flex items-center gap-1.5 rounded-ctl px-2 py-1.5 text-ui font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
@@ -224,7 +231,8 @@ const BACK_BUTTON =
  * them), the chosen category's controls, and an explanation of the last setting pointed
  * at. Below 1200px the explanation column goes and every setting gets a (?) popover with
  * the same copy. On a phone it is a list of categories that opens one category at a time,
- * sitting above the dock so the tabs stay visible (any of them leaves Settings).
+ * filling the screen behind the floating dock, whose tabs stay on top (any of them leaves
+ * Settings).
  */
 export function Settings(props: SettingsProps) {
   const layout = useSettingsLayout();
@@ -274,9 +282,12 @@ export function Settings(props: SettingsProps) {
           label="Settings"
           onClose={props.onClose}
           placement="fill"
-          bottomInset="var(--wn-phone-tabs, 0px)"
           dismissOnBackdrop={false}
-          className="flex h-full w-full flex-col bg-chrome"
+          // To the screen's bottom edge, behind the floating dock: the dock floats, so a
+          // sheet that stopped at the pill's top left the inbox showing round the pill
+          // and under the home indicator. The scrollers pad their ends to clear the pill
+          // instead (`PHONE_SETTINGS_END`), and overscroll stays inside the sheet.
+          className="flex h-full w-full flex-col overscroll-none bg-chrome"
         >
           <div data-settings-layout="phone" data-settings-page={phonePage} className="flex min-h-0 flex-1 flex-col">
             {phonePage === "list" ? (
@@ -284,7 +295,7 @@ export function Settings(props: SettingsProps) {
                 <div className="shrink-0 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))]">
                   <h2 className="text-title font-semibold text-ink">Settings</h2>
                 </div>
-                <nav aria-label="Settings categories" data-settings-nav="" className="thin-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+                <nav aria-label="Settings categories" data-settings-nav="" className="thin-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3" style={{ paddingBottom: PHONE_SETTINGS_END }}>
                   <ul className="flex flex-col">
                     {categories.map((id) => (
                       <li key={id}>
@@ -337,7 +348,8 @@ export function Settings(props: SettingsProps) {
                 <div
                   data-select-scope=""
                   data-settings-body=""
-                  className="selectable scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4"
+                  className="selectable scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pt-4"
+                  style={{ paddingBottom: PHONE_SETTINGS_END }}
                 >
                   {content}
                 </div>
