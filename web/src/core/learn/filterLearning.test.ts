@@ -320,6 +320,79 @@ describe("FilterLearning", () => {
     expect(twice.decide(unrelated, "shipping", signalsOf(unrelated), background).into).toBe(false);
   });
 
+  describe("support counts only corrections sharing a clue that pushes the flip's way", () => {
+    // DPD's mail shares a tracking number and delivery words with Evri's. The volunteer
+    // rota shares only "driver" with it, a word the licence reminder (moved the other way)
+    // also carries, so in your corrections "driver" says nothing for Deliveries, or the
+    // opposite. Both Evri and the rota were moved into Deliveries.
+    const evriMail = () => evri(1);
+    const rota = () =>
+      mail({ sender: "rota@club.example", subject: "Volunteer driver rota", body: "Can you take the minibus for the club outing?" });
+    const licence = () =>
+      mail({ sender: "reminders@dvla.example", subject: "Driver licence renewal", body: "Renew your driving licence online before it expires." });
+    const unrelatedOut = () =>
+      mail({ sender: "news@garden.example", subject: "Seed swap", body: "Bring your spare seeds to the allotment on Saturday." });
+    const shares = (email: Email, other: Email, clue: string) => cluesOf(email).includes(clue) && cluesOf(other).includes(clue);
+
+    it.each([
+      ["pushes the other way", false],
+      ["has no weight", true],
+    ])("a second correction whose only shared clue %s is not support: built-in stays", (_label, evenly) => {
+      const target = dpd();
+      const a = evriMail();
+      const b = rota();
+      const c = licence();
+      const d = unrelatedOut();
+      expect(signalsOf(target).shipping).toBe(false);
+      // The rota shares exactly one specific clue with DPD's mail, and Evri several.
+      const specific = (email: Email) => cluesOf(email).filter((clue) => !clue.startsWith("c:") && clue !== "p:date" && clue !== "h:no-reply");
+      expect(specific(b).filter((clue) => cluesOf(target).includes(clue))).toEqual(["w:driver"]);
+      expect(shares(target, a, "p:tracking")).toBe(true);
+      expect(shares(b, c, "w:driver")).toBe(true);
+      let model = FilterLearning.empty()
+        .record(a, "shipping", true, 1)
+        .record(b, "shipping", true, 2)
+        .record(c, "shipping", false, 3);
+      // With a second "out" correction, "driver" is one in two each way: weight exactly 0.
+      if (evenly) model = model.record(d, "shipping", false, 4);
+      const background = inboxOf(a, b, c, d, target);
+      // Evri's clues alone do push DPD's mail toward Deliveries, but only one correction
+      // (Evri) backs that, and one is never enough (MIN_SUPPORT = 2). Counting the rota,
+      // which shares only "driver", would have made it two.
+      const decision = model.decide(target, "shipping", signalsOf(target), background);
+      expect(decision).toEqual({ by: "built-in", into: false });
+      expect(model.apply(target, signalsOf(target), background).filterOverrides?.shipping).toBeUndefined();
+      const line = explainFilters(target, signalsOf(target), model.apply(target, signalsOf(target), background), profile, model, { background }).find(
+        (reason) => reason.filter === "shipping",
+      );
+      expect(line?.source).not.toBe("similar");
+    });
+
+    it("two corrections that both share a clue pushing that way do flip it, and say so with 2", () => {
+      const target = dpd();
+      const a = evriMail();
+      const b = mail({ ...evri(2), sender: "hello@evri-parcels.example" });
+      const c = licence();
+      const model = FilterLearning.empty()
+        .record(a, "shipping", true, 1)
+        .record(b, "shipping", true, 2)
+        .record(c, "shipping", false, 3);
+      const background = inboxOf(a, b, c, target);
+      const decision = model.decide(target, "shipping", signalsOf(target), background);
+      expect(decision).toMatchObject({ by: "similar", into: true, similar: 2 });
+      if (decision.by === "similar") {
+        expect(decision.clues[0]).toBe("p:tracking");
+        // "driver" pushed the other way, so it is never given as a reason.
+        expect(decision.clues).not.toContain("w:driver");
+      }
+      const learned = model.apply(target, signalsOf(target), background);
+      expect(matchesBuiltin("shipping", target, learned, profile)).toBe(true);
+      const line = explainFilters(target, signalsOf(target), learned, profile, model, { background }).find((reason) => reason.filter === "shipping");
+      expect(line?.source).toBe("similar");
+      expect(line?.line).toMatch(/you moved 2 similar emails here$/);
+    });
+  });
+
   it("can take a message out of a filter the built-in rules put it in", () => {
     const promoLike = (n: number) =>
       mail({

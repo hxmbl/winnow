@@ -30,8 +30,8 @@
  *      no single clue weighs more than the built-in answer, so it takes two different
  *      specific clues (a tracking number and the words, say) to overturn it.
  *      It may overturn the built-in answer only when at least `MIN_SUPPORT` of your
- *      corrections for this filter moved mail sharing a specific clue with this message
- *      the same way, and it never takes mail out of Security or Important on its own.
+ *      corrections for this filter moved mail the same way sharing a clue that pushes
+ *      this message that way (not merely any clue in common), and it never takes mail out of Security or Important on its own.
  *   4. **The built-in rules** (`classify.ts`), which are also the starting point of
  *      step 3: their answer is taken to be right three times in four (`BUILT_IN_ODDS`).
  *
@@ -99,8 +99,8 @@ function withAnswer(signals: EmailSignals, filter: LearnableFilter, into: boolea
 export const BUILT_IN_ODDS = 3;
 /**
  * Similar mail can overturn the built-in answer only when at least this many of your
- * corrections (one per sender per action) moved mail sharing a specific clue with it
- * the same way. One correction is never enough on its own.
+ * corrections (one per sender per action) moved mail the same way sharing a clue that
+ * pushes it that way. One correction is never enough on its own.
  */
 export const MIN_SUPPORT = 2;
 /**
@@ -497,7 +497,8 @@ export class FilterLearning {
    * background rate. Each clue is capped at the prior's own weight, and words together at
    * the strongest single word, so no one clue can overturn the built-in answer. Returns the
    * flipped answer, the clues that pushed toward it (strongest first) and how many of
-   * your decisions back it — or null when the built-in answer stands.
+   * your decisions back it, counting only those that share one of those clues — or null
+   * when the built-in answer stands.
    */
   private similarEvidence(
     email: Email,
@@ -515,14 +516,12 @@ export class FilterLearning {
     const cap = (weight: number) => Math.max(-prior, Math.min(prior, weight));
     let logOdds = (builtIn ? 1 : -1) * prior;
     const pushes: { clue: string; weight: number }[] = [];
-    const specific = new Set<string>();
     let words = 0;
     let strongestWord = 0;
     for (const clue of cachedClues(email)) {
       if (isGenericClue(clue)) continue;
       const tally = stats.clues.get(clue);
       if (!tally) continue;
-      specific.add(clue);
       const weight = cap(clueWeight(tally, moved, backgroundRate(background, clue)));
       if (weight === 0) continue;
       pushes.push({ clue, weight });
@@ -541,12 +540,20 @@ export class FilterLearning {
     // Similarity alone never takes mail out of Security or Important: missing a security
     // notice or something important costs far more than an extra one shown.
     if (!into && (filter === "security" || filter === "important")) return null;
-    const support = stats.units.filter((unit) => unit.into === into && [...specific].some((clue) => (unit.clues.get(clue) ?? 0) > 0)).length;
-    if (support < MIN_SUPPORT) return null;
+    // The clues that pushed this message toward the flipped answer: each pattern, header
+    // or category whose own weight points that way, and each word that does, but words
+    // only when the words together point that way too, since a word moves the answer
+    // only through their combined, capped sum.
+    const sign = into ? 1 : -1;
+    const wordsToward = Math.sign(words) === sign;
     const toward = pushes
-      .filter((push) => (into ? push.weight > 0 : push.weight < 0))
+      .filter((push) => Math.sign(push.weight) === sign && (clueKind(push.clue) !== "word" || wordsToward))
       .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight) || kindRank(a.clue) - kindRank(b.clue))
       .map((push) => push.clue);
+    // A decision of yours backs the flip only when it shares one of those clues. Sharing
+    // a clue with no weight, or one that pushes the other way, is not support.
+    const support = stats.units.filter((unit) => unit.into === into && toward.some((clue) => (unit.clues.get(clue) ?? 0) > 0)).length;
+    if (support < MIN_SUPPORT) return null;
     return { into, clues: toward, support };
   }
 
