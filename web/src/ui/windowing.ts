@@ -103,3 +103,15 @@ export function scrollTopForIndex(
   const target = offsets[Math.min(Math.max(index, 0), Math.max(count - 1, 0))] ?? 0;
   return Math.min(Math.max(target, 0), Math.max(total - viewportHeight, 0));
 }
+/**
+ * The scroll top that brings a row into view under chrome floating over the top of the
+ * scroller: the row's top just below the `covered` band, clamped to the scrollable range.
+ *
+ * `rowTop` is in scroller coordinates (lead and padding included), unlike
+ * `scrollTopForIndex`, which works in item offsets: under floating chrome the list's
+ * content does not start at the scroller's top.
+ */
+export function revealScrollTop(rowTop: number, covered: number, scrollHeight: number, clientHeight: number): number {
+  const max = Math.max(scrollHeight - clientHeight, 0);
+  return Math.min(Math.max(rowTop - covered, 0), max);
+}

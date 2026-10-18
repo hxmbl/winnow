@@ -352,6 +352,33 @@ export function App({ store }: Props) {
   /** The two panes' container, which the reader split is a fraction of. */
   const mainRef = useRef<HTMLElement | null>(null);
   phoneRef.current = phone;
+
+  /**
+   * The desktop's floating list header, measured: the list pads its top by this much so
+   * its first row clears the glass at rest. A callback ref, since the header unmounts in
+   * the phone layout.
+   */
+  const [listChromeHeight, setListChromeHeight] = useState(0);
+  const listChromeObserver = useRef<ResizeObserver | null>(null);
+  const measureListChrome = useCallback((element: HTMLDivElement | null) => {
+    listChromeObserver.current?.disconnect();
+    listChromeObserver.current = null;
+    if (!element) return;
+    const read = () => setListChromeHeight(Math.round(element.getBoundingClientRect().height));
+    read();
+    if (typeof ResizeObserver !== "undefined") {
+      listChromeObserver.current = new ResizeObserver(read);
+      listChromeObserver.current.observe(element);
+    }
+  }, []);
+  /** A wheel over the floating header scrolls the list under it, except over the rail. */
+  const forwardChromeWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("[data-rail-scroller], [role='menu'], [role='dialog']")) return;
+    const scroller = event.currentTarget.parentElement?.querySelector<HTMLElement>("[data-row-count]");
+    if (!scroller || event.deltaY === 0) return;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientHeight : 1;
+    scroller.scrollTop += event.deltaY * unit;
+  }, []);
   useKeyboardInset(phone && composer !== null);
 
   // ── Theme ────────────────────────────────────────────────────────────────
@@ -2488,6 +2515,68 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
   ) : null;
 
+  /** What the inbox needs from you, the sync line, and the demo's Connect Gmail. */
+  const briefing = (
+          <div data-briefing="" className="flex items-center justify-between gap-3 px-4 pb-2 pt-3">
+            <div className="min-w-0">
+              {snapshot.mailbox === "inbox" && (
+                <p data-attention="" className="text-ui font-medium text-ink sm:truncate">
+                  {attentionSentence(view.attention)}
+                </p>
+              )}
+              <p
+                data-sync-status={sync.tone}
+                role="status"
+                aria-live="polite"
+                className={`selectable text-meta sm:truncate ${
+                  sync.tone === "error" ? "text-danger" : "text-ink-subtle"
+                }`}
+              >
+                {sync.line}
+              </p>
+            </div>
+            {snapshot.account === null ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void connectFromDemo();
+                }}
+                disabled={signingIn}
+                // The demo's one primary action, so it is the one filled control in view.
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
+                {signingIn ? "Waiting for Google…" : "Connect Gmail"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  void store.refresh();
+                }}
+                disabled={sync.busy}
+                aria-label={sync.button}
+                title={sync.button}
+                data-sync-button=""
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <RefreshCw
+                  size={12}
+                  strokeWidth={2.2}
+                  className={snapshot.syncing ? "animate-spin" : ""}
+                  aria-hidden="true"
+                />
+                {sync.button}
+              </button>
+            )}
+          </div>
+  );
+  const connectNotice = connectError ? (
+    <div role="alert" className="px-4 pb-2 text-meta font-medium text-danger">
+              <ErrorText text={connectError} />
+            </div>
+  ) : null;
+
   return (
     <SenderPicturesContext.Provider value={senderPictures}>
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
@@ -2720,7 +2809,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         <div
           className={`${
             selected ? "hidden lg:flex" : "flex"
-          } min-h-0 min-w-0 flex-1 flex-col bg-surface`}
+          } relative min-h-0 min-w-0 flex-1 flex-col bg-surface`}
         >
           {/*
             The mailbox's own status line, and the demo note.
@@ -2738,7 +2827,19 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             classifier's own signals. Only in the inbox — it is a claim about the inbox,
             and over Sent or the bin it would be answering a question nobody asked.
           */}
+          {/*
+            The desktop's header floats over the list (see `Masthead`): the glass bar and
+            the chips, or the selection bar in the chips' place. The list scrolls under it
+            and pads its top by its measured height; a wheel over the bar scrolls the list
+            (the rail keeps its own wheel, which moves it sideways).
+          */}
           {!phone && (
+            <div
+              ref={measureListChrome}
+              data-list-chrome=""
+              onWheel={forwardChromeWheel}
+              className="pointer-events-none absolute inset-x-0 top-0 z-20"
+            >
             <Masthead
               searchQuery={snapshot.searchQuery}
               onSearchChange={store.setSearchQuery.bind(store)}
@@ -2757,80 +2858,33 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               onPrev={() => store.moveCursor(-1)}
               onNext={() => store.moveCursor(1)}
               onCompose={() => openCompose()}
+              replaceRail={
+                selection.size > 0 ? (
+                  <SelectionBar
+                    phone={false}
+                    count={selection.size}
+                    mailbox={snapshot.mailbox}
+                    anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
+                    onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
+                    onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
+                    onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
+                    onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+                    onClear={() => setSelection(EMPTY_SELECTION)}
+                  />
+                ) : undefined
+              }
             />
-          )}
-          {!phone && selection.size > 0 ? (
-            <SelectionBar
-              phone={false}
-              count={selection.size}
-              mailbox={snapshot.mailbox}
-              anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
-              onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
-              onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
-              onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
-              onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
-              onClear={() => setSelection(EMPTY_SELECTION)}
-            />
-          ) : (
-          <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-3">
-            <div className="min-w-0">
-              {snapshot.mailbox === "inbox" && (
-                <p data-attention="" className="text-ui font-medium text-ink sm:truncate">
-                  {attentionSentence(view.attention)}
-                </p>
-              )}
-              <p
-                data-sync-status={sync.tone}
-                role="status"
-                aria-live="polite"
-                className={`selectable text-meta sm:truncate ${
-                  sync.tone === "error" ? "text-danger" : "text-ink-subtle"
-                }`}
-              >
-                {sync.line}
-              </p>
-            </div>
-            {snapshot.account === null ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void connectFromDemo();
-                }}
-                disabled={signingIn}
-                // The demo's one primary action, so it is the one filled control in view.
-                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              >
-                <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
-                {signingIn ? "Waiting for Google…" : "Connect Gmail"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  void store.refresh();
-                }}
-                disabled={sync.busy}
-                aria-label={sync.button}
-                title={sync.button}
-                data-sync-button=""
-                className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              >
-                <RefreshCw
-                  size={12}
-                  strokeWidth={2.2}
-                  className={snapshot.syncing ? "animate-spin" : ""}
-                  aria-hidden="true"
-                />
-                {sync.button}
-              </button>
-            )}
-          </div>
-          )}
-          {connectError && (
-            <div role="alert" className="px-4 pb-2 text-meta font-medium text-danger">
-              <ErrorText text={connectError} />
             </div>
           )}
+          {/*
+            The briefing. On a phone it heads the list as before; on the desktop it is
+            the first thing in the list's own scroll (`lead`), under the floating header
+            at rest and scrolled away with the mail, so its small grey sync line is never
+            read over moving rows and Connect Gmail is a scroll (or Home) away. The
+            Connect action is also in the sidebar's account menu.
+          */}
+          {phone && briefing}
+          {phone && connectNotice}
           <MessageList
             threads={view.threads}
             signals={view.signals}
@@ -2868,6 +2922,17 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onCopyCode={copyCode}
             copiedCodeId={copiedCodeId}
             // Swipes are the phone's, and stand down while anything sits over the list.
+            // The desktop's floating header covers the list's top, and the briefing
+            // scrolls with the list under it.
+            topInset={phone ? 0 : listChromeHeight}
+            lead={
+              phone ? undefined : (
+                <>
+                  {briefing}
+                  {connectNotice}
+                </>
+              )
+            }
             swipe={
               phone && preferences.swipeActions && !menu && !labelPicker && !sidebarOpen && !composer && snapshot.overlay === "none"
                 ? swipeConfig

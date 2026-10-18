@@ -43,6 +43,15 @@ type Props = {
    */
   touch?: boolean;
   /**
+   * The desktop's floating rail, over the list like the phone's: every chip its own glass
+   * pill (`.wn-chip-glass`, the phone's recipe) at desktop size, no band and no edge fades
+   * (a fade to the surface colour would be a band over moving mail, and a mask would be a
+   * backdrop root that leaves the chips' blur nothing to blur). A chip running off an end
+   * says "more" as on the phone, and the step button there is a small round glass button
+   * of its own. Stepped and wheeled as before.
+   */
+  floating?: boolean;
+  /**
    * The colour the rail sits on, which its desktop edge fades dissolve into. The phone's
    * floating rail sits on nothing and has no fades.
    */
@@ -70,12 +79,15 @@ export const FilterStrip = memo(function FilterStrip({
   onClear,
   leading,
   touch = false,
+  floating = false,
   tone = "canvas",
   className = "",
 }: Props) {
   const fade = `var(--wn-${tone})`;
   // 44px on touch: the dock's tabs are thumb targets like everything else there.
-  const tabHeight = touch ? "h-11" : "h-7";
+  const tabHeight = touch ? "h-11" : floating ? "h-8" : "h-7";
+  // Glass chips, on the phone and on the desktop's floating rail.
+  const glass = touch || floating;
   const hasActive = activeFilters.length > 0;
   const activeKeys = new Set(activeFilters.map(filterKey));
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -227,8 +239,11 @@ export const FilterStrip = memo(function FilterStrip({
         className={`no-scrollbar flex items-center overflow-x-auto ${
           touch
             ? "pointer-events-none gap-2 py-2 pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
-            : "gap-1"
+            : floating
+              ? "pointer-events-none gap-1.5 px-0.5 py-1.5 [&>*]:pointer-events-auto"
+              : "gap-1"
         }`}
+
       >
         {/*
           The mark, pinned. `z-10` so it paints above the pills travelling behind it;
@@ -251,7 +266,7 @@ export const FilterStrip = memo(function FilterStrip({
             type="button"
             data-rail-item=""
             onClick={onClear}
-            className={`${touch ? "wn-glass h-11 px-4" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+            className={`${touch ? "wn-glass h-11 px-4" : floating ? "wn-glass h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             All
           </button>
@@ -271,7 +286,7 @@ export const FilterStrip = memo(function FilterStrip({
             data-on={on ? "" : undefined}
             // The pill's identity only; the mode's recipe turns it into a fill.
             style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}
-            className={`wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150 ${touch ? "wn-chip-glass" : ""}`}
+            className={`wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150 ${glass ? "wn-chip-glass" : ""}`}
           >
             <button
               type="button"
@@ -285,7 +300,7 @@ export const FilterStrip = memo(function FilterStrip({
               title={digit ? `${label} (${digit})` : label}
               aria-keyshortcuts={digit ?? undefined}
               className={`relative flex ${tabHeight} items-center rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                touch ? "gap-2 px-4" : "gap-1.5 px-2.5"
+                touch ? "gap-2 px-4" : floating ? "gap-1.5 px-3.5" : "gap-1.5 px-2.5"
               }`}
             >
               {/*
@@ -337,7 +352,8 @@ export const FilterStrip = memo(function FilterStrip({
           style={{
             width: leadingWidth + EDGE,
             paddingLeft: leadingWidth,
-            background: `linear-gradient(to right, ${fade} ${leadingWidth + STEP}px, transparent)`,
+            // Floating, there is no band to fade into: the chips fade out themselves.
+            background: floating ? undefined : `linear-gradient(to right, ${fade} ${leadingWidth + STEP}px, transparent)`,
           }}
         >
           <button
@@ -346,7 +362,9 @@ export const FilterStrip = memo(function FilterStrip({
             aria-label="Scroll filters left"
             title="More filters"
             onClick={() => step(-1)}
-            className="pointer-events-auto relative flex h-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink"
+            className={`pointer-events-auto relative flex h-7 items-center justify-center text-ink-icon transition-colors hover:text-ink ${
+              floating ? "wn-glass rounded-full" : "rounded-ctl hover:bg-surface-hover"
+            }`}
             style={{ width: STEP }}
           >
             <ChevronLeft size={16} strokeWidth={1.9} aria-hidden="true" />
@@ -359,18 +377,22 @@ export const FilterStrip = memo(function FilterStrip({
           className="pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end"
           style={{ width: EDGE }}
         >
-          <div
-            aria-hidden="true"
-            className="absolute inset-0"
-            style={{ background: `linear-gradient(to left, ${fade} 50%, transparent)` }}
-          />
+          {!floating && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0"
+              style={{ background: `linear-gradient(to left, ${fade} 50%, transparent)` }}
+            />
+          )}
           <button
             type="button"
             tabIndex={-1}
             aria-label="Scroll filters right"
             title="More filters"
             onClick={() => step(1)}
-            className="pointer-events-auto relative flex h-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink"
+            className={`pointer-events-auto relative flex h-7 items-center justify-center text-ink-icon transition-colors hover:text-ink ${
+              floating ? "wn-glass rounded-full" : "rounded-ctl hover:bg-surface-hover"
+            }`}
             style={{ width: STEP }}
           >
             <ChevronRight size={16} strokeWidth={1.9} aria-hidden="true" />

@@ -454,13 +454,17 @@ try {
       const base = parse(getComputedStyle(document.documentElement).getPropertyValue("--wn-surface").trim().replace(/^#(..)(..)(..)$/, (_, r, g, b) => `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`));
       return [...document.querySelectorAll("header [data-rail-scroller] [data-rail-item][data-rail-key]")]
         .map((item) => {
-          const fill = parse(getComputedStyle(item).backgroundColor);
+          // A floating glass chip paints its tint as the first background layer (over the
+          // frost), not as the background colour: read the tint from there.
+          const style = getComputedStyle(item);
+          const tint = style.backgroundColor === "rgba(0, 0, 0, 0)" ? (style.backgroundImage.match(/rgba?\([^)]*\)/)?.[0] ?? style.backgroundColor) : style.backgroundColor;
+          const fill = parse(tint);
           const label = item.querySelector("button[aria-pressed] span.grid > span:last-child");
           const ink = parse(getComputedStyle(label).color);
           return {
             key: item.dataset.railKey,
             on: item.hasAttribute("data-on"),
-            fill: getComputedStyle(item).backgroundColor,
+            fill: tint,
             alpha: fill[3],
             radius: parseFloat(getComputedStyle(item).borderTopLeftRadius),
             height: item.getBoundingClientRect().height,
@@ -6704,6 +6708,181 @@ try {
         check("a tap smooth-scrolls the list to the top", mid > 0 && after.scrollTop === 0, JSON.stringify({ mid, after: after.scrollTop }));
         check("and the pill hides again there", !after.shown && !after.takesTap);
       }
+      await ctx.close();
+    }
+  }
+
+  {
+    /*
+      The desktop list's header floats over the list like the phone's dock: the bar
+      (search, where-you-are, Compose) is a rounded glass pill inset from the pane, each
+      chip its own glass pill, no band behind either; the list starts below it at rest,
+      scrolls visibly under it, and the cursor's row never ends up hidden beneath it.
+    */
+    for (const mode of ["dark", "light", "oled"]) {
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      await ctx.addInitScript((m) => localStorage.setItem("winnow.preferences.v1", JSON.stringify({ appearance: m })), mode);
+      const d = await ctx.newPage();
+      d.on("pageerror", (error) => errors.push(String(error)));
+      await d.goto(URL, { waitUntil: "networkidle" });
+      await d.waitForSelector("[data-row-count] [data-row-id]");
+      await d.locator("[data-row-count] button[data-message-id]").first().click();
+      await d.waitForTimeout(400);
+      const geometry = () =>
+        d.evaluate(() => {
+          const pane = document.querySelector("[data-list-chrome]").parentElement.getBoundingClientRect();
+          const chrome = document.querySelector("[data-list-chrome]");
+          const header = document.querySelector("[data-masthead]");
+          const bar = document.querySelector("[data-masthead-bar]");
+          const barRect = bar.getBoundingClientRect();
+          const scroller = document.querySelector("[data-row-count]");
+          const rail = document.querySelector("header [data-rail-scroller]");
+          const chips = rail ? [...rail.querySelectorAll("[data-rail-key]")] : [];
+          const filterOf = (el) => { const st = getComputedStyle(el); return st.backdropFilter || st.webkitBackdropFilter; };
+          const rows = [...scroller.querySelectorAll("[data-row-id]")].map((r) => r.getBoundingClientRect());
+          const briefing = scroller.querySelector("[data-briefing]");
+          const connect = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Connect Gmail");
+          const connectRect = connect?.getBoundingClientRect() ?? null;
+          const underConnect = connectRect ? document.elementFromPoint(connectRect.left + connectRect.width / 2, connectRect.top + connectRect.height / 2) : null;
+          const firstHeader = scroller.querySelector("[data-item-key]")?.getBoundingClientRect() ?? null;
+          const underBar = document.elementFromPoint(barRect.left + barRect.width * 0.3, barRect.top + barRect.height / 2);
+          return {
+            theme: document.documentElement.dataset.theme,
+            bands: [chrome, header, rail].filter(Boolean).map((el) => getComputedStyle(el).backgroundColor),
+            railMask: rail ? getComputedStyle(rail).maskImage || getComputedStyle(rail).webkitMaskImage || "none" : "none",
+            barFilter: filterOf(bar),
+            barRadius: parseFloat(getComputedStyle(bar).borderTopLeftRadius),
+            barHeight: barRect.height,
+            inset: { left: Math.round(barRect.left - pane.left), right: Math.round(pane.right - barRect.right), top: Math.round(barRect.top - pane.top) },
+            chipsGlass: chips.length > 0 && chips.every((chip) => chip.classList.contains("wn-chip-glass") && /blur\(12px\)/.test(filterOf(chip))),
+            chromeBottom: Math.round(chrome.getBoundingClientRect().bottom),
+            scrollTop: Math.round(scroller.scrollTop),
+            padTop: parseFloat(getComputedStyle(scroller).paddingTop),
+            scrollPad: parseFloat(getComputedStyle(scroller).scrollPaddingTop),
+            briefingIn: Boolean(briefing),
+            briefingTop: briefing ? Math.round(briefing.getBoundingClientRect().top) : null,
+            connectTakesClick: Boolean(underConnect?.closest("button") === connect),
+            firstHeaderTop: firstHeader ? Math.round(firstHeader.top) : null,
+            firstRowTop: rows.length ? Math.round(rows[0].top) : null,
+            rowUnderBar: rows.some((r) => r.top < barRect.bottom && r.bottom > barRect.top),
+            barTakesEvents: Boolean(underBar?.closest("[data-masthead-bar]")),
+          };
+        });
+      const rest = await geometry();
+      check(
+        `${mode}: the desktop header floats: no band behind it, the bar a rounded glass pill inset from the pane, every chip its own glass pill`,
+        rest.theme === mode && rest.bands.every((bg) => bg === "rgba(0, 0, 0, 0)") && rest.railMask === "none" &&
+          /blur\(12px\)/.test(rest.barFilter) && /saturate\(1\.3\)/.test(rest.barFilter) &&
+          rest.barRadius >= rest.barHeight / 2 - 1 && rest.inset.left >= 8 && rest.inset.right >= 8 && rest.inset.top >= 8 && rest.chipsGlass,
+        JSON.stringify(rest),
+      );
+      check(
+        `${mode}: at rest the briefing, Connect Gmail, the first day and the first row all sit below the floating header`,
+        rest.scrollTop === 0 && rest.padTop >= rest.chromeBottom - 1 && rest.briefingIn && rest.briefingTop >= rest.chromeBottom &&
+          rest.connectTakesClick && rest.firstHeaderTop >= rest.chromeBottom && rest.firstRowTop >= rest.chromeBottom && !rest.rowUnderBar,
+        JSON.stringify(rest),
+      );
+      if (mode !== "dark") {
+        await ctx.close();
+        continue;
+      }
+      await d.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 400));
+      await d.waitForTimeout(300);
+      const scrolled = await geometry();
+      check(
+        "scrolled, the list shows under the glass bar, which still takes the pointer",
+        scrolled.scrollTop === 400 && scrolled.rowUnderBar && scrolled.barTakesEvents,
+        JSON.stringify(scrolled),
+      );
+      // A wheel over the bar scrolls the list under it.
+      const barBox = await d.locator("[data-masthead-bar]").boundingBox();
+      await d.mouse.move(barBox.x + barBox.width * 0.3, barBox.y + barBox.height / 2);
+      await d.mouse.wheel(0, 300);
+      await d.waitForTimeout(300);
+      const wheeled = await d.evaluate(() => Math.round(document.querySelector("[data-row-count]").scrollTop));
+      check("a wheel over the floating bar scrolls the list", wheeled > 400, `${wheeled}px`);
+
+      // j down a long way, then k back up: the open row is never under the header or the
+      // pinned day, and focus scrolling keeps the same clearance.
+      await d.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+      await d.locator("[data-row-count] button[data-message-id]").first().click();
+      await d.waitForTimeout(200);
+      await d.locator("[data-reader-pane]").first().click({ position: { x: 5, y: 600 } }).catch(() => undefined);
+      await d.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+      const hidden = [];
+      const covered = async () =>
+        d.evaluate(() => {
+          const scroller = document.querySelector("[data-row-count]");
+          const row = scroller.querySelector('button[data-message-id][aria-current="true"]');
+          const chrome = document.querySelector("[data-list-chrome]").getBoundingClientRect().bottom;
+          const day = document.querySelector("[data-sticky-day]")?.getBoundingClientRect().bottom ?? chrome;
+          const box = scroller.getBoundingClientRect();
+          if (!row) return { missing: true };
+          const r = row.getBoundingClientRect();
+          return { top: Math.round(r.top), bottom: Math.round(r.bottom), clear: Math.round(Math.max(chrome, day)), end: Math.round(box.bottom) };
+        });
+      for (let i = 0; i < 24; i += 1) {
+        await d.keyboard.press("j");
+        await d.waitForTimeout(60);
+        const at = await covered();
+        if (at.missing || at.top < at.clear - 1 || at.bottom > at.end + 1) hidden.push({ key: "j", i, ...at });
+      }
+      for (let i = 0; i < 24; i += 1) {
+        await d.keyboard.press("k");
+        await d.waitForTimeout(60);
+        const at = await covered();
+        if (at.missing || at.top < at.clear - 1 || at.bottom > at.end + 1) hidden.push({ key: "k", i, ...at });
+      }
+      check("j and k never leave the open row under the floating header or the pinned day", hidden.length === 0, JSON.stringify(hidden.slice(0, 4)));
+      const pad = await geometry();
+      check(
+        "and the scroller's scroll-padding-top covers the header and the pinned day, for focus scrolling",
+        pad.scrollPad >= pad.chromeBottom,
+        JSON.stringify({ scrollPad: pad.scrollPad, chrome: pad.chromeBottom }),
+      );
+
+      // A selection stands in for the chips in the same slot: the header keeps its height.
+      const before = (await geometry()).chromeBottom;
+      const firstAvatar = d.locator("[data-row-count] [data-row-control='avatar']").first();
+      await firstAvatar.click();
+      await d.waitForTimeout(150);
+      await d.locator("[data-menu-item='sender-select']").click();
+      await d.waitForTimeout(200);
+      const bar = d.locator("header [data-selection-bar='desktop']");
+      const selBox = await bar.boundingBox();
+      const selFilter = await bar.evaluate((el) => getComputedStyle(el).backdropFilter || getComputedStyle(el).webkitBackdropFilter).catch(() => "");
+      check(
+        "a selection's bar floats in the chips' place, in the same glass, and the header keeps its height",
+        Boolean(selBox) && /blur\(12px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
+        JSON.stringify({ selBox, selFilter, before }),
+      );
+      await d.keyboard.press("Escape");
+      await ctx.close();
+    }
+    {
+      // Reduced transparency: the floating bar and chips turn solid.
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      const d = await ctx.newPage();
+      const cdp = await ctx.newCDPSession(d);
+      await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] }).catch(() => undefined);
+      await d.goto(URL, { waitUntil: "networkidle" });
+      await d.waitForSelector("[data-row-count] [data-row-id]");
+      const solid = await d.evaluate(() => {
+        const bar = document.querySelector("[data-masthead-bar]");
+        const chip = document.querySelector("header [data-rail-key]");
+        const st = (el) => getComputedStyle(el);
+        return {
+          matches: matchMedia("(prefers-reduced-transparency: reduce)").matches,
+          bar: st(bar).backdropFilter || st(bar).webkitBackdropFilter,
+          barBg: st(bar).backgroundColor,
+          chip: st(chip).backdropFilter || st(chip).webkitBackdropFilter,
+        };
+      });
+      check(
+        "with reduced transparency the desktop's floating bar and chips are solid",
+        !solid.matches || (solid.bar === "none" && solid.chip === "none" && /^rgb\(/.test(solid.barBg)),
+        JSON.stringify(solid),
+      );
       await ctx.close();
     }
   }

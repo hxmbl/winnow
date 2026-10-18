@@ -13,6 +13,7 @@ import {
   ESTIMATED_ROW_HEIGHT,
   computeOffsets,
   indexAt,
+  revealScrollTop,
   scrollTopForIndex,
   visibleRange,
 } from "./windowing";
@@ -141,5 +142,18 @@ describe("scrollTopForIndex", () => {
 
   it("is 0 for an empty list", () => {
     expect(scrollTopForIndex(computeOffsets(0, []), 3, 800)).toBe(0);
+  });
+});
+describe("revealScrollTop (a row under floating chrome)", () => {
+  it("puts the row's top just below the covered band", () => {
+    // Row at 900px in the scroller, 150px covered by the header and the pinned day.
+    expect(revealScrollTop(900, 150, 5000, 800)).toBe(750);
+  });
+  it("never scrolls above the top, so the first rows stay where they rest", () => {
+    expect(revealScrollTop(120, 150, 5000, 800)).toBe(0);
+  });
+  it("clamps to the end of the list", () => {
+    expect(revealScrollTop(4900, 150, 5000, 800)).toBe(4200);
+    expect(revealScrollTop(300, 150, 500, 800)).toBe(0);
   });
 });

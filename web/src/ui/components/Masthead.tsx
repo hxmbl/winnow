@@ -2,6 +2,13 @@
  * The desktop list's header: search across the full width of the list column with
  * where you are in the list beside it, then the filter rail on its own row.
  *
+ * It floats over the list, like the phone's dock: the top row is a rounded glass bar
+ * (`.wn-glass.wn-glass-bar`) inset from the pane's edges, each smart-filter chip is its
+ * own glass pill (`FilterStrip` `floating`), and there is no band behind either, so the
+ * list scrolls visibly underneath. The header itself takes no pointer events; only the
+ * bar, the chips and the slot below them (`below`, the selection bar) do. The list pads
+ * its top by the header's measured height (`MessageList` `topInset`).
+ *
  * The smart filters are the rail (`FilterStrip`), not sidebar rows: coloured pills with
  * their counts, ranked by the store, fading into a step chevron at either edge. It has
  * the list column's full width to itself, so the search field can never sit over its
@@ -46,6 +53,12 @@ export type MastheadProps = {
   onNext: () => void;
   /** Open a blank composer. Absent, the button is not drawn. */
   onCompose?: () => void;
+  /**
+   * Shown instead of the chips while there is a multi-selection: the selection bar, so
+   * its actions float with the rest of the header and stay in reach however far down
+   * the list the selection was made, and the header keeps its height.
+   */
+  replaceRail?: React.ReactNode;
 };
 
 /**
@@ -95,12 +108,15 @@ export function Masthead({
   onPrev,
   onNext,
   onCompose,
+  replaceRail,
 }: MastheadProps) {
   return (
-    // No `border-b`, no `bg-chrome`: the header is the same surface as the list below
-    // it, separated by nothing but the change in what the two contain.
-    <header data-masthead="" className="relative z-20 shrink-0">
-      <div className="flex h-14 min-w-0 items-center gap-3 px-4">
+    // No band at all: the header floats over the list, and only its glass takes events.
+    <header data-masthead="" data-floating="" className="pointer-events-none flex flex-col gap-1 px-2.5 pt-2.5">
+      <div
+        data-masthead-bar=""
+        className="wn-glass wn-glass-bar pointer-events-auto flex h-[52px] min-w-0 items-center gap-3 rounded-full pl-2 pr-2"
+      >
         {/*
           The sidebar's toggle, at the edge the sidebar slides in from. It wears the app
           mark (the one the phone's top bar shows) rather than a generic panel icon, so
@@ -116,7 +132,7 @@ export function Masthead({
           aria-haspopup="dialog"
           aria-label="Open sidebar"
           title="Sidebar"
-          className="-ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <AppMark size={32} />
         </button>
@@ -133,7 +149,9 @@ export function Masthead({
               composes `box-shadow` out of custom properties and silently resolves to
               `none` on some elements; see the note in `index.css`.
             */
-            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-ctl border border-edge bg-canvas px-3 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+            // Solid, inside the glass: typed text and the placeholder never sit over
+            // moving mail.
+            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-edge bg-canvas px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
           >
             <Search size={14} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
             <input
@@ -167,7 +185,7 @@ export function Masthead({
               onClick={onPrev}
               aria-label="Previous message"
               disabled={!canPrev}
-              className="ml-1 flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronLeft size={17} />
             </button>
@@ -176,7 +194,7 @@ export function Masthead({
               onClick={onNext}
               aria-label="Next message"
               disabled={!canNext}
-              className="flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronRight size={17} />
             </button>
@@ -195,7 +213,7 @@ export function Masthead({
             onClick={onCompose}
             aria-label="Compose"
             title={shortcutHint("Compose", "compose")}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-2.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:px-3.5"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:px-3.5"
           >
             <SquarePen size={16} strokeWidth={2} aria-hidden="true" />
             <span className="hidden lg:inline">Compose</span>
@@ -204,17 +222,22 @@ export function Masthead({
       </div>
 
       {/*
-        The rail, on its own row under search. Inset to the list's own padding; the
-        fades and step chevrons dissolve into the list's surface.
+        The rail, on its own row under the bar: each chip its own floating glass pill,
+        with no band behind them. Held at one height, so the selection bar that stands
+        in for it while rows are selected does not move the list.
       */}
-      <FilterStrip
-        pills={pills}
-        activeFilters={activeFilters as FilterId[]}
-        onToggle={onToggleFilter}
-        onClear={onClearFilters}
-        tone="surface"
-        className="mx-2.5 pb-1"
-      />
+      <div data-masthead-rail="" className="flex h-11 min-w-0 items-center">
+        {replaceRail ?? (
+          <FilterStrip
+            pills={pills}
+            activeFilters={activeFilters as FilterId[]}
+            onToggle={onToggleFilter}
+            onClear={onClearFilters}
+            floating
+            className="min-w-0 flex-1"
+          />
+        )}
+      </div>
     </header>
   );
 }

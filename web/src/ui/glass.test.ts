@@ -27,15 +27,19 @@ const HUES = [
 describe("the floating glass", () => {
   it("is light frost: the rim lets 30–45% of what is underneath through", () => {
     for (const scheme of MODES) {
-      const { rim, text, textOn, fallback } = GLASS[scheme];
+      const { rim, text, textOn, bar, fallback } = GLASS[scheme];
       expect(rim).toBeGreaterThanOrEqual(0.55);
       expect(rim).toBeLessThanOrEqual(0.7);
       // Raised only behind text, and never to opaque.
       expect(text).toBeGreaterThanOrEqual(rim);
       expect(textOn).toBeGreaterThanOrEqual(text);
       expect(textOn).toBeLessThan(0.9);
+      // The desktop's bars may sit higher than the chips' plates, never opaque.
+      expect(bar).toBeGreaterThanOrEqual(text);
+      expect(bar).toBeLessThan(0.9);
       // Without a blur there is nothing to read through, so the fallback is nearly solid.
       expect(fallback).toBeGreaterThan(textOn);
+      expect(fallback).toBeGreaterThan(bar);
     }
   });
 
@@ -66,11 +70,40 @@ describe("the floating glass", () => {
       }
     });
 
+    it(`${scheme}: the desktop's floating top bar and selection bar read over the worst backdrop`, () => {
+      for (const spec of WORST_BACKDROPS[scheme]) {
+        const plate = glassOver(scheme, GLASS[scheme].bar, backdrop(spec, scheme));
+        // The count ("12"), the list's name and the selection count, and the selection
+        // bar's labels: text, so AA.
+        expect(contrastRatio(plate, color.ink), `${scheme} ${spec} ink`).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(plate, color.inkBody), `${scheme} ${spec} body`).toBeGreaterThanOrEqual(4.5);
+        // "of 39" and the list's name are muted text, and still text.
+        expect(contrastRatio(plate, color.inkMuted), `${scheme} ${spec} muted`).toBeGreaterThanOrEqual(4.5);
+        // The prev/next chevrons and the rail's step buttons are icons: 3:1.
+        expect(contrastRatio(plate, color.inkIcon), `${scheme} ${spec} icon`).toBeGreaterThanOrEqual(3);
+        const stepPlate = glassOver(scheme, GLASS[scheme].text, backdrop(spec, scheme));
+        expect(contrastRatio(stepPlate, color.inkIcon), `${scheme} ${spec} step`).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    it(`${scheme}: the bar's own tint is the lowest that keeps "of 39" at AA (no darker than it needs)`, () => {
+      // One step (2%) lower would fail somewhere, unless the bar is already at the
+      // chips' text tint, which is the floor.
+      const { bar, text } = GLASS[scheme];
+      if (bar <= text) return;
+      const lower = bar - 0.02;
+      const worst = Math.min(
+        ...WORST_BACKDROPS[scheme].map((spec) => contrastRatio(glassOver(scheme, lower, backdrop(spec, scheme)), color.inkMuted)),
+      );
+      expect(worst).toBeLessThan(4.5);
+    });
+
     it(`${scheme}: publishes its recipe as custom properties`, () => {
       const props = glassProperties(scheme, color);
       expect(props["--wn-glass-base"]).toBe(color[GLASS[scheme].base]);
       expect(props["--wn-glass-rim"]).toMatch(/^\d+%$/);
       expect(props["--wn-glass-text-on"]).toBe(`${Math.round(GLASS[scheme].textOn * 100)}%`);
+      expect(props["--wn-glass-bar"]).toBe(`${Math.round(GLASS[scheme].bar * 100)}%`);
     });
   }
 });

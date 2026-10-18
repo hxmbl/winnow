@@ -534,6 +534,16 @@ html[data-resizing] iframe {
 }
 
 /*
+ * The desktop's floating bars (the list's top bar, the selection bar): the same glass,
+ * its text tint raised to `--wn-glass-bar`, because these carry muted text ("of 39")
+ * across their face rather than icons. Everything else (blur, rim, fallback, reduced
+ * transparency, forced colours) is `.wn-glass`'s own.
+ */
+.wn-glass.wn-glass-bar {
+  --wn-glass-text: var(--wn-glass-bar, 80%);
+}
+
+/*
  * A smart-filter chip, floating on its own above the dock. Its colour is still
  * `.wn-pill`'s tint (identity hue, the mode's recipe), laid over the glass rather than
  * over a band: the rail has no background at all, and the list scrolls visibly

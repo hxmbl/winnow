@@ -1,6 +1,7 @@
 /**
- * The phone's floating glass: the dock pill, the menu panel it grows into, and the
- * smart-filter chips that float above it.
+ * The floating glass: on a phone the dock pill, the menu panel it grows into, and the
+ * smart-filter chips that float above it; on the desktop the list's floating top bar
+ * (search, where-you-are, Compose), its chips and the selection bar.
  *
  * Light frost, not heavy: a modest `backdrop-filter` (`GLASS_BLUR`) over a translucent
  * tint of the mode's glass base, so rows and colours stay perceptible as they scroll
@@ -15,7 +16,7 @@
  * stays light.
  *
  * Published as `--wn-glass-*` by `applyTheme`, combined in `index.css` (`.wn-glass`,
- * `.wn-chip-glass`). Without `backdrop-filter` the tint is `fallback` instead.
+ * `.wn-glass-bar`, `.wn-chip-glass`). Without `backdrop-filter` the tint is `fallback` instead.
  */
 
 import type { ThemeName } from "./theme";
@@ -29,6 +30,12 @@ export type GlassRecipe = {
   text: number;
   /** Behind the label of a chip that is on, whose stronger hue needs more. */
   textOn: number;
+  /**
+   * The desktop's floating bars (the list's top bar, the selection bar). They carry
+   * secondary text across their whole face ("of 39", the list's name), which needs
+   * `inkMuted` at AA rather than the 3:1 an icon needs, so their tint can sit higher.
+   */
+  bar: number;
   /** With no `backdrop-filter` there is no frost to read through: nearly opaque. */
   fallback: number;
 };
@@ -37,11 +44,11 @@ export const GLASS_BLUR = "blur(12px) saturate(1.3)";
 
 export const GLASS: Record<ThemeName, GlassRecipe> = {
   // Dark ink on a pale tint: the worst backdrop is something dark (the accent, an avatar).
-  light: { base: "surface", rim: 0.62, text: 0.72, textOn: 0.76, fallback: 0.94 },
+  light: { base: "surface", rim: 0.62, text: 0.72, textOn: 0.76, bar: 0.72, fallback: 0.94 },
   // Light ink: the worst is something bright. The canvas (darker than the surface) is
   // the base, so the frost is a shade darker than the list and the ink keeps its edge.
-  dark: { base: "canvas", rim: 0.62, text: 0.68, textOn: 0.84, fallback: 0.94 },
-  oled: { base: "surface", rim: 0.62, text: 0.62, textOn: 0.74, fallback: 0.94 },
+  dark: { base: "canvas", rim: 0.62, text: 0.68, textOn: 0.84, bar: 0.78, fallback: 0.94 },
+  oled: { base: "surface", rim: 0.62, text: 0.62, textOn: 0.74, bar: 0.68, fallback: 0.94 },
 };
 
 /**
@@ -66,6 +73,7 @@ export function glassProperties(scheme: ThemeName, color: Record<string, string>
     "--wn-glass-rim": `${Math.round(recipe.rim * 100)}%`,
     "--wn-glass-text": `${Math.round(recipe.text * 100)}%`,
     "--wn-glass-text-on": `${Math.round(recipe.textOn * 100)}%`,
+    "--wn-glass-bar": `${Math.round(recipe.bar * 100)}%`,
     "--wn-glass-fallback": `${Math.round(recipe.fallback * 100)}%`,
   };
 }

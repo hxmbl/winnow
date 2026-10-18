@@ -56,6 +56,7 @@ import {
   ESTIMATED_ROW_HEIGHT,
   computeOffsets,
   indexAt,
+  revealScrollTop,
   scrollTopForIndex,
   visibleRange,
 } from "../windowing";
@@ -729,6 +730,20 @@ type Props = {
    * itself also holds off in select mode, and answers touch only, never a mouse.
    */
   swipe?: { mailbox: string; onAction: (id: number, action: SwipeAction) => void } | null;
+  /**
+   * How much of the top of the list is covered by chrome floating over it, in px: the
+   * desktop's glass top bar and chips (`Masthead`). The rows start below it at rest and
+   * scroll visibly underneath it; the pinned day header, the cursor's reveal and focus
+   * scrolling (`scroll-padding-top`) all treat the band as covered. 0 (the phone, whose
+   * top bar is in the flow) changes nothing.
+   */
+  topInset?: number;
+  /**
+   * In-flow content at the top of the scroll, above the first day: the desktop's
+   * briefing ("3 waiting on you…", the sync line, Connect Gmail). It scrolls away with
+   * the list, and the windowing counts it in.
+   */
+  lead?: React.ReactNode;
   className?: string;
 };
 
@@ -759,6 +774,8 @@ function MessageList({
   onCopyCode,
   copiedCodeId,
   swipe = null,
+  topInset = 0,
+  lead,
   className = "",
 }: Props) {
 
@@ -808,6 +825,25 @@ function MessageList({
   const [measureVersion, setMeasureVersion] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  /** The lead's measured height (0 without one). */
+  const [leadHeight, setLeadHeight] = useState(0);
+  const leadObserver = useRef<ResizeObserver | null>(null);
+  const measureLead = useCallback((element: HTMLDivElement | null) => {
+    leadObserver.current?.disconnect();
+    leadObserver.current = null;
+    if (!element) {
+      setLeadHeight(0);
+      return;
+    }
+    const read = () => setLeadHeight(element.offsetHeight);
+    read();
+    if (typeof ResizeObserver !== "undefined") {
+      leadObserver.current = new ResizeObserver(read);
+      leadObserver.current.observe(element);
+    }
+  }, []);
+  /** Where the first item starts inside the scroller: the floating band, then the lead. */
+  const contentTop = topInset + (lead ? leadHeight : 0);
 
   const offsets = useMemo(
     () =>
@@ -821,8 +857,8 @@ function MessageList({
   );
 
   const { start, end } = useMemo(
-    () => visibleRange(offsets, scrollTop, viewportHeight),
-    [offsets, scrollTop, viewportHeight],
+    () => visibleRange(offsets, scrollTop - contentTop, viewportHeight),
+    [offsets, scrollTop, viewportHeight, contentTop],
   );
 
   /** Measure one rendered item, and record it only if it actually moved. */
@@ -937,13 +973,28 @@ function MessageList({
    * is correct: there is no day to name.
    */
   const stickyHeader = useMemo(() => {
-    const at = indexAt(offsets, Math.max(0, scrollTop + 1));
+    // Under floating chrome the copy is pinned just below it, so it names the day at
+    // that line; above the first header (the lead still showing) there is none to pin.
+    const line = scrollTop + topInset - contentTop;
+    if (contentTop > 0 && line < 0) return null;
+    const at = indexAt(offsets, Math.max(0, line + 1));
     for (let i = at; i >= 0; i -= 1) {
       const item = items[i];
       if (item?.kind === "header") return item;
     }
     return null;
-  }, [items, offsets, scrollTop]);
+  }, [items, offsets, scrollTop, topInset, contentTop]);
+
+  /**
+   * How much of the scroller's top a row has to clear to be seen: the floating chrome,
+   * and the day header pinned under it. 0 on the phone, as before.
+   */
+  const firstHeaderKey = items[0]?.kind === "header" ? items[0].key : null;
+  const coveredTop =
+    topInset > 0
+      ? // `||`, not `??`: an unmounted header can be on record as 0.
+        topInset + (firstHeaderKey ? heightsRef.current.get(firstHeaderKey) || ESTIMATED_HEADER_HEIGHT : 0)
+      : 0;
 
   /**
    * Bring the cursor's row into view — once per navigation, and only if it is off screen.
@@ -959,6 +1010,14 @@ function MessageList({
    * `block: "nearest"` semantics: a row already fully visible is left alone.
    */
   const revealedSeq = useRef(revealSeq);
+  /** The post-reveal check under floating chrome (see below). */
+  const settleFrame = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (settleFrame.current !== null) cancelAnimationFrame(settleFrame.current);
+    },
+    [],
+  );
   useEffect(() => {
     if (revealedSeq.current === revealSeq) return;
     if (cursorIndex < 0) return;
@@ -973,16 +1032,65 @@ function MessageList({
     const rowIndex = rowIndexForCursor(items, cursorIndex);
     if (rowIndex === null) return;
 
-    const target = scrollTopForIndex(offsets, rowIndex, element.clientHeight);
-    const rowTop = offsets[rowIndex] ?? 0;
-    const rowBottom = offsets[rowIndex + 1] ?? 0;
-    const viewTop = element.scrollTop;
-    const viewBottom = viewTop + element.clientHeight;
+    // Rows sit `contentTop` down the scroller, and the top `coveredTop` of it is under
+    // the floating chrome (and the pinned day header): a row there is not in view, and
+    // one brought into view lands just below it.
+    // Under floating chrome a mounted row is judged by where it really is: the offsets
+    // of rows above it may still be estimates, and a few pixels off is under the glass.
+    const key = items[rowIndex]?.key;
+    const clearance = (top: number, bottom: number): number =>
+      top < coveredTop ? top - coveredTop : bottom > element.clientHeight ? Math.min(bottom - element.clientHeight, top - coveredTop) : 0;
+    if (contentTop > 0 && key) {
+      const mounted = element.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(key)}"]`);
+      if (mounted) {
+        const box = element.getBoundingClientRect();
+        const rect = mounted.getBoundingClientRect();
+        const delta = clearance(rect.top - box.top, rect.bottom - box.top);
+        if (Math.abs(delta) >= 1) {
+          element.scrollTop += delta;
+          setScrollTop(element.scrollTop);
+        }
+        return;
+      }
+    }
+    const rowTop = contentTop + (offsets[rowIndex] ?? 0);
+    const rowBottom = contentTop + (offsets[rowIndex + 1] ?? 0);
+    const viewTop = element.scrollTop + coveredTop;
+    const viewBottom = element.scrollTop + element.clientHeight;
     if (rowTop >= viewTop && rowBottom <= viewBottom) return;
 
+    const target =
+      contentTop > 0
+        ? revealScrollTop(rowTop, coveredTop, element.scrollHeight, element.clientHeight)
+        : scrollTopForIndex(offsets, rowIndex, element.clientHeight);
     element.scrollTop = target;
     setScrollTop(target);
-  }, [revealSeq, cursorIndex, items, offsets, scroller, viewportHeight]);
+    if (contentTop === 0) return;
+    // Under floating chrome, check where the row really landed once it is mounted: rows
+    // above it that were only estimated can put it a little off, and here "a little"
+    // is under the glass. Corrected against the DOM, a frame later.
+    let frames = 0;
+    if (settleFrame.current !== null) cancelAnimationFrame(settleFrame.current);
+    // Not cancelled by this effect's cleanup: the offsets change (and re-run the effect)
+    // in exactly the frames this is waiting on.
+    settleFrame.current = requestAnimationFrame(function settle() {
+      settleFrame.current = null;
+      frames += 1;
+      const row = key ? element.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(key)}"]`) : null;
+      if (!row) {
+        if (frames < 4) settleFrame.current = requestAnimationFrame(settle);
+        return;
+      }
+      const box = element.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      const delta = clearance(rect.top - box.top, rect.bottom - box.top);
+      if (Math.abs(delta) >= 1) {
+        element.scrollTop += delta;
+        setScrollTop(element.scrollTop);
+      }
+      if (frames < 3) settleFrame.current = requestAnimationFrame(settle);
+    });
+  }, [revealSeq, cursorIndex, items, offsets, scroller, viewportHeight, contentTop, coveredTop]);
 
   /**
    * Carry keyboard focus along with the cursor, but only when it is already on a row.
@@ -1286,7 +1394,8 @@ function MessageList({
     // Edge scrolling, so a drag can reach rows that are not mounted yet. It keeps going
     // while the pointer rests near (or past) an edge, one step a frame.
     const box = scroller.getBoundingClientRect();
-    const speed = edgeScrollSpeed(y, box.top, box.bottom);
+    // The top edge that scrolls is the floating chrome's bottom, where the rows show.
+    const speed = edgeScrollSpeed(y, box.top + topInset, box.bottom);
     if (speed !== 0 && state.frame === null) {
       state.frame = requestAnimationFrame(() => {
         const now = drag.current;
@@ -1607,7 +1716,7 @@ function MessageList({
   useEffect(() => () => clearLongPress(), []);
 
   if (threads.length === 0) {
-    return (
+    const empty = (
       <Empty
         reason={emptyReason}
         onClearFilters={onClearFilters}
@@ -1616,6 +1725,14 @@ function MessageList({
         canSync={canSync}
         emptyMailbox={emptyMailbox}
       />
+    );
+    if (topInset === 0 && !lead) return empty;
+    // Under floating chrome: start below it, the lead (briefing) still on top.
+    return (
+      <div data-list-empty="" className="flex min-h-0 flex-1 flex-col bg-surface" style={{ paddingTop: topInset }}>
+        {lead}
+        {empty}
+      </div>
     );
   }
 
@@ -1640,7 +1757,15 @@ function MessageList({
         onContextMenu={onContextMenu}
         onKeyDown={onKeyDownList}
         className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4"
+        // Under floating chrome: the rows start below it, and anything the browser
+        // scrolls into view itself (Tab onto a row) stops below it and the pinned day.
+        style={topInset > 0 ? { paddingTop: topInset, scrollPaddingTop: coveredTop + 4 } : undefined}
       >
+      {lead && (
+        <div ref={measureLead} data-list-lead="">
+          {lead}
+        </div>
+      )}
       {/*
         The scroll extent, and the window positioned inside it.
 
@@ -1755,7 +1880,19 @@ function MessageList({
         below; it must not swallow a click meant for the row underneath.
       */}
       {stickyHeader && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-surface px-1.5">
+        <div
+          data-sticky-day=""
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-surface px-1.5"
+          style={topInset > 0 ? { top: topInset } : undefined}
+        >
+          {/*
+            Under floating chrome the mail shows through the glass above this copy, so its
+            top edge would cut a scrolling row in half; a short fade into the surface
+            softens it. Decorative and behind the chrome.
+          */}
+          {topInset > 0 && (
+            <div aria-hidden data-sticky-fade="" className="absolute inset-x-0 bottom-full h-4 bg-gradient-to-b from-transparent to-surface" />
+          )}
           <SectionHeader label={stickyHeader.label} count={stickyHeader.count} />
         </div>
       )}

@@ -34,7 +34,7 @@ export function SelectionBar({ count, mailbox, anyUnread, phone, onArchive, onTr
 
   const button = phone
     ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-    : "flex h-8 shrink-0 items-center gap-1.5 rounded-ctl px-2.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+    : "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
   const iconSize = phone ? 19 : 14;
   const label = (text: string) => (phone ? <span className="sr-only">{text}</span> : <span>{text}</span>);
 
@@ -46,7 +46,9 @@ export function SelectionBar({ count, mailbox, anyUnread, phone, onArchive, onTr
       className={
         phone
           ? "relative z-30 flex shrink-0 items-center gap-1 px-2 pb-1.5 pt-[max(0.5rem,env(safe-area-inset-top))]"
-          : "flex min-h-[52px] items-center gap-1 px-3 pb-2 pt-3"
+          : // The desktop's, floating in the list's header in the chips' place: the
+            // same glass as the bar above it.
+            "wn-glass wn-glass-bar pointer-events-auto flex h-10 min-w-0 flex-1 items-center gap-1 rounded-full px-1.5"
       }
     >
       <button type="button" onClick={onClear} aria-label="Clear selection" title="Clear selection (Esc)" className={phone ? button : `${button} px-2`}>
