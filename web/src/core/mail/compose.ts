@@ -81,6 +81,8 @@ export function needsSubjectConfirmation(draft: Pick<Draft, "subject">): boolean
 export function isUntouchedNewDraft(draft: Draft, initial: Pick<Draft, "to" | "cc" | "bcc" | "subject">): boolean {
   const same = (a: readonly string[], b: readonly string[]) =>
     a.length === b.length && a.every((value, index) => value === b[index]);
+  // A file attached is something written.
+  if ((draft.attachments?.length ?? 0) > 0) return false;
   return (
     same(draft.to, initial.to) &&
     same(draft.cc, initial.cc) &&

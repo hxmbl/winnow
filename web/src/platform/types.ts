@@ -89,6 +89,12 @@ export interface Platform {
   onBackgroundTick(handler: (tick: number) => void): () => void;
   openExternal(url: string): Promise<void>;
   saveFile(filename: string, bytes: Uint8Array, mimeType: string): Promise<string | null>;
+  /**
+   * Show a file (a PDF attachment) in a viewer: the browser's own in a new tab, or the
+   * system's default app on the desktop. `false` when this host cannot, and the caller
+   * saves it instead (Android). Optional so a test double need not implement it.
+   */
+  openFile?(filename: string, bytes: Uint8Array, mimeType: string): Promise<boolean>;
   focusWindow(): Promise<void>;
 }
 

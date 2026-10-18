@@ -14,11 +14,13 @@
 import type { Email, Draft } from "../model/email";
 import { mimeTypeForFilename } from "../model/email";
 
-/** A file to attach: its bytes and its name. */
+/** A file to attach: its name, and its bytes either raw or already standard base64. */
 export type OutgoingAttachment = {
   filename: string;
   mimeType?: string;
-  bytes: Uint8Array;
+  bytes?: Uint8Array;
+  /** Standard base64 of the bytes, as a draft holds them: re-encoding 25 MB is avoidable. */
+  base64?: string;
 };
 
 const CRLF = "\r\n";
@@ -158,15 +160,17 @@ export function buildMime(draft: Draft, options: BuildOptions): string {
   );
 
   for (const attachment of attachments) {
-    const filename = encodeMimeHeader(attachment.filename);
+    const filename = encodeMimeHeader(headerSafeFilename(attachment.filename));
     parts.push(
       [
         `--${boundary}`,
-        `Content-Type: ${attachment.mimeType ?? mimeTypeForFilename(attachment.filename)}; name="${filename}"`,
+        `Content-Type: ${headerSafeType(attachment.mimeType ?? mimeTypeForFilename(attachment.filename))}; name="${filename}"`,
         `Content-Disposition: attachment; filename="${filename}"`,
         "Content-Transfer-Encoding: base64",
         "",
-        base64Chunked(attachment.bytes),
+        attachment.base64 !== undefined
+          ? wrap76(attachment.base64.replace(/\s+/g, ""))
+          : base64Chunked(attachment.bytes ?? new Uint8Array(0)),
       ].join(CRLF),
     );
   }
@@ -183,9 +187,42 @@ export function buildMime(draft: Draft, options: BuildOptions): string {
  * part body; the outer API `raw` envelope uses base64url.
  */
 function base64Chunked(bytes: Uint8Array): string {
+  // In chunks: one `fromCharCode` per byte made a 25 MB attachment a 25-million-step
+  // string build, and spreading the whole array at once overflows the stack.
+  const CHUNK = 0x8000;
   let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/(.{76})/g, "$1" + CRLF);
+  for (let start = 0; start < bytes.length; start += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + CHUNK));
+  }
+  return wrap76(btoa(binary));
+}
+
+/** Base64 wrapped at 76 characters, CRLF between lines. */
+function wrap76(base64: string): string {
+  const lines: string[] = [];
+  for (let start = 0; start < base64.length; start += 76) lines.push(base64.slice(start, start + 76));
+  return lines.join(CRLF);
+}
+
+/**
+ * A filename that cannot break out of its quoted header parameter: no CR, LF or other
+ * control characters, no `"` or `\`. The sender of a reopened draft, or a file manager's
+ * drop, decides the name; it must not decide the headers.
+ */
+function headerSafeFilename(name: string): string {
+  let safe = "";
+  for (const char of name) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f || char === '"' || char === "\\") continue;
+    safe += char;
+  }
+  return safe.trim() || "attachment";
+}
+
+/** A MIME type as written into `Content-Type`: `type/subtype` and nothing else. */
+function headerSafeType(type: string): string {
+  const bare = type.split(";")[0]!.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(bare) ? bare : "application/octet-stream";
 }
 
 /**

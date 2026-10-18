@@ -204,6 +204,15 @@ export const desktopPlatform: Platform = {
     return invoke<string | null>("save_attachment", { filename, bytesBase64: base64 });
   },
 
+  async openFile(filename: string, bytes: Uint8Array, mimeType: string): Promise<boolean> {
+    void mimeType;
+    // Android has no "open with the default app" for a file Winnow writes; the caller
+    // saves it through the system picker instead.
+    if ((await this.info()).os === "android") return false;
+    await invoke<null>("open_attachment", { filename, bytesBase64: bytesToBase64(bytes) });
+    return true;
+  },
+
   async focusWindow(): Promise<void> {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     const window = getCurrentWindow();

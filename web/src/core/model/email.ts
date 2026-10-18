@@ -102,6 +102,29 @@ export type Draft = {
    * thread (`In-Reply-To`, `References`) rather than as a stranger's new message.
    */
   replyHeaders?: { inReplyTo: string; references?: string };
+  /**
+   * Files attached in the composer. Absent on a draft with none. See
+   * `core/mail/attachments.ts` for the 25 MB cap and how much of this the device copy keeps.
+   */
+  attachments?: DraftAttachment[];
+};
+
+/**
+ * A file attached to a draft: its bytes (standard base64, so the draft stays plain JSON
+ * for the device copy), or where in Gmail they can be read from — a draft reopened from
+ * Drafts names its files by the saved message's attachment ids until they are needed.
+ */
+export type DraftAttachment = {
+  /** Unique within the draft; a chip's key. */
+  id: string;
+  filename: string;
+  mimeType: string;
+  /** Bytes, decoded. */
+  size: number;
+  /** The bytes, base64 (not base64url). */
+  data?: string;
+  /** Where Gmail holds the bytes, when `data` is not here yet. */
+  source?: { gmailId: GmailId; attachmentId: string };
 };
 
 export const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {

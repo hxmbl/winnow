@@ -217,6 +217,23 @@ export const webPlatform: WebPlatform = {
     return null;
   },
 
+  async openFile(filename: string, bytes: Uint8Array, mimeType: string): Promise<boolean> {
+    // A new tab on a blob URL: the browser's own viewer for a PDF. The URL outlives this
+    // call because the tab loads it after the click; a minute is ample.
+    const blob = new Blob([bytes as unknown as BlobPart], { type: mimeType });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.target = "_blank";
+    anchor.rel = "noopener";
+    anchor.title = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
+    return true;
+  },
+
   async focusWindow(): Promise<void> {
     globalThis.focus?.();
   },

@@ -12,6 +12,9 @@
 /** The base URL every Gmail request is built from. */
 export const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 
+/** The media upload endpoint, for a message too big to send as JSON. Same host. */
+export const GMAIL_UPLOAD_API = "https://gmail.googleapis.com/upload/gmail/v1";
+
 /** Google's token endpoint, shared by the installed-app and web flows. */
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
