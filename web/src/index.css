@@ -1022,3 +1022,19 @@ div[data-row-count] {
     transform: translate(var(--wn-tip-x, -50%), 0);
   }
 }
+
+/*
+ * The filter strip's input (`FilterStrip`, `useRailMotion`).
+ *
+ * Over the strip, a swipe is sideways or nothing: `pan-x` on the scroller and everything
+ * in it (the chips and the catcher behind their gaps) so a vertical drag never scrolls
+ * the list underneath, and the strip's own overscroll never chains anywhere. Taps still
+ * work: `pan-x` only withholds vertical panning and zoom.
+ */
+.wn-rail-scroller,
+.wn-rail-scroller > * {
+  touch-action: pan-x;
+}
+.wn-rail-scroller {
+  overscroll-behavior: contain;
+}

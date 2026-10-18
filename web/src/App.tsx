@@ -402,7 +402,7 @@ export function App({ store }: Props) {
   const attentionRef = useRef<string | null>(null);
   /** A wheel over the floating header scrolls the list under it, except over the rail. */
   const forwardChromeWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("[data-rail-scroller], [role='menu'], [role='dialog']")) return;
+    if ((event.target as HTMLElement).closest("[data-rail], [data-rail-scroller], [role='menu'], [role='dialog']")) return;
     const scroller = event.currentTarget.parentElement?.querySelector<HTMLElement>("[data-row-count]");
     if (!scroller || event.deltaY === 0) return;
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientHeight : 1;

@@ -20,7 +20,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { filterKey, type FilterId } from "../../core/model/signals";
-import { digitFor, scrollToReveal, stepRail, wheelPixels, type PillItem, type RailGeometry } from "../rail";
+import { digitFor, scrollToReveal, stepRail, type PillItem, type RailGeometry } from "../rail";
+import { useRailMotion } from "./useRailMotion";
 
 export type { PillItem } from "../rail";
 
@@ -93,6 +94,10 @@ export const FilterStrip = memo(function FilterStrip({
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   const leadingRef = useRef<HTMLDivElement>(null);
+  /** The strip's root: wheel and touch over any part of it (gaps, step buttons) stay in it. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const catcherRef = useRef<HTMLDivElement>(null);
+  useRailMotion(rootRef, scrollerRef);
   /** What changes the rail's content width: which pills, their counts, and "All". */
   const contentSignature = `${hasActive ? "all|" : ""}${pills
     .map((pill) => `${filterKey(pill.id)}:${pill.count}`)
@@ -118,6 +123,13 @@ export const FilterStrip = memo(function FilterStrip({
       // twenty-odd pills) on every scroll event of it.
       setOverflow((was) => (was.start === start && was.end === end ? was : { start, end }));
       setLeadingWidth(leadingRef.current?.offsetWidth ?? 0);
+      // The catcher spans every chip, gaps included (see its element below). Measured
+      // from the last item rather than `scrollWidth`, which would include the catcher
+      // itself and never shrink.
+      const catcher = catcherRef.current;
+      const items = element.querySelectorAll<HTMLElement>("[data-rail-item]");
+      const last = items[items.length - 1];
+      if (catcher) catcher.style.width = last ? `${last.offsetLeft + last.offsetWidth}px` : "0px";
     };
 
     element.addEventListener("scroll", update, { passive: true });
@@ -216,29 +228,15 @@ export const FilterStrip = memo(function FilterStrip({
     [geometry],
   );
 
-  /**
-   * A mouse wheel moves the rail sideways.
-   *
-   * Nothing else in the masthead scrolls, so a vertical wheel over the rail has no other
-   * meaning — and without this a mouse with no tilt wheel could only reach the tabs past
-   * the edge through the step buttons.
-   */
-  const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    const element = scrollerRef.current;
-    if (!element || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-    element.scrollLeft += wheelPixels(event.deltaY, event.deltaMode, element.clientWidth);
-  }, []);
-
   return (
     // A flow root, so the rail's negative margin (below) stays inside this box instead of
     // collapsing through it: everything that measures the rail's row (the dock's
     // clearance, the Top pill's slot, the desktop header's height) sees the same box.
-    <div className={`relative min-w-0 ${touch || floating ? "flow-root" : ""} ${className}`}>
+    <div ref={rootRef} data-rail="" className={`wn-rail relative min-w-0 ${touch || floating ? "flow-root" : ""} ${className}`}>
       <div
         ref={scrollerRef}
         data-rail-scroller=""
         onFocus={onFocus}
-        onWheel={touch ? undefined : onWheel}
         // Touch: the rail is transparent and lets taps between the chips through to the
         // list; the vertical padding keeps the chips' shadows from being clipped by the
         // scroller, and the side padding matches the dock's insets.
@@ -250,7 +248,7 @@ export const FilterStrip = memo(function FilterStrip({
         // rail's own end instead of lengthening its scroll.
         // `--wn-rail-gap` is the gap between the chips, which their frost layers bridge
         // (half each) so the frost is one band under the rail (`index.css`).
-        className={`no-scrollbar flex items-center overflow-x-auto ${
+        className={`wn-rail-scroller no-scrollbar relative flex items-center overflow-x-auto ${
           touch
             ? "pointer-events-none -my-[44px] gap-[var(--wn-rail-gap)] py-[52px] [--wn-rail-gap:0.5rem] pl-[var(--wn-dock-left)] pr-[max(var(--wn-dock-right),var(--wn-glass-reach))] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
             : floating
@@ -259,6 +257,23 @@ export const FilterStrip = memo(function FilterStrip({
         }`}
 
       >
+        {/*
+          The catcher: a transparent band behind the chips, as wide as all of them and as
+          tall as the strip's own box, so a wheel, a swipe or a tap in a gap between two
+          chips lands on the strip instead of falling through to the list under it (the
+          scroller itself lets events through, for the frost padding above and below the
+          chips). First in the rail so the chips paint over it and the CSS that finds the
+          first and last chip is undisturbed; sized in `update` above.
+        */}
+        {glass && (
+          <div
+            ref={catcherRef}
+            aria-hidden="true"
+            data-rail-catcher=""
+            className="absolute left-0 top-[44px] bottom-[44px]"
+          />
+        )}
+
         {/*
           The mark, pinned. `z-10` so it paints above the pills travelling behind it;
           the veil fades them out underneath. The veil is `pointer-events-none` and
