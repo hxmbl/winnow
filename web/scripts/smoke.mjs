@@ -5217,6 +5217,16 @@ try {
     check("the reader shows a code bar for a message with a code", (await bar.count()) === 1);
     check("which shows the code, grouped", ((await bar.textContent()) ?? "").includes("418 902"));
     check("and carries its own Copy button", (await bar.locator('button[aria-label$="code 418902"]').count()) === 1);
+    const order = await bar.evaluate((el) => {
+      const copy = el.querySelector("[data-code-copy]")?.getBoundingClientRect();
+      const value = el.querySelector("[data-code-value]")?.getBoundingClientRect();
+      return copy && value ? { copyRight: copy.right, valueLeft: value.left, valueRight: value.right, barRight: el.getBoundingClientRect().right } : null;
+    });
+    check(
+      "Copy on the left, the code on the right",
+      order !== null && order.copyRight <= order.valueLeft && order.barRight - order.valueRight < 40,
+      JSON.stringify(order),
+    );
     const barBox = await bar.boundingBox();
     const headingBox = await cPage.locator("article h1").boundingBox();
     check(

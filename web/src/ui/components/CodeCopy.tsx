@@ -64,29 +64,32 @@ export function CodeBar({
   onCopy: () => void;
   phone?: boolean;
 }) {
+  // Copy on the left, where the cursor already is coming from the list (and the thumb's
+  // side of the bar on a phone), and the code on the right, read after pressing it.
   return (
     <div
       data-code-bar={code}
-      className={`flex items-center justify-between gap-3 border-b border-hairline-soft bg-surface px-5 pb-3 ${
+      className={`flex items-center gap-3 border-b border-hairline-soft bg-surface px-5 pb-3 ${
         phone ? "pt-[max(0.75rem,env(safe-area-inset-top))]" : "pt-3"
       }`}
     >
-      <div className="min-w-0">
-        <p className="text-meta text-ink-subtle">Verification code</p>
-        <p className="selectable text-title font-semibold tabular-nums text-ink">{formatCode(code)}</p>
-      </div>
       <button
         type="button"
+        data-code-copy=""
         onClick={onCopy}
         aria-label={copied ? `Copied code ${code}` : `Copy code ${code}`}
         title="Copy the code (c)"
-        className={`flex shrink-0 items-center gap-1.5 rounded-ctl px-3 py-1.5 text-ui font-semibold transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
+        className={`flex min-w-[5.5rem] shrink-0 items-center justify-center gap-1.5 rounded-ctl px-3 py-1.5 text-ui font-semibold transition-[background-color,opacity] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
           copied ? "bg-surface-active text-ink" : "bg-accent text-on-accent hover:opacity-90"
         }`}
       >
         {copied ? <Check size={14} strokeWidth={2.4} aria-hidden="true" /> : <Copy size={14} strokeWidth={2} aria-hidden="true" />}
         <span aria-hidden="true">{copied ? "Copied" : "Copy"}</span>
       </button>
+      <div data-code-value="" className="ml-auto min-w-0 text-right">
+        <p className="text-meta text-ink-subtle">Verification code</p>
+        <p className="selectable text-title font-semibold tabular-nums text-ink">{formatCode(code)}</p>
+      </div>
     </div>
   );
 }
