@@ -192,7 +192,9 @@ pub fn finish_for(request: &ActionRequest, outcome: &Outcome) -> Finish {
             COULD_NOT_SEND,
             match failure {
                 Failure::Offline => "You're offline. Your reply is saved in Drafts.",
-                Failure::Auth => "Winnow needs you to sign in again. Your reply is saved in Drafts.",
+                Failure::Auth => {
+                    "Winnow needs you to sign in again. Your reply is saved in Drafts."
+                }
                 _ => "Gmail didn't accept it. Your reply is saved in Drafts.",
             },
             true,
@@ -201,8 +203,12 @@ pub fn finish_for(request: &ActionRequest, outcome: &Outcome) -> Finish {
             "failed",
             COULD_NOT_SEND,
             match failure {
-                Failure::Offline => "You're offline. Your reply is kept on this phone until Winnow opens.",
-                Failure::Auth => "Winnow needs you to sign in again. Your reply is kept on this phone.",
+                Failure::Offline => {
+                    "You're offline. Your reply is kept on this phone until Winnow opens."
+                }
+                Failure::Auth => {
+                    "Winnow needs you to sign in again. Your reply is kept on this phone."
+                }
                 _ => "Your reply is kept on this phone until Winnow opens.",
             },
             false,
@@ -276,13 +282,23 @@ pub fn execute(
                 Ok(raw) => raw,
                 Err(_) => return Outcome::KeptOnDevice(Failure::Invalid),
             };
-            let send = session.call(transport, "POST", "/users/me/messages/send", Some(send_body(&raw, thread_id.as_deref())));
+            let send = session.call(
+                transport,
+                "POST",
+                "/users/me/messages/send",
+                Some(send_body(&raw, thread_id.as_deref())),
+            );
             match send {
                 Ok(_) => Outcome::Sent,
                 Err(send_failure) => {
                     // Never resend: a send whose answer was lost may have gone. The
                     // draft is the safe second step either way.
-                    let draft = session.call(transport, "POST", "/users/me/drafts", Some(draft_body(&raw, thread_id.as_deref())));
+                    let draft = session.call(
+                        transport,
+                        "POST",
+                        "/users/me/drafts",
+                        Some(draft_body(&raw, thread_id.as_deref())),
+                    );
                     match draft {
                         Ok(_) => Outcome::SavedAsDraft(send_failure),
                         Err(_) => Outcome::KeptOnDevice(send_failure),
@@ -290,16 +306,28 @@ pub fn execute(
                 }
             }
         }
-        Action::Trash => modify(&mut session, transport, &request.gmail_id, &["TRASH"], &["INBOX"])
-            .map(|_| Outcome::Trashed)
-            .unwrap_or_else(Outcome::Failed),
+        Action::Trash => modify(
+            &mut session,
+            transport,
+            &request.gmail_id,
+            &["TRASH"],
+            &["INBOX"],
+        )
+        .map(|_| Outcome::Trashed)
+        .unwrap_or_else(Outcome::Failed),
         Action::Read => modify(&mut session, transport, &request.gmail_id, &[], &["UNREAD"])
             .map(|_| Outcome::MarkedRead)
             .unwrap_or_else(Outcome::Failed),
         // The app's own restore: Trash off, Inbox back on (`client.ts` `restore`).
-        Action::Untrash => modify(&mut session, transport, &request.gmail_id, &["INBOX"], &["TRASH"])
-            .map(|_| Outcome::Restored)
-            .unwrap_or_else(Outcome::Failed),
+        Action::Untrash => modify(
+            &mut session,
+            transport,
+            &request.gmail_id,
+            &["INBOX"],
+            &["TRASH"],
+        )
+        .map(|_| Outcome::Restored)
+        .unwrap_or_else(Outcome::Failed),
     }
 }
 
@@ -312,7 +340,12 @@ fn modify(
 ) -> Result<(), Failure> {
     let body = serde_json::json!({ "addLabelIds": add, "removeLabelIds": remove }).to_string();
     session
-        .call(transport, "POST", &format!("/users/me/messages/{gmail_id}/modify"), Some(body))
+        .call(
+            transport,
+            "POST",
+            &format!("/users/me/messages/{gmail_id}/modify"),
+            Some(body),
+        )
         .map(|_| ())
 }
 
@@ -353,8 +386,8 @@ impl Session {
             .client
             .as_deref()
             .and_then(|raw| serde_json::from_str(raw).ok());
-        let fresh = !tokens.access_token.is_empty()
-            && (tokens.expires_at as i64) - EXPIRY_SKEW_MS > now_ms;
+        let fresh =
+            !tokens.access_token.is_empty() && (tokens.expires_at as i64) - EXPIRY_SKEW_MS > now_ms;
         Ok(Self {
             access: fresh.then_some(tokens.access_token),
             refresh: tokens.refresh_token.filter(|token| !token.is_empty()),
@@ -389,7 +422,10 @@ impl Session {
         let response = transport.exchange(&HttpRequest {
             method: "POST".into(),
             url: GOOGLE_TOKEN_URL.into(),
-            headers: vec![("Content-Type".into(), "application/x-www-form-urlencoded".into())],
+            headers: vec![(
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
             body: Some(form.finish()),
         });
         self.refreshed = true;
@@ -473,7 +509,10 @@ pub fn assemble_reply(head: &str, text: &str, now_ms: i64) -> Result<String, &'s
     if !lines.iter().any(|line| line.starts_with("In-Reply-To: ")) {
         return Err("the reply head is not a reply");
     }
-    if !lines.iter().any(|line| *line == "Content-Transfer-Encoding: base64") {
+    if !lines
+        .iter()
+        .any(|line| *line == "Content-Transfer-Encoding: base64")
+    {
         return Err("the reply head is not a base64 text body");
     }
     let date = format!("Date: {}", http_date(now_ms));
@@ -490,7 +529,11 @@ pub fn assemble_reply(head: &str, text: &str, now_ms: i64) -> Result<String, &'s
     if !dated {
         out.insert(0, date);
     }
-    Ok(format!("{}\r\n\r\n{}", out.join("\r\n"), wrapped_base64(text)))
+    Ok(format!(
+        "{}\r\n\r\n{}",
+        out.join("\r\n"),
+        wrapped_base64(text)
+    ))
 }
 
 /// `buildMime`'s body encoding: base64 of the UTF-8, with CRLF after every full
@@ -586,7 +629,9 @@ mod tests {
             tokens: Some(format!(
                 r#"{{"accessToken":"old","refreshToken":"rt","expiresAt":{expires_at}}}"#
             )),
-            client: Some(r#"{"clientId":"id.apps.googleusercontent.com","clientSecret":"sec"}"#.into()),
+            client: Some(
+                r#"{"clientId":"id.apps.googleusercontent.com","clientSecret":"sec"}"#.into(),
+            ),
         }
     }
 
@@ -601,7 +646,10 @@ mod tests {
             Self {
                 answers: answers
                     .iter()
-                    .map(|(status, body)| HttpResponse { status: *status, body: body.to_string() })
+                    .map(|(status, body)| HttpResponse {
+                        status: *status,
+                        body: body.to_string(),
+                    })
                     .collect(),
                 seen: Vec::new(),
             }
@@ -619,7 +667,12 @@ mod tests {
     }
 
     fn bearer(request: &HttpRequest) -> &str {
-        &request.headers.iter().find(|(k, _)| k == "Authorization").unwrap().1
+        &request
+            .headers
+            .iter()
+            .find(|(k, _)| k == "Authorization")
+            .unwrap()
+            .1
     }
 
     #[test]
@@ -640,7 +693,10 @@ mod tests {
         let long = wrapped_base64(&"é".repeat(100));
         assert!(long.split("\r\n").all(|line| line.len() <= 76));
         let joined: String = long.split("\r\n").collect();
-        assert_eq!(String::from_utf8(STANDARD.decode(joined).unwrap()).unwrap(), "é".repeat(100));
+        assert_eq!(
+            String::from_utf8(STANDARD.decode(joined).unwrap()).unwrap(),
+            "é".repeat(100)
+        );
     }
 
     #[test]
@@ -654,7 +710,10 @@ mod tests {
         assert!(!headers.contains("Sat, 17 Oct"));
         assert_eq!(headers.matches("Date: ").count(), 1);
         let decoded = STANDARD.decode(body.replace("\r\n", "")).unwrap();
-        assert_eq!(String::from_utf8(decoded).unwrap(), "Sounds good — Thursday?");
+        assert_eq!(
+            String::from_utf8(decoded).unwrap(),
+            "Sounds good — Thursday?"
+        );
     }
 
     #[test]
@@ -668,7 +727,12 @@ mod tests {
     #[test]
     fn reply_sends_on_the_thread_with_a_fresh_token() {
         let mut t = Script::new(&[(200, r#"{"id":"m2"}"#)]);
-        let outcome = execute(&request("reply", Some("On my way")), &secrets(NOW + 3_600_000), NOW, &mut t);
+        let outcome = execute(
+            &request("reply", Some("On my way")),
+            &secrets(NOW + 3_600_000),
+            NOW,
+            &mut t,
+        );
         assert_eq!(outcome, Outcome::Sent);
         assert_eq!(t.seen.len(), 1);
         let send = &t.seen[0];
@@ -676,15 +740,26 @@ mod tests {
         assert_eq!(bearer(send), "Bearer old");
         let body: serde_json::Value = serde_json::from_str(send.body.as_deref().unwrap()).unwrap();
         assert_eq!(body["threadId"], "18c0ff00");
-        let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(body["raw"].as_str().unwrap()).unwrap()).unwrap();
+        let raw = String::from_utf8(
+            URL_SAFE_NO_PAD
+                .decode(body["raw"].as_str().unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         assert!(raw.contains("In-Reply-To: <orig@mail.example.com>"));
         let finish = finish_for(&request("reply", Some("x")), &outcome);
-        assert_eq!((finish.kind, finish.title.as_str(), finish.release_pending), ("done", "Sent", true));
+        assert_eq!(
+            (finish.kind, finish.title.as_str(), finish.release_pending),
+            ("done", "Sent", true)
+        );
     }
 
     #[test]
     fn expired_token_is_refreshed_once_with_the_client() {
-        let mut t = Script::new(&[(200, r#"{"access_token":"new","expires_in":3599}"#), (200, "{}")]);
+        let mut t = Script::new(&[
+            (200, r#"{"access_token":"new","expires_in":3599}"#),
+            (200, "{}"),
+        ]);
         let outcome = execute(&request("read", None), &secrets(NOW - 1), NOW, &mut t);
         assert_eq!(outcome, Outcome::MarkedRead);
         assert_eq!(t.seen[0].url, GOOGLE_TOKEN_URL);
@@ -693,23 +768,40 @@ mod tests {
         assert!(form.contains("refresh_token=rt"));
         assert!(form.contains("client_secret=sec"));
         assert_eq!(bearer(&t.seen[1]), "Bearer new");
-        let body: serde_json::Value = serde_json::from_str(t.seen[1].body.as_deref().unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(t.seen[1].body.as_deref().unwrap()).unwrap();
         assert_eq!(body["removeLabelIds"], serde_json::json!(["UNREAD"]));
-        assert!(t.seen[1].url.ends_with("/users/me/messages/18c0ffee/modify"));
+        assert!(t.seen[1]
+            .url
+            .ends_with("/users/me/messages/18c0ffee/modify"));
     }
 
     #[test]
     fn a_401_gets_one_refresh_and_one_replay() {
         let mut t = Script::new(&[(401, ""), (200, r#"{"access_token":"new"}"#), (200, "{}")]);
-        assert_eq!(execute(&request("trash", None), &secrets(NOW + 3_600_000), NOW, &mut t), Outcome::Trashed);
+        assert_eq!(
+            execute(
+                &request("trash", None),
+                &secrets(NOW + 3_600_000),
+                NOW,
+                &mut t
+            ),
+            Outcome::Trashed
+        );
         assert_eq!(t.seen.len(), 3);
-        let body: serde_json::Value = serde_json::from_str(t.seen[2].body.as_deref().unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(t.seen[2].body.as_deref().unwrap()).unwrap();
         assert_eq!(body["addLabelIds"], serde_json::json!(["TRASH"]));
         assert_eq!(body["removeLabelIds"], serde_json::json!(["INBOX"]));
 
         let mut again = Script::new(&[(401, ""), (200, r#"{"access_token":"new"}"#), (401, "")]);
         assert_eq!(
-            execute(&request("trash", None), &secrets(NOW + 3_600_000), NOW, &mut again),
+            execute(
+                &request("trash", None),
+                &secrets(NOW + 3_600_000),
+                NOW,
+                &mut again
+            ),
             Outcome::Failed(Failure::Auth)
         );
     }
@@ -717,14 +809,31 @@ mod tests {
     #[test]
     fn trash_is_never_permanent_and_undo_restores_the_inbox() {
         let mut t = Script::new(&[(200, "{}")]);
-        execute(&request("trash", None), &secrets(NOW + 3_600_000), NOW, &mut t);
-        assert!(t.seen.iter().all(|r| r.method != "DELETE" && !r.url.ends_with("/delete")));
+        execute(
+            &request("trash", None),
+            &secrets(NOW + 3_600_000),
+            NOW,
+            &mut t,
+        );
+        assert!(t
+            .seen
+            .iter()
+            .all(|r| r.method != "DELETE" && !r.url.ends_with("/delete")));
         let finish = finish_for(&request("trash", None), &Outcome::Trashed);
         assert_eq!(finish.kind, "undo");
 
         let mut u = Script::new(&[(200, "{}")]);
-        assert_eq!(execute(&request("untrash", None), &secrets(NOW + 3_600_000), NOW, &mut u), Outcome::Restored);
-        let body: serde_json::Value = serde_json::from_str(u.seen[0].body.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            execute(
+                &request("untrash", None),
+                &secrets(NOW + 3_600_000),
+                NOW,
+                &mut u
+            ),
+            Outcome::Restored
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(u.seen[0].body.as_deref().unwrap()).unwrap();
         assert_eq!(body["addLabelIds"], serde_json::json!(["INBOX"]));
         assert_eq!(body["removeLabelIds"], serde_json::json!(["TRASH"]));
     }
@@ -732,21 +841,35 @@ mod tests {
     #[test]
     fn a_failed_send_becomes_a_draft_on_the_same_thread_and_is_never_resent() {
         let mut t = Script::new(&[(0, ""), (200, r#"{"id":"d1"}"#)]);
-        let outcome = execute(&request("reply", Some("hello")), &secrets(NOW + 3_600_000), NOW, &mut t);
+        let outcome = execute(
+            &request("reply", Some("hello")),
+            &secrets(NOW + 3_600_000),
+            NOW,
+            &mut t,
+        );
         assert_eq!(outcome, Outcome::SavedAsDraft(Failure::Offline));
         assert_eq!(t.seen.len(), 2);
         assert!(t.seen[1].url.ends_with("/users/me/drafts"));
-        let body: serde_json::Value = serde_json::from_str(t.seen[1].body.as_deref().unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(t.seen[1].body.as_deref().unwrap()).unwrap();
         assert_eq!(body["message"]["threadId"], "18c0ff00");
         let finish = finish_for(&request("reply", Some("hello")), &outcome);
         assert_eq!(finish.title, COULD_NOT_SEND);
-        assert!(finish.release_pending, "a reply in Drafts can leave the device");
+        assert!(
+            finish.release_pending,
+            "a reply in Drafts can leave the device"
+        );
     }
 
     #[test]
     fn a_reply_that_cannot_reach_gmail_at_all_stays_on_the_device() {
         let mut t = Script::new(&[(0, ""), (0, "")]);
-        let outcome = execute(&request("reply", Some("hello")), &secrets(NOW + 3_600_000), NOW, &mut t);
+        let outcome = execute(
+            &request("reply", Some("hello")),
+            &secrets(NOW + 3_600_000),
+            NOW,
+            &mut t,
+        );
         assert_eq!(outcome, Outcome::KeptOnDevice(Failure::Offline));
         let finish = finish_for(&request("reply", Some("hello")), &outcome);
         assert_eq!(finish.title, COULD_NOT_SEND);
@@ -756,23 +879,52 @@ mod tests {
     #[test]
     fn signed_out_or_revoked_keeps_the_reply() {
         let mut none = Script::new(&[]);
-        let outcome = execute(&request("reply", Some("hi")), &Secrets::default(), NOW, &mut none);
+        let outcome = execute(
+            &request("reply", Some("hi")),
+            &Secrets::default(),
+            NOW,
+            &mut none,
+        );
         assert_eq!(outcome, Outcome::KeptOnDevice(Failure::Auth));
         assert!(none.seen.is_empty());
 
         let mut revoked = Script::new(&[(400, r#"{"error":"invalid_grant"}"#)]);
-        let outcome = execute(&request("reply", Some("hi")), &secrets(NOW - 1), NOW, &mut revoked);
+        let outcome = execute(
+            &request("reply", Some("hi")),
+            &secrets(NOW - 1),
+            NOW,
+            &mut revoked,
+        );
         assert_eq!(outcome, Outcome::KeptOnDevice(Failure::Auth));
     }
 
     #[test]
     fn empty_replies_and_bad_ids_send_nothing() {
         let mut t = Script::new(&[]);
-        assert_eq!(execute(&request("reply", Some("  \n")), &secrets(NOW + 1_000_000), NOW, &mut t), Outcome::EmptyReply);
+        assert_eq!(
+            execute(
+                &request("reply", Some("  \n")),
+                &secrets(NOW + 1_000_000),
+                NOW,
+                &mut t
+            ),
+            Outcome::EmptyReply
+        );
         let mut bad = request("trash", None);
         bad.gmail_id = "../../drafts".into();
-        assert_eq!(execute(&bad, &secrets(NOW + 1_000_000), NOW, &mut t), Outcome::Failed(Failure::Invalid));
-        assert_eq!(execute(&request("archive", None), &secrets(NOW + 1_000_000), NOW, &mut t), Outcome::Failed(Failure::Invalid));
+        assert_eq!(
+            execute(&bad, &secrets(NOW + 1_000_000), NOW, &mut t),
+            Outcome::Failed(Failure::Invalid)
+        );
+        assert_eq!(
+            execute(
+                &request("archive", None),
+                &secrets(NOW + 1_000_000),
+                NOW,
+                &mut t
+            ),
+            Outcome::Failed(Failure::Invalid)
+        );
         assert!(t.seen.is_empty());
     }
 
