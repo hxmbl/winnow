@@ -13,10 +13,11 @@
  * The top is one row: the mark and, beside it, search, whose placeholder names the list
  * ("Search Inbox"); the list's name and count are a visually hidden heading.
  *
- * The top bar is flat, the canvas tone over the list's surface tone. The floating
- * bottom chrome is the one raised thing: light frost, a hairline and a soft shadow
- * (`glass.ts`), with the list scrolling visibly underneath. Every control is sized for
- * a thumb, and nothing is revealed by hover.
+ * The top floats too: the mark and the search pill are each their own glass over the
+ * list, with no band behind them, and the mark is the version toggle (`logoVersion.ts`).
+ * Light frost, a hairline and a soft shadow (`glass.ts`), with the list scrolling
+ * visibly underneath top and bottom. Every control is sized for a thumb, and nothing is
+ * revealed by hover.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -29,6 +30,7 @@ import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 import { ComposeButton } from "./ComposeFab";
 import { listScroller, scrollListToTop } from "../listScroll";
+import { VERSION_TOGGLE_LABEL, logoHaptic, logoPressed, versionText, type LogoView } from "../logoVersion";
 import {
   BACK_TO_TOP_LABEL,
   DOCK_TABS,
@@ -60,13 +62,41 @@ export type PhoneTopBarProps = {
   mailboxName: string;
   position: number | null;
   total: number;
+  /** The build's version, from the platform; null until it has said. */
+  version: string | null;
+  /** Whether the field shows search or the version (`logoVersion.ts`). */
+  logoView: LogoView;
+  /** The mark was tapped. */
+  onToggleLogo: () => void;
+  /** Search was focused some other way: it shows search again. */
+  onSearchFocus: () => void;
 };
 
-export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle, mailboxName, position, total }: PhoneTopBarProps) {
+export function PhoneTopBar({
+  searchQuery,
+  onSearchChange,
+  searchRef,
+  listTitle,
+  mailboxName,
+  position,
+  total,
+  version,
+  logoView,
+  onToggleLogo,
+  onSearchFocus,
+}: PhoneTopBarProps) {
+  const showVersion = logoView === "version";
   return (
+    /*
+      Floating over the list, like the dock: no band behind it, so the mail scrolls up
+      visibly under the mark and the search pill, each its own glass (`.wn-glass`). The
+      header takes no taps; only the mark and the field do. The list pads its top by the
+      bar's measured height, so the first row still clears it at rest.
+    */
     <header
       data-phone-topbar=""
-      className="relative z-30 shrink-0 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]"
+      data-floating=""
+      className="pointer-events-none relative shrink-0 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]"
     >
       {/*
         One row: the mark, then search beside it, taking the rest of the width. There is
@@ -82,28 +112,59 @@ export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle,
         {total === 1 ? "conversation" : "conversations"}
       </h1>
       <div className="flex min-h-11 items-center gap-2">
-        <span data-phone-mark="" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl bg-surface">
-          <AppMark size={28} />
-          <span className="sr-only">Winnow</span>
-        </span>
-        <label
-          htmlFor="winnow-search"
-          data-phone-search=""
-          className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-ctl bg-surface px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+        {/*
+          The mark is the version toggle: a tap swaps search for "Winnow 1.2.2" (with a
+          small haptic tick), a second tap brings search back.
+        */}
+        <button
+          type="button"
+          data-phone-mark=""
+          data-version-toggle=""
+          aria-pressed={logoPressed(logoView)}
+          aria-label={VERSION_TOGGLE_LABEL}
+          title={VERSION_TOGGLE_LABEL}
+          onClick={() => {
+            const tick = logoHaptic(true);
+            if (tick) navigator.vibrate?.(tick);
+            onToggleLogo();
+          }}
+          className="wn-glass pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <Search size={17} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
-          <input
-            id="winnow-search"
-            ref={searchRef}
-            type="search"
-            enterKeyHint="search"
-            value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={`Search ${mailboxName}`}
-            // 16px: iOS zooms the page into any focused field smaller than that.
-            className="min-w-0 flex-1 bg-transparent text-read text-ink outline-none placeholder:text-ink-placeholder"
-          />
-        </label>
+          <AppMark size={28} />
+        </button>
+        <div
+          data-phone-search=""
+          data-logo-view={logoView}
+          className="wn-glass wn-glass-bar wn-logo-swap pointer-events-auto h-11 min-w-0 flex-1 rounded-full focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+        >
+          <label
+            htmlFor="winnow-search"
+            data-shown={showVersion ? undefined : ""}
+            className="flex h-11 min-w-0 items-center gap-2.5 px-3.5"
+          >
+            <Search size={17} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
+            <input
+              id="winnow-search"
+              ref={searchRef}
+              type="search"
+              enterKeyHint="search"
+              value={searchQuery}
+              onChange={(event) => onSearchChange(event.target.value)}
+              onFocus={onSearchFocus}
+              placeholder={`Search ${mailboxName}`}
+              // 16px: iOS zooms the page into any focused field smaller than that.
+              className="min-w-0 flex-1 bg-transparent text-read text-ink outline-none placeholder:text-ink-placeholder"
+            />
+          </label>
+          <p
+            data-version-text=""
+            data-shown={showVersion ? "" : undefined}
+            aria-live="polite"
+            className="truncate px-4 text-read font-semibold text-ink"
+          >
+            {showVersion ? versionText(version) : ""}
+          </p>
+        </div>
       </div>
     </header>
   );

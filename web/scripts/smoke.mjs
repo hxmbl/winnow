@@ -3474,13 +3474,14 @@ try {
     JSON.stringify(logoBox),
   );
   // The top bar is where you are and search, nothing else: no prev/next chevrons, no
-  // tick and no menu button (the menu is the dock's Expand button).
-  const topBarButtons = await topBar.locator("button").evaluateAll((nodes) =>
+  // tick and no menu button (the menu is the dock's Expand button). Its one button is
+  // the mark itself, which toggles the version.
+  const topBarButtons = await topBar.locator("button:not([data-version-toggle])").evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute("aria-label") ?? node.textContent),
   );
   check(
-    "no chevrons, tick or menu button in the phone top bar",
-    topBarButtons.length === 0 &&
+    "no chevrons, tick or menu button in the phone top bar (the mark is its only button, the version toggle)",
+    topBarButtons.length === 0 && (await topBar.locator("button[data-version-toggle][data-phone-mark]").count()) === 1 &&
       (await topBar.locator(
         '[aria-label="Previous message"], [aria-label="Next message"], [aria-label="Mark all read"], [aria-label="Open menu"], [data-sidebar-toggle]',
       ).count()) === 0,

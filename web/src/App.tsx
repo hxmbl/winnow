@@ -2641,41 +2641,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         (see `Masthead` below), and the email actions live in the reader. The sidebar
         itself is an overlay on both, rendered after everything else.
       */}
-      {phone ? (
-        // On a phone the reader takes the whole screen, its own way back included, so
-        // the list's bar steps aside while a message is open.
-        !selected && selection.size > 0 ? (
-          // Held at the top bar's height, so entering select mode does not pull the list
-          // up under the finger: a long-press that goes on to drag would otherwise land
-          // on a row a bar's height further down than the one it meant.
-          <div data-phone-selection-slot="" className="shrink-0" style={{ minHeight: phoneBarHeight || undefined }}>
-          <SelectionBar
-            phone
-            count={selection.size}
-            mailbox={snapshot.mailbox}
-            anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
-            onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
-            onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
-            onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
-            onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
-            onClear={() => setSelection(EMPTY_SELECTION)}
-          />
-          </div>
-        ) : !selected && (
-          <div ref={measurePhoneBar} className="shrink-0">
-          <PhoneTopBar
-            searchQuery={snapshot.searchQuery}
-            onSearchChange={store.setSearchQuery.bind(store)}
-            searchRef={searchRef}
-            listTitle={store.listTitle()}
-            mailboxName={MAILBOX_LABEL[snapshot.mailbox]}
-            position={null}
-            total={view.threads.length}
-          />
-          </div>
-        )
-      ) : null}
-
       <p role="status" aria-live="polite" className="sr-only" data-code-announcement="">
         {codeAnnouncement}
       </p>
@@ -2883,6 +2848,55 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             and pads its top by its measured height; a wheel over the bar scrolls the list
             (the rail keeps its own wheel, which moves it sideways).
           */}
+          {/*
+            The phone's top bar floats over the list, as the dock does at the bottom: the
+            mark and the search pill in glass, and the list scrolls up under them, padded
+            at its top by the bar's measured height (`topInset`) so the first row clears it
+            at rest. On a phone the reader takes the whole screen, its own way back
+            included, so the bar steps aside while a message is open. A selection's bar
+            stands in for it at the same height, so entering select mode does not move the
+            list under the finger: a long-press that goes on to drag would otherwise land
+            on a row a bar's height further down than the one it meant.
+          */}
+          {phone && !selected && (
+            <div data-phone-chrome="" className="pointer-events-none absolute inset-x-0 top-0 z-[31]">
+              {selection.size > 0 ? (
+                <div
+                  data-phone-selection-slot=""
+                  className="wn-glass wn-glass-bar pointer-events-auto rounded-none border-x-0 border-t-0"
+                  style={{ minHeight: phoneBarHeight || undefined, "--wn-glass-radius": "0px" } as React.CSSProperties}
+                >
+                  <SelectionBar
+                    phone
+                    count={selection.size}
+                    mailbox={snapshot.mailbox}
+                    anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
+                    onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
+                    onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
+                    onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
+                    onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+                    onClear={() => setSelection(EMPTY_SELECTION)}
+                  />
+                </div>
+              ) : (
+                <div ref={measurePhoneBar}>
+                  <PhoneTopBar
+                    searchQuery={snapshot.searchQuery}
+                    onSearchChange={store.setSearchQuery.bind(store)}
+                    searchRef={searchRef}
+                    listTitle={store.listTitle()}
+                    mailboxName={MAILBOX_LABEL[snapshot.mailbox]}
+                    position={null}
+                    total={view.threads.length}
+                    version={info?.version ?? null}
+                    logoView={logoView}
+                    onToggleLogo={toggleLogo}
+                    onSearchFocus={showSearch}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           {!phone && (
             <div
               ref={measureListChrome}
@@ -2942,8 +2956,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             (`PullRefresh`), and what is waiting on you rides along in its result. The demo
             keeps one compact line, so Connect Gmail stays in reach.
           */}
-          {phone && snapshot.account === null && compactBriefing}
-          {phone && connectNotice}
           {phone && snapshot.account !== null && (
             <PullRefresh
               containerRef={listPaneRef}
@@ -2954,6 +2966,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || labelPicker !== null,
               }}
               syncing={sync.busy}
+              top={phoneBarHeight}
               onRefresh={() => storeRef.current.refresh()}
               result={() => {
                 const after = storeRef.current.getSnapshot();
@@ -3002,9 +3015,16 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // Swipes are the phone's, and stand down while anything sits over the list.
             // The desktop's floating header covers the list's top, and the briefing
             // scrolls with the list under it.
-            topInset={phone ? 0 : listChromeHeight}
+            topInset={phone ? (selected ? 0 : phoneBarHeight) : listChromeHeight}
             lead={
-              phone ? undefined : (
+              phone ? (
+                snapshot.account === null || connectNotice ? (
+                  <>
+                    {snapshot.account === null && compactBriefing}
+                    {connectNotice}
+                  </>
+                ) : undefined
+              ) : (
                 <>
                   {briefing}
                   {connectNotice}

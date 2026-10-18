@@ -45,9 +45,14 @@ type Props = {
   onRefresh: () => Promise<unknown> | void;
   /** After the sync: what to say. Read once it has finished, so it is the new line. */
   result: () => { ok: boolean; text: string };
+  /**
+   * Where the list's visible top is, in px from the pane's top: the floating top bar's
+   * height, since the list now runs up under it. The indicator comes down from there.
+   */
+  top?: number;
 };
 
-export function PullRefresh({ containerRef, context, syncing, onRefresh, result }: Props) {
+export function PullRefresh({ containerRef, context, syncing, onRefresh, result, top = 0 }: Props) {
   const [phase, setPhase] = useState<PullPhase>("idle");
   const [distance, setDistance] = useState(0);
   const [text, setText] = useState("");
@@ -156,6 +161,7 @@ export function PullRefresh({ containerRef, context, syncing, onRefresh, result 
       aria-hidden={settled ? undefined : true}
       className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center"
       style={{
+        top,
         transform: `translateY(${distance - SIZE}px)`,
         opacity,
         // Held, it follows the finger exactly; let go, it eases to rest or back out. The
