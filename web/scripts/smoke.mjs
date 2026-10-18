@@ -3403,12 +3403,33 @@ try {
 
   const searchBox = await page.locator("[data-phone-search]").boundingBox();
   check(
-    "search has its own full-width row under the title, at touch height",
-    Boolean(searchBox && logoBox) && searchBox.y >= logoBox.y + logoBox.height &&
-      Math.abs(searchBox.x - logoBox.x) <= 1 && searchBox.x + searchBox.width >= 390 - logoBox.x - 1 &&
-      searchBox.height >= MIN_TARGET,
-    JSON.stringify(searchBox),
+    "search sits on the logo's row, filling the rest of it, at touch height",
+    Boolean(searchBox && logoBox) && searchBox.x >= logoBox.x + logoBox.width &&
+      Math.abs(searchBox.y + searchBox.height / 2 - (logoBox.y + logoBox.height / 2)) <= 2 &&
+      searchBox.x + searchBox.width >= 390 - logoBox.x - 1 && searchBox.height >= MIN_TARGET,
+    JSON.stringify({ searchBox, logoBox }),
   );
+  const phoneTitle = await topBar.evaluate((bar) => {
+    const heading = bar.querySelector("h1");
+    const big = [...bar.querySelectorAll("span, h1, h2")].filter((node) => {
+      const style = getComputedStyle(node);
+      return node.getClientRects().length > 0 && parseFloat(style.fontSize) >= 20 && node.getBoundingClientRect().width > 1;
+    });
+    return {
+      heading: heading?.textContent?.replace(/\s+/g, " ").trim() ?? null,
+      hidden: heading ? heading.getBoundingClientRect().width <= 1 : null,
+      placeholder: document.querySelector("#winnow-search")?.getAttribute("placeholder"),
+      bigText: big.map((node) => node.textContent),
+      barHeight: Math.round(bar.getBoundingClientRect().height),
+    };
+  });
+  check(
+    "no visible title row: the list's name and count are a visually hidden heading, and search says which list",
+    /^Inbox, \d+ conversations$/.test(phoneTitle.heading ?? "") && phoneTitle.hidden &&
+      phoneTitle.placeholder === "Search Inbox" && phoneTitle.bigText.length === 0,
+    JSON.stringify(phoneTitle),
+  );
+  check("so the top bar is one row tall and the mail starts higher", phoneTitle.barHeight <= 72, `${phoneTitle.barHeight}px`);
   check("the list's name is in the top bar", (await listTitle())?.trim() === "Inbox", await listTitle());
   const overflow = await page.evaluate(() => {
     const row = document.querySelector("[data-phone-topbar] > div");

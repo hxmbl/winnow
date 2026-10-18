@@ -480,7 +480,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `Menu.tsx` | The WAI-ARIA menu pattern, including submenus. Every other key is swallowed so the app's global shortcuts cannot fire while a menu is open. |
 | `menuPlacement.ts` | `placeMenu` and `MenuAnchor` as pure geometry, kept out of the component module so they test without React. |
 | `NavigationPalette.tsx` | The `!` palette: inbox, spam, trash, sent, drafts, settings. It is a `menu`, not a `dialog`. |
-| `PhoneChrome.tsx` | `PhoneTopBar` and `PhoneDock`. Below `sm` the masthead is replaced, not squeezed; all targets are 44 px. The dock is the filter chips over three tabs (Inbox, Sent, Archive): no Settings tab and no Compose in its place; Settings is the gear on the menu's account row, and a second tap on Inbox opens the menu. |
+| `PhoneChrome.tsx` | `PhoneTopBar` and `PhoneDock`. Below `sm` the masthead is replaced, not squeezed; all targets are 44 px. The top bar is one row, the mark then search (placeholder "Search <list>"); the list's name and count are a visually hidden `h1`, so mail starts higher. The dock is the filter chips over three tabs (Inbox, Sent, Archive): no Settings tab and no Compose in its place; Settings is the gear on the menu's account row, and a second tap on Inbox opens the menu. |
 | `SelectionBar.tsx` | The batch bar, using the same `archiveLabel` and `moveTargets` helpers as the row menu so the two cannot disagree. |
 | `Avatar.tsx` | Contact photo → Gravatar → BIMI logo → monogram. Every picture is an `<img>`; the monogram stays present under a loaded logo so a transparent logo does not let the letter through. |
 | `ShortcutSheet.tsx` | The cheat sheet, rendered from `BINDINGS`. |

@@ -2495,6 +2495,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onSearchChange={store.setSearchQuery.bind(store)}
             searchRef={searchRef}
             listTitle={store.listTitle()}
+            mailboxName={MAILBOX_LABEL[snapshot.mailbox]}
             position={null}
             total={view.threads.length}
           />

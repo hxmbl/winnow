@@ -6,8 +6,8 @@
  * of the screen: the swipeable filter chips sit just above the three tabs (Inbox, Sent,
  * Archive), and a second tap on Inbox raises the menu (`MailNav.tsx`, every folder and
  * the account, whose gear is the way into Settings) as a sheet from the dock.
- * The top is only where you are and search: the mark, the list's name and count, and
- * the search field under them.
+ * The top is one row: the mark and, beside it, search, whose placeholder names the list
+ * ("Search Inbox"); the list's name and count are a visually hidden heading.
  *
  * Flat on purpose, the same way the desktop chrome is: the bars are the canvas tone and
  * the list is the surface tone, so the boundary is a change in value with no rule, no
@@ -37,56 +37,58 @@ export type PhoneTopBarProps = {
   /** The same ref the keyboard handler focuses on `/`. See `Masthead`. */
   searchRef: React.RefObject<HTMLInputElement | null>;
   listTitle: string;
+  /**
+   * The mailbox being searched, for the field's placeholder ("Search Inbox"). Not the
+   * list title, which under a smart filter is the filter's name ("Urgent", "Filtered").
+   */
+  mailboxName: string;
   position: number | null;
   total: number;
 };
 
-export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle, position, total }: PhoneTopBarProps) {
+export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle, mailboxName, position, total }: PhoneTopBarProps) {
   return (
     <header
       data-phone-topbar=""
       className="relative z-30 shrink-0 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]"
     >
       {/*
-        Where you are: the mark, then the list's name and how many conversations are in
-        it. No list-wide buttons up here: the phone list has no cursor to step through,
-        there is no Mark all read, and the menu is a second tap on Inbox.
-        The title is a `span[title]`, as in the masthead.
+        One row: the mark, then search beside it, taking the rest of the width. There is
+        no big "Inbox 39" title row any more, so the mail starts higher; where you are is
+        said by the dock's current tab, by search's own placeholder ("Search Inbox"), and
+        to a screen reader by the visually hidden heading below, which carries the list's
+        name and count. No list-wide buttons up here: the phone list has no cursor to step
+        through, there is no Mark all read, and the menu is a second tap on Inbox.
+        The name is a `span[title]` inside that heading, as in the masthead.
       */}
-      <div className="flex min-h-11 items-center gap-3">
+      <h1 className="sr-only">
+        <span title={listTitle}>{listTitle}</span>, <PositionReadout position={position} total={total} />{" "}
+        {total === 1 ? "conversation" : "conversations"}
+      </h1>
+      <div className="flex min-h-11 items-center gap-2">
         <span data-phone-mark="" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl bg-surface">
           <AppMark size={28} />
           <span className="sr-only">Winnow</span>
         </span>
-        <span className="min-w-0 truncate text-title font-semibold tracking-[-0.01em] text-ink" title={listTitle}>
-          {listTitle}
-        </span>
-        <PositionReadout position={position} total={total} className="shrink-0 pt-1" />
+        <label
+          htmlFor="winnow-search"
+          data-phone-search=""
+          className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-ctl bg-surface px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+        >
+          <Search size={17} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
+          <input
+            id="winnow-search"
+            ref={searchRef}
+            type="search"
+            enterKeyHint="search"
+            value={searchQuery}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={`Search ${mailboxName}`}
+            // 16px: iOS zooms the page into any focused field smaller than that.
+            className="min-w-0 flex-1 bg-transparent text-read text-ink outline-none placeholder:text-ink-placeholder"
+          />
+        </label>
       </div>
-
-      {/*
-        Search has the whole width to itself, on its own row: a field as wide as the
-        screen reads as the place to type, where one squeezed between two buttons read
-        as a third button.
-      */}
-      <label
-        htmlFor="winnow-search"
-        data-phone-search=""
-        className="mt-2 flex h-11 min-w-0 items-center gap-2.5 rounded-ctl bg-surface px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
-      >
-        <Search size={17} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
-        <input
-          id="winnow-search"
-          ref={searchRef}
-          type="search"
-          enterKeyHint="search"
-          value={searchQuery}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search mail"
-          // 16px: iOS zooms the page into any focused field smaller than that.
-          className="min-w-0 flex-1 bg-transparent text-read text-ink outline-none placeholder:text-ink-placeholder"
-        />
-      </label>
     </header>
   );
 }
