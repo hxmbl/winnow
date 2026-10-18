@@ -968,7 +968,17 @@ try {
     (await setup.getByRole("button", { name: "Open the setup guide" }).count()) === 1,
   );
   check("and there is no Back on the first step", (await setup.getByRole("button", { name: "Back" }).count()) === 0);
+  check(
+    "Continue in demo is on the sheet from the first step",
+    (await setup.locator("[data-setup-demo]").textContent())?.trim() === "Continue in demo",
+  );
+  check("and nothing is done yet", (await setup.locator("[data-setup-done]").textContent())?.includes("0 of 5 done"));
   await nextButton.click();
+  check(
+    "Next ticks the step it leaves",
+    (await setup.locator("[data-setup-done]").textContent())?.includes("1 of 5 done") &&
+      (await setup.locator('[data-setup-step-button="project"]').getAttribute("data-done")) === "true",
+  );
   check("Next goes to step 2, the Gmail API", (await setupStep()) === "apis" && (await progress()) === "Step 2 of 5");
   check(
     "and focus follows to the step's heading",
@@ -986,6 +996,14 @@ try {
     (await setupStep()) === "consent" &&
       (await consoleHref("consent")) === "https://console.cloud.google.com/apis/credentials/consent" &&
       (await consoleHref("test-users")) === "https://console.cloud.google.com/auth/audience",
+  );
+  check(
+    "and lists the exact scopes to add, each with a copy button, linked to Data access",
+    (await setup.locator('[data-copy-value="scope-required"]').textContent())?.trim() === "https://www.googleapis.com/auth/gmail.modify" &&
+      (await setup.locator('[data-copy-value="scope-optional"]').allTextContents()).map((t) => t.trim()).join(" ") ===
+        "https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly" &&
+      (await setup.locator("[data-setup-scopes] button[aria-label^='Copy scope']").count()) === 3 &&
+      (await consoleHref("scopes")) === "https://console.cloud.google.com/auth/scopes",
   );
   await setup.getByRole("button", { name: "Back" }).click();
   check("Back goes back a step", (await setupStep()) === "apis" && (await progress()) === "Step 2 of 5");
@@ -1112,7 +1130,34 @@ try {
   });
   await connect.first().click();
   await setup.waitFor({ timeout: 5_000 });
-  check("reopened with nothing saved, it starts again at step 1", (await setupStep()) === "project");
+  check(
+    "reopened before saving, it picks up where it was left, with the ticks kept",
+    (await setupStep()) === "paste" &&
+      (await setup.locator("[data-setup-resumed]").count()) === 1 &&
+      (await setup.locator('[data-setup-step-button="project"]').getAttribute("data-done")) === "true",
+  );
+  check(
+    "the half-finished setup is kept apart from the client, and never holds the secret",
+    await page.evaluate(
+      (secret) => {
+        const raw = localStorage.getItem("winnow.google.setupProgress") ?? "";
+        return raw.includes('"step":4') && !raw.includes(secret) && localStorage.getItem("winnow.google.oauthClient") === null;
+      },
+      WEB_SECRET,
+    ),
+  );
+  // Google's own error pages, explained: paste what it said, get the fix and the step.
+  await setup.getByRole("button", { name: "Google showed an error?" }).click();
+  await setup.locator("[data-setup-google-said]").fill("Access blocked: this app's request is invalid\nError 400: redirect_uri_mismatch");
+  check(
+    "a pasted redirect_uri_mismatch is explained, with a way back to step 4",
+    (await setup.locator('[data-setup-fix="redirect_uri_mismatch"]').count()) === 1 &&
+      (await setup.locator('[data-setup-fix-step="client"]').count()) === 1,
+  );
+  await setup.getByRole("button", { name: /Error 403: access_denied/ }).click();
+  check("so is not being a test user, from the list", (await setup.locator('[data-setup-fix="not_test_user"]').count()) === 1);
+  await setup.locator('[data-setup-fix-step="consent"]').click();
+  check("and its link goes to the consent step", (await setupStep()) === "consent");
   await setup.locator('[data-setup-step-button="paste"]').click();
   await idInput.fill(VALID_ID);
   await secretInput.fill(WEB_SECRET);
@@ -1134,6 +1179,10 @@ try {
   await page.waitForTimeout(400);
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("winnow.google.oauthClient") ?? "null"));
   check("the client is kept in this browser's storage", saved?.clientId === VALID_ID && saved?.clientSecret === WEB_SECRET);
+  check(
+    "and saving it drops the half-finished setup",
+    (await page.evaluate(() => localStorage.getItem("winnow.google.setupProgress"))) === null,
+  );
 
   // Settings → Google account shows it, and can remove it.
   await page.keyboard.press(",");

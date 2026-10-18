@@ -205,6 +205,46 @@ imports the `client_secret_….json` Cloud Console downloads (**Import JSON**, d
 the file on the sheet, or paste its text into Client ID);
 [docs/google-setup.md](docs/google-setup.md) has the step-by-step.
 
+The setup sheet opens only when you ask for it (**Connect Gmail**, **Continue
+with Google**, or **Settings → Google account**); Winnow always starts in the
+demo, and **Continue in demo** stays on the sheet the whole way through. It is a
+five-step guide, each step with a link straight to the right Cloud Console page
+(opened in your browser):
+
+1. **Create a Google Cloud project.** Keep it selected; the next links open in it.
+2. **Enable the Gmail API**, and optionally the People API (contact suggestions
+   and photos).
+3. **Configure the consent screen**: External, left in Testing, with your Gmail
+   address as a test user, and the scopes below added under Data access (each has
+   a copy button on the sheet).
+4. **Create the OAuth client**: Desktop app on the desktop and Android builds, Web
+   application in the browser, with the exact redirect URI and origin shown and a
+   copy button for each.
+5. **Paste the client ID and secret** (or import the JSON). The format is checked
+   as you type, **Test connection** asks Google whether it knows the client, and
+   a failed test or sign-in comes back as a plain fix with a link to the step that
+   fixes it.
+
+Steps you finish are ticked, and a half-finished setup is remembered on this
+device (the step, the ticks and the client ID draft, never the secret, under
+`winnow.google.setupProgress`), so the sheet picks up where you left off; **Start
+over** clears it, and saving the client drops it.
+
+Google shows most setup errors on its own pages. Paste what it said under
+**Google showed an error?** on step 5, or pick it from the list:
+
+| Google says | What it means | Fix (step) |
+| --- | --- | --- |
+| `Error 400: redirect_uri_mismatch` | Web: the page's address isn't registered. Desktop: the client isn't a Desktop app client | add the redirect URI exactly, or create the right client type (4) |
+| `Error 403: access_denied`, "has not completed the Google verification process" | your address isn't a test user | add it under Audience → Test users (3) |
+| `Error 401: invalid_client`, "OAuth client was not found" | the ID is wrong or from another project | copy it again (5) |
+| `invalid_client` (other) | the secret is wrong | copy it again or add a new secret (5) |
+| `invalid_request`, "client_secret is missing" | a Web application client needs its secret | paste the secret (5) |
+| `unauthorized_client` | wrong client type for this build | create a Desktop app / Web application client (4) |
+| "Gmail API has not been used in project … or it is disabled" (`SERVICE_DISABLED`) | the Gmail API is off | enable it in the same project (2) |
+| `Error 403: org_internal` | the consent screen is Internal | set the audience to External (3) |
+| `admin_policy_enforced` | a Workspace admin blocks unlisted apps | ask the admin to trust the client, or use a personal account (3) |
+
 | Build | Client type | Redirect URI | Secret | Stored in |
 | --- | --- | --- | --- | --- |
 | Desktop | **Desktop app** | none to register, Winnow uses a loopback port | optional; sent if you paste it (not confidential for an installed app) | OS keychain, entry `google.oauth-client` |

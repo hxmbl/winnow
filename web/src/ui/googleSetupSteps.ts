@@ -16,6 +16,8 @@
  */
 
 import { apiLibraryUrl } from "../core/session/clientJson";
+import { GMAIL_SCOPE } from "../core/gmail/dto";
+import { CONTACTS_SCOPE, OTHER_CONTACTS_SCOPE } from "../core/gmail/people";
 import type { ClientKind } from "../core/session/credentials";
 
 const CONSOLE = "https://console.cloud.google.com";
@@ -30,6 +32,8 @@ export const CONSOLE_LINKS = {
   peopleApi: apiLibraryUrl("people.googleapis.com"),
   /** The OAuth consent screen (now "Google Auth Platform"; the old address forwards). */
   consent: `${CONSOLE}/apis/credentials/consent`,
+  /** Google Auth Platform → Data access, where the scopes are added. */
+  scopes: `${CONSOLE}/auth/scopes`,
   /** Google Auth Platform → Audience, where test users are added. */
   testUsers: `${CONSOLE}/auth/audience`,
   /** Create an OAuth client. */
@@ -90,3 +94,26 @@ export function originOf(redirectUri: string): string {
     return "";
   }
 }
+
+/** The index of a step by id. */
+export function stepIndexOf(id: SetupStepId): number {
+  return Math.max(0, SETUP_STEPS.findIndex((step) => step.id === id));
+}
+
+/**
+ * The scopes to add under Data access, exactly as Winnow asks for them. Gmail's one
+ * scope covers reading, labels, drafts and sending; the two contact scopes are asked for
+ * only when Google contacts is switched on in Settings.
+ */
+export const SETUP_SCOPES: readonly { scope: string; purpose: string; required: boolean }[] = [
+  { scope: GMAIL_SCOPE, purpose: "Read, sort, draft and send your mail", required: true },
+  { scope: CONTACTS_SCOPE, purpose: "Your contacts, for suggestions and photos", required: false },
+  { scope: OTHER_CONTACTS_SCOPE, purpose: "People you've emailed, for suggestions", required: false },
+];
+
+/**
+ * What the desktop and Android builds redirect to: a loopback address on a port picked at
+ * sign-in. A Desktop app client accepts any loopback port without registering one, which
+ * is why there is nothing to add in the console — shown so nobody goes looking.
+ */
+export const LOOPBACK_REDIRECT = "http://127.0.0.1";
