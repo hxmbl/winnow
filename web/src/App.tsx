@@ -3208,7 +3208,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               }
               whyHere={
                 selected?.mailbox === "inbox" ? (
-                  <WhyHere reasons={store.explainSmartFilters(selected.id)} onChange={() => openFilterPicker([selected.id])} />
+                  <WhyHere reasons={store.explainSmartFilters(selected.id)} />
                 ) : null
               }
               onSenderMenu={(trigger) => {

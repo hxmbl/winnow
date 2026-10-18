@@ -898,6 +898,26 @@ export function Reader({
           )}
 
           {/*
+            "Change smart filters…", after the message: the moment to say where it belongs
+            is once it has been read, and up in the header it sat between the sender and
+            the words, the first thing the eye met on every message.
+          */}
+          {actions.onChangeFilters && (
+            <div data-reader-filters-footer="" className="mt-8 flex max-w-[68ch] items-center gap-2 border-t border-hairline-soft pt-4">
+              <ListFilter size={13} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-ink-subtle" />
+              <p className="text-meta text-ink-subtle">Not where it belongs?</p>
+              <button
+                type="button"
+                data-why-change=""
+                onClick={actions.onChangeFilters}
+                className="rounded-ctl px-1.5 py-1 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Change smart filters…
+              </button>
+            </div>
+          )}
+
+          {/*
             The rest of the conversation.
 
             Clickable, because a thread you cannot read past the newest message is half
