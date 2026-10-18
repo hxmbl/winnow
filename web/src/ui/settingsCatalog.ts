@@ -104,6 +104,12 @@ export const SETTINGS = {
     explanation:
       "Opening a message or conversation marks it read in Gmail, so it also shows as read on your other devices. Turn this off if you use unread as a to-do list: mail then stays unread until you mark it yourself.",
   },
+  undoSend: {
+    category: "reading",
+    label: "Undo send",
+    explanation:
+      "After you press Send, the message waits this long with an Undo button before it goes, and Undo brings it back to the composer as it was. Nothing is recalled: the message simply has not left yet. If Winnow closes during the wait, the message is not sent but kept as a draft, in Gmail and on this device, and offered back next time. Off sends at once.",
+  },
   resetSorting: {
     category: "reading",
     label: "Reset sorting",

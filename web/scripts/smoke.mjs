@@ -1797,7 +1797,16 @@ try {
     (await page.locator('[data-composer] button:has-text("Send") kbd').count()) > 0,
   );
   await page.keyboard.press("Meta+Enter");
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(300);
+  // Undo send holds it first; Send now skips the wait, and a failed send brings the
+  // composer back with its draft and the reason.
+  check("⌘⏎ puts the reply in its undo window", (await page.locator("[data-send-pending]").count()) === 1);
+  await page.locator("[data-send-now]").click();
+  await page.locator('[data-composer] [role="alert"]').first().waitFor({ timeout: 5_000 }).catch(() => undefined);
+  check(
+    "and a send that fails reopens the reply as it was",
+    ((await page.locator('textarea[aria-label="Message"]').first().inputValue().catch(() => "")) ?? "").startsWith("Sounds good"),
+  );
 
   // The demo has nowhere to send to, which is the one thing it can usefully prove here:
   // the failure is reported *once*, in the composer, in words a person can act on. It
@@ -2353,6 +2362,32 @@ try {
     await newSend().click();
     await newSheet().waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
     check("a valid send in the demo closes the composer", (await newSheet().count()) === 0);
+
+    // Undo send (5s by default): the message waits under a "Sending… Undo" strip, and
+    // Undo brings it back to the composer exactly as it was — nothing has left.
+    const sendingStrip = page.locator("[data-send-pending]");
+    check("and holds the message under a Sending… Undo strip", (await sendingStrip.count()) === 1,
+      String(await sendingStrip.textContent().catch(() => "none")));
+    check("which counts down", /Sending in \d+s/.test((await sendingStrip.textContent().catch(() => "")) ?? ""));
+    await sendingStrip.locator("[data-send-undo]").click();
+    await newSheet().waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check(
+      "Undo reopens the composer with what was written",
+      (await newSheet().count()) === 1 &&
+        (await newSheet().locator('input[aria-label="Subject"]').inputValue()) === subject &&
+        (await newSheet().locator('button[aria-label^="Remove"]').count()) === 1,
+    );
+    check("and the strip goes", (await sendingStrip.count()) === 0);
+    await page.waitForTimeout(5_500);
+    check("and nothing was sent in the meantime",
+      !(((await page.locator("[data-notice-text]").textContent().catch(() => "")) ?? "").includes("Message sent")));
+
+    // Sending again, then Send now on the strip: it goes without waiting the rest out.
+    await newSend().click();
+    await newSheet().waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
+    await sendingStrip.locator("[data-send-now]").click();
+    await page.locator("[data-notice-text]", { hasText: "Message sent" }).waitFor({ timeout: 5_000 }).catch(() => undefined);
+    check("Send now on the strip sends at once", (await sendingStrip.count()) === 0);
     check(
       "and confirms it went",
       ((await page.locator("[data-notice-text]").textContent().catch(() => "")) ?? "").includes("Message sent"),
@@ -2534,6 +2569,20 @@ try {
       "Restore reopens it docked on its message, with the text",
       (await dockEl.count()) === 1 && (await body.inputValue()).startsWith("Thursday works.") && (await d.locator("article h1").count()) === 1,
     );
+
+    // Closing during the undo window keeps the message as a draft and never sends it:
+    // the reload offers it back, text and all.
+    await body.focus();
+    await d.keyboard.press("Meta+Enter");
+    await d.locator("[data-send-pending]").waitFor({ state: "visible", timeout: 3_000 }).catch(() => undefined);
+    check("Send puts the reply in its undo window", (await d.locator("[data-send-pending]").count()) === 1 && (await dockEl.count()) === 0);
+    await d.reload({ waitUntil: "networkidle" });
+    await d.waitForSelector("[data-message-id]", { timeout: 10_000 });
+    await offer.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check("closing in the undo window keeps it as a draft, offered back on launch", (await offer.count()) === 1);
+    await offer.getByRole("button", { name: "Restore" }).click();
+    await dockEl.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check("and it comes back unsent, with the text", (await dockEl.count()) === 1 && (await body.inputValue()).startsWith("Thursday works."));
 
     // Escape asks; Discard clears.
     await body.focus();
@@ -5525,6 +5574,25 @@ try {
       "the switch is saved with the other preferences",
       await r.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").markReadOnOpen === false),
     );
+
+    // Undo send sits beside it: Off, 5, 10, 20 or 30 seconds, 5 by default.
+    await r.keyboard.press(",");
+    await r.waitForSelector('[role="dialog"][aria-label="Settings"]', { timeout: 5_000 });
+    const undoChoices = r.locator("[data-undo-send-choices] button");
+    check(
+      "Settings offers Undo send as Off, 5s, 10s, 20s and 30s",
+      (await undoChoices.allTextContents()).join("|") === "Off|5s|10s|20s|30s",
+      (await undoChoices.allTextContents()).join("|"),
+    );
+    check("with 5s chosen by default", (await r.locator("[data-undo-send-choices] button[aria-pressed='true']").textContent()) === "5s");
+    await r.locator("[data-undo-send-choices] button", { hasText: "Off" }).click();
+    await r.waitForTimeout(150);
+    check(
+      "and Off is saved with the other preferences",
+      await r.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").undoSendSeconds === 0),
+    );
+    await r.keyboard.press("Escape");
+    await r.waitForTimeout(250);
     await ctx.close();
   }
 

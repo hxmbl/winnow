@@ -29,6 +29,7 @@ import {
   type SettingsLayout,
 } from "../settingsView";
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
+import { UNDO_SEND_CHOICES, undoSendLabel, type UndoSendSeconds } from "../../core/mail/undoSend";
 import { FILTER_LABELS } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
 import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
@@ -111,6 +112,9 @@ export type SettingsProps = {
   /** Read on open. On by default; see `Preferences.markReadOnOpen`. */
   markReadOnOpen: boolean;
   onMarkReadOnOpen: (value: boolean) => void;
+  /** How long Send waits for Undo. 5s by default; see `Preferences.undoSendSeconds`. */
+  undoSendSeconds: UndoSendSeconds;
+  onUndoSendSeconds: (value: UndoSendSeconds) => void;
   /** Brand logos from BIMI in avatars. Off by default; see `Preferences.brandLogos`. */
   brandLogos: boolean;
   onBrandLogos: (value: boolean) => void;
@@ -613,6 +617,24 @@ function ReadingSettings({ props }: { props: SettingsProps }) {
         </Row>
         <Row setting="markReadOnOpen">
           <Toggle checked={props.markReadOnOpen} onChange={props.onMarkReadOnOpen} label="Mark as read when opened" />
+        </Row>
+        <Row setting="undoSend">
+          <div data-undo-send-choices="" className="flex gap-1 rounded-ctl border border-hairline p-0.5">
+            {UNDO_SEND_CHOICES.map((seconds) => (
+              <button
+                key={seconds}
+                type="button"
+                onClick={() => props.onUndoSendSeconds(seconds)}
+                aria-pressed={props.undoSendSeconds === seconds}
+                aria-label={seconds === 0 ? "Undo send off" : `Wait ${seconds} seconds`}
+                className={`rounded-ctl px-2 py-1 text-meta font-semibold tabular-nums transition-colors ${
+                  props.undoSendSeconds === seconds ? "bg-surface-active text-ink" : "text-ink-muted hover:text-ink-body"
+                }`}
+              >
+                {undoSendLabel(seconds)}
+              </button>
+            ))}
+          </div>
         </Row>
       </Section>
 

@@ -61,6 +61,7 @@ import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
+import { DelayedSend } from "./core/mail/undoSend";
 import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
 import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
@@ -80,6 +81,7 @@ import { ReaderSplitHandle } from "./ui/components/ReaderSplitHandle";
 import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer } from "./ui/components/Composer";
+import { SendingStrip } from "./ui/components/SendingStrip";
 import { Settings } from "./ui/components/SettingsPanel";
 import { ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
@@ -180,6 +182,13 @@ type ComposerState = {
    */
   fromDrafts?: { draftId: string; row: Email; baseline: Draft };
 };
+
+/**
+ * A sent message waiting out its undo window: the composer as it was when Send was
+ * pressed, its autosave (still attached to the Gmail draft), and the message a reply
+ * threads on.
+ */
+type PendingSend = { composer: ComposerState; saver: DraftAutosaver | null; inReplyTo?: GmailId };
 
 /** What `startComposer` is given: the composer, less the state it owns itself. */
 type ComposerStart = Omit<ComposerState, "sending" | "error" | "status">;
@@ -1328,6 +1337,141 @@ export function App({ store }: Props) {
   const [confirmNoSubject, setConfirmNoSubject] = useState<Pick<Draft, "to" | "cc" | "bcc"> | null>(null);
 
   /**
+   * The message in its undo window (see `core/mail/undoSend`), and what the "Sending…"
+   * strip shows: when it goes.
+   */
+  const delayedSendRef = useRef(new DelayedSend<PendingSend>());
+  const [sendWait, setSendWait] = useState<{ deadline: number; seconds: number } | null>(null);
+
+  /**
+   * Hand a message to Gmail, sending its saved draft when there is one (so no orphan is
+   * left in Drafts), then tidy up after it: the device copy goes, the autosave stops, a
+   * row in Drafts goes, and a new message says it went. Throws when the send fails; the
+   * caller decides where the error is shown.
+   */
+  const deliver = useCallback(async ({ composer: sending, saver, inReplyTo }: PendingSend) => {
+    const draftId = (saver ? await saver.settle().catch(() => null) : null) ?? undefined;
+    const s = storeRef.current;
+    let simulated = false;
+    if (sending.mode === "new") ({ simulated } = await s.sendNew(sending.draft, draftId));
+    else if (inReplyTo) await s.sendReply(sending.draft, inReplyTo, draftId);
+    else throw new Error("Couldn't find the message this replies to.");
+    saver?.finish();
+    if (saverRef.current === saver) saverRef.current = null;
+    // Gmail removed the draft as it sent it; so does the list, now.
+    if (sending.fromDrafts) s.removeDraftRow(sending.fromDrafts.draftId);
+    if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
+    if (sending.mode !== "new") return;
+    // Said, because a closing sheet alone does not say whether it went. The demo says
+    // what it did: nothing left the device.
+    const message = simulated ? "Message sent (demo: saved to Sent on this device only)." : "Message sent.";
+    s.setNotice(message);
+    setTimeout(() => {
+      if (s.getSnapshot().notice === message) s.dismissNotice();
+    }, SENT_NOTICE_MS);
+  }, []);
+
+  /**
+   * The undo window ended: send. A failure puts the composer back with the error, as an
+   * immediate send would — unless another composer has opened since, when the failed
+   * one is kept as a draft (Gmail and device) and a notice says so, rather than
+   * replacing what the user is writing now.
+   */
+  const deliverPending = useCallback(
+    async (pending: PendingSend) => {
+      setSendWait(null);
+      try {
+        await deliver(pending);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Couldn't send that message.";
+        if (composerRef.current) {
+          void pending.saver?.park();
+          storeRef.current.setNotice(`${message} It was kept as a draft.`);
+          return;
+        }
+        saverRef.current = pending.saver;
+        const back: ComposerState = {
+          ...pending.composer,
+          sending: false,
+          error: message,
+          status: pending.saver?.currentStatus ?? pending.composer.status,
+        };
+        composerRef.current = back;
+        setComposer(back);
+      }
+    },
+    [deliver],
+  );
+
+  /**
+   * Undo: the waiting message comes back to the composer exactly as it was, with its
+   * autosave (and so its Gmail draft) still attached. A composer opened in the meantime
+   * is parked first, the way opening any other draft parks it.
+   */
+  const undoSend = useCallback(() => {
+    const pending = delayedSendRef.current.undo();
+    setSendWait(null);
+    if (!pending) return;
+    const current = composerRef.current;
+    if (current) retireComposer(current, "park");
+    saverRef.current = pending.saver;
+    const back: ComposerState = {
+      ...pending.composer,
+      sending: false,
+      error: null,
+      status: pending.saver?.currentStatus ?? pending.composer.status,
+    };
+    composerRef.current = back;
+    setComposer(back);
+  }, [retireComposer]);
+
+  /** "Send now" on the strip: skip the rest of the wait. */
+  const sendWaitingNow = useCallback(() => {
+    delayedSendRef.current.sendNow();
+  }, []);
+
+  /**
+   * Leaving with a message in its undo window keeps it as a draft and never sends it
+   * (the reasons are on `core/mail/undoSend`). The device copy was written when Send was
+   * pressed; this asks Gmail for its copy too, best effort, since a closing page cannot
+   * wait. `pagehide` rather than `beforeunload`: it also fires for a tab put into the
+   * back/forward cache, and it never prompts. A page that comes back from that cache
+   * gets the composer back, as if Undo had been pressed. Going to the background
+   * (`visibilitychange`, which is all Android may say before killing the webview) only
+   * pushes the save to Gmail and leaves the wait running.
+   */
+  const keptOnHideRef = useRef<PendingSend | null>(null);
+  useEffect(() => {
+    const onHide = () => {
+      const pending = delayedSendRef.current.undo();
+      if (!pending) return;
+      setSendWait(null);
+      keptOnHideRef.current = pending;
+      void pending.saver?.flush();
+    };
+    const onShow = (event: PageTransitionEvent) => {
+      const kept = keptOnHideRef.current;
+      keptOnHideRef.current = null;
+      if (!kept || !event.persisted || composerRef.current) return;
+      saverRef.current = kept.saver;
+      const back: ComposerState = { ...kept.composer, sending: false, error: null };
+      composerRef.current = back;
+      setComposer(back);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") void delayedSendRef.current.pending?.saver?.flush();
+    };
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("pageshow", onShow);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pageshow", onShow);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  /**
    * Send what the composer holds.
    *
    * `recipients` is what the composer counted, including an address typed and not yet a
@@ -1336,71 +1480,61 @@ export function App({ store }: Props) {
    * A reply goes out on its thread. A new message goes out on its own, and is asked
    * about first when it has no subject — Gmail's "send without a subject?", because a
    * blank subject is almost always a slip and the recipient's list shows nothing.
+   *
+   * With Undo send on, the composer closes at once and the message waits out its window
+   * under a "Sending… Undo" strip. Its draft is saved first — on this device at once,
+   * and to Gmail — so a close in the wait loses nothing. With it Off, the composer stays
+   * up saying "Sending" and shows a failure in place, as before.
    */
   const sendDraft = useCallback(
     async (recipients?: Pick<Draft, "to" | "cc" | "bcc">, confirmedNoSubject = false) => {
       if (!composer || composer.sending) return;
       const draft = { ...composer.draft, ...(recipients ?? {}) };
+      if (composer.mode === "new" && !confirmedNoSubject && needsSubjectConfirmation(draft)) {
+        setConfirmNoSubject({ to: draft.to, cc: draft.cc, bcc: draft.bcc });
+        return;
+      }
+      const inReplyTo =
+        composer.mode === "new" ? undefined : (composer.replyTo ?? snapshotRef.current.view.selected?.gmailId);
+      if (composer.mode !== "new" && !inReplyTo) return;
       const saver = saverRef.current;
-      /** Send the saved Gmail draft when there is one, so no orphan is left in Drafts. */
-      const settledDraftId = async (): Promise<string | undefined> =>
-        (saver ? await saver.settle().catch(() => null) : null) ?? undefined;
-      /** The message went out: the device copy goes, and the autosave stops. */
-      const sent = () => {
-        saver?.finish();
-        if (saverRef.current === saver) saverRef.current = null;
-        setComposer(null);
-        // Gmail removed the draft as it sent it; so does the list, now.
-        const s = storeRef.current;
-        if (composer.fromDrafts) s.removeDraftRow(composer.fromDrafts.draftId);
-        if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
-      };
+      const pending: PendingSend = { composer: { ...composer, draft }, saver, inReplyTo };
 
-      if (composer.mode === "new") {
-        if (!confirmedNoSubject && needsSubjectConfirmation(draft)) {
-          setConfirmNoSubject({ to: draft.to, cc: draft.cc, bcc: draft.bcc });
-          return;
-        }
-        setComposer({ ...composer, draft, sending: true, error: null });
-        try {
-          const { simulated } = await storeRef.current.sendNew(draft, await settledDraftId());
-          sent();
-          // Said, because a closing sheet alone does not say whether it went. The demo
-          // says what it did: nothing left the device.
-          const message = simulated ? "Message sent (demo: saved to Sent on this device only)." : "Message sent.";
-          const s = storeRef.current;
-          s.setNotice(message);
-          setTimeout(() => {
-            if (s.getSnapshot().notice === message) s.dismissNotice();
-          }, SENT_NOTICE_MS);
-        } catch (error) {
-          setComposer({
-            ...composer,
-            draft,
-            sending: false,
-            error: error instanceof Error ? error.message : "Couldn't send that message.",
-          });
-        }
+      const seconds = storeRef.current.getSnapshot().preferences.undoSendSeconds;
+      if (seconds > 0) {
+        saver?.change(draft, { replyAll: composer.replyAll, initial: composer.initial });
+        void saver?.flush();
+        // Detached from the screen, not stopped: the saver goes with the message.
+        saverRef.current = null;
+        composerRef.current = null;
+        setComposer(null);
+        delayedSendRef.current.schedule(pending, seconds * 1000, (value) => void deliverPending(value));
+        setSendWait({ deadline: Date.now() + seconds * 1000, seconds });
         return;
       }
 
-      const snap = snapshotRef.current;
-      const inReplyTo = composer.replyTo ?? snap.view.selected?.gmailId;
-      if (!inReplyTo) return;
       setComposer({ ...composer, draft, sending: true, error: null });
       try {
-        await storeRef.current.sendReply(draft, inReplyTo, await settledDraftId());
-        sent();
+        await deliver(pending);
+        if (composerRef.current?.context === composer.context) {
+          composerRef.current = null;
+          setComposer(null);
+        }
       } catch (error) {
         setComposer({
           ...composer,
           draft,
           sending: false,
-          error: error instanceof Error ? error.message : "Couldn't send that reply.",
+          error:
+            error instanceof Error
+              ? error.message
+              : composer.mode === "new"
+                ? "Couldn't send that message."
+                : "Couldn't send that reply.",
         });
       }
     },
-    [composer],
+    [composer, deliver, deliverPending],
   );
 
   /**
@@ -1563,6 +1697,10 @@ export function App({ store }: Props) {
    * session that merely expired keeps them, so a draft survives signing back in.
    */
   const forgetDeviceDrafts = useCallback(() => {
+    // A message in its undo window is not sent on the way out: it stays in Gmail's
+    // Drafts if it got there, like the open composer's draft.
+    delayedSendRef.current.undo()?.saver?.finish();
+    setSendWait(null);
     const saver = saverRef.current;
     saverRef.current = null;
     saver?.finish();
@@ -2455,6 +2593,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         affordance is unreliable — but waits for an explicit dismissal, a different action,
         or a navigation.
       */}
+      {sendWait && <SendingStrip deadline={sendWait.deadline} onUndo={undoSend} onSendNow={sendWaitingNow} />}
+
       {snapshot.undo && (
         <div
           role="status"
@@ -2867,6 +3007,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onImagePolicy={(imagePolicy) => store.setPreferences({ imagePolicy })}
           markReadOnOpen={preferences.markReadOnOpen}
           onMarkReadOnOpen={(value) => store.setPreferences({ markReadOnOpen: value })}
+          undoSendSeconds={preferences.undoSendSeconds}
+          onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           brandLogos={preferences.brandLogos}
           onBrandLogos={(value) => store.setPreferences({ brandLogos: value })}
           gravatars={preferences.gravatars}

@@ -124,3 +124,22 @@ describe("Gravatar preference", () => {
     expect(revivePreferences({ gravatars: "yes" })?.gravatars).toBeUndefined();
   });
 });
+
+describe("undo send delay", () => {
+  it("defaults to five seconds", () => {
+    expect(DEFAULT_PREFERENCES.undoSendSeconds).toBe(5);
+    expect(demoStore().getSnapshot().preferences.undoSendSeconds).toBe(5);
+  });
+
+  it("survives a restart, Off included", () => {
+    for (const value of [0, 5, 10, 20, 30]) {
+      expect(revivePreferences({ undoSendSeconds: value })?.undoSendSeconds).toBe(value);
+    }
+  });
+
+  it("drops a delay Settings does not offer, so the default applies", () => {
+    for (const value of [15, -1, 60, "10", null, true]) {
+      expect(revivePreferences({ undoSendSeconds: value })).not.toHaveProperty("undoSendSeconds");
+    }
+  });
+});

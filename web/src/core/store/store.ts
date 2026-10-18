@@ -60,6 +60,7 @@ import {
   type ThreadRow,
 } from "../classify/pipeline";
 import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
+import { DEFAULT_UNDO_SEND_SECONDS, type UndoSendSeconds } from "../mail/undoSend";
 import { LearningModel } from "../learn/learning";
 import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
@@ -235,6 +236,11 @@ export type Preferences = {
    * Off restores the old behaviour, where mail stays unread until the user says so.
    */
   markReadOnOpen: boolean;
+  /**
+   * How long Send waits before the message goes out, so Undo can bring it back. `0` is
+   * Off. See `core/mail/undoSend`: closing the app in the wait keeps it as a draft.
+   */
+  undoSendSeconds: UndoSendSeconds;
   notificationsEnabled: boolean;
   /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
   appearance: Appearance;
@@ -260,6 +266,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   brandLogos: false,
   gravatars: false,
   markReadOnOpen: true,
+  undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
