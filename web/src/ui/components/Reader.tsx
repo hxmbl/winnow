@@ -22,7 +22,6 @@ import {
   Mail,
   MailOpen,
   MoreHorizontal,
-  Paperclip,
   RotateCcw,
   Star,
   Tag,
@@ -58,7 +57,7 @@ function firstLine(body: string): string {
   }
   return "";
 }
-import { formatBytes } from "../../core/gmail/mime";
+import { AttachmentList, type LoadedAttachment } from "./AttachmentList";
 import { LabelChips } from "./LabelChips";
 import type { Mailbox } from "../../core/model/email";
 import { DOCK_SURFACE } from "./PhoneChrome";
@@ -113,6 +112,10 @@ type Actions = {
   /** Open another message in the conversation. */
   onOpenMessage: (id: number) => void;
   onSaveAttachment: (attachment: { filename: string; mimeType: string; size: number; index: number }) => void;
+  /** The bytes of the open message's attachment at `index`, for a thumbnail. */
+  onLoadAttachment: (index: number) => Promise<LoadedAttachment>;
+  /** Show the open message's attachment at `index` (a PDF) in a viewer. */
+  onOpenAttachment: (index: number) => void;
 };
 
 const ICON_BUTTON =
@@ -899,31 +902,15 @@ export function Reader({
           )}
 
           {email.attachments.length > 0 && (
-            <div className="mt-6 max-w-[68ch]">
-              <h3 className="text-meta font-semibold text-ink-muted">
-                {email.attachments.length}{" "}
-                {email.attachments.length === 1 ? "attachment" : "attachments"}
-              </h3>
-              <ul className="mt-2 flex flex-col gap-1.5">
-                {email.attachments.map((attachment, index) => (
-                  <li key={attachment.id}>
-                    <button
-                      type="button"
-                      onClick={() => actions.onSaveAttachment({ ...attachment, index })}
-                      className="flex w-full items-center gap-2.5 rounded-ctl px-3 py-2 text-left transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                    >
-                      <Paperclip size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
-                      <span className="min-w-0 flex-1 truncate text-ui font-medium text-ink">
-                        {attachment.filename}
-                      </span>
-                      <span className="shrink-0 text-meta tabular-nums text-ink-subtle">
-                        {formatBytes(attachment.size)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <AttachmentList
+              attachments={email.attachments}
+              load={actions.onLoadAttachment}
+              onSave={(index) => {
+                const attachment = email.attachments[index];
+                if (attachment) actions.onSaveAttachment({ ...attachment, index });
+              }}
+              onOpen={actions.onOpenAttachment}
+            />
           )}
 
           {/*

@@ -5,7 +5,7 @@
  * chrome; the chrome is `Overlay.tsx`'s, and the composer has grown its own concerns.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { RecipientField } from "./RecipientField";
 import { normaliseRecipients, recipientProblem } from "../../core/mail/compose";
@@ -81,7 +81,16 @@ export type ComposerProps = {
   /** "Drafts need permission": ask for it (incremental consent). */
   onAllowDrafts?: (() => void) | null;
   allowingDrafts?: boolean;
+  /** The attachment area (`ComposerAttachments`), under the message. */
+  attachments?: ReactNode;
+  /** Files dropped on the composer (desktop). Without it the composer takes no drops. */
+  onFiles?: (files: File[]) => void;
 };
+
+/** Whether a drag carries files (not text or a link dragged out of the message). */
+function carriesFiles(event: React.DragEvent): boolean {
+  return [...event.dataTransfer.types].includes("Files");
+}
 
 /** Reply / Reply all: two pressed-state buttons, because both choices are always visible. */
 function ReplyAllToggle({ replyAll, onChange }: { replyAll: boolean; onChange: (replyAll: boolean) => void }) {
@@ -166,7 +175,40 @@ export function Composer({
   saveStatus = { kind: "idle" },
   onAllowDrafts = null,
   allowingDrafts = false,
+  attachments = null,
+  onFiles,
 }: ComposerProps) {
+  /** Files are being dragged over the composer: the drop hint is up. */
+  const [dropping, setDropping] = useState(false);
+  /** Nested `dragenter`/`dragleave` pairs, so crossing a child does not drop the hint. */
+  const dragDepth = useRef(0);
+  const dropProps = onFiles && !phone
+    ? {
+        onDragEnter: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          dragDepth.current += 1;
+          setDropping(true);
+        },
+        onDragOver: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        },
+        onDragLeave: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDropping(false);
+        },
+        onDrop: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          dragDepth.current = 0;
+          setDropping(false);
+          onFiles([...event.dataTransfer.files]);
+        },
+      }
+    : {};
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLInputElement>(null);
   const ccRef = useRef<HTMLInputElement>(null);
@@ -288,7 +330,9 @@ export function Composer({
     <>
       <div
         data-composer={mode}
-        className={`thin-scroll min-h-0 flex-1 overflow-y-auto ${phone ? "flex flex-col" : ""}`}
+        {...dropProps}
+        data-dropping={dropping ? "" : undefined}
+        className={`thin-scroll relative min-h-0 flex-1 overflow-y-auto ${phone ? "flex flex-col" : ""}`}
         onKeyDown={(event) => {
           /*
             Send from the keyboard.
@@ -414,6 +458,8 @@ export function Composer({
           }`}
         />
 
+        {attachments}
+
         {error && (
           <p role="alert" className="text-meta font-medium text-danger">
             {error}
@@ -460,6 +506,15 @@ export function Composer({
           <p className="text-meta leading-snug text-ink-subtle">{hint}</p>
         )}
       </div>
+      {dropping && (
+        <div
+          aria-hidden="true"
+          data-drop-hint=""
+          className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-pane border-2 border-dashed border-accent bg-chrome text-ui font-semibold text-accent"
+        >
+          Drop files to attach
+        </div>
+      )}
       </div>
       {/*
         The phone's action bar: outside the scroller, so it stays put at the bottom of the

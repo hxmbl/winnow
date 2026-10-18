@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build, preview } from "vite";
 import { smokeOffline } from "./smoke-offline.mjs";
+import { labelsAndAttachments } from "./smoke-labels-attachments.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -7953,6 +7954,10 @@ try {
   // END glass-and-version
 
   await smokeOffline({ browser, URL, check, section, errors });
+  // Labels and attachments: chips, the label picker's other doors, label mailboxes, the
+  // reader's file list and lightbox, and compose attachments. Its own module, so it can
+  // also run alone (`node scripts/smoke-labels-attachments.mjs`).
+  await labelsAndAttachments({ browser, url: URL, check, section });
 
   // ── Console ────────────────────────────────────────────────────────────────
 
