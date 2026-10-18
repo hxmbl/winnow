@@ -4,6 +4,7 @@
 
 import type { TokenStore } from "../core/gmail/tokens";
 import type { CredentialStore } from "../core/session/credentials";
+import type { NotificationActionEvent, NotificationBatch } from "../core/notify/notifications";
 
 /** What this build can do. Reported to the UI so it can hide what is absent. */
 export type PlatformInfo = {
@@ -18,11 +19,11 @@ export type PlatformInfo = {
   saveFiles: boolean;
 };
 
-export type NewMailNotification = {
-  title: string;
-  body: string;
-  messageIds: number[];
-};
+/**
+ * One sync's new mail, as the platform shows it: a notification per message (at most
+ * five) with the buttons the user allowed, and a summary. See `core/notify/notifications.ts`.
+ */
+export type NewMailNotification = NotificationBatch;
 
 /** An OAuth attempt that the platform delivered back to us. */
 export type OAuthRedirect =
@@ -131,6 +132,24 @@ export interface Platform {
   // ── OS integration ───────────────────────────────────────────────────────
 
   notifyNewMail(mail: NewMailNotification): Promise<void>;
+
+  /**
+   * A press on one of those notifications: its body (`open`) or a button. Desktop and
+   * browser presses are for the app to carry out; Android's arrive already carried out
+   * (`origin: "android"`). Returns the unsubscribe.
+   */
+  onNotificationAction(handler: (event: NotificationActionEvent) => void): () => void;
+
+  /** Desktop: say on the notification what the app did with a press. Optional. */
+  confirmNotificationAction?(messageId: number, title: string, text: string, failed: boolean): Promise<void>;
+
+  /**
+   * Android: replies typed into a notification that could not be sent or saved, for the
+   * app to save to Drafts. Listing keeps them; `releaseKeptReplies` forgets the ones
+   * saved. Optional; absent means none.
+   */
+  keptReplies?(): Promise<unknown[]>;
+  releaseKeptReplies?(requestIds: readonly string[]): Promise<void>;
 
   requestNotificationPermission(): Promise<boolean>;
   setUnreadBadge(count: number): Promise<void>;

@@ -25,11 +25,14 @@ import type {
 } from "./types";
 import { parseNativeSignInResult, parseSigningInfo, unavailable } from "./nativeGoogle";
 import { waitUntilVisible } from "./visibility";
+import { parseNotificationAction, type NotificationActionEvent } from "../core/notify/notifications";
 
 /** Events from Rust. */
 const SYNC_TICK_EVENT = "winnow://sync-tick";
 const DEEP_LINK_EVENT = "winnow://open-url";
 const TRAY_ACTION_EVENT = "winnow://tray-action";
+/** `notify_actions::ACTION_EVENT`. */
+const NOTIFICATION_ACTION_EVENT = "winnow://notification-action";
 
 type AuthOutcome =
   | { kind: "code"; code: string; state: string }
@@ -175,13 +178,36 @@ export const desktopPlatform: Platform = {
   },
 
   async notifyNewMail(mail: NewMailNotification): Promise<void> {
-    await invoke("notify_new_mail", {
-      mail: {
-        title: mail.title,
-        body: mail.body,
-        message_ids: mail.messageIds,
-      },
-    });
+    // `notify_messages` (Rust, `notify_actions/`): per-message notifications with
+    // buttons on Android, Linux and Windows; one grouped notification on macOS.
+    await invoke("notify_messages", { batch: mail });
+  },
+
+  onNotificationAction(handler: (event: NotificationActionEvent) => void): () => void {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listen<unknown>(NOTIFICATION_ACTION_EVENT, (event) => {
+      const parsed = parseNotificationAction(event.payload);
+      if (parsed) handler(parsed);
+    })
+      .then((fn) => (cancelled ? fn() : (unlisten = fn)))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  },
+
+  async confirmNotificationAction(messageId: number, title: string, text: string, failed: boolean): Promise<void> {
+    await invoke("notify_action_result", { result: { messageId, title, text, failed } }).catch(() => undefined);
+  },
+
+  async keptReplies(): Promise<unknown[]> {
+    return invoke<unknown[]>("notify_kept_replies").catch(() => []);
+  },
+
+  async releaseKeptReplies(requestIds: readonly string[]): Promise<void> {
+    await invoke("notify_release_kept", { ids: [...requestIds] });
   },
 
   async requestNotificationPermission(): Promise<boolean> {

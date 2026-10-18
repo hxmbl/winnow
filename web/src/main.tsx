@@ -30,7 +30,8 @@ import type { Preferences, StoreOptions } from "./core/store/store";
 import { applyTheme, resolveScheme } from "./ui/theme";
 import { DEFAULT_ACCENT_THEME, DEFAULT_APPEARANCE } from "./core/model/appearance";
 import type { LearningSnapshot } from "./core/learn/learning";
-import type { Mailbox } from "./core/model/email";
+import type { Email, Mailbox } from "./core/model/email";
+import { announce, saveKeptReplies, wireNotifications } from "./ui/notificationActions";
 import "./index.css";
 
 const container = document.getElementById("root");
@@ -200,22 +201,9 @@ function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): 
  * directly, and routing them through the store would mean reaching past it.
  */
 const platformBridge = {
-  notifyNewMail: async (emails: readonly { id: number; sender: string; name?: string; subject: string }[]) => {
-    const first = emails[0];
-    if (!first) return;
-    // One message gets the sender as the title; several get a count, with the
-    // senders as the body. A notification that reads "Ada Lovelace — Re: the plan"
-    // is actionable; one that reads "Winnow" is not.
-    const title = emails.length === 1 ? first.name ?? first.sender : `${emails.length} new messages`;
-    const body =
-      emails.length === 1
-        ? first.subject
-        : emails
-            .slice(0, 3)
-            .map((email) => email.name ?? email.sender)
-            .join(", ");
-    await platform.notifyNewMail({ title, body, messageIds: emails.map((email) => email.id) });
-  },
+  // One notification per message with its buttons, plus a summary; what qualifies and
+  // what it says are in `core/notify/notifications.ts`.
+  notifyNewMail: (emails: readonly Email[]) => announce(store, platform, emails),
   setUnreadBadge: (count: number) => platform.setUnreadBadge(count),
   setBackgroundSync: (interval: number | null) => platform.setBackgroundSync(interval),
 };
@@ -264,7 +252,24 @@ void platform
     // store owns `now`.
     const stopClock = store.startClock();
 
+    // Presses on new-mail notifications, and replies a phone kept while it could not
+    // send: saved to Drafts once signed in, and again whenever the app comes back.
+    const unlistenNotifications = wireNotifications(store, platform);
+    let wasReady = false;
+    const unsubscribeKept = store.subscribe(() => {
+      const ready = store.getSnapshot().status === "ready";
+      if (ready && !wasReady) void saveKeptReplies(store, platform);
+      wasReady = ready;
+    });
+    const onVisible = () => {
+      if (globalThis.document?.visibilityState === "visible") void saveKeptReplies(store, platform);
+    };
+    globalThis.document?.addEventListener("visibilitychange", onVisible);
+
     globalThis.addEventListener?.("pagehide", () => {
+      unlistenNotifications();
+      unsubscribeKept();
+      globalThis.document?.removeEventListener("visibilitychange", onVisible);
       unlistenTick();
       foreground.stop();
       stopClock();

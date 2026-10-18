@@ -480,22 +480,60 @@ describe("beginSignIn()", () => {
 // ── OS integration ───────────────────────────────────────────────────────────
 
 describe("notifyNewMail()", () => {
-  it("sends `message_ids` inside the mail value", async () => {
-    const { desktopPlatform } = await loadDesktop();
-    await desktopPlatform.notifyNewMail({ title: "Winnow", body: "3 new", messageIds: [7, 9] });
-    expect(invokes).toEqual([
+  const BATCH = {
+    total: 2,
+    summaryTitle: "2 new messages",
+    summaryBody: "Ada, Bob",
+    messages: [
       {
-        cmd: "notify_new_mail",
-        args: { mail: { title: "Winnow", body: "3 new", message_ids: [7, 9] } },
+        messageId: 7,
+        gmailId: "abc",
+        threadId: "t1",
+        title: "Ada",
+        subject: "Plan",
+        preview: "Hi",
+        receivedAt: 1,
+        replyHead: null,
       },
-    ]);
-    expect(JSON.stringify(invokes)).not.toContain("messageIds");
+    ],
+    actions: { reply: true, trash: false, read: true },
+    hidePreview: true,
+  };
+
+  it("hands the whole batch to `notify_messages` under `batch`, keys untouched", async () => {
+    const { desktopPlatform } = await loadDesktop();
+    await desktopPlatform.notifyNewMail(BATCH);
+    expect(invokes).toEqual([{ cmd: "notify_messages", args: { batch: BATCH } }]);
+    // Tauri rewrites only the top-level key; Rust reads the value's camelCase as is.
+    expect(JSON.stringify(invokes)).toContain("messageId");
+    expect(JSON.stringify(invokes)).toContain("hidePreview");
+  });
+});
+
+describe("onNotificationAction()", () => {
+  it("passes on a valid press and drops a malformed one", async () => {
+    const { desktopPlatform } = await loadDesktop();
+    const seen: unknown[] = [];
+    desktopPlatform.onNotificationAction((event) => seen.push(event));
+    const subscription = subscriptions.find((entry) => entry.event === "winnow://notification-action");
+    expect(subscription).toBeDefined();
+    subscription!.handler({ payload: { action: "trash", messageId: 9, gmailId: "abc", origin: "desktop" } });
+    subscription!.handler({ payload: { action: "deleteForever", messageId: 9, origin: "desktop" } });
+    subscription!.handler({ payload: { action: "read", messageId: "9", origin: "desktop" } });
+    expect(seen).toEqual([{ action: "trash", messageId: 9, gmailId: "abc", origin: "desktop" }]);
   });
 
-  it("sends an empty list as an empty list, not as an absent key", async () => {
+  it("confirms with `notify_action_result` and lists kept replies with `notify_kept_replies`", async () => {
     const { desktopPlatform } = await loadDesktop();
-    await desktopPlatform.notifyNewMail({ title: "t", body: "b", messageIds: [] });
-    expect(invokes[0].args).toEqual({ mail: { title: "t", body: "b", message_ids: [] } });
+    reply = (cmd) => (cmd === "notify_kept_replies" ? [{ requestId: "r1" }] : undefined);
+    await desktopPlatform.confirmNotificationAction!(9, "Moved to Trash", "", false);
+    expect(await desktopPlatform.keptReplies!()).toEqual([{ requestId: "r1" }]);
+    await desktopPlatform.releaseKeptReplies!(["r1"]);
+    expect(invokes).toEqual([
+      { cmd: "notify_action_result", args: { result: { messageId: 9, title: "Moved to Trash", text: "", failed: false } } },
+      { cmd: "notify_kept_replies", args: undefined },
+      { cmd: "notify_release_kept", args: { ids: ["r1"] } },
+    ]);
   });
 });
 

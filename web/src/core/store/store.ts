@@ -67,6 +67,13 @@ import { LearningModel } from "../learn/learning";
 import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
 import type { DraftsApi } from "../mail/drafts";
+import {
+  DEFAULT_NOTIFICATION_ACTIONS,
+  draftForKeptReply,
+  notifiable,
+  type KeptReply,
+  type NotificationActions,
+} from "../notify/notifications";
 import type { SignalWeights } from "../classify/weights";
 import {
   FilterLearning,
@@ -265,6 +272,10 @@ export type Preferences = {
    */
   undoSendSeconds: UndoSendSeconds;
   notificationsEnabled: boolean;
+  /** Which buttons a new-mail notification offers (Reply, Delete, Mark read). */
+  notificationActions: NotificationActions;
+  /** Lock screen: "New message" instead of the sender and subject. */
+  notificationHidePreview: boolean;
   /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
   appearance: Appearance;
   /** The accent theme, applied across every mode. */
@@ -292,6 +303,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   swipeActions: true,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
+  notificationActions: DEFAULT_NOTIFICATION_ACTIONS,
+  notificationHidePreview: false,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
   backgroundSync: true,
@@ -583,6 +596,12 @@ export interface MailBackend {
    * `sendNew`; without it the composer keeps its draft on the device only.
    */
   drafts?: DraftsApi;
+  /**
+   * The header block a notification's inline reply is sent with, by Gmail id: the
+   * composer's own `rawFor` → `buildMime`, for `notificationReplyDraft` with an empty
+   * body. Optional like `drafts`; absent means notifications offer no inline reply.
+   */
+  replyHeads?(gmailIds: readonly string[]): Promise<Record<string, string>>;
   /** The user's own Gmail labels (`labels.list`, user ones only). Optional like `sendNew`. */
   listLabels?(): Promise<UserLabel[]>;
   /** Make a user label (`labels.create`). */
@@ -1635,12 +1654,56 @@ export class WinnowStore {
   private async notifyIfNew(recent: ReadonlySet<number>): Promise<void> {
     if (!this.state.preferences.notificationsEnabled || !this.platform) return;
     if (recent.size === 0) return;
-    // A muted sender's mail arrives silently: that is what muting them means.
-    const arrived = this.state.all.filter(
-      (email) => recent.has(email.id) && !this.isSenderMuted(email.sender),
+    // A muted or hidden sender's mail arrives silently: that is what muting them means.
+    // Mail already read (on another device, before this sync saw it) is not news, and
+    // nor is mail a filter filed out of the inbox.
+    const arrived = notifiable(
+      this.state.all.filter((email) => recent.has(email.id)),
+      this.state.preferences,
     );
     if (arrived.length === 0) return;
     await this.platform.notifyNewMail(arrived).catch(() => undefined);
+  }
+
+  /**
+   * The reply header blocks for a notification batch (see `MailBackend.replyHeads`).
+   * Never throws: a notification without inline reply beats no notification.
+   */
+  async notificationReplyHeads(emails: readonly Email[]): Promise<Record<string, string>> {
+    if (!this.backend?.replyHeads || !this.state.preferences.notificationActions.reply) return {};
+    try {
+      return await this.backend.replyHeads(emails.map((email) => email.gmailId));
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Replies typed into a notification that the phone could neither send nor save
+   * (offline, signed out, or the app not running), saved to Gmail's Drafts now.
+   * Returns how many were saved; any that fail are handed back so nothing typed is lost.
+   */
+  async saveKeptReplies(kept: readonly KeptReply[]): Promise<{ saved: number; failed: KeptReply[] }> {
+    const drafts = this.backend?.drafts;
+    if (!drafts) return { saved: 0, failed: [...kept] };
+    let saved = 0;
+    const failed: KeptReply[] = [];
+    for (const reply of kept) {
+      const original = this.state.all.find((email) => email.gmailId === reply.gmailId);
+      const draft = draftForKeptReply(reply, original);
+      if (!draft) {
+        failed.push(reply);
+        continue;
+      }
+      try {
+        await drafts.create(draft, original ? original.gmailId : undefined);
+        saved += 1;
+      } catch {
+        failed.push(reply);
+      }
+    }
+    if (saved > 0) void this.refreshDrafts().catch(() => undefined);
+    return { saved, failed };
   }
 
   /** The OS badge: the mailbox's unread count, less mail from muted senders. */
