@@ -3543,7 +3543,7 @@ try {
   });
   check(
     "in light frost: a modest blur over a translucent tint, with a shadow",
-    /blur\(12px\)/.test(pillGlass.filter) && /saturate\(1\.3\)/.test(pillGlass.filter) &&
+    /blur\(22px\)/.test(pillGlass.filter) && /saturate\(1\.8\)/.test(pillGlass.filter) &&
       /\/ 0\.[5-8]\d*\)|, 0\.[5-8]\d*\)/.test(pillGlass.background) && pillGlass.shadow !== "none",
     JSON.stringify(pillGlass),
   );
@@ -3623,7 +3623,7 @@ try {
   check(
     "each chip is its own frosted pill with a hairline and a shadow; no band behind the rail",
     chipRow.bands.length === 0 && (chipRow.dockBg === "rgba(0, 0, 0, 0)" || chipRow.dockBg === "transparent") &&
-      /blur\(12px\)/.test(chipRow.chipFilter) && chipRow.chipShadow !== "none" && chipRow.chipBorder === "1px" &&
+      /blur\(22px\)/.test(chipRow.chipFilter) && chipRow.chipShadow !== "none" && chipRow.chipBorder === "1px" &&
       chipRow.gap >= 8,
     JSON.stringify(chipRow),
   );
@@ -3835,7 +3835,7 @@ try {
   );
   check(
     "in the same light frost as the dock",
-    /blur\(12px\)/.test(phoneSide.filter) && /saturate\(1\.3\)/.test(phoneSide.filter) && !/, 1\)$/.test(phoneSide.background),
+    /blur\(22px\)/.test(phoneSide.filter) && /saturate\(1\.8\)/.test(phoneSide.filter) && !/, 1\)$/.test(phoneSide.background),
     JSON.stringify({ filter: phoneSide.filter, background: phoneSide.background }),
   );
   check(
@@ -6651,7 +6651,7 @@ try {
           "past a screen it shows: a frosted pill named Back to top, labelled Top, centred above the chips, clear of the dock and compose",
           past.shown && past.visibility === "visible" && past.takesTap && past.name === "Back to top" && past.label === "Top" &&
             Math.abs(past.centre - past.width / 2) <= 2 && past.aboveChips && !past.overlapsChrome &&
-            /blur\(12px\)/.test(past.filter) && /saturate\(1\.3\)/.test(past.filter),
+            /blur\(22px\)/.test(past.filter) && /saturate\(1\.8\)/.test(past.filter),
           JSON.stringify(past),
         );
       } else {
@@ -6754,7 +6754,7 @@ try {
             barRadius: parseFloat(getComputedStyle(bar).borderTopLeftRadius),
             barHeight: barRect.height,
             inset: { left: Math.round(barRect.left - pane.left), right: Math.round(pane.right - barRect.right), top: Math.round(barRect.top - pane.top) },
-            chipsGlass: chips.length > 0 && chips.every((chip) => chip.classList.contains("wn-chip-glass") && /blur\(12px\)/.test(filterOf(chip))),
+            chipsGlass: chips.length > 0 && chips.every((chip) => chip.classList.contains("wn-chip-glass") && /blur\(22px\)/.test(filterOf(chip))),
             chromeBottom: Math.round(chrome.getBoundingClientRect().bottom),
             scrollTop: Math.round(scroller.scrollTop),
             padTop: parseFloat(getComputedStyle(scroller).paddingTop),
@@ -6772,7 +6772,7 @@ try {
       check(
         `${mode}: the desktop header floats: no band behind it, the bar a rounded glass pill inset from the pane, every chip its own glass pill`,
         rest.theme === mode && rest.bands.every((bg) => bg === "rgba(0, 0, 0, 0)") && rest.railMask === "none" &&
-          /blur\(12px\)/.test(rest.barFilter) && /saturate\(1\.3\)/.test(rest.barFilter) &&
+          /blur\(22px\)/.test(rest.barFilter) && /saturate\(1\.8\)/.test(rest.barFilter) &&
           rest.barRadius >= rest.barHeight / 2 - 1 && rest.inset.left >= 8 && rest.inset.right >= 8 && rest.inset.top >= 8 && rest.chipsGlass,
         JSON.stringify(rest),
       );
@@ -6853,7 +6853,7 @@ try {
       const selFilter = await bar.evaluate((el) => getComputedStyle(el).backdropFilter || getComputedStyle(el).webkitBackdropFilter).catch(() => "");
       check(
         "a selection's bar floats in the chips' place, in the same glass, and the header keeps its height",
-        Boolean(selBox) && /blur\(12px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
+        Boolean(selBox) && /blur\(22px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
         JSON.stringify({ selBox, selFilter, before }),
       );
       await d.keyboard.press("Escape");

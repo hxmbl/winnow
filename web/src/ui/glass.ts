@@ -3,7 +3,8 @@
  * smart-filter chips that float above it; on the desktop the list's floating top bar
  * (search, where-you-are, Compose), its chips and the selection bar.
  *
- * Light frost, not heavy: a modest `backdrop-filter` (`GLASS_BLUR`) over a translucent
+ * Light tint, soft frost: a strong `backdrop-filter` (`GLASS_BLUR`, `--wn-glass-filter` in
+ * `index.css`; stronger since 1.2.2 at the owner's request) over a translucent
  * tint of the mode's glass base, so rows and colours stay perceptible as they scroll
  * underneath. A hairline edge and a soft shadow lift it off the list.
  *
@@ -40,7 +41,7 @@ export type GlassRecipe = {
   fallback: number;
 };
 
-export const GLASS_BLUR = "blur(12px) saturate(1.3)";
+export const GLASS_BLUR = "blur(22px) saturate(1.8)";
 
 export const GLASS: Record<ThemeName, GlassRecipe> = {
   // Dark ink on a pale tint: the worst backdrop is something dark (the accent, an avatar).
@@ -55,7 +56,7 @@ export const GLASS: Record<ThemeName, GlassRecipe> = {
  * What can slide under the glass, per mode, already as it arrives through the blur: the
  * accents of every accent theme at full strength (an avatar, a selected row), and for
  * the extreme, black (light mode) or white (the dark modes) covering 60% of the chip
- * with the list's surface between: through a 12px blur, nothing in the list comes
+ * with the list's surface between: through a 22px blur, nothing in the list comes
  * closer to solid than that.
  * `glass.test.ts` holds every chip, rest and on, to AA over each.
  */
