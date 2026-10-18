@@ -69,6 +69,12 @@ android-native-keyring-store = "1"
 # Already in the tree through the dialog plugin; registered on Android only.
 tauri-plugin-fs = "2"
 
+# Notification buttons on Linux (D-Bus actions) and Windows (WinRT toast buttons):
+# `tauri-plugin-notification` already depends on it there, at this version, and
+# offers no actions on the desktop. See `src/notify_actions/desktop.rs`.
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+notify-rust = "4.11"
+
 [dev-dependencies]
 tempfile = "3"
 

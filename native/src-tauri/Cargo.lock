@@ -5257,6 +5257,7 @@ dependencies = [
  "base64 0.22.1",
  "keyring",
  "keyring-core",
+ "notify-rust",
  "parking_lot",
  "serde",
  "serde_json",
