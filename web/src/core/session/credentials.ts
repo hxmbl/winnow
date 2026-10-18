@@ -33,6 +33,19 @@ export type OAuthClientCredentials = {
   clientId: string;
   /** Absent when the user left it blank (allowed for Desktop clients). */
   clientSecret?: string;
+  /**
+   * Android only, optional: the Web application client that native sign-in names as
+   * its `serverClientId`. Google issues the authorization code to this client, so its
+   * secret does the exchange and every later refresh of that session. See
+   * `nativeSignIn.ts`.
+   */
+  nativeAndroid?: NativeAndroidClient;
+};
+
+/** The Web application client behind native Android sign-in. Both halves required. */
+export type NativeAndroidClient = {
+  clientId: string;
+  clientSecret: string;
 };
 
 /** Where the pair lives. Same shape on both hosts. */
@@ -70,14 +83,48 @@ export type CredentialErrors = {
   clientSecret?: string;
 };
 
-/** Trim both fields and drop an empty secret. */
+/**
+ * Trim both fields and drop an empty secret. The native Android client is kept only when
+ * both of its halves are there; half of one is no client at all.
+ */
 export function normaliseCredentials(input: {
   clientId: string;
   clientSecret?: string;
+  nativeAndroid?: { clientId?: string; clientSecret?: string } | null;
 }): OAuthClientCredentials {
   const clientId = input.clientId.trim();
   const clientSecret = (input.clientSecret ?? "").trim();
-  return clientSecret ? { clientId, clientSecret } : { clientId };
+  const base: OAuthClientCredentials = clientSecret ? { clientId, clientSecret } : { clientId };
+  const nativeId = (input.nativeAndroid?.clientId ?? "").trim();
+  const nativeSecret = (input.nativeAndroid?.clientSecret ?? "").trim();
+  if (nativeId && nativeSecret) base.nativeAndroid = { clientId: nativeId, clientSecret: nativeSecret };
+  return base;
+}
+
+/**
+ * The native Android client's problems, field by field. Empty when it can be saved, or
+ * when both fields are blank (the step is optional).
+ *
+ * It must be a Web application client — Google issues a `serverClientId` code to nothing
+ * else — so its secret is required and checked as a web secret, and it cannot be the
+ * main client, which on Android is a Desktop app client.
+ */
+export function validateNativeClient(
+  input: { clientId: string; clientSecret: string },
+  mainClientId: string,
+): CredentialErrors {
+  const id = input.clientId.trim();
+  const secret = input.clientSecret.trim();
+  if (!id && !secret) return {};
+  const errors: CredentialErrors = {};
+  const idProblem = id ? clientIdError(id) : "Enter the Web application client's ID, or clear both fields to skip this.";
+  if (idProblem) errors.clientId = idProblem;
+  else if (id === mainClientId.trim()) {
+    errors.clientId = "That's your Desktop app client. This one is a separate Web application client.";
+  }
+  const secretProblem = clientSecretError(secret, "web");
+  if (secretProblem) errors.clientSecret = secretProblem;
+  return errors;
 }
 
 /** The client id's problem, in a sentence, or `null`. */
@@ -152,9 +199,17 @@ export function parseStoredCredentials(raw: string | null | undefined): OAuthCli
     const parsed = JSON.parse(raw) as Partial<OAuthClientCredentials> | null;
     if (!parsed || typeof parsed.clientId !== "string") return null;
     if (clientIdError(parsed.clientId)) return null;
+    const native = parsed.nativeAndroid as Partial<NativeAndroidClient> | undefined;
+    const nativeUsable = Boolean(
+      native &&
+        typeof native.clientId === "string" &&
+        typeof native.clientSecret === "string" &&
+        !clientIdError(native.clientId),
+    );
     return normaliseCredentials({
       clientId: parsed.clientId,
       clientSecret: typeof parsed.clientSecret === "string" ? parsed.clientSecret : undefined,
+      nativeAndroid: nativeUsable ? native : undefined,
     });
   } catch {
     return null;

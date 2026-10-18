@@ -14,12 +14,16 @@ import {
   type CredentialStore,
 } from "../core/session/credentials";
 import type {
+  AppSigningInfo,
+  NativeSignInRequest,
+  NativeSignInResult,
   NewMailNotification,
   Platform,
   PlatformInfo,
   SignInRequest,
   SignInResult,
 } from "./types";
+import { parseNativeSignInResult, parseSigningInfo, unavailable } from "./nativeGoogle";
 import { waitUntilVisible } from "./visibility";
 
 /** Events from Rust. */
@@ -107,7 +111,7 @@ export const desktopPlatform: Platform = {
     activePort = begun.port;
 
     try {
-      await invoke("open_external", { url: begun.authorize_url });
+      await openSignInPage(begun.authorize_url, androidWebView());
     } catch (error) {
       await abandonSignIn(begun.port);
       return {
@@ -137,6 +141,28 @@ export const desktopPlatform: Platform = {
   async cancelSignIn(): Promise<void> {
     if (activePort === null) return;
     await abandonSignIn(activePort);
+  },
+
+  async nativeGoogleSignIn(request: NativeSignInRequest): Promise<NativeSignInResult> {
+    if (!(await isAndroid())) return unavailable("unsupported", "native sign-in is Android only");
+    try {
+      const raw = await invoke<unknown>("google_signin_authorize", {
+        serverClientId: request.serverClientId,
+        scopes: request.scopes,
+      });
+      return parseNativeSignInResult(raw);
+    } catch (error) {
+      return unavailable("failed", describeIpcError(error, "the sign-in plugin did not answer"));
+    }
+  },
+
+  async appSigningInfo(): Promise<AppSigningInfo | null> {
+    if (!(await isAndroid())) return null;
+    try {
+      return parseSigningInfo(await invoke<unknown>("google_signin_info"));
+    } catch {
+      return null;
+    }
   },
 
   async waitForForeground(): Promise<unknown> {
@@ -276,6 +302,45 @@ export const desktopPlatformExtras = {
     };
   },
 };
+
+/**
+ * Whether this webview is Android's, from its user agent: synchronous and without an IPC
+ * round trip, for the one place that only picks how to open a page. Anything that
+ * decides more than that asks `app_info` (`isAndroid`).
+ */
+function androidWebView(): boolean {
+  return /\bAndroid\b/.test(globalThis.navigator?.userAgent ?? "");
+}
+
+async function isAndroid(): Promise<boolean> {
+  const { os } = await desktopPlatform.info().catch(() => ({ os: "unknown" }));
+  return os === "android";
+}
+
+/**
+ * Open Google's consent page for a loopback sign-in.
+ *
+ * On Android, in a Custom Tab (`open_sign_in_tab`): it opens over the app, in the
+ * app's own task, so the success page's "Back to Winnow" link closes it rather than
+ * leaving a browser tab behind. A phone with no Custom Tabs browser still gets a plain
+ * browser from the same call; if the command itself fails, the system browser
+ * (`open_external`) is the fallback, which is how every sign-in opened before.
+ */
+export async function openSignInPage(
+  url: string,
+  android: boolean,
+  call: (command: string, args: Record<string, unknown>) => Promise<unknown> = invoke,
+): Promise<void> {
+  if (android) {
+    try {
+      await call("open_sign_in_tab", { url });
+      return;
+    } catch {
+      // Fall through to the system browser.
+    }
+  }
+  await call("open_external", { url });
+}
 
 function bytesToBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000;
