@@ -338,6 +338,10 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
   /** The browser's context menu was opened from inside the panel. */
   const contextMenu = useRef(false);
 
+  /** Whether it is open now, for timers and listeners that outlive a render. */
+  const openRef = useRef(open);
+  openRef.current = open;
+
   const clearIdle = useCallback(() => {
     if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
     idleTimer.current = null;
@@ -347,7 +351,12 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     clearIdle();
     idleTimer.current = window.setTimeout(function check() {
       const panel = panelRef.current;
-      if (!panel) return;
+      // A timer armed by a leave the closing panel itself caused (it slides out from
+      // under a still pointer) must not close the next opening.
+      if (!panel || !openRef.current) {
+        idleTimer.current = null;
+        return;
+      }
       const active = document.activeElement;
       const inside = active !== null && panel.contains(active);
       const selection = document.getSelection();
@@ -427,6 +436,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     if (!panel) return;
     if (open) {
       wasOpen.current = true;
+      clearIdle();
       pointerInside.current = false;
       const active = document.activeElement;
       restoreRef.current = active instanceof HTMLElement && !panel.contains(active) ? active : null;
@@ -454,6 +464,24 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
         : firstVisible(document.querySelectorAll<HTMLElement>("[data-sidebar-toggle]"));
     back?.focus({ preventScroll: true });
   }, [open, clearIdle]);
+
+  // Crossing the phone breakpoint while open swaps the rows' order (and moves the account
+  // row), which remounts the focused button and drops focus on the body: a keyboard user
+  // was left outside the open dialog. Put it back on the current destination.
+  const crossedTouch = useRef(touch);
+  useEffect(() => {
+    if (crossedTouch.current === touch) return;
+    crossedTouch.current = touch;
+    const panel = panelRef.current;
+    if (!open || !panel) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && panel.contains(active)) return;
+    const target =
+      panel.querySelector<HTMLElement>('[data-mail-nav] [aria-current="page"]') ??
+      panel.querySelector<HTMLElement>("[data-mail-nav] button") ??
+      panel;
+    target.focus({ preventScroll: true });
+  }, [open, touch]);
 
   // The phone's list is reversed: if it ever outgrows the panel, start at the end that
   // holds Inbox, next to the thumb, rather than at Spam. Its own effect, so a breakpoint
@@ -597,7 +625,14 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
           // close the sidebar by idling. Only a mouse or a pen arms the timer, though.
           pointerInside.current = false;
           if (!armsIdleClose(event.pointerType)) return;
-          if (open) armIdle();
+          if (openRef.current) armIdle();
+        }}
+        onPointerMove={() => {
+          // Any movement over the panel means the pointer is here, whatever the enter and
+          // leave events said: a leave that the panel's own slide caused (it moves out from
+          // under, or in under, a still pointer) can arrive late and arm a stale timer.
+          pointerInside.current = true;
+          if (idleTimer.current !== null) clearIdle();
         }}
         onPointerDown={(event) => {
           if (event.button === 0) pressing.current = true;

@@ -811,6 +811,14 @@ div[data-row-count] {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+/*
+ * And its frost layer (`::before`, which reaches 44px past the pill) goes with it: left
+ * on, it frosted over the panel's Inbox row, which sits on the pill's line, and the row
+ * was there to tap but could not be seen.
+ */
+:root .wn-glass[data-phone-pill][data-expanded]::before {
+  content: none;
+}
 
 /*
  * The phone's back-to-top pill, centred above the chips. Hidden it takes no taps and is
