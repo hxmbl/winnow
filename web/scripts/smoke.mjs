@@ -4337,7 +4337,16 @@ try {
   const leftAt = (await listState()).scrollTop;
   // A tap on whatever row is under the thumb, not a locator: Playwright scrolls a
   // located element into view first, which would move the list this is about to measure.
-  await tapPage.touchscreen.tap(195, 520);
+  // The row nearest y=520 rather than that exact point, which can be a day's header.
+  const thumb = await tapPage.evaluate(() => {
+    const rows = [...document.querySelectorAll("[data-row-count] [data-row-id]")]
+      .map((row) => row.getBoundingClientRect())
+      .filter((box) => box.top >= 120 && box.bottom <= 700 && box.height > 0);
+    rows.sort((a, b) => Math.abs(a.top + a.height / 2 - 520) - Math.abs(b.top + b.height / 2 - 520));
+    const box = rows[0];
+    return box ? { x: 195, y: Math.round(box.top + box.height / 2) } : { x: 195, y: 520 };
+  });
+  await tapPage.touchscreen.tap(thumb.x, thumb.y);
   await tapPage.waitForSelector("article h1", { timeout: 5_000 });
   const whileReading = await listState();
   check(
