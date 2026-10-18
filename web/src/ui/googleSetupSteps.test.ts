@@ -10,6 +10,8 @@ import {
   originOf,
   SETUP_SCOPES,
   stepIndexOf,
+  pasteStepOf,
+  setupSteps,
 } from "./googleSetupSteps";
 
 describe("the Google setup walkthrough", () => {
@@ -68,5 +70,29 @@ describe("the Google setup walkthrough", () => {
     expect(stepIndexOf("consent")).toBe(2);
     expect(stepIndexOf("paste")).toBe(PASTE_STEP);
     expect(LOOPBACK_REDIRECT).toBe("http://127.0.0.1");
+  });
+});
+
+describe("the Android walkthrough", () => {
+  const android = setupSteps(true);
+
+  it("adds the optional native sign-in step just before the paste step", () => {
+    expect(android.map((step) => step.id)).toEqual(["project", "apis", "consent", "client", "android", "paste"]);
+    expect(pasteStepOf(android)).toBe(5);
+    expect(setupSteps(false)).toBe(SETUP_STEPS);
+  });
+
+  it("opens on, and clamps to, its own paste step", () => {
+    expect(initialSetupStep(true, android)).toBe(5);
+    expect(initialSetupStep(false, android)).toBe(0);
+    expect(clampStep(9, android)).toBe(5);
+    expect(clampStep(4, android)).toBe(4);
+  });
+
+  it("points a Google error's fix at the step's place in the walkthrough on screen", () => {
+    expect(stepIndexOf("paste", android)).toBe(5);
+    expect(stepIndexOf("android", android)).toBe(4);
+    expect(stepIndexOf("client", android)).toBe(3);
+    expect(stepIndexOf("paste")).toBe(4);
   });
 });

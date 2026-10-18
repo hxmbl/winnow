@@ -41,7 +41,7 @@
  * On a phone the sheet fills the screen, with Back/Next pinned above the keyboard.
  */
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, BookOpen, Check, Copy, ExternalLink, FileJson, RotateCcw, TriangleAlert } from "lucide-react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { ErrorText } from "./ErrorText";
@@ -51,6 +51,7 @@ import {
   hasErrors,
   normaliseCredentials,
   validateCredentials,
+  validateNativeClient,
   type ClientKind,
   type ConnectionTest,
   type CredentialErrors,
@@ -68,13 +69,13 @@ import {
 import {
   CONSOLE_LINKS,
   LOOPBACK_REDIRECT,
-  PASTE_STEP,
   SETUP_SCOPES,
-  SETUP_STEPS,
   clampStep,
   clientTypeFor,
   initialSetupStep,
   originOf,
+  pasteStepOf,
+  setupSteps,
   type SetupStepId,
 } from "../googleSetupSteps";
 import { explainGoogleText } from "../../core/session/googleErrors";
@@ -86,6 +87,8 @@ import {
   saveSetupProgress,
 } from "../setupProgress";
 import { SetupFix, SetupTroubleshoot } from "./SetupTroubleshoot";
+import type { AppSigningInfo } from "../../platform/types";
+import { AndroidSignInStep } from "./AndroidSignInStep";
 
 /** Where the setup guide lives. Opened in the system browser. */
 export const SETUP_GUIDE_URL = "https://github.com/hxmbl/winnow/blob/master/docs/google-setup.md";
@@ -108,6 +111,11 @@ type Props = {
   /** Open a Cloud Console link in the system browser. Defaults to a new tab. */
   onOpenLink?: (url: string) => void;
   onClose: () => void;
+  /**
+   * The Android app's package name and signing certificate, read at run time. Present
+   * only in the Android app, where it adds the optional native sign-in step.
+   */
+  android?: AppSigningInfo | null;
 };
 
 /** What the last successful import brought in, shown under the import button. */
@@ -134,6 +142,9 @@ function Strong({ children }: { children: React.ReactNode }) {
 
 export function GoogleSetup(props: Props) {
   const { kind, current, phone } = props;
+  const hasAndroid = Boolean(props.android);
+  const steps = useMemo(() => setupSteps(hasAndroid), [hasAndroid]);
+  const PASTE_STEP = pasteStepOf(steps);
   const ids = useId();
   const idField = `${ids}-client-id`;
   const secretField = `${ids}-client-secret`;
@@ -159,13 +170,32 @@ export function GoogleSetup(props: Props) {
   /** A file is being dragged over the sheet. */
   const [dragging, setDragging] = useState(false);
   /** The walkthrough step on screen, 0-based. */
-  const [step, setStep] = useState(() => resume?.step ?? initialSetupStep(Boolean(current)));
+  const [step, setStep] = useState(() =>
+    resume ? clampStep(resume.step, steps) : initialSetupStep(Boolean(current), steps),
+  );
   /** Steps finished (left with Next), ticked on the indicator and remembered. */
   const [done, setDone] = useState<SetupStepId[]>(() => resume?.done ?? []);
   /** The "picking up where you left off" note, until it is dismissed or acted on. */
   const [resumed, setResumed] = useState(Boolean(resume));
   /** Off once the client is saved or removed, so a late render cannot write it back. */
   const tracking = useRef(!current);
+  /** The optional Android step's Web client (native sign-in's `serverClientId`). */
+  const [nativeId, setNativeId] = useState(current?.nativeAndroid?.clientId ?? "");
+  const [nativeSecret, setNativeSecret] = useState(current?.nativeAndroid?.clientSecret ?? "");
+  const [nativeShown, setNativeShown] = useState<{ clientId: boolean; clientSecret: boolean }>({
+    clientId: false,
+    clientSecret: false,
+  });
+  /**
+   * The Android step arrives with the signing info, which is read once at start-up and
+   * can land after the sheet opened: keep the same step on screen when the list grows.
+   */
+  const [shownSteps, setShownSteps] = useState(steps);
+  if (shownSteps !== steps) {
+    const index = steps.findIndex((item) => item.id === shownSteps[step]?.id);
+    setShownSteps(steps);
+    if (index >= 0 && index !== step) setStep(index);
+  }
   const [copiedOrigin, setCopiedOrigin] = useState(false);
   const [copiedScope, setCopiedScope] = useState<string | null>(null);
 
@@ -204,16 +234,16 @@ export function GoogleSetup(props: Props) {
     stepMoved.current = false;
     if (step === PASTE_STEP) idRef.current?.focus();
     else headingRef.current?.focus();
-  }, [step]);
+  }, [step, PASTE_STEP]);
 
   function go(to: number) {
     stepMoved.current = true;
-    setStep(clampStep(to));
+    setStep(clampStep(to, steps));
   }
 
   /** Next: this step is done, on to the following one. */
   function next() {
-    setDone((list) => markDone(list, SETUP_STEPS[step]!.id));
+    setDone((list) => markDone(list, steps[step]!.id));
     go(step + 1);
   }
 
@@ -236,6 +266,25 @@ export function GoogleSetup(props: Props) {
   }, [step, done, kind, clientId]);
 
   const local = validateCredentials({ clientId, clientSecret }, kind);
+  const nativeLocal: CredentialErrors = props.android
+    ? validateNativeClient({ clientId: nativeId, clientSecret: nativeSecret }, clientId)
+    : {};
+  const nativeErrors: CredentialErrors = {
+    clientId: nativeShown.clientId ? nativeLocal.clientId : undefined,
+    clientSecret: nativeShown.clientSecret ? nativeLocal.clientSecret : undefined,
+  };
+
+  /**
+   * What Test and Save send. On Android the native client comes from its step; anywhere
+   * else a stored one is carried over untouched rather than dropped by a save.
+   */
+  function candidate(): OAuthClientCredentials {
+    return normaliseCredentials({
+      clientId,
+      clientSecret,
+      nativeAndroid: props.android ? { clientId: nativeId, clientSecret: nativeSecret } : current?.nativeAndroid,
+    });
+  }
   const errors: CredentialErrors = {
     clientId: (shown.clientId && local.clientId) || remote.clientId,
     clientSecret: (shown.clientSecret && local.clientSecret) || remote.clientSecret,
@@ -262,9 +311,17 @@ export function GoogleSetup(props: Props) {
   /** Validate everything; focus the first bad field. True when the form can go. */
   function ready(): boolean {
     setShown({ clientId: true, clientSecret: true });
-    if (!hasErrors(local)) return true;
-    (local.clientId ? idRef : secretRef).current?.focus();
-    return false;
+    setNativeShown({ clientId: true, clientSecret: true });
+    if (hasErrors(local)) {
+      (local.clientId ? idRef : secretRef).current?.focus();
+      return false;
+    }
+    if (hasErrors(nativeLocal)) {
+      // The bad field is on the Android step: take the user there.
+      go(steps.findIndex((item) => item.id === "android"));
+      return false;
+    }
+    return true;
   }
 
   /** Put Google's verdict on the field it was about. */
@@ -281,7 +338,7 @@ export function GoogleSetup(props: Props) {
     if (!ready()) return;
     setBusy("test");
     try {
-      applyTest(await props.onTest(normaliseCredentials({ clientId, clientSecret })));
+      applyTest(await props.onTest(candidate()));
     } finally {
       setBusy(null);
     }
@@ -299,7 +356,7 @@ export function GoogleSetup(props: Props) {
     tracking.current = false;
     clearSetupProgress();
     try {
-      await props.onSaveAndConnect(normaliseCredentials({ clientId, clientSecret }));
+      await props.onSaveAndConnect(candidate());
     } catch (error) {
       setFailure(error instanceof Error ? error.message : "The client could not be saved.");
     } finally {
@@ -316,7 +373,10 @@ export function GoogleSetup(props: Props) {
       clearSetupProgress();
       setClientId("");
       setClientSecret("");
+      setNativeId("");
+      setNativeSecret("");
       setShown({ clientId: false, clientSecret: false });
+      setNativeShown({ clientId: false, clientSecret: false });
       setConfirmRemove(false);
       setTest(null);
       setImported(null);
@@ -402,7 +462,7 @@ export function GoogleSetup(props: Props) {
   const device = kind === "desktop" ? "device" : "browser";
   const clientType = clientTypeFor(kind);
   const origin = originOf(props.redirectUri);
-  const current_ = SETUP_STEPS[step]!;
+  const current_ = steps[step]!;
   const last = step === PASTE_STEP;
   const headingId = `${ids}-step-heading`;
 
@@ -629,7 +689,7 @@ export function GoogleSetup(props: Props) {
             <ErrorText text={test.message} />
           </p>
         )}
-        {testHelp && <SetupFix help={testHelp} onGoToStep={go} />}
+        {testHelp && <SetupFix help={testHelp} steps={steps} onGoToStep={go} />}
       </div>
 
       {failure && (
@@ -637,9 +697,9 @@ export function GoogleSetup(props: Props) {
           <ErrorText text={failure} />
         </div>
       )}
-      {failureHelp && <SetupFix help={failureHelp} onGoToStep={go} />}
+      {failureHelp && <SetupFix help={failureHelp} steps={steps} onGoToStep={go} />}
 
-      <SetupTroubleshoot kind={kind} onGoToStep={go} />
+      <SetupTroubleshoot kind={kind} steps={steps} onGoToStep={go} />
 
       <p className="text-meta leading-relaxed text-ink-subtle">
         {kind === "desktop"
@@ -841,6 +901,29 @@ export function GoogleSetup(props: Props) {
             </p>
           </>
         );
+      case "android":
+        return props.android ? (
+          <AndroidSignInStep
+            signing={props.android}
+            clientId={nativeId}
+            clientSecret={nativeSecret}
+            onClientId={(value) => {
+              setNativeId(value);
+              setTest(null);
+            }}
+            onClientSecret={(value) => {
+              setNativeSecret(value);
+              setTest(null);
+            }}
+            errors={nativeErrors}
+            onBlur={(field) =>
+              setNativeShown((now) => ({ ...now, [field]: now[field] || Boolean(field === "clientId" ? nativeId : nativeSecret) }))
+            }
+            openLink={openLink}
+            copyText={copyText}
+            idPrefix={ids}
+          />
+        ) : null;
       case "paste":
         return pasteStep;
     }
@@ -899,9 +982,9 @@ export function GoogleSetup(props: Props) {
           <div className="flex items-center justify-between gap-3">
             <p className="text-meta text-ink-subtle">
               <span data-setup-progress="">
-                Step {step + 1} of {SETUP_STEPS.length}
+                Step {step + 1} of {steps.length}
               </span>
-              <span data-setup-done=""> · {doneSummary(done)}</span>
+              <span data-setup-done=""> · {doneSummary(done, steps)}</span>
             </p>
             {/* The demo is always one step away: setup is never a wall. */}
             {!props.signedIn && (
@@ -916,7 +999,7 @@ export function GoogleSetup(props: Props) {
             )}
           </div>
           <ol className="mt-2 flex items-start gap-1.5">
-            {SETUP_STEPS.map((item, index) => (
+            {steps.map((item, index) => (
               <li key={item.id} className="min-w-0 flex-1">
                 <button
                   type="button"

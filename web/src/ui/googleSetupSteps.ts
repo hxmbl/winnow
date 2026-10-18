@@ -13,6 +13,8 @@
  * apps sign in through a loopback redirect, which Google allows only for a Desktop app
  * client, and the web build returns to its own address, which only a Web application
  * client can register. `docs/google-setup.md` is the long form of the same steps.
+ *
+ * Android adds one optional step before the paste (`ANDROID_STEP`), for native sign-in.
  */
 
 import { apiLibraryUrl } from "../core/session/clientJson";
@@ -42,7 +44,7 @@ export const CONSOLE_LINKS = {
   clients: `${CONSOLE}/auth/clients`,
 } as const;
 
-export type SetupStepId = "project" | "apis" | "consent" | "client" | "paste";
+export type SetupStepId = "project" | "apis" | "consent" | "client" | "android" | "paste";
 
 export type SetupStep = {
   id: SetupStepId;
@@ -63,6 +65,31 @@ export const SETUP_STEPS: readonly SetupStep[] = [
 /** The last step, where the client is pasted or imported. */
 export const PASTE_STEP = SETUP_STEPS.length - 1;
 
+/**
+ * Android's optional extra step, before the paste step: an Android client (package name
+ * and the running APK's signing certificate) and the Web application client native
+ * sign-in names as its `serverClientId`. Skippable; the browser sign-in needs none of it.
+ */
+export const ANDROID_STEP: SetupStep = {
+  id: "android",
+  short: "Android",
+  title: "Optional: sign in without the browser",
+};
+
+/** The walkthrough for this build: the five steps, plus the Android one on Android. */
+export function setupSteps(android: boolean): readonly SetupStep[] {
+  if (!android) return SETUP_STEPS;
+  return [...SETUP_STEPS.slice(0, PASTE_STEP), ANDROID_STEP, SETUP_STEPS[PASTE_STEP]!];
+}
+
+/** Every step any build shows, in order: the bound a remembered step is kept within. */
+export const ALL_SETUP_STEPS: readonly SetupStep[] = setupSteps(true);
+
+/** The paste step's index in `steps`: always the last. */
+export function pasteStepOf(steps: readonly SetupStep[]): number {
+  return steps.length - 1;
+}
+
 /** The client type to choose in the console, as the console names it. */
 export function clientTypeFor(kind: ClientKind): "Desktop app" | "Web application" {
   return kind === "desktop" ? "Desktop app" : "Web application";
@@ -73,14 +100,14 @@ export function clientTypeFor(kind: ClientKind): "Desktop app" | "Web applicatio
  * stored (Settings → Google account → Change) — that user has done the console part —
  * and at the start otherwise.
  */
-export function initialSetupStep(hasClient: boolean): number {
-  return hasClient ? PASTE_STEP : 0;
+export function initialSetupStep(hasClient: boolean, steps: readonly SetupStep[] = SETUP_STEPS): number {
+  return hasClient ? pasteStepOf(steps) : 0;
 }
 
 /** A step index kept inside the walkthrough. */
-export function clampStep(step: number): number {
+export function clampStep(step: number, steps: readonly SetupStep[] = SETUP_STEPS): number {
   if (!Number.isFinite(step)) return 0;
-  return Math.min(PASTE_STEP, Math.max(0, Math.trunc(step)));
+  return Math.min(pasteStepOf(steps), Math.max(0, Math.trunc(step)));
 }
 
 /**
@@ -95,9 +122,9 @@ export function originOf(redirectUri: string): string {
   }
 }
 
-/** The index of a step by id. */
-export function stepIndexOf(id: SetupStepId): number {
-  return Math.max(0, SETUP_STEPS.findIndex((step) => step.id === id));
+/** The index of a step by id, in `steps` (the walkthrough on screen). */
+export function stepIndexOf(id: SetupStepId, steps: readonly SetupStep[] = SETUP_STEPS): number {
+  return Math.max(0, steps.findIndex((step) => step.id === id));
 }
 
 /**

@@ -14,7 +14,7 @@
  */
 
 import type { ClientKind } from "../core/session/credentials";
-import { SETUP_STEPS, clampStep, type SetupStepId } from "./googleSetupSteps";
+import { ALL_SETUP_STEPS, SETUP_STEPS, clampStep, type SetupStep, type SetupStepId } from "./googleSetupSteps";
 
 export const SETUP_PROGRESS_KEY = "winnow.google.setupProgress";
 
@@ -27,7 +27,11 @@ export type SetupProgress = {
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-const STEP_IDS = new Set<string>(SETUP_STEPS.map((step) => step.id));
+/**
+ * The record is kept within every step any build has (Android's walkthrough has an extra
+ * one before Paste); the sheet clamps it again to the steps it shows.
+ */
+const STEP_IDS = new Set<string>(ALL_SETUP_STEPS.map((step) => step.id));
 
 /** Read a stored record; anything malformed, or for another build kind, is no record. */
 export function parseSetupProgress(raw: string | null | undefined, kind: ClientKind): SetupProgress | null {
@@ -38,7 +42,7 @@ export function parseSetupProgress(raw: string | null | undefined, kind: ClientK
     const done = Array.isArray(value.done)
       ? [...new Set(value.done.filter((id): id is SetupStepId => typeof id === "string" && STEP_IDS.has(id)))]
       : [];
-    const step = clampStep(typeof value.step === "number" ? value.step : 0);
+    const step = clampStep(typeof value.step === "number" ? value.step : 0, ALL_SETUP_STEPS);
     const clientId = typeof value.clientId === "string" ? value.clientId.slice(0, 256) : "";
     return { step, done, kind, clientId };
   } catch {
@@ -76,7 +80,7 @@ export function saveSetupProgress(progress: SetupProgress, store: StorageLike | 
       return;
     }
     const record: SetupProgress = {
-      step: clampStep(progress.step),
+      step: clampStep(progress.step, ALL_SETUP_STEPS),
       done: [...new Set(progress.done)],
       kind: progress.kind,
       clientId: progress.clientId.trim().slice(0, 256),
@@ -98,11 +102,11 @@ export function clearSetupProgress(store: StorageLike | null = storage()): void 
 /** Mark a step done, keeping walkthrough order. */
 export function markDone(done: readonly SetupStepId[], id: SetupStepId): SetupStepId[] {
   const set = new Set([...done, id]);
-  return SETUP_STEPS.map((step) => step.id).filter((step) => set.has(step));
+  return ALL_SETUP_STEPS.map((step) => step.id).filter((step) => set.has(step));
 }
 
-/** "2 of 5 done", for the progress line. */
-export function doneSummary(done: readonly SetupStepId[]): string {
-  const count = done.filter((id) => STEP_IDS.has(id)).length;
-  return `${count} of ${SETUP_STEPS.length} done`;
+/** "2 of 5 done", for the progress line, counted over the steps on screen. */
+export function doneSummary(done: readonly SetupStepId[], steps: readonly SetupStep[] = SETUP_STEPS): string {
+  const count = steps.filter((step) => done.includes(step.id)).length;
+  return `${count} of ${steps.length} done`;
 }

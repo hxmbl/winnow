@@ -15,10 +15,13 @@ import { useId, useState } from "react";
 import { ArrowLeft, ChevronDown, Lightbulb } from "lucide-react";
 import type { ClientKind } from "../../core/session/credentials";
 import { COMMON_GOOGLE_ERRORS, explainGoogleText, type GoogleErrorHelp } from "../../core/session/googleErrors";
-import { SETUP_STEPS, stepIndexOf } from "../googleSetupSteps";
+import { SETUP_STEPS, stepIndexOf, type SetupStep } from "../googleSetupSteps";
 
-export function SetupFix({ help, onGoToStep }: { help: GoogleErrorHelp; onGoToStep: (index: number) => void }) {
-  const index = stepIndexOf(help.step);
+/** `steps` is the walkthrough on screen (Android's has one more), so the index matches it. */
+type StepProps = { steps?: readonly SetupStep[]; onGoToStep: (index: number) => void };
+
+export function SetupFix({ help, steps = SETUP_STEPS, onGoToStep }: { help: GoogleErrorHelp } & StepProps) {
+  const index = stepIndexOf(help.step, steps);
   const isPaste = help.step === "paste";
   return (
     <div
@@ -38,14 +41,14 @@ export function SetupFix({ help, onGoToStep }: { help: GoogleErrorHelp; onGoToSt
           data-setup-fix-step={help.step}
         >
           <ArrowLeft size={12} aria-hidden="true" />
-          Back to step {index + 1}: {SETUP_STEPS[index]!.title}
+          Back to step {index + 1}: {steps[index]!.title}
         </button>
       )}
     </div>
   );
 }
 
-export function SetupTroubleshoot({ kind, onGoToStep }: { kind: ClientKind; onGoToStep: (index: number) => void }) {
+export function SetupTroubleshoot({ kind, steps = SETUP_STEPS, onGoToStep }: { kind: ClientKind } & StepProps) {
   const ids = useId();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -95,7 +98,7 @@ export function SetupTroubleshoot({ kind, onGoToStep }: { kind: ClientKind; onGo
           </ul>
           <div role="status" aria-live="polite">
             {help ? (
-              <SetupFix help={help} onGoToStep={onGoToStep} />
+              <SetupFix help={help} steps={steps} onGoToStep={onGoToStep} />
             ) : text.trim() ? (
               <p className="text-meta text-ink-subtle" data-setup-fix="unknown">
                 Winnow doesn't recognise that one. The setup guide covers more cases.

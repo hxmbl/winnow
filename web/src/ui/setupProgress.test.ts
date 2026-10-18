@@ -10,6 +10,7 @@ import {
   saveSetupProgress,
 } from "./setupProgress";
 import { WEB_CREDENTIALS_KEY } from "../core/session/credentials";
+import { setupSteps } from "./googleSetupSteps";
 
 function memory() {
   const map = new Map<string, string>();
@@ -64,7 +65,8 @@ describe("setup progress", () => {
     expect(parseSetupProgress("{not json", "web")).toBeNull();
     expect(parseSetupProgress("null", "web")).toBeNull();
     expect(parseSetupProgress(JSON.stringify({ kind: "web", step: 99, done: ["apis", "bogus", 4, "apis"] }), "web")).toEqual({
-      step: 4,
+      // Kept within the longest walkthrough (Android's six steps); the sheet clamps to its own.
+      step: 5,
       done: ["apis"],
       kind: "web",
       clientId: "",
@@ -97,5 +99,14 @@ describe("setup progress", () => {
     expect(markDone(["project"], "project")).toEqual(["project"]);
     expect(doneSummary([])).toBe("0 of 5 done");
     expect(doneSummary(["project", "apis"])).toBe("2 of 5 done");
+  });
+
+  it("keeps Android's extra step in the record and counts it only where it is shown", () => {
+    const store = memory();
+    saveSetupProgress({ step: 5, done: ["client", "android"], kind: "desktop", clientId: "" }, store);
+    expect(loadSetupProgress("desktop", store)).toMatchObject({ step: 5, done: ["client", "android"] });
+    expect(markDone(["paste"], "android")).toEqual(["android", "paste"]);
+    expect(doneSummary(["client", "android"], setupSteps(true))).toBe("2 of 6 done");
+    expect(doneSummary(["client", "android"])).toBe("1 of 5 done");
   });
 });

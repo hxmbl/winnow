@@ -66,6 +66,7 @@ import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
 import { DelayedSend } from "./core/mail/undoSend";
 import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
+import type { AppSigningInfo } from "./platform/types";
 import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
 import { useOnline } from "./ui/useOnline";
@@ -598,6 +599,8 @@ export function App({ store }: Props) {
   const [oauthClient, setOauthClient] = useState<OAuthClientCredentials | null | undefined>(undefined);
   const [setupOpen, setSetupOpen] = useState(false);
   const [redirectUri, setRedirectUri] = useState("");
+  /** Android only: package name and signing certificate, for setup's native sign-in step. */
+  const [androidSigning, setAndroidSigning] = useState<AppSigningInfo | null>(null);
 
   const runSignIn = useCallback(async (): Promise<void> => {
     const bridge = sessionRef.current;
@@ -729,6 +732,7 @@ export function App({ store }: Props) {
         // setup sheet can show the redirect URI a web user has to register.
         setOauthClient(await bridge.credentials());
         setRedirectUri(await bridge.redirectUriToRegister().catch(() => ""));
+        void platform.appSigningInfo?.().then(setAndroidSigning, () => undefined);
 
         // First, in case this page load *is* the redirect back from Google: the code is in
         // the URL and the verifier in `sessionStorage`, and both are consumed on the spot.
@@ -2435,6 +2439,7 @@ export function App({ store }: Props) {
       kind={info?.kind === "desktop" ? "desktop" : "web"}
       current={oauthClient ?? null}
       redirectUri={redirectUri}
+      android={androidSigning}
       signedIn={snapshot.account !== null}
       phone={phone}
       onTest={async (candidate) => {

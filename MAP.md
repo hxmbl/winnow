@@ -345,6 +345,7 @@ the store can be driven by a demo seed with no session at all.
 | `pendingAuth.ts` | The PKCE verifier in `sessionStorage`, as an array keyed by `state` so two tabs cannot clobber each other. Single-use: `take` removes. |
 | `errors.ts` | `describeFailure` — the message and hint for each failure kind. |
 | `googleErrors.ts` | Google's setup errors (redirect_uri_mismatch, not a test user, API disabled, invalid_client, missing secret, org_internal, admin policy, …) mapped to a plain title, the fix, and the setup step that makes it. `explainGoogleText` reads a code out of pasted text. |
+| `nativeSignIn.ts` | Native Android sign-in's pure decisions. Two clients can own a session now: the main (Desktop app) client, or the Web application client native sign-in names as `serverClientId`, which `TokenSet.clientId` records. `refreshClientFor` picks the one to refresh under; `sessionStrandedBy` says when saving a client must sign out; `browserFallbackScope` re-asks for the session's scopes when the browser's client is not the one that granted them. `GmailSession.authorize` tries `platform.nativeGoogleSignIn` first when a Web client is stored, and falls back to the browser on anything but a code or a cancel, the exchange included. |
 | `exchangeRetry.ts` | The end of a native sign-in on a WebView that may be paused (Android, behind the browser): before the code exchange and the profile read, wait for `platform.waitForForeground`, and resend only an attempt that got no HTTP response (`GoogleUnreachable`, or a bare fetch `TypeError` for the profile), backing off 0.5/1.5/3 s. `invalid_grant` and every other answer from Google are never resent. Out of attempts → `SignInUnreachable`: "Couldn't reach Google to finish signing in. Check your connection and try again." |
 
 **The offline cache** (`localCache`). A `Map<GmailId, Email>` mirror in memory,
@@ -468,6 +469,13 @@ Supporting files:
 
 - `index.ts` — `isTauri()`, `createPlatform()`, and the module-level `platform`
   singleton everything else imports.
+- `nativeGoogle.ts` — reads what the Android sign-in plugin returns
+  (`parseNativeSignInResult`, `parseSigningInfo`). Anything unexpected is
+  `unavailable`, which sends the sign-in to the browser. `desktop.ts` implements the
+  two optional, Android-only `Platform` methods with it: `nativeGoogleSignIn` and
+  `appSigningInfo` (package name, the running APK's SHA-1, Play services). Its
+  `beginSignIn` opens Google in a Custom Tab on Android (`open_sign_in_tab`), and in
+  the system browser if that fails.
 - `visibility.ts` — `waitUntilVisible`: resolves when `document.visibilityState` is
   `visible`, or `false` after a timeout (15 s). `desktop.ts`'s `waitForForeground` uses it
   on Android only; desktop windows are not paused behind the browser.
@@ -568,12 +576,13 @@ could be written in TypeScript, it belongs in `web/`.
 | --- | --- |
 | `main.rs` | Seven lines: `winnow_lib::run()`, plus `windows_subsystem = "windows"` so a release build has no console. |
 | `lib.rs` | The real startup: `single_instance` registered **first**, then dialog/opener/notification/window-state, the invoke handler, `on_page_load` revealing the window (skipped with `--minimized`), `setup` registering autostart, OAuth sessions, deep links, tray and scheduler, and `CloseRequested` → hide rather than quit. |
-| `commands.rs` | 13 commands, each of which validates, delegates and converts errors to strings. |
+| `commands.rs` | 16 commands, each of which validates, delegates and converts errors to strings. |
 | `oauth.rs` | The loopback listener: binds `127.0.0.1:0`, substitutes the real port into `__WINNOW_LOOPBACK_PORT__`, answers one request and stops. On Android the success page has a "Back to Winnow" button to `winnow://signed-in` (the manifest's `VIEW` intent filter), which brings the app forward; the web layer ignores that link beyond focusing. |
 | `secrets.rs` | Keychain get/set/delete under service `app.winnow.desktop`, one user per secret name. |
 | `scheduler.rs` | The tick, 30–3600 s, clamped, joined on retune so two threads can never overlap. |
 | `files.rs` | Save dialog → sanitised filename → `spawn_blocking` write. Async is mandatory, not stylistic: blocking the calling thread deadlocks the dialog callback. |
 | `tray.rs` | The tray icon and its three items (`sync`, `settings`, `quit`); there is deliberately no Mark all read. A left click reveals the window; there is deliberately no "Open Winnow" row duplicating it. |
+| `google_signin.rs` | Android only at run time: the `google-signin` mobile plugin, registered from this crate with its Kotlin in `gen/android/app/src/main/java/app/winnow/android/signin/` (Play services' `AuthorizationClient` with offline access, the signing certificate, a Custom Tab). Validates the commands' arguments (a client id, Google API scopes, an `accounts.google.com` URL) and passes the plugin's JSON through. The plugin has no permission of its own, so the page reaches it only through the three commands below; off Android they answer "unsupported". |
 | `deep_link.rs` | The `winnow://` scheme only. The old OAuth callback scheme was removed: a private-use redirect URI is not something Google hands a desktop client an authorization code for. |
 
 ### 8.1 The command surface
@@ -585,6 +594,9 @@ could be written in TypeScript, it belongs in `web/`.
 | `oauth_begin` | `authorize_url` | `{ port, authorize_url }` | `beginSignIn` |
 | `oauth_await` | `port`, `timeout_ms?` | `AuthOutcome` (`kind: code \| error`) | `beginSignIn` |
 | `oauth_cancel` | `port` | `()` | `cancelSignIn` |
+| `google_signin_info` | — | `{ packageName, sha1, playServices }` or `null` | `appSigningInfo` |
+| `google_signin_authorize` | `server_client_id`, `scopes` | `{ kind: code \| cancelled \| unavailable, … }`, never an error | `nativeGoogleSignIn` |
+| `open_sign_in_tab` | `url` (accounts.google.com only) | `()` | `beginSignIn` on Android |
 | `notify_new_mail` | `{ title, body, messageIds }` | `()` | `notifyNewMail` |
 | `request_notification_permission` | — | `bool` | `requestNotificationPermission` |
 | `open_external` | `url` | `()` | `openExternal` |
@@ -709,6 +721,11 @@ judged as IPv4.
   swipe actions work through real CDP touches (left trashes with Undo, right toggles
   read, short springs back, vertical scrolls, edge zones and the setting turn it off),
   and that the console stayed empty.
+- `smoke-android.mjs` — the setup walkthrough's Android step and native sign-in's
+  fallback, against the same build with a stand-in for Tauri's IPC reporting
+  `os: "android"`: the step's package name and SHA-1, field validation, the Web
+  client saved beside the Desktop one, and DEVELOPER_ERROR going on to the loopback
+  flow. `npm run smoke` runs it after `smoke.mjs`; it runs alone too (port 4174).
 
 The four tests worth reading first, because each exists because a real bug got
 out and nothing else would have caught it:
