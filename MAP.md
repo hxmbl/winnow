@@ -36,7 +36,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       gmail/        The Gmail REST API: quota, retries, sync, MIME.
       session/      OAuth, the token/credential stores, the offline cache.
       classify/     Message → signals, and the list pipeline.
-      learn/        Stars and hidden buckets → weights.
+      learn/        Stars and hidden buckets → weights; filter corrections → smart filters that learn.
       model/        Email, signals, filters, profile, appearance, ids.
       contacts/     People API sync, the contact index, suggestions.
       mail/         Sanitising, quoting, dates, codes, unsubscribe, keybinds.
@@ -278,6 +278,37 @@ to its range, and records a `FeedbackEvent`.
   reset — it is the audit trail, and Settings → **How Winnow sorts** renders it.
 - `fromSnapshot` never throws. A corrupt snapshot costs the user their tuning; a
   thrown error costs them the app.
+
+### 5.3a `learn/filter*` — smart filters that learn, readably
+
+"Change smart filters…" (row menu, reader overflow, selection bar, phone long-press →
+selection bar) records one **correction** per message per ticked or unticked filter.
+That is the only input; nothing is learned from opening or ignoring mail.
+
+- `filterClues.ts` — the readable features: patterns (`p:tracking`, `p:ups`,
+  `p:royal-mail`, `p:evri`, `p:dpd`, `p:amazon-order`, `p:order-number`, `p:amount`,
+  `p:date`), headers (`h:list-unsubscribe`, `h:no-reply`, `h:attachments`), Gmail's
+  category (`c:updates`) and up to 10 subject/preview words (`w:parcel`). Each has a
+  phrase for "Why it's here". The sender is not a clue.
+- `filterLearning.ts` — `FilterLearning`, immutable. Decision order per learnable
+  filter: this message's own correction → a **sender rule** (balance of corrections for
+  the exact address, else for a company's registrable domain; gmail.com and other
+  shared domains never get a domain rule) → **per-filter naive Bayes** over the clues,
+  with the built-in answer as the prior at `BUILT_IN_ODDS = 3` to 1 and Laplace-
+  smoothed counts of your corrections, counting only clues you have corrected mail
+  with → the built-in rules. Learned answers flip the signal booleans (and
+  `importantOverride` for Important), so the rail, counts, badges and list agree. Twelve
+  filters are learnable (`LEARNABLE_FILTERS`); Starred, Unread, Files, the contact
+  buckets, Read later, Long reads and Unsafe are facts, not judgements, and are not.
+- `filterExplain.ts` — one line per filter the message is in: "In Deliveries because:
+  from evri.com, has an Evri tracking number, you moved 2 emails here". Words only.
+- Storage: `winnow.filterLearning.v1`, `{ version: 1, owner, corrections }`, capped at
+  300 corrections, 20 clues each and 1,200 distinct clues (rarest words dropped first).
+  Local only, never synced. Cleared on sign-out and when a different account connects
+  (the demo's corrections are dropped on the first real connect).
+- The demo has two Evri deliveries (`demo-missed-delivery-1/2`) the built-in rules miss
+  on purpose; correcting the first moves the second by the sender rule.
+- Targeted smoke: `node web/scripts/smoke-filters.mjs` (port 4350 by default).
 
 ### 5.4 `model/` — the vocabulary
 
@@ -632,6 +663,7 @@ judged as IPv4.
 | --- | --- | --- |
 | `winnow.preferences.v1` | Appearance, sort, image policy, blocked/muted senders | never, by design |
 | `winnow.learning.v1` | Weights + the 400-event log | never, by design |
+| `winnow.filterLearning.v1` | Smart-filter corrections (sender rules and clues are derived from them) | sign-out, another account connecting, Settings → Smart filters reset |
 | `winnow.activeFilters.v1` | The active filter set | sign-out |
 | `winnow.mailbox.v1` | Which mailbox was last open | — |
 | `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
@@ -654,6 +686,7 @@ judged as IPv4.
 | --- | --- | --- |
 | Unit | `npm test` | Vitest, **node** environment, `src/**/*.test.ts` plus `../proxy/**/*.test.ts`. There are no component tests, and the glob says `.ts` not `.tsx` so nobody infers there should be. |
 | Gate | `npm run check` | typecheck + lint + lint:proxy + unit |
+| Smart filters | `node scripts/smoke-filters.mjs` | Targeted smoke for "Change smart filters…", "Why it's here" and Settings → Smart filters. Own `vite preview` on 4350 (`WINNOW_PORT`); `WINNOW_SHOTS=dir` writes screenshots. |
 | End-to-end | `npm run smoke` | Playwright + Chromium against the real production build. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |
 
