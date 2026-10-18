@@ -10,7 +10,7 @@
  * selecting a message re-renders two rows rather than a thousand.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, Check, Mail, MailOpen, Trash2 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { CodeChip } from "./CodeCopy";
@@ -568,6 +568,12 @@ function SwipeBackdrop({ actions }: { actions: SwipeActions }) {
 }
 
 /** How long the row takes to leave, to collapse, and to spring back (ms). */
+/**
+ * The breathing gap between floating chrome and the first thing in the list, in px.
+ * Added to the measured chrome height, never in place of it.
+ */
+const TOP_GAP = 6;
+
 const SWIPE_OUT_MS = 180;
 const SWIPE_COLLAPSE_MS = 160;
 const SWIPE_BACK_MS = 220;
@@ -768,6 +774,18 @@ type Props = {
    */
   topInset?: number;
   /**
+   * What the list is showing: the mailbox or label, the smart filters and the search.
+   * When it changes the list starts again at its top, so the new view's first email is
+   * the first thing under the chrome rather than whatever sat at the old scroll offset.
+   */
+  listView?: string;
+  /**
+   * The store's cursor for revealing only, when it differs from the highlighted
+   * `cursorIndex`: the phone shows no current row, but `j`/`k` in its reader still move
+   * through the list, and Back should land where they went. Defaults to `cursorIndex`.
+   */
+  revealIndex?: number;
+  /**
    * In-flow content at the top of the scroll, above the first day: the desktop's
    * briefing ("3 waiting on you…", the sync line, Connect Gmail). It scrolls away with
    * the list, and the windowing counts it in.
@@ -805,6 +823,8 @@ function MessageList({
   copiedCodeId,
   swipe = null,
   topInset = 0,
+  listView = "",
+  revealIndex,
   lead,
   className = "",
 }: Props) {
@@ -872,8 +892,13 @@ function MessageList({
       leadObserver.current.observe(element);
     }
   }, []);
+  /**
+   * The band at the top of the scroller the rows start below: the floating chrome plus a
+   * small breathing gap, so the first day and row never sit flush against the glass.
+   */
+  const band = topInset > 0 ? topInset + TOP_GAP : 0;
   /** Where the first item starts inside the scroller: the floating band, then the lead. */
-  const contentTop = topInset + (lead ? leadHeight : 0);
+  const contentTop = band + (lead ? leadHeight : 0);
 
   const offsets = useMemo(
     () =>
@@ -1023,8 +1048,24 @@ function MessageList({
   const coveredTop =
     topInset > 0
       ? // `||`, not `??`: an unmounted header can be on record as 0.
-        topInset + (firstHeaderKey ? heightsRef.current.get(firstHeaderKey) || ESTIMATED_HEADER_HEIGHT : 0)
+        band + (firstHeaderKey ? heightsRef.current.get(firstHeaderKey) || ESTIMATED_HEADER_HEIGHT : 0)
       : 0;
+
+  /**
+   * A new view (another mailbox or label, other smart filters, a new search, another sort)
+   * starts at its top. Before, the scroller kept the old view's offset, so switching a
+   * filter from halfway down the Inbox opened the filtered list halfway down too, its top
+   * email out of sight above the chrome. Layout effect, so the old offset is never painted.
+   */
+  const shownView = useRef(listView);
+  useLayoutEffect(() => {
+    if (shownView.current === listView) return;
+    shownView.current = listView;
+    if (scroller && scroller.scrollTop !== 0) {
+      scroller.scrollTop = 0;
+      setScrollTop(0);
+    }
+  }, [listView, scroller]);
 
   /**
    * Bring the cursor's row into view — once per navigation, and only if it is off screen.
@@ -1048,19 +1089,49 @@ function MessageList({
     },
     [],
   );
+  /**
+   * A navigation that happened while the list was hidden (behind the phone's full-screen
+   * reader, or the reader at 640–1023px): the row it landed on, by key, revealed when the
+   * list is back. By key rather than by cursor, because leaving the phone reader drops
+   * the cursor: `j` through messages from the list's top and Back used to return to the
+   * old scroll offset, with the message just read (the top email, say) out of sight.
+   */
+  const pendingReveal = useRef<string | null>(null);
   useEffect(() => {
-    if (revealedSeq.current === revealSeq) return;
-    if (cursorIndex < 0) return;
     const element = scroller;
     if (!element) return;
-    // A list hidden behind the phone reader has no height; reveal when it is back.
-    if (element.clientHeight === 0) return;
-    revealedSeq.current = revealSeq;
-
-    // Scroll by *offset*, not by `querySelectorAll` index: only a window of the list is
-    // mounted, so an index into the DOM is an index into whatever happened to be visible.
-    const rowIndex = rowIndexForCursor(items, cursorIndex);
+    let rowIndex: number | null;
+    const revealAt = revealIndex ?? cursorIndex;
+    if (revealedSeq.current !== revealSeq && revealAt >= 0) {
+      revealedSeq.current = revealSeq;
+      // Scroll by *offset*, not by `querySelectorAll` index: only a window of the list is
+      // mounted, so an index into the DOM is an index into whatever happened to be visible.
+      rowIndex = rowIndexForCursor(items, revealAt);
+      // A list hidden behind the reader has no height; reveal when it is back.
+      if (element.clientHeight === 0) {
+        pendingReveal.current = rowIndex === null ? null : (items[rowIndex]?.key ?? null);
+        return;
+      }
+      pendingReveal.current = null;
+    } else if (pendingReveal.current !== null && element.clientHeight > 0) {
+      const pending = pendingReveal.current;
+      pendingReveal.current = null;
+      const index = items.findIndex((item) => item.key === pending);
+      rowIndex = index < 0 ? null : index;
+    } else {
+      return;
+    }
     if (rowIndex === null) return;
+
+    // The first message goes to the very top of the list: its day, the briefing and the
+    // breathing gap all show, and nothing can leave it under the chrome.
+    if (items.findIndex((item) => item.kind === "row") === rowIndex) {
+      if (element.scrollTop !== 0) {
+        element.scrollTop = 0;
+        setScrollTop(0);
+      }
+      return;
+    }
 
     // Rows sit `contentTop` down the scroller, and the top `coveredTop` of it is under
     // the floating chrome (and the pinned day header): a row there is not in view, and
@@ -1120,7 +1191,7 @@ function MessageList({
       }
       if (frames < 3) settleFrame.current = requestAnimationFrame(settle);
     });
-  }, [revealSeq, cursorIndex, items, offsets, scroller, viewportHeight, contentTop, coveredTop]);
+  }, [revealSeq, cursorIndex, revealIndex, items, offsets, scroller, viewportHeight, contentTop, coveredTop]);
 
   /**
    * Carry keyboard focus along with the cursor, but only when it is already on a row.
@@ -1767,7 +1838,11 @@ function MessageList({
     if (topInset === 0 && !lead) return empty;
     // Under floating chrome: start below it, the lead (briefing) still on top.
     return (
-      <div data-list-empty="" className="flex min-h-0 flex-1 flex-col bg-surface" style={{ paddingTop: topInset }}>
+      <div
+        data-list-empty=""
+        className="flex min-h-0 flex-1 flex-col bg-surface"
+        style={{ "--wn-top-chrome": `${band}px`, paddingTop: "var(--wn-top-chrome)" } as React.CSSProperties}
+      >
         {lead}
         {empty}
       </div>
@@ -1800,7 +1875,18 @@ function MessageList({
         className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4 [overflow-anchor:none]"
         // Under floating chrome: the rows start below it, and anything the browser
         // scrolls into view itself (Tab onto a row) stops below it and the pinned day.
-        style={topInset > 0 ? { paddingTop: topInset, scrollPaddingTop: coveredTop + 4 } : undefined}
+        // `--wn-top-chrome` is the measured chrome (a ResizeObserver on it in the app) plus
+        // the gap; `--wn-top-clear` adds the first day's height, which the pinned day covers.
+        style={
+          band > 0
+            ? ({
+                "--wn-top-chrome": `${band}px`,
+                "--wn-top-clear": `${coveredTop + TOP_GAP}px`,
+                paddingTop: "var(--wn-top-chrome)",
+                scrollPaddingTop: "var(--wn-top-clear)",
+              } as React.CSSProperties)
+            : undefined
+        }
       >
       {lead && (
         <div ref={measureLead} data-list-lead="">

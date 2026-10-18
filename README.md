@@ -134,6 +134,7 @@ advertise a shortcut that isn't wired.
 | Keys | Does |
 | --- | --- |
 | `j` / `k`, `↓` / `↑` | Next / previous message; the arrows scroll an open message instead |
+| `Home` | Back to the top of the list |
 | `o` or `⏎` | Open the highlighted message |
 | `Esc` | Close the message, a sheet, or the filters |
 | `s` | Star or unstar |

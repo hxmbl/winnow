@@ -24,6 +24,7 @@ export type Command =
   | { type: "moveSelection"; delta: number }
   | { type: "scrollReader"; delta: number }
   | { type: "openSelected" }
+  | { type: "listTop" }
   | { type: "closeViewer" }
   | { type: "closeComposer" }
   | { type: "dismissOverlay" }
@@ -207,6 +208,14 @@ export const BINDINGS: readonly Binding[] = [
         ? { type: "scrollReader", delta }
         : { type: "moveSelection", delta };
     },
+  },
+  {
+    // Back to the top of the list, the first email clear of the chrome. Scrolls only:
+    // the cursor and the open message stay where they are.
+    keys: "Home",
+    help: "Back to the top of the list",
+    matches: { keys: ["Home"] },
+    command: { type: "listTop" },
   },
   {
     keys: "o / ⏎",

@@ -78,6 +78,7 @@ import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { logoViewAfter, type LogoView } from "./ui/logoVersion";
 import { PullRefresh } from "./ui/components/PullRefresh";
 import { scrollListToTop } from "./ui/listScroll";
+import { viewKey } from "./ui/inboxClear";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
 import { buildPills } from "./ui/rail";
@@ -2248,6 +2249,9 @@ export function App({ store }: Props) {
         case "openSelected":
           s.openCursor();
           break;
+        case "listTop":
+          scrollListToTop();
+          break;
         case "closeViewer":
           // On a phone, leaving the message leaves the list with no current row.
           s.closeReader({ dropCursor: phoneRef.current });
@@ -3150,6 +3154,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             signals={view.signals}
             selectedId={listSelectedId}
             cursorIndex={listCursor}
+            revealIndex={snapshot.cursorIndex}
             revealSeq={snapshot.revealSeq}
             unreadIds={unreadIds}
             freshIds={snapshot.recentIds}
@@ -3186,6 +3191,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // The desktop's floating header covers the list's top, and the briefing
             // scrolls with the list under it.
             topInset={phone ? (selected ? 0 : phoneBarHeight) : listChromeHeight}
+            listView={`${viewKey(emptyContext)}|${preferences.sortBy}|${snapshot.searchQuery.trim()}`}
             lead={
               phone ? (
                 snapshot.account === null || connectNotice ? (

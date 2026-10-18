@@ -29,6 +29,7 @@ import { chromium } from "playwright";
 import { build, preview } from "vite";
 import { smokeOffline } from "./smoke-offline.mjs";
 import { labelsAndAttachments } from "./smoke-labels-attachments.mjs";
+import { topEmail } from "./smoke-top-email.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -8036,6 +8037,10 @@ try {
   // reader's file list and lightbox, and compose attachments. Its own module, so it can
   // also run alone (`node scripts/smoke-labels-attachments.mjs`).
   await labelsAndAttachments({ browser, url: URL, check, section });
+  // The first email under the floating chrome: at rest, after the Top pill, Home and j/k,
+  // in every kind of view, and when the chrome's height changes. Its own module, so it
+  // can also run alone (`node scripts/smoke-top-email.mjs`).
+  await topEmail({ browser, url: URL, check, section });
 
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");
