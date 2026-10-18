@@ -43,7 +43,10 @@ function requestReply(): void {
 export async function announce(store: WinnowStore, platform: Platform, emails: readonly Email[]): Promise<void> {
   if (emails.length === 0) return;
   const preferences = store.getSnapshot().preferences;
-  const heads = await store.notificationReplyHeads(emails.slice(0, 5));
+  // Only Android replies from the notification itself; elsewhere Reply opens the
+  // composer, so the header blocks (a profile read each) would be built for nothing.
+  const info = await platform.info().catch(() => null);
+  const heads = info?.os === "android" ? await store.notificationReplyHeads(emails.slice(0, 5)) : {};
   await platform.notifyNewMail(buildNotificationBatch(emails, preferences, heads));
 }
 
