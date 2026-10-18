@@ -45,6 +45,9 @@ if (!container) throw new Error("no #root element to mount into");
 const STORAGE_KEYS = {
   preferences: "winnow.preferences.v1",
   learning: "winnow.learning.v1",
+  // What "Change smart filters…" learned. This device only: never synced or backed up
+  // (Android backup is off for all app data), and replaced on sign-out.
+  filterLearning: "winnow.filterLearning.v1",
   filters: "winnow.activeFilters.v1",
   mailbox: "winnow.mailbox.v1",
 } as const;
@@ -106,6 +109,7 @@ function loadPersisted(): PersistedState {
     ) ?? [],
     mailbox: read(STORAGE_KEYS.mailbox, reviveMailbox),
     learning: read(STORAGE_KEYS.learning, (raw) => raw as LearningSnapshot),
+    filterLearning: read(STORAGE_KEYS.filterLearning, (raw) => raw),
   };
 }
 
@@ -115,6 +119,7 @@ type PersistedState = {
   activeFilters: string[];
   mailbox: Mailbox | null;
   learning: LearningSnapshot | null;
+  filterLearning: unknown;
 };
 
 /**
@@ -181,6 +186,7 @@ function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): 
     write(STORAGE_KEYS.preferences, { ...current, ...patch.preferences });
   }
   if (patch.learning) write(STORAGE_KEYS.learning, patch.learning);
+  if (patch.filterLearning) write(STORAGE_KEYS.filterLearning, patch.filterLearning);
   if (patch.activeFilters) write(STORAGE_KEYS.filters, patch.activeFilters);
   if (patch.mailbox) write(STORAGE_KEYS.mailbox, patch.mailbox);
 }
