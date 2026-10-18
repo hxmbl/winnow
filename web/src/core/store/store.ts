@@ -93,6 +93,12 @@ export type SyncPhase = "full" | "incremental";
 export const NO_CURSOR = -1;
 
 /**
+ * How long a draft discarded with Undo waits before Gmail's copy is deleted, when the
+ * offer is neither taken nor let go sooner.
+ */
+export const DRAFT_DISCARD_UNDO_MS = 10_000;
+
+/**
  * How often the list's reference clock is refreshed.
  *
  * A minute: the coarsest thing it drives is a relative timestamp, and a store that
@@ -238,6 +244,12 @@ export type Preferences = {
    */
   markReadOnOpen: boolean;
   /**
+   * Swipe a row on a phone: left to Trash (with Undo), right to toggle read. On by
+   * default. The same actions stay in the selection bar and the reader, so turning it
+   * off loses nothing but the gesture.
+   */
+  swipeActions: boolean;
+  /**
    * How long Send waits before the message goes out, so Undo can bring it back. `0` is
    * Off. See `core/mail/undoSend`: closing the app in the wait keeps it as a draft.
    */
@@ -267,6 +279,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   brandLogos: false,
   gravatars: false,
   markReadOnOpen: true,
+  swipeActions: true,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
   appearance: DEFAULT_APPEARANCE,
@@ -751,6 +764,17 @@ export class WinnowStore {
    * function in the public snapshot would make the whole state object unserialisable.
    */
   private undoAction: (() => void) | null = null;
+  /**
+   * What happens when the offered undo is let go rather than taken, for an action that
+   * waits for that before it reaches Gmail (discarding a draft). Run when the offer is
+   * dismissed, replaced, or left behind by a mailbox change; dropped, never run, by
+   * sign-out and the demo, where keeping the draft is the safe side.
+   */
+  private undoCommit: (() => void) | null = null;
+  /** The commit's deadline, so a forgotten strip does not hold a draft back for ever. */
+  private undoCommitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Drafts discarded with Undo still on offer: a listing landing meanwhile keeps them out. */
+  private pendingDiscards = new Set<string>();
 
   constructor(options: StoreOptions = {}) {
     this.backend = options.backend;
@@ -1309,8 +1333,10 @@ export class WinnowStore {
     this.set({ draftsLoading: true });
     const run = (async () => {
       try {
-        const drafts = await backend.listDrafts!(this.state.drafts);
+        const listed = await backend.listDrafts!(this.state.drafts);
         if (generation !== this.draftsGeneration || this.backend !== backend) return;
+        // A draft discarded with Undo still on offer is still in Gmail; keep it out.
+        const drafts = listed.filter((email) => !this.pendingDiscards.has(email.gmailDraft?.id ?? ""));
         this.set({ drafts, draftsLoading: false });
       } catch (error) {
         if (generation !== this.draftsGeneration || this.backend !== backend) return;
@@ -1617,8 +1643,8 @@ export class WinnowStore {
     // am I in" and "what is narrowed inside it" are one decision.
     //
     // The undo offer goes with them: its label names a mailbox, and it is about to stop
-    // being true.
-    this.undoAction = null;
+    // being true. Letting it go is what a draft discard waits for, so that runs now.
+    this.settleUndo();
     this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [], undo: null }, {
       mailbox,
       activeFilters: [],
@@ -2161,8 +2187,130 @@ export class WinnowStore {
   undoLast(): void {
     const action = this.undoAction;
     if (!action) return;
-    this.undoAction = null;
+    this.dropUndo();
+    this.set({ undo: null });
     action();
+  }
+
+  /**
+   * Offer one undo, letting the previous offer go (and running its commit). `commit`
+   * runs when this offer is let go, and at the latest after `commitAfterMs`.
+   */
+  private offerUndo(
+    label: string,
+    action: () => void,
+    { commit, commitAfterMs }: { commit?: () => void; commitAfterMs?: number } = {},
+  ): void {
+    this.settleUndo();
+    this.undoAction = action;
+    this.undoCommit = commit ?? null;
+    if (commit && commitAfterMs !== undefined) {
+      this.undoCommitTimer = setTimeout(() => {
+        if (this.undoAction !== action) return;
+        this.settleUndo();
+        this.set({ undo: null });
+      }, commitAfterMs);
+    }
+    this.set({ undo: { label } });
+  }
+
+  /** Let the offered undo go: its commit (if any) runs. The strip is the caller's. */
+  private settleUndo(): void {
+    const commit = this.undoCommit;
+    this.dropUndo();
+    commit?.();
+  }
+
+  /** Forget the offered undo and its commit without running either. */
+  private dropUndo(): void {
+    this.undoAction = null;
+    this.undoCommit = null;
+    if (this.undoCommitTimer) clearTimeout(this.undoCommitTimer);
+    this.undoCommitTimer = null;
+  }
+
+  /**
+   * Move a message, with Undo on the strip: the swipe's Trash, and its Restore from the
+   * Trash. A plain `move` underneath, so the optimistic update, the rollback on failure
+   * and the trash bias are the ordinary ones; Undo puts the mailbox and the unread flag
+   * back as they were and takes the sender's trash mark back if this move added it.
+   *
+   * Sent mail is restored by taking the Trash label off (Gmail keeps SENT itself and
+   * refuses it in a modify), so its undo files to "archive" at the API and to Sent here.
+   */
+  moveWithUndo(id: number, mailbox: Mailbox): void {
+    const email = this.state.all.find((candidate) => candidate.id === id);
+    if (!email || email.mailbox === mailbox) return;
+    if (email.mailbox === "sent" && mailbox !== "trash") return;
+    const previousMailbox = email.mailbox;
+    const previousUnread = email.unread;
+    const markedSender = mailbox === "trash" && !this.trashSenders.includes(email.sender);
+    this.move(id, mailbox);
+    const backend = this.backend;
+    this.offerUndo(`Moved to ${MAILBOX_LABEL[mailbox]}.`, () => {
+      const now = this.state.all.find((candidate) => candidate.id === id);
+      if (!now || now.mailbox !== mailbox || this.backend !== backend) return;
+      if (markedSender) this.trashSenders = this.trashSenders.filter((sender) => sender !== email.sender);
+      this.mutate(
+        id,
+        () => ({ ...now, mailbox: previousMailbox, unread: previousUnread }),
+        async () => {
+          await this.backend?.moveToMailbox(id, previousMailbox === "sent" ? "archive" : previousMailbox);
+        },
+        { previousMailbox: mailbox, previousUnread: now.unread },
+      );
+    });
+  }
+
+  /**
+   * Discard one draft with Undo: the row goes now, and Gmail's copy is deleted only when
+   * the offer is let go (dismissed, replaced, a mailbox change) or after
+   * `DRAFT_DISCARD_UNDO_MS`. Undo just puts the row back. Closing the app first keeps
+   * the draft, which is the safe way round.
+   */
+  discardDraftWithUndo(id: number): void {
+    const row = this.draftRow(id);
+    const draftId = row?.gmailDraft?.id;
+    if (!row || !draftId) return;
+    const generation = this.draftsGeneration;
+    this.pendingDiscards.add(draftId);
+    this.set({
+      drafts: this.state.drafts.filter((email) => email.id !== id),
+      ...(this.state.selectedId === id ? { selectedId: null } : {}),
+    });
+    const restore = () => {
+      if (generation !== this.draftsGeneration) return;
+      if (this.state.drafts.some((email) => email.gmailDraft?.id === draftId)) return;
+      this.set({ drafts: [row, ...this.state.drafts].sort((a, b) => b.receivedAt - a.receivedAt) });
+    };
+    this.offerUndo(
+      "Draft discarded.",
+      () => {
+        this.pendingDiscards.delete(draftId);
+        restore();
+      },
+      {
+        commit: () => {
+          if (generation !== this.draftsGeneration) {
+            this.pendingDiscards.delete(draftId);
+            return;
+          }
+          const api = this.backend?.drafts;
+          if (!api) {
+            this.pendingDiscards.delete(draftId);
+            return;
+          }
+          api
+            .delete(draftId)
+            .catch(() => {
+              restore();
+              this.set({ notice: "Couldn't discard that draft." });
+            })
+            .finally(() => this.pendingDiscards.delete(draftId));
+        },
+        commitAfterMs: DRAFT_DISCARD_UNDO_MS,
+      },
+    );
   }
 
   // ── Labels ───────────────────────────────────────────────────────────────
@@ -2251,7 +2399,7 @@ export class WinnowStore {
   /** Drop the offered undo without taking it. */
   dismissUndo(): void {
     if (!this.undoAction) return;
-    this.undoAction = null;
+    this.settleUndo();
     this.set({ undo: null });
   }
 
@@ -2795,7 +2943,7 @@ export class WinnowStore {
   markDemoMode(now: number = DEMO_NOW, drafts?: readonly Email[]): void {
     this.backend = undefined;
     this.pendingConnect = null;
-    this.undoAction = null;
+    this.dropUndo();
     this.dropBodyWork();
     this.draftsGeneration += 1;
     this.set({
@@ -2848,7 +2996,7 @@ export class WinnowStore {
     };
     this.backend = undefined;
     this.pendingConnect = null;
-    this.undoAction = null;
+    this.dropUndo();
     this.dropBodyWork();
     // The resident bodies are the account's mail in memory. A sync would replace them on
     // the next sign-in, but until then they would sit in the heap of a signed-out app.

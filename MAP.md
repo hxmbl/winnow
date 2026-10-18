@@ -177,7 +177,7 @@ The public surface is ~80 methods, grouped:
 | Backend passthrough | `sync` via `MailBackend`; `toggleStar`, `moveToMailbox`, `setRead`, `deletePermanently`, `sendReply`, `fetchAttachment`, `fetchBody` |
 | Navigation | `setMailbox`, `select`, `openCursor`, `closeReader`, `moveCursor`, `openRow`, `focusMessage`, `searchSubject`, `listTitle`, `setOverlay`, `moveNavigation`, `activateNavigation` |
 | Filters | `toggleFilter`, `clearFilters`, `setFilters` (private) |
-| Mutations | `archive`, `move`, `trash`, `toggleRead`, `markUnreadAndMoveOn`, the `*Many` batch variants, `undoLast` |
+| Mutations | `archive`, `move`, `trash`, `toggleRead`, `markUnreadAndMoveOn`, the `*Many` batch variants, `moveWithUndo` / `discardDraftWithUndo` (the phone's swipes), `undoLast`, `dismissUndo` |
 | Senders | `blockSender`, `unblockSender`, `muteSender`, `unmuteSender`, `showSender`, `isSenderMuted` |
 | Bodies | `loadBody`, `prefetchBodies`, `hasLoadedBody`, `scheduleReclassify` |
 | Offline storage | `saveMailboxOffline`, `declineMailboxStorage`, `dismissStoragePrompt` |
@@ -188,6 +188,12 @@ Two behaviours worth knowing before touching it:
 - **Every mutation goes through `mutate()`,** which snapshots for `undoLast()`
   and drops the read cursor when the row under it leaves the screen. An undo that
   cannot restore exactly what it touched is not an undo.
+- **The undo strip has one slot** (`state.undo`, `offerUndo`). Its producers are the
+  phone's swipes: `moveWithUndo` (Trash, and Restore from the Trash) and
+  `discardDraftWithUndo`. A draft discard only reaches Gmail when the offer is *let
+  go* — dismissed, replaced by a newer offer, left by a mailbox change, or after
+  `DRAFT_DISCARD_UNDO_MS = 10 s` — and a listing in the meantime keeps the row out.
+  Sign-out and the demo drop the offer without committing, so the draft survives.
 - **`signOut()` keeps what is about the person, drops what is about the account.**
   Mail, unread state, active filters and the account go; preferences, blocked and
   muted senders, and everything Winnow learned stay, so signing back in finds the
@@ -469,7 +475,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 
 | File | Responsibility |
 | --- | --- |
-| `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips. At most one signal word per row; "Urgent" is drawn in the Urgent chip's hue (`.wn-signal-ink`: `FILTER_HUES.urgent` at the mode's `pill.textLightness`, AA-checked by `pillInk` in `theme.test.ts`), the rest grey. |
+| `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips, and the phone's swipe actions (the row is moved by hand with `translate3d`, a backdrop is mounted for the swiped row only, and `touch-action: pan-y pinch-zoom` on the list leaves sideways motion to it). At most one signal word per row; "Urgent" is drawn in the Urgent chip's hue (`.wn-signal-ink`: `FILTER_HUES.urgent` at the mode's `pill.textLightness`, AA-checked by `pillInk` in `theme.test.ts`), the rest grey. |
 | `Reader.tsx` | The message pane: back bar, header (avatar → sender menu, sender `h2`, subject as the document `h1`), filter tags with their reasons, the three-way image offer, body, attachments, the conversation, and the phone dock. |
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
 | `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next, Compose (no Mark all read anywhere: opening a message marks it read), and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
@@ -499,6 +505,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `theme.ts` | Every colour and the machinery that mirrors it to `--wn-*`, plus the contrast functions `theme.test.ts` uses. A screenshot cannot tell you a grey is 3.14:1 on white, which is how `inkSubtle` shipped. |
 | `rail.ts` | `buildPills`, `digitFor`, scroll geometry. Separate from `FilterStrip.tsx` because exporting a plain function from a component module breaks fast refresh. An active sender pill is never hidden. |
 | `selection.ts` | Selection arithmetic and the `LongPress` state machine (`LONG_PRESS_MS = 450`, `TOUCH_SLOP = 10`, `EDGE_SCROLL_ZONE = 40`). |
+| `swipe.ts` | Swipe actions as pure logic: `SwipeGesture` (edge zones `EDGE_PX = 24`, axis lock after `AXIS_LOCK_PX = 10`, commit past `COMMIT_FRACTION = 0.38` of the row or a fling ≥ `FLING_VELOCITY = 0.6` px/ms over ≥ 40 px) and `swipeActionsFor`, which says what each direction does per mailbox: left is Trash, right toggles read; in Trash left restores to the Inbox; in Drafts left discards (with Undo) and right does nothing. Touch only, phone layout only, off in select mode and under any menu, sheet or dialog; Settings → Reading → Swipe actions turns it off. |
 | `windowing.ts` | Variable-height windowing arithmetic (`ESTIMATED_ROW_HEIGHT = 53`, `OVERSCAN = 6`). No fixed-height virtualiser, because rows are 53–82 px. |
 | `syncStatus.ts` | The sync line and button text as one pure function, with a documented precedence order. |
 | `bodyViews.ts` | Which "Show as" options exist for this message — two instead of four when there is no HTML part. |
@@ -659,12 +666,14 @@ judged as IPv4.
   declines quietly rather than erroring), and success is asserted by looking for
   the file. Preflights `hdiutil` and `create-dmg` so a missing one is a sentence
   rather than a stack trace from inside a vendored bash script.
-- `smoke.mjs` — 23 sections. It asserts the rail renders exactly once below the
+- `smoke.mjs` — 33 sections. It asserts the rail renders exactly once below the
   search field with `aria-keyshortcuts` in order, that every pill is visible with
   ≥4.5:1 label contrast, that the sidebar scrim's blur falls off identically in
   all directions, that persistence survives a reload, that the theme survives a
-  reload with the bundle blocked, that a phone layout has no sideways scroll, and
-  that the console stayed empty.
+  reload with the bundle blocked, that a phone layout has no sideways scroll, that
+  swipe actions work through real CDP touches (left trashes with Undo, right toggles
+  read, short springs back, vertical scrolls, edge zones and the setting turn it off),
+  and that the console stayed empty.
 
 The four tests worth reading first, because each exists because a real bug got
 out and nothing else would have caught it:

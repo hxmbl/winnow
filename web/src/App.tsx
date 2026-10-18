@@ -76,6 +76,7 @@ import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
 import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
+import type { SwipeAction } from "./ui/swipe";
 import { Reader } from "./ui/components/Reader";
 import { ReaderSplitHandle } from "./ui/components/ReaderSplitHandle";
 import { ShortcutSheet } from "./ui/components/ShortcutSheet";
@@ -1056,6 +1057,36 @@ export function App({ store }: Props) {
     if (index < 0) return;
     s.openRow(index);
   }, []);
+
+  /**
+   * A row swiped past its commit line (phone only; see `ui/swipe.ts`). Trash and Restore
+   * offer Undo on the strip; a draft is discarded with Undo; read and unread are a plain
+   * toggle, which the row shows as it snaps back.
+   */
+  const handleSwipe = useCallback((id: number, action: SwipeAction) => {
+    const s = storeRef.current;
+    switch (action) {
+      case "trash":
+        s.moveWithUndo(id, "trash");
+        break;
+      case "restore":
+        s.moveWithUndo(id, "inbox");
+        break;
+      case "discard":
+        s.discardDraftWithUndo(id);
+        break;
+      case "markRead":
+        s.setRead(id, true);
+        break;
+      case "markUnread":
+        s.setRead(id, false);
+        break;
+    }
+  }, []);
+  const swipeConfig = useMemo(
+    () => ({ mailbox: snapshot.mailbox, onAction: handleSwipe }),
+    [snapshot.mailbox, handleSwipe],
+  );
 
   const handleToggleStar = useCallback((messageId: number) => {
     storeRef.current.toggleStar(messageId);
@@ -2832,6 +2863,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onRowMenu={phone ? undefined : openRowMenu}
             onCopyCode={copyCode}
             copiedCodeId={copiedCodeId}
+            // Swipes are the phone's, and stand down while anything sits over the list.
+            swipe={
+              phone && preferences.swipeActions && !menu && !labelPicker && !sidebarOpen && !composer && snapshot.overlay === "none"
+                ? swipeConfig
+                : null
+            }
             className="min-w-0"
           />
         </div>
@@ -3050,6 +3087,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onImagePolicy={(imagePolicy) => store.setPreferences({ imagePolicy })}
           markReadOnOpen={preferences.markReadOnOpen}
           onMarkReadOnOpen={(value) => store.setPreferences({ markReadOnOpen: value })}
+          swipeActions={phone ? preferences.swipeActions : null}
+          onSwipeActions={(value) => store.setPreferences({ swipeActions: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           brandLogos={preferences.brandLogos}

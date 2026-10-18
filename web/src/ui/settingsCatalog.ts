@@ -104,6 +104,12 @@ export const SETTINGS = {
     explanation:
       "Opening a message or conversation marks it read in Gmail, so it also shows as read on your other devices. Turn this off if you use unread as a to-do list: mail then stays unread until you mark it yourself.",
   },
+  swipeActions: {
+    category: "reading",
+    label: "Swipe actions",
+    explanation:
+      "On a phone, swipe a message left to move it to the Trash, with Undo, or right to mark it read or unread. In Drafts a left swipe discards the draft, and in the Trash it restores the message to the Inbox. The same actions stay in the selection bar and the message's own menu, so turning this off only takes away the gesture.",
+  },
   undoSend: {
     category: "reading",
     label: "Undo send",

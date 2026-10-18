@@ -112,6 +112,12 @@ export type SettingsProps = {
   /** Read on open. On by default; see `Preferences.markReadOnOpen`. */
   markReadOnOpen: boolean;
   onMarkReadOnOpen: (value: boolean) => void;
+  /**
+   * Swipe actions on the list. Null hides the row: the gesture only exists in the phone
+   * layout, so a desktop window does not offer a switch that changes nothing there.
+   */
+  swipeActions: boolean | null;
+  onSwipeActions: (value: boolean) => void;
   /** How long Send waits for Undo. 5s by default; see `Preferences.undoSendSeconds`. */
   undoSendSeconds: UndoSendSeconds;
   onUndoSendSeconds: (value: UndoSendSeconds) => void;
@@ -618,6 +624,11 @@ function ReadingSettings({ props }: { props: SettingsProps }) {
         <Row setting="markReadOnOpen">
           <Toggle checked={props.markReadOnOpen} onChange={props.onMarkReadOnOpen} label="Mark as read when opened" />
         </Row>
+        {props.swipeActions !== null && (
+          <Row setting="swipeActions">
+            <Toggle checked={props.swipeActions} onChange={props.onSwipeActions} label="Swipe actions" />
+          </Row>
+        )}
         <Row setting="undoSend">
           <div data-undo-send-choices="" className="flex gap-1 rounded-ctl border border-hairline p-0.5">
             {UNDO_SEND_CHOICES.map((seconds) => (

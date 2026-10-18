@@ -36,6 +36,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.brandLogos === "boolean") out.brandLogos = source.brandLogos;
   if (typeof source.gravatars === "boolean") out.gravatars = source.gravatars;
   if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
+  if (typeof source.swipeActions === "boolean") out.swipeActions = source.swipeActions;
   // Only a delay Settings offers: anything else (a newer build's choice, a hand edit)
   // falls back to the default rather than being rounded to a neighbour.
   if (isUndoSendSeconds(source.undoSendSeconds)) out.undoSendSeconds = source.undoSendSeconds;

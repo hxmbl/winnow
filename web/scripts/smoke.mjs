@@ -4603,8 +4603,8 @@ try {
     await d.locator("[data-menu='row'] [data-menu-item='label-as']").click();
     await picker.waitFor({ timeout: 5_000 }).catch(() => undefined);
     const stuck = {
-      family: await picker.locator('[data-label-option="Label_4"]').getAttribute("aria-checked").catch(() => null),
-      made: await picker.locator("[data-label-option]", { hasText: "Smoke/Made here" }).getAttribute("aria-checked").catch(() => null),
+      family: await picker.locator('[data-label-option="Label_4"]').getAttribute("aria-checked", { timeout: 2_000 }).catch(() => null),
+      made: await picker.locator("[data-label-option]", { hasText: "Smoke/Made here" }).getAttribute("aria-checked", { timeout: 2_000 }).catch(() => null),
     };
     check(
       "and the labels stick on the message",
@@ -4777,6 +4777,220 @@ try {
     );
     check("no console errors on the phone pass", pErrors.length === 0, pErrors.slice(0, 3).join(" | "));
     await ctx.close();
+  }
+
+  // ── Swipe actions, on a phone ──────────────────────────────────────────────
+
+  /*
+   * Real touches through CDP (`Input.dispatchTouchEvent`), so the browser's own
+   * touch-action and scrolling decide what a drag is, exactly as on a phone: left is
+   * Trash with Undo, right toggles read, a short drag springs back, a vertical drag
+   * scrolls, a touch starting in a screen-edge zone is the system's, and the setting
+   * turns it all off. The desktop list gets none of it.
+   */
+  section("swipe actions");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const p = await ctx.newPage();
+    const sErrors = [];
+    p.on("pageerror", (error) => sErrors.push(String(error)));
+    p.on("console", (message) => {
+      if (message.type() === "error") sErrors.push(message.text());
+    });
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-row-count] [data-row-id]");
+    const cdp = await ctx.newCDPSession(p);
+    const scroller = p.locator("[data-row-count]");
+    const rows = p.locator("[data-row-count] [data-row-id]");
+    const rowById = (id) => p.locator(`[data-row-count] [data-row-id="${id}"]`);
+    const isUnread = async (id) =>
+      /, unread,/.test((await p.locator(`[data-row-count] button[data-message-id="${id}"]`).getAttribute("aria-label")) ?? "");
+    const rowCount = async () => Number(await scroller.getAttribute("data-row-count"));
+    /** One finger from (x, y) by (dx, dy) in `steps` moves `stepMs` apart, then up. */
+    const drag = async ({ x, y, dx, dy = 0, steps = 12, stepMs = 16, settle = 700 }) => {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (let i = 1; i <= steps; i += 1) {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x: x + (dx * i) / steps, y: y + (dy * i) / steps }],
+        });
+        await p.waitForTimeout(stepMs);
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await p.waitForTimeout(settle);
+    };
+    const middleOf = async (id) => {
+      const box = await rowById(id).boundingBox();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: box.width, left: box.x };
+    };
+    const unreadRowId = async () =>
+      p.evaluate(() => {
+        const button = [...document.querySelectorAll("[data-row-count] button[data-message-id]")].find((b) =>
+          /, unread,/.test(b.getAttribute("aria-label") ?? ""),
+        );
+        return button ? button.getAttribute("data-message-id") : null;
+      });
+
+    check("the phone list takes swipes", (await p.locator("[data-row-count] [role='list'][data-swipe-enabled]").count()) === 1);
+    check(
+      "and leaves vertical panning to the browser",
+      (await p.locator("[data-row-count] [role='list']").evaluate((el) => getComputedStyle(el).touchAction)).includes("pan-y"),
+    );
+
+    // Swipe left: Trash, with Undo.
+    {
+      const id = await rows.nth(2).getAttribute("data-row-id");
+      const before = await rowCount();
+      const at = await middleOf(id);
+      await drag({ x: at.x + 60, y: at.y, dx: -240 });
+      check("a swipe left takes the message out of the list", (await rowById(id).count()) === 0 && (await rowCount()) === before - 1, `${before} → ${await rowCount()}`);
+      check("and nothing opened", (await p.locator("[data-reader]").count()) === 0);
+      const label = p.locator("[data-undo-label]");
+      check("the undo strip says it went to the Trash", (await label.count()) === 1 && /Trash/.test((await label.textContent()) ?? ""));
+      await p.locator('[role="status"]:has([data-undo-label]) button', { hasText: /^Undo$/ }).click({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(300);
+      check("Undo puts it back", (await rowById(id).count()) === 1 && (await rowCount()) === before);
+      check("and clears the strip", (await p.locator("[data-undo-label]").count()) === 0);
+      check(
+        "with the row drawn where it belongs, not left translated",
+        (await rowById(id).evaluate((el) => el.style.transform)) === "",
+      );
+    }
+
+    // Swipe right: read and unread, snapping back.
+    {
+      const id = await unreadRowId();
+      if (require("the demo shows an unread row on the phone", id !== null)) {
+        const at = await middleOf(id);
+        await drag({ x: at.left + 60, y: at.y, dx: 240 });
+        check("a swipe right marks an unread message read", !(await isUnread(id)));
+        check("and the row snaps back in place", (await rowById(id).count()) === 1 && (await rowById(id).evaluate((el) => el.style.transform)) === "");
+        check("with no backdrop left behind", (await p.locator("[data-swipe-backdrop]").count()) === 0);
+        check("and nothing opened", (await p.locator("[data-reader]").count()) === 0);
+        const again = await middleOf(id);
+        await drag({ x: again.left + 60, y: again.y, dx: 240 });
+        check("a second swipe right marks it unread again", await isUnread(id));
+      }
+    }
+
+    // A short, slow swipe springs back and does nothing.
+    {
+      const id = await rows.nth(3).getAttribute("data-row-id");
+      const unread = await isUnread(id);
+      const before = await rowCount();
+      const at = await middleOf(id);
+      await drag({ x: at.x + 40, y: at.y, dx: -60, steps: 12, stepMs: 40 });
+      check(
+        "a short swipe springs back and changes nothing",
+        (await rowById(id).count()) === 1 && (await rowCount()) === before && (await isUnread(id)) === unread,
+      );
+      check("and the row is back in place", (await rowById(id).evaluate((el) => el.style.transform)) === "");
+      check("with no undo offered", (await p.locator("[data-undo-label]").count()) === 0);
+      check("and nothing opened", (await p.locator("[data-reader]").count()) === 0);
+      // The same short swipe to the right does not toggle read either.
+      await drag({ x: at.x - 40, y: at.y, dx: 60, steps: 12, stepMs: 40 });
+      check("nor does a short one to the right", (await isUnread(id)) === unread);
+    }
+
+    // A vertical drag scrolls and never swipes.
+    {
+      await scroller.evaluate((el) => (el.scrollTop = 0));
+      await p.waitForTimeout(200);
+      const before = await rowCount();
+      const id = await rows.nth(4).getAttribute("data-row-id");
+      const unread = await isUnread(id);
+      const at = await middleOf(id);
+      // A little sideways drift, the way a thumb scrolls.
+      await drag({ x: at.x, y: at.y, dx: -18, dy: -260, settle: 400 });
+      const scrolled = await scroller.evaluate((el) => el.scrollTop);
+      check("a vertical drag over a row scrolls the list", scrolled > 50, `${scrolled}px`);
+      check("and swipes nothing", (await rowCount()) === before && (await p.locator("[data-undo-label]").count()) === 0 && (await isUnread(id)) === unread);
+      await scroller.evaluate((el) => (el.scrollTop = 0));
+      await p.waitForTimeout(200);
+    }
+
+    // A touch from a screen edge is the system's back gesture.
+    {
+      const before = await rowCount();
+      const id = await rows.nth(2).getAttribute("data-row-id");
+      const unread = await isUnread(id);
+      const at = await middleOf(id);
+      await drag({ x: 10, y: at.y, dx: 240 });
+      check("a swipe starting at the left edge is ignored", (await isUnread(id)) === unread && (await rowCount()) === before);
+      await drag({ x: 390 - 8, y: at.y, dx: -240 });
+      check("and so is one starting at the right edge", (await rowById(id).count()) === 1 && (await rowCount()) === before);
+      check("leaving no undo offered", (await p.locator("[data-undo-label]").count()) === 0);
+    }
+
+    // A long-press still selects rather than swiping.
+    {
+      const id = await rows.nth(1).getAttribute("data-row-id");
+      const at = await middleOf(id);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: at.x, y: at.y }] });
+      await p.waitForTimeout(650);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await p.waitForTimeout(200);
+      check("a long-press still enters select mode", (await p.locator("[data-row-count][data-select-mode]").count()) === 1);
+      const other = await rows.nth(3).getAttribute("data-row-id");
+      const before = await rowCount();
+      const o = await middleOf(other);
+      await drag({ x: o.x + 60, y: o.y, dx: -240 });
+      check("so a swipe in select mode trashes nothing", (await rowCount()) === before && (await rowById(other).count()) === 1);
+      const clear = p.locator("[data-selection-bar='phone'] button[aria-label='Clear selection']");
+      if ((await clear.count()) > 0) await clear.tap({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(200);
+    }
+
+    // Reduced motion: the commit is instant.
+    {
+      await p.emulateMedia({ reducedMotion: "reduce" });
+      const id = await rows.nth(2).getAttribute("data-row-id");
+      const at = await middleOf(id);
+      await drag({ x: at.x + 60, y: at.y, dx: -240, settle: 120 });
+      check("with reduced motion a swipe commits at once", (await rowById(id).count()) === 0);
+      await p.locator('[role="status"]:has([data-undo-label]) button', { hasText: /^Undo$/ }).click({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(200);
+      await p.emulateMedia({ reducedMotion: "no-preference" });
+    }
+
+    // The setting: on by default in Settings → Reading, and off turns swipes off.
+    {
+      const sheetToggle = p.locator("[data-sidebar-toggle]:visible").first();
+      await sheetToggle.click({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(150);
+      if ((await p.locator("[data-sidebar][data-open]").count()) === 0) await sheetToggle.click({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(300);
+      await p.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').click({ timeout: 3_000 }).catch(() => undefined);
+      await openSettingsCategory(p, "reading").catch(() => undefined);
+      const toggle = p.locator('[role="dialog"][aria-label="Settings"] button[role="switch"][aria-label="Swipe actions"]');
+      check("Settings → Reading has a Swipe actions switch on a phone", (await toggle.count()) === 1);
+      check("on by default", (await toggle.getAttribute("aria-checked", { timeout: 2_000 }).catch(() => null)) === "true");
+      if ((await toggle.count()) === 1) await toggle.click({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(150);
+      check("which turns off", (await toggle.getAttribute("aria-checked", { timeout: 2_000 }).catch(() => null)) === "false");
+      // Read back after a reload, so what follows tests the saved setting and not a
+      // dialog still over the list.
+      await p.reload({ waitUntil: "networkidle" });
+      await p.waitForSelector("[data-row-count] [data-row-id]");
+      check("the list takes no swipes with the setting off", (await p.locator("[data-row-count] [role='list'][data-swipe-enabled]").count()) === 0);
+      const before = await rowCount();
+      const id = await rows.nth(2).getAttribute("data-row-id");
+      const at = await middleOf(id);
+      await drag({ x: at.x + 60, y: at.y, dx: -240 });
+      check("and a swipe left then trashes nothing", (await rowById(id).count()) === 1 && (await rowCount()) === before);
+      check("nor offers an undo", (await p.locator("[data-undo-label]").count()) === 0);
+    }
+
+    check("no console errors in the swipe pass", sErrors.length === 0, sErrors.slice(0, 3).join(" | "));
+    await ctx.close();
+
+    // The desktop list is untouched.
+    const desk = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const d = await desk.newPage();
+    await d.goto(URL, { waitUntil: "networkidle" });
+    await d.waitForSelector("[data-row-count] [data-row-id]");
+    check("the desktop list takes no swipes", (await d.locator("[data-row-count] [role='list'][data-swipe-enabled]").count()) === 0);
+    await desk.close();
   }
 
   // ── One-time codes ─────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { ArchiveRestore, Check, Mail, MailOpen, Trash2 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { CodeChip } from "./CodeCopy";
 import { codeChipVisible } from "../../core/mail/otp";
@@ -42,6 +42,15 @@ import { filterIcon } from "../filterIcons";
 import { FILTER_HUES } from "../filterColors";
 import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
+import {
+  SWIPE_LABEL,
+  SwipeGesture,
+  removesRow,
+  swipeActionsFor,
+  type SwipeAction,
+  type SwipeActions,
+  type SwipeDirection,
+} from "../swipe";
 import {
   ESTIMATED_HEADER_HEIGHT,
   ESTIMATED_ROW_HEIGHT,
@@ -485,6 +494,82 @@ const Row = memo(function Row({
   );
 });
 
+/** The icon for a swipe action, as the backdrop shows it. */
+function SwipeIcon({ action }: { action: SwipeAction }) {
+  const props = { size: 20, strokeWidth: 2.2, "aria-hidden": true } as const;
+  switch (action) {
+    case "trash":
+    case "discard":
+      return <Trash2 {...props} />;
+    case "restore":
+      return <ArchiveRestore {...props} />;
+    case "markRead":
+      return <MailOpen {...props} />;
+    case "markUnread":
+      return <Mail {...props} />;
+  }
+}
+
+/** Removing actions are drawn in the danger colour; the rest in the accent. */
+function swipeTone(action: SwipeAction): "danger" | "accent" {
+  return action === "trash" || action === "discard" ? "danger" : "accent";
+}
+
+/**
+ * What is behind a row being swiped: the colour and the icon and words of what letting
+ * go will do, on the side the row uncovers.
+ *
+ * Rendered only for the one row under the finger, and only once the touch has locked
+ * sideways, so the list carries no hidden layer per row. Which side shows, its colour
+ * and whether the icon is "armed" (past the commit line) are data attributes the list
+ * sets by hand on every move, so a drag re-renders nothing.
+ *
+ * Trash and Discard take the danger colour with the surface's own colour on it (the
+ * pairing every destructive button uses, light text on dark red in light mode and dark
+ * on light red in dark and OLED); read, unread and Restore take the accent with
+ * `on-accent`, which is checked for contrast per mode and per accent theme.
+ */
+function SwipeBackdrop({ actions }: { actions: SwipeActions }) {
+  return (
+    <div
+      data-swipe-backdrop=""
+      aria-hidden="true"
+      className="group/swipe pointer-events-none absolute inset-0 flex items-center justify-between overflow-hidden rounded-ctl px-5 text-ui font-semibold data-[tone=accent]:bg-accent data-[tone=accent]:text-on-accent data-[tone=danger]:bg-danger data-[tone=danger]:text-[var(--wn-surface)]"
+    >
+      {/* The finger moved right: the left side is uncovered. */}
+      <span data-swipe-side="right" className="hidden items-center gap-2 group-data-[dir=right]/swipe:flex">
+        {actions.right && (
+          <>
+            <span className="flex origin-center opacity-75 transition-transform duration-150 group-data-[armed]/swipe:scale-125 group-data-[armed]/swipe:opacity-100 motion-reduce:transition-none">
+              <SwipeIcon action={actions.right} />
+            </span>
+            {SWIPE_LABEL[actions.right]}
+          </>
+        )}
+      </span>
+      <span data-swipe-side="left" className="ml-auto hidden items-center gap-2 group-data-[dir=left]/swipe:flex">
+        {actions.left && (
+          <>
+            {SWIPE_LABEL[actions.left]}
+            <span className="flex origin-center opacity-75 transition-transform duration-150 group-data-[armed]/swipe:scale-125 group-data-[armed]/swipe:opacity-100 motion-reduce:transition-none">
+              <SwipeIcon action={actions.left} />
+            </span>
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** How long the row takes to leave, to collapse, and to spring back (ms). */
+const SWIPE_OUT_MS = 180;
+const SWIPE_COLLAPSE_MS = 160;
+const SWIPE_BACK_MS = 220;
+
+function prefersReducedMotion(): boolean {
+  return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
 /**
  * The day heading.
  *
@@ -638,6 +723,12 @@ type Props = {
   onCopyCode: (id: number) => void;
   /** The message whose code was just copied, for the chip's "Copied". */
   copiedCodeId: number | null;
+  /**
+   * Swipe actions on rows (see `ui/swipe.ts`), or null for none. The app passes this only
+   * in the phone layout with the setting on and no menu, sheet or dialog open; the list
+   * itself also holds off in select mode, and answers touch only, never a mouse.
+   */
+  swipe?: { mailbox: string; onAction: (id: number, action: SwipeAction) => void } | null;
   className?: string;
 };
 
@@ -667,6 +758,7 @@ function MessageList({
   onRowMenu,
   onCopyCode,
   copiedCodeId,
+  swipe = null,
   className = "",
 }: Props) {
 
@@ -930,8 +1022,8 @@ function MessageList({
 
   // The gesture handlers read the latest values through refs, so they can be attached
   // once and never rebuilt mid-drag.
-  const live = useRef({ order, selection, onSelectionChange, touchSelect, onRowMenu });
-  live.current = { order, selection, onSelectionChange, touchSelect, onRowMenu };
+  const live = useRef({ order, selection, onSelectionChange, touchSelect, onRowMenu, swipe, unreadIds });
+  live.current = { order, selection, onSelectionChange, touchSelect, onRowMenu, swipe, unreadIds };
 
   const selectMode = touchSelect && selection.size > 0;
 
@@ -966,6 +1058,187 @@ function MessageList({
   } | null>(null);
   /** Undoes what an active drag attached to the window (Escape, scroll, blur). */
   const dragCleanup = useRef<(() => void) | null>(null);
+
+  // ── Swipe actions ──────────────────────────────────────────────────────────
+
+  /**
+   * The touch that may be a swipe. Every decision is `SwipeGesture`'s; this holds the
+   * elements it moves. `row` is the row's own element (translated), `item` its list item
+   * (collapsed when the row leaves). `active` once the touch locked sideways.
+   */
+  const swipeRef = useRef<{
+    pointerId: number;
+    id: number;
+    gesture: SwipeGesture;
+    actions: SwipeActions;
+    row: HTMLElement;
+    item: HTMLElement;
+    width: number;
+    active: boolean;
+    armed: boolean;
+  } | null>(null);
+  /** A released swipe still animating: no new one starts until it is done. */
+  const swipeBusy = useRef(false);
+  /** The row whose backdrop is mounted, and what its two sides do. */
+  const [swiping, setSwiping] = useState<{ id: number; actions: SwipeActions } | null>(null);
+
+  /** Put the row and its item back exactly as React left them. */
+  const clearSwipeStyles = (row: HTMLElement, item: HTMLElement) => {
+    row.style.transform = "";
+    row.style.transition = "";
+    row.style.willChange = "";
+    row.style.backgroundColor = "";
+    item.style.height = "";
+    item.style.transition = "";
+  };
+
+  /** Draw the row at `offset`, and say on the backdrop which side and whether armed. */
+  const paintSwipe = (offset: number, direction: SwipeDirection | null, armed: boolean) => {
+    const state = swipeRef.current;
+    if (!state) return;
+    state.row.style.transform = `translate3d(${offset}px, 0, 0)`;
+    const backdrop = state.item.querySelector<HTMLElement>("[data-swipe-backdrop]");
+    if (!backdrop) return;
+    const action = direction ? state.actions[direction] : null;
+    if (direction && action) {
+      backdrop.dataset.dir = direction;
+      backdrop.dataset.tone = swipeTone(action);
+    } else {
+      delete backdrop.dataset.dir;
+      delete backdrop.dataset.tone;
+    }
+    if (armed) backdrop.dataset.armed = "";
+    else delete backdrop.dataset.armed;
+  };
+
+  /** Arm a swipe on a touch press over a row, when swipes are on and nothing else owns it. */
+  const startSwipe = (event: React.PointerEvent, target: Element) => {
+    swipeRef.current = null;
+    const config = live.current.swipe;
+    if (!config || event.pointerType !== "touch" || swipeBusy.current) return;
+    if (live.current.selection.size > 0) return;
+    const row = target.closest<HTMLElement>("[data-row-id]");
+    const item = row?.parentElement;
+    const id = row ? Number(row.dataset.rowId) : NaN;
+    if (!row || !item || !Number.isFinite(id)) return;
+    const actions = swipeActionsFor(config.mailbox, live.current.unreadIds.has(id));
+    const width = row.getBoundingClientRect().width;
+    swipeRef.current = {
+      pointerId: event.pointerId,
+      id,
+      gesture: new SwipeGesture({ x: event.clientX, y: event.clientY, at: performance.now() }, width, actions, {
+        screenWidth: window.innerWidth,
+      }),
+      actions,
+      row,
+      item,
+      width,
+      active: false,
+      armed: false,
+    };
+  };
+
+  /** A move of the swiping finger. True when the swipe owns this touch now. */
+  const moveSwipe = (event: React.PointerEvent): boolean => {
+    const state = swipeRef.current;
+    if (!state || state.pointerId !== event.pointerId) return false;
+    // A long-press that already fired (select mode, a range drag) owns the touch.
+    if (!state.active && (drag.current || live.current.selection.size > 0)) {
+      swipeRef.current = null;
+      return false;
+    }
+    const move = state.gesture.move(event.clientX, event.clientY, performance.now());
+    if (move.phase === "ignored") {
+      if (!state.active) swipeRef.current = null;
+      return false;
+    }
+    if (move.phase === "pending") return false;
+    if (!state.active) {
+      state.active = true;
+      // Sideways is a swipe and never a long-press.
+      clearLongPress();
+      longPress.current.up();
+      state.row.style.transition = "none";
+      state.row.style.willChange = "transform";
+      // Rows are transparent over the list's surface; the backdrop must not show through.
+      state.row.style.backgroundColor = "var(--wn-surface)";
+      setSwiping({ id: state.id, actions: state.actions });
+    }
+    if (move.armed && !state.armed) navigator.vibrate?.(10);
+    state.armed = move.armed;
+    paintSwipe(move.offset, move.direction, move.armed);
+    return true;
+  };
+
+  /** The finger came up (`commit`) or the touch was taken away (not). */
+  const endSwipe = (event: React.PointerEvent, commit: boolean): boolean => {
+    const state = swipeRef.current;
+    if (!state || state.pointerId !== event.pointerId) return false;
+    swipeRef.current = null;
+    if (!state.active) return false;
+    // A swipe never ends in a tap: no open, no sender menu.
+    suppressClick.current = true;
+    const direction = commit ? state.gesture.release() : null;
+    const action = direction ? state.actions[direction] : null;
+    const reduce = prefersReducedMotion();
+    const { row, item, id } = state;
+    const onAction = live.current.swipe?.onAction;
+    swipeBusy.current = true;
+    const done = () => {
+      swipeBusy.current = false;
+      setSwiping((current) => (current?.id === id ? null : current));
+    };
+
+    if (!action || !onAction) {
+      // Spring back. With reduced motion, simply back.
+      row.style.transition = reduce ? "none" : `transform ${SWIPE_BACK_MS}ms cubic-bezier(0.2, 0.9, 0.3, 1.15)`;
+      row.style.transform = "translate3d(0, 0, 0)";
+      window.setTimeout(() => {
+        clearSwipeStyles(row, item);
+        done();
+      }, reduce ? 0 : SWIPE_BACK_MS);
+      return true;
+    }
+
+    if (!removesRow(action)) {
+      // Read or unread: toggled now, and the row snaps back showing it.
+      onAction(id, action);
+      row.style.transition = reduce ? "none" : `transform ${SWIPE_BACK_MS}ms cubic-bezier(0.2, 0.9, 0.3, 1)`;
+      row.style.transform = "translate3d(0, 0, 0)";
+      window.setTimeout(() => {
+        clearSwipeStyles(row, item);
+        done();
+      }, reduce ? 0 : SWIPE_BACK_MS);
+      return true;
+    }
+
+    // Trash, Discard, Restore: the row leaves the way it was going, its space closes,
+    // and then the store takes it out. Whatever is still on screen after that (an
+    // action that was refused, a thread with another message) is put back.
+    const finish = () => {
+      onAction(id, action);
+      window.setTimeout(() => {
+        if (row.isConnected) clearSwipeStyles(row, item);
+        done();
+      }, 50);
+    };
+    if (reduce) {
+      finish();
+      return true;
+    }
+    const sign = direction === "left" ? -1 : 1;
+    row.style.transition = `transform ${SWIPE_OUT_MS}ms ease-out`;
+    row.style.transform = `translate3d(${sign * (state.width + 16)}px, 0, 0)`;
+    window.setTimeout(() => {
+      item.style.height = `${item.offsetHeight}px`;
+      // Read back so the height above is the starting value of the transition.
+      void item.offsetHeight;
+      item.style.transition = `height ${SWIPE_COLLAPSE_MS}ms ease-in`;
+      item.style.height = "0px";
+      window.setTimeout(finish, SWIPE_COLLAPSE_MS);
+    }, SWIPE_OUT_MS);
+    return true;
+  };
 
   const rowIdAt = (target: EventTarget | null): number | null => {
     const element = target instanceof Element ? target.closest<HTMLElement>("[data-row-id]") : null;
@@ -1090,6 +1363,7 @@ function MessageList({
     suppressClick.current = false;
     if (drag.current) finishDrag(true);
     const target = event.target as Element;
+    startSwipe(event, target);
     const control = target.closest<HTMLElement>("[data-row-control]");
     const onAvatar = control?.dataset.rowControl === "avatar";
     if (control && !onAvatar) return;
@@ -1133,6 +1407,8 @@ function MessageList({
     longPressTimer.current = setTimeout(() => {
       const fired = longPress.current.tick(performance.now());
       if (fired === null) return;
+      // Held still long enough to select: this touch is no longer a swipe.
+      if (swipeRef.current && !swipeRef.current.active) swipeRef.current = null;
       const { selection: current, onSelectionChange: change } = live.current;
       anchorRef.current = fired;
       const next = current.size === 0 ? new Set([fired]) : toggleId(current, fired);
@@ -1160,6 +1436,7 @@ function MessageList({
   };
 
   const onPointerMove = (event: React.PointerEvent) => {
+    if (moveSwipe(event)) return;
     const state = drag.current;
     if (state && state.pointerId === event.pointerId) {
       if (state.pointerType === "mouse" && (event.buttons & 1) === 0) {
@@ -1179,6 +1456,11 @@ function MessageList({
   };
 
   const endPointer = (event: React.PointerEvent) => {
+    if (endSwipe(event, event.type === "pointerup")) {
+      clearLongPress();
+      longPress.current.up();
+      return;
+    }
     const state = drag.current;
     if (state && state.pointerId === event.pointerId) {
       finishDrag(true);
@@ -1202,6 +1484,8 @@ function MessageList({
   const noScroll = useRef((event: TouchEvent) => {
     const state = drag.current;
     if (state?.active && state.pointerType !== "mouse" && event.cancelable) event.preventDefault();
+    // A swipe that has locked sideways keeps the list still under it.
+    else if (swipeRef.current?.active && event.cancelable) event.preventDefault();
   }).current;
   const touchTarget = useRef<Element | null>(null);
   const holdTouchTarget = (target: Element) => {
@@ -1369,8 +1653,15 @@ function MessageList({
         <div
           role="list"
           aria-label={ariaLabel}
+          data-swipe-enabled={swipe ? "" : undefined}
           className="absolute inset-x-0 top-0 px-1.5"
-          style={{ transform: `translateY(${offsets[start] ?? 0}px)` }}
+          style={{
+            transform: `translateY(${offsets[start] ?? 0}px)`,
+            // With swipes on, the browser pans vertically and leaves sideways motion to
+            // the list, so a swipe never gets cancelled by a horizontal pan or Chrome's
+            // overscroll navigation. Pinch zoom is untouched.
+            touchAction: swipe ? "pan-y pinch-zoom" : undefined,
+          }}
         >
           {/*
             Each day is its own boundary, with an accessible name.
@@ -1409,8 +1700,18 @@ function MessageList({
                   );
                 }
                 const email = item.row.representative;
+                const swipedHere = swiping?.id === email.id;
                 return (
-                  <div role="listitem" key={item.key} data-item-key={item.key} ref={observeItem}>
+                  <div
+                    role="listitem"
+                    key={item.key}
+                    data-item-key={item.key}
+                    ref={observeItem}
+                    // Only while its row is swiped: the clip would otherwise cut the star's
+                    // touch target, which reaches a little past the row.
+                    className={swipedHere ? "relative overflow-hidden rounded-ctl" : undefined}
+                  >
+                    {swipedHere && <SwipeBackdrop actions={swiping.actions} />}
                     <Row
                       row={item.row}
                       signals={item.signals}
