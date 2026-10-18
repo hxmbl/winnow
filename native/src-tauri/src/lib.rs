@@ -10,6 +10,7 @@
 //! | OS keychain for OAuth tokens | [`secrets`] |
 //! | Loopback HTTP listener for the OAuth redirect | [`oauth`] |
 //! | Native notifications, dock badge, tray | [`lib`] |
+//! | Notification actions: Reply, Delete, Mark read | [`notify_actions`] |
 //! | Background sync ticks while the window is hidden | [`scheduler`] |
 //! | Writing attachments to disk | [`files`] |
 //! | Deep links, autostart, window state | plugins, [`deep_link`] |
@@ -29,6 +30,7 @@ pub mod google_signin;
 pub mod oauth;
 pub mod scheduler;
 pub mod secrets;
+pub mod notify_actions;
 #[cfg(desktop)]
 pub mod tray;
 
@@ -71,7 +73,10 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        // Actionable new-mail notifications. Registered on every host: on Android it
+        // is the Kotlin half, on Linux and Windows the table of shown notifications.
+        .plugin(notify_actions::init());
 
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
@@ -105,6 +110,10 @@ pub fn run() {
             commands::set_unread_badge,
             commands::set_background_sync,
             commands::request_notification_permission,
+            notify_actions::notify_messages,
+            notify_actions::notify_action_result,
+            notify_actions::notify_kept_replies,
+            notify_actions::notify_release_kept,
         ])
         .on_page_load(|window, payload| {
             // The window is configured `visible: false` so the user never sees a
