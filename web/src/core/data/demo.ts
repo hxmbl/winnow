@@ -347,6 +347,54 @@ The courier attempted a delivery yesterday and could not leave the package safel
     demonstrates: "shipping",
   },
 
+  // The delivery the built-in rules miss: no shipping phrase anywhere, only a courier,
+  // a tracking code and a time. It stays out of Deliveries until it is corrected with
+  // "Change smart filters…", and then its sibling below follows by the sender rule.
+  {
+    id: "demo-missed-delivery-1",
+    sender: "noreply@evri.com",
+    name: "Evri",
+    at: 3 * HOUR,
+    subject: "Your Evri delivery is coming today",
+    body: `
+Hi Alex,
+
+Good news: Sam is bringing it today between 10:15 and 11:15.
+
+Tracking: H01HYA0012345678
+From: Northwind Books
+
+Not going to be in? Choose a safe place or a neighbour before 8am.`,
+    bodyHtml: toHtml(`
+Hi Alex,
+
+Good news: Sam is bringing it today between 10:15 and 11:15.
+
+Tracking: H01HYA0012345678
+From: Northwind Books
+
+Not going to be in? Choose a safe place or a neighbour before 8am.`),
+    category: "updates",
+  },
+  {
+    id: "demo-missed-delivery-2",
+    sender: "noreply@evri.com",
+    name: "Evri",
+    at: 2 * DAY,
+    subject: "We've got it from Northwind Books",
+    body: `
+It's with us now, and we'll tell you when Sam is on the way.
+
+Tracking: H01HYA0012345678
+Expected: Saturday, 9 May`,
+    bodyHtml: toHtml(`
+It's with us now, and we'll tell you when Sam is on the way.
+
+Tracking: H01HYA0012345678
+Expected: Saturday, 9 May`),
+    category: "updates",
+  },
+
   // ── Travel ────────────────────────────────────────────────────────────────
   {
     id: "demo-travel-1",
