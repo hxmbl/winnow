@@ -128,6 +128,32 @@ const browser = await chromium.launch(
 );
 let failed = false;
 
+/**
+ * CSP tripwire. The production build carries the web Content-Security-Policy as a
+ * `<meta>` tag (`src/platform/csp.ts`), so every page this run opens is running under
+ * it. Chromium reports a violation as a console message; every page in every context
+ * is watched, including the ones whose own error lists ignore the console, and the run
+ * fails at the end if any appeared.
+ */
+const cspViolations = [];
+const cspWatched = new WeakSet();
+const watchCsp = (p) => {
+  if (cspWatched.has(p)) return p;
+  cspWatched.add(p);
+  p.on("console", (message) => {
+    if (/Content Security Policy/i.test(message.text())) cspViolations.push(message.text());
+  });
+  return p;
+};
+const bareNewContext = browser.newContext.bind(browser);
+browser.newContext = async (options) => {
+  const ctx = await bareNewContext(options);
+  ctx.on("page", watchCsp);
+  return ctx;
+};
+const watchedNewPage = browser.newPage.bind(browser);
+browser.newPage = async (options) => watchCsp(await watchedNewPage(options));
+
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
@@ -284,6 +310,34 @@ try {
 
   await page.waitForSelector("text=Nothing selected", { timeout: 10_000 });
   check("the app boots into the demo, with the reader's empty state", true);
+
+  // The web CSP is in force, not just written down: the meta tag is there, and a
+  // throwaway page (outside the tripwire) sees an inline script refused.
+  if (!EXTERNAL) {
+    const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content").catch(() => null);
+    check(
+      "the build carries the web CSP as a meta tag",
+      Boolean(csp && /script-src 'self'(;|$)/.test(csp) && /object-src 'none'/.test(csp) && /base-uri 'none'/.test(csp)),
+      csp ?? "missing",
+    );
+    // Its own unwatched context: `browser.newPage` makes one through `newContext`,
+    // which would put the probe's deliberate violation in the tripwire.
+    const probeCtx = await bareNewContext();
+    const probe = await probeCtx.newPage();
+    await probe.goto(URL, { waitUntil: "domcontentloaded" });
+    const refused = await probe.evaluate(
+      () =>
+        new Promise((resolve) => {
+          document.addEventListener("securitypolicyviolation", (event) => resolve(event.violatedDirective), { once: true });
+          const script = document.createElement("script");
+          script.textContent = "window.__inlineRan = true";
+          document.head.append(script);
+          setTimeout(() => resolve(window.__inlineRan ? "ran" : "no report"), 1_000);
+        }),
+    );
+    check("and it refuses an inline script", /^script-src/.test(String(refused)), String(refused));
+    await probeCtx.close();
+  }
 
   const rowCount = await rowTotal();
   require("the demo mailbox has rows", rowCount > 20, `${rowCount} rows`);
@@ -6416,6 +6470,11 @@ try {
   section("console");
 
   check("no console errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+  check(
+    "no Content-Security-Policy violations on any page of the run",
+    cspViolations.length === 0,
+    `${cspViolations.length}: ${cspViolations.slice(0, 3).join(" | ")}`,
+  );
 
   await page.screenshot({ path: "smoke.png", fullPage: false });
 } catch (error) {

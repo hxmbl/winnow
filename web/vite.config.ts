@@ -1,6 +1,7 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
+import { contentSecurityPolicy } from "./src/platform/csp.ts";
 
 /** The app's version, for Settings → About in the browser build (the desktop build asks Tauri). */
 const version = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -20,8 +21,52 @@ const version = (JSON.parse(readFileSync(new URL("./package.json", import.meta.u
  * The web build is therefore a real, deployable Winnow; the desktop build is
  * that same artefact wrapped in a native shell.
  */
+/**
+ * The web build's Content-Security-Policy (see `src/platform/csp.ts` for every source
+ * and why): a `<meta>` tag first thing in `<head>`, and `_headers` for static hosts,
+ * which can also forbid framing. Build only — the dev server's client is inline script —
+ * and never for Tauri, which runs this same build under its own policy; the Tauri CLI
+ * sets `TAURI_ENV_PLATFORM` for `beforeBuildCommand`, which is how a desktop or Android
+ * build is told apart.
+ */
+function webCsp(): Plugin {
+  const forTauri = Boolean(process.env.TAURI_ENV_PLATFORM);
+  let renderProxy: string | undefined;
+  return {
+    name: "winnow-web-csp",
+    apply: "build",
+    configResolved(config) {
+      renderProxy = config.env.VITE_RENDER_PROXY as string | undefined;
+    },
+    transformIndexHtml() {
+      if (forTauri) return;
+      return [
+        {
+          tag: "meta",
+          attrs: { "http-equiv": "Content-Security-Policy", content: contentSecurityPolicy({ renderProxy }) },
+          injectTo: "head-prepend",
+        },
+      ];
+    },
+    generateBundle() {
+      if (forTauri) return;
+      this.emitFile({
+        type: "asset",
+        fileName: "_headers",
+        source: [
+          "/*",
+          `  Content-Security-Policy: ${contentSecurityPolicy({ renderProxy, header: true })}`,
+          "  Referrer-Policy: no-referrer",
+          "  X-Content-Type-Options: nosniff",
+          "",
+        ].join("\n"),
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), webCsp()],
   define: { __WINNOW_VERSION__: JSON.stringify(version) },
   base: "./",
   server: {
