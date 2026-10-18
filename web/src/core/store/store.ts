@@ -3228,7 +3228,10 @@ export class WinnowStore {
     const base = cache?.baseSignals.get(id);
     const learned = cache?.signals.get(id);
     if (!cache || !base || !learned) return [];
-    return explainFilters(email, base, learned, cache.profile, this.state.filterLearning, cache.background);
+    return explainFilters(email, base, learned, cache.profile, this.state.filterLearning, {
+      background: cache.background,
+      weights: cache.weights,
+    });
   }
 
   /** Whether the built-in rules alone would put this message in a filter. For tests and Settings. */

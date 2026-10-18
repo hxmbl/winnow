@@ -396,6 +396,7 @@ describe("Why it's here", () => {
     const line = explainFilters(third, base, learned, profile, model).find((reason) => reason.filter === "shipping");
     // Both corrections came from one address, so the rule is that address's.
     expect(line?.line).toBe("In Deliveries because: from notifications@mail.evri.com, has an Evri tracking number, you moved 2 emails here");
+    expect(line?.source).toBe("sender");
   });
 
   it("explains a domain rule by its domain", () => {
@@ -416,8 +417,9 @@ describe("Why it's here", () => {
     const base = signalsOf(other);
     const background = inboxOf(e1, e2, other);
     const learned = model.apply(other, base, background);
-    const line = explainFilters(other, base, learned, profile, model, background).find((reason) => reason.filter === "shipping");
+    const line = explainFilters(other, base, learned, profile, model, { background }).find((reason) => reason.filter === "shipping");
     expect(line?.line).toMatch(/^In Deliveries because: has a tracking number, .+, you moved 2 similar emails here$/);
+    expect(line?.source).toBe("similar");
     // Never a generic clue as a reason.
     expect(line?.line).not.toMatch(/Gmail files it|no-reply|List-Unsubscribe|mentions a date/);
   });
