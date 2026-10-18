@@ -394,7 +394,9 @@ export const FilterStrip = memo(function FilterStrip({
             className={`pointer-events-auto relative flex h-7 items-center justify-center text-ink-icon transition-colors hover:text-ink ${
               floating ? "wn-glass rounded-full" : "rounded-ctl hover:bg-surface-hover"
             }`}
-            style={{ width: STEP }}
+            // Floating, nearly opaque: at the usual glass tint the chip passing under the
+            // button read through it, its words cut by the chevron.
+            style={{ width: STEP, ...(floating ? { "--wn-glass-text": "94%" } : {}) } as React.CSSProperties}
           >
             <ChevronLeft size={16} strokeWidth={1.9} aria-hidden="true" />
           </button>
@@ -422,7 +424,9 @@ export const FilterStrip = memo(function FilterStrip({
             className={`pointer-events-auto relative flex h-7 items-center justify-center text-ink-icon transition-colors hover:text-ink ${
               floating ? "wn-glass rounded-full" : "rounded-ctl hover:bg-surface-hover"
             }`}
-            style={{ width: STEP }}
+            // Floating, nearly opaque: at the usual glass tint the chip passing under the
+            // button read through it, its words cut by the chevron.
+            style={{ width: STEP, ...(floating ? { "--wn-glass-text": "94%" } : {}) } as React.CSSProperties}
           >
             <ChevronRight size={16} strokeWidth={1.9} aria-hidden="true" />
           </button>
