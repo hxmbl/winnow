@@ -4,6 +4,7 @@ import {
   DEFAULT_CONTEXT,
   commandForKey,
   shortcutFor,
+  shortcutHint,
   shouldSwallow,
   specMatches,
   type Binding,
@@ -19,7 +20,7 @@ import {
 function reachableCommandTypes(): Set<string> {
   const types = new Set<string>();
   const keys = [
-    ..."jkoseurfmuhc#/,?!123456789".split(""),
+    ..."jkoseurfmuhc#/,?!123456789[".split(""),
     "Enter",
     "Escape",
     "ArrowUp",
@@ -487,6 +488,7 @@ describe("the cheat sheet", () => {
       "blurText",
       "toggleShortcutsOverlay",
       "openSettings",
+      "toggleSidebar",
     ];
 
     for (const type of expected) {
@@ -528,7 +530,7 @@ describe("the cheat sheet", () => {
     const ambiguous: string[] = [];
 
     for (const ctx of REACHABLE_CONTEXTS) {
-      for (const key of "jkoseurfmuh#/,?!123456789U&".split("")) {
+      for (const key of "jkoseurfmuh#/,?!123456789U&[".split("")) {
         for (const event of [{}, { shiftKey: true }, { shiftKey: false }]) {
           const firing = BINDINGS.filter((binding) => {
             if (![...binding.matches.keys, ...(binding.matches.chars ?? [])].includes(key)) {
@@ -593,5 +595,41 @@ describe("composing", () => {
 
   it("is what the toolbar advertises", () => {
     expect(shortcutFor("compose")).toBe("c");
+  });
+});
+
+describe("the sidebar shortcut", () => {
+  it("[ toggles the sidebar on the canvas, with the reader open or not", () => {
+    expect(commandForKey("[", DEFAULT_CONTEXT)).toEqual({ type: "toggleSidebar" });
+    expect(commandForKey("[", { ...DEFAULT_CONTEXT, viewerOpen: true })).toEqual({ type: "toggleSidebar" });
+  });
+  it("never fires while typing, in the composer, with a modifier, or as {", () => {
+    expect(commandForKey("[", { ...DEFAULT_CONTEXT, textEditing: true })).toBeNull();
+    expect(commandForKey("[", { ...DEFAULT_CONTEXT, composerOpen: true })).toBeNull();
+    expect(commandForKey("[", DEFAULT_CONTEXT, { ctrlKey: true })).toBeNull();
+    expect(commandForKey("[", DEFAULT_CONTEXT, { metaKey: true })).toBeNull();
+    expect(commandForKey("[", DEFAULT_CONTEXT, { shiftKey: true })).toBeNull();
+  });
+  it("clashes with no other binding, and the shortcut sheet and hints carry it", () => {
+    const claiming = BINDINGS.filter((binding) => binding.matches.keys.includes("[") || binding.matches.chars?.includes("["));
+    expect(claiming).toHaveLength(1);
+    expect(shortcutFor("toggleSidebar")).toBe("[");
+    expect(shortcutHint("Sidebar", "toggleSidebar")).toBe("Sidebar ([)");
+    expect(BINDINGS.some((binding) => binding.keys === "[" && /sidebar/i.test(binding.help))).toBe(true);
+  });
+});
+
+describe("the sidebar shortcut on other layouts", () => {
+  it("the physical [ key toggles it when its character is bound to nothing (German ü, French dead ^)", () => {
+    expect(commandForKey("ü", DEFAULT_CONTEXT, { code: "BracketLeft" })).toEqual({ type: "toggleSidebar" });
+    expect(commandForKey("Dead", DEFAULT_CONTEXT, { code: "BracketLeft" })).toEqual({ type: "toggleSidebar" });
+  });
+  it("but never steals a key that is bound, takes a modifier, or fires while typing", () => {
+    // A layout whose BracketLeft types a bound letter keeps the letter's meaning.
+    expect(commandForKey("j", DEFAULT_CONTEXT, { code: "BracketLeft" })).toEqual({ type: "moveSelection", delta: 1 });
+    expect(commandForKey("ü", DEFAULT_CONTEXT, { code: "BracketLeft", shiftKey: true })).toBeNull();
+    expect(commandForKey("ü", DEFAULT_CONTEXT, { code: "BracketLeft", altKey: true })).toBeNull();
+    expect(commandForKey("ü", { ...DEFAULT_CONTEXT, textEditing: true }, { code: "BracketLeft" })).toBeNull();
+    expect(commandForKey("ü", DEFAULT_CONTEXT, { code: "KeyU" })).toBeNull();
   });
 });

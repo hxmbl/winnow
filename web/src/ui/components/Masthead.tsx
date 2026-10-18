@@ -143,7 +143,8 @@ export function Masthead({
           aria-controls="winnow-sidebar"
           aria-haspopup="dialog"
           aria-label="Open sidebar"
-          title="Sidebar"
+          title={shortcutHint("Sidebar", "toggleSidebar")}
+          aria-keyshortcuts="["
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <PanelLeft size={17} strokeWidth={1.9} aria-hidden="true" />

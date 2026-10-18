@@ -30,6 +30,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
+import { shortcutHint } from "../../core/mail/keybinds";
 import { formatFullTime, formatRelative } from "../../core/mail/datetime";
 import { countRemoteReferences } from "../../core/mail/html";
 import { displayAddress, displayName, recipientLines, type Email } from "../../core/model/email";
@@ -228,7 +229,8 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
           aria-controls="winnow-sidebar"
           aria-haspopup="dialog"
           aria-label="Open sidebar"
-          title="Sidebar"
+          title={shortcutHint("Sidebar", "toggleSidebar")}
+          aria-keyshortcuts="["
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
         >
           <AppMark size={26} />

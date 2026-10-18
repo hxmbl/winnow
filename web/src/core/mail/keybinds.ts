@@ -45,12 +45,15 @@ export type Command =
   | { type: "activateNavigation" }
   | { type: "blurText" }
   | { type: "toggleShortcutsOverlay" }
-  | { type: "openSettings" };
+  | { type: "openSettings" }
+  | { type: "toggleSidebar" };
 
 /** The modifiers as the router sees them, plus the key itself. */
 export type KeyModifiers = {
   /** `KeyboardEvent.key`, when the caller has the real event rather than a fixture. */
   key?: string;
+  /** `KeyboardEvent.code`, the physical key, for bindings with a `codes` fallback. */
+  code?: string;
   shiftKey?: boolean;
   altKey?: boolean;
   ctrlKey?: boolean;
@@ -67,6 +70,12 @@ export type KeySpec = {
   keys: readonly string[];
   /** Additional `key` values for the same binding on other layouts. */
   chars?: readonly string[];
+  /**
+   * Physical keys (`KeyboardEvent.code`) that also match, but only when the pressed
+   * `key` matched no binding at all: a layout fallback for punctuation that other
+   * layouts move behind AltGr or replace with a letter (`[` is `ü` on German).
+   */
+  codes?: readonly string[];
   /** Require (`true`) or forbid (`false`) a modifier. Unset means "don't care". */
   shift?: boolean;
   alt?: boolean;
@@ -163,6 +172,18 @@ function lookup(
     const command =
       typeof binding.command === "function" ? binding.command(pressed) : binding.command;
     if (command) return command;
+  }
+  // The layout fallback: the key itself bound nothing, so try the physical key.
+  if (event.code) {
+    for (const binding of bindings) {
+      if (!binding.matches.codes?.includes(event.code)) continue;
+      const spec = { ...binding.matches, keys: [key], chars: [] };
+      if (!specMatches(key, spec, event)) continue;
+      if (binding.when && !binding.when(pressed)) continue;
+      const command =
+        typeof binding.command === "function" ? binding.command(pressed) : binding.command;
+      if (command) return command;
+    }
   }
   return null;
 }
@@ -338,6 +359,18 @@ export const BINDINGS: readonly Binding[] = [
     // Only when shift was really held: German `?` arrives as `/` with shift.
     when: ({ key, event }) => key === "?" || event.shiftKey === true,
     command: { type: "toggleShortcutsOverlay" },
+  },
+  {
+    // `[`, as in Linear and Notion: the bracket on the sidebar's side of the keyboard.
+    // Unshifted only (`{` is a different key to a user), and like every canvas key it
+    // never fires while a text field has focus.
+    keys: "[",
+    help: "Open or close the sidebar",
+    // `codes`: where `[` is not on its own key (`ü` on German, a dead `^` on French),
+    // the same physical key still toggles it.
+    matches: { keys: ["["], codes: ["BracketLeft"] },
+    when: ({ event }) => event.shiftKey !== true,
+    command: { type: "toggleSidebar" },
   },
   {
     keys: ",",

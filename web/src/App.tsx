@@ -129,6 +129,7 @@ import { ComposerAttachments, type AttachmentAdder } from "./ui/components/Compo
 import { attachmentBytes } from "./ui/attachmentBytes";
 import { onReplyRequest } from "./ui/notificationActions";
 import { exitRows } from "./ui/rowExit";
+import { isEditingElement } from "./ui/sidebarOverlay";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -2082,7 +2083,11 @@ export function App({ store }: Props) {
       // The open sidebar is modal: the app behind it is inert, so no shortcut reaches
       // it. Escape from outside the sidebar (focus fell to the body) still closes it.
       if (sidebarOpenRef.current) {
-        if (event.key === "Escape") {
+        // `[` closes it as it opened it, unless someone is typing in the sidebar.
+        const sidebarToggleKey =
+          (event.key === "[" || event.code === "BracketLeft") && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey &&
+          !isEditingElement(event.target instanceof Element ? event.target : null);
+        if (event.key === "Escape" || sidebarToggleKey) {
           event.preventDefault();
           setSidebarOpen(false);
         }
@@ -2160,6 +2165,7 @@ export function App({ store }: Props) {
         altKey: event.altKey,
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
+        code: event.code,
       });
 
       if (!command) {
@@ -2273,6 +2279,9 @@ export function App({ store }: Props) {
           break;
         case "toggleShortcutsOverlay":
           s.setOverlay(snap.overlay === "shortcuts" ? "none" : "shortcuts");
+          break;
+        case "toggleSidebar":
+          setSidebarOpen((open) => !open);
           break;
         case "openSettings":
           s.setOverlay(snap.overlay === "settings" ? "none" : "settings");

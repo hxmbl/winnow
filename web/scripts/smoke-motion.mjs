@@ -234,6 +234,35 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     await settle(p, 300);
     check("Escape still closes it", (await p.locator("[data-sidebar][data-open]").count()) === 0);
 
+    // ── The sidebar shortcut, and its focus outline.
+    section("sidebar shortcut");
+    await p.locator("[data-row-count]").click({ position: { x: 5, y: 400 } }).catch(() => undefined);
+    await p.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await p.keyboard.press("[");
+    await p.locator("[data-sidebar][data-open]").waitFor({ timeout: 5_000 });
+    await settle(p, 300);
+    const keyOpen = await p.evaluate(() => document.querySelector("[data-sidebar]").contains(document.activeElement));
+    check("[ opens the sidebar, focus inside it", keyOpen);
+    await p.keyboard.press("[");
+    await settle(p, 300);
+    check("[ again closes it", (await p.locator("[data-sidebar][data-open]").count()) === 0);
+    await p.locator("#winnow-search").focus();
+    await p.keyboard.press("[");
+    await settle(p, 200);
+    check(
+      "typing [ in search types it, and leaves the sidebar shut",
+      (await p.locator("[data-sidebar][data-open]").count()) === 0 && (await p.locator("#winnow-search").inputValue()).includes("["),
+    );
+    await p.locator("#winnow-search").fill("");
+    await p.keyboard.press("Escape");
+    const hint = await p.locator("header [data-sidebar-toggle]").getAttribute("title");
+    check("the toggle's tooltip names the key", hint === "Sidebar ([)", String(hint));
+    await p.keyboard.press("?");
+    await settle(p, 200);
+    check("and the shortcut sheet lists it", /Open or close the sidebar/.test(await p.locator('[role="dialog"]').last().innerText()));
+    await p.keyboard.press("Escape");
+    await settle(p, 200);
+
     // ── Settings' category column.
     section("settings: the category column");
     for (const [width, layout, expected] of [
