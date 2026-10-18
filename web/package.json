@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "check": "npm run typecheck && npm run lint && npm run lint:proxy && npm run test",
-    "smoke": "npm run build && node scripts/smoke.mjs && node scripts/smoke-android.mjs",
+    "smoke": "npm run build && node scripts/smoke.mjs && node scripts/smoke-android.mjs && node scripts/smoke-filters.mjs",
     "leaks": "npm run build && node scripts/leaks.mjs",
     "tauri:dev": "cd ../native && cargo tauri dev",
     "tauri:build": "node scripts/bundle.mjs",

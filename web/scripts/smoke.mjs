@@ -6370,7 +6370,7 @@ try {
     const tabLabels = await tabs.allTextContents();
     check(
       "the categories, Reading first and selected",
-      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Compose", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About"]) &&
+      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Smart filters", "Compose", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About"]) &&
         (await tabs.first().getAttribute("aria-selected")) === "true",
       JSON.stringify(tabLabels),
     );
@@ -6387,8 +6387,8 @@ try {
     await s.waitForTimeout(80);
     check(
       "ArrowDown selects and focuses the next category",
-      (await title()) === "Compose" &&
-        (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "compose",
+      (await title()) === "Smart filters" &&
+        (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "filters",
     );
     await s.keyboard.press("End");
     await s.waitForTimeout(80);
@@ -6396,6 +6396,7 @@ try {
     await s.keyboard.press("ArrowDown");
     await s.waitForTimeout(80);
     check("and ArrowDown wraps round to the first", (await title()) === "Reading");
+    await s.keyboard.press("ArrowDown");
     await s.keyboard.press("ArrowDown");
     await s.keyboard.press("ArrowDown");
     await s.keyboard.press("ArrowDown");
@@ -6531,7 +6532,7 @@ try {
     await dialog.waitFor({ timeout: 5_000 });
     await s.waitForTimeout(300);
     check("a phone opens Settings on its category list", (await s.locator('[data-settings-layout="phone"][data-settings-page="list"]').count()) === 1);
-    check("with every category", (await dialog.locator("button[data-category]").count()) === 9);
+    check("with every category", (await dialog.locator("button[data-category]").count()) === 10);
     const dockBox = await s.locator("[data-phone-dock] [data-phone-pill]").boundingBox();
     const dialogBox = await dialog.boundingBox();
     const currentTabs = await tabsNav.evaluateAll((tabs) => tabs.filter((tab) => tab.getAttribute("aria-current") === "page").length);
