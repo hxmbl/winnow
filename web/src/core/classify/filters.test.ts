@@ -250,7 +250,7 @@ describe("matchesBuiltin — unsafe", () => {
         expected.includes(message.gmailId),
       );
     }
-    expect(DEMO_EMAILS).toHaveLength(57);
+    expect(DEMO_EMAILS).toHaveLength(59);
   });
 });
 
@@ -728,8 +728,8 @@ describe("countAllFilters", () => {
     // Each number below was derived by reading the seed, not by asking the code.
     // `starred` is 1 because `demo-starred-1` is the only starred message in the
     // inbox; `attachments` is 1 because `demo-action-4` is the only message
-    // carrying one; `low_priority` is 11 because eleven of the 45 carry no signal
-    // and score 50 or below. A seed edit means re-deriving this table, and that
+    // carrying one; `low_priority` is 13 because thirteen of the 47 carry no signal
+    // and score 50 or below (two are the Evri deliveries the rules miss on purpose). A seed edit means re-deriving this table, and that
     // is the intended cost: the alternative is a count that drifts with nobody
     // noticing, which is the defect this file exists to catch.
     const expected: [BuiltinSmartFilter, number][] = [
@@ -750,7 +750,7 @@ describe("countAllFilters", () => {
       ["quiet_contacts", 12],
       ["newsletters", 4],
       ["promotional", 5],
-      ["low_priority", 11],
+      ["low_priority", 13],
       ["long_reads", 1],
       ["social", 2],
       ["unsafe", 1],
@@ -794,9 +794,9 @@ describe("rankFilters", () => {
       "shipping",
       "new_senders",
       "needs_action",
+      "low_priority",
       "quiet_contacts",
       "top_contacts",
-      "low_priority",
       "unread",
       "promotional",
       "receipts",
@@ -843,7 +843,7 @@ describe("rankFilters", () => {
     // leaves 44 messages still ranking.
     const unstarred = inbox.filter((m) => !m.starred);
     const ranked = rankFilters(unstarred, classifyAll(unstarred, profile), profile);
-    expect(unstarred.length).toBe(44);
+    expect(unstarred.length).toBe(46);
     expect(ranked).not.toContain("starred");
     expect(ranked).toContain("important");
     expect(ranked).toContain("social");
