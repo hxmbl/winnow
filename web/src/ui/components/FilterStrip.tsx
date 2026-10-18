@@ -227,7 +227,10 @@ export const FilterStrip = memo(function FilterStrip({
   }, []);
 
   return (
-    <div className={`relative min-w-0 ${className}`}>
+    // A flow root, so the rail's negative margin (below) stays inside this box instead of
+    // collapsing through it: everything that measures the rail's row (the dock's
+    // clearance, the Top pill's slot, the desktop header's height) sees the same box.
+    <div className={`relative min-w-0 ${touch || floating ? "flow-root" : ""} ${className}`}>
       <div
         ref={scrollerRef}
         data-rail-scroller=""

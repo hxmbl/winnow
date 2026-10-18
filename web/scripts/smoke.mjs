@@ -222,7 +222,8 @@ try {
   // own row below it — and counting both would have doubled every number here; there is
   // one copy now, and the `:visible` guard documents that it is a layout assumption
   // rather than a structural one.
-  const pills = () => page.locator("header button[aria-pressed]:visible");
+  // The filter pills. Not the logo, which is a pressed/unpressed toggle too (the version).
+  const pills = () => page.locator("header button[aria-pressed]:not([data-version-toggle]):visible");
   const isOn = async (locator) => (await locator.getAttribute("aria-pressed")) === "true";
   /**
    * The navigation: the sidebar, an overlay on every screen size, opened by the toggle
@@ -382,7 +383,8 @@ try {
       visible: visible.length,
       width: Math.round(box.width),
       headerWidth: Math.round(header.width),
-      belowSearch: box.top >= field.bottom - 0.5,
+      // The chips themselves: the scroller reaches past them by the glass's frost reach.
+      belowSearch: (pills[0]?.getBoundingClientRect().top ?? box.top) >= field.bottom - 0.5,
       inSidebar: Boolean(document.querySelector("[data-sidebar] [data-rail-scroller]")),
     };
   });
@@ -3639,7 +3641,7 @@ try {
   );
   check(
     "and none of them are left in the top bar",
-    (await topBar.locator("button[aria-pressed]").count()) === 0,
+    (await topBar.locator("button[aria-pressed]:not([data-version-toggle])").count()) === 0,
   );
 
   // The list scrolls under the floating chrome, and its end clears all of it.
@@ -5833,7 +5835,7 @@ try {
     // The list rows: unselectable, so drag-select owns the drag.
     const row = t.locator("button[data-message-id]").first();
     check("a list row is not selectable", (await userSelect(row)) === "none" && (await selectIn(row)).trim() === "", await userSelect(row));
-    const pill = t.locator("header button[aria-pressed]:visible").first();
+    const pill = t.locator("header button[aria-pressed]:not([data-version-toggle]):visible").first();
     check("a filter pill is not selectable", (await userSelect(pill)) === "none" && (await selectIn(pill)).trim() === "");
     await clear();
 
@@ -7759,6 +7761,21 @@ try {
           audit.layer.every((l) => l.inset <= -40 && /^inset\(4\dpx/.test(l.clip) && /blur\(22px\)/.test(l.filter) && l.z === "-1") &&
           audit.rails.every((pad) => pad >= 44),
         JSON.stringify({ count: audit.count, roots: audit.roots.slice(0, 4), layer: audit.layer.slice(0, 2), rails: audit.rails }),
+      );
+
+      // The rail pads itself by the frost's reach and takes it back: the row it sits in
+      // (what the dock's clearance, the Top pill's slot and the header's height measure)
+      // keeps the chips' own box.
+      const railRow = await g.evaluate(() => {
+        const scroller = document.querySelector(".wn-chip-glass")?.closest("[data-rail-scroller]");
+        const chip = scroller?.querySelector(".wn-chip-glass")?.getBoundingClientRect();
+        const row = scroller?.parentElement.getBoundingClientRect();
+        return chip && row ? { chip: Math.round(chip.height), row: Math.round(row.height), chipTop: Math.round(chip.top), rowTop: Math.round(row.top) } : null;
+      });
+      check(
+        `${kind}: the chip rail's row keeps the chips' box despite the frost padding`,
+        railRow !== null && railRow.row <= railRow.chip + 17 && railRow.chipTop - railRow.rowTop <= 9,
+        JSON.stringify(railRow),
       );
 
       // The real thing, measured: text under the glass loses its detail to the frost.
