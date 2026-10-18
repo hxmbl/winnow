@@ -6,7 +6,10 @@ import {
   clampStep,
   clientTypeFor,
   initialSetupStep,
+  LOOPBACK_REDIRECT,
   originOf,
+  SETUP_SCOPES,
+  stepIndexOf,
 } from "./googleSetupSteps";
 
 describe("the Google setup walkthrough", () => {
@@ -21,6 +24,7 @@ describe("the Google setup walkthrough", () => {
       gmailApi: "https://console.cloud.google.com/apis/library/gmail.googleapis.com",
       peopleApi: "https://console.cloud.google.com/apis/library/people.googleapis.com",
       consent: "https://console.cloud.google.com/apis/credentials/consent",
+      scopes: "https://console.cloud.google.com/auth/scopes",
       testUsers: "https://console.cloud.google.com/auth/audience",
       newClient: "https://console.cloud.google.com/apis/credentials/oauthclient",
       clients: "https://console.cloud.google.com/auth/clients",
@@ -49,5 +53,20 @@ describe("the Google setup walkthrough", () => {
     expect(originOf("https://mail.example.com/winnow/")).toBe("https://mail.example.com");
     expect(originOf("")).toBe("");
     expect(originOf("not a url")).toBe("");
+  });
+
+  it("lists the exact scopes Winnow asks for, Gmail's required and the contacts' optional", () => {
+    expect(SETUP_SCOPES.map((item) => [item.scope, item.required])).toEqual([
+      ["https://www.googleapis.com/auth/gmail.modify", true],
+      ["https://www.googleapis.com/auth/contacts.readonly", false],
+      ["https://www.googleapis.com/auth/contacts.other.readonly", false],
+    ]);
+  });
+
+  it("finds a step's index by id, and shows the loopback the desktop signs in through", () => {
+    expect(stepIndexOf("project")).toBe(0);
+    expect(stepIndexOf("consent")).toBe(2);
+    expect(stepIndexOf("paste")).toBe(PASTE_STEP);
+    expect(LOOPBACK_REDIRECT).toBe("http://127.0.0.1");
   });
 });

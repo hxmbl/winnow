@@ -27,11 +27,22 @@
  * ID field. `core/session/clientJson` does the parsing and refuses a client type this
  * host cannot use.
  *
+ * Progress: Next ticks the step it leaves, and a half-finished setup (step, ticks and the
+ * client ID draft, never the secret) is kept by `ui/setupProgress`, so reopening picks
+ * up where the user left off, with "Start over" beside the note. Saving or removing the
+ * client drops it. "Continue in demo" sits beside the progress line on every step while
+ * no account is connected: setup is never a wall in front of the demo.
+ *
+ * Google's errors come back in plain words (`core/session/googleErrors`): a failed test
+ * or sign-in gets a fix card with a link to the step that fixes it, and step 5's
+ * "Google showed an error?" explains what was pasted off Google's own error pages
+ * (`SetupTroubleshoot`). Step 3 lists the exact scopes, each with a copy button.
+ *
  * On a phone the sheet fills the screen, with Back/Next pinned above the keyboard.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, BookOpen, Check, Copy, ExternalLink, FileJson, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Check, Copy, ExternalLink, FileJson, RotateCcw, TriangleAlert } from "lucide-react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { ErrorText } from "./ErrorText";
 import {
@@ -56,13 +67,25 @@ import {
 } from "../../core/session/clientJson";
 import {
   CONSOLE_LINKS,
+  LOOPBACK_REDIRECT,
   PASTE_STEP,
+  SETUP_SCOPES,
   SETUP_STEPS,
   clampStep,
   clientTypeFor,
   initialSetupStep,
   originOf,
+  type SetupStepId,
 } from "../googleSetupSteps";
+import { explainGoogleText } from "../../core/session/googleErrors";
+import {
+  clearSetupProgress,
+  doneSummary,
+  loadSetupProgress,
+  markDone,
+  saveSetupProgress,
+} from "../setupProgress";
+import { SetupFix, SetupTroubleshoot } from "./SetupTroubleshoot";
 
 /** Where the setup guide lives. Opened in the system browser. */
 export const SETUP_GUIDE_URL = "https://github.com/hxmbl/winnow/blob/master/docs/google-setup.md";
@@ -115,7 +138,9 @@ export function GoogleSetup(props: Props) {
   const idField = `${ids}-client-id`;
   const secretField = `${ids}-client-secret`;
 
-  const [clientId, setClientId] = useState(current?.clientId ?? "");
+  /** A half-finished setup from an earlier visit (`ui/setupProgress`); never with a client stored. */
+  const [resume] = useState(() => (current ? null : loadSetupProgress(kind)));
+  const [clientId, setClientId] = useState(current?.clientId ?? resume?.clientId ?? "");
   const [clientSecret, setClientSecret] = useState(current?.clientSecret ?? "");
   /** Fields whose errors are visible: touched (blurred) or submitted. */
   const [shown, setShown] = useState<{ clientId: boolean; clientSecret: boolean }>({
@@ -134,8 +159,15 @@ export function GoogleSetup(props: Props) {
   /** A file is being dragged over the sheet. */
   const [dragging, setDragging] = useState(false);
   /** The walkthrough step on screen, 0-based. */
-  const [step, setStep] = useState(() => initialSetupStep(Boolean(current)));
+  const [step, setStep] = useState(() => resume?.step ?? initialSetupStep(Boolean(current)));
+  /** Steps finished (left with Next), ticked on the indicator and remembered. */
+  const [done, setDone] = useState<SetupStepId[]>(() => resume?.done ?? []);
+  /** The "picking up where you left off" note, until it is dismissed or acted on. */
+  const [resumed, setResumed] = useState(Boolean(resume));
+  /** Off once the client is saved or removed, so a late render cannot write it back. */
+  const tracking = useRef(!current);
   const [copiedOrigin, setCopiedOrigin] = useState(false);
+  const [copiedScope, setCopiedScope] = useState<string | null>(null);
 
   const idRef = useRef<HTMLInputElement>(null);
   const secretRef = useRef<HTMLInputElement>(null);
@@ -179,6 +211,30 @@ export function GoogleSetup(props: Props) {
     setStep(clampStep(to));
   }
 
+  /** Next: this step is done, on to the following one. */
+  function next() {
+    setDone((list) => markDone(list, SETUP_STEPS[step]!.id));
+    go(step + 1);
+  }
+
+  function startOver() {
+    clearSetupProgress();
+    setDone([]);
+    setResumed(false);
+    setClientId("");
+    setShown({ clientId: false, clientSecret: false });
+    setRemote({});
+    setTest(null);
+    go(0);
+  }
+
+  // Remember a half-finished setup, so leaving for the console (or the demo) loses
+  // nothing. The secret is never part of it.
+  useEffect(() => {
+    if (!tracking.current) return;
+    saveSetupProgress({ step, done, kind, clientId });
+  }, [step, done, kind, clientId]);
+
   const local = validateCredentials({ clientId, clientSecret }, kind);
   const errors: CredentialErrors = {
     clientId: (shown.clientId && local.clientId) || remote.clientId,
@@ -190,6 +246,12 @@ export function GoogleSetup(props: Props) {
     const timer = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
+
+  useEffect(() => {
+    if (!copiedScope) return;
+    const timer = setTimeout(() => setCopiedScope(null), 1500);
+    return () => clearTimeout(timer);
+  }, [copiedScope]);
 
   useEffect(() => {
     if (!copiedOrigin) return;
@@ -232,6 +294,10 @@ export function GoogleSetup(props: Props) {
     setRemote({});
     if (!ready()) return;
     setBusy("connect");
+    // The client is about to be stored where it belongs; the draft has done its job. The
+    // web build leaves the page for Google here, so this cannot wait for the outcome.
+    tracking.current = false;
+    clearSetupProgress();
     try {
       await props.onSaveAndConnect(normaliseCredentials({ clientId, clientSecret }));
     } catch (error) {
@@ -247,6 +313,7 @@ export function GoogleSetup(props: Props) {
     setBusy("remove");
     try {
       await props.onRemove();
+      clearSetupProgress();
       setClientId("");
       setClientSecret("");
       setShown({ clientId: false, clientSecret: false });
@@ -318,6 +385,11 @@ export function GoogleSetup(props: Props) {
       // Clipboard refused (permissions, insecure origin). The value is selectable text.
     }
   }
+
+  // Google's verdict, in plain words with the step that fixes it: from a failed sign-in,
+  // or from a test that Google answered with something other than a field error.
+  const failureHelp = failure ? explainGoogleText(failure, kind) : null;
+  const testHelp = test && !test.ok && !test.field ? explainGoogleText(test.message, kind) : null;
 
   const secretRequired = kind === "web";
   const idHint = `${ids}-id-hint`;
@@ -557,6 +629,7 @@ export function GoogleSetup(props: Props) {
             <ErrorText text={test.message} />
           </p>
         )}
+        {testHelp && <SetupFix help={testHelp} onGoToStep={go} />}
       </div>
 
       {failure && (
@@ -564,6 +637,9 @@ export function GoogleSetup(props: Props) {
           <ErrorText text={failure} />
         </div>
       )}
+      {failureHelp && <SetupFix help={failureHelp} onGoToStep={go} />}
+
+      <SetupTroubleshoot kind={kind} onGoToStep={go} />
 
       <p className="text-meta leading-relaxed text-ink-subtle">
         {kind === "desktop"
@@ -686,10 +762,32 @@ export function GoogleSetup(props: Props) {
                 Under <Strong>Audience → Test users</Strong>, add the Gmail address you'll sign in with.
                 While the app is in Testing, only test users can sign in.
               </Item>
+              <Item>
+                Under <Strong>Data access → Add or remove scopes</Strong>, paste these into{" "}
+                <Strong>Manually add scopes</Strong>, then <Strong>Update</Strong> and <Strong>Save</Strong>.
+              </Item>
             </ol>
+            <ul className="flex flex-col gap-2" aria-label="Scopes" data-setup-scopes="">
+              {SETUP_SCOPES.map((item) => (
+                <li key={item.scope}>
+                  <p className="text-meta text-ink-body">
+                    {item.purpose}
+                    <span className="text-ink-subtle">{item.required ? " (required)" : " (optional, for Google contacts)"}</span>
+                  </p>
+                  {copyRow(
+                    item.scope,
+                    `scope ${item.scope}`,
+                    copiedScope === item.scope,
+                    () => void copyText(item.scope, () => setCopiedScope(item.scope)),
+                    `scope-${item.required ? "required" : "optional"}`,
+                  )}
+                </li>
+              ))}
+            </ul>
             <div className="flex flex-wrap gap-x-5 gap-y-1">
               {consoleLink(CONSOLE_LINKS.consent, "Open the consent screen", "consent")}
               {consoleLink(CONSOLE_LINKS.testUsers, "Add test users", "test-users")}
+              {consoleLink(CONSOLE_LINKS.scopes, "Add the scopes", "scopes")}
             </div>
             <p className="text-meta text-ink-subtle">
               In Testing, Google asks you to sign in again about once a week, and shows an “unverified
@@ -725,10 +823,16 @@ export function GoogleSetup(props: Props) {
                 </p>
               </div>
             ) : (
-              <p>
-                Name it <Strong>Winnow</Strong> and choose <Strong>Create</Strong>. There are no redirect
-                URIs to add.
-              </p>
+              <div className="flex flex-col gap-1.5" data-redirect-setup="loopback">
+                <p>
+                  Name it <Strong>Winnow</Strong> and choose <Strong>Create</Strong>. There are no redirect
+                  URIs to add: Winnow signs in through
+                </p>
+                {copyRow(LOOPBACK_REDIRECT, "loopback address", copied, () => void copyText(LOOPBACK_REDIRECT, () => setCopied(true)), "redirect")}
+                <p className="text-meta text-ink-subtle">
+                  on a port picked at sign-in, which a Desktop app client accepts without registering it.
+                </p>
+              </div>
             )}
             {consoleLink(CONSOLE_LINKS.newClient, "Create the client", "new-client")}
             <p className="text-meta text-ink-subtle">
@@ -792,9 +896,25 @@ export function GoogleSetup(props: Props) {
         data-dragging={dragging || undefined}
       >
         <nav aria-label="Setup steps" className="border-b border-hairline-soft px-5 pb-3 pt-1">
-          <p className="text-meta text-ink-subtle" data-setup-progress="">
-            Step {step + 1} of {SETUP_STEPS.length}
-          </p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-meta text-ink-subtle">
+              <span data-setup-progress="">
+                Step {step + 1} of {SETUP_STEPS.length}
+              </span>
+              <span data-setup-done=""> · {doneSummary(done)}</span>
+            </p>
+            {/* The demo is always one step away: setup is never a wall. */}
+            {!props.signedIn && (
+              <button
+                type="button"
+                onClick={props.onClose}
+                className="shrink-0 rounded-ctl text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                data-setup-demo=""
+              >
+                Continue in demo
+              </button>
+            )}
+          </div>
           <ol className="mt-2 flex items-start gap-1.5">
             {SETUP_STEPS.map((item, index) => (
               <li key={item.id} className="min-w-0 flex-1">
@@ -802,19 +922,23 @@ export function GoogleSetup(props: Props) {
                   type="button"
                   onClick={() => go(index)}
                   aria-current={index === step ? "step" : undefined}
-                  aria-label={`Step ${index + 1}: ${item.title}`}
+                  aria-label={`Step ${index + 1}: ${item.title}${done.includes(item.id) ? " (done)" : ""}`}
+                  data-done={done.includes(item.id) || undefined}
                   data-setup-step-button={item.id}
                   className="flex w-full flex-col gap-1.5 rounded-ctl py-1 text-left max-sm:min-h-11 max-sm:justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   <span
                     aria-hidden="true"
-                    className={`h-1 w-full rounded-full transition-colors ${index <= step ? "bg-accent" : "bg-hairline"}`}
+                    className={`h-1 w-full rounded-full transition-colors ${
+                      index === step || done.includes(item.id) ? "bg-accent" : "bg-hairline"
+                    } ${index !== step && done.includes(item.id) ? "opacity-60" : ""}`}
                   />
                   <span
                     aria-hidden="true"
-                    className={`truncate text-meta max-sm:hidden ${index === step ? "font-semibold text-ink-body" : "text-ink-subtle"}`}
+                    className={`flex min-w-0 items-center gap-1 text-meta max-sm:hidden ${index === step ? "font-semibold text-ink-body" : "text-ink-subtle"}`}
                   >
-                    {item.short}
+                    {done.includes(item.id) && <Check size={11} strokeWidth={2.5} className="shrink-0 text-accent" />}
+                    <span className="truncate">{item.short}</span>
                   </span>
                 </button>
               </li>
@@ -838,6 +962,22 @@ export function GoogleSetup(props: Props) {
             >
               {current_.title}
             </h2>
+            {resumed && (
+              <div
+                className="flex items-center justify-between gap-3 rounded-pane border border-hairline bg-surface px-3 py-2 text-meta text-ink-body"
+                data-setup-resumed=""
+              >
+                <span>Picking up where you left off.</span>
+                <button
+                  type="button"
+                  onClick={startOver}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                >
+                  <RotateCcw size={12} aria-hidden="true" />
+                  Start over
+                </button>
+              </div>
+            )}
             {body}
           </section>
           <input
@@ -893,7 +1033,7 @@ export function GoogleSetup(props: Props) {
               <button
                 ref={nextRef}
                 type="button"
-                onClick={() => go(step + 1)}
+                onClick={next}
                 className={`${PRIMARY} inline-flex items-center gap-1.5`}
                 data-setup-next=""
               >

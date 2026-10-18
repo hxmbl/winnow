@@ -344,6 +344,7 @@ the store can be driven by a demo seed with no session at all.
 | `redirect.ts` | Web-only redirect parsing as pure functions over a query string. A code with no `state` returns `null`. |
 | `pendingAuth.ts` | The PKCE verifier in `sessionStorage`, as an array keyed by `state` so two tabs cannot clobber each other. Single-use: `take` removes. |
 | `errors.ts` | `describeFailure` — the message and hint for each failure kind. |
+| `googleErrors.ts` | Google's setup errors (redirect_uri_mismatch, not a test user, API disabled, invalid_client, missing secret, org_internal, admin policy, …) mapped to a plain title, the fix, and the setup step that makes it. `explainGoogleText` reads a code out of pasted text. |
 | `exchangeRetry.ts` | The end of a native sign-in on a WebView that may be paused (Android, behind the browser): before the code exchange and the profile read, wait for `platform.waitForForeground`, and resend only an attempt that got no HTTP response (`GoogleUnreachable`, or a bare fetch `TypeError` for the profile), backing off 0.5/1.5/3 s. `invalid_grant` and every other answer from Google are never resent. Out of attempts → `SignInUnreachable`: "Couldn't reach Google to finish signing in. Check your connection and try again." |
 
 **The offline cache** (`localCache`). A `Map<GmailId, Email>` mirror in memory,
@@ -668,6 +669,7 @@ judged as IPv4.
 | `winnow.brandLogos.v1` | Cached BIMI answers | sign-out, setting off |
 | `winnow.gravatars.v1` | Cached Gravatar answers, by sender address | sign-out, setting off |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
+| `winnow.google.setupProgress` | A half-finished setup: step, ticks, client ID draft (never the secret) | saving or removing the client, Start over |
 | `winnow.gmail.tokens` | Tokens (web only) | sign-out, which also revokes the grant at Google |
 | `winnow.pendingAuth`, `winnow.pendingState` | PKCE verifier, sign-in state (`sessionStorage`) | read, or 15 min |
 | keychain `gmail.tokens`, `google.oauth-client` | The same two, on desktop and Android | sign-out (revoked at Google first, from the web layer) / setup |

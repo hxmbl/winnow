@@ -175,6 +175,12 @@ and signs you out.
 
 ## Troubleshooting
 
+The setup sheet explains these for you: on step 5, open **Google showed an error?**
+and paste what Google's page said (or pick it from the list) to get the fix and a
+link back to the step where it is made. A failed **Test connection** or sign-in
+shows the same fix under it. If you stop part-way, the sheet remembers your step
+on this device and picks up there next time; **Start over** clears it.
+
 | What you see | Usual cause |
 | --- | --- |
 | "Google doesn't know this client ID" | Copied only part of the ID, or from another project. |
