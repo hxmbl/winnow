@@ -43,6 +43,8 @@ import {
   LocalDrafts,
   draftContextKey,
   draftRowFrom,
+  lostAttachmentsMessage,
+  restoreLocalDraft,
   reopenDraft,
   type DraftSaveStatus,
   type LocalDraft,
@@ -116,6 +118,8 @@ import { dohResolver } from "./core/avatars/bimi";
 import { contactsFailureNotice } from "./core/gmail/people";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import { LabelNamesContext, type LabelNames } from "./ui/labelNames";
+import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
+import { attachmentBytes } from "./ui/attachmentBytes";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -185,6 +189,8 @@ type ComposerState = {
    * draft as it opened, so an untouched reopen neither re-saves nor counts as an edit.
    */
   fromDrafts?: { draftId: string; row: Email; baseline: Draft };
+  /** Files a restored device copy could not bring back, said by the attachment area. */
+  attachNotice?: string | null;
 };
 
 /**
@@ -246,6 +252,7 @@ const SENT_NOTICE_MS = 6000;
  */
 function isUntouchedDraft(draft: Draft, initial?: ComposerState["initial"]): boolean {
   if (initial) return isUntouchedNewDraft(draft, initial);
+  if ((draft.attachments?.length ?? 0) > 0) return false;
   const written = stripQuote(draft.body, draft.quoteBlock).trim();
   return written === (draft.prefilled ?? "").trim();
 }
@@ -1152,6 +1159,8 @@ export function App({ store }: Props) {
 
   /** The autosave for the open composer. One at a time, like the composer itself. */
   const saverRef = useRef<DraftAutosaver | null>(null);
+  /** The attachment area's `add`, for files dropped on the composer. */
+  const attachAdderRef = useRef<AttachmentAdder>(null);
   /**
    * Whether the grant allows Gmail drafts, read from the token when an account connects.
    * `null` until known; the sign-in scope allows drafts, so it is `granted` for a normal
@@ -1251,7 +1260,15 @@ export function App({ store }: Props) {
       const next: ComposerState = {
         ...start,
         ...(kept
-          ? { draft: kept.draft, replyAll: kept.replyAll ?? start.replyAll, initial: kept.initial ?? start.initial }
+          ? (() => {
+              const restored = restoreLocalDraft(kept);
+              return {
+                draft: restored.draft,
+                replyAll: kept.replyAll ?? start.replyAll,
+                initial: kept.initial ?? start.initial,
+                attachNotice: lostAttachmentsMessage(restored.lost),
+              };
+            })()
           : {}),
         sending: false,
         error: null,
@@ -1934,22 +1951,21 @@ export function App({ store }: Props) {
     if (id !== undefined) void storeRef.current.loadBody(id);
   }, []);
 
+  /**
+   * The open message's attachment bytes: Gmail for an account, the seeded files in the
+   * demo (`attachmentBytes`).
+   */
+  const loadAttachment = useCallback(async (index: number) => {
+    const email = snapshotRef.current.view.selected;
+    if (!email) throw new Error("No message is open.");
+    const bridge = snapshotRef.current.account ? sessionRef.current : null;
+    return attachmentBytes(email, index, bridge);
+  }, []);
+
   const saveAttachment = useCallback(async (attachment: { index: number }) => {
     const s = storeRef.current;
-    const email = snapshotRef.current.view.selected;
-    const target = email?.attachments[attachment.index];
-    const bridge = sessionRef.current;
-
-    if (!email || !target) return;
-
-    if (!bridge || !snapshotRef.current.account) {
-      // No account means no bytes. Saying so beats a button that appears to do nothing.
-      s.setError("Signing in to Gmail is required to download attachments. The demo inbox has none to give you.");
-      return;
-    }
-
     try {
-      const fetched = await bridge.fetchAttachment(email.gmailId, target.id);
+      const fetched = await loadAttachment(attachment.index);
       await platform.saveFile(fetched.filename, fetched.bytes, fetched.mimeType);
       s.setError(null);
     } catch (error) {
@@ -1957,7 +1973,20 @@ export function App({ store }: Props) {
         error instanceof Error ? error.message : "Couldn't download that attachment.",
       );
     }
-  }, []);
+  }, [loadAttachment]);
+
+  /** Show a PDF in a viewer: a browser tab, or the system's app; saved where neither exists. */
+  const openAttachment = useCallback(async (index: number) => {
+    const s = storeRef.current;
+    try {
+      const fetched = await loadAttachment(index);
+      const opened = platform.openFile ? await platform.openFile(fetched.filename, fetched.bytes, fetched.mimeType) : false;
+      if (!opened) await platform.saveFile(fetched.filename, fetched.bytes, fetched.mimeType);
+      s.setError(null);
+    } catch (error) {
+      s.setError(error instanceof Error ? error.message : "Couldn't open that attachment.");
+    }
+  }, [loadAttachment]);
 
   // ── The keyboard ─────────────────────────────────────────────────────────
 
@@ -2540,6 +2569,24 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           saveStatus={composer.status}
           onAllowDrafts={sessionRef.current ? () => void allowDrafts() : null}
           allowingDrafts={allowingDrafts}
+          attachments={
+            <ComposerAttachments
+              attachments={composer.draft.attachments ?? []}
+              adderRef={attachAdderRef}
+              phone={phone}
+              notice={composer.attachNotice ?? null}
+              onChange={(next) =>
+                setComposer((current) => {
+                  if (!current) return current;
+                  const draft = { ...current.draft };
+                  if (next.length > 0) draft.attachments = next;
+                  else delete draft.attachments;
+                  return { ...current, draft, attachNotice: null };
+                })
+              }
+            />
+          }
+          onFiles={(files) => attachAdderRef.current?.add(files)}
           onSend={(recipients) => {
             void sendDraft(recipients);
           }}
@@ -3172,6 +3219,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   store.focusMessage(id);
                 },
                 onSaveAttachment: saveAttachment,
+                onLoadAttachment: loadAttachment,
+                onOpenAttachment: openAttachment,
               }}
             />
             {/* The docked reply: under the conversation, inside this pane. */}

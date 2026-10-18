@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build, preview } from "vite";
+import { labelsAndAttachments } from "./smoke-labels-attachments.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -7600,6 +7601,11 @@ try {
     check("no page errors in Label as", lErrors.length === 0, lErrors.slice(0, 3).join(" | "));
     await ctx.close();
   }
+
+  // Labels and attachments: chips, the label picker's other doors, label mailboxes, the
+  // reader's file list and lightbox, and compose attachments. Its own module, so it can
+  // also run alone (`node scripts/smoke-labels-attachments.mjs`).
+  await labelsAndAttachments({ browser, url: URL, check, section });
 
   // ── Console ────────────────────────────────────────────────────────────────
 
