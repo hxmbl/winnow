@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Native Google sign-in. Tauri finds the plugin by class name and calls its commands by
+# reflection; proguard-tauri.pro keeps @TauriPlugin / @InvokeArg classes in general, and
+# this names ours so a change to those generated rules cannot strip it silently.
+-keep class app.winnow.android.signin.GoogleSignInPlugin { *; }
+-keep class app.winnow.android.signin.AuthorizeArgs { *; }
+-keep class app.winnow.android.signin.OpenTabArgs { *; }

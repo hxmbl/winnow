@@ -13,6 +13,7 @@
 //! | Background sync ticks while the window is hidden | [`scheduler`] |
 //! | Writing attachments to disk | [`files`] |
 //! | Deep links, autostart, window state | plugins, [`deep_link`] |
+//! | Native Google sign-in and the sign-in Custom Tab (Android) | [`google_signin`] |
 //!
 //! On Android the tray, autostart, single-instance and window-state pieces are
 //! compiled out (`#[cfg(desktop)]`); there is no tray and the OS owns the window.
@@ -24,6 +25,7 @@
 pub mod commands;
 pub mod deep_link;
 pub mod files;
+pub mod google_signin;
 pub mod oauth;
 pub mod scheduler;
 pub mod secrets;
@@ -79,6 +81,11 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder.plugin(tauri_plugin_fs::init());
 
+    // Android only: native Google sign-in and the sign-in Custom Tab, in Kotlin. The
+    // webview reaches it through the `google_signin_*` / `open_sign_in_tab` commands.
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(google_signin::init());
+
     builder
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
@@ -90,6 +97,9 @@ pub fn run() {
             commands::oauth_cancel,
             commands::notify_new_mail,
             commands::open_external,
+            commands::google_signin_info,
+            commands::google_signin_authorize,
+            commands::open_sign_in_tab,
             commands::save_attachment,
             commands::open_attachment,
             commands::set_unread_badge,
