@@ -583,6 +583,7 @@ could be written in TypeScript, it belongs in `web/`.
 | `request_notification_permission` | — | `bool` | `requestNotificationPermission` |
 | `open_external` | `url` | `()` | `openExternal` |
 | `save_attachment` | `filename`, `bytes_base64` | `Option<String>` (path) | `saveFile` |
+| `open_attachment` | `filename`, `bytes_base64` | `()` | `openFile` (desktop; PDFs only, written under the temp dir's `winnow-attachments/`, opened in the default app; Android saves instead) |
 | `set_unread_badge` | `count` | `()` | `setUnreadBadge` |
 | `set_background_sync` | `interval_secs?` | `()` | `setBackgroundSync` |
 
@@ -752,13 +753,48 @@ is hard to see.
 
 ---
 
+## 13a. Labels and attachments
+
+**Labels.** `core/mail/labels.ts` (picker rules, chip naming, a stable hue per name),
+`core/store/labelView.ts` (which mail a label lists; a change widens to the whole
+conversation). The store's `labelView` is a user label browsed as a mailbox — every
+message carrying it outside Trash, Spam and Drafts — with `mailbox` kept as where Inbox
+goes back to; `setMailbox` and `setLabelView` both drop the reader, cursor and filters.
+Gmail: `labels.list` (on connect and when the sidebar opens), `labels.create`, and
+`threads.modify` per conversation (`batchModify` only for a message with no thread id).
+UI: `LabelChips` on rows (leaf names, two at most) and in the reader, names handed down
+through `ui/labelNames.ts` context so the memoised rows take no new prop; "Label as…" from
+the reader toolbar, the More menu, the row menu and the selection bar (`LabelPicker`); the
+sidebar's and the phone dock menu's Labels section (`LabelNav.tsx`).
+
+**Attachments in.** `AttachmentList.tsx`: type icon (`attachmentKind`), name, size, Save,
+Open for a PDF (`platform.openFile`: a blob tab on the web, `open_attachment` on the
+desktop, the save picker on Android), and raster pictures (never SVG) as thumbnails up to
+8 MB with a `Lightbox` (portalled; it swallows the app's shortcuts). Bytes come from
+`ui/attachmentBytes.ts`: Gmail, or `core/data/demoAttachments.ts` in the demo.
+
+**Attachments out.** `Draft.attachments` (`DraftAttachment`: base64 `data`, or a Gmail
+`source` for a draft reopened from Drafts, read once per session and kept, since a draft's
+attachment ids die with its next save). `core/mail/attachments.ts` holds the 25 MB cap
+(`planAttachments`, decided on sizes before anything is read) and the device copy's
+budget (`forDeviceCopy`: ~1.5 MB of bytes kept in `localStorage`, the rest by name only;
+`restoreLocalDraft` names what must be attached again). `ComposerAttachments.tsx` is the
+composer's attach button, chips and refusal line; `Composer` only renders it and takes
+drops (`onFiles`, desktop). A raw message over 4 MB goes to Gmail's media upload endpoint
+(`/upload/gmail/v1`, `multipart/related`) for send and for drafts create/update/send.
+
+Smoke: `scripts/smoke-labels-attachments.mjs`, run by `smoke.mjs` and alone.
+
+---
+
 ## 14. What is deliberately not here
 
 - **No second platform implementation.** Three of `Platform` means a rule was
   wrong.
-- **No attachments on outgoing mail, and no rich text.** Compose, reply and forward
-  send `text/plain` through one builder (`core/gmail/mime.ts`); `core/mail/compose.ts`
-  is the new-message half: the blank draft, the recipient check, `mailto:`.
+- **No rich text.** Compose, reply and forward send `text/plain` (plus attachments, below)
+  through one builder (`core/gmail/mime.ts`); `core/mail/compose.ts` is the new-message
+  half: the blank draft, the recipient check, `mailto:`. Forwarding does not carry the
+  original's attachments.
 - **No component tests.** The layers that are hard to get right (classification,
   the wire, sanitising, the store) are pure and heavily tested; the components
   are covered by the smoke pass against a real browser instead.
