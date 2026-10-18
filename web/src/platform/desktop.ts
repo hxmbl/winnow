@@ -20,6 +20,7 @@ import type {
   SignInRequest,
   SignInResult,
 } from "./types";
+import { waitUntilVisible } from "./visibility";
 
 /** Events from Rust. */
 const SYNC_TICK_EVENT = "winnow://sync-tick";
@@ -136,6 +137,15 @@ export const desktopPlatform: Platform = {
   async cancelSignIn(): Promise<void> {
     if (activePort === null) return;
     await abandonSignIn(activePort);
+  },
+
+  async waitForForeground(): Promise<unknown> {
+    // Desktop webviews are not paused behind the browser, and a minimised window can
+    // report "hidden" for as long as it stays minimised, so waiting there would only
+    // hold the sign-in up. Android is the platform that pauses.
+    const { os } = await this.info().catch(() => ({ os: "unknown" }));
+    if (os !== "android") return true;
+    return waitUntilVisible();
   },
 
   async notifyNewMail(mail: NewMailNotification): Promise<void> {

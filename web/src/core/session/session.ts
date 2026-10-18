@@ -22,6 +22,7 @@
  */
 
 import { GoogleAuthStateMissing } from "./errors";
+import { exchangeWithRetry, isFetchRejection, retryWhileUnreachable } from "./exchangeRetry";
 import {
   testConnection,
   webRedirectUriFor,
@@ -544,7 +545,7 @@ export class GmailSession {
       { purpose: "contacts", expectEmail: expected },
     );
 
-    const actual = (await this.client.profile()).emailAddress;
+    const actual = (await this.profileAfterAuthorize()).emailAddress;
     if (actual.toLowerCase() !== expected.toLowerCase()) {
       await this.tokens.adopt(before);
       throw new GmailError(wrongAccountMessage(actual, expected), 0, "declined");
@@ -579,7 +580,7 @@ export class GmailSession {
       { include_granted_scopes: "true", login_hint: expected },
       { purpose: "drafts", expectEmail: expected },
     );
-    const actual = (await this.client.profile()).emailAddress;
+    const actual = (await this.profileAfterAuthorize()).emailAddress;
     if (actual.toLowerCase() !== expected.toLowerCase()) {
       await this.tokens.adopt(before);
       throw new GmailError(wrongAccountMessage(actual, expected, "Drafts were"), 0, "declined");
@@ -674,8 +675,26 @@ export class GmailSession {
   async signIn(): Promise<{ email: string }> {
     await this.authorize(GMAIL_SCOPE);
 
-    const profile = await this.client.profile();
+    const profile = await this.profileAfterAuthorize();
     return { email: profile.emailAddress };
+  }
+
+  /**
+   * The profile read that ends a native sign-in, with the same foreground wait and
+   * resend as the code exchange (`retryWhileUnreachable`). It is the first Gmail call
+   * on the new token, made in the same breath as the exchange — so on Android it too
+   * left a WebView that was still behind the browser, and the Gmail client lets a
+   * bare `TypeError: Failed to fetch` through. A profile read is safe to repeat.
+   */
+  private profileAfterAuthorize(): ReturnType<GmailClient["profile"]> {
+    return retryWhileUnreachable(() => this.client.profile(), {
+      retryable: isFetchRejection,
+      waitForForeground: () => this.waitForForeground(),
+    });
+  }
+
+  private waitForForeground(): Promise<unknown> {
+    return this.platform.waitForForeground?.() ?? Promise.resolve();
   }
 
   /**
@@ -760,8 +779,12 @@ export class GmailSession {
     // verifier behind would let a replayed code find one waiting for it.
     const pending = takePendingAuth(pkce.state);
 
-    await this.tokens.exchangeCode({
-      code: outcome.code,
+    // Through `exchangeWithRetry`: on Android the code arrives while the WebView is
+    // paused behind the browser, so the exchange waits for the app to be in front and
+    // resends a request that never reached Google (never one Google answered).
+    const code = outcome.code;
+    await exchangeWithRetry(() => this.tokens.exchangeCode({
+      code,
       // Prefer the stashed verifier: on the web the `pkce` local is from before
       // a navigation, and only the stash survived. On the desktop both agree,
       // and either source works.
@@ -771,7 +794,7 @@ export class GmailSession {
       // browser, and Google rejects an exchange that names the placeholder
       // instead — see `LOOPBACK_REDIRECT_URI` and `desktop.ts`'s `redirectUriIn`.
       redirectUri: outcome.redirectUri ?? redirectUri,
-    });
+    }), { waitForForeground: () => this.waitForForeground() });
     this.writable = true;
   }
 
@@ -895,11 +918,12 @@ export class GmailSession {
     // Kept so a contacts opt-in approved for the wrong account can be undone.
     const before = pending.purpose ? await this.tokens.current() : null;
 
-    await this.tokens.exchangeCode({
-      code: redirect.code,
+    const code = redirect.code;
+    await exchangeWithRetry(() => this.tokens.exchangeCode({
+      code,
       verifier: pending.verifier,
       redirectUri: pending.redirectUri,
-    });
+    }));
     this.writable = true;
 
     this.scrubAddressBar();

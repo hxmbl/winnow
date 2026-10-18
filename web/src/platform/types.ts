@@ -69,6 +69,15 @@ export interface Platform {
 
   cancelSignIn(): Promise<void>;
 
+  /**
+   * Resolve once the app is back in the foreground, or the platform stops waiting.
+   *
+   * Called before each authorization-code exchange. Only Android needs it: its
+   * WebView is paused behind the browser when the redirect arrives, and a request
+   * made then fails without reaching Google. Optional; absent means "go now".
+   */
+  waitForForeground?(): Promise<unknown>;
+
   // ── OS integration ───────────────────────────────────────────────────────
 
   notifyNewMail(mail: NewMailNotification): Promise<void>;

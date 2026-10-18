@@ -282,6 +282,9 @@ function wireDesktopEvents(): void {
   // window reads as nothing happening at all.
   const unlistenLink = desktopPlatformExtras.onDeepLink((url) => {
     void platform.focusWindow();
+    // Android's sign-in success page links here only to bring the app forward; the
+    // sign-in itself finishes in `session.ts`, so there is nothing else to do.
+    if (isSignedInLink(url)) return;
     const messageId = messageIdFromDeepLink(url);
     if (messageId !== null) {
       void store.focusMessage(messageId);
@@ -327,6 +330,10 @@ function wireDesktopEvents(): void {
  * Returns `null` for a link that is not a message link — a bare `winnow://open`,
  * say — because "show me the app" is a legitimate deep link that carries no id.
  */
+function isSignedInLink(url: string): boolean {
+  return /^winnow:\/\/signed-in\/?$/.test(url.trim());
+}
+
 function messageIdFromDeepLink(url: string): number | null {
   const match = /^winnow:\/\/message\/(\d+)$/.exec(url.trim());
   if (!match) return null;

@@ -829,3 +829,47 @@ describe("webTokenStore", () => {
     await expect(store.clear()).resolves.toBeUndefined();
   });
 });
+
+// ── waitForForeground ────────────────────────────────────────────────────────
+
+describe("desktopPlatform.waitForForeground", () => {
+  function hiddenDocument() {
+    const listeners: Array<() => void> = [];
+    const doc = {
+      visibilityState: "hidden",
+      addEventListener: (_type: string, listener: () => void) => void listeners.push(listener),
+      removeEventListener: () => {},
+    };
+    Object.defineProperty(globalThis, "document", { configurable: true, value: doc });
+    return {
+      show() {
+        doc.visibilityState = "visible";
+        for (const listener of listeners) listener();
+      },
+    };
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, "document");
+  });
+
+  it("does not wait on a desktop OS, even with the window hidden", async () => {
+    hiddenDocument();
+    reply = (cmd) => (cmd === "app_info" ? { ...APP_INFO_WIRE, os: "macos" } : undefined);
+    const { desktopPlatform } = await loadDesktop();
+    await expect(desktopPlatform.waitForForeground?.()).resolves.toBe(true);
+  });
+
+  it("waits on Android until the app is visible again", async () => {
+    const page = hiddenDocument();
+    reply = (cmd) => (cmd === "app_info" ? { ...APP_INFO_WIRE, os: "android" } : undefined);
+    const { desktopPlatform } = await loadDesktop();
+    let settled: unknown = "pending";
+    const waiting = desktopPlatform.waitForForeground!().then((value) => (settled = value));
+    await flush();
+    expect(settled).toBe("pending");
+    page.show();
+    await waiting;
+    expect(settled).toBe(true);
+  });
+});

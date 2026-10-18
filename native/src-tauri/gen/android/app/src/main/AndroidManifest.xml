@@ -31,6 +31,17 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!--
+              winnow:// links. The sign-in success page (oauth.rs) links to
+              winnow://signed-in so one tap brings this single-task activity back in
+              front of the browser, where the code exchange is waiting for it.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="winnow" />
+            </intent-filter>
         </activity>
 
         <provider

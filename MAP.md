@@ -337,6 +337,7 @@ the store can be driven by a demo seed with no session at all.
 | `redirect.ts` | Web-only redirect parsing as pure functions over a query string. A code with no `state` returns `null`. |
 | `pendingAuth.ts` | The PKCE verifier in `sessionStorage`, as an array keyed by `state` so two tabs cannot clobber each other. Single-use: `take` removes. |
 | `errors.ts` | `describeFailure` — the message and hint for each failure kind. |
+| `exchangeRetry.ts` | The end of a native sign-in on a WebView that may be paused (Android, behind the browser): before the code exchange and the profile read, wait for `platform.waitForForeground`, and resend only an attempt that got no HTTP response (`GoogleUnreachable`, or a bare fetch `TypeError` for the profile), backing off 0.5/1.5/3 s. `invalid_grant` and every other answer from Google are never resent. Out of attempts → `SignInUnreachable`: "Couldn't reach Google to finish signing in. Check your connection and try again." |
 
 **The offline cache** (`localCache`). A `Map<GmailId, Email>` mirror in memory,
 with `localStorage` treated as a *sink*, not a store: mutations coalesce into one
@@ -435,6 +436,9 @@ Supporting files:
 
 - `index.ts` — `isTauri()`, `createPlatform()`, and the module-level `platform`
   singleton everything else imports.
+- `visibility.ts` — `waitUntilVisible`: resolves when `document.visibilityState` is
+  `visible`, or `false` after a timeout (15 s). `desktop.ts`'s `waitForForeground` uses it
+  on Android only; desktop windows are not paused behind the browser.
 - `foregroundSync.ts` — polls every 10 s while the document is visible and
   focused, and fires at once on focus regain, tab-visible and `online`. There is
   no server to push from, and an empty incremental sync costs 2 quota units. The
@@ -526,7 +530,7 @@ could be written in TypeScript, it belongs in `web/`.
 | `main.rs` | Seven lines: `winnow_lib::run()`, plus `windows_subsystem = "windows"` so a release build has no console. |
 | `lib.rs` | The real startup: `single_instance` registered **first**, then dialog/opener/notification/window-state, the invoke handler, `on_page_load` revealing the window (skipped with `--minimized`), `setup` registering autostart, OAuth sessions, deep links, tray and scheduler, and `CloseRequested` → hide rather than quit. |
 | `commands.rs` | 13 commands, each of which validates, delegates and converts errors to strings. |
-| `oauth.rs` | The loopback listener: binds `127.0.0.1:0`, substitutes the real port into `__WINNOW_LOOPBACK_PORT__`, answers one request and stops. |
+| `oauth.rs` | The loopback listener: binds `127.0.0.1:0`, substitutes the real port into `__WINNOW_LOOPBACK_PORT__`, answers one request and stops. On Android the success page has a "Back to Winnow" button to `winnow://signed-in` (the manifest's `VIEW` intent filter), which brings the app forward; the web layer ignores that link beyond focusing. |
 | `secrets.rs` | Keychain get/set/delete under service `app.winnow.desktop`, one user per secret name. |
 | `scheduler.rs` | The tick, 30–3600 s, clamped, joined on retune so two threads can never overlap. |
 | `files.rs` | Save dialog → sanitised filename → `spawn_blocking` write. Async is mandatory, not stylistic: blocking the calling thread deadlocks the dialog callback. |

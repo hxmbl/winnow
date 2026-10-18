@@ -253,6 +253,19 @@ export class GmailError extends Error {
   }
 }
 
+/**
+ * A token request that never got an HTTP response: `fetch` itself rejected (offline,
+ * DNS, or — on Android — the WebView was paused behind the browser when the request
+ * went out). Distinct from every rejection Google *answers* with, because only this
+ * one is safe to send again: an answered `invalid_grant` means the code is spent.
+ */
+export class GoogleUnreachable extends GmailError {
+  constructor(message: string) {
+    super(message, 0, "network");
+    this.name = "GoogleUnreachable";
+  }
+}
+
 /** A message that could not be fetched, with enough context to retry it. */
 /**
  * The grant does not allow drafts: Google answered 403 with an insufficient-scope

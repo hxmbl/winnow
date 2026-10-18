@@ -1,6 +1,7 @@
 /** Sign-in failures for display. */
 
 import { isTauri } from "../../platform";
+import { SignInUnreachable } from "./exchangeRetry";
 
 /** Redirect state could not be matched to a sign-in in this window. */
 export class GoogleAuthStateMissing extends Error {
@@ -73,6 +74,15 @@ export function describeFailure(error: unknown): AuthFailure {
         retryable: false,
       };
     case "network":
+      // The sign-in got its code but never reached Google to finish it — Android's
+      // paused WebView, or a phone that really is offline. `exchangeRetry.ts`.
+      if (error instanceof SignInUnreachable) {
+        return {
+          message: "Couldn't reach Google to finish signing in.",
+          hint: "Check your connection and try again.",
+          retryable: true,
+        };
+      }
       return {
         message: "Could not reach Google.",
         hint: "Check your connection and try again.",

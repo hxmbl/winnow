@@ -154,6 +154,8 @@ const SUCCESS_PAGE: &str = r#"<!doctype html>
   h1 { margin:0 0 8px; font-size:20px; font-weight:600; }
   p  { margin:0; color:#3C434C; }
   code { font-family: ui-monospace, SFMono-Regular, monospace; font-size:13px; }
+  .back { display:inline-block; margin-top:20px; padding:10px 18px; border-radius:6px;
+          background:#5028E2; color:#fff; font-weight:600; text-decoration:none; }
   /* The colours above are Winnow's light palette, hardcoded, so `color-scheme`
      alone left a white card on a dark browser — which is what this tab looks like
      for the second or two the user spends reading it. These are the dark palette's
@@ -163,12 +165,34 @@ const SUCCESS_PAGE: &str = r#"<!doctype html>
     .card { background:#1B2027;
             box-shadow:0 12px 32px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.30); }
     p { color:#9FA8B1; }
+    .back { background:#B9A5FF; color:#070612; }
   }
 </style></head>
 <body><div class="card">
   <h1>Signed in to Winnow</h1>
-  <p>You can close this tab and go back to the app.</p>
+  {RETURN}
 </div></body></html>"#;
+
+/// Where the success page points the user next.
+///
+/// On Android the browser is in front and Winnow's WebView is paused behind it, so
+/// the page offers a button back into the app: a `winnow://` link, which the
+/// manifest's `VIEW` intent filter routes to the (single-task) activity, bringing it
+/// forward. The web layer waits for that before it exchanges the code. Elsewhere
+/// the app's window was never paused, and the tab can simply be closed.
+const RETURN_DESKTOP: &str = "<p>You can close this tab and go back to the app.</p>";
+const RETURN_ANDROID: &str = "<p>Go back to Winnow to finish signing in.</p>\n  \
+    <a class=\"back\" href=\"winnow://signed-in\">Back to Winnow</a>";
+
+/// The success page for this platform (see [`RETURN_ANDROID`]).
+fn success_page(android: bool) -> String {
+    let next = if android {
+        RETURN_ANDROID
+    } else {
+        RETURN_DESKTOP
+    };
+    SUCCESS_PAGE.replace("{RETURN}", next)
+}
 
 const ERROR_PAGE: &str = r#"<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -369,7 +393,7 @@ fn serve(
         };
 
         let (status, body) = match &outcome {
-            AuthOutcome::Code { .. } => (200, SUCCESS_PAGE.to_string()),
+            AuthOutcome::Code { .. } => (200, success_page(cfg!(target_os = "android"))),
             AuthOutcome::Error {
                 error, description, ..
             } => (
@@ -713,6 +737,18 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
         assert!(!session.cancel.load(Ordering::SeqCst));
         session.abort();
+    }
+
+    #[test]
+    fn the_success_page_links_back_into_the_app_on_android_only() {
+        let android = success_page(true);
+        assert!(android.contains(r#"href="winnow://signed-in""#));
+        assert!(!android.contains("{RETURN}"));
+
+        let desktop = success_page(false);
+        assert!(!desktop.contains("winnow://"));
+        assert!(desktop.contains("close this tab"));
+        assert!(!desktop.contains("{RETURN}"));
     }
 
     #[test]

@@ -22,6 +22,7 @@ import {
   GOOGLE_REVOKE_URL,
   GOOGLE_TOKEN_URL,
   GmailError,
+  GoogleUnreachable,
   type AuthErrorKind,
   type TokenSet,
 } from "./dto";
@@ -405,10 +406,9 @@ export class TokenManager {
         body: body.toString(),
       });
     } catch (error) {
-      throw new GmailError(
+      // No HTTP response at all — the one failure `exchangeWithRetry` may resend.
+      throw new GoogleUnreachable(
         `Could not reach Google: ${error instanceof Error ? error.message : "network error"}`,
-        0,
-        "network",
       );
     }
 
