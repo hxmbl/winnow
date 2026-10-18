@@ -133,11 +133,14 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     check("the strip pans sideways only and keeps its overscroll", touchAction.touch === "pan-x" && touchAction.over === "contain", JSON.stringify(touchAction));
 
     // A vertical wheel in a gap: the strip glides sideways, the list stays put.
+    // Each glide must land exactly on its target: a browser that snaps scrollLeft down to
+    // whole pixels once left it a pixel short, still running, every time.
+    const gapStart = await railLeft(p, scope);
     await p.mouse.move(gap.x, gap.y);
     await p.mouse.wheel(0, 300);
     await railRest(p, rail);
     const afterGap = { list: await listTop(p), rail: await railLeft(p, scope) };
-    check("a wheel in a gap scrolls the strip sideways and never the list", afterGap.list === 0 && afterGap.rail > 100, JSON.stringify(afterGap));
+    check("a wheel in a gap scrolls the strip sideways, the whole notch, and never the list", afterGap.list === 0 && afterGap.rail - gapStart === 300, JSON.stringify({ gapStart, ...afterGap }));
 
     // Over a chip, the same.
     const chip = await p.locator(`${rail} > [data-rail-item]`).nth(3).boundingBox();
@@ -145,7 +148,7 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     await p.mouse.wheel(0, 200);
     await railRest(p, rail);
     const afterChip = { list: await listTop(p), rail: await railLeft(p, scope) };
-    check("and over a chip", afterChip.list === 0 && afterChip.rail > afterGap.rail, JSON.stringify({ afterGap, afterChip }));
+    check("and over a chip", afterChip.list === 0 && afterChip.rail - afterGap.rail === 200, JSON.stringify({ afterGap, afterChip }));
 
     // Smoothed: one notch arrives over several frames rather than in one jump, and lands on
     // its target without passing it. Measured from where the strip starts (with room to
@@ -184,7 +187,7 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     const furthest = Math.max(0, ...steps);
     check(
       "a wheel notch glides: part of the way after a frame, all of it (and no further) after",
-      glideStart.room >= NOTCH && glideRest.rested && glideRest.left === glideStart.start && early > 0 && early < NOTCH - 2 && late >= NOTCH - 2 && late <= NOTCH + 1 && furthest <= NOTCH + 1,
+      glideStart.room >= NOTCH && glideRest.rested && glideRest.left === glideStart.start && early > 0 && early < NOTCH - 2 && late === NOTCH && furthest <= NOTCH,
       JSON.stringify({ ...glideStart, rest: glideRest.left, steps, late, settled: glideEnd.rested }),
     );
 

@@ -38,6 +38,17 @@ export function smoothStep(current: number, target: number, dtMs: number): numbe
   return target - distance * kept;
 }
 
+/**
+ * Whether a glide frame that moved the strip from `before` to `after` (as read back, after
+ * the browser snapped it) is the last one. Done within a pixel of `target`, or when the
+ * frame made no progress at all: a browser that snaps scrollLeft down to whole pixels turns
+ * every write of 439.3 into 439, so on the way to 440 the strip would otherwise sit a pixel
+ * short with the glide running every frame, for ever.
+ */
+export function glideDone(target: number, before: number, after: number): boolean {
+  return Math.abs(target - after) <= 1 || after === before;
+}
+
 /** A scroll position this far (px) from the glide's last write means someone else moved the strip. */
 export const OUTSIDE_SCROLL_PX = 1;
 

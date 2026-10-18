@@ -4,6 +4,7 @@ import {
   RUBBER_MAX,
   SPRING_BACK_MS,
   blurForVelocity,
+  glideDone,
   glideFrom,
   nextVelocity,
   rubberBand,
@@ -121,5 +122,40 @@ describe("smoothStep on slow frames", () => {
       expect(x).toBeGreaterThan(200);
       expect(x).toBeLessThanOrEqual(440);
     }
+  });
+});
+
+describe("glideDone", () => {
+  /** A glide as useRailMotion runs it, against a browser that snaps scrollLeft with `snap`. */
+  const run = (from: number, target: number, snap: (x: number) => number, dt = 16.67) => {
+    let x = from;
+    for (let frame = 1; frame <= 200; frame += 1) {
+      const before = x;
+      x = snap(smoothStep(before, target, dt));
+      if (glideDone(target, before, x)) return { frames: frame, at: snap(target) };
+    }
+    return { frames: Infinity, at: x };
+  };
+  it("ends where scrollLeft snaps down to whole pixels (it used to stop a pixel short, for ever)", () => {
+    for (const [from, target] of [[200, 440], [0, 300], [300, 500], [440, 200]] as const) {
+      const done = run(from, target, Math.floor);
+      expect(done.frames).toBeLessThan(40);
+      expect(done.at).toBe(target);
+    }
+  });
+  it("ends with rounding or fractional scrollLeft too, on fast and slow frames", () => {
+    for (const snap of [Math.round, (x: number) => x]) {
+      for (const dt of [8.33, 16.67, 100]) {
+        const done = run(200, 440, snap, dt);
+        expect(done.frames).toBeLessThan(80);
+        expect(done.at).toBe(440);
+      }
+    }
+  });
+  it("keeps going while a frame still makes progress", () => {
+    expect(glideDone(440, 200, 267)).toBe(false);
+    expect(glideDone(440, 437, 438)).toBe(false);
+    expect(glideDone(440, 438, 439)).toBe(true);
+    expect(glideDone(440, 439, 439)).toBe(true);
   });
 });

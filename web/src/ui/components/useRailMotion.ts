@@ -14,6 +14,7 @@
 import { useEffect, type RefObject } from "react";
 import {
   blurForVelocity,
+  glideDone,
   glideFrom,
   nextVelocity,
   OUTSIDE_SCROLL_PX,
@@ -86,12 +87,14 @@ export function useRailMotion(
       }
       const dt = lastFrame ? now - lastFrame : 16.67;
       lastFrame = now;
-      const next = smoothStep(scroller.scrollLeft, target, dt);
-      scroller.scrollLeft = next;
+      const before = scroller.scrollLeft;
+      scroller.scrollLeft = smoothStep(before, target, dt);
       written = scroller.scrollLeft;
-      // scrollLeft snaps to device pixels: within one of the target is there.
-      if (Math.abs(target - scroller.scrollLeft) < 1) {
+      // scrollLeft snaps to device pixels: within one of the target, or stuck short of it
+      // by the snapping, is there.
+      if (glideDone(target, before, scroller.scrollLeft)) {
         scroller.scrollLeft = target;
+        written = scroller.scrollLeft;
         target = null;
         lastFrame = 0;
         return;
