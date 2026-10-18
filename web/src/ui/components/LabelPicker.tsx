@@ -102,7 +102,14 @@ export function LabelPicker({
 
   const count = targets.length;
   return (
-    <Sheet label="Label as" onClose={onClose} initialFocus={inputRef} dismissOnBackdrop className="max-w-[400px]">
+    <Sheet
+      label="Label as"
+      onClose={onClose}
+      initialFocus={inputRef}
+      dismissOnBackdrop
+      // The surface is the caller's to draw: without these the list sat on the backdrop.
+      className="flex w-full max-w-[400px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+    >
       <div data-label-picker="" className="flex max-h-[min(560px,85vh)] flex-col">
         <SheetHeader title={count === 1 ? "Label as" : `Label ${count} messages as`} onClose={onClose} />
         <div className="border-b border-hairline px-5 py-3">
