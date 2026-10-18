@@ -13,6 +13,7 @@ import type { Platform } from "../../platform/types";
 import type { MailBackend, WinnowStore } from "../store/store";
 import type { GoogleContact } from "../contacts/google";
 import type { ConnectionTest, OAuthClientCredentials } from "./credentials";
+import { OfflineQueue } from "../offline/queue";
 
 export type SessionBridge = {
   /** The user's stored OAuth client, or `null` before setup. */
@@ -33,8 +34,10 @@ export type SessionBridge = {
   signIn(): Promise<{ email: string }>;
   /** Finish a sign-in delivered via redirect. Returns null if no redirect. */
   completeWebRedirect(): Promise<CompletedWebRedirect | null>;
-  /** The store-facing backend. */
+  /** The store-facing backend, behind the offline queue (`core/offline/queue.ts`). */
   backend(): MailBackend;
+  /** What is waiting to reach Gmail; the "Offline: N changes waiting" line reads it. */
+  offlineQueue: OfflineQueue;
   /** Download one attachment's bytes. */
   fetchAttachment(
     gmailId: string,
@@ -67,6 +70,11 @@ export type SessionBridge = {
 /** Build a bridge over a `Platform`. */
 export function createSessionBridge(platform: Platform, store: WinnowStore): SessionBridge {
   const session = new GmailSession(platform, localCache());
+  const offlineQueue = new OfflineQueue({
+    storage: globalThis.localStorage ?? null,
+    isOnline: () => globalThis.navigator?.onLine ?? true,
+  });
+  globalThis.addEventListener?.("online", () => offlineQueue.kick());
 
   const bridge: SessionBridge = {
     credentials: () => session.storedCredentials(),
@@ -74,12 +82,14 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
     async saveCredentials(next) {
       const result = await session.saveCredentials(next);
       // The session half already wiped tokens and cache; the screen has to follow.
+      if (result.signedOut) offlineQueue.clear();
       if (result.signedOut) await store.signOut();
       return result;
     },
 
     async removeCredentials() {
       const result = await session.removeCredentials();
+      if (result.signedOut) offlineQueue.clear();
       if (result.signedOut) await store.signOut();
       return result;
     },
@@ -103,12 +113,15 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
 
     completeWebRedirect: () => session.completeWebRedirect(),
 
-    backend: () => session.backend(),
+    backend: () => offlineQueue.wrap(session.backend(), () => session.accountEmail()),
+
+    offlineQueue,
 
     fetchAttachment: (gmailId, attachmentId) =>
       session.backend().fetchAttachment(gmailId, attachmentId),
 
     async signOut(options) {
+      offlineQueue.clear();
       await session.signOut(options);
       await store.signOut();
     },
