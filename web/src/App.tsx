@@ -117,6 +117,8 @@ import { BrandLogoCache } from "./core/avatars/logoCache";
 import { dohResolver } from "./core/avatars/bimi";
 import { contactsFailureNotice } from "./core/gmail/people";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
+import type { OfflineQueue } from "./core/offline/queue";
+import { OfflineIndicator } from "./ui/components/OfflineIndicator";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -470,6 +472,8 @@ export function App({ store }: Props) {
   }, [store]);
 
   const sessionRef = useRef<SessionBridge | null>(null);
+  /** The bridge's offline queue, as state so the indicator mounts when it exists. */
+  const [offlineQueue, setOfflineQueue] = useState<OfflineQueue | null>(null);
 
   // ── Google contacts ──────────────────────────────────────────────────────
 
@@ -711,6 +715,7 @@ export function App({ store }: Props) {
       try {
         const bridge = createSessionBridge(platform, store);
         sessionRef.current = bridge;
+        setOfflineQueue(bridge.offlineQueue);
         setRestoringSession(true);
         // Read once up front so Settings can say whether a client is set up, and the
         // setup sheet can show the redirect URI a web user has to register.
@@ -1458,6 +1463,11 @@ export function App({ store }: Props) {
     // Gmail removed the draft as it sent it; so does the list, now.
     if (sending.fromDrafts) s.removeDraftRow(sending.fromDrafts.draftId);
     if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
+    // Offline: the send is in the offline queue, not in Gmail yet, and says so.
+    if ((sessionRef.current?.offlineQueue.status().sends ?? 0) > 0) {
+      s.setNotice("Offline: your message will be sent when you're back online.");
+      return;
+    }
     if (sending.mode !== "new") return;
     // Said, because a closing sheet alone does not say whether it went. The demo says
     // what it did: nothing left the device.
@@ -1567,6 +1577,27 @@ export function App({ store }: Props) {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
+
+  /**
+   * The offline queue gave up on something (`core/offline/queue.ts`): say so. A new
+   * message it could not send comes back in the composer when none is open, so its
+   * words are never lost; otherwise the notice says where it is.
+   */
+  useEffect(() => {
+    if (!offlineQueue) return;
+    return offlineQueue.onDrop(({ action, message }) => {
+      const s = storeRef.current;
+      if (action.kind === "send" && action.mode === "new" && !composerRef.current) {
+        startComposer(
+          { draft: action.draft, mode: "new", context: draftContextKey("new"), initial: BLANK_INITIAL },
+          false,
+        );
+        setComposer((current) => (current ? { ...current, error: message } : current));
+        return;
+      }
+      s.setNotice(action.kind === "send" && action.draftId ? `${message} It is still in Drafts.` : message);
+    });
+  }, [offlineQueue, startComposer]);
 
   /**
    * Send what the composer holds.
@@ -2773,6 +2804,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       )}
 
       {sendWait && <SendingStrip deadline={sendWait.deadline} onUndo={undoSend} onSendNow={sendWaitingNow} />}
+      <OfflineIndicator queue={offlineQueue} />
 
       {snapshot.undo && (
         <div
