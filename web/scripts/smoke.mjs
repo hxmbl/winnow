@@ -3364,7 +3364,7 @@ try {
 
     Below 640px the masthead is replaced, not squeezed: a top bar (the mark, the list's
     name and search), the list, and one dock at the bottom edge holding the swipeable
-    smart filter chips above four tabs; folders and the account are in
+    smart filter chips above three tabs; folders, the account and its Settings gear are in
     the menu, a bottom sheet that a second tap on Inbox raises. The reader brings its own action bar to the
     same edge. What is claimed here is the ergonomics — that the controls a thumb uses
     most are at the bottom, that every one is a real touch target, and that nothing the
@@ -3426,10 +3426,15 @@ try {
   const tabs = dock.locator('nav[aria-label="Primary"] button');
   const tabLabels = (await tabs.allTextContents()).map((t) => t.replace(/\d+/g, "").trim());
   check(
-    "four tabs: Inbox, Sent, Archive, Settings",
-    JSON.stringify(tabLabels) === JSON.stringify(["Inbox", "Sent", "Archive", "Settings"]),
+    "three tabs: Inbox, Sent, Archive — no Settings tab and no Compose in its place",
+    JSON.stringify(tabLabels) === JSON.stringify(["Inbox", "Sent", "Archive"]) &&
+      (await dock.locator('nav[aria-label="Primary"] [aria-label="Settings"], nav[aria-label="Primary"] [data-compose]').count()) === 0,
     JSON.stringify(tabLabels),
   );
+  const tabColumns = await dock.locator('nav[aria-label="Primary"]').evaluate(
+    (nav) => getComputedStyle(nav).gridTemplateColumns.split(" ").length,
+  );
+  check("and the tab row is a three-column grid", tabColumns === 3, `${tabColumns} columns`);
   const tabBoxes = await Promise.all((await tabs.all()).map((tab) => tab.boundingBox()));
   check(
     "every tab is a full touch target",
@@ -3604,7 +3609,7 @@ try {
     !(await sidebarOpen()) && (await inboxTab.evaluate((tab) => document.activeElement === tab)),
   );
 
-  // The tabs switch mailbox and open Settings.
+  // The tabs switch mailbox; Settings is the gear on the menu's account row.
   await tabs.filter({ hasText: "Sent" }).click();
   await page.waitForTimeout(300);
   check(
@@ -3613,11 +3618,12 @@ try {
       (await tabs.filter({ hasText: "Sent" }).getAttribute("aria-current")) === "page",
     await listTitle(),
   );
-  await tabs.filter({ hasText: "Settings" }).click();
+  await openDrawer();
+  await page.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').click();
   await page.waitForTimeout(300);
   check(
-    "the Settings tab opens Settings",
-    (await page.locator('[role="dialog"][aria-label="Settings"]').count()) === 1,
+    "the gear on the menu's account row opens Settings",
+    (await page.locator('[role="dialog"][aria-label="Settings"]').count()) === 1 && !(await sidebarOpen()),
   );
   // Google account setup, on a phone: the whole screen, with touch-sized fields.
   await openSettingsCategory(page, "google");
@@ -5916,20 +5922,24 @@ try {
     await s.goto(URL, { waitUntil: "networkidle" });
     await s.waitForSelector("[data-row-count] [data-row-id]");
     const tabsNav = s.locator('[data-phone-dock] nav[aria-label="Primary"] button');
-    await tabsNav.filter({ hasText: "Settings" }).tap();
+    // No Settings tab: a second tap on Inbox raises the menu, whose account row has the gear.
+    await tabsNav.filter({ hasText: "Inbox" }).tap();
+    await s.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await s.waitForTimeout(300);
+    await s.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').tap();
     const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
     await dialog.waitFor({ timeout: 5_000 });
     await s.waitForTimeout(300);
     check("a phone opens Settings on its category list", (await s.locator('[data-settings-layout="phone"][data-settings-page="list"]').count()) === 1);
     check("with every category", (await dialog.locator("button[data-category]").count()) === 8);
-    const settingsTab = tabsNav.filter({ hasText: "Settings" });
     const dockBox = await s.locator("[data-phone-dock] nav").boundingBox();
     const dialogBox = await dialog.boundingBox();
+    const currentTabs = await tabsNav.evaluateAll((tabs) => tabs.filter((tab) => tab.getAttribute("aria-current") === "page").length);
     check(
-      "above the dock, whose Settings tab stays visible and current",
-      (await settingsTab.getAttribute("aria-current")) === "page" && Boolean(dockBox && dialogBox) &&
-        dialogBox.y + dialogBox.height <= dockBox.y + 1 && (await settingsTab.isVisible()),
-      JSON.stringify({ dockBox, dialogBox }),
+      "above the dock, whose tabs stay visible (none of them current) to leave Settings by",
+      currentTabs === 0 && Boolean(dockBox && dialogBox) &&
+        dialogBox.y + dialogBox.height <= dockBox.y + 1 && (await tabsNav.first().isVisible()),
+      JSON.stringify({ dockBox, dialogBox, currentTabs }),
     );
     await dialog.locator('button[data-category="privacy"]').tap();
     await s.waitForTimeout(200);

@@ -2979,7 +2979,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       </main>
 
       {/*
-        The phone's dock: the smart filter chips above the four tabs, on one surface at
+        The phone's dock: the smart filter chips above the three tabs, on one surface at
         the bottom edge. Not while reading — the reader brings its own action bar.
       */}
       </div>
@@ -2997,7 +2997,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             store.setMailbox(mailbox);
           }}
           settingsOpen={snapshot.overlay === "settings"}
-          onOpenSettings={() => store.setOverlay("settings")}
           menuOpen={sidebarOpen}
           onOpenMenu={openSidebar}
           onCloseMenu={closeSidebar}

@@ -199,7 +199,7 @@ const BACK_BUTTON =
  * them), the chosen category's controls, and an explanation of the last setting pointed
  * at. Below 1200px the explanation column goes and every setting gets a (?) popover with
  * the same copy. On a phone it is a list of categories that opens one category at a time,
- * sitting above the dock so the Settings tab stays visible.
+ * sitting above the dock so the tabs stay visible (any of them leaves Settings).
  */
 export function Settings(props: SettingsProps) {
   const layout = useSettingsLayout();

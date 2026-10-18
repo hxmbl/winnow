@@ -60,8 +60,8 @@ type Props = {
   placement?: "center" | "left" | "fill";
   /**
    * Stop the backdrop this far above the window's bottom edge, leaving what is there
-   * (the phone dock) visible and live. Settings on a phone uses it so the Settings tab
-   * stays on screen.
+   * (the phone dock) visible and live. Settings on a phone uses it so the tabs stay
+   * on screen, and any of them leaves Settings for that mailbox.
    */
   bottomInset?: string;
   className?: string;

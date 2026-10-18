@@ -2,10 +2,10 @@
  * The phone layout's chrome: a top bar and a bottom dock.
  *
  * Below `sm` the masthead is replaced rather than squeezed. Everything a thumb does often
- * — narrowing by a smart filter, switching mailbox, opening the menu, opening Settings —
- * is at the bottom of the screen: the swipeable filter chips sit just above the four
- * tabs (Inbox, Sent, Archive, Settings), and a second tap on Inbox raises the menu
- * (`MailNav.tsx`, every folder and the account) as a sheet from the dock.
+ * — narrowing by a smart filter, switching mailbox, opening the menu — is at the bottom
+ * of the screen: the swipeable filter chips sit just above the three tabs (Inbox, Sent,
+ * Archive), and a second tap on Inbox raises the menu (`MailNav.tsx`, every folder and
+ * the account, whose gear is the way into Settings) as a sheet from the dock.
  * The top is only where you are and search: the mark, the list's name and count, and
  * the search field under them.
  *
@@ -16,7 +16,7 @@
  */
 
 import { useLayoutEffect, useRef } from "react";
-import { Archive, Inbox, Search, Send, Settings } from "lucide-react";
+import { Archive, Inbox, Search, Send } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { FilterStrip, type PillItem } from "./FilterStrip";
@@ -93,12 +93,15 @@ export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle,
 
 // ── Dock ────────────────────────────────────────────────────────────────────
 
-/** The four tabs. Trash and Spam are in the menu. */
-const TABS: readonly { id: Mailbox | "settings"; label: string; Icon: LucideIcon }[] = [
+/**
+ * The three tabs. Trash, Spam and Drafts are in the menu, and so is Settings, behind the
+ * gear on the account row: it is opened rarely, so it does not earn a tab, and Compose
+ * already has its own button over the list.
+ */
+const TABS: readonly { id: Mailbox; label: string; Icon: LucideIcon }[] = [
   { id: "inbox", label: "Inbox", Icon: Inbox },
   { id: "sent", label: "Sent", Icon: Send },
   { id: "archive", label: "Archive", Icon: Archive },
-  { id: "settings", label: "Settings", Icon: Settings },
 ];
 
 export type PhoneDockProps = {
@@ -110,8 +113,8 @@ export type PhoneDockProps = {
   /** Unread per mailbox, for the tab's accessible name and its quiet count. */
   unread: Partial<Record<Mailbox, number>>;
   onSelectMailbox: (mailbox: Mailbox) => void;
+  /** Settings is open over the list: no mailbox tab is the current page then. */
   settingsOpen: boolean;
-  onOpenSettings: () => void;
   /** The menu (the sidebar), which the Inbox tab opens on its second tap. */
   menuOpen: boolean;
   onOpenMenu: () => void;
@@ -127,7 +130,6 @@ export function PhoneDock({
   unread,
   onSelectMailbox,
   settingsOpen,
-  onOpenSettings,
   menuOpen,
   onOpenMenu,
   onCloseMenu,
@@ -192,10 +194,10 @@ export function PhoneDock({
         />
       </div>
 
-      <nav ref={tabsRef} aria-label="Primary" className="mt-1.5 grid grid-cols-4 gap-1 px-2">
+      <nav ref={tabsRef} aria-label="Primary" className="mt-1.5 grid grid-cols-3 gap-1 px-2">
         {TABS.map(({ id, label, Icon }) => {
-          const current = id === "settings" ? settingsOpen : !settingsOpen && mailbox === id;
-          const count = id === "settings" ? 0 : (unread[id] ?? 0);
+          const current = !settingsOpen && mailbox === id;
+          const count = unread[id] ?? 0;
           const isInbox = id === "inbox";
           // Inbox is two things: the mailbox on the first tap, and once it is the
           // current tab, the menu's toggle.
@@ -209,8 +211,7 @@ export function PhoneDock({
               return;
             }
             if (menuOpen) onCloseMenu();
-            if (id === "settings") onOpenSettings();
-            else onSelectMailbox(id);
+            onSelectMailbox(id);
           };
           return (
             <button
