@@ -14,6 +14,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, Check, Mail, MailOpen, Trash2 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { CodeChip } from "./CodeCopy";
+import { LabelChips } from "./LabelChips";
 import { codeChipVisible } from "../../core/mail/otp";
 import { anchorFromElement, type MenuAnchor } from "../menuPlacement";
 import {
@@ -429,6 +430,7 @@ const Row = memo(function Row({
             is set apart by colour and a gap, and it is the part that gives way.
           */}
           <span className="block truncate text-ui">
+            <LabelChips ids={email.labels} compact className="mr-1.5" />
             <span
               data-row-subject=""
               className={unread ? "font-semibold text-ink" : "font-normal text-ink-body"}
