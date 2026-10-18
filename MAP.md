@@ -126,7 +126,8 @@ order for "why is this message wrong".
        From is parsed not trusted; internalDate beats the Date header;
        plain text wins over HTML
 3. written to the mirror                        core/session/session.ts (localCache)
-     winnow.gmail.cache.messages, debounced 250ms; a loaded body is never
+     winnow.gmail.cache.messages, written in idle time in chunks (idleWrite.ts) and at
+     once on pagehide or flush(); a loaded body is never
      overwritten by a metadata-only copy
 4. handed to the store                          core/store/store.ts (applySync)
 5. classified                                   core/classify/classify.ts

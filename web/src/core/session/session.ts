@@ -21,6 +21,7 @@
  * planted redirect cannot trade its own code for the user's tokens.
  */
 
+import { createIdleWriter, onPageLeave, type IdleScheduler } from "./idleWrite";
 import { GoogleAuthStateMissing } from "./errors";
 import { exchangeWithRetry, isFetchRejection, retryWhileUnreachable } from "./exchangeRetry";
 import {
@@ -102,9 +103,6 @@ export const LOOPBACK_REDIRECT_URI =
  */
 export const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
 
-/** How long a pending cache write waits for more writes to join it. */
-const FLUSH_DEBOUNCE_MS = 250;
-
 /** How many drafts the Drafts mailbox lists, newest first. */
 export const DRAFTS_LIST_CAP = 100;
 
@@ -148,6 +146,12 @@ function quote(value: string): string {
  */
 export function localCache(
   key = "winnow.gmail.cache",
+  options: {
+    /** When idle work runs; the browser's `requestIdleCallback` by default (tests drive it). */
+    scheduler?: IdleScheduler;
+    /** Calls back when the page is leaving, to write at once; `onPageLeave` by default. */
+    lifecycle?: (flushNow: () => void) => () => void;
+  } = {},
 ): MailboxCache & CursorStore & { flush(): Promise<void>; cursorClear(): Promise<void> } {
   /**
    * The mirror, keyed by Gmail id.
@@ -165,7 +169,6 @@ export function localCache(
    * the initial parse.
    */
   let mirror: Map<GmailId, Email> | null = null;
-  let flushHandle: ReturnType<typeof setTimeout> | null = null;
   /** The last persistence failure, or `null`. Reported by `flush()`. */
   let flushError: unknown = null;
 
@@ -182,14 +185,12 @@ export function localCache(
   };
 
   /**
-   * Push the mirror to storage now.
-   *
-   * Records the failure instead of discarding it. `flush()` is where it surfaces.
+   * Hand a serialised mailbox to storage. Records the failure instead of discarding it;
+   * `flush()` is where it surfaces.
    */
-  const writeNow = (): void => {
-    if (!mirror) return;
+  const commit = (json: string): void => {
     try {
-      globalThis.localStorage?.setItem(`${key}.messages`, JSON.stringify([...mirror.values()]));
+      globalThis.localStorage?.setItem(`${key}.messages`, json);
       flushError = null;
     } catch (error) {
       flushError = error ?? new Error("cache write failed");
@@ -197,19 +198,19 @@ export function localCache(
   };
 
   /**
-   * Ask for a write, joining any already pending.
-   *
-   * The `flushHandle` check is the coalescing: the first mutation in a burst
-   * schedules, and everything after it for the next 250ms rides along on that one
-   * timer rather than each writing its own full copy.
+   * The writer: every mutation asks for a write, and a burst of them shares one, which
+   * runs in idle time and in chunks (`idleWrite.ts`) instead of stalling a frame. Leaving
+   * the page writes whatever is pending at once.
    */
-  const scheduleFlush = (): void => {
-    if (flushHandle !== null) return;
-    flushHandle = setTimeout(() => {
-      flushHandle = null;
-      writeNow();
-    }, FLUSH_DEBOUNCE_MS);
-  };
+  const writer = createIdleWriter<Email>({
+    rows: () => (mirror ? [...mirror.values()] : null),
+    commit,
+    scheduler: options.scheduler,
+  });
+  (options.lifecycle ?? onPageLeave)(() => {
+    writer.flushNow();
+  });
+  const scheduleFlush = (): void => writer.schedule();
 
   /** Replace the mirror and schedule one write. */
   const setAll = (emails: readonly Email[]): void => {
@@ -252,10 +253,7 @@ export function localCache(
       setAll(emails);
     },
     async clear() {
-      if (flushHandle !== null) {
-        clearTimeout(flushHandle);
-        flushHandle = null;
-      }
+      writer.cancel();
       mirror = new Map();
       flushError = null;
       try {
@@ -273,11 +271,9 @@ export function localCache(
      * this history id", and that claim is only true if the cache actually landed.
      */
     async flush() {
-      if (flushHandle !== null) {
-        clearTimeout(flushHandle);
-        flushHandle = null;
-      }
-      writeNow();
+      // Pending or not: a flush always writes the mirror, so it reports on the
+      // storage's real state rather than on a write that landed earlier.
+      if (!writer.flushNow() && mirror) commit(JSON.stringify([...mirror.values()]));
       if (flushError !== null) throw flushError;
     },
 
