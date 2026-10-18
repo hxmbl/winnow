@@ -110,7 +110,9 @@ describe("FilterLearning", () => {
     const email = evri();
     const model = FilterLearning.empty().record(email, "shipping", true, 1);
     const learned = model.apply(email, signalsOf(email));
-    expect(learned.shipping).toBe(true);
+    // A per-filter override; the classifier's own flag is left as it was.
+    expect(learned.filterOverrides).toEqual({ shipping: true });
+    expect(learned.shipping).toBe(false);
     expect(matchesBuiltin("shipping", email, learned, profile)).toBe(true);
     expect(model.decide(email, "shipping", signalsOf(email))).toEqual({ by: "message", into: true });
   });
@@ -195,7 +197,9 @@ describe("FilterLearning", () => {
     for (const [i, email] of [a, b, c].entries()) model = model.record(email, "shipping", false, i);
     const decision = model.decide(target, "shipping", base);
     expect(decision).toMatchObject({ by: "similar", into: false });
-    expect(model.apply(target, base).shipping).toBe(false);
+    const learned = model.apply(target, base);
+    expect(learned.filterOverrides?.shipping).toBe(false);
+    expect(matchesBuiltin("shipping", target, learned, profile)).toBe(false);
   });
 
   it("can put mail in Important and take it out", () => {
@@ -204,7 +208,7 @@ describe("FilterLearning", () => {
     expect(isImportant(email, base)).toBe(false);
     const model = FilterLearning.empty().record(email, "important", true, 1);
     const learned = model.apply(email, base);
-    expect(learned.importantOverride).toBe(true);
+    expect(learned.filterOverrides?.important).toBe(true);
     expect(isImportant(email, learned)).toBe(true);
     const back = model.record(email, "important", false, 2).apply(email, base);
     expect(isImportant(email, back)).toBe(false);

@@ -11,7 +11,8 @@
 import type { Email } from "../model/email";
 import {
   BUILTIN_FILTERS,
-  isImportant,
+  inSignalFilter,
+  isSignalFilter,
   isUnsafe,
   PERMANENT_FILTERS,
   type BuiltinSmartFilter,
@@ -50,41 +51,13 @@ export function matchesBuiltin(
 ): boolean {
   const safe = !isUnsafe(signals);
 
+  // The filters a correction can change are answered by one shared predicate, which
+  // reads the user's per-filter correction first. The badge asks the same function.
+  if (isSignalFilter(filter)) return inSignalFilter(filter, email, signals);
+
   switch (filter) {
     case "starred":
       return email.starred;
-
-    case "important":
-      // Delegated to `isImportant` rather than written out here, because the badge
-      // on the message is the same question asked by a different caller — and the two
-      // copies drifted. See `isImportant` for what they disagreed about.
-      return isImportant(email, signals);
-
-    case "urgent":
-      // Marketing "last chance!" is promo pressure, not urgency — unless the
-      // sender explicitly flagged it.
-      return signals.urgentText && safe && !(signals.promotional && !email.urgent);
-
-    case "security":
-      return signals.security;
-
-    case "needs_action":
-      // Newsletters are excluded: every issue "needs" a click, and counting
-      // that would bury real asks under the weekly digest.
-      return signals.needsAction && safe && !signals.newsletter;
-
-    case "receipts":
-      return signals.finance && safe;
-    case "codes":
-      return signals.codes && safe;
-    case "shipping":
-      return signals.shipping && safe;
-    case "travel":
-      return signals.travel && safe;
-    case "events":
-      return signals.events && safe;
-    case "social":
-      return signals.social && safe;
 
     case "new_senders":
       return safe && profile.firstTimeSenders.includes(email.sender);
@@ -110,11 +83,6 @@ export function matchesBuiltin(
         !signals.security &&
         !signals.needsAction
       );
-
-    case "newsletters":
-      return signals.newsletter;
-    case "promotional":
-      return signals.promotional;
 
     case "low_priority":
       // Genuinely skippable — not "is a newsletter". The score test is

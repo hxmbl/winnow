@@ -921,7 +921,10 @@ export class WinnowStore {
     inbox: ReadonlySet<Email>;
     stats: ProfileStats;
     profile: UserProfile;
-    /** What the built-in rules said, before `filterLearning`; for "Why it's here". */
+    /**
+     * What the built-in rules said, before `filterLearning`: for "Why it's here" and for
+     * star learning, which must see the classifier's own output, never corrections.
+     */
     baseSignals: SignalMap;
     signals: SignalMap;
     /**
@@ -2084,7 +2087,7 @@ export class WinnowStore {
     if (!email) return;
 
     const starred = !email.starred;
-    const signals = this.signalsFor(email);
+    const signals = this.rawSignalsFor(email);
     const learning = this.state.learning.recordStar(email, signals, starred, this.now());
 
     this.mutate(id, () => ({ ...email, starred }), async () => {
@@ -2600,6 +2603,22 @@ export class WinnowStore {
         this.markOpenedRead();
       }
     }
+  }
+
+  /**
+   * The classifier's own signals for a message, with no smart-filter correction in them:
+   * what star learning reads, so it learns from the score's real inputs and never from a
+   * filter the user corrected.
+   */
+  private rawSignalsFor(email: Email): EmailSignals {
+    if (email.mailbox === "inbox") {
+      this.inboxAnalysis();
+      const base = this.inboxCache?.baseSignals.get(email.id);
+      if (base) return base;
+    }
+    const { filterOverrides: _corrections, ...raw } = this.signalsFor(email);
+    void _corrections;
+    return raw;
   }
 
   /** Signals for a message, classifying it if the view has not yet. */

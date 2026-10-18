@@ -25,6 +25,10 @@
  *      step 3: their answer is taken to be right three times in four (`BUILT_IN_ODDS`),
  *      so one similar correction rarely overturns it, and two or three usually do.
  *
+ * A correction changes exactly one filter. It is applied as a per-filter override
+ * (`EmailSignals.filterOverrides`), never by rewriting the classifier's flags, so it
+ * cannot leak into another filter, the importance score or star learning.
+ *
  * So learned evidence can both add a message to a filter and take it out of one the
  * built-in rules put it in. No score is ever shown; "Why it's here" (`filterExplain.ts`)
  * says it in words.
@@ -38,67 +42,44 @@
 
 import type { Email } from "../model/email";
 import {
-  isImportant,
-  type BuiltinSmartFilter,
+  SIGNAL_FILTERS,
+  builtInSignalFilter,
+  isSignalFilter,
   type EmailSignals,
+  type SignalFilter,
 } from "../model/signals";
 import { cachedClues, canRuleDomain, clueKind, registrableDomain, senderAddress } from "./filterClues";
 
 // ── What can be learned ─────────────────────────────────────────────────────
 
 /**
- * The smart filters a correction can change, in rail order, and the signal each one
- * reads. Filters that are facts about a message rather than a judgement — Starred,
- * Unread, Files, the contact buckets, Read later, Long reads and Unsafe — are not here:
- * they are changed by starring, reading, or "Not spam", not by teaching.
+ * The smart filters a correction can change, in rail order. Filters that are facts about
+ * a message rather than a judgement — Starred, Unread, Files, the contact buckets, Read
+ * later, Long reads and Unsafe — are not here: they are changed by starring, reading, or
+ * "Not spam", not by teaching. The list lives beside the predicate (`SIGNAL_FILTERS`), so
+ * the filter, its badge and the learning read one answer.
  */
-export const LEARNABLE_FILTERS = [
-  "important",
-  "urgent",
-  "needs_action",
-  "security",
-  "codes",
-  "shipping",
-  "travel",
-  "events",
-  "receipts",
-  "newsletters",
-  "promotional",
-  "social",
-] as const satisfies readonly BuiltinSmartFilter[];
+export const LEARNABLE_FILTERS = SIGNAL_FILTERS;
 
-export type LearnableFilter = (typeof LEARNABLE_FILTERS)[number];
-
-type SignalFlag = "urgentText" | "needsAction" | "security" | "codes" | "shipping" | "travel" | "events" | "finance" | "newsletter" | "promotional" | "social";
-
-const SIGNAL_FOR: Record<Exclude<LearnableFilter, "important">, SignalFlag> = {
-  urgent: "urgentText",
-  needs_action: "needsAction",
-  security: "security",
-  codes: "codes",
-  shipping: "shipping",
-  travel: "travel",
-  events: "events",
-  receipts: "finance",
-  newsletters: "newsletter",
-  promotional: "promotional",
-  social: "social",
-};
+export type LearnableFilter = SignalFilter;
 
 export function isLearnable(filter: string): filter is LearnableFilter {
-  return (LEARNABLE_FILTERS as readonly string[]).includes(filter);
+  return isSignalFilter(filter);
 }
 
-/** What the built-in rules say about one filter for one message. */
+/**
+ * What the built-in rules say about one filter for one message: exactly what the filter
+ * would show with no correction, gates included (Urgent leaves promos out, most filters
+ * leave unsafe mail out). The naive-Bayes prior starts from this, so it starts from what
+ * the user actually sees.
+ */
 export function builtInSays(filter: LearnableFilter, email: Email, signals: EmailSignals): boolean {
-  if (filter === "important") return isImportant(email, { ...signals, importantOverride: undefined });
-  return signals[SIGNAL_FOR[filter]];
+  return builtInSignalFilter(filter, email, signals);
 }
 
-/** The signals with one filter's answer set, the way every reader of signals sees it. */
+/** The signals with one filter's answer set as an override; the classifier's flags stay. */
 function withAnswer(signals: EmailSignals, filter: LearnableFilter, into: boolean): EmailSignals {
-  if (filter === "important") return { ...signals, importantOverride: into };
-  return { ...signals, [SIGNAL_FOR[filter]]: into };
+  return { ...signals, filterOverrides: { ...signals.filterOverrides, [filter]: into } };
 }
 
 // ── The numbers, all of them ────────────────────────────────────────────────
@@ -455,15 +436,15 @@ export class FilterLearning {
   }
 
   /**
-   * The signals with every learned answer applied. Returns the same object when nothing
-   * changed, so an untouched message costs nothing downstream.
+   * The signals with every learned answer applied as a per-filter override. Returns the
+   * same object when nothing changed, so an untouched message costs nothing downstream.
    */
   apply(email: Email, signals: EmailSignals): EmailSignals {
     let next = signals;
     for (const filter of this.filtersWithCorrections()) {
       const decision = this.decide(email, filter, signals);
       if (decision.by === "built-in") continue;
-      if (decision.into === builtInSays(filter, email, signals) && filter !== "important") continue;
+      if (decision.into === builtInSays(filter, email, signals)) continue;
       next = withAnswer(next, filter, decision.into);
     }
     return next;
