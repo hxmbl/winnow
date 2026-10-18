@@ -162,7 +162,19 @@ export const SETTINGS = {
     category: "sync",
     label: "Notify me about new mail",
     explanation:
-      "Shows a system notification for messages that arrived since the last sync, never for older mail, and never for senders you have muted. Your device asks for permission the first time; if you decline, this switches itself back off.",
+      "Shows a system notification for each message that arrived in your inbox since the last sync, up to five at once with a summary for the rest. Never for older mail, mail already read, or senders you have muted or hidden. Your device asks for permission the first time; if you decline, this switches itself back off.",
+  },
+  notificationActions: {
+    category: "sync",
+    label: "Notification buttons",
+    explanation:
+      "Which buttons a new-mail notification offers. Reply sends from the notification on Android, and opens the composer on a computer; Delete moves the message to the Trash, never deletes it for good; Mark read marks it read in Gmail. On a Mac, and in the browser, a notification has no buttons and opens the message instead.",
+  },
+  notificationPrivacy: {
+    category: "sync",
+    label: "Hide preview on lock screen",
+    explanation:
+      "On, a notification on a locked phone says only that Winnow has new mail, not who sent it or what it says; unlock to see the rest. A computer has no separate lock-screen version, so there it shows the sender and \"New message\" instead of the subject. Nothing about this leaves the device.",
   },
   backgroundSync: {
     category: "sync",

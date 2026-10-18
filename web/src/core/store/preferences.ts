@@ -8,6 +8,7 @@
 
 import { isAccentTheme, isAppearance } from "../model/appearance";
 import { isUndoSendSeconds } from "../mail/undoSend";
+import { DEFAULT_NOTIFICATION_ACTIONS } from "../notify/notifications";
 import type { Preferences } from "./store";
 
 /** Preferences, keeping only the keys and values the current build knows about. */
@@ -42,6 +43,19 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (isUndoSendSeconds(source.undoSendSeconds)) out.undoSendSeconds = source.undoSendSeconds;
   if (typeof source.notificationsEnabled === "boolean") {
     out.notificationsEnabled = source.notificationsEnabled;
+  }
+  // Each button on its own: a missing or non-boolean one keeps its default (on), so an
+  // older blob or a newer build's extra button never switches the others off.
+  if (source.notificationActions && typeof source.notificationActions === "object") {
+    const actions = source.notificationActions as Record<string, unknown>;
+    out.notificationActions = {
+      reply: typeof actions.reply === "boolean" ? actions.reply : DEFAULT_NOTIFICATION_ACTIONS.reply,
+      trash: typeof actions.trash === "boolean" ? actions.trash : DEFAULT_NOTIFICATION_ACTIONS.trash,
+      read: typeof actions.read === "boolean" ? actions.read : DEFAULT_NOTIFICATION_ACTIONS.read,
+    };
+  }
+  if (typeof source.notificationHidePreview === "boolean") {
+    out.notificationHidePreview = source.notificationHidePreview;
   }
   if (typeof source.backgroundSync === "boolean") out.backgroundSync = source.backgroundSync;
   if (typeof source.backgroundSyncInterval === "number" && source.backgroundSyncInterval > 0) {

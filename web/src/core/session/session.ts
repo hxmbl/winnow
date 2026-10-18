@@ -61,6 +61,7 @@ import {
   type GoogleContactsStore,
 } from "../contacts/google";
 import { buildMime } from "../gmail/mime";
+import { notificationReplyDraft } from "../notify/notifications";
 import { base64UrlDecode } from "../gmail/dto";
 import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
 import { loadedBodyOf, mailboxFor, toDraftEmail } from "../gmail/mapper";
@@ -1201,6 +1202,24 @@ export class GmailSession {
         return rows
           .filter((row): row is Email => row !== null)
           .sort((a, b) => b.receivedAt - a.receivedAt);
+      },
+
+      async replyHeads(gmailIds) {
+        // The composer's own path (`rawFor` → `buildMime`) for the notification's reply
+        // with an empty body: everything but the text, which the native side appends.
+        // One message failing (not cached any more) costs that message its Reply button.
+        const all = await loadCache();
+        const heads: Record<string, string> = {};
+        for (const gmailId of gmailIds) {
+          const email = all.find((candidate) => candidate.gmailId === gmailId);
+          if (!email) continue;
+          try {
+            heads[gmailId] = (await rawFor(notificationReplyDraft(email), gmailId, true)).raw;
+          } catch {
+            // No head, no inline reply for this one; the notification still shows.
+          }
+        }
+        return heads;
       },
 
       drafts: {

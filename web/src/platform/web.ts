@@ -2,6 +2,7 @@
  * Browser platform.
  */
 
+import type { NotificationActionEvent } from "../core/notify/notifications";
 import type { TokenStore } from "../core/gmail/tokens";
 import { localStorageCredentialStore, type CredentialStore } from "../core/session/credentials";
 import { parseRedirect } from "../core/session/redirect";
@@ -150,26 +151,40 @@ export const webPlatform: WebPlatform = {
   async notifyNewMail(mail: NewMailNotification): Promise<void> {
     const NotificationCtor = globalThis.Notification;
     if (!NotificationCtor) return;
-    if (NotificationCtor.permission === "granted") {
-      const notification = new NotificationCtor(mail.title, {
-        body: mail.body,
-        // The tag collapses a burst into one notification. Without it, forty
-        // messages arriving together produce forty toasts and the user dismisses
-        // all of them without reading any.
+    if (NotificationCtor.permission === "default") {
+      await NotificationCtor.requestPermission();
+      return;
+    }
+    if (NotificationCtor.permission !== "granted") return;
+    // A browser notification can carry no buttons without a service worker, which
+    // Winnow does not have, so each one is click-to-open: the closure holds the id,
+    // and the tab is alive to act on it. A tag per message keeps a re-sync from
+    // doubling one up; the summary has its own and collapses a burst.
+    for (const message of mail.messages) {
+      const notification = new NotificationCtor(message.title, {
+        body: mail.hidePreview ? "New message" : message.subject,
+        tag: `winnow-${message.gmailId}`,
+      });
+      notification.onclick = () => {
+        notification.close();
+        emitNotificationAction({ action: "open", messageId: message.messageId, gmailId: message.gmailId, origin: "web" });
+      };
+    }
+    if (mail.total > mail.messages.length) {
+      const summary = new NotificationCtor(mail.summaryTitle, {
+        body: mail.hidePreview ? "" : mail.summaryBody,
         tag: "winnow-new-mail",
       });
-      // A click on a browser notification cannot focus an existing tab, so the
-      // best available behaviour is to bring this one forward. Opening the right
-      // message is not possible here: `Notification` gives JS no way to carry a
-      // payload through to the click handler, which is why the desktop build's
-      // native notification carries message ids and this one does not.
-      notification.onclick = () => {
+      summary.onclick = () => {
+        summary.close();
         globalThis.focus?.();
-        globalThis.location?.assign("/");
       };
-    } else if (NotificationCtor.permission === "default") {
-      await NotificationCtor.requestPermission();
     }
+  },
+
+  onNotificationAction(handler: (event: NotificationActionEvent) => void): () => void {
+    notificationHandlers.add(handler);
+    return () => notificationHandlers.delete(handler);
   },
 
   async requestNotificationPermission(): Promise<boolean> {
@@ -221,3 +236,10 @@ export const webPlatform: WebPlatform = {
     globalThis.focus?.();
   },
 };
+
+/** Who hears a browser notification's click. Module state: the tab is the only listener. */
+const notificationHandlers = new Set<(event: NotificationActionEvent) => void>();
+
+function emitNotificationAction(event: NotificationActionEvent): void {
+  for (const handler of notificationHandlers) handler(event);
+}

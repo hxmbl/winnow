@@ -13,6 +13,7 @@ import { ArrowLeft, Check, ChevronRight, RotateCcw } from "lucide-react";
 import { Sheet } from "./Overlay";
 import { InfoButton, RadioCards, Row, Section, SettingBlock, SettingLabel, Toggle } from "./SettingsControls";
 import { BINDINGS } from "../../core/mail/keybinds";
+import type { NotificationActions } from "../../core/notify/notifications";
 import { categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
@@ -35,6 +36,13 @@ import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
 import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
+
+/** The notification buttons Settings can switch, in the order a notification shows them. */
+const NOTIFICATION_BUTTONS: readonly { key: keyof NotificationActions; label: string }[] = [
+  { key: "reply", label: "Reply" },
+  { key: "read", label: "Mark read" },
+  { key: "trash", label: "Delete" },
+];
 
 /**
  * The three standing answers about remote images.
@@ -129,6 +137,10 @@ export type SettingsProps = {
   onGravatars: (value: boolean) => void;
   notificationsEnabled: boolean;
   onNotifications: (value: boolean) => void;
+  /** Which buttons a notification offers, and the lock-screen privacy switch. */
+  notificationActions: NotificationActions;
+  notificationHidePreview: boolean;
+  onNotificationSettings: (patch: { notificationActions?: NotificationActions; notificationHidePreview?: boolean }) => void;
   /** Null on the web, where there is no background thread to hand. */
   backgroundSync: boolean | null;
   onBackgroundSync: (value: boolean) => void;
@@ -524,6 +536,41 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
           <Row setting="notifications">
             <Toggle checked={props.notificationsEnabled} onChange={props.onNotifications} label="Notify about new mail" />
           </Row>
+          {props.notificationsEnabled && (
+            <>
+              <Row setting="notificationActions">
+                <div role="group" aria-label="Notification buttons" className="flex items-center gap-0.5 rounded-ctl bg-sheen p-0.5">
+                  {NOTIFICATION_BUTTONS.map((button) => {
+                    const on = props.notificationActions[button.key];
+                    return (
+                      <button
+                        key={button.key}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          props.onNotificationSettings({
+                            notificationActions: { ...props.notificationActions, [button.key]: !on },
+                          })
+                        }
+                        className={`rounded-ctl px-2.5 py-1 text-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                          on ? "bg-surface text-ink shadow-pane" : "text-ink-muted hover:text-ink-body"
+                        }`}
+                      >
+                        {button.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Row>
+              <Row setting="notificationPrivacy">
+                <Toggle
+                  checked={props.notificationHidePreview}
+                  onChange={(value) => props.onNotificationSettings({ notificationHidePreview: value })}
+                  label="Hide preview on lock screen"
+                />
+              </Row>
+            </>
+          )}
           {props.isDesktop && props.backgroundSync !== null ? (
             <>
               <Row setting="backgroundSync">

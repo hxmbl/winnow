@@ -117,6 +117,7 @@ import { BrandLogoCache } from "./core/avatars/logoCache";
 import { dohResolver } from "./core/avatars/bimi";
 import { contactsFailureNotice } from "./core/gmail/people";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
+import { onReplyRequest } from "./ui/notificationActions";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -1957,6 +1958,9 @@ export function App({ store }: Props) {
   pillsRef.current = pills;
   const openReplyRef = useRef(openReply);
   openReplyRef.current = openReply;
+  // A notification's Reply on the desktop: the message is already open, so the composer
+  // opens on it exactly as R would (`ui/notificationActions.ts`).
+  useEffect(() => onReplyRequest(() => openReplyRef.current()), []);
   const openForwardRef = useRef(openForward);
   openForwardRef.current = openForward;
   const openComposeRef = useRef(openCompose);
@@ -3282,6 +3286,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               }
             });
           }}
+          notificationActions={preferences.notificationActions}
+          notificationHidePreview={preferences.notificationHidePreview}
+          onNotificationSettings={(patch) => store.setPreferences(patch)}
           backgroundSync={info?.backgroundSync ?? null}
           onBackgroundSync={(backgroundSync) => store.setPreferences({ backgroundSync })}
           backgroundSyncInterval={preferences.backgroundSyncInterval}
