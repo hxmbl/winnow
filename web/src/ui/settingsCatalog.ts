@@ -13,6 +13,7 @@
 
 export type CategoryId =
   | "reading"
+  | "filters"
   | "compose"
   | "appearance"
   | "privacy"
@@ -36,6 +37,12 @@ export const CATEGORIES: readonly SettingsCategory[] = [
     label: "Reading",
     intro:
       "How your mail is ordered and what happens when you open it. Winnow learns from what you star and hide, and you can see or undo what it has learned here.",
+  },
+  {
+    id: "filters",
+    label: "Smart filters",
+    intro:
+      "Winnow sorts your inbox into smart filters with built-in rules. When it gets one wrong, use “Change smart filters…” on the message, and Winnow learns from that correction, here on this device. This is what it has learnt, and how to take it back.",
   },
   {
     id: "compose",
@@ -99,6 +106,18 @@ export type SettingDefinition = {
  * its category, label and explanation.
  */
 export const SETTINGS = {
+  filterLearning: {
+    category: "filters",
+    label: "What's been learnt",
+    explanation:
+      "Every time you move a message with “Change smart filters…”, Winnow keeps that correction. A correction on mail from a company teaches a sender rule for its domain (for gmail.com and other shared domains, only the exact address); similar mail is judged by its tracking numbers, order numbers, headers, Gmail category and a few words. Remove any sender rule here. It is stored on this device only, never synced, and erased when you sign out or switch account.",
+  },
+  resetFilterLearning: {
+    category: "filters",
+    label: "Reset what's learnt",
+    explanation:
+      "Forgets every correction and sender rule for every smart filter, so they go back to Winnow's built-in rules. It asks first. To reset only one filter, use Reset beside it above.",
+  },
   sortBy: {
     category: "reading",
     label: "Sort messages by",

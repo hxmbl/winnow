@@ -35,6 +35,8 @@ import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
 import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
+import type { FilterLearning, LearnableFilter } from "../../core/learn/filterLearning";
+import { SmartFilterSettings } from "./SmartFilterSettings";
 
 /**
  * The three standing answers about remote images.
@@ -142,6 +144,10 @@ export type SettingsProps = {
    * the part that explains the weights on screen.
    */
   events: readonly FeedbackEvent[];
+  /** What "Change smart filters…" has taught; Settings → Smart filters. */
+  filterLearning: FilterLearning;
+  onRemoveFilterRule: (filter: LearnableFilter, key: string) => void;
+  onResetFilterLearning: (filter?: LearnableFilter) => void;
   blockedSenders: readonly string[];
   onUnblock: (sender: string) => void;
   /** Senders muted from the sender menu: listed, but silent. */
@@ -452,6 +458,14 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
   switch (category) {
     case "reading":
       return <ReadingSettings props={props} />;
+    case "filters":
+      return (
+        <SmartFilterSettings
+          model={props.filterLearning}
+          onRemoveRule={props.onRemoveFilterRule}
+          onReset={props.onResetFilterLearning}
+        />
+      );
     case "compose":
       return (
         <Section>

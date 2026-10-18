@@ -90,6 +90,9 @@ import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer } from "./ui/components/Composer";
 import { SendingStrip } from "./ui/components/SendingStrip";
 import { LabelPicker } from "./ui/components/LabelPicker";
+import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
+import { WhyHere } from "./ui/components/WhyHere";
+import { movedNotice } from "./ui/smartFilterPicker";
 import { Settings } from "./ui/components/SettingsPanel";
 import { ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
@@ -1490,6 +1493,18 @@ export function App({ store }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labelPicker]);
 
+  /**
+   * "Change smart filters…" is open for these inbox messages. Each tick moves them at once
+   * and is a correction Winnow learns from; see `core/learn/filterLearning.ts`.
+   */
+  const [filterPicker, setFilterPicker] = useState<number[] | null>(null);
+  const [filterPickerStatus, setFilterPickerStatus] = useState("");
+  const openFilterPicker = useCallback((ids: readonly number[]) => {
+    if (ids.length === 0) return;
+    setFilterPickerStatus("");
+    setFilterPicker([...ids]);
+  }, []);
+
   /** "Send without a subject?" is up, holding the recipients Send was pressed with. */
   const [confirmNoSubject, setConfirmNoSubject] = useState<Pick<Draft, "to" | "cc" | "bcc"> | null>(null);
 
@@ -2564,6 +2579,11 @@ const listSelectedId = phone
   ? null
   : (view.threads[view.selectedIndex]?.representative.id ?? snapshot.selectedId);
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
+  /**
+   * Smart filters sort the inbox, so the list offers "Change smart filters…" there only:
+   * a label view mixes in mail from every folder. The reader goes by the message itself.
+   */
+  const smartFiltersHere = snapshot.mailbox === "inbox" && snapshot.labelView === null;
 
   /**
    * The composer, built once and placed by layout: docked in the reader pane for a
@@ -2898,6 +2918,20 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
       )}
 
+      {filterPicker && (
+        <SmartFilterPicker
+          count={filterPicker.length}
+          membership={store.smartFilterMembership(filterPicker)}
+          reasons={filterPicker.length === 1 ? store.explainSmartFilters(filterPicker[0]) : []}
+          status={filterPickerStatus}
+          onChange={(filter, into) => {
+            store.changeSmartFilters(filterPicker, [{ filter, into }]);
+            setFilterPickerStatus(movedNotice(FILTER_LABELS[filter], into, filterPicker.length));
+          }}
+          onClose={() => setFilterPicker(null)}
+        />
+      )}
+
       {sendWait && <SendingStrip deadline={sendWait.deadline} onUndo={undoSend} onSendNow={sendWaitingNow} />}
       <OfflineIndicator queue={offlineQueue} />
 
@@ -3003,6 +3037,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
                     onLabel={snapshot.mailbox === "drafts" && snapshot.labelView === null ? undefined : () => openLabelPicker([...selection])}
+                    onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
                 </div>
@@ -3066,6 +3101,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
                     onLabel={snapshot.mailbox === "drafts" && snapshot.labelView === null ? undefined : () => openLabelPicker([...selection])}
+                    onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
                 ) : undefined
@@ -3092,7 +3128,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 connected: true,
                 menuOpen: sidebarOpen,
                 selecting: selection.size > 0,
-                overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || labelPicker !== null,
+                overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || labelPicker !== null || filterPicker !== null,
               }}
               syncing={sync.busy}
               top={phoneBarHeight}
@@ -3162,7 +3198,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               )
             }
             swipe={
-              phone && preferences.swipeActions && !menu && !labelPicker && !sidebarOpen && !composer && snapshot.overlay === "none"
+              phone && preferences.swipeActions && !menu && !labelPicker && !filterPicker && !sidebarOpen && !composer && snapshot.overlay === "none"
                 ? swipeConfig
                 : null
             }
@@ -3240,6 +3276,11 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   />
                 ) : null
               }
+              whyHere={
+                selected?.mailbox === "inbox" ? (
+                  <WhyHere reasons={store.explainSmartFilters(selected.id)} onChange={() => openFilterPicker([selected.id])} />
+                ) : null
+              }
               onSenderMenu={(trigger) => {
                 if (selected) openSenderMenu(selected.id, trigger);
               }}
@@ -3284,6 +3325,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 onLabelAs: () => {
                   if (selected) openLabelPicker([selected.id]);
                 },
+                onChangeFilters:
+                  selected?.mailbox === "inbox"
+                    ? () => {
+                        if (selected) openFilterPicker([selected.id]);
+                      }
+                    : undefined,
                 onLoadRemoteContent: act((_store, snap) => {
                 // Not a preference change: this message only. See `remoteFor`.
                 if (snap.view.selected) setRemoteFor(snap.view.selected.id);
@@ -3352,7 +3399,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               : null
           }
           // Back to top, likewise, only over the plain list.
-          backToTopAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !labelPicker}
+          backToTopAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !labelPicker && !filterPicker}
         />
       )}
 
@@ -3422,6 +3469,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             store.setPreferences({ backgroundSyncInterval })
           }
           onResetSorting={store.resetLearning.bind(store)}
+          filterLearning={snapshot.filterLearning}
+          onRemoveFilterRule={store.removeFilterSenderRule.bind(store)}
+          onResetFilterLearning={store.resetFilterLearning.bind(store)}
           events={snapshot.learning.history}
           blockedSenders={preferences.blockedSenders}
           onUnblock={store.unblockSender.bind(store)}
@@ -3644,6 +3694,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 },
                 move: (target) => runOn((s, ids) => s.moveMany(ids, target)),
                 labelAs: () => openLabelPicker(menu.ids),
+                changeFilters: smartFiltersHere ? () => openFilterPicker(menu.ids) : undefined,
                 toggleMuteSender: toggleMute,
                 findFrom: showAll,
                 findSubject: () => {
