@@ -1882,23 +1882,30 @@ function MessageList({
         `pointer-events-none` because this is a copy of a header that is also in the flow
         below; it must not swallow a click meant for the row underneath.
       */}
-      {stickyHeader && (
-        <div
-          data-sticky-day=""
-          className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-surface px-1.5"
-          style={topInset > 0 ? { top: topInset } : undefined}
-        >
-          {/*
-            Under floating chrome the mail shows through the glass above this copy, so its
-            top edge would cut a scrolling row in half; a short fade into the surface
-            softens it. Decorative and behind the chrome.
-          */}
-          {topInset > 0 && (
-            <div aria-hidden data-sticky-fade="" className="absolute inset-x-0 bottom-full h-4 bg-gradient-to-b from-transparent to-surface" />
-          )}
-          <SectionHeader label={stickyHeader.label} count={stickyHeader.count} />
-        </div>
-      )}
+      {stickyHeader &&
+        (topInset > 0 ? (
+          /*
+            Under floating chrome there is no strip at all: an opaque band here (and the
+            fade that softened its top edge) was a wall the mail stopped at, right under
+            the glass. The day rides in its own small glass pill instead, at the sender
+            column, and the rows run under it and on up under the bar.
+          */
+          <div
+            data-sticky-day=""
+            data-floating=""
+            className="pointer-events-none absolute inset-x-0 z-10 px-1.5 pl-[56px] pt-1"
+            style={{ top: topInset }}
+          >
+            <span className="wn-glass inline-flex h-7 items-center gap-2 rounded-full px-3 text-meta">
+              <span className="font-semibold text-ink-muted">{stickyHeader.label}</span>
+              <span className="tabular-nums text-ink-subtle">{stickyHeader.count}</span>
+            </span>
+          </div>
+        ) : (
+          <div data-sticky-day="" className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-surface px-1.5">
+            <SectionHeader label={stickyHeader.label} count={stickyHeader.count} />
+          </div>
+        ))}
     </div>
   );
 }
