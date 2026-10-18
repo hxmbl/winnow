@@ -1582,6 +1582,31 @@ try {
     rowFilters.every((row) => row.labels.every((l) => (l.title ?? "").length > l.text.length + 8)),
     JSON.stringify(rowFilters.flatMap((r) => r.labels).slice(0, 4)),
   );
+  // "Urgent" is not grey: it is drawn in the Urgent chip's hue, the same `--pill-h` the
+  // rail's Urgent pill carries, so a glance down the list catches it.
+  const urgentInk = await page.evaluate(() => {
+    const word = document.querySelector('[data-row-signal="urgent"]');
+    const chip = [...document.querySelectorAll("[data-rail-scroller] button[aria-pressed]")].find((pill) =>
+      /^Urgent\b/.test(pill.getAttribute("aria-label") ?? pill.textContent ?? ""),
+    );
+    if (!word) return null;
+    const rgb = (getComputedStyle(word).color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    return {
+      text: word.textContent?.trim(),
+      color: getComputedStyle(word).color,
+      spread: Math.max(...rgb) - Math.min(...rgb),
+      redLeads: rgb[0] > rgb[1] && rgb[0] > rgb[2],
+      wordHue: getComputedStyle(word).getPropertyValue("--pill-h").trim(),
+      chipHue: chip ? getComputedStyle(chip).getPropertyValue("--pill-h").trim() : null,
+      muted: getComputedStyle(word).color === getComputedStyle(document.documentElement).getPropertyValue("--wn-inkMuted"),
+    };
+  });
+  check(
+    "a row's Urgent word is coloured like the Urgent chip, not grey",
+    Boolean(urgentInk) && urgentInk.text === "Urgent" && urgentInk.spread > 60 && urgentInk.redLeads &&
+      urgentInk.wordHue !== "" && (urgentInk.chipHue === null || urgentInk.chipHue === urgentInk.wordHue),
+    JSON.stringify(urgentInk),
+  );
 
   // ── The reader holds its message when the filters change ──────────────────
 

@@ -43,7 +43,9 @@ import {
   contrastRatio,
   PALETTES,
   paletteFor,
+  composite,
   pillFill,
+  pillInk,
   relativeLuminance,
   resolveScheme,
   type ThemeName,
@@ -619,6 +621,31 @@ describe("the design system stays small", () => {
     const reader = readFileSync(new URL("components/Reader.tsx", import.meta.url), "utf8");
     expect(reader).toMatch(/<h1 className="[^"]*\btext-title\b[^"]*\bfont-semibold\b[^"]*\btracking-\[-0\.01em\][^"]*"/);
   });
+});
+
+describe("the row's Urgent word", () => {
+  /**
+   * The list row says "Urgent" in the Urgent chip's colour: the chip's own hue and
+   * saturation, at the mode's text lightness. It has to clear AA on every plane a row can
+   * be on (resting, hovered, the open or checked row's accent wash under every accent),
+   * because it is 12px text, not a fill.
+   */
+  for (const mode of MODES) {
+    it(`${mode}: is the Urgent chip's hue, and clears AA on every row plane`, () => {
+      const ink = pillInk(FILTER_HUES.urgent, mode);
+      for (const accent of ACCENT_THEMES) {
+        const { color } = paletteFor(mode, accent);
+        for (const plane of ["surface", "surfaceHover", "surfaceSelected", "canvas"] as const) {
+          const base = color[plane].startsWith("rgba") ? composite(color[plane], color.surface) : color[plane];
+          expect(contrastRatio(ink, base), `${ink} on ${plane} (${accent})`).toBeGreaterThanOrEqual(AA_TEXT);
+        }
+      }
+      // Not grey: it carries the chip's colour, not the muted ink it used to be.
+      const { hue, saturation } = hsl(ink);
+      expect(saturation).toBeGreaterThan(0.3);
+      expect(hueGap(hue, FILTER_HUES.urgent.h)).toBeLessThan(4);
+    });
+  }
 });
 
 describe("filter pill colours", () => {

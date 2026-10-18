@@ -39,6 +39,7 @@ import {
   type EmailSignals,
 } from "../../core/model/signals";
 import { filterIcon } from "../filterIcons";
+import { FILTER_HUES } from "../filterColors";
 import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
 import {
@@ -157,12 +158,31 @@ type RowProps = {
  */
 const ROW_SIGNAL_ORDER: readonly BuiltinSmartFilter[] = ["unsafe", "urgent", "security"];
 
-function rowSignal(
-  indicators: readonly BuiltinSmartFilter[],
-  fresh: boolean,
-): { label: string; title: string; danger: boolean } | null {
+type RowSignal = {
+  label: string;
+  title: string;
+  danger: boolean;
+  /** Drawn in this smart filter's chip colour rather than grey (Urgent only). */
+  hue?: BuiltinSmartFilter;
+};
+
+/**
+ * Words drawn in their chip's colour. Urgent is the one a glance has to catch, so it
+ * takes the Urgent chip's hue from the rail (`FILTER_HUES`, at the mode's text
+ * lightness); the rest stay grey so colour keeps meaning something.
+ */
+const TINTED_SIGNALS: ReadonlySet<BuiltinSmartFilter> = new Set(["urgent"]);
+
+function rowSignal(indicators: readonly BuiltinSmartFilter[], fresh: boolean): RowSignal | null {
   const id = ROW_SIGNAL_ORDER.find((candidate) => indicators.includes(candidate));
-  if (id) return { label: FILTER_LABELS[id], title: filterIcon(id).title, danger: id === "unsafe" };
+  if (id) {
+    return {
+      label: FILTER_LABELS[id],
+      title: filterIcon(id).title,
+      danger: id === "unsafe",
+      hue: TINTED_SIGNALS.has(id) ? id : undefined,
+    };
+  }
   if (fresh) return { label: "New", title: "Arrived in the last sync", danger: false };
   return null;
 }
@@ -236,7 +256,7 @@ const Row = memo(function Row({
   const draft = email.gmailDraft !== undefined;
   const name = draft ? draftRowName(email) : displayName(email);
 
-  const signal = draft ? { label: "Draft", title: "Not sent yet", danger: true } : rowSignal(indicators, fresh);
+  const signal: RowSignal | null = draft ? { label: "Draft", title: "Not sent yet", danger: true } : rowSignal(indicators, fresh);
 
   return (
     <div
@@ -377,7 +397,15 @@ const Row = memo(function Row({
                 <span
                   title={signal.title}
                   aria-hidden="true"
-                  className={`text-meta font-medium ${signal.danger ? "text-danger" : "text-ink-muted"}`}
+                  data-row-signal={signal.hue ?? ""}
+                  className={`text-meta font-medium ${
+                    signal.danger ? "text-danger" : signal.hue ? "wn-signal-ink" : "text-ink-muted"
+                  }`}
+                  style={
+                    signal.hue
+                      ? ({ "--pill-h": FILTER_HUES[signal.hue].h, "--pill-s": FILTER_HUES[signal.hue].s } as React.CSSProperties)
+                      : undefined
+                  }
                 >
                   {signal.label}
                 </span>

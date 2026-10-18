@@ -322,6 +322,15 @@ html[data-resizing] iframe {
 }
 
 /*
+ * A pill's hue as text: the list row's "Urgent" word, in the colour of the Urgent chip
+ * on the rail. Same `--pill-h` / `--pill-s` the pill takes, at the mode's text
+ * lightness (`textLightness` in `theme.ts`, checked for AA by `pillInk`'s tests).
+ */
+.wn-signal-ink {
+  color: hsl(var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-textL));
+}
+
+/*
  * The sidebar as an overlay (`Sidebar` in `MailNav.tsx`).
  *
  * The panel slides in from the left edge and the scrim fades in behind it. Both stay

@@ -94,6 +94,14 @@ export type PillRecipe = {
   inkOn: string;
   /** The count's ink. */
   count: string;
+  /**
+   * HSL lightness for a hue used as *text* on the list (the row's "Urgent" word), in
+   * percent. The same hue and saturation as the pill, so the word reads as its chip,
+   * but at a lightness that clears AA on every row plane: the pill's own `lightness`
+   * is tuned for a translucent fill and is too light (light mode) or too dark (dark
+   * modes) for small text. Published as `--wn-pill-textL`; see `.wn-signal-ink`.
+   */
+  textLightness: number;
 };
 
 /**
@@ -215,7 +223,7 @@ const LIGHT: Palette = {
     lift: "none",
   },
 
-  pill: { lightness: 48, saturation: 1, rest: 0.14, on: 0.34, ring: 0.5, ink: "inkBody", inkOn: "ink", count: "inkBody" },
+  pill: { lightness: 48, saturation: 1, rest: 0.14, on: 0.34, ring: 0.5, ink: "inkBody", inkOn: "ink", count: "inkBody", textLightness: 42 },
 };
 
 /**
@@ -312,7 +320,7 @@ const DARK: Palette = {
    * Darker and less saturated than light's: a bright yellow at light's alphas lifts the
    * dark plane so far that #E3E3E3 text on it misses AA.
    */
-  pill: { lightness: 55, saturation: 0.7, rest: 0.16, on: 0.34, ring: 0.55, ink: "ink", inkOn: "ink", count: "ink" },
+  pill: { lightness: 55, saturation: 0.7, rest: 0.16, on: 0.34, ring: 0.55, ink: "ink", inkOn: "ink", count: "ink", textLightness: 68 },
 };
 
 /**
@@ -488,6 +496,7 @@ export function applyTheme(
   root.style.setProperty("--wn-pill-rest", String(pill.rest));
   root.style.setProperty("--wn-pill-on", String(pill.on));
   root.style.setProperty("--wn-pill-ring", String(pill.ring));
+  root.style.setProperty("--wn-pill-textL", `${pill.textLightness}%`);
   root.style.setProperty("--wn-pill-ink", palette.color[pill.ink]);
   root.style.setProperty("--wn-pill-inkOn", palette.color[pill.inkOn]);
   root.style.setProperty("--wn-pill-count", palette.color[pill.count]);
@@ -539,6 +548,15 @@ export function composite(top: string, base: string): string {
   const [r, g, b, a] = parseColor(top);
   const [br, bg, bb] = parseColor(base);
   return toHex([r * a + br * (1 - a), g * a + bg * (1 - a), b * a + bb * (1 - a)]);
+}
+
+/**
+ * A pill hue as text (`.wn-signal-ink`): the pill's hue and saturation at the mode's
+ * `textLightness`, as an opaque `#hex`, for the contrast tests.
+ */
+export function pillInk(hue: { h: number; s: number }, scheme: ThemeName): string {
+  const { pill } = PALETTES[scheme];
+  return toHex(hslToRgb(hue.h, hue.s * pill.saturation, pill.textLightness));
 }
 
 /**

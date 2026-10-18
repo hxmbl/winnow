@@ -465,7 +465,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 
 | File | Responsibility |
 | --- | --- |
-| `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips. At most one signal word per row. |
+| `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips. At most one signal word per row; "Urgent" is drawn in the Urgent chip's hue (`.wn-signal-ink`: `FILTER_HUES.urgent` at the mode's `pill.textLightness`, AA-checked by `pillInk` in `theme.test.ts`), the rest grey. |
 | `Reader.tsx` | The message pane: back bar, header (avatar → sender menu, sender `h2`, subject as the document `h1`), filter tags with their reasons, the three-way image offer, body, attachments, the conversation, and the phone dock. |
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
 | `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next, Compose (no Mark all read anywhere: opening a message marks it read), and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
