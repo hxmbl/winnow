@@ -321,6 +321,7 @@ export function PhoneDock({
       button take them. The list runs all the way to the bottom edge and scrolls visibly
       underneath, padded at its end by `--wn-phone-dock`.
 
+      While Settings is open on a phone the dock rises over its sheet (z 55), chips hidden.
       While the menu is open the dock rises over the scrim and the panel (z 55), and of
       the pill only Expand stays, sitting in the panel's bottom row where it was, so the
       chevron that opened the panel is the one that closes it. The chips are set aside
@@ -331,7 +332,10 @@ export function PhoneDock({
       data-phone-dock=""
       data-menu-open={menuOpen ? "" : undefined}
       className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
-      style={menuOpen ? { zIndex: 55 } : undefined}
+      // Over the open menu, and over Settings, which fills the screen behind the dock so
+      // its tabs (any of them leaves Settings) stay on top; under the sheet's z-50 they
+      // were covered.
+      style={menuOpen || settingsOpen ? { zIndex: 55 } : undefined}
     >
       {/*
         Back to top: a small glass pill centred above the chips, once the list is a screen
