@@ -67,7 +67,7 @@ Six files, in this order, and you will have the shape of the product:
 | `web/src/core/store/store.ts` | The only file that knows about all the state. It owns one derived pass (§5.1) and everything else reads its snapshot. |
 | `web/src/core/classify/classify.ts` | What a message *is*. Pure, synchronous, and the oldest code in the project. |
 | `web/src/core/gmail/sync.ts` | How the mailbox gets here at all: full vs incremental, cursor, caps. |
-| `web/src/platform/types.ts` | The thirteen methods that are allowed to differ between browser and desktop. |
+| `web/src/platform/types.ts` | The fourteen methods that are allowed to differ between browser and desktop. |
 | `web/src/App.tsx` | The keyboard, the theme and the layout, and the three pieces of state that live here rather than in the store. |
 | `native/src-tauri/src/commands.rs` | The whole native surface, thin enough to read in one sitting. |
 
@@ -419,7 +419,9 @@ URI or origin. The secret never appears in an error, a warning or a log.
 
 ## 6. `web/src/platform` — the boundary
 
-`types.ts` is the whole contract. Thirteen methods, and a browser cannot do seven
+`types.ts` is the whole contract. Fourteen methods (plus three optional notification
+helpers, `confirmNotificationAction`, `keptReplies`, `releaseKeptReplies`, that only the
+native host has), and a browser cannot do seven
 of them properly:
 
 | Method | Browser | Desktop |
@@ -429,7 +431,8 @@ of them properly:
 | `credentialStore()` | `localStorage["winnow.google.oauthClient"]` | keychain `google.oauth-client` |
 | `beginSignIn()` | `sessionStorage` + `location.assign` | `oauth_begin` / `open_external` / `oauth_await` on an ephemeral loopback port |
 | `cancelSignIn()` | drop the session key | `oauth_cancel` |
-| `notifyNewMail()` | `Notification` with a shared `tag` | `notify_new_mail`, grouped |
+| `notifyNewMail()` | a `Notification` per message, click-to-open (no buttons without a service worker) | `notify_messages`: per-message with buttons, see §8.3 |
+| `onNotificationAction()` | the click closure | `listen("winnow://notification-action")` |
 | `requestNotificationPermission()` | `Notification.requestPermission()` | `request_notification_permission` |
 | `setUnreadBadge()` | `document.title` | dock badge + tray tooltip |
 | `setBackgroundSync()` | `setInterval`, floor 30 s | a Rust thread, 30–3600 s |
@@ -557,7 +560,10 @@ could be written in TypeScript, it belongs in `web/`.
 | `oauth_begin` | `authorize_url` | `{ port, authorize_url }` | `beginSignIn` |
 | `oauth_await` | `port`, `timeout_ms?` | `AuthOutcome` (`kind: code \| error`) | `beginSignIn` |
 | `oauth_cancel` | `port` | `()` | `cancelSignIn` |
-| `notify_new_mail` | `{ title, body, messageIds }` | `()` | `notifyNewMail` |
+| `notify_new_mail` | `{ title, body, messageIds }` | `()` | unused since `notify_messages`; kept registered until batch D's handler-list edit lands, then remove |
+| `notify_messages` | `batch` (`NotificationBatch`, camelCase) | `()` | `notifyNewMail` (`notify_actions/`) |
+| `notify_action_result` | `result` `{ messageId, title, text, failed }` | `()` | `confirmNotificationAction` |
+| `notify_kept_replies` / `notify_release_kept` | — / `ids` | `Value[]` / `()` | `keptReplies` / `releaseKeptReplies` |
 | `request_notification_permission` | — | `bool` | `requestNotificationPermission` |
 | `open_external` | `url` | `()` | `openExternal` |
 | `save_attachment` | `filename`, `bytes_base64` | `Option<String>` (path) | `saveFile` |
@@ -592,6 +598,50 @@ Three decisions in there are worth not rediscovering:
   bundle builds fine and then has no tray icon), `keyring` with
   `apple-native`/`windows-native`/`sync-secret-service`, and a release profile of
   `opt-level = "s"`, `lto`, `codegen-units = 1`, `strip`.
+
+### 8.3 Notification actions (`src/notify_actions/`, `gen/android/.../notify/`)
+
+One batch per sync from the web layer (`core/notify/notifications.ts`): only unread inbox
+mail from senders neither muted nor hidden, newest first, five per-message notifications
+at most plus a summary, the buttons the user left on, and the lock-screen preview switch.
+There is no "only important" setting to respect yet; `notificationsEnabled`, muted and
+hidden senders and the read state are what gate it.
+
+| Host | Shown by | Reply | Delete / Mark read | Tap | Where the action runs |
+| --- | --- | --- | --- | --- | --- |
+| Android | `NotifyPlugin.kt`: MessagingStyle per message, InboxStyle group summary, `ic_stat_winnow` | Inline (RemoteInput) | Buttons; Delete then offers Undo for 6 s | Opens `winnow://message/<id>` | **Native**, app backgrounded or not: receiver → channel → `android.rs` → `plan::execute` with the keychain tokens; `Http.kt` does the HTTPS |
+| Linux | `notify-rust` over D-Bus | Button opens the composer on the message (no inline reply: KDE's is a vendor extension `notify-rust` does not expose) | Buttons | Opens the message | Webview (hidden, not paused): `ACTION_EVENT` → store `setRead` / `moveWithUndo`; confirmation replaces the notification for 3 s |
+| Windows | `notify-rust` WinRT toast | Button opens the composer (`tauri-winrt-notification` has no toast inputs) | Buttons | Opens the message | Webview, as Linux; only failures get a follow-up toast |
+| macOS | `tauri-plugin-notification`, one grouped notification | — | — | Reveals the window (`RunEvent::Reopen`) | Fallback: actions need `UNUserNotificationCenter` categories; `notify-rust`'s path is the deprecated `NSUserNotificationCenter` blocking a thread per notification, untestable here |
+| Browser | `Notification`, one per message | — | — | Opens the message | — (buttons need a service worker) |
+
+How a press is done:
+
+- **The reply is the composer's message.** At notification time the session builds the
+  header block with `rawFor` → `buildMime` for `notificationReplyDraft` (to the sender
+  only, `Re:`, `In-Reply-To`/`References`, thread id) with an empty body
+  (`MailBackend.replyHeads`). `plan.rs` swaps in the current `Date:` and appends the text
+  exactly as `buildMime` encodes a body; a test on each side pins that (`notifications.test.ts`
+  builds both and compares, `plan.rs` checks the result).
+- **Delete is never permanent**: `modify` add `TRASH` remove `INBOX`; Undo is the app's
+  restore (remove `TRASH`, add `INBOX`). On the desktop it is `moveWithUndo`.
+- **Failures** (`plan::execute` → `finish_for`): a 401 gets one refresh and one replay;
+  a failed send is never resent but saved with `drafts.create` on the same thread
+  ("Couldn't send. Open Winnow", "saved in Drafts"); if that fails too, or there is no
+  token, or the process was restarted just to deliver the press (no Rust to ask), the
+  text stays in `PendingReplies` (written *before* anything is attempted) and the web
+  layer saves it to Drafts once signed in, releasing each only after Gmail has it.
+- **Secrets on Android** cross JNI in-process for one action and are never stored by
+  Kotlin; a refreshed access token is not written back (the web `TokenManager` owns it).
+- **The Kotlin commands are Rust-only**: no `winnow-notify:` permission is granted to the
+  window, so page script cannot reach `http`, and `Http.kt` refuses any host but
+  `gmail.googleapis.com` and `oauth2.googleapis.com`.
+
+What only a device can tell (untested here: no emulator, no macOS or Windows host):
+RemoteInput on Android 12–15, the receiver with the process killed, the deep link from a
+cold start (`get_current` may fire before the webview listens), `Channel` delivery after
+the activity is recreated, the Undo window, D-Bus servers that draw no buttons, and WinRT
+`on_activated` for an unpackaged build.
 
 ---
 
@@ -645,6 +695,7 @@ judged as IPv4.
 | `winnow.pendingAuth`, `winnow.pendingState` | PKCE verifier, sign-in state (`sessionStorage`) | read, or 15 min |
 | keychain `gmail.tokens`, `google.oauth-client` | The same two, on desktop and Android | sign-out (revoked at Google first, from the web layer) / setup |
 | `winnow.mutedFilters.v1` | Retired — deleted on launch | — |
+| Android `SharedPreferences` `winnow.notify` / `pendingReplies` | Replies typed into a notification that are not yet sent or in Drafts | released by the web layer once saved to Drafts |
 
 ---
 
