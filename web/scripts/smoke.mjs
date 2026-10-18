@@ -8011,6 +8011,17 @@ try {
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");
   {
+    // The top bar floats over the list (1.2.3): the empty state starts below it, so
+    // neither the mark nor the line is ever read through the glass.
+    const clearsBar = (page, barSel) =>
+      page.evaluate((barSel) => {
+        const bar = document.querySelector(barSel)?.getBoundingClientRect();
+        const state = document.querySelector("[data-empty-kind]")?.getBoundingClientRect();
+        const art = document.querySelector("[data-empty-kind] .inbox-clear__mark, [data-empty-kind] svg")?.getBoundingClientRect();
+        return bar && state && art
+          ? { barBottom: Math.round(bar.bottom), stateTop: Math.round(state.top), artTop: Math.round(art.top), ok: state.top >= bar.bottom - 1 && art.top >= bar.bottom }
+          : { ok: false, bar: Boolean(bar), state: Boolean(state), art: Boolean(art) };
+      }, barSel);
     // Its own page, so the state the sections above leave behind cannot matter.
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 820 } });
     const c = await ctx.newPage();
@@ -8059,6 +8070,10 @@ try {
         (await empty.locator('[role="status"] [data-clear-headline]').count()) === 1,
     );
     check("no haptic on the desktop", (await c.evaluate(() => window.__buzz)) === 0);
+    {
+      const clear = await clearsBar(c, "[data-list-chrome]");
+      check("desktop: the clear state starts below the floating top bar", clear.ok, JSON.stringify(clear));
+    }
     await c.waitForTimeout(1_900);
     check("the motion ends on its own, and does not replay", (await empty.getAttribute("data-celebrating")) === null);
 
@@ -8173,6 +8188,10 @@ try {
       // Back to the list if the reader stayed open on the next message.
       if ((await ph.locator("[data-empty-kind]").count()) === 0) await ph.keyboard.press("Escape");
       await ph.waitForTimeout(200);
+    }
+    {
+      const clear = await clearsBar(ph, "[data-phone-chrome]");
+      check("phone: the clear state starts below the floating top bar", clear.ok, JSON.stringify(clear));
     }
     const buzz = await ph.evaluate(() => window.__buzz);
     check(
