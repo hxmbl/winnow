@@ -4,6 +4,7 @@ import {
   RUBBER_MAX,
   SPRING_BACK_MS,
   blurForVelocity,
+  glideFrom,
   nextVelocity,
   rubberBand,
   smoothStep,
@@ -92,5 +93,33 @@ describe("wheelDelta", () => {
     expect(wheelDelta(0, 120, 0, 600)).toBe(120);
     expect(wheelDelta(-30, 4, 0, 600)).toBe(-30);
     expect(wheelDelta(0, 3, 1, 600)).toBe(48);
+  });
+});
+
+describe("glideFrom", () => {
+  it("starts from the strip when no glide is in flight", () => {
+    expect(glideFrom(null, 0, 200)).toBe(200);
+  });
+  it("adds notches onto an in-flight glide's target", () => {
+    // The glide last left the strip at 380 on its way to 500: the next notch builds on 500.
+    expect(glideFrom(500, 380, 380)).toBe(500);
+    // scrollLeft snapping to a device pixel is still the glide's own write.
+    expect(glideFrom(500, 380.4, 380)).toBe(500);
+  });
+  it("drops a stale target when something else scrolled the strip mid-glide", () => {
+    // Mid-glide to 500 the strip was moved to 200 (focus, a scrollbar, code): go on from 200,
+    // not from 500, or the next notch lands far past where it should.
+    expect(glideFrom(500, 380, 200)).toBe(200);
+    expect(glideFrom(500, 380, 0)).toBe(0);
+  });
+});
+
+describe("smoothStep on slow frames", () => {
+  it("a long frame closes more of the distance but never passes the target", () => {
+    for (const dt of [16.67, 100, 250, 1000]) {
+      const x = smoothStep(200, 440, dt);
+      expect(x).toBeGreaterThan(200);
+      expect(x).toBeLessThanOrEqual(440);
+    }
   });
 });

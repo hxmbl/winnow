@@ -38,6 +38,21 @@ export function smoothStep(current: number, target: number, dtMs: number): numbe
   return target - distance * kept;
 }
 
+/** A scroll position this far (px) from the glide's last write means someone else moved the strip. */
+export const OUTSIDE_SCROLL_PX = 1;
+
+/**
+ * Where a wheel's glide starts from. While a glide is in flight (`target` set) notches add
+ * up onto its target, so quick turns of the wheel travel the full distance. But if the
+ * strip is no longer where the glide last put it (`written`), something else scrolled it
+ * (a scrollbar drag, focus scrolling a chip into view, code), and the stale target is
+ * dropped: the next notch moves on from where the strip actually is.
+ */
+export function glideFrom(target: number | null, written: number, current: number): number {
+  if (target === null) return current;
+  return Math.abs(current - written) > OUTSIDE_SCROLL_PX ? current : target;
+}
+
 /** The furthest the strip travels past an end, in px. */
 export const RUBBER_MAX = 56;
 

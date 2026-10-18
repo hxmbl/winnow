@@ -14,7 +14,8 @@
  *   Settings fills the screen behind the dock, with no mail showing round it.
  *
  * Its own module so it can run alone (`node scripts/smoke-motion.mjs`, serving `dist/`
- * itself on `WINNOW_PORT`, default 4323) as well as inside `smoke.mjs`.
+ * itself on `WINNOW_PORT`, default 4323; `WINNOW_CPU_THROTTLE=4` to run it on a slowed CPU) as
+ * well as inside `smoke.mjs`.
  */
 
 import path from "node:path";
@@ -57,6 +58,31 @@ const gapPoint = (page, scope) =>
     const under = document.elementFromPoint(x, y);
     return { x, y, gap: b.left - a.right, catcher: Boolean(under?.closest("[data-rail-catcher]")) };
   }, scope);
+
+/**
+ * Wait until the strip is at rest: scrollLeft unchanged over several frames and no rubber
+ * band showing (a glide or spring in flight on a slow runner can outlast any fixed wait).
+ * Gives up after `ms` and reports where it stood, unrounded.
+ */
+const railRest = (page, sel, ms = 3000) =>
+  page.evaluate(
+    ({ sel, ms }) =>
+      new Promise((resolve) => {
+        const el = document.querySelector(sel);
+        const end = performance.now() + ms;
+        let last = NaN;
+        let still = 0;
+        const step = () => {
+          const left = el.scrollLeft;
+          still = left === last && el.style.transform === "" ? still + 1 : 0;
+          last = left;
+          if (still >= 4 || performance.now() >= end) resolve({ left, rested: still >= 4, transform: el.style.transform });
+          else requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }),
+    { sel, ms },
+  );
 
 const listTop = (page) => page.evaluate(() => Math.round(document.querySelector("[data-row-count]").scrollTop));
 const railLeft = (page, scope) =>
@@ -109,7 +135,7 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     // A vertical wheel in a gap: the strip glides sideways, the list stays put.
     await p.mouse.move(gap.x, gap.y);
     await p.mouse.wheel(0, 300);
-    await settle(p, 500);
+    await railRest(p, rail);
     const afterGap = { list: await listTop(p), rail: await railLeft(p, scope) };
     check("a wheel in a gap scrolls the strip sideways and never the list", afterGap.list === 0 && afterGap.rail > 100, JSON.stringify(afterGap));
 
@@ -117,30 +143,106 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     const chip = await p.locator(`${rail} > [data-rail-item]`).nth(3).boundingBox();
     await p.mouse.move(chip.x + chip.width / 2, chip.y + chip.height / 2);
     await p.mouse.wheel(0, 200);
-    await settle(p, 500);
+    await railRest(p, rail);
     const afterChip = { list: await listTop(p), rail: await railLeft(p, scope) };
     check("and over a chip", afterChip.list === 0 && afterChip.rail > afterGap.rail, JSON.stringify({ afterGap, afterChip }));
 
-    // Smoothed: one notch arrives over several frames rather than in one jump.
-    await p.evaluate((sel) => (document.querySelector(sel).scrollLeft = 200), rail);
-    await frames(p, 2);
-    await p.mouse.wheel(0, 240);
-    await frames(p, 1);
-    const early = await railLeft(p, scope);
-    await settle(p, 700);
-    const late = await railLeft(p, scope);
-    check("a wheel notch glides: part of the way after a frame, all of it after", early > 200 && early < 440 && late >= 438, JSON.stringify({ early, late }));
+    // Smoothed: one notch arrives over several frames rather than in one jump, and lands on
+    // its target without passing it. Measured from where the strip starts (with room to
+    // travel the whole notch), and only once the earlier glides have stopped.
+    const NOTCH = 240;
+    const glideStart = await p.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      el.scrollLeft = 200;
+      return { start: el.scrollLeft, room: el.scrollWidth - el.clientWidth - el.scrollLeft };
+    }, rail);
+    const glideRest = await railRest(p, rail);
+    // Every position the strip passes through, read once a frame: the first step is the
+    // glide's first frame however slowly frames come, so one long frame cannot hide it.
+    await p.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const path = [];
+      let frame = 0;
+      const tick = () => {
+        if (el.scrollLeft !== (path.at(-1) ?? el.scrollLeft - 1)) path.push(el.scrollLeft);
+        frame = requestAnimationFrame(tick);
+      };
+      tick();
+      window.__railGlide = { path, stop: () => cancelAnimationFrame(frame) };
+    }, rail);
+    await p.mouse.wheel(0, NOTCH);
+    const glideEnd = await railRest(p, rail);
+    const glidePath = await p.evaluate(() => {
+      const probe = window.__railGlide;
+      probe.stop();
+      delete window.__railGlide;
+      return probe.path;
+    });
+    const steps = glidePath.map((x) => Math.round(x - glideRest.left)).slice(1);
+    const early = steps[0] ?? 0;
+    const late = Math.round(glideEnd.left - glideRest.left);
+    const furthest = Math.max(0, ...steps);
+    check(
+      "a wheel notch glides: part of the way after a frame, all of it (and no further) after",
+      glideStart.room >= NOTCH && glideRest.rested && glideRest.left === glideStart.start && early > 0 && early < NOTCH - 2 && late >= NOTCH - 2 && late <= NOTCH + 1 && furthest <= NOTCH + 1,
+      JSON.stringify({ ...glideStart, rest: glideRest.left, steps, late, settled: glideEnd.rested }),
+    );
 
-    // Rubber band at the start: pulled past, it shows a little and springs back.
+    // Moved by something else mid-glide (focus, a scrollbar, code), the strip stays where it
+    // was put: the glide lets go instead of pulling it back to its old target.
+    await p.mouse.wheel(0, NOTCH);
+    await frames(p, 1);
+    const yielded = await p.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const inFlight = el.scrollLeft;
+      el.scrollLeft = 100;
+      return { inFlight, put: el.scrollLeft };
+    }, rail);
+    const yieldEnd = await railRest(p, rail);
+    check("moved mid-glide, the strip stays where it was put", yieldEnd.rested && yieldEnd.left === yielded.put, JSON.stringify({ ...yielded, after: yieldEnd.left }));
+
+    // Rubber band at the start: pulled past, it shows a little and springs back. The pull is
+    // recorded as it happens (every style write, plus each frame), so a slow frame between
+    // the wheel and a sample cannot hide it.
     await p.evaluate((sel) => (document.querySelector(sel).scrollLeft = 0), rail);
-    await frames(p, 2);
+    const bandRest = await railRest(p, rail);
+    await p.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const probe = { max: 0, writes: 0, stop: null };
+      const read = () => {
+        const x = Number(/translate3d\(([-\d.]+)px/.exec(el.style.transform)?.[1] ?? 0);
+        probe.max = Math.max(probe.max, x);
+      };
+      const observer = new MutationObserver(() => {
+        probe.writes += 1;
+        read();
+      });
+      observer.observe(el, { attributes: true, attributeFilter: ["style"] });
+      let frame = 0;
+      const tick = () => {
+        read();
+        frame = requestAnimationFrame(tick);
+      };
+      frame = requestAnimationFrame(tick);
+      probe.stop = () => {
+        observer.disconnect();
+        cancelAnimationFrame(frame);
+      };
+      window.__railBand = probe;
+    }, rail);
     await p.mouse.wheel(0, -200);
-    await frames(p, 2);
-    const stretched = await p.evaluate((sel) => document.querySelector(sel).style.transform, rail);
-    const pulled = Number(/translate3d\(([-\d.]+)px/.exec(stretched)?.[1] ?? 0);
-    await settle(p, 700);
-    const relaxed = await p.evaluate((sel) => document.querySelector(sel).style.transform, rail);
-    check("past the start it gives a little (under 56px) and springs back", pulled > 0 && pulled < 56 && relaxed === "", JSON.stringify({ stretched, relaxed }));
+    const bandEnd = await railRest(p, rail);
+    const band = await p.evaluate((sel) => {
+      const probe = window.__railBand;
+      probe.stop();
+      delete window.__railBand;
+      return { pulled: probe.max, writes: probe.writes, relaxed: document.querySelector(sel).style.transform, left: document.querySelector(sel).scrollLeft };
+    }, rail);
+    check(
+      "past the start it gives a little (under 56px) and springs back",
+      bandRest.left === 0 && band.pulled > 0 && band.pulled < 56 && band.relaxed === "" && bandEnd.rested && band.left === 0,
+      JSON.stringify({ from: bandRest.left, ...band }),
+    );
     check("and the list never moved", (await listTop(p)) === 0);
 
     // A scroll gesture in a gap does not reach the list either.
@@ -401,6 +503,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const browser = await chromium.launch(
     process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM, args: ["--no-sandbox"] } : {},
   );
+  // WINNOW_CPU_THROTTLE=4 slows every page's CPU that many times (as a busy CI runner).
+  const throttle = Number(process.env.WINNOW_CPU_THROTTLE ?? 1);
+  if (throttle > 1) {
+    const newContext = browser.newContext.bind(browser);
+    browser.newContext = async (...args) => {
+      const ctx = await newContext(...args);
+      const newPage = ctx.newPage.bind(ctx);
+      ctx.newPage = async () => {
+        const page = await newPage();
+        await (await ctx.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle });
+        return page;
+      };
+      return ctx;
+    };
+    console.log(`CPU throttled ${throttle}x`);
+  }
   let passed = 0;
   const failures = [];
   const errors = [];

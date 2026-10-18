@@ -14,7 +14,9 @@
 import { useEffect, type RefObject } from "react";
 import {
   blurForVelocity,
+  glideFrom,
   nextVelocity,
+  OUTSIDE_SCROLL_PX,
   rubberBand,
   smoothStep,
   splitOvershoot,
@@ -67,6 +69,8 @@ export function useRailMotion(
 
     // ── The wheel: smoothed towards a target, the pull past an end accumulated.
     let target: number | null = null;
+    // Where the glide last left scrollLeft, to tell its own writes from anyone else's.
+    let written = 0;
     let pull = 0;
     let glideFrame = 0;
     let lastFrame = 0;
@@ -74,10 +78,17 @@ export function useRailMotion(
     const maxScroll = () => Math.max(0, scroller.scrollWidth - scroller.clientWidth);
     const glide = (now: number) => {
       if (target === null) return;
+      // Something else scrolled the strip mid-glide: let it, rather than pulling it back.
+      if (Math.abs(scroller.scrollLeft - written) > OUTSIDE_SCROLL_PX) {
+        target = null;
+        lastFrame = 0;
+        return;
+      }
       const dt = lastFrame ? now - lastFrame : 16.67;
       lastFrame = now;
       const next = smoothStep(scroller.scrollLeft, target, dt);
       scroller.scrollLeft = next;
+      written = scroller.scrollLeft;
       // scrollLeft snaps to device pixels: within one of the target is there.
       if (Math.abs(target - scroller.scrollLeft) < 1) {
         scroller.scrollLeft = target;
@@ -100,9 +111,10 @@ export function useRailMotion(
         scroller.scrollLeft = Math.min(max, Math.max(0, scroller.scrollLeft + delta));
         return;
       }
-      const from = target ?? scroller.scrollLeft;
+      const from = glideFrom(target, written, scroller.scrollLeft);
       const { scroll, overshoot } = splitOvershoot(from + delta, max);
       target = scroll;
+      written = scroller.scrollLeft;
       // At an end the pull builds (and lets go as soon as the wheel turns back).
       pull = overshoot !== 0 && Math.sign(overshoot) === Math.sign(pull || overshoot) ? pull + overshoot : 0;
       if (pull !== 0) {
