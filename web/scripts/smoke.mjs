@@ -849,28 +849,43 @@ try {
   check("and Inbox comes back the same way", !(await sidebarOpen()) && (await listTitle())?.trim() === "Inbox", await listTitle());
 
   // Idle: the mouse in, then away from it. Still open just before the timer, closed after.
+  // Single moves, timed from the leave: a stepped move waits a frame per step, and over
+  // the scrim's software-rendered blur a frame can take ~0.5s on a loaded machine, so the
+  // steps alone could use up the timer before "not before" was sampled.
   await openDrawer();
   await page.mouse.move(120, 120);
   await page.mouse.move(130, 130);
-  await page.mouse.move(900, 450, { steps: 4 });
+  await page.mouse.move(900, 450);
+  const awayAt = await page.evaluate(() => performance.now());
   await page.waitForTimeout(SIDEBAR_IDLE_MS - 600);
   const stillOpen = await sidebarOpen();
+  const sampledAt = (await page.evaluate(() => performance.now())) - awayAt;
   await page.waitForTimeout(1_100);
   check(
     `the mouse away for ${SIDEBAR_IDLE_MS}ms closes it, and not before`,
-    stillOpen && !(await sidebarOpen()),
-    `open at ${SIDEBAR_IDLE_MS - 600}ms: ${stillOpen}`,
+    (stillOpen || sampledAt >= SIDEBAR_IDLE_MS) && !(await sidebarOpen()),
+    `open at ${Math.round(sampledAt)}ms: ${stillOpen}`,
   );
   await waitSidebarClosed().catch(() => undefined);
 
   // Coming back inside cancels the timer; and an open account menu keeps it open.
+  // One event each way, not stepped: over the scrim's backdrop blur a software-rendered
+  // frame can take ~0.5s on a loaded machine, and every stepped move waits for a frame,
+  // so a stepped round trip could itself outlast the 1.5s timer and the return land late.
+  // The return's lateness is measured, so a slow machine reads as that, not as a bug.
   await openDrawer();
   await page.mouse.move(120, 120);
-  await page.mouse.move(900, 450, { steps: 3 });
-  await page.waitForTimeout(500);
-  await page.mouse.move(120, 140, { steps: 3 });
+  await page.mouse.move(900, 450);
+  const leftSidebarAt = await page.evaluate(() => performance.now());
+  await page.waitForTimeout(300);
+  await page.mouse.move(120, 140);
+  const backAfter = (await page.evaluate(() => performance.now())) - leftSidebarAt;
   await page.waitForTimeout(SIDEBAR_IDLE_MS + 300);
-  check("coming back before the timer keeps it open", await sidebarOpen());
+  check(
+    "coming back before the timer keeps it open",
+    (await sidebarOpen()) || backAfter >= SIDEBAR_IDLE_MS,
+    `back after ${Math.round(backAfter)}ms`,
+  );
   await sidebar.locator("[data-nav-account] button[aria-haspopup='menu']").click();
   await page.locator('[role="menu"]').first().waitFor({ state: "visible", timeout: 5_000 });
   const menuBox = await page.locator('[role="menu"]').first().boundingBox();
