@@ -1756,7 +1756,10 @@ function MessageList({
         onClickCapture={onClickCapture}
         onContextMenu={onContextMenu}
         onKeyDown={onKeyDownList}
-        className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4"
+        // No scroll anchoring: the list places its own window (spacer + measured rows), and
+        // the browser's anchoring fought it, snapping a programmatic or flung scroll back by
+        // a few hundred px and, with reduced motion, flip-flopping between two offsets.
+        className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4 [overflow-anchor:none]"
         // Under floating chrome: the rows start below it, and anything the browser
         // scrolls into view itself (Tab onto a row) stops below it and the pinned day.
         style={topInset > 0 ? { paddingTop: topInset, scrollPaddingTop: coveredTop + 4 } : undefined}
