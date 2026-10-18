@@ -6522,7 +6522,7 @@ try {
     await dialog.waitFor({ timeout: 5_000 });
     await s.waitForTimeout(300);
     check("a phone opens Settings on its category list", (await s.locator('[data-settings-layout="phone"][data-settings-page="list"]').count()) === 1);
-    check("with every category", (await dialog.locator("button[data-category]").count()) === 8);
+    check("with every category", (await dialog.locator("button[data-category]").count()) === 9);
     const dockBox = await s.locator("[data-phone-dock] [data-phone-pill]").boundingBox();
     const dialogBox = await dialog.boundingBox();
     const currentTabs = await tabsNav.evaluateAll((tabs) => tabs.filter((tab) => tab.getAttribute("aria-current") === "page").length);
