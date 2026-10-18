@@ -47,6 +47,13 @@ describe("emptyKindFor", () => {
     expect(emptyKindFor("noSignal", { mailbox: "archive", filters: [] })).toBeNull();
   });
 
+  it("an empty label being browsed is a quiet folder named for it, never a clear Inbox", () => {
+    const travel = { mailbox: "inbox" as const, filters: [], label: { id: "Label_3", name: "Travel" } };
+    expect(emptyKindFor("mailbox", travel)).toEqual({ kind: "quiet", scope: "folder", label: "Travel" });
+    expect(emptyKindFor("filters", { ...travel, filters: [builtinFilter("important")] })).toEqual({ kind: "quiet", scope: "filter" });
+    expect(emptyKindFor("noSignal", travel)).toBeNull();
+  });
+
   it("leaves search and non-empty lists to the remedy screens", () => {
     expect(emptyKindFor("search", inbox)).toBeNull();
     expect(emptyKindFor(null, inbox)).toBeNull();
@@ -132,6 +139,9 @@ describe("viewKey", () => {
     expect(a).not.toBe(viewKey(inbox));
     expect(viewKey({ mailbox: "archive", filters: [] })).not.toBe(viewKey(inbox));
     expect(viewKey(undefined)).toBe("");
+    // Leaving a full Inbox for an empty label is a different view, not a clearing.
+    expect(viewKey({ ...inbox, label: { id: "Label_3", name: "Travel" } })).not.toBe(viewKey(inbox));
+    expect(viewKey({ ...inbox, label: null })).toBe(viewKey(inbox));
   });
 });
 

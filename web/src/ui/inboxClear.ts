@@ -28,6 +28,12 @@ import { FILTER_LABELS, filterKey, type FilterId } from "../core/model/signals";
 export type EmptyContext = {
   mailbox: Mailbox;
   filters: readonly FilterId[];
+  /**
+   * A user label being browsed as a mailbox (the store's `labelView`), or none. While set,
+   * `mailbox` is only where leaving it goes back to, so an empty label is a quiet folder,
+   * never a clear Inbox.
+   */
+  label?: { id: string; name: string } | null;
 };
 
 export type EmptyKind =
@@ -42,6 +48,11 @@ export type EmptyKind =
  */
 export function emptyKindFor(reason: EmptyReason, context: EmptyContext | undefined): EmptyKind | null {
   if (!context) return null;
+  if (context.label) {
+    if (reason === "mailbox") return { kind: "quiet", scope: "folder", label: context.label.name };
+    if (reason === "filters") return { kind: "quiet", scope: "filter" };
+    return null;
+  }
   // Everything left in the Inbox looks like junk: nothing needs attention, which is the
   // clear state, with the held-back mail one quiet link away.
   if (reason === "noSignal" && context.mailbox === "inbox" && context.filters.length === 0) {
@@ -64,7 +75,8 @@ export function emptyKindFor(reason: EmptyReason, context: EmptyContext | undefi
 /** A stable name for "this view", so a celebration only follows a change inside one. */
 export function viewKey(context: EmptyContext | undefined): string {
   if (!context) return "";
-  return [context.mailbox, ...context.filters.map(filterKey).sort()].join("|");
+  const where = context.label ? `label:${context.label.id}` : context.mailbox;
+  return [where, ...context.filters.map(filterKey).sort()].join("|");
 }
 
 export type DayPart = "morning" | "afternoon" | "evening" | "night";

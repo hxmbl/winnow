@@ -804,9 +804,15 @@ export function App({ store }: Props) {
   );
 
   // What the list's empty state needs to tell a clear Inbox from an empty folder.
+  // Browsing a label, that label is the view: empty, it is a quiet folder, not the Inbox.
+  const labelViewName = snapshot.labelView !== null ? store.labelViewName() : null;
   const emptyContext = useMemo(
-    () => ({ mailbox: snapshot.mailbox, filters: snapshot.activeFilters }),
-    [snapshot.mailbox, snapshot.activeFilters],
+    () => ({
+      mailbox: snapshot.mailbox,
+      filters: snapshot.activeFilters,
+      label: snapshot.labelView !== null ? { id: snapshot.labelView, name: labelViewName ?? "Label" } : null,
+    }),
+    [snapshot.mailbox, snapshot.activeFilters, snapshot.labelView, labelViewName],
   );
 
   const unreadIds = useMemo(
