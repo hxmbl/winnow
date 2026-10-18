@@ -1,0 +1,163 @@
+/*
+ * The inbox-clear illustration. Light, not outlines: two soft accent glows behind the
+ * app mark and a dashed trail leading to it. Every colour is the accent mixed into
+ * transparency, so all four accents and all three modes work without new tokens.
+ */
+
+.inbox-clear__art {
+  position: relative;
+  width: 240px;
+  height: 150px;
+  margin-bottom: 18px;
+  --clear-glow: 16%;
+  --clear-core: 26%;
+  --clear-trail: 42%;
+}
+
+:root[data-theme="dark"] .inbox-clear__art {
+  --clear-glow: 18%;
+  --clear-core: 26%;
+  --clear-trail: 48%;
+}
+
+/* OLED: the black stays black; the light is a smaller, dimmer pool. */
+:root[data-theme="oled"] .inbox-clear__art {
+  --clear-glow: 12%;
+  --clear-core: 20%;
+  --clear-trail: 44%;
+}
+
+.inbox-clear__glow {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.inbox-clear__glow--wide {
+  left: 50%;
+  top: 46%;
+  width: 260px;
+  height: 170px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, var(--wn-accent) var(--clear-glow), transparent),
+    transparent
+  );
+}
+
+.inbox-clear__glow--core {
+  left: 164px;
+  top: 58px;
+  width: 120px;
+  height: 120px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, var(--wn-accent) var(--clear-core), transparent),
+    transparent
+  );
+}
+
+.inbox-clear__trail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.inbox-clear__path {
+  stroke: color-mix(in oklab, var(--wn-accent) var(--clear-trail), transparent);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 2.2 3.4;
+}
+
+.inbox-clear__dot {
+  fill: color-mix(in oklab, var(--wn-accent) var(--clear-trail), transparent);
+}
+
+/* The mark sits at the end of the trail. The cut through it is drawn in the colour
+   behind it, as it is on the chrome, so the artwork reads exactly as it does there. */
+.inbox-clear__mark {
+  position: absolute;
+  left: 164px;
+  top: 58px;
+  transform: translate(-50%, -50%);
+  --wn-chrome: var(--wn-surface);
+  display: block;
+  line-height: 0;
+}
+
+/* ── The one-time motion, when the last item was just cleared ─────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  .inbox-clear[data-celebrating] .inbox-clear__path {
+    stroke-dasharray: 100;
+    animation: inbox-clear-draw 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .inbox-clear[data-celebrating] .inbox-clear__mark {
+    animation: inbox-clear-glide 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .inbox-clear[data-celebrating] .inbox-clear__glow--core {
+    animation: inbox-clear-bloom 1500ms ease-out both;
+  }
+
+  .inbox-clear[data-celebrating] [role="status"] {
+    animation: inbox-clear-rise 700ms 250ms ease-out both;
+  }
+}
+
+@keyframes inbox-clear-draw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  70% {
+    stroke-dashoffset: 0;
+    stroke-dasharray: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+    stroke-dasharray: 2.2 3.4;
+  }
+}
+
+@keyframes inbox-clear-glide {
+  from {
+    opacity: 0;
+    transform: translate(calc(-50% - 120px), calc(-50% + 60px)) scale(0.7) rotate(-8deg);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@keyframes inbox-clear-bloom {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  45% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes inbox-clear-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

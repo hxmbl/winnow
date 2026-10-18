@@ -7650,6 +7650,182 @@ try {
     await ctx.close();
   }
 
+  // ── Inbox clear ────────────────────────────────────────────────────────────
+  section("inbox clear");
+  {
+    // Its own page, so the state the sections above leave behind cannot matter.
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 820 } });
+    const c = await ctx.newPage();
+    await c.addInitScript(() => {
+      // Count haptics: the desktop never buzzes, the phone does once.
+      window.__buzz = 0;
+      navigator.vibrate = () => {
+        window.__buzz += 1;
+        return true;
+      };
+    });
+    await c.goto(URL, { waitUntil: "networkidle" });
+    await c.waitForSelector("[data-row-count] [data-row-id]");
+    const empty = c.locator("[data-empty-kind]");
+    const rowButtons = c.locator("[data-row-count] [data-row-id] button[data-message-id]");
+    /** Select every mounted row and press one of the selection bar's buttons. */
+    const batch = async (label) => {
+      // The window can shift as rows are selected, so take each row as it is now.
+      for (let i = 0; i < 40 && i < (await rowButtons.count()); i++) {
+        await rowButtons.nth(i).click({ modifiers: ["Control"], timeout: 2_000 }).catch(() => undefined);
+      }
+      await c.locator("[data-selection-bar] button", { hasText: label }).first().click({ timeout: 5_000 });
+      await c.waitForTimeout(250);
+    };
+
+    check("a list with mail shows no empty state", (await empty.count()) === 0);
+
+    // A smart filter worked to the end: the calm state, named, with the one-time motion.
+    await c.locator("button", { hasText: "Deliveries" }).first().click();
+    await c.waitForTimeout(250);
+    const deliveries = Number(await c.locator("[data-row-count]").getAttribute("data-row-count"));
+    await batch("Archive");
+    await c.waitForSelector("[data-empty-kind]", { timeout: 3_000 }).catch(() => undefined);
+    check(
+      "clearing the last item in a smart filter shows the clear state, naming the filter",
+      deliveries > 0 &&
+        (await empty.getAttribute("data-empty-kind")) === "clear" &&
+        (await empty.getAttribute("data-empty-scope")) === "filter" &&
+        (await c.locator("[data-clear-headline]").textContent()) === "Nothing left in Deliveries.",
+      `${deliveries} rows; ${await empty.getAttribute("data-empty-kind").catch(() => "none")}`,
+    );
+    check("and plays the celebration once", (await empty.getAttribute("data-celebrating")) === "true");
+    check(
+      "the illustration is the app mark, untouched, in a role=status that announces the line",
+      (await empty.locator(".inbox-clear__mark svg path").count()) === 4 &&
+        (await empty.locator('[role="status"] [data-clear-headline]').count()) === 1,
+    );
+    check("no haptic on the desktop", (await c.evaluate(() => window.__buzz)) === 0);
+    await c.waitForTimeout(1_900);
+    check("the motion ends on its own, and does not replay", (await empty.getAttribute("data-celebrating")) === null);
+
+    // The Inbox itself: everything archived but the junk Winnow holds back is still clear.
+    await c.locator("button", { hasText: "Deliveries" }).first().click();
+    await c.waitForTimeout(250);
+    for (let round = 0; round < 8 && (await empty.count()) === 0; round++) await batch("Archive");
+    const line = (await c.locator("[data-clear-headline]").textContent().catch(() => "")) ?? "";
+    check(
+      "an Inbox with nothing left that needs attention shows the clear state, with a time-of-day line",
+      (await empty.getAttribute("data-empty-kind")) === "clear" &&
+        (await empty.getAttribute("data-empty-scope")) === "inbox" &&
+        line.length > 0 && !/Nothing left in/.test(line),
+      line,
+    );
+    const held = c.locator("[data-clear-action]");
+    if (await held.count()) {
+      check("held-back junk is one quiet link away", /Show the hidden mail/.test((await held.textContent()) ?? ""));
+    }
+
+    // Reduced motion: the state still appears, nothing moves.
+    await c.emulateMedia({ reducedMotion: "reduce" });
+    const animations = await c.evaluate(() =>
+      [...document.querySelectorAll(".inbox-clear__mark, .inbox-clear__path, .inbox-clear__glow--core")].map(
+        (el) => getComputedStyle(el).animationName,
+      ),
+    );
+    check("under reduced motion nothing animates", animations.length === 3 && animations.every((name) => name === "none"), JSON.stringify(animations));
+    await c.emulateMedia({ reducedMotion: null });
+    // Let the Inbox's own celebration finish before judging what a theme change does.
+    await c.waitForTimeout(1_900);
+
+    // Every mode and accent, chosen the way a user would: the light is the accent, so it
+    // exists in each and changes with it, and OLED stays black around it.
+    const appearance = async (group, label) => {
+      await c.keyboard.press(",");
+      await openSettingsCategory(c, "appearance");
+      await c.locator(`[role="radiogroup"][data-picker="winnow-theme-${group}"] [role="radio"]`).filter({ hasText: label }).click();
+      await c.keyboard.press("Escape");
+      await c.waitForTimeout(250);
+    };
+    const look = () =>
+      c.evaluate(() => {
+        const glow = document.querySelector(".inbox-clear__glow--wide");
+        const state = document.querySelector("[data-empty-kind]");
+        return {
+          theme: document.documentElement.dataset.theme,
+          accent: document.documentElement.dataset.accent,
+          kind: state?.getAttribute("data-empty-kind") ?? null,
+          celebrating: state?.hasAttribute("data-celebrating") ?? null,
+          glow: glow ? getComputedStyle(glow).backgroundImage : "",
+          surface: state ? getComputedStyle(state).backgroundColor : "",
+        };
+      });
+    for (const [label, mode] of [["Light", "light"], ["Dark", "dark"], ["OLED", "oled"]]) {
+      await appearance("mode", label);
+      const seen = await look();
+      check(
+        `the clear state draws its light in ${mode}${mode === "oled" ? ", over true black" : ""}, and a theme change replays nothing`,
+        seen.theme === mode && seen.kind === "clear" && seen.celebrating === false && /radial-gradient/.test(seen.glow) &&
+          (mode !== "oled" || seen.surface === "rgb(0, 0, 0)"),
+        JSON.stringify(seen),
+      );
+    }
+    const glows = [];
+    for (const accent of ["Space", "Plum", "Ember", "Aurora"]) {
+      await appearance("accent", accent);
+      glows.push((await look()).glow);
+    }
+    check("and its light follows each of the four accents", new Set(glows).size === 4, JSON.stringify(glows.map((g) => g.slice(0, 60))));
+    await appearance("accent", "Space");
+    await appearance("mode", "Light");
+
+    // An empty folder: the quieter state, no illustration.
+    await c.keyboard.press("!");
+    await c.getByRole("menuitem", { name: "Trash" }).first().click();
+    await c.waitForTimeout(300);
+    await batch("Delete forever");
+    const confirm = c.getByRole("button", { name: /Delete/ }).last();
+    if ((await empty.count()) === 0 && (await confirm.count())) await confirm.click();
+    await c.waitForSelector("[data-empty-kind]", { timeout: 3_000 }).catch(() => undefined);
+    check(
+      "an empty folder gets the quiet state instead: one line, no illustration, no celebration",
+      (await empty.getAttribute("data-empty-kind")) === "quiet" &&
+        (await empty.getAttribute("data-empty-scope")) === "folder" &&
+        (await empty.textContent())?.includes("Trash is empty.") &&
+        (await c.locator(".inbox-clear__art").count()) === 0 &&
+        (await empty.getAttribute("data-celebrating")) === null,
+    );
+    await ctx.close();
+
+    // A phone: one gentle haptic when the last item goes.
+    const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+    const ph = await phoneCtx.newPage();
+    await ph.addInitScript(() => {
+      window.__buzz = [];
+      navigator.vibrate = (pattern) => {
+        window.__buzz.push(pattern);
+        return true;
+      };
+    });
+    await ph.goto(URL, { waitUntil: "networkidle" });
+    await ph.locator("button", { hasText: "Deliveries" }).first().click();
+    await ph.waitForTimeout(300);
+    // Swipe actions are on by default: left trashes. Use the reader's Trash instead,
+    // which does not depend on gesture timing.
+    for (let i = 0; i < 4 && (await ph.locator("[data-empty-kind]").count()) === 0; i++) {
+      await ph.locator("[data-row-count] [data-row-id] button[data-message-id]").first().click({ timeout: 3_000 }).catch(() => undefined);
+      await ph.waitForTimeout(300);
+      await ph.locator('button[aria-label="Archive"]:visible').first().click({ timeout: 3_000 }).catch(() => undefined);
+      await ph.waitForTimeout(400);
+      // Back to the list if the reader stayed open on the next message.
+      if ((await ph.locator("[data-empty-kind]").count()) === 0) await ph.keyboard.press("Escape");
+      await ph.waitForTimeout(200);
+    }
+    const buzz = await ph.evaluate(() => window.__buzz);
+    check(
+      "on a phone, clearing the last item buzzes once, gently",
+      (await ph.locator('[data-empty-kind="clear"]').count()) === 1 &&
+        buzz.filter((p) => Array.isArray(p) && p.length === 3).length === 1,
+      JSON.stringify(buzz),
+    );
+    await phoneCtx.close();
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   section("console");

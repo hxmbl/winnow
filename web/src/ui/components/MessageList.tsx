@@ -42,6 +42,9 @@ import { filterIcon } from "../filterIcons";
 import { FILTER_HUES } from "../filterColors";
 import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
+import { InboxClear } from "./InboxClear";
+import { emptyKindFor, viewKey, type EmptyContext, type EmptyKind } from "../inboxClear";
+import { useClearCelebration } from "../useClearCelebration";
 import {
   SWIPE_LABEL,
   SwipeGesture,
@@ -599,6 +602,11 @@ export type EmptyState = {
   canSync: boolean;
   /** What an empty mailbox says and its button reads, where "Nothing here yet" is wrong (Drafts). */
   emptyMailbox?: { body: string; action: string };
+  /** Which good-news state an empty list is (`ui/inboxClear`), or null for a remedy screen. */
+  kind?: EmptyKind | null;
+  now?: number;
+  /** The last item was just cleared: play the one-time motion. */
+  celebrating?: boolean;
 };
 
 /**
@@ -614,6 +622,9 @@ function Empty({
   onSync,
   canSync,
   emptyMailbox,
+  kind,
+  now = Date.now(),
+  celebrating = false,
 }: EmptyState) {
   /**
    * What the user can do about *this* emptiness.
@@ -652,6 +663,20 @@ function Empty({
     }
   })();
 
+  if (kind) {
+    // A clear Inbox or filter gets the calm state; an empty folder or filter the quiet
+    // one, which keeps this screen's remedy (and Drafts' own wording).
+    return (
+      <InboxClear
+        kind={kind}
+        now={now}
+        celebrating={celebrating}
+        action={remedy?.action ?? null}
+        line={reason === "mailbox" ? emptyMailbox?.body : undefined}
+      />
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
       {remedy ? (
@@ -687,6 +712,8 @@ type Props = {
   unreadIds: ReadonlySet<number>;
   freshIds: ReadonlySet<number>;
   emptyReason: EmptyState["reason"];
+  /** The mailbox and filters on screen, for the inbox-clear state. */
+  emptyContext?: EmptyContext;
   /**
    * The list's order, which decides whether day sections mean anything.
    *
@@ -756,6 +783,7 @@ function MessageList({
   unreadIds,
   freshIds,
   emptyReason,
+  emptyContext,
   sortBy,
   onSelect,
   onToggleStar,
@@ -1715,6 +1743,11 @@ function MessageList({
 
   useEffect(() => () => clearLongPress(), []);
 
+  const emptyKind = emptyKindFor(emptyReason, emptyContext);
+  // Keyed on the view, so leaving an emptied filter for another view never plays it.
+  const celebrating = useClearCelebration(viewKey(emptyContext), threads.length, touchSelect) &&
+    emptyKind?.kind === "clear";
+
   if (threads.length === 0) {
     const empty = (
       <Empty
@@ -1724,6 +1757,9 @@ function MessageList({
         onSync={onSync}
         canSync={canSync}
         emptyMailbox={emptyMailbox}
+        kind={emptyKind}
+        now={now}
+        celebrating={celebrating}
       />
     );
     if (topInset === 0 && !lead) return empty;
