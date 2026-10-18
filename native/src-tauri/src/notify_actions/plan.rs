@@ -509,10 +509,7 @@ pub fn assemble_reply(head: &str, text: &str, now_ms: i64) -> Result<String, &'s
     if !lines.iter().any(|line| line.starts_with("In-Reply-To: ")) {
         return Err("the reply head is not a reply");
     }
-    if !lines
-        .iter()
-        .any(|line| *line == "Content-Transfer-Encoding: base64")
-    {
+    if !lines.contains(&"Content-Transfer-Encoding: base64") {
         return Err("the reply head is not a base64 text body");
     }
     let date = format!("Date: {}", http_date(now_ms));
