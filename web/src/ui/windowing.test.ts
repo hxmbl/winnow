@@ -15,7 +15,9 @@ import {
   indexAt,
   revealScrollTop,
   scrollTopForIndex,
+  stickyIndex,
   visibleRange,
+  windowKey,
 } from "./windowing";
 
 describe("computeOffsets", () => {
@@ -155,5 +157,29 @@ describe("revealScrollTop (a row under floating chrome)", () => {
   it("clamps to the end of the list", () => {
     expect(revealScrollTop(4900, 150, 5000, 800)).toBe(4200);
     expect(revealScrollTop(300, 150, 500, 800)).toBe(0);
+  });
+});
+
+describe("windowKey", () => {
+  // Header, five rows, header, five rows: 40 + 5×53 per day.
+  const kinds = ["h", "r", "r", "r", "r", "r", "h", "r", "r", "r", "r", "r"];
+  const isHeader = (i: number) => kinds[i] === "h";
+  const offsets = computeOffsets(kinds.length, [], (i) => (isHeader(i) ? 40 : 53));
+
+  it("stays the same while a scroll mounts the same rows under the same header", () => {
+    const a = windowKey(offsets, isHeader, 0, 0, 120, 0);
+    expect(windowKey(offsets, isHeader, 3, 0, 120, 0)).toBe(a);
+    expect(windowKey(offsets, isHeader, 9, 0, 120, 0)).toBe(a);
+  });
+
+  it("changes when the mounted range or the pinned header changes", () => {
+    const small = (top: number) => windowKey(offsets, isHeader, top, 0, 60, 0);
+    expect(new Set([0, 60, 120, 200, 320].map(small)).size).toBeGreaterThan(2);
+    expect(stickyIndex(offsets, isHeader, 10)).toBe(0);
+    expect(stickyIndex(offsets, isHeader, offsets[6]! + 1)).toBe(6);
+  });
+
+  it("names no pinned header while the lead above the first day is showing", () => {
+    expect(windowKey(offsets, isHeader, 0, 80, 300, 40).endsWith(":-1")).toBe(true);
   });
 });

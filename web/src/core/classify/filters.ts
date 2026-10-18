@@ -180,20 +180,33 @@ export function countAllFilters(
   inbox: readonly Email[],
   signals: ReadonlyMap<number, EmailSignals>,
   profile: UserProfile,
+  /**
+   * Optional per-message memo, for the store: the filters one message is in depend only
+   * on (message, signals, profile), so a pass after one message changed recounts one.
+   */
+  memo?: WeakMap<Email, { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }>,
 ): Map<BuiltinSmartFilter, number> {
   const counts = new Map<BuiltinSmartFilter, number>();
   for (const email of inbox) {
     const signal = signals.get(email.id);
     if (!signal) continue;
-    const safe = !isUnsafe(signal);
-    for (const id of ALL_FILTER_IDS) {
-      if (!safe && id !== "unsafe") continue;
-      if (matchesBuiltin(id, email, signal, profile)) {
-        counts.set(id, (counts.get(id) ?? 0) + 1);
-      }
-    }
+    const hit = memo?.get(email);
+    const ids = hit && hit.signal === signal && hit.profile === profile ? hit.ids : filtersFor(email, signal, profile);
+    if (memo && ids !== hit?.ids) memo.set(email, { signal, profile, ids });
+    for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   return counts;
+}
+
+/** Every built-in filter one message is in. An unsafe message is in Unsafe only. */
+export function filtersFor(email: Email, signal: EmailSignals, profile: UserProfile): BuiltinSmartFilter[] {
+  const safe = !isUnsafe(signal);
+  const ids: BuiltinSmartFilter[] = [];
+  for (const id of ALL_FILTER_IDS) {
+    if (!safe && id !== "unsafe") continue;
+    if (matchesBuiltin(id, email, signal, profile)) ids.push(id);
+  }
+  return ids;
 }
 
 const ALL_FILTER_IDS: readonly BuiltinSmartFilter[] = BUILTIN_FILTERS;

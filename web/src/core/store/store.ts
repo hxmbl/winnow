@@ -47,8 +47,8 @@ import {
   type FilterId,
   type NavigationItem,
 } from "../model/signals";
-import { buildUserProfile, type TrashRecord, type UserProfile } from "../model/profile";
-import { classifyAll, type SignalMap } from "../classify/classify";
+import { buildUserProfile, sameProfile, type TrashRecord, type UserProfile } from "../model/profile";
+import { classifyAll, classifyEmail, type SignalMap } from "../classify/classify";
 import { countAllFilters, matchesBuiltin, rankFilters } from "../classify/filters";
 import {
   buildSearchBags,
@@ -912,7 +912,19 @@ export class WinnowStore {
     /** What the built-in rules said, before `filterLearning`; for "Why it's here". */
     baseSignals: SignalMap;
     signals: SignalMap;
+    /**
+     * The built-in answer per message *object*, for the incremental pass: a change to one
+     * message (opened and so read, archived, starred) replaces that object only, so when
+     * the profile comes out the same every other message keeps its classification.
+     */
+    byEmail: WeakMap<Email, EmailSignals>;
   } | null = null;
+
+  /** Which filters each message object is in, so the rail's counts recount only what changed. */
+  private readonly filterHits = new WeakMap<
+    Email,
+    { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }
+  >();
 
   /**
    * The contact index, memoised on the only two inputs that can change it.
@@ -979,11 +991,38 @@ export class WinnowStore {
     const inboxForProfile = all.filter(
       (email) => email.mailbox === "inbox" && !blockedLower.has(email.sender.toLowerCase()),
     );
-    const profile = buildUserProfile(inboxForProfile, this.trashRecords());
-    const baseSignals = classifyAll(inboxForProfile, profile, weights);
+    const built = buildUserProfile(inboxForProfile, this.trashRecords());
+    // Only `all` moved (a message read, starred, archived or arrived) and the profile came
+    // out the same: classification is a pure function of (message, profile, weights), so
+    // only the message objects that are new need classifying. Opening a message in a
+    // 3,000-message inbox used to reclassify all 3,000 because it flipped one `unread`.
+    const incremental =
+      hit !== null && hit.weights === weights && hit.trash === trash && hit.blocked === blocked && sameProfile(hit.profile, built);
+    const profile = incremental ? hit.profile : built;
+    let baseSignals: SignalMap;
+    const byEmail = new WeakMap<Email, EmailSignals>();
+    if (incremental) {
+      const map = new Map<number, EmailSignals>();
+      for (const email of inboxForProfile) {
+        let signals = hit.byEmail.get(email);
+        if (!signals) {
+          signals = classifyEmail(email, profile, weights);
+          // The same answer as before (a read flag flipped): keep the old object, so the
+          // per-message memos below it (the rail's counts) still hit.
+          const previous = hit.baseSignals.get(email.id);
+          if (previous && sameSignals(previous, signals)) signals = previous;
+        }
+        map.set(email.id, signals);
+        byEmail.set(email, signals);
+      }
+      baseSignals = map;
+    } else {
+      baseSignals = classifyAll(inboxForProfile, profile, weights);
+      for (const email of inboxForProfile) byEmail.set(email, baseSignals.get(email.id)!);
+    }
     const filterLearning = state.filterLearning;
     const signals = applyFilterLearning(inboxForProfile, baseSignals, filterLearning);
-    this.inboxCache = { all, weights, trash, blocked, filterLearning, profile, baseSignals, signals };
+    this.inboxCache = { all, weights, trash, blocked, filterLearning, profile, baseSignals, signals, byEmail };
     return { profile, signals };
   }
 
@@ -1037,7 +1076,7 @@ export class WinnowStore {
 
     // The same inbox the rail was ranked against; see `inboxCounts`. A pill count is a
     // claim about the user's mail, not the current result set.
-    const inboxCounts = countAllFilters(inboxForProfile, inboxSignals, profile);
+    const inboxCounts = countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits);
 
     const attention = summarizeAttention(inboxForProfile, inboxSignals, state.now);
 
@@ -3141,6 +3180,12 @@ export class WinnowStore {
  * copied per message: it has no mutable fields, and a map of a few thousand identical
  * references costs nothing next to a few thousand copies.
  */
+/** Field-by-field equality of two classifications. */
+function sameSignals(a: EmailSignals, b: EmailSignals): boolean {
+  const keys = Object.keys(a) as (keyof EmailSignals)[];
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+}
+
 function neutralSignalsFor(emails: readonly Email[]): SignalMap {
   const map = new Map<number, EmailSignals>();
   for (const email of emails) map.set(email.id, NEUTRAL_SIGNALS);

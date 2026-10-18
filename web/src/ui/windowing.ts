@@ -115,3 +115,37 @@ export function revealScrollTop(rowTop: number, covered: number, scrollHeight: n
   const max = Math.max(scrollHeight - clientHeight, 0);
   return Math.min(Math.max(rowTop - covered, 0), max);
 }
+
+/**
+ * The index of the day header to pin at `line` (a y in content coordinates): the last
+ * header at or above it, or -1 when none is. Shared by the pinned header and
+ * `windowKey`, so the two cannot disagree about which header is showing.
+ */
+export function stickyIndex(offsets: Float64Array, isHeader: (index: number) => boolean, line: number): number {
+  const count = offsets.length - 1;
+  if (count <= 0) return -1;
+  for (let i = Math.min(indexAt(offsets, Math.max(0, line + 1)), count - 1); i >= 0; i -= 1) {
+    if (isHeader(i)) return i;
+  }
+  return -1;
+}
+
+/**
+ * Everything a scroll position decides about what the list draws: the mounted range and
+ * the pinned header. Two positions with the same key render the same tree, so a scroll
+ * that does not change it needs no React render at all — the browser moves the pixels.
+ * Before, every scroll event re-rendered the list (one commit per frame while scrolling).
+ */
+export function windowKey(
+  offsets: Float64Array,
+  isHeader: (index: number) => boolean,
+  scrollTop: number,
+  contentTop: number,
+  viewportHeight: number,
+  topInset: number,
+): string {
+  const { start, end } = visibleRange(offsets, scrollTop - contentTop, viewportHeight);
+  const line = scrollTop + topInset - contentTop;
+  const sticky = contentTop > 0 && line < 0 ? -1 : stickyIndex(offsets, isHeader, line);
+  return `${start}:${end}:${sticky}`;
+}

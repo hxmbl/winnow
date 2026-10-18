@@ -19,6 +19,22 @@ export const EMPTY_PROFILE: UserProfile = {
   firstTimeSenders: [],
 };
 
+/**
+ * Whether two profiles say the same thing, field by field. The store uses it to keep a
+ * classification across a change to `all` that did not move the profile (a message
+ * read or archived), since classification is a pure function of message and profile.
+ */
+export function sameProfile(a: UserProfile, b: UserProfile): boolean {
+  if (a === b) return true;
+  const list = (x: readonly string[], y: readonly string[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+  if (!list(a.topSenders, b.topSenders) || !list(a.quietSenders, b.quietSenders) || !list(a.firstTimeSenders, b.firstTimeSenders)) {
+    return false;
+  }
+  const ka = Object.keys(a.trashBiasBySender);
+  if (ka.length !== Object.keys(b.trashBiasBySender).length) return false;
+  return ka.every((key) => a.trashBiasBySender[key] === b.trashBiasBySender[key]);
+}
+
 /** Sender discard rate, capped (only way to read trashBiasBySender). */
 export function trashBiasFor(profile: UserProfile, sender: string): number {
   return Math.min(profile.trashBiasBySender[sender] ?? 0, MAX_TRASH_BIAS);

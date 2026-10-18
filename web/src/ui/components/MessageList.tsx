@@ -58,10 +58,11 @@ import {
   ESTIMATED_HEADER_HEIGHT,
   ESTIMATED_ROW_HEIGHT,
   computeOffsets,
-  indexAt,
   revealScrollTop,
   scrollTopForIndex,
+  stickyIndex,
   visibleRange,
+  windowKey,
 } from "../windowing";
 
 /**
@@ -108,21 +109,28 @@ function rowIndexForCursor(items: readonly ListItem[], cursorIndex: number): num
 }
 
 /** One day boundary's worth of mounted items. */
-type ItemRun = { section: DaySection; firstKey: string; items: ListItem[] };
+type ItemRun = { section: DaySection; key: string; items: ListItem[] };
 
 /**
  * The mounted window, cut into runs of consecutive items that share a day.
  *
- * The key includes the first item so a day split by the window edge becomes two
- * sections rather than two sibling runs colliding on one React key.
+ * A day is contiguous, so it is one run per window; the `#n` suffix only guards against
+ * two runs ever colliding on one React key.
  */
 function runsInWindow(items: readonly ListItem[], start: number, end: number): ItemRun[] {
   const runs: ItemRun[] = [];
+  const seen = new Map<string, number>();
   for (let i = start; i < end; i += 1) {
     const item = items[i]!;
     const current = runs[runs.length - 1];
     if (current && current.section.key === item.section.key) current.items.push(item);
-    else runs.push({ section: item.section, firstKey: item.key, items: [item] });
+    else {
+      // Keyed by the day, not by its first mounted item: keyed by the first item, every
+      // scroll that moved the window's top inside a day remounted that whole day's rows.
+      const n = seen.get(item.section.key) ?? 0;
+      seen.set(item.section.key, n + 1);
+      runs.push({ section: item.section, key: `${item.section.key}#${n}`, items: [item] });
+    }
   }
   return runs;
 }
@@ -973,13 +981,21 @@ function MessageList({
       }
       shown = height > 0;
       setViewportHeight(height);
+      // The scroll listener skips renders that would draw the same rows, so the position
+      // React knows can lag the real one by a few pixels; a new viewport re-reads it.
+      setScrollTop(scroller.scrollTop);
     };
     readViewport();
 
     const onScroll = (): void => {
       // A scroll event on a hidden list is the browser zeroing it, not the user.
       if (scroller.clientHeight > 0) kept = scroller.scrollTop;
-      setScrollTop(scroller.scrollTop);
+      const top = scroller.scrollTop;
+      const w = windowInputs.current;
+      const isHeader = (i: number) => w.items[i]?.kind === "header";
+      const key = (at: number) => windowKey(w.offsets, isHeader, at, w.contentTop, w.viewportHeight, w.topInset);
+      // Only when it changes what is drawn: most scroll events move the same rows.
+      if (key(top) !== key(w.scrollTop)) setScrollTop(top);
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
@@ -1030,13 +1046,18 @@ function MessageList({
     // that line; above the first header (the lead still showing) there is none to pin.
     const line = scrollTop + topInset - contentTop;
     if (contentTop > 0 && line < 0) return null;
-    const at = indexAt(offsets, Math.max(0, line + 1));
-    for (let i = at; i >= 0; i -= 1) {
-      const item = items[i];
-      if (item?.kind === "header") return item;
-    }
-    return null;
+    const at = stickyIndex(offsets, (i) => items[i]?.kind === "header", line);
+    const item = at >= 0 ? items[at] : undefined;
+    return item?.kind === "header" ? item : null;
   }, [items, offsets, scrollTop, topInset, contentTop]);
+
+  /**
+   * What the latest render drew from, for the scroll listener: a scroll that leaves
+   * `windowKey` unchanged skips React entirely (see `windowKey`). Written during render,
+   * read in an event handler, never in render.
+   */
+  const windowInputs = useRef({ offsets, items, contentTop, viewportHeight, topInset, scrollTop });
+  windowInputs.current = { offsets, items, contentTop, viewportHeight, topInset, scrollTop };
 
   /**
    * How much of the scroller's top a row has to clear to be seen: the floating chrome,
@@ -1934,7 +1955,7 @@ function MessageList({
           */}
           {runsInWindow(items, start, end).map((run) => (
             <section
-              key={`${run.section.key}:${run.firstKey}`}
+              key={run.key}
               aria-label={
                 run.section.label
                   ? `${run.section.label}, ${run.section.count} ${run.section.count === 1 ? "message" : "messages"}`

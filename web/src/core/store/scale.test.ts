@@ -210,3 +210,34 @@ describe("scale: resident bodies", () => {
     expect(all.filter((e) => e.body.trim() === "")).toHaveLength(0);
   });
 });
+describe("scale: one message changes", () => {
+  it("reading or archiving one message classifies that message, not the inbox", async () => {
+    // Opening a message marks it read, which replaces one object in `all`. Classification
+    // is pure in (message, profile, weights), so with the profile unchanged only the new
+    // object needs classifying. A 3,000-message inbox used to be reclassified per `j`.
+    const classify = await import("../classify/classify");
+    const all = vi.spyOn(classify, "classifyAll");
+    const one = vi.spyOn(classify, "classifyEmail");
+    const store = new WinnowStore({ seed: synth(2000), backend: inertBackend });
+    void store.view;
+    const unread = store.view.emails.find((e) => e.unread)!;
+    const [allBefore, oneBefore] = [all.mock.calls.length, one.mock.calls.length];
+    store.toggleRead(unread.id);
+    void store.view;
+    expect(all.mock.calls.length - allBefore).toBe(0);
+    expect(one.mock.calls.length - oneBefore).toBeLessThanOrEqual(1);
+  });
+
+  it("and the incremental answer is the one a full pass gives", () => {
+    const seed = synth(400);
+    const store = new WinnowStore({ seed, backend: inertBackend });
+    void store.view;
+    for (const email of store.view.emails.filter((e) => e.unread).slice(0, 5)) store.toggleRead(email.id);
+    const incremental = store.view.signals;
+    store.scheduleReclassify();
+    const fresh = new WinnowStore({ seed: store.getSnapshot().all, backend: inertBackend });
+    for (const [id, signals] of fresh.view.signals) expect(incremental.get(id)).toEqual(signals);
+    // And the rail's counts, which are memoised per message the same way.
+    expect([...store.view.inboxCounts].sort()).toEqual([...fresh.view.inboxCounts].sort());
+  });
+});

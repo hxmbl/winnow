@@ -110,16 +110,16 @@ export const FilterStrip = memo(function FilterStrip({
 
     const update = () => {
       const { scrollLeft, scrollWidth, clientWidth } = element;
-      setOverflow({
-        start: scrollLeft > 1,
-        // One-pixel tolerance: fractional layout widths make a fully-scrolled
-        // scroller report `scrollWidth > clientWidth` forever.
-        end: scrollLeft + clientWidth < scrollWidth - 1,
-      });
+      const start = scrollLeft > 1;
+      // One-pixel tolerance: fractional layout widths make a fully-scrolled
+      // scroller report `scrollWidth > clientWidth` forever.
+      const end = scrollLeft + clientWidth < scrollWidth - 1;
+      // The same object when nothing changed: a fresh one re-rendered the rail (and its
+      // twenty-odd pills) on every scroll event of it.
+      setOverflow((was) => (was.start === start && was.end === end ? was : { start, end }));
       setLeadingWidth(leadingRef.current?.offsetWidth ?? 0);
     };
 
-    update();
     element.addEventListener("scroll", update, { passive: true });
     // A ResizeObserver rather than a window resize listener: the rail also reflows
     // when the pane it lives in changes width, which is not a window event. Its
@@ -127,10 +127,13 @@ export const FilterStrip = memo(function FilterStrip({
     // grows ("All" appearing, a count gaining a digit, a pill going bold), and that is
     // exactly when the end fade and its step button have to appear.
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    // Observing delivers a first reading after layout, so there is no `update()` here: a
+    // direct call read the layout in the middle of the commit that changed the counts
+    // (every open and archive does), forcing a synchronous layout of the whole app.
     if (observer) {
       observer.observe(element);
       for (const child of element.children) observer.observe(child);
-    }
+    } else update();
     return () => {
       element.removeEventListener("scroll", update);
       observer?.disconnect();
