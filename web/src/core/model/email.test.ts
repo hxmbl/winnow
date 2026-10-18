@@ -123,7 +123,9 @@ describe("isMailbox", () => {
   it("narrows only the real mailboxes", () => {
     expect(isMailbox("spam")).toBe(true);
     expect(isMailbox("sent")).toBe(true);
-    expect(isMailbox("drafts")).toBe(false);
+    // Drafts is a mailbox now: its rows are the Gmail drafts the drafts API lists.
+    expect(isMailbox("drafts")).toBe(true);
+    expect(isMailbox("outbox")).toBe(false);
     expect(isMailbox(7)).toBe(false);
   });
 

@@ -26,6 +26,8 @@ import {
   base64UrlEncode,
   type GmailAttachmentResponse,
   type GmailDraft,
+  type GmailDraftList,
+  type GmailFullDraft,
   type GmailHistoryResponse,
   type GmailListResponse,
   type GmailMessage,
@@ -500,8 +502,8 @@ export class GmailClient {
     );
   }
 
-  async draft(id: string): Promise<GmailMessage> {
-    return this.request<GmailMessage>(`/users/me/drafts/${encodeURIComponent(id)}?format=full`);
+  async draft(id: string): Promise<GmailFullDraft> {
+    return this.request<GmailFullDraft>(`/users/me/drafts/${encodeURIComponent(id)}?format=full`);
   }
 
   /**
@@ -536,10 +538,10 @@ export class GmailClient {
     await this.request(`/users/me/drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
-  async listDrafts(maxResults: number, pageToken?: string): Promise<GmailListResponse> {
+  async listDrafts(maxResults: number, pageToken?: string): Promise<GmailDraftList> {
     const params = new URLSearchParams({ maxResults: String(maxResults) });
     if (pageToken) params.set("pageToken", pageToken);
-    return this.request<GmailListResponse>(`/users/me/drafts?${params}`);
+    return this.request<GmailDraftList>(`/users/me/drafts?${params}`);
   }
 }
 

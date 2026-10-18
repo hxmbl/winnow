@@ -13,14 +13,20 @@ export type Millis = number;
 /** Gmail message ID. */
 export type GmailId = string;
 
-export type Mailbox = "inbox" | "archive" | "sent" | "trash" | "spam";
+/**
+ * Where a message is. `drafts` is the odd one out: its rows are the user's Gmail drafts,
+ * listed through the drafts API rather than synced, and opening one reopens it in the
+ * composer instead of the reader. No message is ever *moved* into it.
+ */
+export type Mailbox = "inbox" | "archive" | "sent" | "drafts" | "trash" | "spam";
 
-export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
+export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "sent", "drafts", "trash", "spam"];
 
 export const MAILBOX_LABEL: Record<Mailbox, string> = {
   inbox: "Inbox",
   archive: "Archive",
   sent: "Sent",
+  drafts: "Drafts",
   trash: "Trash",
   spam: "Spam",
 };
@@ -90,6 +96,12 @@ export type Draft = {
   quoteBlock?: string;
   /** Prefilled body before user edits (comparison for discard confirmation). */
   prefilled?: string;
+  /**
+   * The threading headers of a Gmail draft reopened from Drafts whose original message
+   * is not in this device's cache. Carried through so the reply still goes out on its
+   * thread (`In-Reply-To`, `References`) rather than as a stranger's new message.
+   */
+  replyHeaders?: { inReplyTo: string; references?: string };
 };
 
 export const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
@@ -200,6 +212,12 @@ export type Email = {
    * `withCode` fills in on the way into the store.
    */
   code?: string | null;
+  /**
+   * Set on a row of the Drafts mailbox: the Gmail draft it is (`drafts.get`), and the
+   * threading headers it was saved with, so reopening it in the composer replies on the
+   * same thread.
+   */
+  gmailDraft?: { id: string; inReplyTo?: string; references?: string };
 };
 
 /** The message with `code` settled: kept if already looked for, detected otherwise. */

@@ -1425,13 +1425,85 @@ export const DEMO_EMAILS: readonly Email[] = seeds
  * future) and makes both views true at once. `DEMO_EMAILS` and `DEMO_NOW` stay fixed
  * for the tests, which need the same day sections on every machine.
  */
-export function demoMailbox(now: number = Date.now()): { emails: Email[]; now: number } {
+export function demoMailbox(now: number = Date.now()): { emails: Email[]; drafts: Email[]; now: number } {
   const shift = Math.max(0, now - DEMO_NOW);
   return {
     emails: DEMO_EMAILS.map((email) => ({ ...email, receivedAt: email.receivedAt + shift })),
+    drafts: DEMO_DRAFTS.map((email) => ({ ...email, receivedAt: email.receivedAt + shift })),
     now: DEMO_NOW + shift,
   };
 }
+
+/** One demo draft, the shape `toDraftEmail` gives a real one. */
+function demoDraft(fields: {
+  id: string;
+  at: number;
+  to: string;
+  subject: string;
+  body: string;
+  threadId?: string;
+}): Email {
+  return withCode({
+    id: hashId(`${fields.id}-message`),
+    gmailId: `${fields.id}-message`,
+    ...(fields.threadId ? { threadId: fields.threadId } : {}),
+    sender: DEMO_ACCOUNT.email,
+    address: DEMO_ACCOUNT.email,
+    name: DEMO_ACCOUNT.name,
+    to: parseAddressList(fields.to),
+    cc: [],
+    bcc: [],
+    mailbox: "drafts",
+    receivedAt: ago(fields.at),
+    subject: fields.subject,
+    body: fields.body,
+    category: "primary",
+    starred: false,
+    unread: false,
+    urgent: false,
+    attachments: [],
+    gmailDraft: { id: fields.id },
+  });
+}
+
+/**
+ * The demo's Gmail drafts, for the Drafts mailbox: a half-written reply on the migration
+ * thread (so reopening one shows it threading), a new message, and one with nobody on
+ * it yet. Edited and sent only on this device, like everything else in the demo.
+ */
+export const DEMO_DRAFTS: readonly Email[] = [
+  demoDraft({
+    id: "demo-draft-queries",
+    at: 40 * MINUTE,
+    to: "Dana Whitfield <dana@northwind.example>",
+    subject: "Re: the migration plan",
+    threadId: "demo-thread-migration",
+    body: `Hi Dana,
+
+Here are the two slow queries. The third one I still need to look at properly — I will send the plan for it separately.
+
+`,
+  }),
+  demoDraft({
+    id: "demo-draft-studio",
+    at: 1 * DAY + 3 * HOUR,
+    to: "Helena Ruiz <helena@quarrylane.example>",
+    subject: "Studio visit next week",
+    body: `Hi Helena,
+
+Would Tuesday or Wednesday afternoon work for the studio visit? I can bring the printed proofs.`,
+  }),
+  demoDraft({
+    id: "demo-draft-offsite",
+    at: 4 * DAY,
+    to: "",
+    subject: "Notes for the offsite",
+    body: `Agenda ideas:
+- migration retro
+- hiring plan for Q3
+- `,
+  }),
+].sort((a, b) => b.receivedAt - a.receivedAt);
 
 /**
  * The demo's Google address book: what `GoogleContactsSync` would have stored for a

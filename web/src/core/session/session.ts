@@ -62,7 +62,8 @@ import {
 import { buildMime } from "../gmail/mime";
 import { base64UrlDecode } from "../gmail/dto";
 import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
-import { loadedBodyOf, mailboxFor } from "../gmail/mapper";
+import { loadedBodyOf, mailboxFor, toDraftEmail } from "../gmail/mapper";
+import { mapPool } from "../gmail/pool";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
 
@@ -100,6 +101,9 @@ export const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
 
 /** How long a pending cache write waits for more writes to join it. */
 const FLUSH_DEBOUNCE_MS = 250;
+
+/** How many drafts the Drafts mailbox lists, newest first. */
+export const DRAFTS_LIST_CAP = 100;
 
 /** Wrap a value so it reads in a message — quoted, and visible when empty. */
 function quote(value: string): string {
@@ -1099,6 +1103,9 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.spam]);
             await client.removeLabels(gmailId, [LABEL.inbox]);
             break;
+          case "drafts":
+            // Unreachable too: a draft is listed through the drafts API, never filed.
+            throw new GmailError("Mail cannot be filed into Drafts.", 400, "unknown");
           case "sent":
             // Unreachable: nothing in the product files mail into Sent, because the
             // label is set by Gmail at the moment it sends. Said rather than left
@@ -1125,10 +1132,36 @@ export class GmailSession {
       },
       async sendNew(draft, draftId) {
         // The same `From` and the same builder as a reply, with no message to answer:
-        // no `In-Reply-To`, no `References`, and no thread id for Gmail to file it under.
-        const { raw } = await rawFor(draft);
-        if (draftId) await draftCall(() => client.sendDraft(draftId, raw));
-        else await client.send(raw);
+        // no `In-Reply-To`, no `References`, and no thread id for Gmail to file it under —
+        // unless it is a reply reopened from Drafts whose original is not cached, which
+        // carries its own headers and thread id (`Draft.replyHeaders`).
+        const { raw, threadId } = await rawFor(draft);
+        if (draftId) await draftCall(() => client.sendDraft(draftId, raw, threadId));
+        else await client.send(raw, threadId);
+      },
+
+      async listDrafts(previous) {
+        // `drafts.list` gives ids only, and a draft's message id changes every time it is
+        // saved — so a row whose message id is unchanged is the same content, and only
+        // new or edited drafts cost a `drafts.get`. Newest first, capped: Drafts is a
+        // working set, not an archive.
+        const listing = await draftCall(() => client.listDrafts(DRAFTS_LIST_CAP));
+        const known = new Map(previous.map((email) => [email.gmailId, email]));
+        const rows = await mapPool(listing.drafts ?? [], 8, async (entry) => {
+          const messageId = entry.message?.id;
+          const kept = messageId ? known.get(messageId) : undefined;
+          if (kept && kept.gmailDraft?.id === entry.id) return kept;
+          try {
+            return toDraftEmail(await client.draft(entry.id));
+          } catch (error) {
+            // Sent or deleted between the listing and the fetch: gone, not a failure.
+            if (error instanceof GmailHttpError && error.status === 404) return null;
+            throw error;
+          }
+        });
+        return rows
+          .filter((row): row is Email => row !== null)
+          .sort((a, b) => b.receivedAt - a.receivedAt);
       },
 
       drafts: {

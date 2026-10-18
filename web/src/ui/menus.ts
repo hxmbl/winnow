@@ -27,6 +27,7 @@ import {
   ContactRound,
   Copy,
   ExternalLink,
+  FilePen,
   FolderInput,
   Forward,
   ListChecks,
@@ -88,12 +89,16 @@ export type RowMenuInput = {
     findFrom: () => void;
     findSubject: () => void;
     openInGmail: () => void;
+    /** Drafts rows: reopen in the composer. */
+    openDraft?: () => void;
+    /** Drafts rows: delete the Gmail draft. */
+    discardDraft?: () => void;
   };
 };
 
 /** What `archive` does in this mailbox, as a menu says it. `null` in Sent. */
 export function archiveLabel(mailbox: Mailbox): { label: string; restore: boolean } | null {
-  if (mailbox === "sent") return null;
+  if (mailbox === "sent" || mailbox === "drafts") return null;
   if (mailbox === "inbox") return { label: "Archive", restore: false };
   if (mailbox === "spam") return { label: "Not spam", restore: true };
   return { label: "Move to Inbox", restore: true };
@@ -101,6 +106,8 @@ export function archiveLabel(mailbox: Mailbox): { label: string; restore: boolea
 
 /** Where "Move to" can send messages from `mailbox`. Sent is Gmail's, not a destination. */
 export function moveTargets(mailbox: Mailbox): Mailbox[] {
+  // A draft is not a message yet: it can be opened, sent or discarded, not filed.
+  if (mailbox === "drafts") return [];
   return (["inbox", "archive", "spam", "trash"] as const).filter((m) => m !== mailbox);
 }
 
@@ -110,6 +117,7 @@ const MAILBOX_ICON: Record<Mailbox, LucideIcon> = {
   spam: ShieldAlert,
   trash: Trash2,
   sent: Mail,
+  drafts: FilePen,
 };
 
 export function buildRowMenu(input: RowMenuInput): MenuEntry[] {
@@ -118,6 +126,24 @@ export function buildRowMenu(input: RowMenuInput): MenuEntry[] {
   const plural = single ? "" : ` ${count}`;
   const archive = archiveLabel(mailbox);
   const entries: MenuEntry[] = [];
+
+  // A Drafts row is a draft, not mail: the only things to do are finish it or bin it.
+  if (mailbox === "drafts") {
+    if (single && actions.openDraft) {
+      entries.push({ kind: "item", id: "open-draft", label: "Open draft", icon: FilePen, onSelect: actions.openDraft });
+    }
+    if (actions.discardDraft) {
+      entries.push({
+        kind: "item",
+        id: "discard-draft",
+        label: single ? "Discard draft" : `Discard${plural} drafts`,
+        icon: Trash2,
+        danger: true,
+        onSelect: actions.discardDraft,
+      });
+    }
+    return tidy(entries);
+  }
 
   if (single && mailbox !== "trash" && mailbox !== "spam") {
     entries.push(

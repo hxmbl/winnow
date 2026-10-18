@@ -207,3 +207,23 @@ describe("the avatar monogram", () => {
     expect(tones.size).toBe(2);
   });
 });
+
+describe("the Drafts row menu", () => {
+  it("offers only opening and discarding a draft", () => {
+    const entries = buildRowMenu(
+      rowInput({ mailbox: "drafts", actions: { ...rowInput().actions, openDraft: noop, discardDraft: noop } }),
+    );
+    expect(ids(entries)).toEqual(["open-draft", "discard-draft"]);
+    const many = buildRowMenu(
+      rowInput({ count: 3, mailbox: "drafts", actions: { ...rowInput().actions, openDraft: noop, discardDraft: noop } }),
+    );
+    expect(ids(many)).toEqual(["discard-draft"]);
+    expect(many[0]).toMatchObject({ label: "Discard 3 drafts", danger: true });
+  });
+
+  it("files nothing into or out of Drafts", () => {
+    expect(archiveLabel("drafts")).toBeNull();
+    expect(moveTargets("drafts")).toEqual([]);
+    expect(moveTargets("inbox")).not.toContain("drafts");
+  });
+});

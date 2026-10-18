@@ -75,8 +75,8 @@ import {
 } from "../model/appearance";
 import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
 
-/** The five mailboxes, in the order the sidebar shows them. */
-export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "sent", "trash", "spam"];
+/** The six mailboxes, in the order the sidebar shows them. */
+export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "sent", "drafts", "trash", "spam"];
 
 /**
  * Which half of a sync is running, for the status line.
@@ -306,6 +306,17 @@ export type StoreState = {
 
   /** Every message the app knows about, across all mailboxes. */
   all: Email[];
+  /**
+   * The user's Gmail drafts, the rows of the Drafts mailbox (each with `gmailDraft`).
+   *
+   * Kept apart from `all` because they are listed through the drafts API, not synced:
+   * a sync replaces `all` wholesale and would drop them, and nothing that reads `all`
+   * (the profile, the contact index, new-mail notices, the mutations) should ever see a
+   * draft as mail.
+   */
+  drafts: Email[];
+  /** A drafts listing is in flight. */
+  draftsLoading: boolean;
   /** The messages in the current mailbox, newest first. */
   mailbox: Mailbox;
 
@@ -514,6 +525,11 @@ export interface MailBackend {
    */
   sendNew?(draft: Draft, draftId?: string): Promise<void>;
   /**
+   * The user's Gmail drafts as Drafts rows, newest first. `previous` is the last
+   * listing, so an unchanged draft is not fetched again. Optional like `sendNew`.
+   */
+  listDrafts?(previous: readonly Email[]): Promise<Email[]>;
+  /**
    * Gmail drafts, for the composer's autosave. Optional for the same reason as
    * `sendNew`; without it the composer keeps its draft on the device only.
    */
@@ -597,6 +613,8 @@ export type StoreOptions = {
   /** The demo's address book, so suggestions show the merge with no network. */
   seedContacts?: readonly GoogleContact[];
   seedTrash?: readonly TrashRecord[];
+  /** The demo's drafts, for the Drafts mailbox. */
+  seedDrafts?: readonly Email[];
   backend?: MailBackend;
   platform?: PlatformBridge;
   preferences?: Partial<Preferences>;
@@ -724,6 +742,8 @@ export class WinnowStore {
       googleContacts: options.backend ? [] : this.seedContacts,
       contactsAccess: options.backend ? "unavailable" : "demo",
       all: seed,
+      drafts: options.backend ? [] : (options.seedDrafts ?? []).slice(),
+      draftsLoading: false,
       mailbox: "inbox",
       activeFilters: [],
       searchQuery: "",
@@ -901,7 +921,10 @@ export class WinnowStore {
     // Blocked senders are hidden from every view, and before the profile is built, or
     // their volume would still push them up the engagement ranking.
     const visible = state.all.filter((email) => !blocked.has(email.sender.toLowerCase()));
-    const mailboxEmails = visible.filter((email) => email.mailbox === state.mailbox);
+    // Drafts are their own list (see `StoreState.drafts`), never filtered by sender: the
+    // sender of every draft is the user.
+    const mailboxEmails =
+      state.mailbox === "drafts" ? state.drafts : visible.filter((email) => email.mailbox === state.mailbox);
 
     // The profile is built from the *inbox*, not the current mailbox: learning "who you
     // read" from an archive or a bin would teach it the wrong thing. Memoised; see
@@ -1006,7 +1029,7 @@ export class WinnowStore {
       conversation,
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
       totalCount: mailboxEmails.length,
-      otherMailboxCount: visible.length - mailboxEmails.length,
+      otherMailboxCount: state.mailbox === "drafts" ? visible.length : visible.length - mailboxEmails.length,
       contacts: this.contacts(),
     };
   }
@@ -1209,7 +1232,12 @@ export class WinnowStore {
       ...(this.state.contactsAccess === "demo"
         ? { googleContacts: [], contactsAccess: "unavailable" as const }
         : {}),
+      // The demo's drafts are not this account's; its own are listed when Drafts opens.
+      drafts: [],
+      draftsLoading: false,
     });
+    this.draftsGeneration += 1;
+    if (this.state.mailbox === "drafts") void this.refreshDrafts();
     await this.runSync({ initial: true });
     // The retained connection only exists so a *failed* connect can be retried;
     // keeping it would let "Try again" resurrect a revoked session.
@@ -1224,7 +1252,101 @@ export class WinnowStore {
    */
   async refresh(): Promise<void> {
     if (!this.backend || this.state.syncing) return;
+    // Drafts are listed only while they are on screen: a listing on every 30 s poll
+    // would spend quota on a folder nobody is looking at.
+    if (this.state.mailbox === "drafts") void this.refreshDrafts();
     await this.runSync({ initial: false });
+  }
+
+  // ── Drafts ────────────────────────────────────────────────────────────────
+
+  /** Drafts listings, one at a time; a second request while one runs waits for it. */
+  private draftsInFlight: Promise<void> | null = null;
+  /** Bumped by sign-out and the demo, so a listing landing afterwards is dropped. */
+  private draftsGeneration = 0;
+
+  /**
+   * List the user's Gmail drafts into the Drafts mailbox. A no-op in the demo, whose
+   * drafts are seeded and edited locally. A failure is a notice, not an error state:
+   * the rows already listed stay.
+   */
+  refreshDrafts(): Promise<void> {
+    const backend = this.backend;
+    if (!backend?.listDrafts) return Promise.resolve();
+    if (this.draftsInFlight) return this.draftsInFlight;
+    const generation = this.draftsGeneration;
+    this.set({ draftsLoading: true });
+    const run = (async () => {
+      try {
+        const drafts = await backend.listDrafts!(this.state.drafts);
+        if (generation !== this.draftsGeneration || this.backend !== backend) return;
+        this.set({ drafts, draftsLoading: false });
+      } catch (error) {
+        if (generation !== this.draftsGeneration || this.backend !== backend) return;
+        this.set({
+          draftsLoading: false,
+          notice: error instanceof Error ? `Couldn't list drafts: ${error.message}` : "Couldn't list drafts.",
+        });
+      } finally {
+        this.draftsInFlight = null;
+      }
+    })();
+    this.draftsInFlight = run;
+    return run;
+  }
+
+  /** A Drafts row, by message id. */
+  draftRow(id: number): Email | null {
+    return this.state.drafts.find((email) => email.id === id) ?? null;
+  }
+
+  /**
+   * Show what the composer holds as its Drafts row now, ahead of the next listing (the
+   * demo's only listing). Replaces the row with the same Gmail draft id, or adds one.
+   */
+  putDraftRow(row: Email): void {
+    const draftId = row.gmailDraft?.id;
+    if (!draftId) return;
+    const rest = this.state.drafts.filter((email) => email.gmailDraft?.id !== draftId);
+    this.set({ drafts: [row, ...rest].sort((a, b) => b.receivedAt - a.receivedAt) });
+  }
+
+  /** The draft was sent or discarded: its row goes at once. */
+  removeDraftRow(draftId: string): void {
+    if (!this.state.drafts.some((email) => email.gmailDraft?.id === draftId)) return;
+    this.set({ drafts: this.state.drafts.filter((email) => email.gmailDraft?.id !== draftId) });
+  }
+
+  /**
+   * Discard drafts from the Drafts mailbox: the rows go at once, and each Gmail draft is
+   * deleted (`drafts.delete`, which does not go through Trash). The demo just drops them.
+   */
+  async discardDrafts(ids: Iterable<number>): Promise<void> {
+    const targets = [...ids]
+      .map((id) => this.draftRow(id))
+      .filter((row): row is Email => row?.gmailDraft !== undefined);
+    if (targets.length === 0) return;
+    const gone = new Set(targets.map((row) => row.id));
+    this.set({
+      drafts: this.state.drafts.filter((email) => !gone.has(email.id)),
+      ...(this.state.selectedId !== null && gone.has(this.state.selectedId) ? { selectedId: null } : {}),
+    });
+    const api = this.backend?.drafts;
+    if (!api) return;
+    const failed: Email[] = [];
+    for (const row of targets) {
+      try {
+        await api.delete(row.gmailDraft!.id);
+      } catch {
+        failed.push(row);
+      }
+    }
+    if (failed.length > 0) {
+      this.set({
+        drafts: [...failed, ...this.state.drafts].sort((a, b) => b.receivedAt - a.receivedAt),
+        notice: failed.length === 1 ? "Couldn't discard that draft." : `Couldn't discard ${failed.length} drafts.`,
+      });
+    }
   }
 
   /**
@@ -1470,6 +1592,7 @@ export class WinnowStore {
       mailbox,
       activeFilters: [],
     });
+    if (mailbox === "drafts") void this.refreshDrafts();
   }
 
   select(id: number | null): void {
@@ -1478,7 +1601,10 @@ export class WinnowStore {
 
   /** The visible row message `id` is read on, or `-1`; see `rowIndexOf`. */
   private rowIndex(id: number): number {
-    const mailboxEmails = this.state.all.filter((email) => email.mailbox === this.state.mailbox);
+    const mailboxEmails =
+      this.state.mailbox === "drafts"
+        ? this.state.drafts
+        : this.state.all.filter((email) => email.mailbox === this.state.mailbox);
     return rowIndexOf(this.view.threads, id, mailboxEmails);
   }
 
@@ -1842,6 +1968,11 @@ export class WinnowStore {
   }
 
   trash(id: number): void {
+    // In Drafts, delete means discard the draft.
+    if (this.state.mailbox === "drafts" && this.draftRow(id)) {
+      void this.discardDrafts([id]);
+      return;
+    }
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!email) return;
     // In the bin, "delete" means delete; anywhere else it means move to the bin — the
@@ -1931,6 +2062,10 @@ export class WinnowStore {
 
   /** Move every id to the bin, or delete permanently from the bin. */
   trashMany(ids: Iterable<number>): void {
+    if (this.state.mailbox === "drafts") {
+      void this.discardDrafts(ids);
+      return;
+    }
     for (const id of [...ids]) this.trash(id);
   }
 
@@ -2157,6 +2292,7 @@ export class WinnowStore {
     const id = this.state.selectedId;
     const openMessageSurvives = (): boolean => {
       if (id === null) return false;
+      if (this.state.mailbox === "drafts") return this.state.drafts.some((email) => email.id === id);
       return this.state.all.some(
         (email) => email.id === id && email.mailbox === this.state.mailbox,
       );
@@ -2600,14 +2736,17 @@ export class WinnowStore {
    * backend, so every action is local and nothing can be sent or synced. Marking it
    * explicitly means "signed in" is never inferred from the presence of messages.
    */
-  markDemoMode(now: number = DEMO_NOW): void {
+  markDemoMode(now: number = DEMO_NOW, drafts?: readonly Email[]): void {
     this.backend = undefined;
     this.pendingConnect = null;
     this.undoAction = null;
     this.dropBodyWork();
+    this.draftsGeneration += 1;
     this.set({
       status: "ready",
       account: null,
+      drafts: drafts ? drafts.slice() : this.state.drafts,
+      draftsLoading: false,
       googleContacts: this.seedContacts,
       contactsAccess: "demo",
       selectedId: null,
@@ -2659,6 +2798,7 @@ export class WinnowStore {
     this.bodyChecked = new Set();
     this.bodyFailed = new Set();
     this.bodyInFlight = new Map();
+    this.draftsGeneration += 1;
 
     // Park the background ticker *before* dropping the backend: on the desktop it is a
     // Rust thread that would otherwise keep firing every minute, calling `refresh` with
@@ -2675,6 +2815,8 @@ export class WinnowStore {
       googleContacts: [],
       contactsAccess: "unavailable",
       all: [],
+      drafts: [],
+      draftsLoading: false,
       selectedId: null,
       cursorIndex: NO_CURSOR,
       activeFilters: [],

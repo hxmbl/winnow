@@ -150,6 +150,7 @@ const demo = demoMailbox();
 const store = new WinnowStore({
   seed: demo.emails,
   seedTrash: DEMO_TRASH,
+  seedDrafts: demo.drafts,
   // The demo address book, so the composer shows Google contacts merged in with no network.
   seedContacts: DEMO_CONTACTS,
   // The seed's own reference instant, moved onto the real clock (`demoMailbox`), so the

@@ -36,12 +36,14 @@ import {
   FILTER_LABELS,
   NAVIGATION_ITEMS,
 } from "./core/model/signals";
-import { displayName, MAILBOX_LABEL, type Mailbox } from "./core/model/email";
+import { displayName, MAILBOX_LABEL, type Email, type Mailbox } from "./core/model/email";
 import { buildForward, buildReply, stripQuote, withReplyAll } from "./core/mail/reply";
 import {
   DraftAutosaver,
   LocalDrafts,
   draftContextKey,
+  draftRowFrom,
+  reopenDraft,
   type DraftSaveStatus,
   type LocalDraft,
 } from "./core/mail/drafts";
@@ -170,6 +172,12 @@ type ComposerState = {
   context: string;
   /** What the autosave last said. */
   status: DraftSaveStatus;
+  /**
+   * Reopened from the Drafts mailbox: always a sheet (never docked, never parked by
+   * the selection moving), closing keeps it rather than asking, and `baseline` is the
+   * draft as it opened, so an untouched reopen neither re-saves nor counts as an edit.
+   */
+  fromDrafts?: { draftId: string; row: Email; baseline: Draft };
 };
 
 /** What `startComposer` is given: the composer, less the state it owns itself. */
@@ -1068,18 +1076,47 @@ export function App({ store }: Props) {
     const saver = saverRef.current;
     saverRef.current = null;
     if (!saver) return;
-    if (how === "discard" || isUntouchedDraft(current.draft, current.initial)) {
-      void saver.discard();
-      return;
-    }
-    void saver.park();
     const s = storeRef.current;
+    const reopened = current.fromDrafts;
+    if (reopened) {
+      // A draft from Drafts is the user's already: putting it away keeps it, edited or
+      // not, and only Discard deletes it.
+      if (how === "discard") {
+        s.removeDraftRow(reopened.draftId);
+        void saver.discard().then(() => s.refreshDrafts());
+        return;
+      }
+      if (current.draft === reopened.baseline) {
+        void saver.park();
+        return;
+      }
+      s.putDraftRow(draftRowFrom(reopened.row, current.draft, Date.now()));
+      void saver.park().then(() => {
+        // Its row in Drafts is the way back to it, so the device copy is not offered for
+        // restoring on the next launch — unless Gmail did not take the save, when the
+        // device copy is the only up-to-date one.
+        const status = saver.currentStatus;
+        const savedElsewhere = status.kind === "saved" && status.where === "gmail";
+        if (savedElsewhere || s.draftsApi() === null) localDrafts()?.remove(current.context);
+        void s.refreshDrafts();
+      });
+    } else if (how === "discard" || isUntouchedDraft(current.draft, current.initial)) {
+      const hadDraft = saver.draftId !== null;
+      void saver.discard().then(() => {
+        if (hadDraft && s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
+      });
+      return;
+    } else {
+      void saver.park().then(() => {
+        if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
+      });
+    }
     const message = "Draft saved.";
     s.setNotice(message);
     setTimeout(() => {
       if (s.getSnapshot().notice === message) s.dismissNotice();
     }, DRAFT_NOTICE_MS);
-  }, []);
+  }, [localDrafts]);
 
   /**
    * Open the composer, with its autosave.
@@ -1216,7 +1253,7 @@ export function App({ store }: Props) {
   const openCompose = useCallback(
     (from?: Draft) => {
       const current = composerRef.current;
-      if (current && (current.mode === "new" || phoneRef.current)) return;
+      if (current && (current.mode === "new" || current.fromDrafts || phoneRef.current)) return;
       const draft = from ?? buildNewDraft();
       startComposer(
         {
@@ -1239,6 +1276,51 @@ export function App({ store }: Props) {
       else void platform.openExternal(url);
     },
     [openCompose],
+  );
+
+  /**
+   * Reopen a Drafts row in the composer: a sheet on the desktop, full screen on a phone,
+   * autosaving to the same Gmail draft. A reply reopens on the message it answers, so
+   * it sends on its thread (see `reopenDraft`). The copy kept on this device wins only
+   * when it is the same draft and newer than Gmail's — an edit made elsewhere since is
+   * not overwritten by an old local one.
+   */
+  const openDraftRow = useCallback(
+    (id: number) => {
+      const s = storeRef.current;
+      const snap = s.getSnapshot();
+      const row = snap.drafts.find((email) => email.id === id);
+      const reopened = row ? reopenDraft(row, snap.all) : null;
+      if (!row || !reopened) return;
+      if (composerRef.current?.context === reopened.context) return focusComposer();
+      const local = localDrafts()?.get(reopened.context) ?? null;
+      const kept: LocalDraft =
+        local && local.gmailDraftId === reopened.gmailDraftId && local.savedAt >= row.receivedAt
+          ? local
+          : {
+              context: reopened.context,
+              mode: reopened.mode,
+              draft: reopened.draft,
+              ...(reopened.replyTo ? { replyTo: reopened.replyTo } : {}),
+              gmailDraftId: reopened.gmailDraftId,
+              savedAt: row.receivedAt,
+            };
+      const draft = kept.draft;
+      startComposer(
+        {
+          draft,
+          mode: reopened.mode,
+          replyTo: reopened.replyTo,
+          context: reopened.context,
+          ...(reopened.mode === "new"
+            ? { initial: { to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject } }
+            : {}),
+          fromDrafts: { draftId: reopened.gmailDraftId, row, baseline: draft },
+        },
+        kept,
+      );
+    },
+    [startComposer, focusComposer, localDrafts],
   );
 
   /** "Send without a subject?" is up, holding the recipients Send was pressed with. */
@@ -1267,6 +1349,10 @@ export function App({ store }: Props) {
         saver?.finish();
         if (saverRef.current === saver) saverRef.current = null;
         setComposer(null);
+        // Gmail removed the draft as it sent it; so does the list, now.
+        const s = storeRef.current;
+        if (composer.fromDrafts) s.removeDraftRow(composer.fromDrafts.draftId);
+        if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
       };
 
       if (composer.mode === "new") {
@@ -1332,6 +1418,13 @@ export function App({ store }: Props) {
   const closeComposer = useCallback((force = false) => {
     const current = composerRef.current;
     if (!current) return;
+    // A draft reopened from Drafts closes the way Gmail's does: kept, without a question.
+    if (current.fromDrafts && !force) {
+      retireComposer(current, "park");
+      composerRef.current = null;
+      setComposer(null);
+      return;
+    }
     if (force || isUntouchedDraft(current.draft, current.initial)) {
       // Discarding deletes the saved draft too: Gmail's and this device's.
       retireComposer(current, "discard");
@@ -1364,6 +1457,7 @@ export function App({ store }: Props) {
     const current = composerRef.current;
     const saver = saverRef.current;
     if (!current || !saver || current.sending) return;
+    if (current.fromDrafts && current.draft === current.fromDrafts.baseline) return;
     if (isUntouchedDraft(current.draft, current.initial) && !saver.hasSaved) return;
     saver.change(current.draft, { replyAll: current.replyAll, initial: current.initial });
   }, [composerDraft, composerReplyAll]);
@@ -1416,7 +1510,7 @@ export function App({ store }: Props) {
   const selectedGmailId = view.selected?.gmailId ?? null;
   useEffect(() => {
     const current = composerRef.current;
-    if (!current || phone || current.mode === "new" || current.sending) return;
+    if (!current || phone || current.mode === "new" || current.fromDrafts || current.sending) return;
     if (current.replyTo === selectedGmailId) return;
     retireComposer(current, "park");
     composerRef.current = null;
@@ -1428,10 +1522,23 @@ export function App({ store }: Props) {
     composer !== null &&
     !phone &&
     composer.mode !== "new" &&
+    !composer.fromDrafts &&
     composer.replyTo !== undefined &&
     composer.replyTo === selectedGmailId;
   const dockedRef = useRef(docked);
   dockedRef.current = docked;
+
+  /**
+   * In Drafts, opening a row — a click, Enter, `o` — opens the composer, not the
+   * reader: a draft is something to finish. Every way of opening a row selects it, so
+   * the selection is where this is caught, once, and then dropped again.
+   */
+  const openedDraftId = snapshot.mailbox === "drafts" ? snapshot.selectedId : null;
+  useEffect(() => {
+    if (openedDraftId === null) return;
+    storeRef.current.select(null);
+    openDraftRow(openedDraftId);
+  }, [openedDraftId, openDraftRow]);
 
   /**
    * On launch (and after signing in), offer the newest draft kept on this device — the
@@ -1888,7 +1995,7 @@ export function App({ store }: Props) {
   const enterDemo = useCallback(() => {
     const demo = demoMailbox();
     store.replaceAll(demo.emails);
-    store.markDemoMode(demo.now);
+    store.markDemoMode(demo.now, demo.drafts);
   }, [store]);
 
   /*
@@ -2437,8 +2544,14 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             onClearFilters={store.clearFilters.bind(store)}
             onClearSearch={() => store.setSearchQuery("")}
             onSync={() => {
-              void store.refresh();
+              if (snapshot.mailbox === "drafts") void store.refreshDrafts();
+              else void store.refresh();
             }}
+            emptyMailbox={
+              snapshot.mailbox === "drafts"
+                ? { body: snapshot.draftsLoading ? "Loading your drafts…" : "No drafts.", action: "Check for drafts" }
+                : undefined
+            }
             // Only a real account has something to sync with. Offering the button
             // over the demo would be a control that cannot do anything, which is the
             // exact failure the empty state's own copy was written to avoid.
@@ -2727,7 +2840,48 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         The sender menu (avatar) and the row context menu. One at a time, fixed to the
         viewport, built from `ui/menus` so what each contains is unit-tested.
       */}
-      {menu && (() => {
+      {menu && snapshot.mailbox === "drafts" && (() => {
+        // A Drafts row: open it or discard it, from the avatar or the row alike — the
+        // sender of every draft is the user, so a sender menu would say nothing.
+        const row = store.draftRow(menu.id);
+        if (!row) return null;
+        const close = () => setMenu(null);
+        const single = menu.ids.length === 1;
+        const noop = () => {};
+        return (
+          <Menu
+            testId="row"
+            label={single ? `Actions for draft: ${row.subject || "no subject"}` : `Actions for ${menu.ids.length} drafts`}
+            anchor={menu.anchor}
+            returnFocus={menu.trigger}
+            onClose={close}
+            items={buildRowMenu({
+              count: menu.ids.length,
+              mailbox: "drafts",
+              anyUnread: false,
+              actions: {
+                reply: noop,
+                replyAll: noop,
+                forward: noop,
+                archive: noop,
+                trash: noop,
+                setRead: noop,
+                move: noop,
+                toggleMuteSender: noop,
+                findFrom: noop,
+                findSubject: noop,
+                openInGmail: noop,
+                openDraft: () => openDraftRow(row.id),
+                discardDraft: () => {
+                  void store.discardDrafts(menu.ids);
+                  if (!single) setSelection(EMPTY_SELECTION);
+                },
+              },
+            })}
+          />
+        );
+      })()}
+      {menu && snapshot.mailbox !== "drafts" && (() => {
         const email = snapshot.all.find((candidate) => candidate.id === menu.id);
         if (!email) return null;
         const close = () => setMenu(null);

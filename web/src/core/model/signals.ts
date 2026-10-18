@@ -174,7 +174,7 @@ export function rowIndicators(email: Email, signals: EmailSignals): BuiltinSmart
 
 // ── Mailbox navigation ──────────────────────────────────────────────────────
 
-export type NavigationItem = "inbox" | "spam" | "trash" | "sent" | "settings";
+export type NavigationItem = "inbox" | "spam" | "trash" | "sent" | "drafts" | "settings";
 
 /**
  * The `!` palette's rows.
@@ -190,6 +190,7 @@ export const NAVIGATION_ITEMS: readonly { id: NavigationItem; mailbox?: Mailbox 
   { id: "spam", mailbox: "spam" },
   { id: "trash", mailbox: "trash" },
   { id: "sent", mailbox: "sent" },
+  { id: "drafts", mailbox: "drafts" },
   { id: "settings" },
 ] as const;
 

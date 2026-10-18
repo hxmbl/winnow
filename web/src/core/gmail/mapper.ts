@@ -24,7 +24,7 @@ import {
   type Mailbox,
 } from "../model/email";
 import { hashId } from "../model/ids";
-import { LABEL, base64UrlDecode, type GmailMessage, type GmailPart } from "./dto";
+import { LABEL, base64UrlDecode, type GmailFullDraft, type GmailMessage, type GmailPart } from "./dto";
 import { decodeEntities, parseAddressHeader, parseAddressList, plainTextFromHtml } from "../mail/html";
 import { parseListUnsubscribe } from "../mail/unsubscribe";
 
@@ -272,6 +272,37 @@ export function toEmail(
     // Subject plus the body we have: the snippet on a metadata sync, the decoded text
     // on a full one.
     code: detectCode(decodeMimeWord(headerValue(payload, "Subject") ?? ""), body),
+  };
+}
+
+/**
+ * A Gmail draft (`drafts.get?format=full`) as a row of the Drafts mailbox, or `null`
+ * when the draft carries no message.
+ *
+ * Mapped by `toEmail` so it reads exactly like any other message, then filed in
+ * `drafts` whatever its labels say, read (a draft is never "unread"), and stamped with
+ * the draft id and the threading headers it was saved with — the two things reopening
+ * it in the composer needs.
+ */
+export function toDraftEmail(draft: GmailFullDraft): Email | null {
+  const message = draft.message;
+  if (!message?.id) return null;
+  // `format=full` always carries a payload, so even a blank draft maps; `null` here is a
+  // stub with nothing in it at all.
+  const email = toEmail(message);
+  if (!email) return null;
+  const inReplyTo = headerValue(message.payload, "In-Reply-To")?.trim();
+  const references = headerValue(message.payload, "References")?.trim();
+  return {
+    ...email,
+    mailbox: "drafts",
+    unread: false,
+    starred: false,
+    gmailDraft: {
+      id: draft.id,
+      ...(inReplyTo ? { inReplyTo } : {}),
+      ...(references ? { references } : {}),
+    },
   };
 }
 

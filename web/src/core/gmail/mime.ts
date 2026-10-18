@@ -123,6 +123,16 @@ export function buildMime(draft: Draft, options: BuildOptions): string {
     const parent = messageIdFor(options.inReplyTo);
     headers.push(`In-Reply-To: ${parent}`);
     headers.push(`References: ${[...replyReferences(options.references ?? []), parent].join(" ")}`);
+  } else if (draft.replyHeaders) {
+    // A draft reopened from Drafts whose original is not cached here: the headers it was
+    // saved with, so it stays on its thread. Message-ids only — anything else (a stray
+    // CR/LF above all) is dropped rather than written into the header block.
+    const parent = safeMessageIds(draft.replyHeaders.inReplyTo)[0];
+    if (parent) {
+      const references = safeMessageIds(draft.replyHeaders.references ?? "").filter((id) => id !== parent);
+      headers.push(`In-Reply-To: ${parent}`);
+      headers.push(`References: ${[...references, parent].join(" ")}`);
+    }
   }
   headers.push("MIME-Version: 1.0");
 
@@ -184,6 +194,11 @@ function base64Chunked(bytes: Uint8Array): string {
  * The real one when the message carried it; otherwise a synthesised
  * `<gmailId@mail.gmail.com>` — better than a bare id, which threads nowhere.
  */
+/** The `<id@host>` tokens in a header value, and nothing else. */
+export function safeMessageIds(value: string): string[] {
+  return value.match(/<[^<>\s@]+@[^<>\s@]+>/g) ?? [];
+}
+
 export function messageIdFor(email: Pick<Email, "gmailId" | "messageId">): string {
   return email.messageId ?? `<${email.gmailId}@mail.gmail.com>`;
 }

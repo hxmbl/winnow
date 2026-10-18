@@ -9,13 +9,15 @@
  * flip to it while triaging, and a sixth row would dilute the ones that matter. Sent is
  * here despite being the same kind of destination, because it is the one folder this app
  * has no other way into: it is what the composer's recipient suggestions are built from,
- * so being unable to read it would make a derived feature unauditable.
+ * so being unable to read it would make a derived feature unauditable. Drafts is here for
+ * the same reason it is in the sidebar: it is the only way back into a draft once the
+ * composer has been put away.
  *
  * **It is a `menu`, not a `dialog`:** the rows are destinations with a roving selection,
  * and `aria-activedescendant` is what makes it announce which row is highlighted.
  */
 
-import { Inbox, Send, Settings, Trash2, TriangleAlert } from "lucide-react";
+import { FilePen, Inbox, Send, Settings, Trash2, TriangleAlert } from "lucide-react";
 import { NAVIGATION_ITEMS, type NavigationItem } from "../../core/model/signals";
 import { MAILBOX_LABEL, type Mailbox } from "../../core/model/email";
 import { Sheet } from "./Overlay";
@@ -25,6 +27,7 @@ const ICONS: Record<NavigationItem, typeof Inbox> = {
   spam: TriangleAlert,
   trash: Trash2,
   sent: Send,
+  drafts: FilePen,
   settings: Settings,
 };
 

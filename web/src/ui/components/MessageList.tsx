@@ -31,6 +31,7 @@ import {
 } from "../selection";
 import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
 import { displayName } from "../../core/model/email";
+import { draftRowName } from "../../core/mail/drafts";
 import {
   rowIndicators,
   FILTER_LABELS,
@@ -230,9 +231,12 @@ const Row = memo(function Row({
   const email = row.representative;
   const indicators = rowIndicators(email, signals);
   const time = formatRowTime(email.receivedAt, bucket);
-  const name = displayName(email);
+  // A draft is named by who it is to, and says it is a draft where a row's signal word
+  // goes, in the danger colour Gmail gives it.
+  const draft = email.gmailDraft !== undefined;
+  const name = draft ? draftRowName(email) : displayName(email);
 
-  const signal = rowSignal(indicators, fresh);
+  const signal = draft ? { label: "Draft", title: "Not sent yet", danger: true } : rowSignal(indicators, fresh);
 
   return (
     <div
@@ -419,6 +423,8 @@ const Row = memo(function Row({
         touch device the 44px target keeps that centre with `-mt-[10.5px]`. The code chip
         does the same (`CodeCopy.tsx`).
       */}
+      {/* A draft has no star: it is not mail yet. */}
+      {!draft && (
       <button
         type="button"
         onClick={() => onToggleStar(email.id)}
@@ -446,6 +452,7 @@ const Row = memo(function Row({
           <path d="m12 3 2.6 5.6 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.4l6-.8Z" strokeLinejoin="round" />
         </svg>
       </button>
+      )}
     </div>
   );
 });
@@ -476,6 +483,8 @@ export type EmptyState = {
   onClearSearch: () => void;
   onSync: () => void;
   canSync: boolean;
+  /** What an empty mailbox says and its button reads, where "Nothing here yet" is wrong (Drafts). */
+  emptyMailbox?: { body: string; action: string };
 };
 
 /**
@@ -490,6 +499,7 @@ function Empty({
   onClearSearch,
   onSync,
   canSync,
+  emptyMailbox,
 }: EmptyState) {
   /**
    * What the user can do about *this* emptiness.
@@ -518,9 +528,9 @@ function Empty({
         };
       case "mailbox":
         return {
-          body: "Nothing here yet.",
+          body: emptyMailbox?.body ?? "Nothing here yet.",
           action: canSync
-            ? { label: "Check for new mail", run: onSync }
+            ? { label: emptyMailbox?.action ?? "Check for new mail", run: onSync }
             : null,
         };
       default:
@@ -579,6 +589,7 @@ type Props = {
   onSync: () => void;
   /** False in the demo, where there is nothing to sync with. */
   canSync: boolean;
+  emptyMailbox?: EmptyState["emptyMailbox"];
   /** Reference instant for the day sections. */
   now: number;
   /** Lowercased sender address → contact photo URL. */
@@ -618,6 +629,7 @@ function MessageList({
   onClearSearch,
   onSync,
   canSync,
+  emptyMailbox,
   now,
   photos,
   selection,
@@ -1290,6 +1302,7 @@ function MessageList({
         onClearSearch={onClearSearch}
         onSync={onSync}
         canSync={canSync}
+        emptyMailbox={emptyMailbox}
       />
     );
   }

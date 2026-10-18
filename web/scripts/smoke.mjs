@@ -2584,7 +2584,7 @@ try {
   // `aria-label`, and `text=` matches visible text only.
   await page.waitForSelector('[role="menu"]', { timeout: 5_000 });
   const paletteRows = await page.locator('[role="menu"] [role="menuitem"]').count();
-  check("the navigation palette opens", paletteRows === 5, `${paletteRows} rows`);
+  check("the navigation palette opens", paletteRows === 6, `${paletteRows} rows`);
   // Sent is a folder now, and this palette is the only place it is reachable on a phone
   // — so a row that is missing here is a mailbox that cannot be opened at all.
   check(
@@ -2609,6 +2609,45 @@ try {
     (await page.locator('[data-message-id]').count()) > 0,
     `${await page.locator('[data-message-id]').count()} rows`,
   );
+
+  // ── Drafts: the demo's drafts, reopened in the composer ───────────────────
+
+  await goTo("Drafts");
+  const draftRows = await page.locator("[data-message-id]").count();
+  check("Drafts lists the demo's drafts", draftRows >= 2, `${draftRows} rows`);
+  check(
+    "and each row says it is a draft",
+    (await page.locator('[data-row-id] span:text-is("Draft")').count()) === draftRows,
+  );
+  const studio = page.locator("[data-message-id]", { hasText: "Studio visit next week" });
+  await studio.click();
+  await page.waitForSelector('[role="dialog"] input[aria-label="Subject"]', { timeout: 5_000 });
+  check(
+    "opening a draft reopens it in the composer",
+    (await page.locator('[role="dialog"] input[aria-label="Subject"]').inputValue()) === "Studio visit next week",
+  );
+  check(
+    "with its words intact",
+    ((await page.locator('[role="dialog"] textarea[aria-label="Message"]').inputValue()) ?? "").includes("printed proofs"),
+  );
+  check("and not the reader", (await page.locator("article h1").count()) === 0);
+  await page.locator('[role="dialog"] textarea[aria-label="Message"]').fill("Hi Helena,\n\nTuesday it is.");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check("Escape puts a reopened draft away without asking", (await page.locator('[role="dialog"]').count()) === 0);
+  check(
+    "and the row shows the edit",
+    (await page.locator("[data-message-id]", { hasText: "Tuesday it is." }).count()) === 1,
+  );
+  const migration = page.locator("[data-message-id]", { hasText: "Re: the migration plan" });
+  await migration.click();
+  await page.waitForSelector('[role="dialog"] textarea[aria-label="Message"]', { timeout: 5_000 });
+  check(
+    "a reply draft reopens as a reply",
+    (await page.locator('[role="dialog"][aria-label="Reply"]').count()) === 1,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
   await goTo("Inbox");
 
   // ── Mark all read is scoped to the mailbox on screen ───────────────────────

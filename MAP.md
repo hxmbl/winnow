@@ -277,7 +277,7 @@ to its range, and records a `FeedbackEvent`.
 
 | File | Holds |
 | --- | --- |
-| `email.ts` | `Email` (product view) vs `RawEmail` (wire view), `Mailbox = "inbox" \| "archive" \| "sent" \| "trash" \| "spam"`, `MAILBOX_LABEL`, `EmailCategory`, `Contact`, `Attachment`, `Draft`, plus the loaded-body helpers (`isBodyLoaded`, `keepLoadedBody`, `withLoadedBody`) and `withCode`. |
+| `email.ts` | `Email` (product view) vs `RawEmail` (wire view), `Mailbox = "inbox" \| "archive" \| "sent" \| "drafts" \| "trash" \| "spam"`, `MAILBOX_LABEL`, `EmailCategory`, `Contact`, `Attachment`, `Draft`, plus the loaded-body helpers (`isBodyLoaded`, `keepLoadedBody`, `withLoadedBody`) and `withCode`. |
 | `signals.ts` | `BUILTIN_FILTERS` (21, in rail-catalog order), `FILTER_LABELS`, `PERMANENT_FILTERS = ["important", "shipping"]`, `NAVIGATION_ITEMS`, `UNSAFE_THRESHOLD = 0.4`, `IMPORTANT_THRESHOLD = 56`, `isUnsafe`, `isImportant`, `badgeFilters` (the chips in a reader) and `rowIndicators` (the at-most-one word a list row carries). |
 | `profile.ts` | `buildUserProfile(inbox, trash)`: per-sender trash bias (unbounded in the profile, clamped to `MAX_TRASH_BIAS = 0.35` where used), top six correspondents, the quiet tail, and first-time senders. Deterministic, and ties break on the sender name — a ranking that hides mail cannot be a shuffle. |
 | `appearance.ts` | `APPEARANCES` (`system \| light \| dark \| oled`) and `ACCENT_THEMES` (`space \| plum \| ember \| aurora`). Names live in `core` because the store persists them and `core` does not import from `ui`. |
@@ -469,7 +469,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
 | `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next/mark-all-read, Compose, and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
 | `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. |
-| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other four mailboxes in `MAILBOX_ORDER`, an account footer carrying Settings, and the progressive scrim blur. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
+| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other five mailboxes in `MAILBOX_ORDER` (Drafts among them), an account footer carrying Settings, and the progressive scrim blur. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
 | `SettingsPanel.tsx` | Settings. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. |
 | `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send and Discard, the Reply / Reply all toggle and the draft status. Three layouts: docked at the bottom of the reader pane (desktop reply and forward, not modal, its own Escape), a centred sheet (desktop new message), full screen (phone, everything). |
 | `GoogleSetup.tsx` | Paste, import by file, drop or paste-into-field; test; save; connect. |
@@ -478,7 +478,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `Overlay.tsx` | `Sheet`, `ConfirmDialog`, `SheetHeader`. Focus moved in and restored on unmount, Tab trapped by `getClientRects()` (because `offsetParent` is null for a fixed element). `ConfirmDialog` exists because `window.confirm` is unimplemented in a Tauri webview. |
 | `Menu.tsx` | The WAI-ARIA menu pattern, including submenus. Every other key is swallowed so the app's global shortcuts cannot fire while a menu is open. |
 | `menuPlacement.ts` | `placeMenu` and `MenuAnchor` as pure geometry, kept out of the component module so they test without React. |
-| `NavigationPalette.tsx` | The `!` palette: inbox, spam, trash, sent, settings. It is a `menu`, not a `dialog`. |
+| `NavigationPalette.tsx` | The `!` palette: inbox, spam, trash, sent, drafts, settings. It is a `menu`, not a `dialog`. |
 | `PhoneChrome.tsx` | `PhoneTopBar` and `PhoneDock`. Below `sm` the masthead is replaced, not squeezed; all targets are 44 px. |
 | `SelectionBar.tsx` | The batch bar, using the same `archiveLabel` and `moveTargets` helpers as the row menu so the two cannot disagree. |
 | `Avatar.tsx` | Contact photo → Gravatar → BIMI logo → monogram. Every picture is an `<img>`; the monogram stays present under a loaded logo so a transparent logo does not let the letter through. |
@@ -720,10 +720,17 @@ is hard to see.
 - **No component tests.** The layers that are hard to get right (classification,
   the wire, sanitising, the store) are pure and heavily tested; the components
   are covered by the smoke pass against a real browser instead.
-- **No Drafts mailbox.** The composer autosaves to Gmail drafts (`core/mail/drafts.ts`,
+- **Drafts are not synced.** The composer autosaves to Gmail drafts (`core/mail/drafts.ts`,
   `DraftAutosaver`: device copy at once, Gmail ~2 s after typing stops, one id per
-  draft, `drafts.send` on Send, `drafts.delete` on Discard), but Gmail's own drafts
-  are excluded from sync, so there is nothing to browse them in yet.
+  draft, `drafts.send` on Send, `drafts.delete` on Discard). The Drafts mailbox lists
+  them through the drafts API instead (`listDrafts`: `drafts.list`, then `drafts.get`
+  only for a draft whose message id changed, capped at 100), only while Drafts is on
+  screen. They live in `StoreState.drafts`, never in `all`, so a sync cannot drop them
+  and nothing that reads mail (profile, contacts, notices, mutations) sees one. Opening
+  a row reopens it in the composer (`reopenDraft`): a reply on the cached message its
+  `In-Reply-To` or thread names, or — original not cached — a message that keeps those
+  headers (`Draft.replyHeaders`) and its thread id, so it still threads. Delete in
+  Drafts is `drafts.delete`.
 - **No path aliases, no router, no state library, no CSS framework beyond
   Tailwind, no date library, no component library.** Each absence is a decision
   recorded in the file that would otherwise have imported it.

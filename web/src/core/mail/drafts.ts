@@ -16,7 +16,7 @@
  * the call sequence is testable with fakes.
  */
 
-import type { Draft, GmailId } from "../model/email";
+import type { Contact, Draft, Email, GmailId } from "../model/email";
 
 /** What the composer is for. Matches `Composer`'s `mode`. */
 export type DraftMode = "reply" | "forward" | "new";
@@ -411,4 +411,123 @@ export class DraftAutosaver {
     this.status = status;
     this.opts.onStatus?.(status);
   }
+}
+
+// ── The Drafts mailbox ──────────────────────────────────────────────────────
+
+/** The device-copy context of a draft reopened from the Drafts mailbox. */
+export function gmailDraftContext(draftId: string): string {
+  return `draft:${draftId}`;
+}
+
+function contactLabel(contact: Contact): string {
+  const name = contact.name?.trim();
+  if (name) return name;
+  return contact.address.split("@")[0] || contact.address;
+}
+
+/**
+ * What a Drafts row names in the sender's place: who the draft is *to*, the way Gmail
+ * does — the sender of every draft is the user, which says nothing.
+ */
+export function draftRowName(email: Pick<Email, "to" | "cc" | "bcc">): string {
+  const people = [...(email.to ?? []), ...(email.cc ?? []), ...(email.bcc ?? [])];
+  if (people.length === 0) return "No recipients";
+  const first = contactLabel(people[0]!);
+  return people.length === 1 ? first : `${first} +${people.length - 1}`;
+}
+
+/** What opening a Drafts row gives the composer. */
+export type DraftReopen = {
+  mode: DraftMode;
+  draft: Draft;
+  /** The cached message a reply or forward answers, so it threads exactly as before. */
+  replyTo?: GmailId;
+  context: string;
+  gmailDraftId: string;
+};
+
+const FORWARD_SUBJECT = /^\s*(fwd?|fw)\s*:/i;
+
+/**
+ * Reopen a Drafts row in the composer.
+ *
+ * The message it answers is found the way Gmail threads: its `In-Reply-To` first, then
+ * the newest other message on its thread. Found, it reopens as the reply (or forward —
+ * read off the `Fwd:` subject) it was, on the same thread. Not found (the original is
+ * older than this device's cache), it reopens as a message of its own but keeps the
+ * threading headers it was saved with (`Draft.replyHeaders`) and its thread id, so it
+ * still goes out on the conversation.
+ *
+ * The body is the draft's text exactly: no quote block to strip and nothing prefilled,
+ * because all of it is the user's now.
+ */
+export function reopenDraft(email: Email, all: readonly Email[]): DraftReopen | null {
+  const gmailDraft = email.gmailDraft;
+  if (!gmailDraft) return null;
+  const addresses = (contacts: readonly Contact[] | undefined) =>
+    (contacts ?? []).map((contact) => contact.address);
+  const draft: Draft = {
+    to: addresses(email.to),
+    cc: addresses(email.cc),
+    bcc: addresses(email.bcc),
+    subject: email.subject,
+    body: email.body,
+  };
+  const context = gmailDraftContext(gmailDraft.id);
+  const others = all.filter((candidate) => candidate.mailbox !== "drafts" && candidate.gmailId !== email.gmailId);
+
+  const byHeader = gmailDraft.inReplyTo
+    ? others.find((candidate) => candidate.messageId !== undefined && candidate.messageId === gmailDraft.inReplyTo)
+    : undefined;
+  const byThread =
+    byHeader ??
+    (email.threadId
+      ? others
+          .filter((candidate) => candidate.threadId === email.threadId)
+          .sort((a, b) => b.receivedAt - a.receivedAt)[0]
+      : undefined);
+
+  if (byThread) {
+    return {
+      mode: FORWARD_SUBJECT.test(email.subject) ? "forward" : "reply",
+      draft: { ...draft, inReplyTo: byThread.gmailId, threadId: byThread.threadId },
+      replyTo: byThread.gmailId,
+      context,
+      gmailDraftId: gmailDraft.id,
+    };
+  }
+  return {
+    mode: "new",
+    draft: {
+      ...draft,
+      ...(email.threadId ? { threadId: email.threadId } : {}),
+      ...(gmailDraft.inReplyTo
+        ? { replyHeaders: { inReplyTo: gmailDraft.inReplyTo, references: gmailDraft.references } }
+        : {}),
+    },
+    context,
+    gmailDraftId: gmailDraft.id,
+  };
+}
+
+/**
+ * The Drafts row for what the composer holds now, so the list shows an edit at once
+ * rather than at the next listing (and the demo, which has no listing, at all).
+ */
+export function draftRowFrom(
+  previous: Email,
+  draft: Draft,
+  now: number,
+): Email {
+  const contacts = (list: readonly string[]) => list.map((address) => ({ address }));
+  return {
+    ...previous,
+    to: contacts(draft.to),
+    cc: contacts(draft.cc),
+    bcc: contacts(draft.bcc),
+    subject: draft.subject,
+    body: draft.body,
+    receivedAt: now,
+  };
 }

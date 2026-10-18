@@ -164,6 +164,19 @@ export type GmailDraft = {
   message?: { id?: string; threadId?: string; labelIds?: string[] };
 };
 
+/** `drafts.get?format=full`: the draft's id and its whole message. */
+export type GmailFullDraft = {
+  id: string;
+  message?: GmailMessage;
+};
+
+/** `drafts.list`: ids only, the message id changing whenever the draft is saved. */
+export type GmailDraftList = {
+  drafts?: { id: string; message?: { id?: string; threadId?: string } }[];
+  nextPageToken?: string;
+  resultSizeEstimate?: number;
+};
+
 export type GmailSendResponse = {
   id: string;
   threadId: string;
