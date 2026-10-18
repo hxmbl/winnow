@@ -27,6 +27,7 @@ import { PositionReadout } from "./Masthead";
 import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 import { ComposeButton } from "./ComposeFab";
+import { listScroller, scrollListToTop } from "../listScroll";
 import { DOCK_TABS, EXPAND_LABEL, PHONE_DOCK_VAR, PHONE_TABS_VAR, badgeText, tabAction, tabLabel } from "../phoneDock";
 
 /** The canvas-toned sheet the reader's bottom bar sits on. */
@@ -130,10 +131,6 @@ export type PhoneDockProps = {
   onCompose: (() => void) | null;
 };
 
-/** The phone list's scroller. One on screen at a time below `sm`. */
-function listScroller(): HTMLElement | null {
-  return document.querySelector<HTMLElement>("[data-row-count]");
-}
 
 export function PhoneDock({
   pills,
@@ -189,12 +186,7 @@ export function PhoneDock({
     };
   }, []);
 
-  const scrollToTop = () => {
-    const scroller = listScroller();
-    if (!scroller) return;
-    const reduce = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    scroller.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
-  };
+  const scrollToTop = scrollListToTop;
 
   return (
     /*
@@ -237,7 +229,12 @@ export function PhoneDock({
           aria-label="Primary"
           data-phone-pill=""
           data-expanded={menuOpen ? "" : undefined}
-          className="wn-glass pointer-events-auto grid h-[var(--wn-dock-h)] min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200"
+          // Open, the pill is see-through and sits above the panel (z 55 over 50), on the
+          // panel's Inbox row: it must not take that row's taps. Only Expand, which keeps
+          // its own `pointer-events-auto`, stays live on it.
+          className={`wn-glass grid h-[var(--wn-dock-h)] min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
+            menuOpen ? "pointer-events-none" : "pointer-events-auto"
+          }`}
         >
           {DOCK_TABS.map((id) => {
             const { label, Icon } = TAB_ICON[id];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCK_TABS, EXPAND_LABEL, badgeText, panelOrder, tabAction, tabLabel } from "./phoneDock";
+import { DOCK_TABS, EXPAND_LABEL, badgeText, PANEL_ORDER, panelOrder, tabAction, tabLabel } from "./phoneDock";
 
 describe("the phone dock", () => {
   it("has two tabs, Inbox then Sent; Archive and the rest are behind Expand", () => {
@@ -29,9 +29,13 @@ describe("the phone dock", () => {
     expect(badgeText(120)).toBe("99+");
   });
 
-  it("lists the panel's folders reversed, so the last one sits nearest the thumb", () => {
+  it("lists the panel's folders rarest first, Archive then Sent nearest the thumb", () => {
     const folders = [{ id: "archive" }, { id: "sent" }, { id: "drafts" }, { id: "trash" }, { id: "spam" }] as const;
-    expect(panelOrder(folders).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "sent", "archive"]);
+    expect(panelOrder(folders).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
+    expect([...PANEL_ORDER]).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
+    // Whatever order the caller hands in, the named folders land in the panel's order.
+    const shuffled = [{ id: "sent" }, { id: "spam" }, { id: "archive" }, { id: "trash" }, { id: "drafts" }] as const;
+    expect(panelOrder(shuffled).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
     // A copy: the caller's order is left alone.
     expect(folders[0].id).toBe("archive");
   });

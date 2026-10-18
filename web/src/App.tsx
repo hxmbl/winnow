@@ -71,6 +71,7 @@ import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
 import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
+import { scrollListToTop } from "./ui/listScroll";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
 import { buildPills } from "./ui/rail";
@@ -795,9 +796,13 @@ export function App({ store }: Props) {
     folders: mailboxes.filter((mailbox) => mailbox.id !== "inbox"),
     filtering: snapshot.activeFilters.length > 0,
     onInbox: () => {
+      // On a phone, the panel's Inbox row on the plain inbox is the dock tab's "home"
+      // gesture: nothing to switch to, so the list goes back to its top instead.
+      const already = snapshot.mailbox === "inbox" && snapshot.activeFilters.length === 0 && snapshot.overlay === "none";
       store.setOverlay("none");
       store.setMailbox("inbox");
       store.clearFilters();
+      if (already && phoneRef.current) scrollListToTop();
     },
     onSelectMailbox: (mailbox) => {
       store.setOverlay("none");

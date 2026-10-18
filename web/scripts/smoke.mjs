@@ -3776,8 +3776,8 @@ try {
     JSON.stringify(menuShape),
   );
   check(
-    "reversed: account and gear on top, then Spam, Trash, Drafts, Sent, Archive, and Inbox last",
-    JSON.stringify(menuShape.order) === JSON.stringify(["account", "spam", "trash", "drafts", "sent", "archive", "inbox"]),
+    "reversed: account and gear on top, then Spam, Trash, Drafts, Archive, Sent, and Inbox last",
+    JSON.stringify(menuShape.order) === JSON.stringify(["account", "spam", "trash", "drafts", "archive", "sent", "inbox"]),
     JSON.stringify(menuShape.order),
   );
   check(
@@ -6477,6 +6477,99 @@ try {
     await s.locator('[data-phone-dock] button[data-dock-tab="inbox"]').tap();
     await s.waitForTimeout(250);
     check("the Inbox tab returns to the mail", (await s.locator('[role="dialog"]').count()) === 0);
+    await ctx.close();
+  }
+
+  {
+    /*
+      The expanded dock panel, with real touch taps at each row's centre (not
+      `locator.click`, which retargets): the see-through pill sits above the panel on the
+      Inbox row's line, and it used to take that row's taps, so Inbox did nothing. Every
+      row must take its own tap, close the panel and go where it says; Inbox on the plain
+      inbox takes the list back to its top.
+    */
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const t = await ctx.newPage();
+    t.on("pageerror", (error) => errors.push(String(error)));
+    await t.goto(URL, { waitUntil: "networkidle" });
+    await t.waitForSelector("[data-row-count] [data-row-id]");
+    const panelOpen = () => t.evaluate(() => document.querySelector("[data-sidebar]")?.hasAttribute("data-open") ?? false);
+    const current = () => t.evaluate(() => {
+      const row = document.querySelector('[data-sidebar] [aria-current="page"][data-nav], [data-sidebar] [aria-current="page"][data-nav-folder]');
+      return row ? (row.getAttribute("data-nav") ?? row.getAttribute("data-nav-folder")) : null;
+    });
+    const tapRow = async (selector) => {
+      await t.locator("[data-phone-dock] button[data-dock-expand]").tap();
+      await t.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+      await t.waitForTimeout(400);
+      const box = await t.locator(`[data-sidebar] ${selector}`).boundingBox();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const hit = await t.evaluate(([px, py, sel]) => Boolean(document.elementFromPoint(px, py)?.closest(`[data-sidebar] ${sel}`)), [x, y, selector]);
+      await t.touchscreen.tap(x, y);
+      await t.waitForTimeout(450);
+      return { hit, open: await panelOpen(), current: await current() };
+    };
+    const results = {};
+    for (const id of ["sent", "archive", "drafts", "trash", "spam"]) {
+      results[id] = await tapRow(`button[data-nav-folder="${id}"]`);
+      if (results[id].open) {
+        await t.locator("[data-phone-dock] button[data-dock-expand]").tap();
+        await t.waitForTimeout(400);
+      }
+    }
+    check(
+      "every folder row in the expanded panel takes a real touch tap: it closes the panel and opens that folder",
+      Object.entries(results).every(([id, r]) => r.hit && !r.open && r.current === id),
+      JSON.stringify(results),
+    );
+    const fromSpam = await tapRow('button[data-nav="inbox"]');
+    check(
+      "the panel's Inbox row takes a real touch tap (the see-through pill above it lets it through), closes the panel and opens Inbox",
+      fromSpam.hit && !fromSpam.open && fromSpam.current === "inbox",
+      JSON.stringify(fromSpam),
+    );
+    const before = await t.evaluate(() => {
+      const scroller = document.querySelector("[data-row-count]");
+      scroller.scrollTop = 600;
+      return Math.round(scroller.scrollTop);
+    });
+    const onInbox = await tapRow('button[data-nav="inbox"]');
+    await t.waitForFunction(() => document.querySelector("[data-row-count]").scrollTop === 0, null, { timeout: 3_000 }).catch(() => undefined);
+    const after = await t.evaluate(() => Math.round(document.querySelector("[data-row-count]").scrollTop));
+    check(
+      "tapping the panel's Inbox row while on Inbox closes the panel and takes the list back to its top",
+      before > 0 && onInbox.hit && !onInbox.open && onInbox.current === "inbox" && after === 0,
+      JSON.stringify({ before, after, onInbox }),
+    );
+    // The account row opens its menu from a real tap (the demo's is Connect Gmail).
+    await t.locator("[data-phone-dock] button[data-dock-expand]").tap();
+    await t.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await t.waitForTimeout(400);
+    const account = await t.locator('[data-sidebar] [data-nav-account] button[aria-haspopup="menu"]').boundingBox();
+    await t.touchscreen.tap(account.x + account.width / 2, account.y + account.height / 2);
+    await t.waitForTimeout(350);
+    check(
+      "the account row opens its menu from a real touch tap",
+      (await t.getByRole("menuitem", { name: "Connect Gmail" }).count()) === 1,
+    );
+    await t.keyboard.press("Escape");
+    await t.waitForTimeout(200);
+    if (await panelOpen()) {
+      await t.locator("[data-phone-dock] button[data-dock-expand]").tap();
+      await t.waitForTimeout(400);
+    }
+    // The account row's gear takes a real tap too, and Settings closes the panel.
+    await t.locator("[data-phone-dock] button[data-dock-expand]").tap();
+    await t.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await t.waitForTimeout(400);
+    const gear = await t.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').boundingBox();
+    await t.touchscreen.tap(gear.x + gear.width / 2, gear.y + gear.height / 2);
+    await t.waitForTimeout(450);
+    check(
+      "and the gear on the account row opens Settings from a real touch tap",
+      !(await panelOpen()) && (await t.locator('[role="dialog"][aria-label="Settings"]').count()) === 1,
+    );
     await ctx.close();
   }
 

@@ -53,9 +53,17 @@ export function badgeText(unread: number): string | null {
 }
 
 /**
- * The panel's mailboxes, top to bottom: the rarer folders first and Inbox last, right
- * above the thumb that opened it. `folders` is the desktop's top-down order.
+ * The panel's mailboxes above Inbox, top to bottom: the rarer folders first, then
+ * Archive and Sent, the two most used, right above Inbox and the thumb that opened it.
+ * `folders` is the desktop's top-down order; anything not named here keeps its place
+ * from the reversed desktop order, above the named ones.
  */
+export const PANEL_ORDER = ["spam", "trash", "drafts", "archive", "sent"] as const satisfies readonly Mailbox[];
+
 export function panelOrder<T extends { id: Mailbox }>(folders: readonly T[]): T[] {
-  return [...folders].reverse();
+  const rank = (id: Mailbox) => (PANEL_ORDER as readonly Mailbox[]).indexOf(id);
+  const reversed = [...folders].reverse();
+  const other = reversed.filter((folder) => rank(folder.id) < 0);
+  const named = reversed.filter((folder) => rank(folder.id) >= 0).sort((a, b) => rank(a.id) - rank(b.id));
+  return [...other, ...named];
 }
