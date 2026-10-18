@@ -803,6 +803,12 @@ export function App({ store }: Props) {
     [view.rail, view.inboxCounts, view.profile.topSenders, view.inboxSenderCounts, snapshot.activeFilters],
   );
 
+  // What the list's empty state needs to tell a clear Inbox from an empty folder.
+  const emptyContext = useMemo(
+    () => ({ mailbox: snapshot.mailbox, filters: snapshot.activeFilters }),
+    [snapshot.mailbox, snapshot.activeFilters],
+  );
+
   const unreadIds = useMemo(
     () => new Set(view.emails.filter((email) => email.unread).map((email) => email.id)),
     [view.emails],
@@ -3097,6 +3103,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             unreadIds={unreadIds}
             freshIds={snapshot.recentIds}
             emptyReason={view.result.emptyReason}
+            emptyContext={emptyContext}
             sortBy={preferences.sortBy}
             onSelect={handleSelectRow}
             onToggleStar={handleToggleStar}
