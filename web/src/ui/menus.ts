@@ -42,6 +42,7 @@ import {
   ShieldAlert,
   SquareCheck,
   Tag,
+  ListFilter,
   Trash2,
   UserPlus,
   UserX,
@@ -89,6 +90,8 @@ export type RowMenuInput = {
     move: (mailbox: Mailbox) => void;
     /** Open the "Label as…" picker for the targets. Absent where labels cannot be set. */
     labelAs?: () => void;
+    /** Open "Change smart filters…" for the targets. Absent outside the inbox. */
+    changeFilters?: () => void;
     toggleMuteSender: () => void;
     findFrom: () => void;
     findSubject: () => void;
@@ -200,6 +203,9 @@ export function buildRowMenu(input: RowMenuInput): MenuEntry[] {
   );
   if (actions.labelAs) {
     entries.push({ kind: "item", id: "label-as", label: "Label as…", icon: Tag, onSelect: actions.labelAs });
+  }
+  if (actions.changeFilters) {
+    entries.push({ kind: "item", id: "change-filters", label: "Change smart filters…", icon: ListFilter, onSelect: actions.changeFilters });
   }
 
   if (single && input.sender) {

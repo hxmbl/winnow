@@ -26,6 +26,7 @@ import {
   RotateCcw,
   Star,
   Tag,
+  ListFilter,
   Trash2,
   Undo2,
   X,
@@ -99,6 +100,8 @@ type Actions = {
   onBlockSender: () => void;
   /** Open "Label as…" for this message. Absent where labels cannot be set. */
   onLabelAs?: () => void;
+  /** Open "Change smart filters…" for this message. Absent outside the inbox. */
+  onChangeFilters?: () => void;
   /** Turn image loading on for this message only. */
   onLoadRemoteContent: () => void;
   /** Load images from now on, for every message. */
@@ -234,6 +237,7 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
         senderName={senderName}
         onBlockSender={actions.onBlockSender}
         onLabelAs={actions.onLabelAs}
+        onChangeFilters={actions.onChangeFilters}
         buttonClass={ICON_BUTTON}
       />
     </div>
@@ -248,13 +252,14 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
  * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
  * hands focus back to its button so the keyboard is not stranded.
  */
-function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onLabelAs, buttonClass, phone, buttonContent }: {
+function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onLabelAs, onChangeFilters, buttonClass, phone, buttonContent }: {
   view: BodyView;
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
   senderName: string;
   onBlockSender: () => void;
   onLabelAs?: () => void;
+  onChangeFilters?: () => void;
   buttonClass: string;
   /**
    * The phone reader's version: the menu opens *upward* from the action bar, its rows
@@ -378,6 +383,12 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onLa
               <span className="flex-1">Label as…</span>
             </button>
           )}
+          {onChangeFilters && (
+            <button type="button" role="menuitem" data-reader-change-filters="" onClick={() => choose(onChangeFilters)} className={ITEM}>
+              <ListFilter size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <span className="flex-1">Change smart filters…</span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -464,6 +475,7 @@ function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, has
         senderName={senderName}
         onBlockSender={actions.onBlockSender}
         onLabelAs={actions.onLabelAs}
+        onChangeFilters={actions.onChangeFilters}
         buttonClass={BUTTON}
         phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead }}
         buttonContent={
@@ -528,6 +540,8 @@ type Props = {
   onSenderMenu?: (trigger: HTMLElement) => void;
   /** The one-time code strip, drawn at the very top, above the sender. */
   codeBar?: React.ReactNode;
+  /** "Why it's here", under the message's filter tags (`WhyHere`). */
+  whyHere?: React.ReactNode;
   /**
    * The sidebar's toggle, for the medium-width layout (640–1023px) where the reader
    * replaces the list and so hides the masthead's toggle with it. Without this the
@@ -555,6 +569,7 @@ export function Reader({
   senderPhoto,
   onSenderMenu,
   codeBar = null,
+  whyHere = null,
   sidebarOpen = false,
   onToggleSidebar,
   onMailto,
@@ -739,6 +754,7 @@ export function Reader({
               ))}
             </div>
           )}
+          {whyHere && <div className="mt-2.5">{whyHere}</div>}
         </div>
       </div>
 
