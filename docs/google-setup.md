@@ -1,43 +1,70 @@
-# Setting up your own Google client
+# Connecting Gmail: set up your own Google client
 
-Winnow doesn't ship a Google sign-in client. To connect Gmail you create one in
-your own Google Cloud project and paste it into Winnow. It's free, takes about ten
-minutes, and means your mail goes between your device and Google with nobody in
-between.
+Winnow doesn't ship a Google sign-in client. To connect Gmail you make one in your
+own Google Cloud project and paste it into Winnow. It's free, needs no billing
+account, takes about ten minutes the first time, and means your mail goes between
+your device and Google with nobody in between.
 
-You only need this to connect a real account. The demo mailbox works without it.
+You only need this to connect a real account. Winnow always opens on the demo
+mailbox, and the setup only appears when you ask for it: **Connect Gmail** (in the
+demo's status line or the menu), **Continue with Google**, or **Settings → Google
+account → Set up**.
 
-## 1. Create a Google Cloud project
+Winnow's setup sheet walks you through the same five steps as this guide, with a
+link to the right Google Cloud page on each one.
 
-1. Open [console.cloud.google.com](https://console.cloud.google.com/) and sign in
-   with the Google account you want to read mail from (any account works, but
-   using the same one keeps things simple).
-2. Use the project picker at the top and choose **New project**. Call it
-   something like `Winnow`. No billing account is needed.
+| Step | What you do | Google Cloud page |
+| --- | --- | --- |
+| 1 | Create a project | [New project](https://console.cloud.google.com/projectcreate) |
+| 2 | Turn on the Gmail API (and the People API, optional) | [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com) · [People API](https://console.cloud.google.com/apis/library/people.googleapis.com) |
+| 3 | Set up the consent screen and add yourself as a test user | [Consent screen](https://console.cloud.google.com/apis/credentials/consent) · [Test users](https://console.cloud.google.com/auth/audience) |
+| 4 | Create the OAuth client | [Create client](https://console.cloud.google.com/apis/credentials/oauthclient) |
+| 5 | Paste or import it into Winnow | Winnow's setup sheet |
 
-## 2. Enable the two APIs
+The console opens each link in whichever project is selected at the top of the page,
+so keep your new project selected throughout.
 
-In **APIs & Services → Library**, search for and **Enable** each of these:
+---
 
-- **Gmail API**, for your mail.
-- **People API**, for the optional contact photos and recipient suggestions
-  (Settings → Google contacts). Winnow works without it, but enabling it now saves a trip back later.
+## Step 1. Create a project
 
-## 3. Configure the OAuth consent screen
+1. Open [New project](https://console.cloud.google.com/projectcreate) and sign in
+   with a Google account. Any account works; the one you'll read mail from keeps
+   things simple.
+2. Name the project `Winnow` and choose **Create**. No billing account is needed.
+3. Check the project picker at the top of the console shows **Winnow**.
 
-Open **Google Auth Platform** (older consoles call it **APIs & Services → OAuth
-consent screen**).
+Already have a project you want to use? Select it in the project picker and go on.
 
-1. **Branding / App information.** App name `Winnow` (or anything you like), and
-   your own email as the support and developer contact.
-2. **Audience.** Choose **External** and leave the publishing status on
-   **Testing**. (If you have a Google Workspace account and only you will use it,
-   **Internal** also works and avoids the 7-day limit below.)
-3. **Test users.** Add the Gmail address you'll sign in with. In Testing mode only
-   listed test users can sign in.
-4. **Data access / Scopes.** Choose **Add or remove scopes** and add exactly these
-   three. Paste them into the "Manually add scopes" box if they don't show up in the
-   list:
+## Step 2. Turn on the Gmail API
+
+1. Open the [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
+   page and choose **Enable**.
+2. *Optional:* open the [People API](https://console.cloud.google.com/apis/library/people.googleapis.com)
+   page and choose **Enable**. Winnow uses it only for contact photos and recipient
+   suggestions, which you turn on later in **Settings → Google contacts**. Winnow
+   works without it; enabling it now saves a trip back.
+
+## Step 3. Set up the consent screen
+
+Google shows a consent screen before it lets any app read mail. In the console it's
+called **Google Auth Platform** (older consoles say **APIs & Services → OAuth
+consent screen**). Open the [consent screen](https://console.cloud.google.com/apis/credentials/consent)
+and choose **Get started** if it asks.
+
+1. **App information.** App name `Winnow` (or anything you like), and your own email
+   as the user support email.
+2. **Audience.** Choose **External**. (With a Google Workspace account that only you
+   will use, **Internal** works too and has no 7-day limit, below.)
+3. **Contact information.** Your own email again. Agree to the policy and choose
+   **Create**.
+4. **Test users.** Open [Audience](https://console.cloud.google.com/auth/audience),
+   leave the publishing status on **Testing**, and under **Test users** choose
+   **Add users** and add the Gmail address you'll sign in with. While the app is in
+   Testing, only listed test users can sign in.
+5. *Optional:* under **Data access**, choose **Add or remove scopes** and add the
+   scopes Winnow asks for. In Testing this isn't required, but it makes the consent
+   screen list them:
 
    | Scope | When Winnow asks | What for |
    | --- | --- | --- |
@@ -46,82 +73,83 @@ consent screen**).
    | `https://www.googleapis.com/auth/contacts.other.readonly` | only if you opt in, later | "other contacts" (people you've written to), in recipient suggestions |
 
    Sign-in asks for `gmail.modify` and nothing else. The two contact scopes are only
-   requested when you choose **Improve suggestions from Google contacts** in
-   Settings.
+   requested when you choose **Improve suggestions from Google contacts** in Settings.
 
-## 4. Create the client
+## Step 4. Create the OAuth client
 
-Go to **Google Auth Platform → Clients** (or **APIs & Services → Credentials →
-Create credentials → OAuth client ID**) and choose **Create client**. The type
+Open [Create client](https://console.cloud.google.com/apis/credentials/oauthclient)
+(or **Google Auth Platform → Clients → Create client**). The **Application type**
 depends on which Winnow you use.
 
-### Desktop app (macOS, Windows, Linux)
+### Desktop app: macOS, Windows, Linux and Android
 
-1. **Application type: Desktop app.** Name it `Winnow desktop`.
-2. Create it. There are no redirect URIs to add: the desktop app listens on a
-   random local port (`http://127.0.0.1:<port>/winnow-oauth`), which Google allows
-   for Desktop clients automatically.
-3. Copy the **Client ID**, and the **Client secret** if one is shown.
+1. **Application type: Desktop app.** Name it `Winnow`.
+2. Choose **Create**. There are no redirect URIs to add: the app signs in through a
+   local address (`http://127.0.0.1:<port>/winnow-oauth` on a random port), which
+   Google allows for Desktop app clients automatically.
+3. Copy the **Client ID**, and the **Client secret** if one is shown, or choose
+   **Download JSON**.
 
-The secret is optional in Winnow for a Desktop client. Google issues one, but for
-an installed app it isn't treated as confidential, and Google's documentation lists
-it as optional for this flow. If **Test connection** says the client needs it,
-paste it in. It's stored in your operating system's keychain.
+The secret is optional in Winnow for a Desktop app client. Google issues one, but
+for an installed app it isn't treated as confidential. If **Test connection** says
+the client needs it, paste it in. It's stored in your system's keychain.
 
-### Web application (running Winnow in a browser)
+### Web application: Winnow in a browser
 
 1. **Application type: Web application.** Name it `Winnow web`.
 2. Under **Authorised JavaScript origins**, add the address you open Winnow at,
-   without a trailing slash, for example `https://mail.example.com` or
+   *without* a trailing slash, for example `https://mail.example.com` or
    `http://localhost:5173`.
-3. Under **Authorised redirect URIs**, add the same address **with** its path and
+3. Under **Authorised redirect URIs**, add the same address *with* its path and
    trailing slash, for example `https://mail.example.com/` or
-   `http://localhost:5173/`. Winnow's setup screen shows the exact value for the
-   page you have open, with a copy button. It has to match character for character:
+   `http://localhost:5173/`. Winnow's step 4 shows both exact values for the page
+   you have open, with copy buttons. They must match character for character:
    `localhost` and `127.0.0.1` are different addresses to Google.
-4. Create it, and copy both the **Client ID** and the **Client secret**. A Web
-   application client needs the secret.
+4. Choose **Create**, and copy both the **Client ID** and the **Client secret**, or
+   choose **Download JSON**. A Web application client needs the secret, and Google's
+   secrets start with `GOCSPX-`. (A client made before 2022 may have an older-style
+   secret: add a new one on the client's page.)
 
 The secret is kept in that browser's local storage, for that site only, and sent
 only to Google's token endpoint. Anyone who can run code on that page could read
-it, so only run Winnow in the browser on a machine and origin you control. The
+it, so only run Winnow in the browser on a machine and address you control. The
 desktop app keeps it in the system keychain instead.
 
-## 5. Import or paste it into Winnow
+## Step 5. Paste it into Winnow
 
-1. In Winnow, choose **Connect Gmail** (in the demo's status line or the menu), or
-   open **Settings → Google account → Set up**.
-2. Either import the client's JSON file, or paste the two values by hand:
-   - **Import JSON.** On the client's page in Google Cloud, choose **Download
-     JSON** (it saves `client_secret_<id>.json`). In Winnow, choose **Import
-     JSON** and pick the file, drop the file anywhere on the setup sheet, or open
-     the file in a text editor and paste all of its text into the **Client ID**
-     field. Winnow fills in the client ID and secret, shows which Cloud project
-     the client came from, and links straight to the Gmail API and People API
-     pages for that project so you can check both are enabled.
-   - **By hand.** Paste the **Client ID** (it ends in `.apps.googleusercontent.com`)
-     and, if you have one, the **Client secret**.
-3. Choose **Test connection**. Winnow asks Google whether it recognises the client,
-   without signing you in. It points at the field to fix if something is wrong.
-4. Choose **Save and connect**. Google's sign-in opens; pick the test user you
-   added.
+On the setup sheet's last step, either import the client's JSON file or paste the
+two values:
 
-To change the client later, open **Settings → Google account → Change**. Saving a
-different client signs you out, because Google won't refresh a session under a
-different client. **Remove** forgets the client and signs you out.
+- **Import JSON.** Choose **Import JSON** and pick the `client_secret_<id>.json`
+  file, drop the file anywhere on the setup sheet (at any step), or paste the
+  file's whole text into the **Client ID** field. Winnow fills in both values,
+  shows which Cloud project the client came from, and links to the Gmail API and
+  People API pages for that project so you can check both are on.
+- **By hand.** Paste the **Client ID** (it ends in `.apps.googleusercontent.com`)
+  and the **Client secret** (required for a Web application client, optional for a
+  Desktop app).
+
+Then:
+
+1. Choose **Test connection**. Winnow asks Google whether it recognises the client,
+   without signing you in, and points at the field to fix if something is wrong.
+2. Choose **Save and connect**. Google's sign-in opens; pick the test user you
+   added in step 3.
+
+To change the client later, open **Settings → Google account → Change**; the sheet
+opens straight on step 5. Saving a different client signs you out, because Google
+won't refresh a session under a different client. **Remove** forgets the client
+and signs you out.
 
 ### What Import JSON checks
 
-- **The client type has to match the app.** The desktop app needs a **Desktop
-  app** client: it signs in through `http://127.0.0.1:<port>/winnow-oauth` on a
-  random port, which Google allows only for Desktop clients, so a Web
-  application file is refused there. Winnow in the browser needs a **Web
-  application** client, because Google returns to the page's own address, which a
-  Desktop client can't register; a Desktop app file is refused there.
+- **The client type has to match the app.** The desktop and Android apps need a
+  **Desktop app** client, so a Web application file is refused there. Winnow in the
+  browser needs a **Web application** client, so a Desktop app file is refused there.
 - **It has to be the client file.** A file that isn't JSON, is over 64 KB, has no
   `client_id`, has a `client_id` that doesn't end in `.apps.googleusercontent.com`,
   or is a service account key is refused with a sentence saying what to download
-  instead. A web client file without a `client_secret` is refused too.
+  instead. A web client file without a well-formed `client_secret` is refused too.
 - **Warnings, not refusals.** For a web client, Winnow warns when the file doesn't
   list the redirect URI it shows (exactly, trailing slash included) or the page's
   origin. It also warns when the file's `auth_uri` or `token_uri` isn't one of
@@ -132,22 +160,18 @@ different client. **Remove** forgets the client and signs you out.
 ## What to expect from Google
 
 - **"Google hasn't verified this app."** Your project is unverified, so Google shows
-  a warning screen before the consent screen. That's expected for a personal
-  project: choose **Continue** (on some accounts it's under **Advanced**). You're the
-  developer and the user here, and the app is your own client. Removing the warning
-  means submitting your project for Google's verification, which a personal setup
-  doesn't need.
-- **Weekly sign-in in Testing mode.** For an **External** app left in **Testing**,
-  Google issues refresh tokens that expire after 7 days (see "Refresh token
-  expiration" in [Google's OAuth 2.0 overview](https://developers.google.com/identity/protocols/oauth2#expiration)).
-  Winnow will ask you to sign in again about once a week. Publishing the app
-  ("In production") removes the 7-day limit, but Google then asks for verification
-  of the Gmail and contacts scopes before strangers can use it; for yourself you can
-  keep clicking through the warning. An **Internal** app (Workspace only) doesn't
-  have the limit.
-- **Revoking access.** You can disconnect Winnow at any time at
+  a warning before the consent screen. That's expected for a personal project:
+  choose **Continue** (on some accounts it's under **Advanced**). You're both the
+  developer and the user here.
+- **Signing in again every week in Testing.** For an **External** app left in
+  **Testing**, Google's refresh tokens expire after 7 days (see "Refresh token
+  expiration" in [Google's OAuth 2.0 overview](https://developers.google.com/identity/protocols/oauth2#expiration)),
+  so Winnow asks you to sign in about once a week. Publishing the app ("In
+  production") removes the limit, but Google then wants the Gmail scope verified
+  before anyone but you can use it. An **Internal** app (Workspace only) has no limit.
+- **Revoking access.** Disconnect Winnow at any time at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions), or
-  delete the client or the whole project in Cloud Console.
+  delete the client or the whole project in Google Cloud.
 
 ## Troubleshooting
 
@@ -155,9 +179,11 @@ different client. **Remove** forgets the client and signs you out.
 | --- | --- |
 | "Google doesn't know this client ID" | Copied only part of the ID, or from another project. |
 | "Google rejected the client secret" | Old or mistyped secret. Copy it again; you can add a new secret on the client's page. |
-| `redirect_uri_mismatch` (web) | The redirect URI in Cloud Console doesn't exactly match the one Winnow shows. Check the scheme, host, port and trailing slash. |
-| `access_denied` / "app is being tested" | The account you picked isn't listed under **Test users**. |
+| "A client secret starts with GOCSPX-" (web) | The secret field holds something else, or an older-style secret. Copy it again, or add a new secret on the client's page. |
+| `redirect_uri_mismatch` (web) | The redirect URI in Google Cloud doesn't exactly match the one Winnow shows in step 4. Check the scheme, host, port and trailing slash. |
+| `access_denied` / "app is being tested" | The account you picked isn't listed under **Test users** (step 3). |
+| "Gmail API has not been used in project …" | The Gmail API isn't enabled in the project the client belongs to (step 2). |
 | "This is a Web application client, which the desktop app can't use" | You downloaded the JSON of a Web application client. Create a **Desktop app** client and import its JSON. |
 | "This is a Desktop app client, which Winnow in the browser can't use" | Create a **Web application** client for the browser, or use the desktop app. |
-| No contact photos / suggestions | Connect them in Settings → Google contacts. If it says the People API is off, enable it in the project your client lives in. Otherwise check the two contact scopes are on the consent screen. |
+| No contact photos / suggestions | Connect them in Settings → Google contacts. If it says the People API is off, enable it in the project your client lives in (step 2). |
 | Signed out every week | Testing mode's 7-day refresh tokens, see above. |

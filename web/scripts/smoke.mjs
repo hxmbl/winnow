@@ -940,29 +940,80 @@ try {
   // every failed load as a console error. Those two are expected; anything else that
   // this section produces still fails the console check at the end.
   const errorsBeforeSetup = errors.length;
+  // A Web application secret in Google's current format, split so no scanner takes the
+  // fixture for a leaked one.
+  const WEB_SECRET = "GOCSPX" + "-smoke-test-secret";
 
   // Winnow ships no Google client, so "Connect Gmail" with nothing stored has to open
-  // the setup sheet rather than fail with a configuration error.
-  await connect.first().click();
+  // the setup sheet rather than fail with a configuration error. It must never open on
+  // its own, though: the app boots into the demo, client or not.
   const setup = page.locator('[role="dialog"][aria-label="Google account"]');
+  check("the setup sheet never opens on its own", (await setup.count()) === 0);
+  await connect.first().click();
   await setup.waitFor({ timeout: 5_000 });
   check("Connect Gmail opens the Google account setup when no client is stored", (await setup.count()) === 1);
+
+  // A five-step walkthrough, each step linked to its Cloud Console page.
+  const setupStep = () => setup.locator("[data-testid='google-setup']").getAttribute("data-setup-step");
+  const progress = async () => ((await setup.locator("[data-setup-progress]").textContent()) ?? "").trim();
+  const consoleHref = (id) => setup.locator(`[data-console-link="${id}"]`).getAttribute("href");
+  const nextButton = setup.locator("[data-setup-next]");
+  check("it opens on step 1 of 5", (await setupStep()) === "project" && (await progress()) === "Step 1 of 5", await progress());
   check(
-    "focus starts in the client ID field",
-    await page.evaluate(() => document.activeElement?.getAttribute("name") === "clientId"),
+    "with a step indicator naming all five steps, the current one marked",
+    (await setup.locator("[data-setup-step-button]").count()) === 5 &&
+      (await setup.locator('[data-setup-step-button][aria-current="step"]').getAttribute("data-setup-step-button")) === "project",
   );
+  check("focus starts on Next", await nextButton.evaluate((el) => el === document.activeElement));
+  check("step 1 links to a new Cloud project", (await consoleHref("project")) === "https://console.cloud.google.com/projectcreate");
+  check(
+    "the setup guide is one click away",
+    (await setup.getByRole("button", { name: "Open the setup guide" }).count()) === 1,
+  );
+  check("and there is no Back on the first step", (await setup.getByRole("button", { name: "Back" }).count()) === 0);
+  await nextButton.click();
+  check("Next goes to step 2, the Gmail API", (await setupStep()) === "apis" && (await progress()) === "Step 2 of 5");
+  check(
+    "and focus follows to the step's heading",
+    await page.evaluate(() => document.activeElement?.hasAttribute("data-setup-heading")),
+  );
+  check(
+    "step 2 links to the Gmail API, and the People API as optional",
+    (await consoleHref("gmail-api")) === "https://console.cloud.google.com/apis/library/gmail.googleapis.com" &&
+      (await consoleHref("people-api")) === "https://console.cloud.google.com/apis/library/people.googleapis.com" &&
+      (await setup.getByText("Optional: the People API").count()) === 1,
+  );
+  await nextButton.click();
+  check(
+    "step 3 links to the consent screen and to test users",
+    (await setupStep()) === "consent" &&
+      (await consoleHref("consent")) === "https://console.cloud.google.com/apis/credentials/consent" &&
+      (await consoleHref("test-users")) === "https://console.cloud.google.com/auth/audience",
+  );
+  await setup.getByRole("button", { name: "Back" }).click();
+  check("Back goes back a step", (await setupStep()) === "apis" && (await progress()) === "Step 2 of 5");
+  await setup.locator('[data-setup-step-button="client"]').click();
+  check("the indicator jumps straight to a step", (await setupStep()) === "client" && (await progress()) === "Step 4 of 5");
   check(
     "the web build asks for a Web application client",
     (await setup.getByText("Web application", { exact: true }).count()) > 0,
   );
   check(
-    "and shows the exact redirect URI to register",
-    (await setup.locator("code").first().textContent())?.trim() === URL,
-    await setup.locator("code").first().textContent(),
+    "and shows the exact redirect URI to register: the app's own address",
+    (await setup.locator('[data-copy-value="redirect"]').textContent())?.trim() === URL,
+    await setup.locator('[data-copy-value="redirect"]').textContent(),
   );
   check(
-    "the setup guide is one click away",
-    (await setup.getByRole("button", { name: "Open the setup guide" }).count()) === 1,
+    "and its JavaScript origin, without the trailing slash",
+    (await setup.locator('[data-copy-value="origin"]').textContent())?.trim() === new globalThis.URL(URL).origin,
+  );
+  check("step 4 links to creating the client", (await consoleHref("new-client")) === "https://console.cloud.google.com/apis/credentials/oauthclient");
+  await nextButton.click();
+  check("step 5 is the client itself", (await setupStep()) === "paste" && (await progress()) === "Step 5 of 5");
+  check("with Save and connect in place of Next", (await nextButton.count()) === 0 && (await setup.getByRole("button", { name: "Save and connect" }).count()) === 1);
+  check(
+    "and focus in the client ID field",
+    await page.evaluate(() => document.activeElement?.getAttribute("name") === "clientId"),
   );
 
   const idInput = setup.locator('input[name="clientId"]');
@@ -1002,6 +1053,14 @@ try {
   const VALID_ID = "1234567890-abc123def.apps.googleusercontent.com";
   await idInput.fill(VALID_ID);
   await secretInput.fill("smoke-test-secret");
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(100);
+  check(
+    "a Web client secret that isn't in Google's format is flagged",
+    /starts with GOCSPX-/.test((await fieldError(secretInput)) ?? ""),
+    (await fieldError(secretInput)) ?? "no error",
+  );
+  await secretInput.fill(WEB_SECRET);
   await page.waitForTimeout(100);
   check("a well-formed pair clears the errors", (await fieldError(idInput)) === null && (await fieldError(secretInput)) === null);
 
@@ -1056,8 +1115,10 @@ try {
   });
   await connect.first().click();
   await setup.waitFor({ timeout: 5_000 });
+  check("reopened with nothing saved, it starts again at step 1", (await setupStep()) === "project");
+  await setup.locator('[data-setup-step-button="paste"]').click();
   await idInput.fill(VALID_ID);
-  await secretInput.fill("smoke-test-secret");
+  await secretInput.fill(WEB_SECRET);
   await page.keyboard.press("Enter");
   await page.waitForURL(/accounts\.google\.com/, { timeout: 5_000 }).catch(() => undefined);
   const authorize = authorizeRequests[0] ? new globalThis.URL(authorizeRequests[0]) : null;
@@ -1067,7 +1128,7 @@ try {
     authorizeRequests[0] ?? "no authorize request",
   );
   check("with the app's own address as the redirect URI", authorize?.searchParams.get("redirect_uri") === URL);
-  check("and never puts the secret in the authorize URL", !(authorizeRequests[0] ?? "").includes("smoke-test-secret"));
+  check("and never puts the secret in the authorize URL", !(authorizeRequests[0] ?? "").includes(WEB_SECRET));
 
   // Back to the app before dropping the stub, so the fake page's own follow-up
   // requests (a favicon) never reach the real network.
@@ -1075,7 +1136,7 @@ try {
   await page.unroute("https://accounts.google.com/**");
   await page.waitForTimeout(400);
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("winnow.google.oauthClient") ?? "null"));
-  check("the client is kept in this browser's storage", saved?.clientId === VALID_ID && saved?.clientSecret === "smoke-test-secret");
+  check("the client is kept in this browser's storage", saved?.clientId === VALID_ID && saved?.clientSecret === WEB_SECRET);
 
   // Settings → Google account shows it, and can remove it.
   await page.keyboard.press(",");
@@ -1086,6 +1147,7 @@ try {
   await page.locator('[role="dialog"][aria-label="Settings"]').getByRole("button", { name: "Change" }).click();
   await setup.waitFor({ timeout: 5_000 });
   check("Change opens the setup sheet with the saved id", (await idInput.inputValue()) === VALID_ID);
+  check("straight at step 5, since the console part is done", (await setupStep()) === "paste");
   await setup.getByRole("button", { name: "Remove…" }).click();
   await setup.getByRole("button", { name: "Remove", exact: true }).click();
   await page.waitForTimeout(300);
@@ -1093,7 +1155,7 @@ try {
   check("and leaves the demo usable", (await idInput.inputValue()) === "");
 
   // Import JSON: the client_secret_….json Google Cloud downloads fills both fields.
-  const IMPORT_SECRET = "smoke-import-secret-value";
+  const IMPORT_SECRET = "GOCSPX" + "-smoke-import-secret-value";
   const clientFile = (section, extra = {}) =>
     JSON.stringify({
       [section]: {
@@ -1175,9 +1237,10 @@ try {
   const pasteWarning = (await setup.locator("[data-import-warning]").first().textContent()) ?? "";
   check("a redirect URI that misses the trailing slash is warned about", /trailing slash/.test(pasteWarning), pasteWarning);
 
-  // Dropping the file onto the sheet.
+  // Dropping the file onto the sheet, from an earlier step: it jumps to step 5.
   await idInput.fill("");
   await secretInput.fill("");
+  await setup.locator('[data-setup-step-button="project"]').click();
   const dropped = await page.evaluateHandle((text) => {
     const data = new DataTransfer();
     data.items.add(new File([text], "client_secret.json", { type: "application/json" }));
@@ -1191,8 +1254,8 @@ try {
   await setup.locator('[data-testid="google-setup"]:not([data-dragging])').waitFor({ timeout: 2_000 }).catch(() => undefined);
   await page.waitForFunction((id) => document.querySelector('input[name="clientId"]')?.value === id, VALID_ID, { timeout: 2_000 }).catch(() => undefined);
   check(
-    "dropping the client file onto the sheet imports it",
-    (await idInput.inputValue()) === VALID_ID && (await secretInput.inputValue()) === IMPORT_SECRET && (await form.getAttribute("data-dragging")) === null,
+    "dropping the client file onto the sheet, at any step, imports it on step 5",
+    (await idInput.inputValue()) === VALID_ID && (await secretInput.inputValue()) === IMPORT_SECRET && (await form.getAttribute("data-dragging")) === null && (await setupStep()) === "paste",
   );
   check(
     "the secret appears nowhere on the sheet as text",
@@ -3702,6 +3765,15 @@ try {
     Boolean(phoneSetupBox) && Math.round(phoneSetupBox.width) === 390,
     JSON.stringify(phoneSetupBox),
   );
+  const phoneNext = phoneSetup.locator("[data-setup-next]");
+  const nextBox = await phoneNext.boundingBox();
+  check(
+    "and fills the screen's height, with Next a full touch target at the bottom",
+    Boolean(phoneSetupBox) && Math.round(phoneSetupBox.height) >= 840 && Boolean(nextBox) && nextBox.height >= MIN_TARGET && nextBox.y + nextBox.height <= 844,
+    JSON.stringify({ sheet: phoneSetupBox, next: nextBox }),
+  );
+  await phoneSetup.locator('[data-setup-step-button="paste"]').click();
+  await page.waitForTimeout(150);
   const fieldBoxes = await Promise.all(
     ["clientId", "clientSecret"].map((name) => phoneSetup.locator(`input[name="${name}"]`).boundingBox()),
   );

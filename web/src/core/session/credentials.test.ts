@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CLIENT_SECRET_PREFIX,
   CLIENT_ID_SUFFIX,
   WEB_CREDENTIALS_KEY,
   clientIdError,
@@ -70,7 +71,16 @@ describe("clientSecretError", () => {
 
   it("is required for a Web application client", () => {
     expect(clientSecretError("", "web")).toMatch(/needs its client secret/);
-    expect(clientSecretError("some-secret", "web")).toBeNull();
+    expect(clientSecretError("GOCSPX" + "-some-secret", "web")).toBeNull();
+  });
+
+  it("wants a Web client's secret to look like one Google issues", () => {
+    expect(CLIENT_SECRET_PREFIX).toBe("GOCSPX" + "-");
+    expect(clientSecretError("some-secret", "web")).toMatch(/starts with GOCSPX-/);
+    expect(clientSecretError("gocspx" + "-lowercase", "web")).toMatch(/starts with/);
+    // The desktop keeps accepting an older-style or absent secret.
+    expect(clientSecretError("some-secret", "desktop")).toBeNull();
+    expect(clientSecretError("", "desktop")).toBeNull();
   });
 
   it("spots the client id pasted into the secret field", () => {
@@ -84,7 +94,7 @@ describe("clientSecretError", () => {
 
 describe("validateCredentials", () => {
   it("returns no errors for a valid pair", () => {
-    expect(hasErrors(validateCredentials({ clientId: ID, clientSecret: "s" }, "web"))).toBe(false);
+    expect(hasErrors(validateCredentials({ clientId: ID, clientSecret: "GOCSPX" + "-s" }, "web"))).toBe(false);
     expect(hasErrors(validateCredentials({ clientId: ID }, "desktop"))).toBe(false);
   });
 

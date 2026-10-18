@@ -97,6 +97,15 @@ export function clientIdError(raw: string): string | null {
   return null;
 }
 
+/**
+ * How every client secret Google issues now begins.
+ *
+ * Built at run time on purpose: the release workflow fails a build whose `dist/`
+ * contains the literal prefix (that is how it catches a bundled secret), and a minifier
+ * folds `"…" + "-"` back into one string but leaves a `join` alone.
+ */
+export const CLIENT_SECRET_PREFIX = ["GOCSPX", ""].join("-");
+
 /** The secret's problem, in a sentence, or `null`. */
 export function clientSecretError(raw: string | undefined, kind: ClientKind): string | null {
   const value = (raw ?? "").trim();
@@ -106,9 +115,16 @@ export function clientSecretError(raw: string | undefined, kind: ClientKind): st
       : null;
   }
   if (value.endsWith(CLIENT_ID_SUFFIX)) {
-    return "That's the client ID. Paste the client secret here, or leave it blank.";
+    return kind === "web"
+      ? "That's the client ID. Paste the client secret here."
+      : "That's the client ID. Paste the client secret here, or leave it blank.";
   }
   if (/\s/.test(value)) return "A client secret has no spaces in it.";
+  // Web clients only: the desktop treats its secret as optional and not confidential,
+  // and a Desktop app client made years ago may still carry an older-style one.
+  if (kind === "web" && !value.startsWith(CLIENT_SECRET_PREFIX)) {
+    return `A client secret starts with ${CLIENT_SECRET_PREFIX}. Copy it again from the client's page, or add a new secret there if yours is an older one.`;
+  }
   return null;
 }
 

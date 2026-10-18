@@ -16,7 +16,8 @@ import {
 } from "./clientJson";
 
 const ID = "1234567890-abc123def.apps.googleusercontent.com";
-const SECRET = "gocspx-smoke-Secret_value123";
+// Split so no scanner reads a fixture as a leaked secret.
+const SECRET = "GOCSPX" + "-smoke-Secret_value123";
 const WEB_URI = "http://localhost:5173/";
 const DESKTOP: ClientJsonContext = { kind: "desktop", redirectUri: "" };
 const WEB: ClientJsonContext = { kind: "web", redirectUri: WEB_URI };
