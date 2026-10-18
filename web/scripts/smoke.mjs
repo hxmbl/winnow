@@ -6932,6 +6932,9 @@ try {
       }
       return json(route, {});
     };
+    // The app also syncs on its own (polling while focused, on focus and on visibility),
+    // so /history calls only prove a pull did sync; a pull that must not sync is judged by
+    // the indicator, which only a pull moves and which shows its sync for over a second.
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     await ctx.addInitScript((accessToken) => {
       if (window.top !== window) return;
@@ -6994,14 +6997,14 @@ try {
     await q.waitForTimeout(400);
     check(
       "a short pull shows the glass indicator, turning with the pull, and letting go short of the line does not sync",
-      short?.phase === "pulling" && /rotate\((?!0deg)/.test(short.turn) && short.glass && historyCalls === before && (await indicator()) === "idle",
+      short?.phase === "pulling" && /rotate\((?!0deg)/.test(short.turn) && short.glass && (await indicator()) === "idle",
       JSON.stringify({ short, calls: historyCalls - before }),
     );
 
     // A horizontal start is a swipe, never a pull, however far down it then goes.
     await drag(start.x, start.y, [[14, 2], [30, 4], [40, 30], [44, 80], [46, 160], [46, 220]]);
     await q.waitForTimeout(400);
-    check("a touch that locks horizontal (a row swipe) never becomes a pull", historyCalls === before && (await indicator()) === "idle", `${historyCalls - before} syncs`);
+    check("a touch that locks horizontal (a row swipe) never becomes a pull", (await indicator()) === "idle", `${historyCalls - before} syncs`);
 
     // Past the line: armed while held, then a spinner, a sync, the result, and back.
     const held = await drag(start.x, start.y, down(220), { holdAt: indicator });
@@ -7010,7 +7013,7 @@ try {
     const resultText = (await q.locator("[data-pull-result]").textContent().catch(() => "")) ?? "";
     check(
       "past ~70px it arms, and letting go syncs (the Sync now action) with a spinner, then says so",
-      held === "armed" && ["syncing", "done"].includes(spinning) && historyCalls === before + 1 && /^Synced just now/.test(resultText.trim()),
+      held === "armed" && ["syncing", "done"].includes(spinning) && historyCalls > before && /^Synced just now/.test(resultText.trim()),
       JSON.stringify({ held, spinning, calls: historyCalls - before, resultText }),
     );
     await q.waitForFunction(() => document.querySelector("[data-pull-indicator]")?.getAttribute("data-pull-indicator") === "idle", null, { timeout: 4_000 }).catch(() => undefined);
@@ -7027,7 +7030,7 @@ try {
     const callsMid = historyCalls;
     await drag(mid.x, mid.y, down(220));
     await q.waitForTimeout(400);
-    check("a pull with the list scrolled down is just a scroll", historyCalls === callsMid && (await indicator()) === "idle");
+    check("a pull with the list scrolled down is just a scroll", (await indicator()) === "idle", `${historyCalls - callsMid} syncs`);
     await q.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
     await q.waitForTimeout(250);
 
@@ -7049,7 +7052,7 @@ try {
     await q.waitForTimeout(400);
     check(
       "a pull during a multi-selection does nothing",
-      (await q.locator("[data-selection-bar='phone']").count()) === 1 && selPhase === "idle" && historyCalls === callsSel,
+      (await q.locator("[data-selection-bar='phone']").count()) === 1 && selPhase === "idle" && (await indicator()) === "idle",
       JSON.stringify({ selPhase, calls: historyCalls - callsSel }),
     );
     await q.locator("[data-selection-bar='phone'] button[aria-label='Clear selection']").tap();
@@ -7061,7 +7064,9 @@ try {
     await q.waitForTimeout(300);
     const callsPanel = historyCalls;
     const panelPhase = await drag(start.x, start.y, down(220), { holdAt: indicator });
-    check("nor with the dock's panel expanded", panelPhase === "idle" && historyCalls === callsPanel, JSON.stringify({ panelPhase }));
+    await q.waitForTimeout(400);
+    const panelAfter = await indicator();
+    check("nor with the dock's panel expanded", panelPhase === "idle" && panelAfter === "idle", JSON.stringify({ panelPhase, panelAfter, calls: historyCalls - callsPanel }));
     await ctx.close();
   }
   {
