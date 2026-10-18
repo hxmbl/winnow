@@ -128,6 +128,7 @@ import { OfflineIndicator } from "./ui/components/OfflineIndicator";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
 import { onReplyRequest } from "./ui/notificationActions";
+import { exitRows } from "./ui/rowExit";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -2223,10 +2224,10 @@ export function App({ store }: Props) {
           // inbox, unarchives from the archive and restores from the bin, and doing
           // that in one place is what keeps the optimistic update, the undo and the
           // server call agreeing about what happened.
-          if (selectedId !== undefined) s.archive(selectedId);
+          if (selectedId !== undefined) exitRows([selectedId], () => s.archive(selectedId));
           break;
         case "trash":
-          if (selectedId !== undefined) s.trash(selectedId);
+          if (selectedId !== undefined) exitRows([selectedId], () => s.trash(selectedId));
           break;
         case "toggleRead":
           if (selectedId !== undefined) toggleReadRef.current(selectedId);
@@ -2963,8 +2964,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     count={selection.size}
                     mailbox={snapshot.mailbox}
                     anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
-                    onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
-                    onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
+                    onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveMany(ids)))}
+                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashMany(ids)))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
@@ -3026,8 +3027,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     count={selection.size}
                     mailbox={snapshot.mailbox}
                     anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
-                    onArchive={() => runBatch((s, ids) => s.archiveMany(ids))}
-                    onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
+                    onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveMany(ids)))}
+                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashMany(ids)))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
@@ -3222,10 +3223,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   if (snap.view.selected) toggleReadFor(snap.view.selected.id);
                 }),
                 onArchive: act((s, snap) => {
-                  if (snap.view.selected) s.archive(snap.view.selected.id);
+                  const id = snap.view.selected?.id;
+                  if (id !== undefined) exitRows([id], () => s.archive(id));
                 }),
                 onTrash: act((s, snap) => {
-                  if (snap.view.selected) s.trash(snap.view.selected.id);
+                  const id = snap.view.selected?.id;
+                  if (id !== undefined) exitRows([id], () => s.trash(id));
                 }),
                 onReply: openReply,
                 onForward: openForward,

@@ -197,7 +197,8 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
         left: position?.left ?? 0,
         visibility: position ? "visible" : "hidden",
       }}
-      className="z-50 flex min-w-[220px] max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body [@media(hover:none)]:min-w-[240px]"
+      data-menu-animate={position ? "" : undefined}
+      className={`${position ? "animate-menu" : ""} z-50 flex min-w-[220px] max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body [@media(hover:none)]:min-w-[240px]`}
     >
       {header && (
         <>

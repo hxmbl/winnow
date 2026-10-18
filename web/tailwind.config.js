@@ -129,7 +129,7 @@ export default {
       },
 
       /**
-       * Two animations, both short.
+       * A few animations, all short.
        *
        * Anything longer starts to read as the app being slow rather than the
        * content being new, and in a keyboard-driven client a transition that
@@ -153,6 +153,9 @@ export default {
          * being *replaced*.
          */
         drawer: "drawer 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+        // A menu opening: a quick fade and a 3% grow from its anchor's side. 140ms, so a
+        // right-click and a keypress into the menu never wait on it.
+        menu: "menu 0.14s cubic-bezier(0.2, 0, 0, 1)",
       },
 
       keyframes: {
@@ -167,6 +170,10 @@ export default {
         drawer: {
           "0%": { opacity: "0", transform: "translateX(-100%)" },
           "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        menu: {
+          "0%": { opacity: "0", transform: "scale(0.97)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
         },
       },
     },
