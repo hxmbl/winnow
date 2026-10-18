@@ -609,24 +609,52 @@ button.wn-glass:active,
   .wn-pill.wn-chip-glass::before {
     content: "";
     position: absolute;
-    inset: calc(-1 * var(--wn-glass-reach)) calc(-1 * var(--wn-glass-reach-x, var(--wn-glass-reach)));
+    inset: calc(-1 * var(--wn-glass-reach));
     z-index: -1;
     pointer-events: none;
     -webkit-backdrop-filter: var(--wn-glass-filter);
     backdrop-filter: var(--wn-glass-filter);
-    clip-path: inset(var(--wn-glass-reach) var(--wn-glass-reach-x, var(--wn-glass-reach)) round var(--wn-glass-radius, 9999px));
+    clip-path: inset(
+      var(--wn-glass-reach) calc(var(--wn-glass-reach) - var(--wn-glass-join-end, 0px))
+        var(--wn-glass-reach) calc(var(--wn-glass-reach) - var(--wn-glass-join-start, 0px))
+        round var(--wn-glass-corners, var(--wn-glass-radius, 9999px))
+    );
   }
 }
 /*
- * The layer is paint only, but it still counts as layout overflow. Inside the chip rail
- * (a sideways scroller) a layer reaching past the last chip would lengthen the rail's
- * scroll, so there it reaches only up and down: a chip's rounded ends are where text
- * crosses it least. And the floating chrome clips the layers sideways, at the screen's
- * (or the pane's) edges, so they never widen the page; up and down they stay free.
+ * The layer is paint only, but it still counts as layout overflow, so two things keep it
+ * from widening anything:
+ *
+ * - The floating chrome clips the layers sideways, at the screen's (or the pane's) edges,
+ *   so they never widen the page; up and down they stay free.
+ * - In the chip rail (a sideways scroller) the layers keep their full sideways reach
+ *   (without it the blur clamps at a chip's rounded ends and text crossing them stays
+ *   readable), and the rail's end padding is at least that reach (`FilterStrip`), so
+ *   the layer past the last chip ends inside the rail's own end and adds no scroll.
+ *
+ * And in the rail the frost is one band: each item's layer reaches half the gap towards
+ * its neighbours (plus the 1px hairline: the layer is placed on the padding box), meeting
+ * edge to edge (an overlap would saturate twice and show as a line), square where they meet and round only at the rail's two ends, so text
+ * in the gaps (and in the corners beside a chip's rounded ends) is as frosted as under a
+ * chip's middle. The tint, hairline and lift stay on each chip: the pills still read as
+ * pills, on a frost that does not stop between them.
  */
 [data-rail-scroller] > .wn-glass,
 [data-rail-scroller] > .wn-chip-glass {
-  --wn-glass-reach-x: 0px;
+  --wn-glass-join-start: calc(var(--wn-rail-gap, 0px) / 2 + 1px);
+  --wn-glass-join-end: calc(var(--wn-rail-gap, 0px) / 2 + 1px);
+  --wn-glass-corners: 0;
+}
+[data-rail-scroller] > :is(.wn-glass, .wn-chip-glass):not(:is(.wn-glass, .wn-chip-glass) ~ *) {
+  --wn-glass-join-start: 0px;
+  --wn-glass-corners: 9999px 0 0 9999px;
+}
+[data-rail-scroller] > :is(.wn-glass, .wn-chip-glass):last-child {
+  --wn-glass-join-end: 0px;
+  --wn-glass-corners: 0 9999px 9999px 0;
+}
+[data-rail-scroller] > :is(.wn-glass, .wn-chip-glass):not(:is(.wn-glass, .wn-chip-glass) ~ *):last-child {
+  --wn-glass-corners: 9999px;
 }
 [data-phone-chrome],
 [data-phone-dock],

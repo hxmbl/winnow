@@ -7817,9 +7817,17 @@ try {
           // Inside the rounded ends, clear of the hairline.
           return { x: r.left + r.height / 2, y: r.top + 3, width: r.width - r.height, height: r.height - 6, name: sel };
         };
+        // Where two chips meet: the first one's rounded end, the gap, the next one's start.
+        const join = (sel) => {
+          const [a, b] = [...document.querySelectorAll(sel)].filter((el) => el.getClientRects().length > 0);
+          if (!a || !b) return null;
+          const ra = a.getBoundingClientRect();
+          const rb = b.getBoundingClientRect();
+          return { x: ra.right - ra.height / 2, y: ra.top + 3, width: rb.left + rb.height / 2 - (ra.right - ra.height / 2), height: ra.height - 6, name: `the ends and gap between two of ${sel}` };
+        };
         return (phone
-          ? [rect("[data-phone-search]"), rect("[data-phone-pill]"), rect("[data-phone-chips] [data-rail-key]")]
-          : [rect("[data-masthead-bar]"), rect("header [data-rail-key]")]
+          ? [rect("[data-phone-search]"), rect("[data-phone-pill]"), rect("[data-phone-chips] [data-rail-key]"), join("[data-phone-chips] [data-rail-key]")]
+          : [rect("[data-masthead-bar]"), rect("header [data-rail-key]"), join("header [data-rail-key]")]
         ).filter(Boolean);
       }, phone);
       for (const region of regions) {

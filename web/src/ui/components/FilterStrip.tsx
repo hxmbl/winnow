@@ -242,12 +242,16 @@ export const FilterStrip = memo(function FilterStrip({
         // Glass (touch and floating): the scroller would clip each chip's frost layer,
         // which reaches 44px past the chip (`--wn-glass-reach` in `index.css`) so the blur
         // has the rows around it to pull from. So the rail pads itself by that much more
-        // and takes it back with a negative margin: it lays out exactly as before.
+        // and takes it back with a negative margin: it lays out exactly as before. At its
+        // end the padding is at least that reach, so the last chip's layer ends inside the
+        // rail's own end instead of lengthening its scroll.
+        // `--wn-rail-gap` is the gap between the chips, which their frost layers bridge
+        // (half each) so the frost is one band under the rail (`index.css`).
         className={`no-scrollbar flex items-center overflow-x-auto ${
           touch
-            ? "pointer-events-none -my-[44px] gap-2 py-[52px] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
+            ? "pointer-events-none -my-[44px] gap-[var(--wn-rail-gap)] py-[52px] [--wn-rail-gap:0.5rem] pl-[var(--wn-dock-left)] pr-[max(var(--wn-dock-right),var(--wn-glass-reach))] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
             : floating
-              ? "pointer-events-none -my-[44px] gap-1.5 px-0.5 py-[50px] [&>*]:pointer-events-auto"
+              ? "pointer-events-none -my-[44px] gap-[var(--wn-rail-gap)] pl-0.5 pr-[var(--wn-glass-reach)] [--wn-rail-gap:0.375rem] py-[50px] [&>*]:pointer-events-auto"
               : "gap-1"
         }`}
 
