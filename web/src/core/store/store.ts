@@ -49,7 +49,7 @@ import {
 } from "../model/signals";
 import { buildUserProfile, type TrashRecord, type UserProfile } from "../model/profile";
 import { classifyAll, type SignalMap } from "../classify/classify";
-import { countAllFilters, rankFilters } from "../classify/filters";
+import { countAllFilters, matchesBuiltin, rankFilters } from "../classify/filters";
 import {
   buildSearchBags,
   conversationFor,
@@ -68,6 +68,15 @@ import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
 import type { DraftsApi } from "../mail/drafts";
 import type { SignalWeights } from "../classify/weights";
+import {
+  FilterLearning,
+  applyFilterLearning,
+  builtInSays,
+  LEARNABLE_FILTERS,
+  type FilterLearningSnapshot,
+  type LearnableFilter,
+} from "../learn/filterLearning";
+import { explainFilters, type FilterReason } from "../learn/filterExplain";
 import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
 import type { SyncProgress, SyncStage } from "../gmail/sync";
 import {
@@ -381,6 +390,11 @@ export type StoreState = {
 
   preferences: Preferences;
   learning: LearningModel;
+  /**
+   * What "Change smart filters…" has taught, for this account only. See
+   * `learn/filterLearning.ts`; cleared on sign-out and when another account connects.
+   */
+  filterLearning: FilterLearning;
 
   /** Which modal is up, if any. */
   overlay: "none" | "shortcuts" | "navigation" | "settings";
@@ -675,6 +689,8 @@ export type StoreOptions = {
 export type PersistPatch = {
   preferences?: Partial<Preferences>;
   learning?: ReturnType<LearningModel["toSnapshot"]>;
+  /** Local only, never synced: see `learn/filterLearning.ts`. */
+  filterLearning?: FilterLearningSnapshot;
   activeFilters?: string[];
   mailbox?: Mailbox;
 };
@@ -811,6 +827,7 @@ export class WinnowStore {
       revealSeq: 0,
       preferences: { ...DEFAULT_PREFERENCES, ...options.preferences },
       learning: LearningModel.initial(),
+      filterLearning: FilterLearning.empty(),
       overlay: "none",
       navigationIndex: 0,
       syncing: false,
@@ -899,7 +916,10 @@ export class WinnowStore {
     weights: SignalWeights;
     trash: readonly string[];
     blocked: readonly string[];
+    filterLearning: FilterLearning;
     profile: UserProfile;
+    /** What the built-in rules said, before `filterLearning`; for "Why it's here". */
+    baseSignals: SignalMap;
     signals: SignalMap;
   } | null = null;
 
@@ -956,7 +976,8 @@ export class WinnowStore {
       hit.all === all &&
       hit.weights === weights &&
       hit.trash === trash &&
-      hit.blocked === blocked
+      hit.blocked === blocked &&
+      hit.filterLearning === state.filterLearning
     ) {
       return { profile: hit.profile, signals: hit.signals };
     }
@@ -968,8 +989,10 @@ export class WinnowStore {
       (email) => email.mailbox === "inbox" && !blockedLower.has(email.sender.toLowerCase()),
     );
     const profile = buildUserProfile(inboxForProfile, this.trashRecords());
-    const signals = classifyAll(inboxForProfile, profile, weights);
-    this.inboxCache = { all, weights, trash, blocked, profile, signals };
+    const baseSignals = classifyAll(inboxForProfile, profile, weights);
+    const filterLearning = state.filterLearning;
+    const signals = applyFilterLearning(inboxForProfile, baseSignals, filterLearning);
+    this.inboxCache = { all, weights, trash, blocked, filterLearning, profile, baseSignals, signals };
     return { profile, signals };
   }
 
@@ -1242,6 +1265,7 @@ export class WinnowStore {
     activeFilters?: readonly string[];
     preferences?: Partial<Preferences>;
     learning?: ReturnType<LearningModel["toSnapshot"]> | null;
+    filterLearning?: unknown;
   }): void {
     const filters = (saved.activeFilters ?? [])
       .map(parseFilterKey)
@@ -1257,6 +1281,9 @@ export class WinnowStore {
       learning: saved.learning
         ? LearningModel.fromSnapshot(saved.learning)
         : this.state.learning,
+      filterLearning: saved.filterLearning
+        ? FilterLearning.fromSnapshot(saved.filterLearning)
+        : this.state.filterLearning,
     };
     this.notify();
   }
@@ -1282,6 +1309,7 @@ export class WinnowStore {
   async connect(backend: MailBackend, account: { email: string }): Promise<void> {
     this.backend = backend;
     this.pendingConnect = { backend, account };
+    this.claimFilterLearning(account.email);
     this.set({
       status: "signing_in",
       account,
@@ -3088,9 +3116,106 @@ export class WinnowStore {
       storagePrompt: null,
       recentIds: new Set(),
       lastSyncedAt: null,
+      // Unlike the sorting weights, what the smart filters learned names this account's
+      // senders, so it goes with the account.
+      filterLearning: FilterLearning.empty(),
       ...keep,
     };
+    this.onPersist?.({ filterLearning: this.state.filterLearning.toSnapshot() });
     this.notify();
+  }
+
+  // ── Smart filters that learn ──────────────────────────────────────────────
+
+  /**
+   * Hand the corrections to the account that just connected, or drop them if they were
+   * another account's (or the demo's). Corrections made before any account owned them
+   * belong to whoever connects first.
+   */
+  private claimFilterLearning(email: string): void {
+    const model = this.state.filterLearning;
+    const owner = email.toLowerCase();
+    if (model.owner === owner) return;
+    const next = model.owner !== null ? FilterLearning.empty(owner) : model.withOwner(owner);
+    this.setFilterLearning(next);
+  }
+
+  private setFilterLearning(model: FilterLearning): void {
+    this.state = { ...this.state, filterLearning: model };
+    this.onPersist?.({ filterLearning: model.toSnapshot() });
+    this.notify();
+  }
+
+  /** The inbox message with this id, if the inbox has it. */
+  private inboxEmail(id: number): Email | undefined {
+    return this.state.all.find((email) => email.id === id && email.mailbox === "inbox");
+  }
+
+  /**
+   * For each learnable filter, whether all, some or none of these messages are in it
+   * now — what the picker opens with.
+   */
+  smartFilterMembership(ids: readonly number[]): Map<LearnableFilter, "all" | "some" | "none"> {
+    const { profile, signals } = this.inboxAnalysis();
+    const emails = ids.map((id) => this.inboxEmail(id)).filter((email): email is Email => email !== undefined);
+    const out = new Map<LearnableFilter, "all" | "some" | "none">();
+    for (const filter of LEARNABLE_FILTERS) {
+      let hits = 0;
+      for (const email of emails) {
+        const signal = signals.get(email.id);
+        if (signal && matchesBuiltin(filter, email, signal, profile)) hits += 1;
+      }
+      out.set(filter, hits === 0 ? "none" : hits === emails.length ? "all" : "some");
+    }
+    return out;
+  }
+
+  /**
+   * "Change smart filters…": record one correction per message per changed filter. The
+   * messages move at once, because a correction for a message decides that message.
+   */
+  changeSmartFilters(ids: readonly number[], changes: readonly { filter: LearnableFilter; into: boolean }[]): void {
+    if (changes.length === 0) return;
+    const { signals } = this.inboxAnalysis();
+    let model = this.state.filterLearning;
+    if (model.owner === null) model = model.withOwner(this.state.account?.email.toLowerCase() ?? "demo");
+    const at = this.now();
+    for (const id of ids) {
+      const email = this.inboxEmail(id);
+      const signal = email ? signals.get(email.id) : undefined;
+      if (!email || !signal) continue;
+      for (const { filter, into } of changes) model = model.record(email, filter, into, at);
+    }
+    this.setFilterLearning(model);
+  }
+
+  /** "Why it's here" for one inbox message: one line per filter it is in. */
+  explainSmartFilters(id: number): FilterReason[] {
+    const email = this.inboxEmail(id);
+    if (!email) return [];
+    this.inboxAnalysis();
+    const cache = this.inboxCache;
+    const base = cache?.baseSignals.get(id);
+    const learned = cache?.signals.get(id);
+    if (!cache || !base || !learned) return [];
+    return explainFilters(email, base, learned, cache.profile, this.state.filterLearning);
+  }
+
+  /** Whether the built-in rules alone would put this message in a filter. For tests and Settings. */
+  builtInFilter(id: number, filter: LearnableFilter): boolean {
+    const email = this.inboxEmail(id);
+    this.inboxAnalysis();
+    const base = this.inboxCache?.baseSignals.get(id);
+    return email && base ? builtInSays(filter, email, base) : false;
+  }
+
+  removeFilterSenderRule(filter: LearnableFilter, key: string): void {
+    this.setFilterLearning(this.state.filterLearning.removeSenderRule(filter, key));
+  }
+
+  /** "Reset what's learnt", for one filter or all of them. */
+  resetFilterLearning(filter?: LearnableFilter): void {
+    this.setFilterLearning(this.state.filterLearning.reset(filter));
   }
 }
 
