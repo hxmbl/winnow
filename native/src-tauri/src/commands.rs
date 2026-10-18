@@ -10,7 +10,7 @@
 //! browser-side equivalent except the ones documented as native-only.
 
 use crate::oauth::{AuthOutcome, Sessions};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, State};
 // Only the macOS dock badge reaches for a window by label.
 #[cfg(target_os = "macos")]
@@ -197,75 +197,6 @@ pub fn oauth_cancel(sessions: State<'_, Sessions>, port: u16) {
 }
 
 // ── Notifications ───────────────────────────────────────────────────────────
-
-/// A native notification for newly arrived mail.
-///
-/// `rename_all = "camelCase"` and it is load-bearing, not cosmetic. Tauri rewrites
-/// the *top-level* argument key from camelCase to snake_case, but the value under
-/// it is deserialised by plain serde, which looks for the field names as declared.
-/// The web layer sent `messageIds`; this struct declared `message_ids` with
-/// `#[serde(default)]`; the two did not match and the field defaulted to an empty
-/// vec. Deserialisation *succeeded*, so nothing failed and nothing was logged — the
-/// ids were simply always empty, and the "a click opens the right conversation"
-/// feature had nothing to open.
-#[derive(Deserialize)]
-pub struct NewMail {
-    title: String,
-    body: String,
-    /// Message ids the notification refers to, so a notification can be tied back to
-    /// the conversations it came from.
-    ///
-    /// `rename_all = "camelCase"` would produce `messageIds` correctly, but it is
-    /// spelled out for the same reason as `AppInfo`: an explicit rename is checked by
-    /// a test against the exact string the web layer sends, whereas `rename_all` is
-    /// checked against serde's notion of the same thing.
-    #[serde(default, rename = "messageIds")]
-    message_ids: Vec<i64>,
-}
-
-/// Show a native notification for newly arrived mail.
-///
-/// Best-effort on platforms where the plugin is unavailable; the browser
-/// adapter's `Notification` path is the fallback for everything else.
-///
-/// **What a notification click is worth knowing, and what it is not.**
-/// `tauri-plugin-notification` exposes no desktop click callback: `on_action` is
-/// mobile-only, and a click on a macOS notification arrives as an *app activation*
-/// carrying no payload. So the ids attached to a notification cannot be read back at
-/// the moment of the click, and the old comment on `NewMail` — "a click can open the
-/// right conversation" — described a capability the desktop build does not have.
-///
-/// What the desktop build does on a click is reveal the window, handled by
-/// [`crate::tray::reveal`] on `RunEvent::Reopen`. Opening the *specific* message is
-/// the browser build's feature, and the platform interface says so rather than
-/// leaving the two to be discovered as a difference in behaviour.
-///
-/// The `message_ids` are still sent and still used: the plugin round-trips them as
-/// `extra`, and a shell that *can* deliver a payload reads them. Sending them costs
-/// nothing and keeps the wire shape one shape across both hosts.
-///
-/// Note there is no event constant here for it. There used to be —
-/// `winnow://notification-action` — declared "so the webview's subscription is not
-/// conditional on the host", but nothing emitted it and nothing subscribed to it,
-/// which is the shape a promise takes when the capability behind it does not exist.
-#[tauri::command]
-pub fn notify_new_mail(app: AppHandle, mail: NewMail) -> Result<()> {
-    use tauri_plugin_notification::NotificationExt;
-
-    app.notification()
-        .builder()
-        .title(mail.title)
-        .body(mail.body)
-        // Carry the ids so a future shell that *can* deliver a payload has them. The
-        // plugin's `extra` takes a key/value pair rather than a JSON blob, and the ids
-        // go in as a list of numbers, which is what the plugin round-trips.
-        .extra("messageIds", &mail.message_ids)
-        // The group collapses a burst: forty messages arriving together should
-        // produce one notification, not forty.
-        .group("winnow.new-mail")
-        .show()
-        .map_err(|e| format!("could not show a notification: {e}"))
-}
 
 /// Whether notifications may be shown, and asks for permission if they may.
 ///
@@ -487,10 +418,10 @@ pub fn set_background_sync(app: AppHandle, interval_secs: Option<u64>) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{AppInfo, NewMail};
+    use super::AppInfo;
 
-    /// `serde_json` is needed for the two wire-shape tests below, and only those.
-    /// They exist because the field names of `AppInfo` and `NewMail` are read by
+    /// `serde_json` is needed for the wire-shape test below, and only that.
+    /// It exists because the field names of `AppInfo` are read by
     /// another language — the one place in this crate where a rename compiles
     /// cleanly and breaks the product.
 
@@ -511,32 +442,8 @@ mod tests {
     }
 
     #[test]
-    fn a_new_mail_payload_survives_the_camel_case_boundary() {
-        // The bug this pins. The webview sends `{ messageIds: [...] }` inside the
-        // `mail` argument. Tauri rewrites the *top-level* key (`mail`), but the value
-        // under it goes through plain serde, which looks for the field names as
-        // declared. `message_ids` + `#[serde(default)]` therefore deserialised
-        // successfully with an empty vec — no error, no log, and the ids silently
-        // gone on every notification.
-        let parsed: NewMail = serde_json::from_value(serde_json::json!({
-            "title": "Ada Lovelace",
-            "body": "Re: the migration plan",
-            "messageIds": [7, 9],
-        }))
-        .expect("a camelCase payload must deserialise");
-
-        assert_eq!(parsed.message_ids, vec![7, 9]);
-
-        // And a payload without the ids still loads, because the field is optional —
-        // the fallback has to be a working one, not a crash.
-        let partial: NewMail =
-            serde_json::from_value(serde_json::json!({ "title": "t", "body": "b" })).unwrap();
-        assert!(partial.message_ids.is_empty());
-    }
-
-    #[test]
     fn app_info_serialises_the_camel_case_the_webview_reads() {
-        // The second half of the same class of bug, and the quieter one: `AppInfo`'s
+        // A camelCase boundary bug, and a quiet one: `AppInfo`'s
         // four capability flags were declared snake_case and serialised as such, so
         // `backgroundSync` read `undefined` on the desktop — and the settings panel
         // gates its whole Background section on that value, so background sync could

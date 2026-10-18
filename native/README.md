@@ -226,7 +226,7 @@ designed to prevent.
 app_info                    what this build can do
 secrets_set / _get / _delete   the keychain
 oauth_begin / _await / _cancel  the loopback sign-in
-notify_new_mail             a native notification
+notify_messages             per-message notifications with Reply, Delete, Mark read
 open_external               the system browser, https only
 save_attachment             a save dialog
 set_unread_badge            dock badge, tray tooltip, window title
@@ -273,7 +273,7 @@ Three bugs shipped that way before the tests that now catch them existed:
 - `oauth_begin`'s reply was read as `authorizeUrl`, so `open_external` was called
   with `url: undefined`, IPC rejected it with "missing required key url", and
   desktop sign-in was impossible.
-- `notify_new_mail`'s `message_ids` was sent as `messageIds`, which *deserialised
+- `notify_new_mail`'s (since replaced by `notify_messages`) `message_ids` was sent as `messageIds`, which *deserialised
   successfully* into a struct with `#[serde(default)]` — as an empty vec. No error
   at all, and a notification click could never know which conversation to open.
 

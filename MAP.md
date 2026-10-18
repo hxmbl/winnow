@@ -525,8 +525,8 @@ Supporting files:
 from camelCase to snake_case but never rewrites *return values*. So `AppInfo` has
 explicit `#[serde(rename)]` on all four capability flags (serde would emit
 `nativeOauth`, which reads as `undefined` at the call site), `OAuthBegin` returns
-`authorize_url` and the web layer reads `authorize_url`, and `NewMail` is
-`rename_all = "camelCase"` so `messageIds` survives. `desktop.ts`'s
+`authorize_url` and the web layer reads `authorize_url`, and `notify_messages`'s
+`NotificationBatch` is `rename_all = "camelCase"` so `messageId` and friends survive. `desktop.ts`'s
 `normaliseAppInfo` accepts either spelling on the way in.
 
 ---
@@ -610,7 +610,7 @@ could be written in TypeScript, it belongs in `web/`.
 | --- | --- |
 | `main.rs` | Seven lines: `winnow_lib::run()`, plus `windows_subsystem = "windows"` so a release build has no console. |
 | `lib.rs` | The real startup: `single_instance` registered **first**, then dialog/opener/notification/window-state, the invoke handler, `on_page_load` revealing the window (skipped with `--minimized`), `setup` registering autostart, OAuth sessions, deep links, tray and scheduler, and `CloseRequested` → hide rather than quit. |
-| `commands.rs` | 16 commands, each of which validates, delegates and converts errors to strings. |
+| `commands.rs` | 15 commands, each of which validates, delegates and converts errors to strings. |
 | `oauth.rs` | The loopback listener: binds `127.0.0.1:0`, substitutes the real port into `__WINNOW_LOOPBACK_PORT__`, answers one request and stops. On Android the success page has a "Back to Winnow" button to `winnow://signed-in` (the manifest's `VIEW` intent filter), which brings the app forward; the web layer ignores that link beyond focusing. |
 | `secrets.rs` | Keychain get/set/delete under service `app.winnow.desktop`, one user per secret name. |
 | `scheduler.rs` | The tick, 30–3600 s, clamped, joined on retune so two threads can never overlap. |
@@ -631,7 +631,6 @@ could be written in TypeScript, it belongs in `web/`.
 | `google_signin_info` | — | `{ packageName, sha1, playServices }` or `null` | `appSigningInfo` |
 | `google_signin_authorize` | `server_client_id`, `scopes` | `{ kind: code \| cancelled \| unavailable, … }`, never an error | `nativeGoogleSignIn` |
 | `open_sign_in_tab` | `url` (accounts.google.com only) | `()` | `beginSignIn` on Android |
-| `notify_new_mail` | `{ title, body, messageIds }` | `()` | unused since `notify_messages`; kept registered until batch D's handler-list edit lands, then remove |
 | `notify_messages` | `batch` (`NotificationBatch`, camelCase) | `()` | `notifyNewMail` (`notify_actions/`) |
 | `notify_action_result` | `result` `{ messageId, title, text, failed }` | `()` | `confirmNotificationAction` |
 | `notify_kept_replies` / `notify_release_kept` | — / `ids` | `Value[]` / `()` | `keptReplies` / `releaseKeptReplies` |

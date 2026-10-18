@@ -26,3 +26,8 @@
 -keep class app.winnow.android.signin.GoogleSignInPlugin { *; }
 -keep class app.winnow.android.signin.AuthorizeArgs { *; }
 -keep class app.winnow.android.signin.OpenTabArgs { *; }
+
+# Notification actions (notify/NotifyPlugin.kt): found and called the same way, so named
+# here for the same reason. The receiver is kept through the manifest.
+-keep class app.winnow.android.notify.NotifyPlugin { *; }
+-keep class app.winnow.android.notify.EventHandlerArgs { *; }

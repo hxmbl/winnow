@@ -100,7 +100,6 @@ pub fn run() {
             commands::oauth_begin,
             commands::oauth_await,
             commands::oauth_cancel,
-            commands::notify_new_mail,
             commands::open_external,
             commands::google_signin_info,
             commands::google_signin_authorize,
