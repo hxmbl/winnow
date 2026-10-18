@@ -191,6 +191,23 @@ try {
     await nativeId.click();
     check("a well-formed Web client clears the error", (await nativeId.getAttribute("aria-invalid")) === null);
 
+    // The step sits in the resumable guide's progress like the other five.
+    check(
+      "the progress line counts six steps",
+      ((await setup.locator("[data-setup-progress]").textContent()) ?? "").includes("Step 5 of 6") &&
+        ((await setup.locator("[data-setup-done]").textContent()) ?? "").includes("of 6 done"),
+      `${await setup.locator("[data-setup-progress]").textContent()} ${await setup.locator("[data-setup-done]").textContent()}`,
+    );
+    await setup.locator("[data-setup-next]").click();
+    const remembered = await page.evaluate(() => JSON.parse(localStorage.getItem("winnow.google.setupProgress") ?? "null"));
+    check(
+      "Next ticks the Android step, moves to Paste and remembers both (never the secret)",
+      (await setup.locator("[data-setup-step]").getAttribute("data-setup-step")) === "paste" &&
+        (await setup.locator('[data-setup-step-button="android"]').getAttribute("data-done")) !== null &&
+        remembered?.step === 5 && remembered.done.includes("android") && !JSON.stringify(remembered).includes(WEB_SECRET),
+      JSON.stringify(remembered),
+    );
+
     // The paste step: the Desktop app client, then Save and connect.
     await setup.locator('[data-setup-step-button="paste"]').click();
     await setup.locator('input[name="clientId"]').fill(DESKTOP_ID);
