@@ -1,12 +1,10 @@
 /**
- * The two wire changes for labels and attachments: a conversation is labelled with
- * `threads.modify`, and a message too big for a JSON body goes through the media upload
- * endpoint as `multipart/related`, carrying its thread and draft id in the metadata part.
+ * A message too big for a JSON body goes through the media upload endpoint as
+ * `multipart/related`, carrying its thread and draft id in the metadata part.
  */
 
 import { describe, expect, it } from "vitest";
-import { GmailClient, UPLOAD_THRESHOLD, costOf, uploadBody, type FetchLike } from "./client";
-import { GmailError } from "./dto";
+import { GmailClient, UPLOAD_THRESHOLD, uploadBody, type FetchLike } from "./client";
 
 type Call = { url: string; init?: { method?: string; headers?: Record<string, string>; body?: string } };
 
@@ -21,28 +19,6 @@ function stubFetch(): { fetchImpl: FetchLike; calls: Call[] } {
 
 const client = (fetchImpl: FetchLike) => new GmailClient(async () => "token-1", { fetchImpl });
 const big = () => "Subject: big\r\n\r\n" + "A".repeat(UPLOAD_THRESHOLD + 10);
-
-describe("threads.modify", () => {
-  it("labels a whole conversation in one call", async () => {
-    const { fetchImpl, calls } = stubFetch();
-    await client(fetchImpl).modifyThread("t 1", ["Label_1"], ["Label_2"]);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toMatch(/\/gmail\/v1\/users\/me\/threads\/t%201\/modify$/);
-    expect(calls[0]!.init?.method).toBe("POST");
-    expect(JSON.parse(calls[0]!.init?.body ?? "{}")).toEqual({ addLabelIds: ["Label_1"], removeLabelIds: ["Label_2"] });
-  });
-
-  it("sends nothing for no change, and refuses Gmail's fixed labels", async () => {
-    const { fetchImpl, calls } = stubFetch();
-    await client(fetchImpl).modifyThread("t1", [], []);
-    expect(calls).toHaveLength(0);
-    await expect(client(fetchImpl).modifyThread("t1", ["SENT"], [])).rejects.toThrow(GmailError);
-  });
-
-  it("is charged 10 quota units", () => {
-    expect(costOf("/users/me/threads/t1/modify", "POST")).toBe(10);
-  });
-});
 
 describe("uploads", () => {
   it("keeps a small message on the JSON endpoint", async () => {

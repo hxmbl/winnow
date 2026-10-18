@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build, preview } from "vite";
 import { smokeOffline } from "./smoke-offline.mjs";
-import { labelsAndAttachments } from "./smoke-labels-attachments.mjs";
+import { attachmentsSmoke } from "./smoke-attachments.mjs";
 import { topEmail } from "./smoke-top-email.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -788,8 +788,8 @@ try {
     nav: Boolean(side.querySelector("nav")),
   }));
   check(
-    "top to bottom: Winnow, Inbox, Mail (Sent, Archive, Trash…), the demo's Labels, the demo account and a gear",
-    sideText.brand && JSON.stringify(sideText.sections) === JSON.stringify(["Mail", "Labels"]) &&
+    "top to bottom: Winnow, Inbox, Mail (Sent, Archive, Trash…), the demo account and a gear; no Labels",
+    sideText.brand && JSON.stringify(sideText.sections) === JSON.stringify(["Mail"]) &&
       ["sent", "archive", "trash"].every((id) => sideText.folders.includes(id)) &&
       sideText.account.includes("Demo account") && sideText.gear && sideText.nav,
     JSON.stringify(sideText),
@@ -4788,90 +4788,6 @@ try {
         (await d.evaluate(() => document.activeElement?.hasAttribute("data-message-id"))),
     );
 
-    // Label as…, from the row menu: the user's Gmail labels with a checkbox each.
-    // The demo seeds four, so the picker has something to show without an account.
-    // By message id rather than row index: the list is windowed, so the nth mounted row
-    // can be a different message by the time the picker is reopened below.
-    const labelledId = await rowButton(5).getAttribute("data-message-id");
-    const labelledRow = d.locator(`[data-row-count] button[data-message-id="${labelledId}"]`);
-    await labelledRow.focus();
-    await d.keyboard.press("Shift+F10");
-    await d.waitForTimeout(150);
-    check("the row menu offers Label as…", (await d.locator("[data-menu='row'] [data-menu-item='label-as']").count()) === 1);
-    await d.locator("[data-menu='row'] [data-menu-item='label-as']").click();
-    const picker = d.locator('[role="dialog"][aria-label="Label as"]');
-    await picker.waitFor({ timeout: 5_000 }).catch(() => undefined);
-    check("Label as… opens the label picker", (await picker.count()) === 1);
-    const pickerSurface = await picker.evaluate((el) => {
-      const list = el.querySelector('[role="group"][aria-label="Labels"]');
-      return { panel: getComputedStyle(el).backgroundColor, list: list ? getComputedStyle(list).backgroundColor : null };
-    });
-    check(
-      "the picker is drawn on its own opaque surface, not straight on the backdrop",
-      /^rgb\(/.test(pickerSurface.panel) || (/^rgba\(/.test(pickerSurface.panel) && !/, 0\)$/.test(pickerSurface.panel)),
-      JSON.stringify(pickerSurface),
-    );
-    const pickerNames = await picker.locator("[data-label-option]").allTextContents();
-    check(
-      "it lists the demo's seeded labels",
-      ["Travel", "Receipts", "Work/Northwind", "Family"].every((name) => pickerNames.includes(name)),
-      pickerNames.join(", "),
-    );
-    check(
-      "focus starts in its find-or-make field",
-      await d.evaluate(() => document.activeElement?.getAttribute("aria-label") === "Find or make a label"),
-    );
-    const apply = picker.locator("[data-label-apply]");
-    check("Apply waits for a change", await apply.isDisabled());
-    const family = picker.locator('[data-label-option="Label_4"]');
-    const familyBefore = await family.getAttribute("aria-checked");
-    await family.click();
-    const familyAfter = await family.getAttribute("aria-checked");
-    check(
-      "clicking a label toggles its checkbox",
-      familyBefore !== familyAfter && ["true", "false"].includes(familyAfter ?? ""),
-      `${familyBefore} → ${familyAfter}`,
-    );
-    check("and enables Apply", !(await apply.isDisabled()));
-    const field = picker.getByRole("textbox", { name: "Find or make a label" });
-    await field.fill("Smoke/Made here");
-    const make = picker.locator("[data-label-create]");
-    check("a new name offers to make it", (await make.count()) === 1 && /Make “Smoke\/Made here”/.test((await make.textContent()) ?? ""));
-    await make.click();
-    const made = picker.locator("[data-label-option]", { hasText: "Smoke/Made here" });
-    await made.waitFor({ timeout: 3_000 }).catch(() => undefined);
-    check(
-      "making it adds it to the list, checked",
-      (await made.count()) === 1 && (await made.getAttribute("aria-checked")) === "true",
-    );
-    check("and clears the field", (await field.inputValue()) === "");
-    await field.fill("Travel");
-    check("an existing name filters to it rather than offering a duplicate", (await picker.locator("[data-label-create]").count()) === 0 && (await picker.locator("[data-label-option]").count()) === 1);
-    await field.fill("");
-    await apply.click();
-    await picker.waitFor({ state: "detached", timeout: 3_000 }).catch(() => undefined);
-    check("Apply closes the picker", (await picker.count()) === 0);
-    check("and says so", (await d.getByText("Labels updated.").count()) > 0);
-    // Reopened on the same message, the picker shows what was applied.
-    await labelledRow.scrollIntoViewIfNeeded().catch(() => undefined);
-    await labelledRow.focus();
-    await d.keyboard.press("Shift+F10");
-    await d.waitForTimeout(150);
-    await d.locator("[data-menu='row'] [data-menu-item='label-as']").click();
-    await picker.waitFor({ timeout: 5_000 }).catch(() => undefined);
-    const stuck = {
-      family: await picker.locator('[data-label-option="Label_4"]').getAttribute("aria-checked", { timeout: 2_000 }).catch(() => null),
-      made: await picker.locator("[data-label-option]", { hasText: "Smoke/Made here" }).getAttribute("aria-checked", { timeout: 2_000 }).catch(() => null),
-    };
-    check(
-      "and the labels stick on the message",
-      stuck.family === familyAfter && stuck.made === "true",
-      JSON.stringify({ ...stuck, expected: familyAfter, id: labelledId }),
-    );
-    await d.keyboard.press("Escape");
-    await picker.waitFor({ state: "detached", timeout: 3_000 }).catch(() => undefined);
-    check("Escape closes the picker", (await picker.count()) === 0);
-
     // Marking the open message unread moves on.
     const readIndex = await d.evaluate(() => {
       const buttons = [...document.querySelectorAll("[data-row-count] button[data-message-id]")];
@@ -7628,87 +7544,6 @@ try {
     await ctx.close();
   }
 
-  // ── Label as ───────────────────────────────────────────────────────────────
-  //
-  // The row menu and the reader's More menu open a picker of the user's Gmail labels:
-  // checked where a label is on the message, and able to make a new one. The demo's
-  // labels are seeded, and the boarding-pass mail carries "Travel".
-
-  section("label as");
-  {
-    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const l = await ctx.newPage();
-    const lErrors = [];
-    l.on("pageerror", (error) => lErrors.push(String(error)));
-    await l.goto(URL, { waitUntil: "networkidle" });
-    await l.waitForSelector("[data-message-id]", { timeout: 10_000 });
-    const picker = l.locator('[role="dialog"][aria-label="Label as"]');
-    const option = (name) => picker.locator("[data-label-option]", { hasText: name });
-    const travelRow = l.locator("[data-message-id]", { hasText: "Check-in is open" }).first();
-    const openFromRow = async () => {
-      await travelRow.click({ button: "right" });
-      await l.locator("[data-menu-item='label-as']").click();
-      await picker.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
-    };
-
-    await travelRow.click({ button: "right" });
-    check("the row menu offers Label as…", (await l.locator("[data-menu-item='label-as']").count()) === 1);
-    await l.locator("[data-menu-item='label-as']").click();
-    await picker.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
-    check("which opens a picker of the user's labels", (await picker.count()) === 1);
-    check(
-      "listing every label, by name",
-      (await picker.locator("[data-label-option]").allTextContents()).join("|") === "Family|Receipts|Travel|Work/Northwind",
-      (await picker.locator("[data-label-option]").allTextContents()).join("|"),
-    );
-    check("with the message's own label checked", (await option("Travel").getAttribute("aria-checked")) === "true");
-    check("and Apply off until something changes", await picker.locator("[data-label-apply]").isDisabled());
-    await option("Family").click();
-    check("a click checks a label", (await option("Family").getAttribute("aria-checked")) === "true");
-
-    // A new label: typed, made, and checked.
-    await picker.locator('input[aria-label="Find or make a label"]').fill("Inbox");
-    check("Gmail's own names are refused in place", ((await picker.locator("[data-label-problem]").textContent()) ?? "").includes("Gmail's own"));
-    await picker.locator('input[aria-label="Find or make a label"]').fill("Lisbon trip");
-    await picker.locator("[data-label-create]").click();
-    await option("Lisbon trip").waitFor({ timeout: 3_000 }).catch(() => undefined);
-    check("a new label can be made, and arrives checked", (await option("Lisbon trip").getAttribute("aria-checked")) === "true");
-    await picker.locator("[data-label-apply]").click();
-    await l.waitForTimeout(200);
-    check("Apply closes the picker", (await picker.count()) === 0);
-    check("and says it did", ((await l.locator("[data-notice-text]").textContent().catch(() => "")) ?? "").includes("Labels updated"));
-
-    await openFromRow();
-    check(
-      "reopening shows the change kept",
-      (await option("Family").getAttribute("aria-checked")) === "true" &&
-        (await option("Lisbon trip").getAttribute("aria-checked")) === "true" &&
-        (await option("Travel").getAttribute("aria-checked")) === "true",
-    );
-    await option("Travel").click();
-    await l.keyboard.press("Escape");
-    await l.waitForTimeout(150);
-    check("Escape closes it without applying", (await picker.count()) === 0);
-    await openFromRow();
-    check("so nothing changed", (await option("Travel").getAttribute("aria-checked")) === "true");
-    await l.keyboard.press("Escape");
-    await l.waitForTimeout(150);
-
-    // The reader's More menu has it too.
-    await travelRow.click();
-    await l.waitForSelector("article h1", { timeout: 5_000 });
-    await l.locator('button[aria-label="More"]').first().click();
-    await l.locator("[data-reader-label-as]").first().click();
-    await picker.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
-    check(
-      "the reader's More menu opens Label as… for the open message",
-      (await picker.count()) === 1 && (await option("Travel").getAttribute("aria-checked")) === "true",
-    );
-    await l.keyboard.press("Escape");
-    check("no page errors in Label as", lErrors.length === 0, lErrors.slice(0, 3).join(" | "));
-    await ctx.close();
-  }
-
   // ── Glass over the list, and the logo's version toggle (1.2.3) ─────────────
   // BEGIN glass-and-version
   {
@@ -8036,7 +7871,7 @@ try {
   // Labels and attachments: chips, the label picker's other doors, label mailboxes, the
   // reader's file list and lightbox, and compose attachments. Its own module, so it can
   // also run alone (`node scripts/smoke-labels-attachments.mjs`).
-  await labelsAndAttachments({ browser, url: URL, check, section });
+  await attachmentsSmoke({ browser, url: URL, check, section });
   // The first email under the floating chrome: at rest, after the Top pill, Home and j/k,
   // in every kind of view, and when the chrome's height changes. Its own module, so it
   // can also run alone (`node scripts/smoke-top-email.mjs`).

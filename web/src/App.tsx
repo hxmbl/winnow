@@ -90,7 +90,6 @@ import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer } from "./ui/components/Composer";
 import { SendingStrip } from "./ui/components/SendingStrip";
-import { LabelPicker } from "./ui/components/LabelPicker";
 import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
 import { WhyHere } from "./ui/components/WhyHere";
 import { movedNotice } from "./ui/smartFilterPicker";
@@ -126,7 +125,6 @@ import { contactsFailureNotice } from "./core/gmail/people";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import type { OfflineQueue } from "./core/offline/queue";
 import { OfflineIndicator } from "./ui/components/OfflineIndicator";
-import { LabelNamesContext, type LabelNames } from "./ui/labelNames";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
 import { onReplyRequest } from "./ui/notificationActions";
@@ -813,15 +811,9 @@ export function App({ store }: Props) {
   );
 
   // What the list's empty state needs to tell a clear Inbox from an empty folder.
-  // Browsing a label, that label is the view: empty, it is a quiet folder, not the Inbox.
-  const labelViewName = snapshot.labelView !== null ? store.labelViewName() : null;
   const emptyContext = useMemo(
-    () => ({
-      mailbox: snapshot.mailbox,
-      filters: snapshot.activeFilters,
-      label: snapshot.labelView !== null ? { id: snapshot.labelView, name: labelViewName ?? "Label" } : null,
-    }),
-    [snapshot.mailbox, snapshot.activeFilters, snapshot.labelView, labelViewName],
+    () => ({ mailbox: snapshot.mailbox, filters: snapshot.activeFilters }),
+    [snapshot.mailbox, snapshot.activeFilters],
   );
 
   const unreadIds = useMemo(
@@ -865,21 +857,6 @@ export function App({ store }: Props) {
    * count is the unfiltered inbox list's own number of conversations. The smart filters
    * are not here; they are the rail (`FilterStrip`).
    */
-  /** The user's labels for the sidebar, each with its unread count outside Trash and Spam. */
-  const navLabels = useMemo(() => {
-    const unread = new Map<string, number>();
-    for (const email of snapshot.all) {
-      if (!email.unread || !email.labels || email.mailbox === "trash" || email.mailbox === "spam") continue;
-      for (const id of email.labels) unread.set(id, (unread.get(id) ?? 0) + 1);
-    }
-    return snapshot.userLabels.map((label) => ({ ...label, unread: unread.get(label.id) ?? 0 }));
-  }, [snapshot.all, snapshot.userLabels]);
-  /** Label names for the chips on rows and in the reader. */
-  const labelNames = useMemo<LabelNames>(
-    () => ({ names: new Map(snapshot.userLabels.map((label) => [label.id, label.name])), hidden: snapshot.labelView }),
-    [snapshot.userLabels, snapshot.labelView],
-  );
-
   const navProps: NavProps = {
     inboxCount: view.inboxThreadCount,
     inboxUnread: mailboxes.find((mailbox) => mailbox.id === "inbox")?.unread ?? 0,
@@ -914,12 +891,6 @@ export function App({ store }: Props) {
     },
     settingsOpen: snapshot.overlay === "settings",
     onOpenSettings: () => store.setOverlay("settings"),
-    labels: navLabels,
-    currentLabel: snapshot.labelView,
-    onSelectLabel: (id) => {
-      store.setOverlay("none");
-      store.setLabelView(id);
-    },
   };
 
   const paletteUnread = useMemo(
@@ -1477,25 +1448,6 @@ export function App({ store }: Props) {
   );
 
   /**
-   * "Label as…" is open for these messages. The labels are listed each time it opens,
-   * cheaply, in case one was made in Gmail meanwhile.
-   */
-  const [labelPicker, setLabelPicker] = useState<number[] | null>(null);
-  const openLabelPicker = useCallback((ids: readonly number[]) => {
-    if (ids.length === 0) return;
-    setLabelPicker([...ids]);
-    void storeRef.current.loadLabels();
-  }, []);
-  const labelTargets = useMemo(() => {
-    if (!labelPicker) return [];
-    const wanted = new Set(labelPicker);
-    return snapshot.all.filter((email) => wanted.has(email.id));
-    // The picker reads the labels as it opened; a sync landing underneath must not
-    // reset the boxes the user is ticking.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labelPicker]);
-
-  /**
    * "Change smart filters…" is open for these inbox messages. Each tick moves them at once
    * and is a correction Winnow learns from; see `core/learn/filterLearning.ts`.
    */
@@ -1818,14 +1770,6 @@ export function App({ store }: Props) {
 
   /** The grant's drafts access, read off the token whenever the account changes. */
   const accountEmail = snapshot.account?.email ?? null;
-  // The account's labels, for the chips and the sidebar: once it connects, and again
-  // whenever the sidebar opens (cheap, one unit), in case one was made in Gmail.
-  useEffect(() => {
-    if (accountEmail) void storeRef.current.loadLabels();
-  }, [accountEmail]);
-  useEffect(() => {
-    if (sidebarOpen && storeRef.current.getSnapshot().account) void storeRef.current.loadLabels();
-  }, [sidebarOpen]);
   useEffect(() => {
     const bridge = sessionRef.current;
     if (!bridge || !accountEmail) {
@@ -2588,10 +2532,10 @@ const listSelectedId = phone
   : (view.threads[view.selectedIndex]?.representative.id ?? snapshot.selectedId);
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
   /**
-   * Smart filters sort the inbox, so the list offers "Change smart filters…" there only:
-   * a label view mixes in mail from every folder. The reader goes by the message itself.
+   * Smart filters sort the inbox, so the list offers "Change smart filters…" there only.
+   * The reader goes by the message itself.
    */
-  const smartFiltersHere = snapshot.mailbox === "inbox" && snapshot.labelView === null;
+  const smartFiltersHere = snapshot.mailbox === "inbox";
 
   /**
    * The composer, built once and placed by layout: docked in the reader pane for a
@@ -2781,7 +2725,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
 
   return (
     <SenderPicturesContext.Provider value={senderPictures}>
-    <LabelNamesContext.Provider value={labelNames}>
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
       {/*
         Everything but the phone's dock is inert while the sidebar is open. The dock stays
@@ -2906,26 +2849,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         affordance is unreliable — but waits for an explicit dismissal, a different action,
         or a navigation.
       */}
-      {labelPicker && labelTargets.length > 0 && (
-        <LabelPicker
-          labels={snapshot.userLabels}
-          loading={snapshot.labelsLoading}
-          targets={labelTargets}
-          onCreate={(name) => store.createLabel(name)}
-          onApply={(add, remove) => {
-            store.applyLabels(labelPicker, add, remove);
-            setLabelPicker(null);
-            const message =
-              labelPicker.length === 1 ? "Labels updated." : `Labels updated on ${labelPicker.length} messages.`;
-            store.setNotice(message);
-            setTimeout(() => {
-              if (storeRef.current.getSnapshot().notice === message) storeRef.current.dismissNotice();
-            }, DRAFT_NOTICE_MS);
-          }}
-          onClose={() => setLabelPicker(null)}
-        />
-      )}
-
       {filterPicker && (
         <SmartFilterPicker
           count={filterPicker.length}
@@ -3044,7 +2967,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
-                    onLabel={snapshot.mailbox === "drafts" && snapshot.labelView === null ? undefined : () => openLabelPicker([...selection])}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
@@ -3056,7 +2978,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onSearchChange={store.setSearchQuery.bind(store)}
                     searchRef={searchRef}
                     listTitle={store.listTitle()}
-                    mailboxName={store.labelViewName() ?? MAILBOX_LABEL[snapshot.mailbox]}
+                    mailboxName={MAILBOX_LABEL[snapshot.mailbox]}
                     position={null}
                     total={view.threads.length}
                     version={info?.version ?? null}
@@ -3108,7 +3030,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     onTrash={() => runBatch((s, ids) => s.trashMany(ids))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
-                    onLabel={snapshot.mailbox === "drafts" && snapshot.labelView === null ? undefined : () => openLabelPicker([...selection])}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
@@ -3136,7 +3057,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 connected: true,
                 menuOpen: sidebarOpen,
                 selecting: selection.size > 0,
-                overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || labelPicker !== null || filterPicker !== null,
+                overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || filterPicker !== null,
               }}
               syncing={sync.busy}
               top={phoneBarHeight}
@@ -3208,7 +3129,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               )
             }
             swipe={
-              phone && preferences.swipeActions && !menu && !labelPicker && !filterPicker && !sidebarOpen && !composer && snapshot.overlay === "none"
+              phone && preferences.swipeActions && !menu && !filterPicker && !sidebarOpen && !composer && snapshot.overlay === "none"
                 ? swipeConfig
                 : null
             }
@@ -3257,8 +3178,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               email={selected}
               conversation={view.conversation}
               signals={selected ? (view.signals.get(selected.id) ?? null) : null}
-              // Browsing a label, the message's own mailbox decides what Archive means.
-              mailbox={snapshot.labelView !== null && selected ? selected.mailbox : snapshot.mailbox}
+              mailbox={snapshot.mailbox}
               // Either the global preference, or this one message the reader's own
               // escape hatch has been used on. See `remoteFor`.
               imagesAllowed={imagesAllowed}
@@ -3332,9 +3252,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     s.closeReader({ dropCursor: phoneRef.current });
                   }
                 }),
-                onLabelAs: () => {
-                  if (selected) openLabelPicker([selected.id]);
-                },
                 onChangeFilters:
                   selected?.mailbox === "inbox"
                     ? () => {
@@ -3409,7 +3326,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               : null
           }
           // Back to top, likewise, only over the plain list.
-          backToTopAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !labelPicker && !filterPicker}
+          backToTopAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !filterPicker}
         />
       )}
 
@@ -3706,7 +3623,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   else store.setReadMany(menu.ids, read);
                 },
                 move: (target) => runOn((s, ids) => s.moveMany(ids, target)),
-                labelAs: () => openLabelPicker(menu.ids),
                 changeFilters: smartFiltersHere ? () => openFilterPicker(menu.ids) : undefined,
                 toggleMuteSender: toggleMute,
                 findFrom: showAll,
@@ -3777,7 +3693,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       onClose={closeSidebar}
       touch={phone}
     />
-    </LabelNamesContext.Provider>
     </SenderPicturesContext.Provider>
   );
 }

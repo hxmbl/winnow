@@ -193,13 +193,6 @@ export type Email = {
   category: EmailCategory;
   starred: boolean;
   unread: boolean;
-  /**
-   * The user's own Gmail labels on this message, by id (`Label_12`), for "Label as…".
-   * Absent on a message cached before labels were read: unknown, shown as unlabelled
-   * until the next sync fetches it again. System labels are never here — `mailbox`,
-   * `starred`, `unread` and `category` are what Winnow makes of those.
-   */
-  labels?: string[];
   attachments: Attachment[];
   /** Gmail spam score 0-100, if available. */
   spamScore?: number;

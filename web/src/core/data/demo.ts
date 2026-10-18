@@ -27,7 +27,6 @@
  *     images and tracking pixels to test the image consent flow.
  */
 
-import type { UserLabel } from "../mail/labels";
 import { hashId } from "../model/ids";
 import { parseAddressList } from "../mail/html";
 import { parseListUnsubscribe } from "../mail/unsubscribe";
@@ -96,20 +95,7 @@ type Seed = {
   demonstrates?: string;
   /** A `List-Unsubscribe` header, as a newsletter would send it. */
   listUnsubscribe?: string;
-  /** User labels, by id from `DEMO_LABELS`, for "Label as…". */
-  labels?: string[];
 };
-
-/**
- * The demo account's own Gmail labels, so "Label as…" has something to show. A nested
- * one is there because Gmail's `/` nesting is the case a picker most often gets wrong.
- */
-export const DEMO_LABELS: readonly UserLabel[] = [
-  { id: "Label_1", name: "Travel" },
-  { id: "Label_2", name: "Receipts" },
-  { id: "Label_3", name: "Work/Northwind" },
-  { id: "Label_4", name: "Family" },
-];
 
 /** A long body, so the "Long reads" threshold is reachable in the demo. */
 const LONG_BODY = `Thanks for the detailed note — I read it twice, because the
@@ -416,7 +402,6 @@ Flight: NA 447 From: London Heathrow (LHR) To: Lisbon (LIS) Departure gate: B22 
 Your boarding pass is attached to this message. You do not need to print it — the gate agent can scan the barcode on your phone. Bags must be checked by 07:00.`),
     category: "reservations",
     demonstrates: "travel",
-    labels: ["Label_1"],
   },
   {
     id: "demo-travel-2",
@@ -526,7 +511,6 @@ Thanks for stopping by.
 Paid by card ending 4417. No change given.`),
     category: "receipts",
     demonstrates: "receipts",
-    labels: ["Label_2"],
   },
   {
     id: "demo-receipts-3",
@@ -1464,7 +1448,6 @@ function toEmail(seed: Seed): Email {
     category: seed.category ?? "primary",
     starred: seed.starred ?? false,
     unread: seed.unread ?? false,
-    ...(seed.labels ? { labels: seed.labels.slice() } : {}),
     urgent: seed.urgent ?? false,
     unsubscribe: parseListUnsubscribe(seed.listUnsubscribe, seed.listUnsubscribe ? "List-Unsubscribe=One-Click" : undefined),
     attachments: (seed.attachments ?? []).map((attachment, index) => ({

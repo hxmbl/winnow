@@ -38,17 +38,11 @@ describe("the row context menu", () => {
     }
   });
 
-  it("offers Label as… after Move to, for one message or a selection, when labels can be set", () => {
-    const labelAs = () => undefined;
-    const single = buildRowMenu(rowInput({ actions: { ...rowInput().actions, labelAs } }));
-    expect(ids(single).slice(8, 11)).toEqual(["move", "label-as", "mute-sender"]);
-    const item = single.find((e) => e.kind === "item" && e.id === "label-as");
-    expect(item && item.kind === "item" && item.label).toBe("Label as…");
-    const many = buildRowMenu(
-      rowInput({ count: 3, sender: undefined, subject: undefined, actions: { ...rowInput().actions, labelAs } }),
-    );
-    expect(ids(many)).toContain("label-as");
-    expect(ids(buildRowMenu(rowInput()))).not.toContain("label-as");
+  it("has no Label as…: Move to is followed by Mute sender", () => {
+    const single = buildRowMenu(rowInput());
+    expect(ids(single).slice(8, 10)).toEqual(["move", "mute-sender"]);
+    const labels = single.filter((e) => e.kind === "item" && /label/i.test(e.label));
+    expect(labels).toEqual([]);
   });
 
   it("hides single-message items for a multi-selection and counts the rest", () => {

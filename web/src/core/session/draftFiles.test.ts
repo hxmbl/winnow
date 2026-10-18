@@ -1,13 +1,15 @@
 /**
- * Labels and attachments, from the session's side: a label change goes out per
- * conversation (`threads.modify`), and a draft's file reopened from Drafts is read from
+ * Attachments, from the session's side: a draft's file reopened from Drafts is read from
  * Gmail once and kept, because the draft's own attachment ids die with its next save.
+ * And labels: Winnow has no way to change the account's labels at all (UI removed in
+ * 1.3.x; the Gmail client and the backend were stripped of the calls with it).
  *
  * Google is a stub `fetch` routed by URL, as in `drafts.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GmailSession } from "./session";
+import { GmailClient } from "../gmail/client";
 import { COMPOSE_SCOPE, GMAIL_SCOPE, base64UrlDecode, type TokenSet } from "../gmail/dto";
 import type { Draft, Email } from "../model/email";
 import type { CursorStore, MailboxCache } from "../gmail/sync";
@@ -115,9 +117,6 @@ function installGoogle(): void {
     if (path.startsWith("/users/me/drafts")) {
       return new Response(draftBody, { status: draftStatus });
     }
-    if (/^\/users\/me\/threads\/[^/]+\/modify$/.test(path) || path === "/users/me/messages/batchModify") {
-      return new Response(null, { status: 204 });
-    }
     if (path.includes("/attachments/")) {
       return new Response(JSON.stringify({ data: "SGVsbG8", size: 5 }), { status: 200 });
     }
@@ -154,14 +153,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("labels go out per conversation", () => {
-  it("modifies each thread once, and a message with no thread by id", async () => {
+describe("labels are not Winnow's to change", () => {
+  it("offers no way to list, make or change the account's labels", () => {
     const { session } = sessionWith();
-    await session.backend().modifyLabels!([1, 2, 3], ["Label_1"], ["Label_2"]);
-    const calls = requests.map((request) => `${request.method} ${request.path}`);
-    expect(calls).toEqual(["POST /users/me/threads/t-1/modify", "POST /users/me/messages/batchModify"]);
-    expect(requests[0]!.body).toEqual({ addLabelIds: ["Label_1"], removeLabelIds: ["Label_2"] });
-    expect(requests[1]!.body).toMatchObject({ ids: ["g-loose"] });
+    const backend = session.backend() as unknown as Record<string, unknown>;
+    for (const name of ["listLabels", "createLabel", "modifyLabels"]) expect(backend[name]).toBeUndefined();
+    const client = GmailClient.prototype as unknown as Record<string, unknown>;
+    for (const name of ["labels", "createLabel", "modifyThread", "batchModify"]) expect(client[name]).toBeUndefined();
   });
 });
 

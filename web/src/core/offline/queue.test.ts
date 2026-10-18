@@ -72,7 +72,6 @@ function fakeBackend(emails: Email[] = []) {
     deletePermanently: (id) => record(["delete", id]),
     sendReply: (draft, inReplyTo, draftId) => record(["sendReply", (draft as Draft).subject, inReplyTo, draftId]),
     sendNew: (draft, draftId) => record(["sendNew", draft.subject, draftId]),
-    modifyLabels: (ids, add, remove) => record(["labels", [...ids], [...add], [...remove]]),
     fetchAttachment: async () => ({ bytes: new Uint8Array(), filename: "", mimeType: "" }),
     fetchBody: async () => undefined,
   };
@@ -224,9 +223,7 @@ describe("the offline queue", () => {
     await wrapped.moveToMailbox(1, "inbox");
     await wrapped.setRead(1, true);
     await wrapped.setRead(2, true);
-    await wrapped.modifyLabels!([1], ["L1"], []);
-    await wrapped.modifyLabels!([1], ["L1"], []);
-    expect(queue.status().waiting).toBe(5);
+    expect(queue.status().waiting).toBe(4);
     net.online = true;
     queue.kick();
     await settle();
@@ -235,7 +232,6 @@ describe("the offline queue", () => {
       ["move", 1, "inbox"],
       ["read", 1, true],
       ["read", 2, true],
-      ["labels", [1], ["L1"], []],
     ]);
   });
 
@@ -322,14 +318,12 @@ describe("the offline queue", () => {
     fake.state.failWith = (call) => (call[0] === "sync" ? null : offlineError());
     await wrapped.moveToMailbox(1, "archive");
     await wrapped.toggleStar(2, true);
-    await wrapped.modifyLabels!([3], ["L9"], []);
-    expect(queue.status().waiting).toBe(3);
+    expect(queue.status().waiting).toBe(2);
     const partials: Email[][] = [];
     const outcome = await wrapped.sync({ onPartial: (emails) => partials.push(emails) });
     const byId = new Map(outcome.emails.map((e) => [e.id, e]));
     expect(byId.get(1)).toMatchObject({ mailbox: "archive", unread: false });
     expect(byId.get(2)).toMatchObject({ starred: true });
-    expect(byId.get(3)?.labels).toEqual(["L9"]);
     expect(partials[0].find((e) => e.id === 1)?.mailbox).toBe("archive");
     expect(timers.pending()).toBe(1);
   });
@@ -450,10 +444,23 @@ describe("overlay", () => {
     expect(overlay(mail, [])).toBe(mail);
   });
 
-  it("lays a label change over the whole conversation, as threads.modify applies it", () => {
-    const mail = [email(1, { threadId: "t1" }), email(2, { threadId: "t1" }), email(3, { threadId: "t2" })];
-    const out = overlay(mail, [{ kind: "labels", ids: [1], add: ["Label_7"], remove: [] }]);
-    expect(out.map((e) => e.labels ?? [])).toEqual([["Label_7"], ["Label_7"], []]);
+  it("drops a label change an older build queued, and never replays it", async () => {
+    const storage = memoryStorage();
+    storage.data.set(
+      OFFLINE_QUEUE_KEY,
+      JSON.stringify({
+        v: 1,
+        account: "me@example.com",
+        entries: [
+          { action: { kind: "labels", ids: [1], add: ["Label_7"], remove: [] } },
+          { action: { kind: "star", id: 2, starred: true } },
+        ],
+      }),
+    );
+    const { fake, queue } = setup({ storage });
+    queue.kick();
+    await settle();
+    expect(fake.calls).toEqual([["star", 2, true]]);
   });
 });
 

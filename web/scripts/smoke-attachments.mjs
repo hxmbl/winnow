@@ -1,13 +1,12 @@
 /**
- * Smoke checks for labels and attachments, against the demo mailbox.
+ * Smoke checks for attachments (and for labels staying gone), against the demo mailbox.
  *
- * Its own module so it can run alone (`node scripts/smoke-labels-attachments.mjs`, which
+ * Its own module so it can run alone (`node scripts/smoke-attachments.mjs`, which
  * serves `dist/` itself on `WINNOW_PORT`, default 4321) as well as inside `smoke.mjs`,
- * which calls `labelsAndAttachments` with its own browser, URL and reporters.
+ * which calls `attachmentsSmoke` with its own browser, URL and reporters.
  *
- *   - Labels: chips on rows and in the reader, the reader toolbar's Label button, the
- *     selection bar's Label for several rows, and browsing a label from the desktop
- *     sidebar and from the phone's dock menu.
+ *   - No labels: no chips, no Labels section in the sidebar or the phone's dock menu,
+ *     no Label as… in the reader, the row menu or the selection bar.
  *   - Attachments: the reader's list (type, name, size), a picture's thumbnail and its
  *     lightbox, Save as a download, Open for a PDF in a new tab; in compose, Attach,
  *     the chips with remove, the 25 MB refusal, a desktop drop, and the device copy
@@ -20,9 +19,11 @@ import { fileURLToPath } from "node:url";
 
 const MB = 1024 * 1024;
 
-export async function labelsAndAttachments({ browser, url, check, section }) {
-  // ── Labels ─────────────────────────────────────────────────────────────────
-  section("labels");
+export async function attachmentsSmoke({ browser, url, check, section }) {
+  // ── No labels ──────────────────────────────────────────────────────────────
+  // Labels were removed from the UI (they are for people who stay on Gmail). Nothing may
+  // name or offer one: no chips, no sidebar section, no Label as… anywhere.
+  section("no labels");
   {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const p = await ctx.newPage();
@@ -30,92 +31,31 @@ export async function labelsAndAttachments({ browser, url, check, section }) {
     p.on("pageerror", (error) => errors.push(String(error)));
     await p.goto(url, { waitUntil: "networkidle" });
     await p.waitForSelector("[data-message-id]", { timeout: 10_000 });
-
+    const labelish = async () =>
+      p.locator("[data-label-chip], [data-label-chips], [data-nav-label], [data-reader-toolbar-label], [data-reader-label-as], [data-selection-label]").count();
+    check("no label chips on rows", (await labelish()) === 0);
     const travelRow = p.locator("[data-message-id]", { hasText: "Check-in is open" }).first();
-    check(
-      "a labelled row shows its label as a chip",
-      (await travelRow.locator('[data-label-chip="Travel"]').count()) === 1,
-    );
-    check(
-      "an unlabelled row shows none",
-      (await p.locator("[data-message-id]").filter({ hasNot: p.locator("[data-label-chips]") }).count()) > 0,
-    );
-
     await travelRow.click();
-    await p.waitForSelector("article h1", { timeout: 5_000 });
-    check("the reader shows the message's labels", (await p.locator('[data-reader] [data-label-chip="Travel"], main [data-label-chip="Travel"]').count()) >= 1);
-    const toolbarLabel = p.locator("[data-reader-toolbar-label]:visible");
-    check("the reader toolbar has a Label as… button", (await toolbarLabel.count()) === 1);
-    await toolbarLabel.click();
-    const picker = p.locator('[role="dialog"][aria-label="Label as"]');
-    await picker.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
-    check(
-      "which opens the picker for the open message",
-      (await picker.count()) === 1 &&
-        (await picker.locator("[data-label-option]", { hasText: "Travel" }).getAttribute("aria-checked")) === "true",
-    );
+    await p.waitForSelector("[data-reader-subject]");
+    await p.locator("[data-reader] [aria-label='More']:visible").first().click();
+    const more = p.locator('[role="menu"][aria-label="More actions"]');
+    await more.waitFor({ timeout: 5_000 });
+    check("the reader has no Label as…", (await labelish()) === 0 && !/label/i.test((await more.textContent()) ?? ""), (await more.textContent()) ?? "");
     await p.keyboard.press("Escape");
-    await p.waitForTimeout(150);
-
-    // Several rows at once, from the selection bar.
-    const plain = p.locator("[data-message-id]").filter({ hasNot: p.locator("[data-label-chips]") });
-    const first = plain.nth(0);
-    const second = plain.nth(1);
-    const firstId = await first.getAttribute("data-message-id");
-    const secondId = await second.getAttribute("data-message-id");
-    await first.click({ modifiers: ["Control"] });
-    await p.locator(`[data-message-id="${secondId}"]`).click({ modifiers: ["Control"] });
-    await p.waitForTimeout(150);
-    const selectionLabel = p.locator("[data-selection-bar='desktop'] [data-selection-label]");
-    check("the selection bar offers Label", (await selectionLabel.count()) === 1);
-    await selectionLabel.click();
-    await picker.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
-    await picker.locator("[data-label-option]", { hasText: "Family" }).click();
-    await picker.locator("[data-label-apply]").click();
-    await p.waitForTimeout(250);
-    check(
-      "and Apply labels every selected row",
-      (await p.locator(`[data-message-id="${firstId}"] [data-label-chip="Family"]`).count()) === 1 &&
-        (await p.locator(`[data-message-id="${secondId}"] [data-label-chip="Family"]`).count()) === 1,
-    );
+    await travelRow.click({ button: "right" });
+    const rowMenu = p.locator("[data-menu='row']");
+    await rowMenu.waitFor({ timeout: 5_000 });
+    check("the row menu has no Label as…", (await rowMenu.locator("[data-menu-item='label-as']").count()) === 0 && !/Label as/.test((await rowMenu.textContent()) ?? ""));
     await p.keyboard.press("Escape");
-
-    // Browsing a label from the sidebar.
     await p.locator("[data-sidebar-toggle]:visible").first().click();
     const sidebar = p.locator("[data-sidebar][data-open]");
     await sidebar.waitFor({ timeout: 5_000 });
-    const navLabels = await sidebar.locator("[data-nav-label]").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-nav-label")));
-    check(
-      "the sidebar has a Labels section with every label",
-      JSON.stringify(navLabels) === JSON.stringify(["Family", "Receipts", "Travel", "Work/Northwind"]),
-      JSON.stringify(navLabels),
-    );
-    await sidebar.locator('[data-nav-label="Travel"]').click();
-    await p.waitForTimeout(300);
-    const listed = await p.locator("[data-message-id]").evaluateAll((nodes) => nodes.length);
-    const travelChips = await p.locator("[data-message-id] [data-label-chip='Travel']").count();
-    check(
-      "choosing one lists that label's mail, without repeating its chip on every row",
-      listed >= 1 && (await p.locator("[data-message-id]", { hasText: "Check-in is open" }).count()) === 1 && travelChips === 0,
-      `${listed} rows, ${travelChips} Travel chips`,
-    );
-    const heading = await p.evaluate(() => [...document.querySelectorAll("[title]")].some((n) => n.getAttribute("title") === "Travel" && n.textContent?.trim() === "Travel"));
-    check("the list's header names the label", heading);
-    await p.locator("[data-sidebar-toggle]:visible").first().click();
-    await sidebar.waitFor({ timeout: 5_000 });
-    check(
-      "and the sidebar marks it as the current page, not Inbox",
-      (await sidebar.locator('[data-nav-label="Travel"][aria-current="page"]').count()) === 1 &&
-        (await sidebar.locator('[data-nav="inbox"][aria-current="page"]').count()) === 0,
-    );
-    await sidebar.locator('[data-nav="inbox"]').click();
-    await p.waitForTimeout(250);
-    check("Inbox leaves the label", (await p.locator("[data-message-id]").count()) > listed);
-    check("no page errors in labels", errors.length === 0, errors.slice(0, 3).join(" | "));
+    check("the sidebar has no Labels section", (await labelish()) === 0 && !/Labels|Travel|Receipts/.test((await sidebar.textContent()) ?? ""), (await sidebar.textContent()) ?? "");
+    check("no page errors without labels", errors.length === 0, errors.slice(0, 3).join(" | "));
     await ctx.close();
   }
 
-  section("labels on a phone");
+  section("no labels on a phone");
   {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const p = await ctx.newPage();
@@ -126,19 +66,8 @@ export async function labelsAndAttachments({ browser, url, check, section }) {
     await p.locator("[data-dock-expand]").click();
     const panel = p.locator("[data-sidebar][data-open]");
     await panel.waitFor({ timeout: 5_000 });
-    const receipts = panel.locator('[data-nav-label="Receipts"]');
-    check("the dock menu lists the labels", (await receipts.count()) === 1);
-    const height = await receipts.evaluate((node) => node.getBoundingClientRect().height);
-    check("at touch size", height >= 44, String(height));
-    await receipts.tap();
-    await p.waitForTimeout(350);
-    check(
-      "and a tap browses one",
-      (await p.locator("[data-message-id]").count()) >= 1 &&
-        (await p.locator("h1").first().textContent())?.includes("Receipts") === true,
-      String(await p.locator("h1").first().textContent()),
-    );
-    check("no page errors in phone labels", errors.length === 0, errors.slice(0, 3).join(" | "));
+    check("the dock menu lists no labels", (await panel.locator("[data-nav-label]").count()) === 0 && !/Receipts|Travel/.test((await panel.textContent()) ?? ""));
+    check("no page errors in phone menu", errors.length === 0, errors.slice(0, 3).join(" | "));
     await ctx.close();
   }
 
@@ -333,7 +262,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   };
   const section = (title) => console.log(`\n── ${title}`);
   try {
-    await labelsAndAttachments({ browser, url: `http://localhost:${port}/`, check, section });
+    await attachmentsSmoke({ browser, url: `http://localhost:${port}/`, check, section });
   } catch (error) {
     failures.push(`aborted: ${error?.stack ?? error}`);
     console.error(error);

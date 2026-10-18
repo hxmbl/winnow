@@ -4,7 +4,7 @@
  * The desktop's header (the glass bar and the smart-filter chips) and the phone's top bar
  * float over the list. The first day header and the first row must always start below
  * them, with a small gap: at rest, after the Top pill or Home, after `j`/`k` back to the
- * first message, in a smart-filter view, a search and a label view, and when the chrome's
+ * first message, in a smart-filter view, a search and another mailbox, and when the chrome's
  * height changes. Desktop 1440x900 and phone 390x844, light and dark.
  *
  * Its own module so it can run alone (`node scripts/smoke-top-email.mjs`, which serves
@@ -174,7 +174,7 @@ export async function topEmail({ browser, url, check, section, shots = null }) {
       }
 
       if (!phone && mode === "light") {
-        // A label view and another mailbox, from halfway down.
+        // Another mailbox, and back, from halfway down.
         const browse = async (selector) => {
           await scrollList(900);
           await p.locator("[data-sidebar-toggle]:visible").first().click();
@@ -184,8 +184,8 @@ export async function topEmail({ browser, url, check, section, shots = null }) {
           await settle();
           return geometry();
         };
-        const label = await browse('[data-nav-label="Travel"]');
-        check("desktop: a label view starts with its top email clear of the chrome", label.scrollTop === 0 && clears(label), JSON.stringify(label));
+        const archive = await browse('[data-nav-folder="archive"]');
+        check("desktop: another mailbox starts with its top email clear of the chrome", archive.scrollTop === 0 && clears(archive), JSON.stringify(archive));
         const inbox = await browse('[data-nav="inbox"]');
         check("desktop: and back to the Inbox, its top email is clear again", inbox.scrollTop === 0 && clears(inbox), JSON.stringify(inbox));
 

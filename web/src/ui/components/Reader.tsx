@@ -24,7 +24,6 @@ import {
   MoreHorizontal,
   RotateCcw,
   Star,
-  Tag,
   ListFilter,
   Trash2,
   Undo2,
@@ -59,7 +58,6 @@ function firstLine(body: string): string {
   return "";
 }
 import { AttachmentList, type LoadedAttachment } from "./AttachmentList";
-import { LabelChips } from "./LabelChips";
 import type { Mailbox } from "../../core/model/email";
 import { DOCK_SURFACE } from "./PhoneChrome";
 import { AppMark } from "../AppMark";
@@ -98,8 +96,6 @@ type Actions = {
   onNotSpam: () => void;
   onShowOriginal: () => void;
   onBlockSender: () => void;
-  /** Open "Label as…" for this message. Absent where labels cannot be set. */
-  onLabelAs?: () => void;
   /** Open "Change smart filters…" for this message. Absent outside the inbox. */
   onChangeFilters?: () => void;
   /** Turn image loading on for this message only. */
@@ -234,25 +230,12 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
       >
         <Trash2 size={15} strokeWidth={1.9} />
       </button>
-      {actions.onLabelAs && (
-        <button
-          type="button"
-          onClick={actions.onLabelAs}
-          aria-label="Label as…"
-          title="Label as…"
-          data-reader-toolbar-label=""
-          className={ICON_BUTTON}
-        >
-          <Tag size={15} strokeWidth={1.9} />
-        </button>
-      )}
       <MoreMenu
         view={view}
         onViewChange={onViewChange}
         hasHtml={hasHtml}
         senderName={senderName}
         onBlockSender={actions.onBlockSender}
-        onLabelAs={actions.onLabelAs}
         onChangeFilters={actions.onChangeFilters}
         buttonClass={ICON_BUTTON}
       />
@@ -268,13 +251,12 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
  * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
  * hands focus back to its button so the keyboard is not stranded.
  */
-function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onLabelAs, onChangeFilters, buttonClass, phone, buttonContent }: {
+function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onChangeFilters, buttonClass, phone, buttonContent }: {
   view: BodyView;
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
   senderName: string;
   onBlockSender: () => void;
-  onLabelAs?: () => void;
   onChangeFilters?: () => void;
   buttonClass: string;
   /**
@@ -393,12 +375,6 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onLa
             </button>
           ))}
           <div className="my-1 h-px bg-divider" aria-hidden="true" />
-          {onLabelAs && (
-            <button type="button" role="menuitem" data-reader-label-as="" onClick={() => choose(onLabelAs)} className={ITEM}>
-              <Tag size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
-              <span className="flex-1">Label as…</span>
-            </button>
-          )}
           {onChangeFilters && (
             <button type="button" role="menuitem" data-reader-change-filters="" onClick={() => choose(onChangeFilters)} className={ITEM}>
               <ListFilter size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
@@ -490,7 +466,6 @@ function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, has
         hasHtml={hasHtml}
         senderName={senderName}
         onBlockSender={actions.onBlockSender}
-        onLabelAs={actions.onLabelAs}
         onChangeFilters={actions.onChangeFilters}
         buttonClass={BUTTON}
         phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead }}
@@ -762,8 +737,6 @@ export function Reader({
             </time>
             {isOwnMessage && " · sent by you"}
           </p>
-
-          <LabelChips ids={email.labels} all className="mt-2 flex-wrap" />
 
           {filters.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">

@@ -2,7 +2,7 @@
  * The offline action queue: what the user did while Gmail could not be reached, kept
  * until it can be.
  *
- * Archive, trash, restore, read/unread, star, labels and send are already optimistic in
+ * Archive, trash, restore, read/unread, star and send are already optimistic in
  * the store: the screen changes first and the request follows. Without this module a
  * request that gets no answer rolls the change back with an error, so on a train every
  * archive bounces. With it, an action taken while the browser says it is offline — or
@@ -20,7 +20,7 @@
  *   new actions join the back of the line even when online, for the same reason.
  * - **Dedupe.** A newer star, read or move of the same message replaces the older one
  *   (only the last answer matters, and each is idempotent); a permanent delete is not
- *   queued at all. Identical label changes and the same draft sent twice collapse.
+ *   queued at all. The same draft sent twice collapses.
  * - **Backoff.** 1 s, 2 s, 4 s … capped at 60 s, reset by any success. 5xx and 429
  *   that outlived the client's own retries back off the same way.
  * - **Conflicts drop quietly.** 404 or 410: the message (or the draft being sent) is
@@ -44,9 +44,7 @@
  */
 
 import type { Draft, Email, Mailbox } from "../model/email";
-import { applyLabelChange } from "../mail/labels";
 import { forDeviceCopy } from "../mail/attachments";
-import { labelTargets } from "../store/labelView";
 import type { MailBackend, SyncOutcome } from "../store/store";
 
 export const OFFLINE_QUEUE_KEY = "winnow.offlineQueue.v1";
@@ -59,7 +57,6 @@ export type QueuedAction =
   | { kind: "star"; id: number; starred: boolean }
   | { kind: "read"; id: number; read: boolean }
   | { kind: "move"; id: number; mailbox: Mailbox }
-  | { kind: "labels"; ids: number[]; add: string[]; remove: string[] }
   | { kind: "send"; mode: "new" | "reply"; draft: Draft; inReplyTo?: string; draftId?: string };
 
 type Entry = {
@@ -136,13 +133,6 @@ function supersedes(next: QueuedAction, older: QueuedAction): boolean {
     case "read":
     case "move":
       return older.kind === next.kind && older.id === next.id;
-    case "labels":
-      return (
-        older.kind === "labels" &&
-        older.ids.join() === next.ids.join() &&
-        older.add.join() === next.add.join() &&
-        older.remove.join() === next.remove.join()
-      );
     case "send":
       return older.kind === "send" && next.draftId !== undefined && older.draftId === next.draftId;
   }
@@ -154,11 +144,9 @@ export function overlay(emails: Email[], actions: readonly QueuedAction[]): Emai
   let out = emails;
   for (const action of actions) {
     if (action.kind === "send") continue;
-    // A label change covers the whole conversation, as the store applied it and as Gmail
-    // will (`threads.modify`), so a reply on the thread keeps the change too.
-    const ids = action.kind === "labels" ? labelTargets(out, action.ids) : new Set([action.id]);
+    const id = action.id;
     out = out.map((email) => {
-      if (!ids.has(email.id)) return email;
+      if (email.id !== id) return email;
       switch (action.kind) {
         case "star":
           return email.starred === action.starred ? email : { ...email, starred: action.starred };
@@ -166,8 +154,6 @@ export function overlay(emails: Email[], actions: readonly QueuedAction[]): Emai
           return email.unread === !action.read ? email : { ...email, unread: !action.read };
         case "move":
           return email.mailbox === action.mailbox ? email : { ...email, mailbox: action.mailbox, unread: false };
-        case "labels":
-          return { ...email, labels: applyLabelChange(email.labels, action.add, action.remove) };
       }
     });
   }
@@ -308,10 +294,6 @@ export class OfflineQueue {
       sendReply: (draft, inReplyTo, draftId) =>
         this.run({ kind: "send", mode: "reply", draft: draft as Draft, inReplyTo, ...(draftId ? { draftId } : {}) }),
     };
-    if (inner.modifyLabels) {
-      wrapped.modifyLabels = (ids, add, remove) =>
-        this.run({ kind: "labels", ids: [...ids], add: [...add], remove: [...remove] });
-    }
     if (inner.sendNew) {
       wrapped.sendNew = (draft, draftId) => this.run({ kind: "send", mode: "new", draft, ...(draftId ? { draftId } : {}) });
     }
@@ -454,9 +436,6 @@ export class OfflineQueue {
         return inner.setRead(action.id, action.read);
       case "move":
         return inner.moveToMailbox(action.id, action.mailbox);
-      case "labels":
-        if (!inner.modifyLabels) throw new Error("Labels can't be changed from here.");
-        return inner.modifyLabels(action.ids, action.add, action.remove);
       case "send":
         if (action.mode === "reply") {
           if (!action.inReplyTo) throw new Error("Couldn't find the message this replies to.");
@@ -588,10 +567,10 @@ function isAction(value: unknown): value is QueuedAction {
       return typeof action.id === "number" && typeof action.read === "boolean";
     case "move":
       return typeof action.id === "number" && typeof action.mailbox === "string";
-    case "labels":
-      return Array.isArray(action.ids) && Array.isArray(action.add) && Array.isArray(action.remove);
     case "send":
       return (action.mode === "new" || action.mode === "reply") && !!action.draft && typeof action.draft === "object";
+    // Anything else is dropped, including a label change queued by 1.3.0-beta: Winnow
+    // no longer changes labels, so it is not replayed against the account.
     default:
       return false;
   }

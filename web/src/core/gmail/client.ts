@@ -28,8 +28,6 @@ import {
   type GmailAttachmentResponse,
   type GmailDraft,
   type GmailDraftList,
-  type GmailLabel,
-  type GmailLabelList,
   type GmailFullDraft,
   type GmailHistoryResponse,
   type GmailListResponse,
@@ -110,11 +108,6 @@ export function costOf(path: string, method: string): number {
   // A get of one message or draft, i.e. the `?format=full` requests.
   if (/\/messages\/[^/?]+\?/.test(path) || /\/drafts\/[^/?]+\?/.test(path)) return 20;
   if (path.startsWith("/users/me/history")) return 2;
-  // messages.batchModify 50, labels.list 1 (labels.create is the default 5).
-  if (path === "/users/me/messages/batchModify") return 50;
-  if (method === "GET" && path === "/users/me/labels") return 1;
-  // threads.modify is 10.
-  if (/^\/users\/me\/threads\/[^/]+\/modify$/.test(path)) return 10;
   if (path.startsWith("/users/me/profile")) return 1;
   return 5;
 }
@@ -590,49 +583,6 @@ export class GmailClient {
     if (pageToken) params.set("pageToken", pageToken);
     return this.request<GmailDraftList>(`/users/me/drafts?${params}`);
   }
-
-  /** Every label in the mailbox, system and user. One page: `labels.list` has no paging. */
-  async labels(): Promise<GmailLabel[]> {
-    const response = await this.request<GmailLabelList>("/users/me/labels");
-    return response.labels ?? [];
-  }
-
-  /** Make a user label, shown in Gmail's label list and on the messages that carry it. */
-  async createLabel(name: string): Promise<GmailLabel> {
-    return this.request<GmailLabel>("/users/me/labels", {
-      method: "POST",
-      body: { name, labelListVisibility: "labelShow", messageListVisibility: "show" },
-    });
-  }
-
-  /**
-   * Add and remove labels on many messages in one call (`messages.batchModify`), in
-   * chunks of `BATCH_MODIFY_MAX` ids — the API's limit per request.
-   */
-  async batchModify(ids: readonly string[], addLabelIds: string[], removeLabelIds: string[]): Promise<void> {
-    refuseFixedLabels([...addLabelIds, ...removeLabelIds]);
-    if (ids.length === 0 || (addLabelIds.length === 0 && removeLabelIds.length === 0)) return;
-    for (let start = 0; start < ids.length; start += BATCH_MODIFY_MAX) {
-      await this.request("/users/me/messages/batchModify", {
-        method: "POST",
-        body: { ids: ids.slice(start, start + BATCH_MODIFY_MAX), addLabelIds, removeLabelIds },
-      });
-    }
-  }
-
-  /**
-   * Add and remove labels on a whole conversation (`threads.modify`), the way Gmail's own
-   * "Label as" works: every message on the thread, including ones that arrive later
-   * under the label's filter, carries it.
-   */
-  async modifyThread(threadId: string, addLabelIds: string[], removeLabelIds: string[]): Promise<void> {
-    refuseFixedLabels([...addLabelIds, ...removeLabelIds]);
-    if (addLabelIds.length === 0 && removeLabelIds.length === 0) return;
-    await this.request(`/users/me/threads/${encodeURIComponent(threadId)}/modify`, {
-      method: "POST",
-      body: { addLabelIds, removeLabelIds },
-    });
-  }
 }
 
 /**
@@ -670,9 +620,6 @@ export function uploadBody(metadata: Record<string, unknown>, raw: string): { co
   ].join("\r\n");
   return { contentType: `multipart/related; boundary=${boundary}`, body };
 }
-
-/** `messages.batchModify` takes at most this many message ids per request. */
-export const BATCH_MODIFY_MAX = 1000;
 
 /** The `message` half of a draft request. */
 function draftMessage(raw: string, threadId?: string): Record<string, unknown> {

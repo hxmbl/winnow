@@ -13,7 +13,6 @@
  *    when the message was received; a sender can put anything in `Date:`.
  */
 
-import { userLabelIds } from "../mail/labels";
 import { detectCode } from "../mail/otp";
 import {
   CATEGORY_MAP,
@@ -256,7 +255,6 @@ export function toEmail(
     category: categoryFor(labelIds),
     starred: labelIds.includes(LABEL.starred),
     unread: labelIds.includes(LABEL.unread),
-    labels: userLabelIds(labelIds),
     attachments: metadata ? [] : collectAttachments(payload),
     urgent: false,
     ...(metadata

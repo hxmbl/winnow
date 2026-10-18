@@ -452,7 +452,7 @@ URI or origin. The secret never appears in an error, a warning or a log.
 ### 5.10 `offline/` — the action queue, and undo send
 
 `queue.ts` wraps the session's backend (`bridge.backend()` returns it wrapped). Archive,
-trash, restore, read/unread, star, labels and send taken while `navigator.onLine` is
+trash, restore, read/unread, star and send taken while `navigator.onLine` is
 false, or whose request got **no HTTP response** (`TypeError: Failed to fetch`,
 `GoogleUnreachable`), are kept in `winnow.offlineQueue.v1` and resolve at once, so the
 store's optimistic change stands. An *answered* refusal still rolls back. Replay is FIFO,
@@ -462,8 +462,8 @@ star/read/move of a message replaces the older one. 404/410 drop quietly; 401 an
 through, never on a timer. A raw `messages.send` whose answer was lost is never replayed
 (it is reported, and a new message reopens in the composer); a `drafts.send` is, since a second try on
 a sent draft is a 404. Every sync result has the queue laid over it, so a fresh reading
-cannot undo a waiting change on screen; a waiting label change is laid over its whole
-conversation, as `threads.modify` (§ labels) applies it. A waiting send's files are written
+cannot undo a waiting change on screen. A label change queued by 1.3.0-beta is dropped
+on load, never replayed (§13a). A waiting send's files are written
 under the drafts' device-copy budget (`forDeviceCopy`), so one big file cannot overflow
 `localStorage` and leave the queue unsaved; this session keeps every byte. Permanent delete is not queued. Sign-out clears
 it; a queue saved for another account is discarded. `ui/components/OfflineIndicator.tsx`
@@ -543,7 +543,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 
 | File | Responsibility |
 | --- | --- |
-| `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips, and the phone's swipe actions (the row is moved by hand with `translate3d`, a backdrop is mounted for the swiped row only, and `touch-action: pan-y pinch-zoom` on the list leaves sideways motion to it). At most one signal word per row; "Urgent" is drawn in the Urgent chip's hue (`.wn-signal-ink`: `FILTER_HUES.urgent` at the mode's `pill.textLightness`, AA-checked by `pillInk` in `theme.test.ts`), the rest grey. Under floating chrome (`topInset`) the rows start below the measured chrome plus a 6px gap (`TOP_GAP`), published on the scroller as `--wn-top-chrome` (padding) and `--wn-top-clear` (`scroll-padding-top`, with the first day's height). The first message is always revealed at scroll 0; a new view (`listView`: mailbox or label, filters, sort, search) starts at its top; a `j`/`k` while the list is hidden behind the reader is revealed on the way back (`revealIndex`, since the phone shows no cursor). Smoke: `scripts/smoke-top-email.mjs`, run by `smoke.mjs` and alone. |
+| `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips, and the phone's swipe actions (the row is moved by hand with `translate3d`, a backdrop is mounted for the swiped row only, and `touch-action: pan-y pinch-zoom` on the list leaves sideways motion to it). At most one signal word per row; "Urgent" is drawn in the Urgent chip's hue (`.wn-signal-ink`: `FILTER_HUES.urgent` at the mode's `pill.textLightness`, AA-checked by `pillInk` in `theme.test.ts`), the rest grey. Under floating chrome (`topInset`) the rows start below the measured chrome plus a 6px gap (`TOP_GAP`), published on the scroller as `--wn-top-chrome` (padding) and `--wn-top-clear` (`scroll-padding-top`, with the first day's height). The first message is always revealed at scroll 0; a new view (`listView`: mailbox, filters, sort, search) starts at its top; a `j`/`k` while the list is hidden behind the reader is revealed on the way back (`revealIndex`, since the phone shows no cursor). Smoke: `scripts/smoke-top-email.mjs`, run by `smoke.mjs` and alone. |
 | `Reader.tsx` | The message pane: back bar, header (avatar → sender menu, sender `h2`, subject as the document `h1`), filter tags with their reasons, the three-way image offer, body, attachments, the conversation, and the phone dock. |
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
 | `Masthead.tsx` | Sidebar toggle (a panel icon), the mark as the version toggle (`logoVersion.ts`), search, position readout, prev/next, Compose (no Mark all read anywhere: opening a message marks it read), and the `FilterStrip`. It floats over the list, like the phone's dock: the bar is a rounded glass pill (`.wn-glass.wn-glass-bar`) inset from the pane, each chip its own glass pill (`FilterStrip` `floating`), no band behind either, and the selection bar takes the chips' slot (`replaceRail`) so the header keeps its height. `App.tsx` measures it (`data-list-chrome`) and passes the height to `MessageList` as `topInset` (top padding, `scroll-padding-top`, the pinned day below it, the cursor's reveal clearing it); the briefing is the list's in-flow `lead`, scrolled away with the mail. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
@@ -860,19 +860,16 @@ is hard to see.
 
 ---
 
-## 13a. Labels and attachments
+## 13a. Attachments (and no labels)
 
-**Labels.** `core/mail/labels.ts` (picker rules, chip naming, a stable hue per name),
-`core/store/labelView.ts` (which mail a label lists; a change widens to the whole
-conversation). The store's `labelView` is a user label browsed as a mailbox — every
-message carrying it outside Trash, Spam and Drafts — with `mailbox` kept as where Inbox
-goes back to; `setMailbox` and `setLabelView` both drop the reader, cursor and filters.
-Gmail: `labels.list` (on connect and when the sidebar opens), `labels.create`, and
-`threads.modify` per conversation (`batchModify` only for a message with no thread id).
-UI: `LabelChips` on rows (leaf names, two at most) and in the reader, names handed down
-through `ui/labelNames.ts` context so the memoised rows take no new prop; "Label as…" from
-the reader toolbar, the More menu, the row menu and the selection bar (`LabelPicker`); the
-sidebar's and the phone dock menu's Labels section (`LabelNav.tsx`).
+**No labels.** Labels were removed from the UI after 1.3.0-beta: the owner's call is that
+they are for people who stay on Gmail. There are no chips, no Labels section in the
+sidebar or the dock menu, no label views and no Label as…. Winnow never changes the
+account's labels: the Gmail client has no `labels.list`, `labels.create`,
+`threads.modify` or `batchModify` (`core/session/draftFiles.test.ts` pins their absence),
+and a label change an older build left in the offline queue is dropped, not replayed.
+System labels (INBOX, SENT, TRASH, SPAM, STARRED, UNREAD, DRAFT, CATEGORY_*) still drive
+the mailboxes, star, read state and categories through `addLabels`/`removeLabels`.
 
 **Attachments in.** `AttachmentList.tsx`: type icon (`attachmentKind`), name, size, Save,
 Open for a PDF (`platform.openFile`: a blob tab on the web, `open_attachment` on the
@@ -890,7 +887,7 @@ composer's attach button, chips and refusal line; `Composer` only renders it and
 drops (`onFiles`, desktop). A raw message over 4 MB goes to Gmail's media upload endpoint
 (`/upload/gmail/v1`, `multipart/related`) for send and for drafts create/update/send.
 
-Smoke: `scripts/smoke-labels-attachments.mjs`, run by `smoke.mjs` and alone.
+Smoke: `scripts/smoke-attachments.mjs` (attachments, and labels staying gone), run by `smoke.mjs` and alone.
 
 ---
 

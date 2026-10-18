@@ -8,7 +8,7 @@
  */
 
 import { useRef, useState } from "react";
-import { Archive, ArchiveRestore, FolderInput, ListFilter, MailMinus, MailOpen, Tag, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, FolderInput, ListFilter, MailMinus, MailOpen, Trash2, X } from "lucide-react";
 import type { Mailbox } from "../../core/model/email";
 import { MAILBOX_LABEL } from "../../core/model/email";
 import { archiveLabel, moveTargets } from "../menus";
@@ -24,8 +24,6 @@ type Props = {
   onTrash: () => void;
   onSetRead: (read: boolean) => void;
   onMove: (mailbox: Mailbox) => void;
-  /** "Label as…" for the selection. Absent where labels do not apply (Drafts). */
-  onLabel?: () => void;
   /** "Change smart filters…" for the selection. Absent outside the inbox. */
   onChangeFilters?: () => void;
   onClear: () => void;
@@ -40,7 +38,6 @@ export function SelectionBar({
   onTrash,
   onSetRead,
   onMove,
-  onLabel,
   onChangeFilters,
   onClear,
 }: Props) {
@@ -114,18 +111,6 @@ export function SelectionBar({
         <FolderInput size={iconSize} strokeWidth={1.9} aria-hidden="true" />
         {label("Move to")}
       </button>
-      {onLabel && (
-        <button
-          type="button"
-          onClick={onLabel}
-          aria-label={phone ? "Label as" : undefined}
-          data-selection-label=""
-          className={button}
-        >
-          <Tag size={iconSize} strokeWidth={1.9} aria-hidden="true" />
-          {label("Label")}
-        </button>
-      )}
       {onChangeFilters && (
         <button
           type="button"

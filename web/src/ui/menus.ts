@@ -8,15 +8,15 @@
  *
  *   Reply · Reply all · Forward
  *   Archive · Delete · Mark as read/unread
- *   Move to ▸ · Label as… · Mute sender
+ *   Move to ▸ · Mute sender
  *   Find emails from … · Find emails with this subject
  *   Open in Gmail
  *
  * Left out, deliberately: *Forward as attachment* (the composer sends text only), *Snooze*
  * and *Add to tasks* (no snooze store and no Tasks scope). Gmail's *Mute* mutes a
  * conversation; Winnow has no thread mute, so the slot is *Mute sender*, the same local
- * mute the avatar menu offers. *Label as…* opens a picker of the user's own Gmail labels
- * rather than a submenu, because it sets several at once and can make a new one.
+ * mute the avatar menu offers. There is no *Label as…*: Winnow has no labels (they are
+ * for people who stay on Gmail), and it never changes the account's labels.
  */
 
 import {
@@ -41,7 +41,6 @@ import {
   Search,
   ShieldAlert,
   SquareCheck,
-  Tag,
   ListFilter,
   Trash2,
   UserPlus,
@@ -88,8 +87,6 @@ export type RowMenuInput = {
     trash: () => void;
     setRead: (read: boolean) => void;
     move: (mailbox: Mailbox) => void;
-    /** Open the "Label as…" picker for the targets. Absent where labels cannot be set. */
-    labelAs?: () => void;
     /** Open "Change smart filters…" for the targets. Absent outside the inbox. */
     changeFilters?: () => void;
     toggleMuteSender: () => void;
@@ -201,9 +198,6 @@ export function buildRowMenu(input: RowMenuInput): MenuEntry[] {
       })),
     },
   );
-  if (actions.labelAs) {
-    entries.push({ kind: "item", id: "label-as", label: "Label as…", icon: Tag, onSelect: actions.labelAs });
-  }
   if (actions.changeFilters) {
     entries.push({ kind: "item", id: "change-filters", label: "Change smart filters…", icon: ListFilter, onSelect: actions.changeFilters });
   }
