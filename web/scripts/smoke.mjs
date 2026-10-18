@@ -30,6 +30,7 @@ import { build, preview } from "vite";
 import { smokeOffline } from "./smoke-offline.mjs";
 import { attachmentsSmoke } from "./smoke-attachments.mjs";
 import { topEmail } from "./smoke-top-email.mjs";
+import { smokeMotion } from "./smoke-motion.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -7894,6 +7895,7 @@ try {
   // in every kind of view, and when the chrome's height changes. Its own module, so it
   // can also run alone (`node scripts/smoke-top-email.mjs`).
   await topEmail({ browser, url: URL, check, section });
+  await smokeMotion({ browser, url: URL, check, section, errors });
 
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");
