@@ -22,6 +22,7 @@ import {
   Mail,
   MailOpen,
   MoreHorizontal,
+  ReplyAll,
   RotateCcw,
   Star,
   ListFilter,
@@ -30,7 +31,6 @@ import {
   X,
 } from "lucide-react";
 import { formatFullTime, formatRelative } from "../../core/mail/datetime";
-import { shortcutHint } from "../../core/mail/keybinds";
 import { countRemoteReferences } from "../../core/mail/html";
 import { displayAddress, displayName, recipientLines, type Email } from "../../core/model/email";
 import { Avatar } from "./Avatar";
@@ -43,6 +43,7 @@ import { filterIcon } from "../filterIcons";
 import { MessageBody, type BodyView } from "./MessageBody";
 import { bodyViewOptions } from "../bodyViews";
 import { platform } from "../../platform";
+import { ariaKey, readerActions, type ReaderAction, type ReaderActionId } from "../readerActions";
 
 /**
  * The first thing someone said, on one line.
@@ -117,9 +118,6 @@ type Actions = {
   onOpenAttachment: (index: number) => void;
 };
 
-const ICON_BUTTON =
-  "flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
-
 /**
  * A quiet text button, for the places in this pane that are not the toolbar.
  *
@@ -129,7 +127,49 @@ const ICON_BUTTON =
 const QUIET_BUTTON =
   "rounded-ctl bg-sheen px-3 py-1.5 text-meta font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
 
-function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName }: {
+/**
+ * One button of the action bar: icon, its word when the pane has room (a container
+ * query in `index.css` hides `.wn-action-text` in a narrow pane, so nothing shifts as
+ * messages change), and a tooltip with the key that does the same thing. The tooltip
+ * is drawn by CSS on hover and keyboard focus after a short delay, faster than a native
+ * `title`, and never takes layout space.
+ */
+function ActionButton({ action, onClick, children, tipStart = false }: { action: ReaderAction; onClick: () => void; children: React.ReactNode; tipStart?: boolean }) {
+  const key = ariaKey(action.keys);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={action.label}
+      aria-pressed={action.pressed ?? undefined}
+      aria-keyshortcuts={key ?? undefined}
+      data-reader-action={action.id}
+      className={`wn-action group/action relative flex h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-ctl text-ui font-medium transition-[background-color,color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring active:scale-[0.96] motion-reduce:active:scale-100 ${
+        action.primary
+          ? "bg-accent px-2.5 text-on-accent hover:opacity-90"
+          : action.text
+            ? "px-2 text-ink-body hover:bg-surface-hover hover:text-ink"
+            : "px-0 text-ink-icon hover:bg-surface-hover hover:text-ink"
+      } ${action.pressed ? "text-[var(--wn-badge-starred)]" : ""}`}
+    >
+      {children}
+      {action.text && <span className="wn-action-text whitespace-nowrap">{action.text}</span>}
+      <span aria-hidden="true" className="wn-tip" data-tip={tipStart ? "start" : ""}>
+        {action.label}
+        {action.keys && <kbd className="wn-tip-key">{action.keys}</kbd>}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The reader's action bar, on the desktop and at medium widths.
+ *
+ * Its own row at the very top of the reader, left-aligned, the same for every message
+ * (see `readerActions.ts` for the order and why). Below `lg`, where the reader replaces
+ * the list, it leads with the sidebar toggle and Close, so there is one bar, not two.
+ */
+function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName, onClose, sidebarOpen, onToggleSidebar }: {
   starred: boolean;
   unread: boolean;
   mailbox: Mailbox;
@@ -138,107 +178,96 @@ function Toolbar({ starred, unread, mailbox, actions, view, onViewChange, hasHtm
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
   senderName: string;
+  onClose: () => void;
+  sidebarOpen: boolean;
+  onToggleSidebar?: () => void;
 }) {
-  // The label follows the action rather than the verb: "Restore" in the bin, because
-  // that is what the button will do.
-  const archiveLabel =
-    mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : "Restore";
-  const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
-
-  const inSpam = mailbox === "spam";
-
-  // The starred fill is the palette's own accent, the same custom property the list
-  // row reads. A literal here was missed when the list row moved onto
-  // `--wn-badge-starred`, and a hard-coded gold goes near-invisible in dark mode.
-  const ICON_BUTTON =
-    "flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
-
+  const list = readerActions(mailbox, { starred, unread });
+  const run: Record<ReaderActionId, () => void> = {
+    reply: actions.onReply,
+    forward: actions.onForward,
+    archive: actions.onArchive,
+    notSpam: actions.onNotSpam,
+    trash: actions.onTrash,
+    read: actions.onRead,
+    star: actions.onStar,
+  };
+  const ICON = { size: 16, strokeWidth: 1.9, "aria-hidden": true } as const;
+  const icon = (action: ReaderAction) => {
+    switch (action.id) {
+      case "reply":
+        return <ReplyAll {...ICON} />;
+      case "forward":
+        return <Forward {...ICON} />;
+      case "archive":
+        return mailbox === "inbox" ? <Archive {...ICON} /> : <RotateCcw {...ICON} />;
+      case "notSpam":
+        return <Undo2 {...ICON} />;
+      case "trash":
+        return <Trash2 {...ICON} />;
+      case "read":
+        return unread ? <MailOpen {...ICON} /> : <Mail {...ICON} />;
+      case "star":
+        return <Star {...ICON} fill={starred ? "currentColor" : "none"} />;
+    }
+  };
   return (
-    // `shrink-0` and, below `sm`, the whole row is a column — see the header.
-    <div className="flex shrink-0 items-center gap-0.5">
-      <button
-        type="button"
-        onClick={actions.onStar}
-        aria-pressed={starred}
-        aria-label={starred ? "Unstar" : "Star"}
-        title={shortcutHint(starred ? "Unstar" : "Star", "toggleStar")}
-        className={`${ICON_BUTTON} ${starred ? "text-[var(--wn-badge-starred)]" : ""}`}
-      >
-        <Star size={15} strokeWidth={1.9} fill={starred ? "currentColor" : "none"} />
-      </button>
-      <button
-        type="button"
-        onClick={actions.onRead}
-        aria-label={unread ? "Mark read" : "Mark unread"}
-        title={unread ? "Mark read" : shortcutHint("Mark unread", "toggleRead")}
-        className={ICON_BUTTON}
-      >
-        {unread ? <Mail size={15} strokeWidth={1.9} /> : <MailOpen size={15} strokeWidth={1.9} />}
-      </button>
-      <span className="mx-1 h-4 w-px bg-divider" aria-hidden="true" />
-      <button
-        type="button"
-        onClick={actions.onReply}
-        aria-label="Reply to all"
-        title={shortcutHint("Reply to all", "focusReply")}
-        className={ICON_BUTTON}
-      >
-        <CornerUpLeft size={15} strokeWidth={1.9} />
-      </button>
-      <button
-        type="button"
-        onClick={actions.onForward}
-        aria-label="Forward"
-        title={shortcutHint("Forward", "forward")}
-        className={ICON_BUTTON}
-      >
-        <Forward size={15} strokeWidth={1.9} />
-      </button>
-      {/* In Spam this *is* the not-spam button, not a second one beside it — both
-          mean "move to the inbox". */}
-      {inSpam ? (
+    <div
+      data-reader-actions=""
+      role="toolbar"
+      aria-label="Message actions"
+      className="wn-reader-actions flex h-12 shrink-0 items-center gap-1 px-3"
+    >
+      {onToggleSidebar && (
         <button
           type="button"
-          onClick={actions.onNotSpam}
-          aria-label="Not spam — move to inbox"
-          title="Not spam — move to inbox"
-          className={ICON_BUTTON}
+          data-sidebar-toggle=""
+          data-reader-sidebar-toggle=""
+          onClick={onToggleSidebar}
+          aria-expanded={sidebarOpen}
+          aria-controls="winnow-sidebar"
+          aria-haspopup="dialog"
+          aria-label="Open sidebar"
+          title="Sidebar"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
         >
-          <Undo2 size={15} strokeWidth={1.9} />
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={actions.onArchive}
-          aria-label={archiveLabel}
-          title={shortcutHint(archiveLabel, "archive")}
-          className={ICON_BUTTON}
-        >
-          {mailbox === "inbox" ? (
-            <Archive size={15} strokeWidth={1.9} />
-          ) : (
-            <RotateCcw size={15} strokeWidth={1.9} />
-          )}
+          <AppMark size={26} />
         </button>
       )}
       <button
         type="button"
-        onClick={actions.onTrash}
-        aria-label={trashLabel}
-        title={shortcutHint(trashLabel, "trash")}
-        className={ICON_BUTTON}
+        onClick={onClose}
+        aria-label="Back to the list"
+        aria-keyshortcuts="Escape"
+        className="wn-action relative flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
       >
-        <Trash2 size={15} strokeWidth={1.9} />
+        <X size={16} strokeWidth={2} aria-hidden="true" />
+        <span aria-hidden="true" className="wn-tip" data-tip="start">
+          Back to the list<kbd className="wn-tip-key">Esc</kbd>
+        </span>
       </button>
-      <MoreMenu
-        view={view}
-        onViewChange={onViewChange}
-        hasHtml={hasHtml}
-        senderName={senderName}
-        onBlockSender={actions.onBlockSender}
-        onChangeFilters={actions.onChangeFilters}
-        buttonClass={ICON_BUTTON}
-      />
+      {onToggleSidebar && <span className="mx-1 h-4 w-px shrink-0 bg-divider lg:hidden" aria-hidden="true" />}
+      {list.map((action, index) => (
+        <span key={action.id} className="contents">
+          {index > 0 && list[index - 1]!.group !== action.group && (
+            <span className="mx-1 h-4 w-px shrink-0 bg-divider" aria-hidden="true" />
+          )}
+          <ActionButton action={action} onClick={run[action.id]} tipStart={index === 0}>
+            {icon(action)}
+          </ActionButton>
+        </span>
+      ))}
+      <div className="ml-auto">
+        <MoreMenu
+          view={view}
+          onViewChange={onViewChange}
+          hasHtml={hasHtml}
+          senderName={senderName}
+          onBlockSender={actions.onBlockSender}
+          onChangeFilters={actions.onChangeFilters}
+          buttonClass="flex h-8 w-8 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        />
+      </div>
     </div>
   );
 }
@@ -625,41 +654,22 @@ export function Reader({
     // lives outside `<article>`, so "which message is open" cannot be answered from
     // the article alone.
     <div data-reader="" data-select-scope="" className="flex min-h-0 flex-1 flex-col">
-      {/* Back bar for a narrow window. On a wide screen the reader is a pane beside
-          the list, so closing it would be redundant; on a phone the dock has Back. */}
+      {/* The action bar: its own row, at the top, the same place for every message. On a
+          phone the actions are the dock at the bottom instead. */}
       {!phone && (
-      <div className="flex items-center gap-1 px-3 py-2 lg:hidden">
-        {onToggleSidebar && (
-          // At the edge the sidebar slides in from, like the masthead's. Hidden at `lg`
-          // with the rest of this bar, where the list (and its toggle) is back.
-          <button
-            type="button"
-            data-sidebar-toggle=""
-            data-reader-sidebar-toggle=""
-            onClick={onToggleSidebar}
-            aria-expanded={sidebarOpen}
-            aria-controls="winnow-sidebar"
-            aria-haspopup="dialog"
-            aria-label="Open sidebar"
-            title="Sidebar"
-            // The app mark, as on the masthead's toggle, with the same quiet tint on
-            // hover and press. The artwork sits small in its square, so it is drawn
-            // close to the button's own size.
-            className="flex h-7 w-7 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            <AppMark size={26} />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Back to the list"
-          className={ICON_BUTTON}
-        >
-          <X size={16} strokeWidth={2} />
-        </button>
-        <span className="text-ui font-semibold text-ink-muted">Message</span>
-      </div>
+        <ActionBar
+          starred={email.starred}
+          unread={email.unread}
+          mailbox={mailbox}
+          actions={actions}
+          view={view}
+          onViewChange={setView}
+          hasHtml={Boolean(email.bodyHtml)}
+          senderName={displayName(email)}
+          onClose={onClose}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={onToggleSidebar}
+        />
       )}
 
       {codeBar}
@@ -691,30 +701,15 @@ export function Reader({
         <div className="min-w-0 flex-1">
           {/* The sender is the h2 and the subject the h1 — inverted from the usual
               pattern, and deliberately: the subject is the page's title, so it is the
-              document's h1 and the sender is subordinate to it.
-
-              1200px rather than `lg` (1024): `lg` is the width at which the pane appears
-              at all, not the width at which it fits. Below 1200px the name is what gives
-              way, and it ellipsised to make room for controls you reach for later. */}
-          <div className="flex flex-col gap-2.5 min-[1200px]:flex-row min-[1200px]:items-start min-[1200px]:justify-between min-[1200px]:gap-3">
-            <div className="min-w-0">
-              <h2 data-reader-sender="" className="selectable truncate text-ui font-semibold text-ink">
-                {displayName(email)}
-              </h2>
-              <p data-reader-address="" className="selectable truncate text-meta text-ink-subtle">
-                {displayAddress(email)}
-              </p>
-            </div>
-            {!phone && <Toolbar
-              starred={email.starred}
-              unread={email.unread}
-              mailbox={mailbox}
-              actions={actions}
-              view={view}
-              onViewChange={setView}
-              hasHtml={Boolean(email.bodyHtml)}
-              senderName={displayName(email)}
-            />}
+              document's h1 and the sender is subordinate to it. The actions are no longer
+              beside the name (they are the bar above), so the name has the whole width. */}
+          <div className="min-w-0">
+            <h2 data-reader-sender="" className="selectable truncate text-ui font-semibold text-ink">
+              {displayName(email)}
+            </h2>
+            <p data-reader-address="" className="selectable truncate text-meta text-ink-subtle">
+              {displayAddress(email)}
+            </p>
           </div>
 
           {/*

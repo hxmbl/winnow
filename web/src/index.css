@@ -928,3 +928,89 @@ div[data-row-count] {
     transition: none;
   }
 }
+
+/*
+ * The reader's action bar (`ActionBar` in `Reader.tsx`).
+ *
+ * The words on its buttons follow the *pane's* width, not the window's: a container
+ * query, so a narrow reader beside a wide list drops to icons, and nothing about it
+ * depends on the message shown (no layout shift from one message to the next).
+ */
+.wn-reader-actions {
+  container-type: inline-size;
+  container-name: reader-actions;
+}
+
+@container reader-actions (max-width: 34rem) {
+  .wn-action-text {
+    display: none;
+  }
+}
+
+/*
+ * The action tooltip: the action's name and its key, under the button. Drawn by CSS on
+ * hover (after a short pause, so sweeping across the bar does not flash a row of them)
+ * and at once on keyboard focus. Absolutely placed, so it never moves anything.
+ */
+.wn-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--wn-ink);
+  color: var(--wn-canvas);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(var(--wn-tip-x, -50%), -2px);
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+/* At the bar's start the tooltip hangs from the button's left edge, inside the pane. */
+.wn-tip[data-tip="start"] {
+  left: 0;
+  --wn-tip-x: 0px;
+}
+
+.wn-tip-key {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wn-canvas) 18%, transparent);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.wn-action:hover .wn-tip {
+  opacity: 1;
+  transform: translate(var(--wn-tip-x, -50%), 0);
+  transition-delay: 350ms;
+}
+
+.wn-action:focus-visible .wn-tip {
+  opacity: 1;
+  transform: translate(var(--wn-tip-x, -50%), 0);
+}
+
+@media (hover: none) {
+  .wn-tip {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wn-tip {
+    transition: none;
+    transform: translate(var(--wn-tip-x, -50%), 0);
+  }
+}
