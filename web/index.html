@@ -7,17 +7,13 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <!--
-      Two favicons, chosen by the OS scheme. The tab strip is not ours to theme, so
-      a single black-on-white mark is invisible in a dark tab — and the app's own
-      mark does not have this problem, being inline and driven by the theme tokens.
+      The tab icon. favicon.svg follows the OS scheme on its own (an @media rule inside
+      the SVG), because Chromium ignores `media` on <link rel="icon">. Safari has no SVG
+      favicons, so it takes the PNG/ICO; iOS home screens take the touch icon.
     -->
-    <link rel="icon" type="image/svg+xml" href="/relayLight.svg" />
-    <link
-      rel="icon"
-      type="image/svg+xml"
-      href="/relayDark.svg"
-      media="(prefers-color-scheme: dark)"
-    />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!--
       The stored theme, applied before first paint. A classic blocking script from
       'self' — the desktop CSP forbids inline script — so `index.css` can paint the

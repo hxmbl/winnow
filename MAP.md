@@ -28,7 +28,8 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
   index.html        Vite entry. Loads /src/main.tsx and /theme-boot.js.
   public/
     theme-boot.js   Sets data-theme before React exists, so the first paint is the right colour.
-    relay*.svg      Light/dark tray relay artwork.
+    favicon.*       The tab icon: favicon.svg follows the OS scheme itself; .ico/.png for Safari.
+    relayLight.svg  The original paper-plane artwork the icons are drawn from.
     demo-avatars/   Seven SVGs for the seeded demo mailbox. No network, no Gravatar.
   src/
     core/           Pure TypeScript. No DOM, no React, no platform calls.
