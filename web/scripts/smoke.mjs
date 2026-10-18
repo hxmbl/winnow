@@ -4792,6 +4792,15 @@ try {
     const picker = d.locator('[role="dialog"][aria-label="Label as"]');
     await picker.waitFor({ timeout: 5_000 }).catch(() => undefined);
     check("Label as… opens the label picker", (await picker.count()) === 1);
+    const pickerSurface = await picker.evaluate((el) => {
+      const list = el.querySelector('[role="group"][aria-label="Labels"]');
+      return { panel: getComputedStyle(el).backgroundColor, list: list ? getComputedStyle(list).backgroundColor : null };
+    });
+    check(
+      "the picker is drawn on its own opaque surface, not straight on the backdrop",
+      /^rgb\(/.test(pickerSurface.panel) || (/^rgba\(/.test(pickerSurface.panel) && !/, 0\)$/.test(pickerSurface.panel)),
+      JSON.stringify(pickerSurface),
+    );
     const pickerNames = await picker.locator("[data-label-option]").allTextContents();
     check(
       "it lists the demo's seeded labels",
