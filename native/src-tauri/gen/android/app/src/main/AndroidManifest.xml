@@ -46,6 +46,14 @@
             </intent-filter>
         </activity>
 
+        <!--
+          Notification buttons (Reply, Delete, Mark read, Undo). Not exported: only the
+          PendingIntents Winnow itself posts can reach it. See notify/MailNotifier.kt.
+        -->
+        <receiver
+            android:name=".notify.NotifyActionReceiver"
+            android:exported="false" />
+
         <provider
           android:name="androidx.core.content.FileProvider"
           android:authorities="${applicationId}.fileprovider"
