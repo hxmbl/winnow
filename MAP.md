@@ -177,7 +177,7 @@ The public surface is ~80 methods, grouped:
 | Backend passthrough | `sync` via `MailBackend`; `toggleStar`, `moveToMailbox`, `setRead`, `deletePermanently`, `sendReply`, `fetchAttachment`, `fetchBody` |
 | Navigation | `setMailbox`, `select`, `openCursor`, `closeReader`, `moveCursor`, `openRow`, `focusMessage`, `searchSubject`, `listTitle`, `setOverlay`, `moveNavigation`, `activateNavigation` |
 | Filters | `toggleFilter`, `clearFilters`, `setFilters` (private) |
-| Mutations | `archive`, `move`, `trash`, `toggleRead`, `markAllRead`, `markUnreadAndMoveOn`, the `*Many` batch variants, `undoLast` |
+| Mutations | `archive`, `move`, `trash`, `toggleRead`, `markUnreadAndMoveOn`, the `*Many` batch variants, `undoLast` |
 | Senders | `blockSender`, `unblockSender`, `muteSender`, `unmuteSender`, `showSender`, `isSenderMuted` |
 | Bodies | `loadBody`, `prefetchBodies`, `hasLoadedBody`, `scheduleReclassify` |
 | Offline storage | `saveMailboxOffline`, `declineMailboxStorage`, `dismissStoragePrompt` |
@@ -467,7 +467,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips. At most one signal word per row. |
 | `Reader.tsx` | The message pane: back bar, header (avatar → sender menu, sender `h2`, subject as the document `h1`), filter tags with their reasons, the three-way image offer, body, attachments, the conversation, and the phone dock. |
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
-| `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next/mark-all-read, Compose, and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
+| `Masthead.tsx` | Sidebar toggle, search, position readout, prev/next, Compose (no Mark all read anywhere: opening a message marks it read), and the `FilterStrip`. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
 | `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. |
 | `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other five mailboxes in `MAILBOX_ORDER` (Drafts among them), an account footer carrying Settings, and the progressive scrim blur. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
 | `SettingsPanel.tsx` | Settings. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. |
@@ -528,7 +528,7 @@ could be written in TypeScript, it belongs in `web/`.
 | `secrets.rs` | Keychain get/set/delete under service `app.winnow.desktop`, one user per secret name. |
 | `scheduler.rs` | The tick, 30–3600 s, clamped, joined on retune so two threads can never overlap. |
 | `files.rs` | Save dialog → sanitised filename → `spawn_blocking` write. Async is mandatory, not stylistic: blocking the calling thread deadlocks the dialog callback. |
-| `tray.rs` | The tray icon and its four items (`sync`, `mark_all_read`, `settings`, `quit`). A left click reveals the window; there is deliberately no "Open Winnow" row duplicating it. |
+| `tray.rs` | The tray icon and its three items (`sync`, `settings`, `quit`); there is deliberately no Mark all read. A left click reveals the window; there is deliberately no "Open Winnow" row duplicating it. |
 | `deep_link.rs` | The `winnow://` scheme only. The old OAuth callback scheme was removed: a private-use redirect URI is not something Google hands a desktop client an authorization code for. |
 
 ### 8.1 The command surface

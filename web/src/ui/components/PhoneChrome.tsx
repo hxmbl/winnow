@@ -5,7 +5,7 @@
  * — narrowing by a smart filter, switching mailbox, opening the menu, opening Settings —
  * is at the bottom of the screen: the swipeable filter chips sit just above the four
  * tabs (Inbox, Sent, Archive, Settings), and a second tap on Inbox raises the menu
- * (`MailNav.tsx`, every folder, the account, Mark all read) as a sheet from the dock.
+ * (`MailNav.tsx`, every folder and the account) as a sheet from the dock.
  * The top is only where you are and search: the mark, the list's name and count, and
  * the search field under them.
  *
@@ -50,7 +50,7 @@ export function PhoneTopBar({ searchQuery, onSearchChange, searchRef, listTitle,
       {/*
         Where you are: the mark, then the list's name and how many conversations are in
         it. No list-wide buttons up here: the phone list has no cursor to step through,
-        Mark all read is in the menu, and the menu is a second tap on Inbox.
+        there is no Mark all read, and the menu is a second tap on Inbox.
         The title is a `span[title]`, as in the masthead.
       */}
       <div className="flex min-h-11 items-center gap-3">

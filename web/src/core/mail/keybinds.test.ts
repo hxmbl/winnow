@@ -267,16 +267,15 @@ describe("commandForKey — the canvas", () => {
     expect(commandForKey("f", context({ viewerOpen: true }))).toEqual({ type: "forward" });
   });
 
-  it("marks the whole mailbox read only with shift", () => {
-    // `u` is already read/unread; a bare letter for this would be one mis-aimed
-    // keystroke.
+  it("has no key that marks the whole mailbox read", () => {
+    // Mark all read was removed: opening a message marks it read, and mass-marking lets
+    // mail look read that never was. `u` still toggles the one message.
     expect(commandForKey("u", context({ hasActionTarget: true }))).toEqual({
       type: "toggleRead",
     });
     expect(commandForKey("U", context({ hasActionTarget: true }))).toBeNull();
-    expect(
-      commandForKey("U", context({ hasActionTarget: true }), { shiftKey: true }),
-    ).toEqual({ type: "markAllRead" });
+    expect(commandForKey("U", context({ hasActionTarget: true }), { shiftKey: true })).toBeNull();
+    expect(BINDINGS.some((binding) => /read/i.test(binding.help) && /mailbox|all|everything/i.test(binding.help))).toBe(false);
   });
 
   it("always allows search, settings and the two overlays", () => {
@@ -404,8 +403,8 @@ describe("shouldSwallow", () => {
   });
 
   it("leaves Shift alone, because Shift types bindings", () => {
-    // Adding `shiftKey` to the system modifiers would cost `⇧U` and `⇧1`.
-    expect(shouldSwallow(DEFAULT_CONTEXT, { key: "U", shiftKey: true })).toBe(true);
+    // Adding `shiftKey` to the system modifiers would cost `⇧1` and `⇧?`.
+    expect(shouldSwallow(DEFAULT_CONTEXT, { key: "!", shiftKey: true })).toBe(true);
   });
 });
 
@@ -469,7 +468,6 @@ describe("the cheat sheet", () => {
       "archive",
       "trash",
       "toggleRead",
-      "markAllRead",
       "focusReply",
       "forward",
       "compose",

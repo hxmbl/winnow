@@ -9,9 +9,9 @@
  * toggle at the head of this row opens.
  */
 
-import { Check, ChevronLeft, ChevronRight, Search, SquarePen } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, SquarePen } from "lucide-react";
 import { AppMark } from "../AppMark";
-import { shortcutFor, shortcutHint } from "../../core/mail/keybinds";
+import { shortcutHint } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { FilterId } from "../../core/model/signals";
 
@@ -44,17 +44,6 @@ export type MastheadProps = {
   canNext: boolean;
   onPrev: () => void;
   onNext: () => void;
-  /**
-   * Mark the whole mailbox read.
-   *
-   * Not an email action — it is about every message on screen — so it lives beside the
-   * readout of how many there are.
-   *
-   * `⇧U` is the same verb and the button says so, which is the only place a user can
-   * discover it: it is the most destructive keystroke in the product, whose only
-   * inverse is the undo strip, and the strip only appears *after* it has been pressed.
-   */
-  onMarkAllRead: () => void;
   /** Open a blank composer. Absent, the button is not drawn. */
   onCompose?: () => void;
 };
@@ -105,7 +94,6 @@ export function Masthead({
   canNext,
   onPrev,
   onNext,
-  onMarkAllRead,
   onCompose,
 }: MastheadProps) {
   return (
@@ -191,22 +179,6 @@ export function Masthead({
               className="flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronRight size={17} />
-            </button>
-            {/* The rationale for this living in the masthead is on the `onMarkAllRead`
-                prop, which does not change with how the button is rendered. */}
-            <button
-              type="button"
-              onClick={onMarkAllRead}
-              aria-label="Mark all read"
-              title={
-                shortcutFor("markAllRead")
-                  ? `Mark all read — ${shortcutFor("markAllRead")}`
-                  : "Mark all read"
-              }
-              disabled={total === 0}
-              className="ml-1 flex h-7 w-7 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-            >
-              <Check size={15} strokeWidth={2} />
             </button>
           </div>
         </div>

@@ -304,11 +304,6 @@ function wireDesktopEvents(): void {
       case "sync":
         void store.refresh();
         break;
-      case "mark_all_read":
-        // The tray says "Mark all read", and it means the mailbox on screen, not every
-        // mailbox: marking spam read too would be a surprise.
-        store.markAllRead();
-        break;
       case "settings":
         store.setOverlay("settings");
         void platform.focusWindow();

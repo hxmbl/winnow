@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCheck, LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
+import { LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { Avatar } from "./Avatar";
 import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
@@ -252,11 +252,6 @@ export type SidebarProps = NavProps & {
    * dock's tabs (sitting on `--wn-phone-tabs`) instead of sliding in from the left.
    */
   touch: boolean;
-  /**
-   * Mark all read for the list on screen, as a row at the top of the menu. Given on a
-   * phone, whose top bar has no button for it; the desktop keeps the masthead's.
-   */
-  markAllRead?: { listTitle: string; disabled: boolean; onRun: () => void };
 };
 
 /** Elements that can hold focus, for the Tab trap. */
@@ -284,7 +279,7 @@ const FOCUSABLE =
  * on the dock's tab row so it is under the thumb that opened it, at most about 80% of
  * the screen tall, and its blur spreads from the middle of its top edge.
  */
-export function Sidebar({ open, onClose, touch, markAllRead, ...props }: SidebarProps) {
+export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   /** Whatever had focus when the sidebar opened, so it can be given back. */
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -574,23 +569,6 @@ export function Sidebar({ open, onClose, touch, markAllRead, ...props }: Sidebar
             <span className="text-read font-semibold text-ink">Winnow</span>
           </div>
           <div data-sidebar-scroll="" className="thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 pb-2">
-            {markAllRead && (
-              <button
-                type="button"
-                data-nav-action="mark-all-read"
-                aria-label={`Mark all read in ${markAllRead.listTitle}`}
-                disabled={markAllRead.disabled}
-                onClick={() => {
-                  markAllRead.onRun();
-                  onClose();
-                }}
-                className="mb-1 flex min-h-11 w-full items-center gap-2.5 rounded-ctl px-3 py-2 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              >
-                <CheckCheck size={17} className="shrink-0 text-ink-icon" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate">Mark all read</span>
-                <span className="shrink-0 truncate text-meta text-ink-subtle">{markAllRead.listTitle}</span>
-              </button>
-            )}
             <NavSections {...props} touch={touch} onNavigate={onClose} />
           </div>
           <AccountFooter {...props} touch={touch} onNavigate={onClose} />

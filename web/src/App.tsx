@@ -1922,10 +1922,6 @@ export function App({ store }: Props) {
         case "toggleRead":
           if (selectedId !== undefined) toggleReadRef.current(selectedId);
           break;
-        case "markAllRead":
-          // The mailbox on screen and nothing else — including not the spam folder.
-          s.markAllRead();
-          break;
         case "focusReply":
           openReplyRef.current();
           break;
@@ -2359,11 +2355,11 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       {/*
         The undo strip.
 
-        `⇧U` clears the read state of a whole mailbox, and unlike every other verb there is
-        no inverse on screen — the messages are simply gone from the unread count.
+        For a verb with no inverse on screen (`state.undo`). Mark all read, its first
+        user, has been removed; the strip stays for the next one.
 
         Positioned below the notices rather than over the list, since it appears precisely
-        when the user is mid-triage. It does not expire on a timer — a `⇧U`, a two-second
+        when the user is mid-triage. It does not expire on a timer — an action, a two-second
         pause, and a gone toast is worse than no toast, because the user learns the
         affordance is unreliable — but waits for an explicit dismissal, a different action,
         or a navigation.
@@ -2453,7 +2449,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               canNext={store.canStep(1)}
               onPrev={() => store.moveCursor(-1)}
               onNext={() => store.moveCursor(1)}
-              onMarkAllRead={store.markAllRead.bind(store)}
               onCompose={() => openCompose()}
             />
           )}
@@ -3100,12 +3095,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       open={sidebarOpen}
       onClose={closeSidebar}
       touch={phone}
-      // On a phone the top bar has no Mark all read button, so the menu carries it.
-      markAllRead={
-        phone
-          ? { listTitle: store.listTitle(), disabled: view.threads.length === 0, onRun: store.markAllRead.bind(store) }
-          : undefined
-      }
     />
     </SenderPicturesContext.Provider>
   );

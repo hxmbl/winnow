@@ -1,8 +1,10 @@
 //! The tray icon.
 //!
 //! Closing the window hides the app (see `lib.rs`), so the tray is the only
-//! way back in on a system with a dock-less menubar. It also carries the two
-//! actions worth one click: sync now, and read/unread toggle.
+//! way back in on a system with a dock-less menubar. It also carries the one
+//! action worth a click: sync now. There is deliberately no "Mark all read":
+//! Winnow marks a message read when it is opened, and mass-marking lets mail
+//! look read that never was.
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -20,7 +22,6 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
 
     let sync = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
-    let unread = MenuItem::with_id(app, "unread", "Mark all read", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Winnow", true, None::<&str>)?;
 
@@ -33,7 +34,6 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         app,
         &[
             &sync,
-            &unread,
             &settings,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -52,9 +52,6 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             // rename cannot desync them.
             "sync" => {
                 let _ = app.emit(TRAY_ACTION_EVENT, "sync");
-            }
-            "unread" => {
-                let _ = app.emit(TRAY_ACTION_EVENT, "mark_all_read");
             }
             "settings" => {
                 let _ = app.emit(TRAY_ACTION_EVENT, "settings");

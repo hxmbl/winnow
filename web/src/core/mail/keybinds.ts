@@ -33,7 +33,6 @@ export type Command =
   | { type: "archive" }
   | { type: "trash" }
   | { type: "toggleRead" }
-  | { type: "markAllRead" }
   | { type: "focusReply" }
   | { type: "forward" }
   | { type: "compose" }
@@ -337,13 +336,6 @@ export const BINDINGS: readonly Binding[] = [
     matches: { keys: [","] },
     command: { type: "openSettings" },
   },
-  {
-    // Shift, because it is the most destructive action on the canvas — no undo.
-    keys: "⇧U",
-    help: "Mark everything in this mailbox read",
-    matches: { keys: ["U"], shift: true },
-    command: { type: "markAllRead" },
-  },
 ] as const;
 
 // ── Routing ─────────────────────────────────────────────────────────────────
@@ -355,7 +347,7 @@ const SYSTEM_MODIFIERS = ["altKey", "ctrlKey", "metaKey"] as const;
  * Keys the platform owns outright, which the app therefore never consumes. Tab is
  * the one that mattered: swallowing it `preventDefault`ed focus movement and made
  * every `focus-visible` control unreachable (WCAG SC 2.1.1). Shift is not exempt —
- * `⇧U` and `⇧1` need it — and does not need to be, since `Shift+Tab` arrives with
+ * `⇧1` and `⇧?` need it — and does not need to be, since `Shift+Tab` arrives with
  * `key === "Tab"` and is excluded by the same test.
  */
 const PLATFORM_KEYS = ["Tab"] as const;

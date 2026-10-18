@@ -2650,67 +2650,28 @@ try {
   await page.waitForTimeout(300);
   await goTo("Inbox");
 
-  // ── Mark all read is scoped to the mailbox on screen ───────────────────────
+  // ── There is no Mark all read ──────────────────────────────────────────────
 
-  // Only the demo's *inbox* has unread mail, so "leaves other mailboxes alone" has to
-  // be set up rather than assumed: this marks a spam message unread first, so a
-  // mark-all-read that ignored its scope would visibly clear it. Asserting against a
-  // mailbox that was already at zero would pass for any implementation at all.
-  await goTo("Spam");
-  await rows().first().click();
-  await page.waitForSelector("article h1", { timeout: 5_000 });
-  await page.locator('button[aria-label="Mark unread"]').first().click();
-  await page.waitForTimeout(300);
-  const spamBefore = await unreadBadge("Spam");
-  require("a spam message can be made unread to test against", Number(spamBefore) > 0, `spam ${spamBefore}`);
-
+  // Winnow marks a message read when it is opened; a button (or `⇧U`, or a palette
+  // row) that clears a whole mailbox's unread state lets mail look read that never
+  // was, so the verb was removed everywhere. The inbox's unread count must survive
+  // the old keystroke, and no undo offer may appear for something that did not happen.
   await goTo("Inbox");
-  await page.locator('button[aria-label="Mark all read"]').click();
+  check(
+    "the masthead has no Mark all read button",
+    (await page.locator('[aria-label^="Mark all read"]').count()) === 0,
+  );
+  const inboxUnreadBefore = await unreadBadge("Inbox");
+  require("the demo inbox has unread mail to test against", Number(inboxUnreadBefore) > 0, `inbox ${inboxUnreadBefore}`);
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+  await page.keyboard.press("Shift+U");
   await page.waitForTimeout(300);
   check(
-    "mark all read clears the mailbox it was pressed in",
-    (await unreadBadge("Inbox")) === "0",
-    `inbox ${await unreadBadge("Inbox")}`,
+    "⇧U no longer marks the mailbox read",
+    (await unreadBadge("Inbox")) === inboxUnreadBefore,
+    `inbox ${inboxUnreadBefore} → ${await unreadBadge("Inbox")}`,
   );
-  check(
-    "and leaves every other mailbox alone",
-    (await unreadBadge("Spam")) === spamBefore,
-    `spam ${spamBefore} → ${await unreadBadge("Spam")}`,
-  );
-
-  // ── Mark-all-read is undoable ──────────────────────────────────────────────
-
-  // `⇧U` is the one verb in the app with no inverse anywhere on screen: a star is a
-  // toggle, a filed message reappears where it went, a filter has its own pill. It
-  // used to clear a whole mailbox's read state on one keystroke with nothing to bring
-  // it back from, which on a thousand unread is the one mistake in triaging you
-  // cannot walk back.
-  const undo = page.locator('button:has-text("Undo")');
-  check("mark all read offers an undo", (await undo.count()) > 0);
-  check(
-    "which says what it did",
-    (await page.locator("text=Marked everything in this mailbox as read").count()) > 0,
-  );
-
-  await undo.first().click();
-  await page.waitForTimeout(300);
-  check("taking it restores the unread count", (await unreadBadge("Inbox")) !== "0", await unreadBadge("Inbox"));
-  check("and the offer goes away", (await undo.count()) === 0);
-
-  // Which mailbox it acted on has to be visible, and the offer has to survive a
-  // message-level action — the label names the mailbox, and the rollback reads live
-  // state rather than a captured snapshot.
-  await page.locator('button[aria-label="Mark all read"]').click();
-  await page.waitForTimeout(250);
-  await openMessage();
-  check("the offer survives opening a message", (await undo.count()) > 0);
-  await closeReader();
-
-  await undo.first().click();
-  await page.waitForTimeout(250);
-  await goTo("Spam");
-  check("and is gone once the mailbox changes", (await undo.count()) === 0);
-  await goTo("Inbox");
+  check("and offers no undo", (await page.locator('button:has-text("Undo")').count()) === 0);
 
   // ── Rail counts are inbox-wide ─────────────────────────────────────────────
 
@@ -3295,7 +3256,7 @@ try {
 
     Below 640px the masthead is replaced, not squeezed: a top bar (the mark, the list's
     name and search), the list, and one dock at the bottom edge holding the swipeable
-    smart filter chips above four tabs; folders, the account and Mark all read are in
+    smart filter chips above four tabs; folders and the account are in
     the menu, a bottom sheet that a second tap on Inbox raises. The reader brings its own action bar to the
     same edge. What is claimed here is the ergonomics — that the controls a thumb uses
     most are at the bottom, that every one is a real touch target, and that nothing the
@@ -3319,7 +3280,7 @@ try {
     JSON.stringify(logoBox),
   );
   // The top bar is where you are and search, nothing else: no prev/next chevrons, no
-  // Mark all read tick and no menu button (the menu is a second tap on Inbox).
+  // tick and no menu button (the menu is a second tap on Inbox).
   const topBarButtons = await topBar.locator("button").evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute("aria-label") ?? node.textContent),
   );
@@ -3450,14 +3411,14 @@ try {
     folders: [...panel.querySelectorAll("[data-nav-folder]")].map((b) => b.getAttribute("data-nav-folder")),
     account: panel.querySelector("[data-nav-account]")?.textContent ?? "",
     settings: Boolean(panel.querySelector('[data-nav-account] button[aria-label="Settings"]')),
-    markAllRead: panel.querySelector('[data-nav-action="mark-all-read"]')?.getAttribute("aria-label") ?? null,
+    markAllRead: panel.querySelectorAll('[data-nav-action="mark-all-read"], [aria-label^="Mark all read"]').length,
   }));
   check(
-    "the menu is one sheet: Mark all read, Inbox, Mail, the account and Settings, and no categories",
+    "the menu is one sheet: Inbox, Mail, the account and Settings, no categories and no Mark all read",
     !menuShape.filter && menuShape.inbox && menuShape.categories === 0 &&
       ["sent", "archive", "trash", "spam"].every((id) => menuShape.folders.includes(id)) &&
       menuShape.account.includes("Demo account") && menuShape.settings &&
-      menuShape.markAllRead === "Mark all read in Inbox",
+      menuShape.markAllRead === 0,
     JSON.stringify(menuShape),
   );
   const menuTargets = await menu.locator('button[data-nav-folder], button[data-nav="inbox"], button[data-nav-action]').evaluateAll((nodes) =>
@@ -3739,8 +3700,8 @@ try {
     Boolean(starTarget) && starTarget.width >= MIN_TARGET && starTarget.height >= MIN_TARGET,
     JSON.stringify(starTarget),
   );
-  // Mark all read on a phone: the top bar has no tick, so it is in the menu (two taps on
-  // Inbox), and it marks the list on screen and closes the sheet.
+  // No Mark all read on a phone either: the menu (two taps on Inbox) has no such row, and
+  // opening and closing it leaves the list's unread rows exactly as they were.
   const touchInbox = touchPage.locator('[data-phone-dock] nav[aria-label="Primary"] button').first();
   const unreadRows = () =>
     touchPage.locator("[data-row-count] button[data-message-id]").evaluateAll((rows) =>
@@ -3749,13 +3710,13 @@ try {
   const unreadBefore = await unreadRows();
   await touchInbox.tap();
   await touchPage.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
-  const touchMarkAll = touchPage.locator('[data-sidebar] [data-nav-action="mark-all-read"]');
-  await touchMarkAll.tap();
+  const touchMarkAll = await touchPage.locator('[data-sidebar] [data-nav-action="mark-all-read"], [data-sidebar] [aria-label^="Mark all read"]').count();
+  await touchPage.keyboard.press("Escape");
   await touchPage.locator("[data-sidebar]").waitFor({ state: "hidden", timeout: 5_000 }).catch(() => undefined);
   check(
-    "on a phone, Mark all read is in the menu, marks the list read and closes the sheet",
-    unreadBefore > 0 && (await unreadRows()) === 0 && (await touchPage.locator("[data-sidebar][data-open]").count()) === 0,
-    `${unreadBefore} → ${await unreadRows()} unread rows`,
+    "on a phone, the menu has no Mark all read and the list keeps its unread mail",
+    unreadBefore > 0 && touchMarkAll === 0 && (await unreadRows()) === unreadBefore,
+    `${touchMarkAll} rows; ${unreadBefore} → ${await unreadRows()} unread rows`,
   );
   await touchContext.close();
 

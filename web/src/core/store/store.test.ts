@@ -527,167 +527,17 @@ describe("the derived view", () => {
 });
 
 /**
- * Mark-all-read: the one verb in the app that can lose information.
- *
- * Everything else in triaging has a visible inverse — a star is a toggle, a filed message
- * reappears in the folder it went to, a filter has its own pill. This one does not: a
- * single `⇧U` on a mailbox with a thousand unread, and the state is gone with nothing on
- * screen to bring it back.
+ * There is no mark-all-read. Winnow marks a message read when it is opened, and a verb
+ * that clears a whole mailbox's unread state lets mail look read that never was, so it
+ * was taken out of the masthead, the phone menu, the keyboard and the tray.
  */
-describe("mark-all-read and its undo", () => {  function storeWithUnread() {
-    const { backend, calls } = fakeBackend();
-    const store = new WinnowStore({ seed: DEMO_EMAILS, backend });
-    const unreadBefore = store
-      .getSnapshot()
-      .all.filter((email) => email.mailbox === "inbox" && email.unread).length;
-    expect(unreadBefore).toBeGreaterThan(0);
-    return { store, calls, unreadBefore };
-  }
-
-  it("clears read state for the current mailbox only", () => {
-    const { store } = storeWithUnread();
-    const before = store.getSnapshot();
-    const archivedUnread = before.all.filter(
-      (email) => email.mailbox === "archive" && email.unread,
-    ).length;
-
-    store.markAllRead();
-
-    const after = store.getSnapshot();
-    expect(after.all.filter((email) => email.mailbox === "inbox" && email.unread)).toHaveLength(
-      0,
-    );
-    // The archive's unread state is untouched: clearing it would be a surprise *and* a
-    // divergence, since only the current mailbox is pushed to the server.
-    expect(after.all.filter((email) => email.mailbox === "archive" && email.unread)).toHaveLength(
-      archivedUnread,
-    );
-  });
-
-  it("pushes the change to the server for every message it touched", async () => {
-    const { store, calls } = storeWithUnread();
-    store.markAllRead();
-    await Promise.resolve();
-    const pushes = calls.filter((call) => call.method === "setRead");
-    expect(pushes.length).toBeGreaterThan(0);
-    expect(pushes.every((call) => call.args[1] === true)).toBe(true);
-  });
-
-  it("undo pushes unread back to the server, not read again", async () => {
-    const { store, calls } = storeWithUnread();
-    store.markAllRead();
-    await Promise.resolve();
-    const before = calls.length;
-    store.undoLast();
-    await Promise.resolve();
-    const pushes = calls.slice(before).filter((call) => call.method === "setRead");
-    expect(pushes.length).toBeGreaterThan(0);
-    expect(pushes.every((call) => call.args[1] === false)).toBe(true);
-  });
-
-  it("does nothing, and offers nothing, when there is nothing unread", () => {
-    const { store } = storeWithUnread();
-    store.markAllRead();
-    expect(store.getSnapshot().undo).not.toBeNull();
-
-    // Now the inbox has no unread mail, so a second press is a no-op — and it must not
-    // offer an undo that would put the message back as unread.
-    store.markAllRead();
-    store.select(store.getSnapshot().all[0].id);
-    const archiveOnly = store.getSnapshot().all.find((email) => email.mailbox === "archive");
-    if (archiveOnly) store.move(archiveOnly.id, "inbox");
-    store.setMailbox("spam");
-    store.markAllRead();
-    expect(store.getSnapshot().undo).toBeNull();
-  });
-
-  it("offers an undo that restores exactly the messages it touched", () => {
-    const { store, unreadBefore } = storeWithUnread();
-    const ids = store
-      .getSnapshot()
-      .all.filter((email) => email.mailbox === "inbox" && email.unread)
-      .map((email) => email.id);
-
-    store.markAllRead();
-    const undo = store.getSnapshot().undo;
-    expect(undo).not.toBeNull();
-    expect(undo?.label).toBe("Marked everything in this mailbox as read");
-
-    store.undoLast();
-
-    const after = store.getSnapshot();
-    const restored = after.all.filter((email) => ids.includes(email.id) && email.unread);
-    expect(restored).toHaveLength(ids.length);
-    expect(after.undo).toBeNull();
-    expect(unreadBefore).toBeGreaterThan(0);
-  });
-
-  it("does not resurrect a message that was read before the press", () => {
-    const { store } = storeWithUnread();
-    // Read one inbox message by hand first. The undo must not claim it.
-    const alreadyRead = store
-      .getSnapshot()
-      .all.find((email) => email.mailbox === "inbox" && !email.unread);
-    expect(alreadyRead).toBeDefined();
-
-    store.markAllRead();
-    store.undoLast();
-
-    const after = store
-      .getSnapshot()
-      .all.find((email) => email.id === alreadyRead!.id);
-    expect(after?.unread).toBe(false);
-  });
-
-  it("survives an interleaved move — the rollback reads live state", () => {
-    const { store } = storeWithUnread();
-    const target = store.getSnapshot().all.find((email) => email.mailbox === "inbox" && email.unread)!;
-
-    store.markAllRead();
-    // Archive a message that the undo would otherwise restore, in between.
-    store.move(target.id, "archive");
-    store.undoLast();
-
-    const after = store.getSnapshot().all.find((email) => email.id === target.id);
-    // Still archived: the undo restores *read state*, not a stale snapshot of the list, so
-    // an unrelated change made in between is not clobbered.
-    expect(after?.mailbox).toBe("archive");
-    expect(after?.unread).toBe(true);
-  });
-
-  it("drops the offer when the user changes mailbox", () => {
-    const { store } = storeWithUnread();
-    store.markAllRead();
-    expect(store.getSnapshot().undo).not.toBeNull();
-
-    store.setMailbox("archive");
-    // The label names a mailbox, and it is about to stop being true.
-    expect(store.getSnapshot().undo).toBeNull();
-  });
-
-  it("drops the offer when it is dismissed rather than taken", () => {
-    const { store } = storeWithUnread();
-    store.markAllRead();
-    store.dismissUndo();
-
-    const after = store.getSnapshot();
-    expect(after.undo).toBeNull();
-    // And dismissing is not taking: the mail stays read.
-    expect(after.all.filter((email) => email.mailbox === "inbox" && email.unread)).toHaveLength(
-      0,
-    );
-
-    // With nothing on offer, `undoLast` is a no-op rather than an error.
-    store.undoLast();
-    expect(store.getSnapshot().undo).toBeNull();
-  });
-
-  it("clears the offer on sign-out", async () => {
-    const { store } = storeWithUnread();
-    store.markAllRead();
-    expect(store.getSnapshot().undo).not.toBeNull();
-
-    await store.signOut();
+describe("marking a mailbox read", () => {
+  it("has no verb that marks a whole mailbox read", () => {
+    const store = new WinnowStore({ seed: DEMO_EMAILS, backend: fakeBackend().backend });
+    expect("markAllRead" in store).toBe(false);
+    // Unread mail stays unread until it is opened or marked one message at a time.
+    const unread = store.getSnapshot().all.filter((email) => email.unread).length;
+    expect(unread).toBeGreaterThan(0);
     expect(store.getSnapshot().undo).toBeNull();
   });
 });
@@ -2167,18 +2017,6 @@ describe("the position readout follows the open message", () => {
     expect(store.getSnapshot().error).not.toBeNull();
     expect(expectReadoutOnOpen(store)).toBe(4);
     expectNextIsBelow(store, 4);
-  });
-
-  it("follows the open message through mark-all-read and its undo under Unread", () => {
-    const store = sortedStore();
-    store.setPreferences({ markReadOnOpen: false });
-    store.toggleFilter(builtinFilter("unread"));
-    const last = store.view.threads.length - 1;
-    store.openRow(last);
-    store.markAllRead();
-    expect(readoutIndex(store.getSnapshot(), store.view)).toBe(NO_CURSOR);
-    store.undoLast();
-    expect(expectReadoutOnOpen(store)).toBe(last);
   });
 
   it("stays on the open message when a sender above is muted", () => {

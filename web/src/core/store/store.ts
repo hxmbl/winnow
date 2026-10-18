@@ -361,9 +361,9 @@ export type StoreState = {
    * one — a star is a toggle, a move is answered by the message reappearing, a filter
    * has its own pill.
    *
-   * "Mark everything in this mailbox read" lands here: a single keystroke (`⇧U`) with
-   * no window and no inverse, and on a mailbox with a thousand unread it is the one
-   * mistake in triaging you cannot walk back.
+   * Mark all read used to be its one producer and has been removed (opening a message
+   * marks it read; mass-marking let mail look read that never was). The slot and the
+   * strip stay for the next verb with no on-screen inverse.
    */
   undo: { label: string } | null;
   /**
@@ -2124,64 +2124,6 @@ export class WinnowStore {
     const bare = subject.replace(/^\s*((re|fwd?|aw|sv|tr)\s*:\s*)+/i, "").trim();
     this.setFilters([]);
     this.setSearchQuery(bare);
-  }
-
-  /**
-   * Mark every message in the current mailbox read.
-   *
-   * The mailbox on screen, and only that one: clearing read state everywhere is both
-   * a surprise — you were looking at the inbox while your archive went quiet — and a
-   * divergence, because only the current mailbox's messages are pushed to the server,
-   * so the rest would snap back on the next sync.
-   *
-   * The undo is the list of ids it touched, not a captured array: a rollback that
-   * restored a stale snapshot would undo whatever else happened in between. It is
-   * offered through `state.undo` rather than swallowed, because this is the only verb
-   * in the app with no other way back.
-   */
-  markAllRead(): void {
-    const mailbox = this.state.mailbox;
-    const ids = new Set(
-      this.state.all
-        .filter((email) => email.mailbox === mailbox && email.unread)
-        .map((email) => email.id),
-    );
-    if (ids.size === 0) return;
-
-    // Captured before the state changes, so each id's *prior* flag is what comes back.
-    // Only unread messages are in `ids`, so "prior" is uniformly `true` — recording it
-    // per id keeps the rollback honest if this ever widens.
-    const restore = new Map(this.state.all.filter((e) => ids.has(e.id)).map((e) => [e.id, e.unread]));
-
-    // Installed before the state changes, so the strip can never render an offer with no
-    // handler behind it.
-    this.undoAction = () => {
-      this.set({
-        all: this.state.all.map((email) =>
-          restore.has(email.id) ? { ...email, unread: restore.get(email.id)! } : email,
-        ),
-        undo: null,
-      });
-      // `setRead(id, read)`: undoing puts each message back as it was, which for a
-      // message that was unread means read = false. This sent `true`, so Gmail kept
-      // them read while the screen showed them unread.
-      for (const [id, wasUnread] of restore) {
-        void this.backend?.setRead(id, !wasUnread).catch(() => undefined);
-      }
-      void this.applyPlatform();
-    };
-
-    this.set({
-      all: this.state.all.map((email) =>
-        ids.has(email.id) ? { ...email, unread: false } : email,
-      ),
-      undo: { label: "Marked everything in this mailbox as read" },
-    });
-
-    for (const email of this.state.all) {
-      if (ids.has(email.id)) this.backend?.setRead(email.id, true).catch(() => undefined);
-    }
-    void this.applyPlatform();
   }
 
   /** Take back the offered undo, if there is one. */

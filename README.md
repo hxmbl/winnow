@@ -145,7 +145,6 @@ advertise a shortcut that isn't wired.
 | `/` | Search |
 | `1`–`9` | Toggle the filter pill in that position |
 | `!` | Switch mailbox, or open Settings |
-| `⇧U` | Mark everything in this mailbox read |
 | `,` | Settings |
 
 `⌘`/`⌃`/`⌥` are never touched, and neither is Tab: those belong to the system,
