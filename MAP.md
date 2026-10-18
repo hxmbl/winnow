@@ -133,7 +133,9 @@ order for "why is this message wrong".
 5. classified                                   core/classify/classify.ts
      pure, synchronous, one message in / one EmailSignals out;
      spam likelihood is computed *before* importance, because importance pays for it
-6. profile rebuilt from inbox + trash           core/model/profile.ts
+6. profile from inbox + trash                   core/model/profile.ts
+     counts updated per moved message (updateProfileStats); only senders whose
+     bias, rank tier or quiet status changed are reclassified (sendersReclassifiedBy)
 7. derived: search → filter → sort → group     core/classify/pipeline.ts
      signals come from a map the caller built; the classifier never runs here
 8. rail ranked, counts computed                 core/classify/filters.ts
@@ -165,7 +167,9 @@ The snapshot is `StoreState & { view: MailboxView; key: string }`. The `key` is 
 monotonic string; `useStore` caches the snapshot against it, because
 `getSnapshot` recomputes the whole view and returns a new object every call —
 without that cache React loops forever. `core/store/scale.test.ts` asserts the
-memo: a clock tick classifies nothing, and a weight change reclassifies.
+memo: a clock tick classifies nothing, a weight change reclassifies, and archiving or
+binning one message reclassifies only the senders it affects, with the same answer as
+a full pass.
 
 **Why the counts are over the inbox, not the current result.** `inboxCounts` is a
 claim about the user's mail, not about the rows currently rendered. Ranking the
@@ -318,7 +322,7 @@ That is the only input; nothing is learned from opening or ignoring mail.
 | --- | --- |
 | `email.ts` | `Email` (product view) vs `RawEmail` (wire view), `Mailbox = "inbox" \| "archive" \| "sent" \| "drafts" \| "trash" \| "spam"`, `MAILBOX_LABEL`, `EmailCategory`, `Contact`, `Attachment`, `Draft`, plus the loaded-body helpers (`isBodyLoaded`, `keepLoadedBody`, `withLoadedBody`) and `withCode`. |
 | `signals.ts` | `BUILTIN_FILTERS` (21, in rail-catalog order), `FILTER_LABELS`, `PERMANENT_FILTERS = ["important", "shipping"]`, `NAVIGATION_ITEMS`, `UNSAFE_THRESHOLD = 0.4`, `IMPORTANT_THRESHOLD = 56`, `isUnsafe`, `isImportant`, `badgeFilters` (the chips in a reader) and `rowIndicators` (the at-most-one word a list row carries). |
-| `profile.ts` | `buildUserProfile(inbox, trash)`: per-sender trash bias (unbounded in the profile, clamped to `MAX_TRASH_BIAS = 0.35` where used), top six correspondents, the quiet tail, and first-time senders. Deterministic, and ties break on the sender name — a ranking that hides mail cannot be a shuffle. |
+| `profile.ts` | `buildUserProfile(inbox, trash)`, also built incrementally (`profileStats` → `updateProfileStats` → `profileFromStats`, integer counts per category so both paths agree exactly; `sendersReclassifiedBy` names the senders a profile change reclassifies): per-sender trash bias (unbounded in the profile, clamped to `MAX_TRASH_BIAS = 0.35` where used), top six correspondents, the quiet tail, and first-time senders. Deterministic, and ties break on the sender name — a ranking that hides mail cannot be a shuffle. |
 | `appearance.ts` | `APPEARANCES` (`system \| light \| dark \| oled`) and `ACCENT_THEMES` (`space \| plum \| ember \| aurora`). Names live in `core` because the store persists them and `core` does not import from `ui`. |
 | `ids.ts` | `hashId` (FNV-1a/64 truncated to 53 bits, deterministic so a cached classification survives a restart), `threadKey`, `localId`. |
 
@@ -819,7 +823,7 @@ out and nothing else would have caught it:
 | `platform.test.ts` | Tauri rewrites argument keys but never return values, so `authorize_url` read as `authorizeUrl` gave `undefined` and desktop sign-in was impossible — with Google's raw IPC error on screen. |
 | `theme.test.ts` | A screenshot cannot tell you a grey is 3.14:1 on white, which is how `inkSubtle` shipped as every section header, row timestamp and status line at 11–13 px. |
 | `mapper.test.ts` / `mime.test.ts` | Neither end of a send was tested: quoted-printable subjects rendered as mojibake and `In-Reply-To` went out as a bare Gmail id, so replies threaded in the sender's account and nowhere else. |
-| `core/store/scale.test.ts` | A 2,500-message sync must not serialise the mailbox 100 times, and a weight change must still reclassify. |
+| `core/store/scale.test.ts` | A 2,500-message sync must not serialise the mailbox 100 times, a weight change must still reclassify, and archiving or binning one message must reclassify only the affected senders while matching a full pass. |
 
 ---
 

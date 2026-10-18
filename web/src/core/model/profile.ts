@@ -71,37 +71,85 @@ export const CATEGORY_WEIGHT: Record<EmailCategory, number> = {
   promotions: 0.1,
 };
 
-export function buildUserProfile(inbox: readonly Email[], trash: readonly TrashRecord[]): UserProfile {
-  const inboxStats = new Map<
-    string,
-    { count: number; starred: number; correspondence: number }
-  >();
-  for (const email of inbox) {
-    const current = inboxStats.get(email.sender) ?? {
-      count: 0,
-      starred: 0,
-      correspondence: 0,
-    };
-    current.count += 1;
-    current.correspondence += CATEGORY_WEIGHT[email.category];
-    if (email.starred) current.starred += 1;
-    inboxStats.set(email.sender, current);
-  }
+/**
+ * What the profile is built from, per sender: the inbox counted by category (integers, so
+ * adding and removing a message is exact and lands where a fresh count would), and the
+ * trash counts. `buildUserProfile` and the incremental path both go through it, so the
+ * two cannot disagree.
+ */
+export type SenderStats = {
+  count: number;
+  starred: number;
+  /** Messages per Gmail category, for the weighted correspondence score. */
+  byCategory: Partial<Record<EmailCategory, number>>;
+};
 
-  const trashStats = new Map<string, number>();
-  for (const row of trash) {
-    trashStats.set(row.sender, (trashStats.get(row.sender) ?? 0) + (row.count ?? 1));
-  }
+export type ProfileStats = {
+  inbox: ReadonlyMap<string, SenderStats>;
+  trash: ReadonlyMap<string, number>;
+};
 
+/** The category order the correspondence sum runs in: fixed, so it is reproducible. */
+const CATEGORIES = Object.keys(CATEGORY_WEIGHT) as EmailCategory[];
+
+function addTo(stats: Map<string, SenderStats>, email: Email, sign: 1 | -1): void {
+  const current = stats.get(email.sender);
+  const next: SenderStats = current
+    ? { count: current.count, starred: current.starred, byCategory: { ...current.byCategory } }
+    : { count: 0, starred: 0, byCategory: {} };
+  next.count += sign;
+  if (email.starred) next.starred += sign;
+  next.byCategory[email.category] = (next.byCategory[email.category] ?? 0) + sign;
+  if (next.count <= 0) stats.delete(email.sender);
+  else stats.set(email.sender, next);
+}
+
+function trashMap(trash: readonly TrashRecord[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of trash) out.set(row.sender, (out.get(row.sender) ?? 0) + (row.count ?? 1));
+  return out;
+}
+
+/** Count an inbox and a trash log from scratch. */
+export function profileStats(inbox: readonly Email[], trash: readonly TrashRecord[]): ProfileStats {
+  const stats = new Map<string, SenderStats>();
+  for (const email of inbox) addTo(stats, email, 1);
+  return { inbox: stats, trash: trashMap(trash) };
+}
+
+/**
+ * The same counts after some messages left the inbox and some arrived (a changed message
+ * is one of each), with a fresh trash log. Touches only the senders involved; `previous`
+ * is not modified.
+ */
+export function updateProfileStats(
+  previous: ProfileStats,
+  removed: readonly Email[],
+  added: readonly Email[],
+  trash: readonly TrashRecord[],
+): ProfileStats {
+  const stats = new Map(previous.inbox);
+  for (const email of removed) addTo(stats, email, -1);
+  for (const email of added) addTo(stats, email, 1);
+  return { inbox: stats, trash: trashMap(trash) };
+}
+
+/** The profile the counts describe: biases per sender, then the rankings over senders. */
+export function profileFromStats({ inbox: inboxStats, trash: trashStats }: ProfileStats): UserProfile {
   const trashBiasBySender: Record<string, number> = {};
   const engagement: { sender: string; score: number; inbox: number }[] = [];
 
   for (const [sender, stats] of inboxStats) {
     const trashed = trashStats.get(sender) ?? 0;
     trashBiasBySender[sender] = trashed / (trashed + stats.count + 1);
+    let correspondence = 0;
+    for (const category of CATEGORIES) {
+      const n = stats.byCategory[category];
+      if (n) correspondence += n * CATEGORY_WEIGHT[category];
+    }
     engagement.push({
       sender,
-      score: stats.correspondence + stats.starred * 2 - trashed * 0.35,
+      score: correspondence + stats.starred * 2 - trashed * 0.35,
       inbox: stats.count,
     });
   }
@@ -129,4 +177,42 @@ export function buildUserProfile(inbox: readonly Email[], trash: readonly TrashR
     .sort();
 
   return { trashBiasBySender, topSenders, quietSenders, firstTimeSenders };
+}
+
+export function buildUserProfile(inbox: readonly Email[], trash: readonly TrashRecord[]): UserProfile {
+  return profileFromStats(profileStats(inbox, trash));
+}
+
+/**
+ * The senders whose messages classify differently under `next` than under `previous`.
+ *
+ * The classifier reads the profile through exactly three per-sender questions: the capped
+ * trash bias (`trashBiasFor`), the rank tier (`tierFor`, which `senderRankBonus` mirrors)
+ * and whether the sender is quiet. A sender for whom all three answers are unchanged gets
+ * the same signals for every message, so only the senders returned here need
+ * reclassifying, including any whose top-sender or quiet status flipped because someone
+ * else's counts moved. `firstTimeSenders` is not read by the classifier.
+ */
+export function sendersReclassifiedBy(previous: UserProfile, next: UserProfile): Set<string> {
+  const candidates = new Set<string>([
+    ...Object.keys(previous.trashBiasBySender),
+    ...Object.keys(next.trashBiasBySender),
+    ...previous.topSenders,
+    ...next.topSenders,
+    ...previous.quietSenders,
+    ...next.quietSenders,
+  ]);
+  const quietBefore = new Set(previous.quietSenders);
+  const quietAfter = new Set(next.quietSenders);
+  const changed = new Set<string>();
+  for (const sender of candidates) {
+    if (
+      trashBiasFor(previous, sender) !== trashBiasFor(next, sender) ||
+      tierFor(previous, sender) !== tierFor(next, sender) ||
+      quietBefore.has(sender) !== quietAfter.has(sender)
+    ) {
+      changed.add(sender);
+    }
+  }
+  return changed;
 }

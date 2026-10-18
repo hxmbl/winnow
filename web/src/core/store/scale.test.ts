@@ -241,3 +241,130 @@ describe("scale: one message changes", () => {
     expect([...store.view.inboxCounts].sort()).toEqual([...fresh.view.inboxCounts].sort());
   });
 });
+
+describe("scale: archiving or binning one message", () => {
+  /**
+   * A large inbox with many senders, as a real account has: the demo seed cycled, each
+   * copy from one of `senders` distinct addresses, so most senders have a handful of
+   * messages and a few have many.
+   */
+  function manySenders(n: number, senders: number): Email[] {
+    return synth(n).map((email, i) => ({
+      ...email,
+      mailbox: "inbox" as const,
+      sender: i % 7 === 0 ? email.sender : `person${(i * 31) % senders}@mail${i % 5}.example.org`,
+    }));
+  }
+
+  /** Classified from scratch: a new store over the same messages and the same bin. */
+  function fullPass(store: WinnowStore) {
+    const fresh = new WinnowStore({ seed: store.getSnapshot().all, backend: inertBackend });
+    return fresh.view;
+  }
+
+  /** The inbox's signals, whichever mailbox the store is showing. */
+  function inboxSignals(store: WinnowStore) {
+    return store.view.signals;
+  }
+
+  for (const [label, seed] of [
+    ["the demo inbox", () => DEMO_EMAILS.map((email) => ({ ...email }))],
+    ["a large synthetic inbox", () => manySenders(3000, 400)],
+  ] as const) {
+    it(`${label}: unrelated messages are not reclassified, and the answer equals a full pass`, async () => {
+      const { sendersReclassifiedBy } = await import("../model/profile");
+      const classify = await import("../classify/classify");
+      const all = vi.spyOn(classify, "classifyAll");
+      const one = vi.spyOn(classify, "classifyEmail");
+      const store = new WinnowStore({ seed: seed(), backend: inertBackend });
+      void store.view;
+
+      // A spread of actions: archive and bin from busy and quiet senders alike.
+      const inbox = () => store.getSnapshot().all.filter((email) => email.mailbox === "inbox");
+      const bySender = new Map<string, number>();
+      for (const email of inbox()) bySender.set(email.sender, (bySender.get(email.sender) ?? 0) + 1);
+      const busiest = [...bySender].sort((a, b) => b[1] - a[1])[0]![0];
+      const loneSender = [...bySender].find(([, count]) => count === 1)?.[0];
+      const targets = [
+        { id: inbox().find((email) => email.sender === busiest)!.id, act: "archive" as const },
+        ...(loneSender ? [{ id: inbox().find((email) => email.sender === loneSender)!.id, act: "trash" as const }] : []),
+        { id: inbox()[Math.floor(inbox().length / 2)]!.id, act: "trash" as const },
+        { id: inbox()[inbox().length - 1]!.id, act: "archive" as const },
+      ];
+
+      for (const { id, act } of targets) {
+        const before = new Map(inboxSignals(store));
+        const profileBefore = store.view.profile;
+        const sender = store.getSnapshot().all.find((email) => email.id === id)!.sender;
+        const [allBefore, oneBefore] = [all.mock.calls.length, one.mock.calls.length];
+        if (act === "archive") store.archive(id);
+        else store.trash(id);
+        const after = inboxSignals(store);
+
+        // No full pass, and far fewer single classifications than the inbox holds.
+        expect(all.mock.calls.length - allBefore).toBe(0);
+        const reclassified = one.mock.calls.length - oneBefore;
+        const reclassifiedSenders = new Set(
+          one.mock.calls.slice(oneBefore).map(([email]) => (email as Email).sender),
+        );
+        // Only the acted-on sender's messages (a moved message is a new object), plus the
+        // senders whose bias, rank tier or quiet status the move actually changed.
+        const allowed = sendersReclassifiedBy(profileBefore, store.view.profile);
+        allowed.add(sender);
+        for (const reclassifiedSender of reclassifiedSenders) expect(allowed).toContain(reclassifiedSender);
+        if (label === "a large synthetic inbox") expect(reclassified).toBeLessThan(inbox().length / 10);
+
+        // Every message from a sender nobody reclassified keeps its exact signals object.
+        for (const email of inbox()) {
+          if (reclassifiedSenders.has(email.sender)) continue;
+          expect(after.get(email.id)).toBe(before.get(email.id));
+        }
+
+        // And the incremental answer is the full pass's answer, message for message.
+        const fresh = fullPass(store);
+        expect(fresh.signals.size).toBe(after.size);
+        for (const [messageId, signals] of fresh.signals) expect(after.get(messageId)).toEqual(signals);
+        expect(store.view.profile).toEqual(fresh.profile);
+        expect([...store.view.inboxCounts].sort()).toEqual([...fresh.inboxCounts].sort());
+      }
+    });
+  }
+
+  it("a sender whose rank or quiet status flips is reclassified, and nobody else", async () => {
+    const { buildUserProfile, sendersReclassifiedBy } = await import("../model/profile");
+    const inbox = manySenders(600, 80);
+    const before = buildUserProfile(inbox, []);
+    // Remove every message from the top sender: the ranks below it all shift up a place.
+    const top = before.topSenders[0]!;
+    const after = buildUserProfile(inbox.filter((email) => email.sender !== top), []);
+    const changed = sendersReclassifiedBy(before, after);
+    expect(changed.has(top)).toBe(true);
+    // The rank ladder moved, so senders crossing a tier boundary are in the set...
+    expect(changed.has(before.topSenders[1]!)).toBe(true);
+    // ...and a sender with no rank, bias or quiet status on either side is not.
+    const bystander = [...new Set(inbox.map((email) => email.sender))].find(
+      (sender) =>
+        !before.topSenders.includes(sender) &&
+        !after.topSenders.includes(sender) &&
+        !before.quietSenders.includes(sender) &&
+        !after.quietSenders.includes(sender),
+    )!;
+    expect(changed.has(bystander)).toBe(false);
+  });
+
+  it("the incremental profile counts equal a fresh count", async () => {
+    const { profileStats, updateProfileStats, profileFromStats, buildUserProfile } = await import("../model/profile");
+    const inbox = manySenders(2000, 300);
+    let stats = profileStats(inbox, []);
+    let current = inbox.slice();
+    for (let step = 0; step < 50; step += 1) {
+      const index = (step * 97) % current.length;
+      const gone = current[index]!;
+      const changed = step % 3 === 0 ? { ...gone, starred: !gone.starred } : null;
+      current = changed ? current.map((email, i) => (i === index ? changed : email)) : current.filter((_, i) => i !== index);
+      const trash = [{ sender: gone.sender, count: step + 1 }];
+      stats = updateProfileStats(stats, [gone], changed ? [changed] : [], trash);
+      expect(profileFromStats(stats)).toEqual(buildUserProfile(current, trash));
+    }
+  });
+});

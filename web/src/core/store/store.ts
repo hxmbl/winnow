@@ -47,7 +47,16 @@ import {
   type FilterId,
   type NavigationItem,
 } from "../model/signals";
-import { buildUserProfile, sameProfile, type TrashRecord, type UserProfile } from "../model/profile";
+import {
+  profileFromStats,
+  profileStats,
+  sameProfile,
+  sendersReclassifiedBy,
+  updateProfileStats,
+  type ProfileStats,
+  type TrashRecord,
+  type UserProfile,
+} from "../model/profile";
 import { classifyAll, classifyEmail, type SignalMap } from "../classify/classify";
 import { countAllFilters, matchesBuiltin, rankFilters } from "../classify/filters";
 import {
@@ -908,6 +917,9 @@ export class WinnowStore {
     trash: readonly string[];
     blocked: readonly string[];
     filterLearning: FilterLearning;
+    /** The inbox the profile was counted from, and those counts, for the incremental update. */
+    inbox: ReadonlySet<Email>;
+    stats: ProfileStats;
     profile: UserProfile;
     /** What the built-in rules said, before `filterLearning`; for "Why it's here". */
     baseSignals: SignalMap;
@@ -991,20 +1003,31 @@ export class WinnowStore {
     const inboxForProfile = all.filter(
       (email) => email.mailbox === "inbox" && !blockedLower.has(email.sender.toLowerCase()),
     );
-    const built = buildUserProfile(inboxForProfile, this.trashRecords());
-    // Only `all` moved (a message read, starred, archived or arrived) and the profile came
-    // out the same: classification is a pure function of (message, profile, weights), so
-    // only the message objects that are new need classifying. Opening a message in a
-    // 3,000-message inbox used to reclassify all 3,000 because it flipped one `unread`.
-    const incremental =
-      hit !== null && hit.weights === weights && hit.trash === trash && hit.blocked === blocked && sameProfile(hit.profile, built);
-    const profile = incremental ? hit.profile : built;
+    const inboxSet = new Set(inboxForProfile);
+    // The incremental path: the weights and the blocked list are as they were, so only
+    // messages moved (read, starred, archived, binned, arrived). The profile's counts are
+    // updated for the messages that left the inbox and the ones that joined it, rather than
+    // recounted, and only the senders whose classification inputs actually changed (see
+    // `sendersReclassifiedBy`) are reclassified, along with any message object that is
+    // new. Archiving one message in a 3,000-message inbox used to reclassify all 3,000,
+    // because it moved that sender's count and so the profile.
+    const incremental = hit !== null && hit.weights === weights && hit.blocked === blocked;
+    let stats: ProfileStats;
+    let profile: UserProfile;
     let baseSignals: SignalMap;
     const byEmail = new WeakMap<Email, EmailSignals>();
     if (incremental) {
+      const removed: Email[] = [];
+      for (const email of hit.inbox) if (!inboxSet.has(email)) removed.push(email);
+      const added = inboxForProfile.filter((email) => !hit.inbox.has(email));
+      stats = updateProfileStats(hit.stats, removed, added, this.trashRecords());
+      const built = profileFromStats(stats);
+      const unchanged = sameProfile(hit.profile, built);
+      profile = unchanged ? hit.profile : built;
+      const affected = unchanged ? null : sendersReclassifiedBy(hit.profile, built);
       const map = new Map<number, EmailSignals>();
       for (const email of inboxForProfile) {
-        let signals = hit.byEmail.get(email);
+        let signals = affected?.has(email.sender) ? undefined : hit.byEmail.get(email);
         if (!signals) {
           signals = classifyEmail(email, profile, weights);
           // The same answer as before (a read flag flipped): keep the old object, so the
@@ -1017,12 +1040,14 @@ export class WinnowStore {
       }
       baseSignals = map;
     } else {
+      stats = profileStats(inboxForProfile, this.trashRecords());
+      profile = profileFromStats(stats);
       baseSignals = classifyAll(inboxForProfile, profile, weights);
       for (const email of inboxForProfile) byEmail.set(email, baseSignals.get(email.id)!);
     }
     const filterLearning = state.filterLearning;
     const signals = applyFilterLearning(inboxForProfile, baseSignals, filterLearning);
-    this.inboxCache = { all, weights, trash, blocked, filterLearning, profile, baseSignals, signals, byEmail };
+    this.inboxCache = { all, weights, trash, blocked, filterLearning, inbox: inboxSet, stats, profile, baseSignals, signals, byEmail };
     return { profile, signals };
   }
 
