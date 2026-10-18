@@ -70,7 +70,9 @@ describe("Change smart filters…", () => {
     const mine = store.explainSmartFilters(MISSED).find((line) => line.filter === "shipping");
     const sibling = store.explainSmartFilters(SIBLING).find((line) => line.filter === "shipping");
     expect(mine?.line).toBe("In Deliveries because: you put it here");
-    expect(sibling?.line).toBe("In Deliveries because: from evri.com, has an Evri tracking number, you moved 1 email here");
+    // Both demo deliveries come from noreply@evri.com: one correction is a rule for that
+    // exact address, never for everyone at evri.com.
+    expect(sibling?.line).toBe("In Deliveries because: from noreply@evri.com, has an Evri tracking number, you moved 1 email here");
   });
 
   it("takes a message out of a filter, and records multiselect corrections per message", () => {
@@ -83,6 +85,9 @@ describe("Change smart filters…", () => {
     expect(inDeliveries(store, other)).toBe(false);
     expect(store.getSnapshot().filterLearning.correctionCount("shipping")).toBe(2);
     expect(store.smartFilterMembership([shipped, MISSED]).get("shipping")).toBe("none");
+    // Every correction in one action shares a batch.
+    const batches = new Set(store.getSnapshot().filterLearning.corrections.map((c) => c.batch));
+    expect(batches.size).toBe(1);
   });
 
   it("persists a versioned local snapshot on every change", () => {
@@ -103,7 +108,7 @@ describe("Change smart filters…", () => {
     const store = demoStore();
     store.changeSmartFilters([MISSED], [{ filter: "shipping", into: true }]);
     expect(store.getSnapshot().filterLearning.senderRules()).toHaveLength(1);
-    store.removeFilterSenderRule("shipping", "evri.com");
+    store.removeFilterSenderRule("shipping", "noreply@evri.com");
     expect(store.getSnapshot().filterLearning.senderRules()).toEqual([]);
     expect(inDeliveries(store, MISSED)).toBe(true);
   });

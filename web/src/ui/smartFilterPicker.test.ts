@@ -60,8 +60,11 @@ describe("Settings → Smart filters", () => {
   });
 
   it("reads a sender rule as a sentence", () => {
-    const [rule] = FilterLearning.empty().record(email, "shipping", true, 1).senderRules();
-    expect(ruleText(rule)).toBe("Mail from anyone at evri.com goes in Deliveries (you moved 1 in)");
+    const once = FilterLearning.empty().record(email, "shipping", true, 1);
+    expect(ruleText(once.senderRules()[0])).toBe(`Mail from ${once.senderRules()[0].key} goes in Deliveries (you moved 1 in)`);
+    expect(once.senderRules()[0].kind).toBe("address");
+    const [rule] = once.record({ ...email, gmailId: "second", sender: "depot@evri.com" }, "shipping", true, 2).senderRules();
+    expect(ruleText(rule)).toBe("Mail from anyone at evri.com goes in Deliveries (you moved 2 in)");
     expect(ruleText({ filter: "promotional", key: "sam@gmail.com", kind: "address", into: false, count: 2 })).toBe(
       "Mail from sam@gmail.com stays out of Promos (you moved 2 out)",
     );

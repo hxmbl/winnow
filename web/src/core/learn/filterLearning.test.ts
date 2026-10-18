@@ -10,6 +10,9 @@ import {
   FilterLearning,
   LEARNABLE_FILTERS,
   MAX_CORRECTIONS,
+  MIN_DOMAIN_ADDRESSES,
+  MIN_SUPPORT,
+  clueBackground,
   MAX_VOCABULARY,
   applyFilterLearning,
   capVocabulary,
@@ -45,6 +48,33 @@ const evri = (n = 1) =>
     subject: "Your Evri delivery is coming today",
     body: `Good news, Sam is bringing it between 10:15 and 11:15 on Tuesday, 12 May. Tracking: H01HYA00123456${70 + n}.`,
   });
+
+/** Unrelated everyday mail, so a test's clue background looks like an inbox. */
+const FILLER: Email[] = [
+  ["dana@acme.example", "Lunch on Friday?", "Are you free for lunch on Friday? The new place on Mill Road.", "primary"],
+  ["news@weekly.example", "The Weekly, issue 12", "This week: compilers, gardens and a long read on trains.", "newsletter"],
+  ["billing@power.example", "Your bill is ready", "Your bill of £42.10 is ready to view.", "updates"],
+  ["team@club.example", "Committee minutes", "Minutes from the committee meeting are attached.", "primary"],
+  ["deals@shop.example", "Spring sale", "Up to 40% off garden furniture this weekend only.", "promotions"],
+  ["sam@friends.example", "photos", "Here are the photos from the walk last weekend.", "primary"],
+  ["it@acme.example", "Laptop refresh", "Your new laptop is ready to collect from the IT desk.", "updates"],
+  ["events@venue.example", "Your tickets", "Your tickets for the concert are in the app.", "updates"],
+].map(([sender, subject, body, category]) => ({
+  id: 0,
+  gmailId: `filler-${subject}`,
+  mailbox: "inbox" as const,
+  receivedAt: 1_600_000_000_000,
+  sender,
+  subject,
+  body,
+  category: category as Email["category"],
+  starred: false,
+  unread: false,
+  attachments: [],
+  urgent: false,
+}));
+/** The clue background of an inbox holding these messages and the filler. */
+const inboxOf = (...emails: Email[]) => clueBackground([...FILLER, ...emails]);
 
 const dpd = () =>
   mail({
@@ -117,14 +147,77 @@ describe("FilterLearning", () => {
     expect(model.decide(email, "shipping", signalsOf(email))).toEqual({ by: "message", into: true });
   });
 
-  it("makes a sender rule from one correction, for the whole company domain", () => {
-    const first = evri(1);
-    const later = mail({ sender: "tracking@evri.com", subject: "Spring offers from Evri", body: "Send for less." });
-    const model = FilterLearning.empty().record(first, "shipping", true, 1);
-    const decision = model.decide(later, "shipping", signalsOf(later));
-    expect(decision.by).toBe("sender");
-    expect(decision.into).toBe(true);
-    expect(model.senderRules()).toEqual([{ filter: "shipping", key: "evri.com", kind: "domain", into: true, count: 1 }]);
+  // Owner decision (R3): one correction makes a rule for that exact address only. A rule
+  // for the whole domain needs corrections from at least two distinct addresses there.
+  it("makes an address rule from one correction, and a domain rule only from two addresses", () => {
+    const fromA = evri(1); // notifications@mail.evri.com
+    const fromB = mail({ sender: "tracking@evri.com", subject: "Your parcel is with your neighbour", body: "We left it at number 12." });
+    const laterB = mail({ sender: "tracking@evri.com", subject: "Spring offers from Evri", body: "Send for less." });
+    const laterA = evri(5);
+    const fromC = mail({ sender: "depot@evri.com", subject: "Your parcel is at the depot", body: "Collect it any time after 2pm." });
+
+    // (a) One correction from address A moves A's later mail, and nothing from B.
+    const once = FilterLearning.empty().record(fromA, "shipping", true, 1);
+    expect(once.decide(laterA, "shipping", signalsOf(laterA))).toMatchObject({ by: "sender", into: true });
+    expect(once.senderRuleFor(laterB, "shipping")).toBeNull();
+    expect(once.decide(laterB, "shipping", signalsOf(laterB))).toEqual({ by: "built-in", into: false });
+    expect(once.senderRules()).toEqual([
+      { filter: "shipping", key: "notifications@mail.evri.com", kind: "address", into: true, count: 1 },
+    ]);
+
+    // (b) Corrections from two distinct addresses make the domain rule, which then
+    // covers a third address.
+    expect(MIN_DOMAIN_ADDRESSES).toBe(2);
+    const twice = once.record(fromB, "shipping", true, 2);
+    expect(twice.decide(fromC, "shipping", signalsOf(fromC))).toMatchObject({
+      by: "sender",
+      into: true,
+      rule: { key: "evri.com", kind: "domain", count: 2 },
+    });
+    expect(twice.senderRules()).toEqual([{ filter: "shipping", key: "evri.com", kind: "domain", into: true, count: 2 }]);
+  });
+
+  it("makes no domain rule when corrections on the domain conflict", () => {
+    const fromA = evri(1);
+    const fromB = mail({ sender: "tracking@evri.com", subject: "Your parcel is with your neighbour", body: "We left it at number 12." });
+    const fromD = mail({ sender: "offers@evri.com", subject: "Spring offers from Evri", body: "Send for less." });
+    const fromC = mail({ sender: "depot@evri.com", subject: "Your parcel is at the depot", body: "Collect it any time after 2pm." });
+    const model = FilterLearning.empty()
+      .record(fromA, "shipping", true, 1)
+      .record(fromB, "shipping", true, 2)
+      .record(fromD, "shipping", false, 3);
+    // Two addresses in, one out: conflicting evidence never produces the broad rule.
+    expect(model.senderRuleFor(fromC, "shipping")).toBeNull();
+    expect(model.decide(fromC, "shipping", signalsOf(fromC)).by).not.toBe("sender");
+    // Each address keeps its own, unmixed rule.
+    expect(model.senderRules().map((rule) => [rule.key, rule.kind, rule.into])).toEqual([
+      ["notifications@mail.evri.com", "address", true],
+      ["offers@evri.com", "address", false],
+      ["tracking@evri.com", "address", true],
+    ]);
+  });
+
+  it("makes no rule for an address with corrections both ways", () => {
+    const a = mail({ sender: "news@shop.example", subject: "Your order is on its way", body: "Order number: A12345." });
+    const b = mail({ sender: "news@shop.example", subject: "Spring sale", body: "40% off." });
+    const c = mail({ sender: "news@shop.example", subject: "Another one", body: "Hello." });
+    const model = FilterLearning.empty().record(a, "shipping", true, 1).record(b, "shipping", false, 2);
+    expect(model.senderRuleFor(c, "shipping")).toBeNull();
+    expect(model.senderRules()).toEqual([]);
+  });
+
+  it("never makes a domain rule for the account's own domain", () => {
+    const colleague = (name: string, subject: string) => mail({ sender: `${name}@acme.example`, subject, category: "primary" });
+    const model = FilterLearning.empty("me@acme.example")
+      .record(colleague("dana", "standup notes"), "urgent", true, 1)
+      .record(colleague("priya", "the release"), "urgent", true, 2)
+      .record(colleague("lee", "rota"), "urgent", true, 3);
+    expect(model.ownDomain).toBe("acme.example");
+    const other = colleague("sam", "lunch?");
+    expect(model.senderRuleFor(other, "urgent")).toBeNull();
+    expect(model.senderRules().every((rule) => rule.kind === "address")).toBe(true);
+    // The demo's own domain is the demo account's.
+    expect(FilterLearning.empty("demo").ownDomain).toBe("northwind.example");
   });
 
   it("never makes a rule for a shared domain, only the address", () => {
@@ -142,7 +235,7 @@ describe("FilterLearning", () => {
     const model = FilterLearning.empty()
       .record(c, "shipping", true, 1)
       .record(a, "shipping", false, 2);
-    // news@ is out by its own rule, even though evri.com is (net) neither.
+    // news@ is out by its own rule; evri.com has corrections both ways, so no domain rule.
     expect(model.decide(b, "shipping", signalsOf(b))).toMatchObject({ by: "sender", into: false });
   });
 
@@ -158,7 +251,7 @@ describe("FilterLearning", () => {
     expect(model.senderRuleFor(three, "shipping")).toBeNull();
   });
 
-  it("generalises to similar mail from another sender, and not to unrelated mail", () => {
+  it("generalises to similar mail from another sender after two corrections, and not to unrelated mail", () => {
     const e1 = evri(1);
     const e2 = mail({ ...evri(2), sender: "hello@evri-parcels.example" });
     const other = dpd();
@@ -168,15 +261,18 @@ describe("FilterLearning", () => {
       body: "Join us on Tuesday, 12 May for the quarterly quiz.",
     });
     expect(signalsOf(other).shipping).toBe(false);
+    const background = inboxOf(e1, e2, other, unrelated);
 
+    // One correction never generalises on its own (owner decision, R4).
+    expect(MIN_SUPPORT).toBe(2);
     const once = FilterLearning.empty().record(e1, "shipping", true, 1);
+    expect(once.decide(other, "shipping", signalsOf(other), background)).toEqual({ by: "built-in", into: false });
     const twice = once.record(e2, "shipping", true, 2);
-    expect(once.decide(other, "shipping", signalsOf(other))).toMatchObject({ by: "similar", into: true, similar: 1 });
-    const decision = twice.decide(other, "shipping", signalsOf(other));
+    const decision = twice.decide(other, "shipping", signalsOf(other), background);
     expect(decision).toMatchObject({ by: "similar", into: true, similar: 2 });
     if (decision.by === "similar") expect(decision.clues[0]).toBe("p:tracking");
     // A date and the Updates category are not enough to make a quiz night a delivery.
-    expect(twice.decide(unrelated, "shipping", signalsOf(unrelated)).into).toBe(false);
+    expect(twice.decide(unrelated, "shipping", signalsOf(unrelated), background).into).toBe(false);
   });
 
   it("can take a message out of a filter the built-in rules put it in", () => {
@@ -195,9 +291,10 @@ describe("FilterLearning", () => {
     const base = { ...signalsOf(target), shipping: true, promotional: false };
     let model = FilterLearning.empty();
     for (const [i, email] of [a, b, c].entries()) model = model.record(email, "shipping", false, i);
-    const decision = model.decide(target, "shipping", base);
+    const background = inboxOf(a, b, c, target);
+    const decision = model.decide(target, "shipping", base, background);
     expect(decision).toMatchObject({ by: "similar", into: false });
-    const learned = model.apply(target, base);
+    const learned = model.apply(target, base, background);
     expect(learned.filterOverrides?.shipping).toBe(false);
     expect(matchesBuiltin("shipping", target, learned, profile)).toBe(false);
   });
@@ -272,7 +369,7 @@ describe("FilterLearning", () => {
     expect(capped.every((c) => c.clues.includes("p:tracking"))).toBe(true);
   });
 
-  it("states its one tuning constant", () => {
+  it("states its tuning constants", () => {
     expect(BUILT_IN_ODDS).toBe(3);
     expect(LEARNABLE_FILTERS).not.toContain("unsafe");
     expect(LEARNABLE_FILTERS).not.toContain("starred");
@@ -297,6 +394,17 @@ describe("Why it's here", () => {
     const base = signalsOf(third);
     const learned = model.apply(third, base);
     const line = explainFilters(third, base, learned, profile, model).find((reason) => reason.filter === "shipping");
+    // Both corrections came from one address, so the rule is that address's.
+    expect(line?.line).toBe("In Deliveries because: from notifications@mail.evri.com, has an Evri tracking number, you moved 2 emails here");
+  });
+
+  it("explains a domain rule by its domain", () => {
+    const first = evri(1);
+    const second = mail({ ...evri(2), sender: "tracking@evri.com" });
+    const third = mail({ ...evri(3), sender: "depot@evri.com" });
+    const model = FilterLearning.empty().record(first, "shipping", true, 1).record(second, "shipping", true, 2);
+    const base = signalsOf(third);
+    const line = explainFilters(third, base, model.apply(third, base), profile, model).find((r) => r.filter === "shipping");
     expect(line?.line).toBe("In Deliveries because: from evri.com, has an Evri tracking number, you moved 2 emails here");
   });
 
@@ -306,9 +414,12 @@ describe("Why it's here", () => {
     const other = dpd();
     const model = FilterLearning.empty().record(e1, "shipping", true, 1).record(e2, "shipping", true, 2);
     const base = signalsOf(other);
-    const learned = model.apply(other, base);
-    const line = explainFilters(other, base, learned, profile, model).find((reason) => reason.filter === "shipping");
+    const background = inboxOf(e1, e2, other);
+    const learned = model.apply(other, base, background);
+    const line = explainFilters(other, base, learned, profile, model, background).find((reason) => reason.filter === "shipping");
     expect(line?.line).toMatch(/^In Deliveries because: has a tracking number, .+, you moved 2 similar emails here$/);
+    // Never a generic clue as a reason.
+    expect(line?.line).not.toMatch(/Gmail files it|no-reply|List-Unsubscribe|mentions a date/);
   });
 
   it("says when you put the message there yourself", () => {

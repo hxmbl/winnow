@@ -37,7 +37,14 @@ import {
 } from "../classify/heuristics";
 import { PhraseMatcher, type KeywordTable } from "../classify/text";
 import { SPECIFIC_TRACKING, cachedClues, clueKind, clueLabel, registrableDomain, senderAddress } from "./filterClues";
-import { isLearnable, type Decision, type FilterLearning, type LearnableFilter } from "./filterLearning";
+import {
+  EMPTY_BACKGROUND,
+  isLearnable,
+  type ClueBackground,
+  type Decision,
+  type FilterLearning,
+  type LearnableFilter,
+} from "./filterLearning";
 
 export type FilterReason = {
   filter: BuiltinSmartFilter;
@@ -207,6 +214,7 @@ export function explainFilters(
   learned: EmailSignals,
   profile: UserProfile,
   model: FilterLearning,
+  background: ClueBackground = EMPTY_BACKGROUND,
 ): FilterReason[] {
   const out: FilterReason[] = [];
   const unsafe = isUnsafe(learned);
@@ -216,13 +224,9 @@ export function explainFilters(
     if (!matchesBuiltin(filter, email, learned, profile)) continue;
     let reasons: string[];
     if (isLearnable(filter)) {
-      const decision = model.decide(email, filter, base);
+      const decision = model.decide(email, filter, base, background);
       reasons = learnedReasons(decision, email, model, filter);
-      if (decision.by === "built-in" || reasons.length === 0) {
-        reasons = builtInReasons(filter, email, base, profile);
-        const backed = model.isEmpty ? 0 : model.similarCount(email, filter, true);
-        if (backed > 0) reasons = [...reasons.slice(0, MAX_REASONS - 1), moved(backed, true)];
-      }
+      if (decision.by === "built-in" || reasons.length === 0) reasons = builtInReasons(filter, email, base, profile);
     } else {
       reasons = builtInReasons(filter, email, base, profile);
     }

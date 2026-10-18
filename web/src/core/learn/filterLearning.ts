@@ -5,37 +5,45 @@
  * filter for a message, and that is one *correction*. Nothing is learned from opening,
  * reading, starring or ignoring mail. Everything stays on this device.
  *
- * A message's place in a filter is decided in this order, and the first that has an
- * answer wins:
- *
- *   1. **You moved this message.** Your correction for this exact message stands.
- *   2. **A sender rule.** You have moved mail from this address (or, for a company's
- *      own domain, from anyone at that domain) into or out of the filter. The rule
- *      follows the balance of your corrections for that sender: moved in more often than
- *      out means in. An exact address beats its domain. A shared domain — gmail.com,
- *      outlook.com — never becomes a rule, only the address does. Sender rules are listed
- *      in Settings, one per sender, and each can be removed.
- *   3. **Similar mail you corrected.** A per-filter naive Bayes over the message's clues
- *      (`filterClues.ts`): tracking numbers, order numbers, amounts, dates, headers,
- *      Gmail's category and a few words. It counts, for every clue, how many of your
- *      corrections for this filter moved mail *with* that clue in and how many moved it
- *      out, and weighs the message's clues by those counts. Only clues you have actually
- *      corrected mail with count; a clue it has never seen says nothing.
- *   4. **The built-in rules** (`classify.ts`), which are also the starting point of
- *      step 3: their answer is taken to be right three times in four (`BUILT_IN_ODDS`),
- *      so one similar correction rarely overturns it, and two or three usually do.
- *
  * A correction changes exactly one filter. It is applied as a per-filter override
  * (`EmailSignals.filterOverrides`), never by rewriting the classifier's flags, so it
  * cannot leak into another filter, the importance score or star learning.
  *
- * So learned evidence can both add a message to a filter and take it out of one the
- * built-in rules put it in. No score is ever shown; "Why it's here" (`filterExplain.ts`)
- * says it in words.
+ * A message's place in a filter is decided in this order, and the first that has an
+ * answer wins:
+ *
+ *   1. **You moved this message.** Your correction for this exact message stands.
+ *   2. **A sender rule.** You have moved mail from this exact address into (or out of)
+ *      the filter, and never the other way: one correction is enough for an address.
+ *      A rule for a whole domain is broader, so it needs more: corrections from at least
+ *      `MIN_DOMAIN_ADDRESSES` different addresses at that domain, all the same way. A
+ *      sender or domain with corrections both ways has no rule. Your own domain (the
+ *      signed-in account's) and shared domains — gmail.com, outlook.com — never become a
+ *      domain rule, only addresses. An exact address beats its domain. Sender rules are
+ *      listed in Settings, one per sender, and each can be removed.
+ *   3. **Similar mail you corrected.** A per-filter naive Bayes over the message's clues
+ *      (`filterClues.ts`). Generic clues — Gmail's category, a no-reply address, a
+ *      List-Unsubscribe header, attachments, a date — never count, and the words of a
+ *      message together count as one clue at most. Each clue's evidence is smoothed
+ *      toward how common it is in your inbox (`ClueBackground`), so a clue most mail
+ *      carries says little, a clue never votes against the direction you moved it, and
+ *      no single clue weighs more than the built-in answer, so it takes two different
+ *      specific clues (a tracking number and the words, say) to overturn it.
+ *      It may overturn the built-in answer only when at least `MIN_SUPPORT` of your
+ *      corrections for this filter moved mail sharing a specific clue with this message
+ *      the same way, and it never takes mail out of Security or Important on its own.
+ *   4. **The built-in rules** (`classify.ts`), which are also the starting point of
+ *      step 3: their answer is taken to be right three times in four (`BUILT_IN_ODDS`).
+ *
+ * One action counts once per sender: ticking a filter for thirty messages from one
+ * newsletter is one decision about that sender, not thirty (`FilterCorrection.batch`).
+ *
+ * No score is ever shown; "Why it's here" (`filterExplain.ts`) says it in words.
  *
  * Storage: a versioned snapshot of the corrections themselves (`FilterLearningSnapshot`),
  * capped at `MAX_CORRECTIONS`, `MAX_CLUES` per correction and `MAX_VOCABULARY` distinct
- * clues. Everything else is recomputed from it. It is kept in this device's local storage
+ * clues. Everything else is recomputed from it, so snapshots written before these rules
+ * load unchanged and are simply read by them. It is kept in this device's local storage
  * only, is never written to Gmail or any server, and belongs to one account: it is
  * cleared on sign-out and when a different account connects.
  */
@@ -48,7 +56,7 @@ import {
   type EmailSignals,
   type SignalFilter,
 } from "../model/signals";
-import { cachedClues, canRuleDomain, clueKind, registrableDomain, senderAddress } from "./filterClues";
+import { cachedClues, canRuleDomain, clueKind, isGenericClue, registrableDomain, senderAddress } from "./filterClues";
 
 // ── What can be learned ─────────────────────────────────────────────────────
 
@@ -86,10 +94,24 @@ function withAnswer(signals: EmailSignals, filter: LearnableFilter, into: boolea
 
 /**
  * Odds that the built-in rules are right about a message, before any similar
- * correction is counted: three to one. This is the only tuning constant in the
- * decision; everything else is your own counts.
+ * correction is counted: three to one.
  */
 export const BUILT_IN_ODDS = 3;
+/**
+ * Similar mail can overturn the built-in answer only when at least this many of your
+ * corrections (one per sender per action) moved mail sharing a specific clue with it
+ * the same way. One correction is never enough on its own.
+ */
+export const MIN_SUPPORT = 2;
+/**
+ * How strongly a clue's evidence is pulled toward how common it is in your inbox, in
+ * corrections' worth. With few corrections a clue most mail carries says almost nothing.
+ */
+export const BACKGROUND_WEIGHT = 2;
+/** A rule for a whole domain needs corrections from at least this many addresses there. */
+export const MIN_DOMAIN_ADDRESSES = 2;
+/** The demo mailbox's own domain: the demo account is alex@northwind.example. */
+export const DEMO_OWN_DOMAIN = "northwind.example";
 /** Corrections kept. The oldest go first; the newest are what you meant most recently. */
 export const MAX_CORRECTIONS = 300;
 /** Clues kept per correction (patterns and headers first, words last). */
@@ -113,6 +135,12 @@ export type FilterCorrection = {
   domain: string;
   clues: string[];
   at: number;
+  /**
+   * The action this correction was part of. Corrections from one action and one sender
+   * count as one decision. Absent in snapshots written before it existed, where each
+   * correction counts on its own.
+   */
+  batch?: number;
 };
 
 export type FilterLearningSnapshot = {
@@ -128,17 +156,64 @@ export type SenderRule = {
   /** The address, or the domain for a domain rule. */
   key: string;
   kind: "address" | "domain";
-  /** Moved in more often than out. */
+  /** Moved in (true) or out (false); a sender with both has no rule. */
   into: boolean;
-  /** How many messages tipped the balance (moved in minus moved out, or the reverse). */
+  /** How many decisions made the rule (one per message, or per sender per action). */
   count: number;
 };
 
-/** Per-filter tallies, the naive-Bayes side. */
+/**
+ * How common each clue is in the mail being sorted: the background a clue's evidence is
+ * smoothed toward. Built from the inbox on this device (`clueBackground`).
+ */
+export type ClueBackground = {
+  readonly size: number;
+  readonly counts: ReadonlyMap<string, number>;
+};
+
+/** No background: every clue is taken to be on half of all mail. Conservative. */
+export const EMPTY_BACKGROUND: ClueBackground = { size: 0, counts: new Map() };
+
+/** Share of mail carrying a clue, smoothed so it is never exactly 0 or 1. */
+function backgroundRate(background: ClueBackground, clue: string): number {
+  return ((background.counts.get(clue) ?? 0) + 1) / (background.size + 2);
+}
+
+const backgroundCache = new WeakMap<readonly Email[], ClueBackground>();
+/** The clue background of a set of messages, memoised per array. */
+export function clueBackground(emails: readonly Email[]): ClueBackground {
+  const hit = backgroundCache.get(emails);
+  if (hit) return hit;
+  const counts = new Map<string, number>();
+  for (const email of emails) {
+    for (const clue of new Set(cachedClues(email))) counts.set(clue, (counts.get(clue) ?? 0) + 1);
+  }
+  const background = { size: emails.length, counts };
+  backgroundCache.set(emails, background);
+  return background;
+}
+
+/**
+ * One decision: a single correction, or every correction one action made for one sender.
+ * `clues` holds the share of its messages carrying each clue (1 for a single message).
+ */
+type Unit = {
+  filter: LearnableFilter;
+  into: boolean;
+  address: string;
+  domain: string;
+  messages: string[];
+  clues: Map<string, number>;
+};
+
+/** Per-filter tallies, the naive-Bayes side, counted in decisions. */
 type ClueStats = {
   moved: { in: number; out: number };
   clues: Map<string, { in: number; out: number }>;
+  units: Unit[];
 };
+
+type Tally = { in: number; out: number; addressesIn: Set<string>; addressesOut: Set<string> };
 
 /** Why a message is where it is, for one filter. Read by `filterExplain.ts`. */
 export type Decision =
@@ -166,7 +241,11 @@ export class FilterLearning {
     return new FilterLearning(owner, []);
   }
 
-  /** Revive a stored snapshot, dropping anything malformed. A wrong version starts fresh. */
+  /**
+   * Revive a stored snapshot, dropping anything malformed. A wrong version starts fresh.
+   * Snapshots from before `batch` existed load as they are: each correction is its own
+   * decision, and the sender and similarity rules here apply to them unchanged.
+   */
   static fromSnapshot(raw: unknown): FilterLearning {
     if (!raw || typeof raw !== "object") return FilterLearning.empty();
     const snapshot = raw as Partial<FilterLearningSnapshot>;
@@ -190,10 +269,21 @@ export class FilterLearning {
   }
 
   /**
-   * Record one correction. A second correction for the same message and filter
-   * replaces the first, so changing your mind is not counted twice.
+   * The account's own domain, which never gets a domain rule: everyone you work with
+   * writes from it, and one colleague's mail says nothing about another's.
    */
-  record(email: Email, filter: LearnableFilter, into: boolean, at: number): FilterLearning {
+  get ownDomain(): string {
+    if (!this.owner) return "";
+    if (this.owner === "demo") return DEMO_OWN_DOMAIN;
+    return this.owner.includes("@") ? registrableDomain(this.owner.toLowerCase()) : "";
+  }
+
+  /**
+   * Record one correction. A second correction for the same message and filter
+   * replaces the first, so changing your mind is not counted twice. Pass the same
+   * `batch` for every correction one action makes.
+   */
+  record(email: Email, filter: LearnableFilter, into: boolean, at: number, batch?: number): FilterLearning {
     const address = senderAddress(email);
     const domain = registrableDomain(address);
     const clues = cachedClues(email).slice(0, MAX_CLUES);
@@ -205,6 +295,7 @@ export class FilterLearning {
       domain: canRuleDomain(domain) ? domain : "",
       clues,
       at,
+      ...(batch !== undefined ? { batch } : {}),
     };
     const kept = this.corrections.filter((c) => !(c.message === email.gmailId && c.filter === filter));
     kept.push(correction);
@@ -239,47 +330,101 @@ export class FilterLearning {
 
   // ── Derived, memoised on this instance ──
 
+  private unitsCache: Unit[] | null = null;
   private statsCache: Map<LearnableFilter, ClueStats> | null = null;
-  private senderCache: Map<string, { in: number; out: number }> | null = null;
+  private senderCache: Map<string, Tally> | null = null;
+
+  /** The corrections grouped into decisions: one per message, or per sender per action. */
+  private units(): Unit[] {
+    if (this.unitsCache) return this.unitsCache;
+    const groups = new Map<string, FilterCorrection[]>();
+    for (const c of this.corrections) {
+      const who = c.address || c.domain || `message:${c.message}`;
+      const key =
+        c.batch !== undefined
+          ? `${c.filter}|${c.into}|batch:${c.batch}|${who}`
+          : `${c.filter}|message:${c.message}`;
+      const list = groups.get(key);
+      if (list) list.push(c);
+      else groups.set(key, [c]);
+    }
+    const units: Unit[] = [];
+    for (const list of groups.values()) {
+      const first = list[0];
+      const clues = new Map<string, number>();
+      for (const c of list) for (const clue of new Set(c.clues)) clues.set(clue, (clues.get(clue) ?? 0) + 1 / list.length);
+      units.push({
+        filter: first.filter,
+        into: first.into,
+        address: first.address,
+        domain: first.domain,
+        messages: list.map((c) => c.message),
+        clues,
+      });
+    }
+    this.unitsCache = units;
+    return units;
+  }
 
   private stats(): Map<LearnableFilter, ClueStats> {
     if (this.statsCache) return this.statsCache;
     const map = new Map<LearnableFilter, ClueStats>();
-    for (const c of this.corrections) {
-      let entry = map.get(c.filter);
+    for (const unit of this.units()) {
+      let entry = map.get(unit.filter);
       if (!entry) {
-        entry = { moved: { in: 0, out: 0 }, clues: new Map() };
-        map.set(c.filter, entry);
+        entry = { moved: { in: 0, out: 0 }, clues: new Map(), units: [] };
+        map.set(unit.filter, entry);
       }
-      entry.moved[c.into ? "in" : "out"] += 1;
-      for (const clue of c.clues) {
+      entry.units.push(unit);
+      entry.moved[unit.into ? "in" : "out"] += 1;
+      for (const [clue, share] of unit.clues) {
         let tally = entry.clues.get(clue);
         if (!tally) {
           tally = { in: 0, out: 0 };
           entry.clues.set(clue, tally);
         }
-        tally[c.into ? "in" : "out"] += 1;
+        tally[unit.into ? "in" : "out"] += share;
       }
     }
     this.statsCache = map;
     return map;
   }
 
-  /** Balance per `filter|kind|key`. */
-  private senders(): Map<string, { in: number; out: number }> {
+  /** Decisions per `filter|kind|key`, with the distinct addresses behind each direction. */
+  private senders(): Map<string, Tally> {
     if (this.senderCache) return this.senderCache;
-    const map = new Map<string, { in: number; out: number }>();
-    const bump = (key: string, into: boolean) => {
-      const tally = map.get(key) ?? { in: 0, out: 0 };
-      tally[into ? "in" : "out"] += 1;
-      map.set(key, tally);
+    const map = new Map<string, Tally>();
+    const bump = (key: string, unit: Unit) => {
+      let tally = map.get(key);
+      if (!tally) {
+        tally = { in: 0, out: 0, addressesIn: new Set(), addressesOut: new Set() };
+        map.set(key, tally);
+      }
+      tally[unit.into ? "in" : "out"] += 1;
+      if (unit.address) (unit.into ? tally.addressesIn : tally.addressesOut).add(unit.address);
     };
-    for (const c of this.corrections) {
-      if (c.address) bump(`${c.filter}|address|${c.address}`, c.into);
-      if (c.domain) bump(`${c.filter}|domain|${c.domain}`, c.into);
+    for (const unit of this.units()) {
+      if (unit.address) bump(`${unit.filter}|address|${unit.address}`, unit);
+      if (unit.domain) bump(`${unit.filter}|domain|${unit.domain}`, unit);
     }
     this.senderCache = map;
     return map;
+  }
+
+  /**
+   * The rule a tally makes, or null. Corrections both ways make no rule; a domain also
+   * needs `MIN_DOMAIN_ADDRESSES` distinct addresses, and is never the account's own or a
+   * shared one.
+   */
+  private ruleFrom(filter: LearnableFilter, kind: "address" | "domain", key: string): SenderRule | null {
+    if (!key) return null;
+    if (kind === "domain" && (!canRuleDomain(key) || key === this.ownDomain)) return null;
+    const tally = this.senders().get(`${filter}|${kind}|${key}`);
+    if (!tally) return null;
+    if (tally.in > 0 && tally.out > 0) return null;
+    const into = tally.in > 0;
+    if (kind === "domain" && (into ? tally.addressesIn : tally.addressesOut).size < MIN_DOMAIN_ADDRESSES) return null;
+    return { filter, key, kind, into, count: into ? tally.in : tally.out };
   }
 
   /** The filters that have any correction at all. */
@@ -287,40 +432,34 @@ export class FilterLearning {
     return new Set(this.stats().keys());
   }
 
+  /** Corrections stored for a filter (one per message). */
   correctionCount(filter: LearnableFilter): number {
-    const moved = this.stats().get(filter)?.moved;
-    return moved ? moved.in + moved.out : 0;
+    return this.corrections.filter((c) => c.filter === filter).length;
   }
 
   /**
-   * Sender rules, as Settings lists them: one per company domain, else one per address,
-   * leaving out senders whose corrections cancel out.
+   * Sender rules, as Settings lists them: domain rules, then address rules — leaving out
+   * an address that only repeats its domain's rule, and senders with no rule.
    */
   senderRules(filter?: LearnableFilter): SenderRule[] {
     const rules: SenderRule[] = [];
-    const domainsShown = new Set<string>();
-    for (const [key, tally] of this.senders()) {
-      const [f, kind, id] = key.split("|") as [LearnableFilter, "address" | "domain", string];
-      if (filter && f !== filter) continue;
-      const net = tally.in - tally.out;
-      if (net === 0) continue;
-      if (kind === "domain") {
-        domainsShown.add(`${f}|${id}`);
-        rules.push({ filter: f, key: id, kind, into: net > 0, count: Math.abs(net) });
-      }
+    const keys = [...this.senders().keys()].map((key) => key.split("|") as [LearnableFilter, "address" | "domain", string]);
+    const domainRules = new Map<string, SenderRule>();
+    for (const [f, kind, id] of keys) {
+      if (kind !== "domain" || (filter && f !== filter)) continue;
+      const rule = this.ruleFrom(f, kind, id);
+      if (!rule) continue;
+      domainRules.set(`${f}|${id}`, rule);
+      rules.push(rule);
     }
-    for (const [key, tally] of this.senders()) {
-      const [f, kind, id] = key.split("|") as [LearnableFilter, "address" | "domain", string];
-      if (filter && f !== filter) continue;
-      if (kind !== "address") continue;
-      const net = tally.in - tally.out;
-      if (net === 0) continue;
+    for (const [f, kind, id] of keys) {
+      if (kind !== "address" || (filter && f !== filter)) continue;
+      const rule = this.ruleFrom(f, kind, id);
+      if (!rule) continue;
       // An address under a domain rule is shown as that domain, unless it disagrees.
-      const domainRule = domainsShown.has(`${f}|${registrableDomain(id)}`);
-      const domainTally = this.senders().get(`${f}|domain|${registrableDomain(id)}`);
-      const domainInto = domainTally ? domainTally.in - domainTally.out > 0 : undefined;
-      if (domainRule && domainInto === net > 0) continue;
-      rules.push({ filter: f, key: id, kind, into: net > 0, count: Math.abs(net) });
+      const domainRule = domainRules.get(`${f}|${registrableDomain(id)}`);
+      if (domainRule && domainRule.into === rule.into) continue;
+      rules.push(rule);
     }
     return rules.sort(
       (a, b) =>
@@ -340,98 +479,91 @@ export class FilterLearning {
   /**
    * The sender rule that applies to this message. An address rule beats its domain's
    * when the two disagree; when they agree the domain is the one named, since that is
-   * the rule Settings lists.
+   * the rule Settings lists. An address with corrections both ways has no rule, and
+   * neither does its domain then.
    */
   senderRuleFor(email: Email, filter: LearnableFilter): SenderRule | null {
     const address = senderAddress(email);
-    const domain = registrableDomain(address);
-    const tallyOf = (kind: "address" | "domain", key: string): SenderRule | null => {
-      if (!key || (kind === "domain" && !canRuleDomain(key))) return null;
-      const tally = this.senders().get(`${filter}|${kind}|${key}`);
-      if (!tally || tally.in === tally.out) return null;
-      const net = tally.in - tally.out;
-      return { filter, key, kind, into: net > 0, count: Math.abs(net) };
-    };
-    const byAddress = tallyOf("address", address);
-    const byDomain = tallyOf("domain", domain);
+    const byAddress = this.ruleFrom(filter, "address", address);
+    const byDomain = this.ruleFrom(filter, "domain", registrableDomain(address));
     if (byAddress && byDomain && byAddress.into === byDomain.into) return byDomain;
     return byAddress ?? byDomain;
   }
 
   /**
-   * Naive Bayes for one filter: the built-in answer as the prior (`BUILT_IN_ODDS` to one),
-   * then one likelihood ratio per clue the message shares with your corrections, each
-   * Laplace-smoothed from the counts. Returns the clues that pushed toward the answer,
-   * strongest first, for the explanation.
+   * Naive Bayes for one filter, when it may overturn the built-in answer: the built-in
+   * answer as the prior (`BUILT_IN_ODDS` to one), then one likelihood ratio per specific
+   * clue the message shares with your corrections, each smoothed toward the clue's
+   * background rate. Each clue is capped at the prior's own weight, and words together at
+   * the strongest single word, so no one clue can overturn the built-in answer. Returns the
+   * flipped answer, the clues that pushed toward it (strongest first) and how many of
+   * your decisions back it — or null when the built-in answer stands.
    */
   private similarEvidence(
     email: Email,
     filter: LearnableFilter,
     builtIn: boolean,
-  ): { into: boolean; clues: string[] } | null {
+    background: ClueBackground,
+  ): { into: boolean; clues: string[]; support: number } | null {
     const stats = this.stats().get(filter);
     if (!stats) return null;
     const { moved } = stats;
-    let logOdds = (builtIn ? 1 : -1) * Math.log(BUILT_IN_ODDS);
+    const prior = Math.log(BUILT_IN_ODDS);
+    // No single clue may outweigh the built-in rules on its own: overturning them takes
+    // at least two different specific clues pointing the same way (a pattern and the
+    // words, say), never one rare word or one pattern alone.
+    const cap = (weight: number) => Math.max(-prior, Math.min(prior, weight));
+    let logOdds = (builtIn ? 1 : -1) * prior;
     const pushes: { clue: string; weight: number }[] = [];
+    const specific = new Set<string>();
+    let words = 0;
+    let strongestWord = 0;
     for (const clue of cachedClues(email)) {
+      if (isGenericClue(clue)) continue;
       const tally = stats.clues.get(clue);
       if (!tally) continue;
-      const pIn = (tally.in + 1) / (moved.in + 2);
-      const pOut = (tally.out + 1) / (moved.out + 2);
-      const weight = Math.log(pIn / pOut);
-      logOdds += weight;
+      specific.add(clue);
+      const weight = cap(clueWeight(tally, moved, backgroundRate(background, clue)));
+      if (weight === 0) continue;
       pushes.push({ clue, weight });
+      if (clueKind(clue) === "word") {
+        words += weight;
+        strongestWord = Math.max(strongestWord, Math.abs(weight));
+      } else {
+        logOdds += weight;
+      }
     }
-    if (pushes.length === 0) return null;
+    // Words come together (a template's boilerplate is many words, one fact), so all of
+    // them together are worth at most the strongest one.
+    logOdds += Math.max(-strongestWord, Math.min(strongestWord, words));
     const into = logOdds > 0;
+    if (into === builtIn) return null;
+    // Similarity alone never takes mail out of Security or Important: missing a security
+    // notice or something important costs far more than an extra one shown.
+    if (!into && (filter === "security" || filter === "important")) return null;
+    const support = stats.units.filter((unit) => unit.into === into && [...specific].some((clue) => (unit.clues.get(clue) ?? 0) > 0)).length;
+    if (support < MIN_SUPPORT) return null;
     const toward = pushes
       .filter((push) => (into ? push.weight > 0 : push.weight < 0))
       .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight) || kindRank(a.clue) - kindRank(b.clue))
       .map((push) => push.clue);
-    return { into, clues: toward };
+    return { into, clues: toward, support };
   }
 
   /**
-   * How many of your corrections for this filter moved mail like this one the same way:
-   * from the same sender, or sharing two clues that are not words, or three of any kind.
-   * The message itself is not counted.
+   * The whole decision for one filter, with its reason. `background` is the clue
+   * background of the mail being sorted (`clueBackground`); without one every clue is
+   * taken to be common, which makes similar mail hard to overturn anything.
    */
-  similarCount(email: Email, filter: LearnableFilter, into: boolean): number {
-    const address = senderAddress(email);
-    const domain = registrableDomain(address);
-    const mine = new Set(cachedClues(email));
-    let count = 0;
-    for (const c of this.corrections) {
-      if (c.filter !== filter || c.into !== into || c.message === email.gmailId) continue;
-      if ((c.address && c.address === address) || (c.domain && c.domain === domain)) {
-        count += 1;
-        continue;
-      }
-      let shared = 0;
-      let strong = 0;
-      for (const clue of c.clues) {
-        if (!mine.has(clue)) continue;
-        shared += 1;
-        if (clueKind(clue) !== "word") strong += 1;
-      }
-      if (strong >= 2 || shared >= 3) count += 1;
-    }
-    return count;
-  }
-
-  /** The whole decision for one filter, with its reason. */
-  decide(email: Email, filter: LearnableFilter, signals: EmailSignals): Decision {
+  decide(email: Email, filter: LearnableFilter, signals: EmailSignals, background: ClueBackground = EMPTY_BACKGROUND): Decision {
     const builtIn = builtInSays(filter, email, signals);
     if (!this.filtersWithCorrections().has(filter)) return { by: "built-in", into: builtIn };
     const mine = this.messageAnswer(email.gmailId, filter);
     if (mine !== undefined) return { by: "message", into: mine };
     const rule = this.senderRuleFor(email, filter);
     if (rule) return { by: "sender", into: rule.into, rule };
-    const similar = this.similarEvidence(email, filter, builtIn);
-    if (similar && similar.into !== builtIn) {
-      return { by: "similar", into: similar.into, clues: similar.clues, similar: this.similarCount(email, filter, similar.into) };
-    }
+    const similar = this.similarEvidence(email, filter, builtIn, background);
+    if (similar) return { by: "similar", into: similar.into, clues: similar.clues, similar: similar.support };
     return { by: "built-in", into: builtIn };
   }
 
@@ -439,16 +571,36 @@ export class FilterLearning {
    * The signals with every learned answer applied as a per-filter override. Returns the
    * same object when nothing changed, so an untouched message costs nothing downstream.
    */
-  apply(email: Email, signals: EmailSignals): EmailSignals {
+  apply(email: Email, signals: EmailSignals, background: ClueBackground = EMPTY_BACKGROUND): EmailSignals {
     let next = signals;
     for (const filter of this.filtersWithCorrections()) {
-      const decision = this.decide(email, filter, signals);
+      const decision = this.decide(email, filter, signals, background);
       if (decision.by === "built-in") continue;
       if (decision.into === builtInSays(filter, email, signals)) continue;
       next = withAnswer(next, filter, decision.into);
     }
     return next;
   }
+}
+
+/**
+ * One clue's log-likelihood ratio. Each side is the clue's share of your decisions that
+ * way, smoothed toward its background rate by `BACKGROUND_WEIGHT` decisions. A clue
+ * never votes against the direction it was seen in more often: with lopsided counts the
+ * smoothing alone could flip the sign, so that case is zero.
+ */
+export function clueWeight(
+  tally: { in: number; out: number },
+  moved: { in: number; out: number },
+  rate: number,
+): number {
+  const pIn = (tally.in + BACKGROUND_WEIGHT * rate) / (moved.in + BACKGROUND_WEIGHT);
+  const pOut = (tally.out + BACKGROUND_WEIGHT * rate) / (moved.out + BACKGROUND_WEIGHT);
+  const weight = Math.log(pIn / pOut);
+  const shareIn = moved.in > 0 ? tally.in / moved.in : 0;
+  const shareOut = moved.out > 0 ? tally.out / moved.out : 0;
+  if ((weight > 0 && shareIn <= shareOut) || (weight < 0 && shareOut <= shareIn)) return 0;
+  return weight;
 }
 
 /** Patterns before headers before the category before words. */
@@ -478,7 +630,8 @@ function isCorrection(raw: unknown): raw is FilterCorrection {
     Array.isArray(c.clues) &&
     c.clues.every((clue) => typeof clue === "string") &&
     typeof c.at === "number" &&
-    Number.isFinite(c.at)
+    Number.isFinite(c.at) &&
+    (c.batch === undefined || (typeof c.batch === "number" && Number.isFinite(c.batch)))
   );
 }
 
@@ -503,18 +656,22 @@ export function capVocabulary(corrections: readonly FilterCorrection[]): FilterC
   return corrections.map((c) => ({ ...c, clues: c.clues.filter((clue) => !drop.has(clue)).slice(0, MAX_CLUES) }));
 }
 
-/** Apply a model to a whole signal map. The map is returned as-is when nothing is learned. */
+/**
+ * Apply a model to a whole signal map, with the clue background of those messages. The
+ * map is returned as-is when nothing is learned.
+ */
 export function applyFilterLearning(
   emails: readonly Email[],
   signals: ReadonlyMap<number, EmailSignals>,
   model: FilterLearning,
+  background: ClueBackground = clueBackground(emails),
 ): ReadonlyMap<number, EmailSignals> {
   if (model.isEmpty) return signals;
   const out = new Map(signals);
   for (const email of emails) {
     const base = signals.get(email.id);
     if (!base) continue;
-    const next = model.apply(email, base);
+    const next = model.apply(email, base, background);
     if (next !== base) out.set(email.id, next);
   }
   return out;
