@@ -4400,7 +4400,11 @@ try {
 
     // Label as…, from the row menu: the user's Gmail labels with a checkbox each.
     // The demo seeds four, so the picker has something to show without an account.
-    await rowButton(5).focus();
+    // By message id rather than row index: the list is windowed, so the nth mounted row
+    // can be a different message by the time the picker is reopened below.
+    const labelledId = await rowButton(5).getAttribute("data-message-id");
+    const labelledRow = d.locator(`[data-row-count] button[data-message-id="${labelledId}"]`);
+    await labelledRow.focus();
     await d.keyboard.press("Shift+F10");
     await d.waitForTimeout(150);
     check("the row menu offers Label as…", (await d.locator("[data-menu='row'] [data-menu-item='label-as']").count()) === 1);
@@ -4450,15 +4454,20 @@ try {
     check("Apply closes the picker", (await picker.count()) === 0);
     check("and says so", (await d.getByText("Labels updated.").count()) > 0);
     // Reopened on the same message, the picker shows what was applied.
-    await rowButton(5).focus();
+    await labelledRow.scrollIntoViewIfNeeded().catch(() => undefined);
+    await labelledRow.focus();
     await d.keyboard.press("Shift+F10");
     await d.waitForTimeout(150);
     await d.locator("[data-menu='row'] [data-menu-item='label-as']").click();
     await picker.waitFor({ timeout: 5_000 }).catch(() => undefined);
+    const stuck = {
+      family: await picker.locator('[data-label-option="Label_4"]').getAttribute("aria-checked").catch(() => null),
+      made: await picker.locator("[data-label-option]", { hasText: "Smoke/Made here" }).getAttribute("aria-checked").catch(() => null),
+    };
     check(
       "and the labels stick on the message",
-      (await picker.locator('[data-label-option="Label_4"]').getAttribute("aria-checked")) === familyAfter &&
-        (await picker.locator("[data-label-option]", { hasText: "Smoke/Made here" }).getAttribute("aria-checked")) === "true",
+      stuck.family === familyAfter && stuck.made === "true",
+      JSON.stringify({ ...stuck, expected: familyAfter, id: labelledId }),
     );
     await d.keyboard.press("Escape");
     await picker.waitFor({ state: "detached", timeout: 3_000 }).catch(() => undefined);
