@@ -27,6 +27,25 @@ export function settingsLayoutFor(width: number): SettingsLayout {
   return width >= WIDE_SETTINGS_MIN ? "three" : "two";
 }
 
+/**
+ * The category column's width on the desktop layouts: about an eighth of the window,
+ * never so narrow a category name breaks badly (160px) nor wider than the names need
+ * (240px). The controls and the explanation share the rest, controls first.
+ */
+export const SETTINGS_NAV_WIDTH = "clamp(160px, 12.5vw, 240px)";
+
+/** `grid-template-columns` for a desktop layout (the phone has no columns). */
+export function settingsColumns(layout: Exclude<SettingsLayout, "phone">): string {
+  return layout === "three"
+    ? `${SETTINGS_NAV_WIDTH} minmax(0, 60fr) minmax(0, 40fr)`
+    : `${SETTINGS_NAV_WIDTH} minmax(0, 1fr)`;
+}
+
+/** The category column's width in px at a window width, for tests (mirrors the clamp). */
+export function settingsNavWidthAt(windowWidth: number): number {
+  return Math.min(240, Math.max(160, windowWidth * 0.125));
+}
+
 // ── Categories ──────────────────────────────────────────────────────────────
 
 /** Arrow keys in the category list. Wraps; returns the current id for any other key. */

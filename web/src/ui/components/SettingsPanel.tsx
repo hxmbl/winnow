@@ -26,6 +26,7 @@ import {
   moveCategory,
   pointAt,
   selectCategory,
+  settingsColumns,
   visibleCategories,
   type SettingsLayout,
 } from "../settingsView";
@@ -360,15 +361,10 @@ export function Settings(props: SettingsProps) {
         <div
           data-settings-layout={layout}
           className="grid h-full min-h-0 w-full"
-          style={{
-            gridTemplateColumns:
-              layout === "three"
-                ? "minmax(0, 27fr) minmax(0, 45fr) minmax(0, 28fr)"
-                : "minmax(13rem, 30fr) minmax(0, 70fr)",
-          }}
+          style={{ gridTemplateColumns: settingsColumns(layout) }}
         >
           {/* Left: Back, then the categories. */}
-          <div data-settings-column="nav" className="flex min-h-0 flex-col border-r border-hairline-soft px-4 py-4">
+          <div data-settings-column="nav" className="flex min-h-0 min-w-0 flex-col border-r border-hairline-soft px-2 py-4 min-[1400px]:px-3">
             <button type="button" data-settings-back="" onClick={props.onClose} className={`${BACK_BUTTON} self-start`}>
               <ArrowLeft size={16} aria-hidden="true" />
               Back
@@ -403,7 +399,7 @@ export function Settings(props: SettingsProps) {
                       choose(next);
                       tabRefs.current.get(next)?.focus();
                     }}
-                    className={`rounded-ctl px-3 py-2 text-left text-ui transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                    className={`rounded-ctl px-2.5 py-2 text-left text-ui leading-snug [overflow-wrap:anywhere] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
                       selected
                         ? "bg-surface-selected font-semibold text-ink"
                         : "font-medium text-ink-muted hover:bg-surface-hover hover:text-ink-body"

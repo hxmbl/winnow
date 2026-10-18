@@ -6301,9 +6301,9 @@ try {
       }),
     );
     check(
-      "about 27%, 45% and 28% of the window, left to right, full height",
+      "the categories an eighth of the window (180px), the rest 60/40 controls and explanation, left to right, full height",
       columns.every(Boolean) &&
-        Math.abs(columns[0].width - 389) <= 12 && Math.abs(columns[1].width - 648) <= 12 && Math.abs(columns[2].width - 403) <= 12 &&
+        Math.abs(columns[0].width - 180) <= 2 && Math.abs(columns[1].width - 756) <= 12 && Math.abs(columns[2].width - 504) <= 12 &&
         columns[0].x === 0 && columns[1].x > columns[0].x && columns[2].x > columns[1].x &&
         columns.every((column) => column.height === 900),
       JSON.stringify(columns),

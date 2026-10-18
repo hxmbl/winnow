@@ -170,3 +170,15 @@ describe("popover placement", () => {
     expect(place.top).toBeGreaterThanOrEqual(8);
   });
 });
+
+describe("settings columns", () => {
+  it("gives the categories about an eighth of the window, 160px to 240px", async () => {
+    const { settingsNavWidthAt, settingsColumns, SETTINGS_NAV_WIDTH } = await import("./settingsView");
+    expect(SETTINGS_NAV_WIDTH).toBe("clamp(160px, 12.5vw, 240px)");
+    expect(settingsNavWidthAt(1440)).toBe(180);
+    expect(settingsNavWidthAt(900)).toBe(160);
+    expect(settingsNavWidthAt(2400)).toBe(240);
+    expect(settingsColumns("three").startsWith(SETTINGS_NAV_WIDTH)).toBe(true);
+    expect(settingsColumns("two")).toBe(`${SETTINGS_NAV_WIDTH} minmax(0, 1fr)`);
+  });
+});
