@@ -1,7 +1,7 @@
 /**
  * Where you can go: the sidebar, an overlay on every screen size.
  *
- * It draws `NavSections` (Inbox with its count, then "Mail", the other folders) and the
+ * It draws `NavSections` (Inbox with its count, then the other folders under a hairline) and the
  * account footer. The smart filters are not here: they are the filter rail above the
  * list on the desktop and the chip row above the dock on a phone (`FilterStrip`).
  *
@@ -120,7 +120,6 @@ function NavSections({
   // the dock finds Inbox at the bottom, on the pill's line, and the rarer folders further
   // up: Spam, Trash, Drafts, then Archive and Sent, then Inbox. The desktop sidebar reads top-down as before.
   const reversed = touch;
-  const headingId = touch ? "nav-mail-touch" : "nav-mail";
 
   const inbox = (
     <ul className="flex flex-col">
@@ -147,17 +146,13 @@ function NavSections({
     </ul>
   );
 
+  // No group heading: Inbox on its own, then the other folders, set apart by a hairline
+  // and a little space. The folder names say what they are; a "Mail" title over them said
+  // nothing a glance does not. Screen readers get the group's name from `aria-label`.
   const mail = folders.length > 0 && (
         <>
-          <h3
-            id={headingId}
-            // The phone's panel has no group heading on screen (the divider under the
-            // account does that job); it stays for a screen reader.
-            className={touch ? "sr-only" : "px-2.5 pb-1 pt-4 text-meta font-medium text-ink-subtle"}
-          >
-            Mail
-          </h3>
-          <ul aria-labelledby={headingId} className="flex flex-col">
+          <div aria-hidden="true" data-nav-divider="" className={touch ? "hidden" : "mx-2.5 my-2 border-t border-hairline-soft"} />
+          <ul aria-label="Folders" className="flex flex-col">
             {(reversed ? panelOrder(folders) : folders).map((folder) => {
 
               const current = mailbox === folder.id;

@@ -781,6 +781,13 @@ try {
   const sideText = await sidebar.evaluate((side) => ({
     brand: side.textContent.includes("Winnow"),
     sections: [...side.querySelectorAll("h3")].map((h) => h.textContent.trim()),
+    divider: (() => {
+      const line = side.querySelector("[data-nav-divider]");
+      const inbox = side.querySelector('button[data-nav="inbox"]')?.getBoundingClientRect();
+      const first = side.querySelector("[data-nav-folder]")?.getBoundingClientRect();
+      const box = line?.getBoundingClientRect();
+      return Boolean(box && inbox && first && box.height <= 1 && getComputedStyle(line).borderTopWidth === "1px" && box.top >= inbox.bottom && box.top <= first.top);
+    })(),
     folders: [...side.querySelectorAll("[data-nav-folder]")].map((b) => b.getAttribute("data-nav-folder")),
     account: side.querySelector("[data-nav-account]")?.textContent ?? "",
     gear: Boolean(side.querySelector('[data-nav-account] button[aria-label="Settings"]')),
@@ -788,8 +795,8 @@ try {
     nav: Boolean(side.querySelector("nav")),
   }));
   check(
-    "top to bottom: Winnow, Inbox, Mail (Sent, Archive, Trash…), the demo account and a gear; no Labels",
-    sideText.brand && JSON.stringify(sideText.sections) === JSON.stringify(["Mail"]) &&
+    "top to bottom: Winnow, Inbox, a hairline, the folders (Sent, Archive, Trash…), the demo account and a gear; no section headings, no Labels",
+    sideText.brand && sideText.sections.length === 0 && sideText.divider &&
       ["sent", "archive", "trash"].every((id) => sideText.folders.includes(id)) &&
       sideText.account.includes("Demo account") && sideText.gear && sideText.nav,
     JSON.stringify(sideText),
