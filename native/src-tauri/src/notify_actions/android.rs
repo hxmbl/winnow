@@ -40,7 +40,10 @@ struct EventHandler {
     handler: Channel,
 }
 
-pub fn register(app: &AppHandle, api: PluginApi<Wry, ()>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn register(
+    app: &AppHandle,
+    api: PluginApi<Wry, ()>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let handle = api.register_android_plugin(KOTLIN_PACKAGE, KOTLIN_CLASS)?;
     let for_events = handle.clone();
     let events_app = app.clone();
@@ -49,7 +52,9 @@ pub fn register(app: &AppHandle, api: PluginApi<Wry, ()>) -> Result<(), Box<dyn 
         EventHandler {
             handler: Channel::new(move |body| {
                 let request = match body {
-                    InvokeResponseBody::Json(json) => serde_json::from_str::<ActionRequest>(&json).ok(),
+                    InvokeResponseBody::Json(json) => {
+                        serde_json::from_str::<ActionRequest>(&json).ok()
+                    }
                     _ => None,
                 };
                 if let Some(request) = request {
@@ -108,7 +113,10 @@ fn run(app: &AppHandle, handle: &PluginHandle<Wry>, request: ActionRequest) {
     let mut transport = |exchange: &HttpRequest| -> HttpResponse {
         handle
             .run_mobile_plugin::<HttpResponse>("http", exchange)
-            .unwrap_or(HttpResponse { status: 0, body: String::new() })
+            .unwrap_or(HttpResponse {
+                status: 0,
+                body: String::new(),
+            })
     };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

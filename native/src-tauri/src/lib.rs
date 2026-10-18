@@ -25,10 +25,10 @@
 pub mod commands;
 pub mod deep_link;
 pub mod files;
+pub mod notify_actions;
 pub mod oauth;
 pub mod scheduler;
 pub mod secrets;
-pub mod notify_actions;
 #[cfg(desktop)]
 pub mod tray;
 

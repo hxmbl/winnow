@@ -117,10 +117,16 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
 pub fn confirm(app: &AppHandle, result: &ActionResult) {
     #[cfg(target_os = "linux")]
     {
-        let id = app.try_state::<Shown>().and_then(|shown| shown.0.lock().get(&result.message_id).copied());
+        let id = app
+            .try_state::<Shown>()
+            .and_then(|shown| shown.0.lock().get(&result.message_id).copied());
         let mut n = base();
         n.summary(&result.title).body(&result.text);
-        n.timeout(notify_rust::Timeout::Milliseconds(if result.failed { 8000 } else { 3000 }));
+        n.timeout(notify_rust::Timeout::Milliseconds(if result.failed {
+            8000
+        } else {
+            3000
+        }));
         if let Some(id) = id {
             n.id(id);
         }
@@ -148,9 +154,14 @@ fn base() -> notify_rust::Notification {
     // dev build under `target/` has none registered and would show nothing with it.
     #[cfg(target_os = "windows")]
     if let Ok(exe) = std::env::current_exe() {
-        let dir = exe.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        let dir = exe
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         let sep = std::path::MAIN_SEPARATOR;
-        if !(dir.ends_with(&format!("{sep}target{sep}debug")) || dir.ends_with(&format!("{sep}target{sep}release"))) {
+        if !(dir.ends_with(&format!("{sep}target{sep}debug"))
+            || dir.ends_with(&format!("{sep}target{sep}release")))
+        {
             n.app_id("app.winnow.desktop");
         }
     }

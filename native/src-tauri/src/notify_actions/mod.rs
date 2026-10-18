@@ -58,7 +58,11 @@ fn yes() -> bool {
 
 impl Default for ActionSet {
     fn default() -> Self {
-        Self { reply: true, trash: true, read: true }
+        Self {
+            reply: true,
+            trash: true,
+            read: true,
+        }
     }
 }
 
@@ -113,7 +117,10 @@ impl NotificationBatch {
             message.title = clip(&message.title);
             message.subject = clip(&message.subject);
             message.preview = clip(&message.preview);
-            message.thread_id = message.thread_id.take().filter(|id| plan::valid_gmail_id(id));
+            message.thread_id = message
+                .thread_id
+                .take()
+                .filter(|id| plan::valid_gmail_id(id));
             // A head with no reply to make is dropped rather than half-used.
             message.reply_head = message
                 .reply_head
@@ -213,7 +220,14 @@ pub(crate) fn summary_text(batch: &NotificationBatch) -> (String, String) {
                 (only.title.clone(), only.subject.clone())
             }
         }
-        _ => (batch.summary_title.clone(), if batch.hide_preview { String::new() } else { batch.summary_body.clone() }),
+        _ => (
+            batch.summary_title.clone(),
+            if batch.hide_preview {
+                String::new()
+            } else {
+                batch.summary_body.clone()
+            },
+        ),
     }
 }
 
@@ -371,7 +385,14 @@ mod tests {
         assert_eq!(json["messageId"], 9);
         assert_eq!(json["gmailId"], "abc");
         assert_eq!(json["outcome"], "done");
-        let desktop = ActionEvent { outcome: None, origin: "desktop", ..event };
-        assert!(serde_json::to_value(&desktop).unwrap().get("outcome").is_none());
+        let desktop = ActionEvent {
+            outcome: None,
+            origin: "desktop",
+            ..event
+        };
+        assert!(serde_json::to_value(&desktop)
+            .unwrap()
+            .get("outcome")
+            .is_none());
     }
 }
