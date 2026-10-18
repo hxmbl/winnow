@@ -210,8 +210,9 @@ describe("R3: no single correction moves a whole domain", () => {
       if (i >= 1) expect(model.senderRuleFor(third, "urgent")).toBeNull();
       decisions.add(JSON.stringify(model.decide(third, "urgent", sig(find("Your Evri delivery")), background)));
     }
-    // Contradictory evidence ends in one stable answer, never a swing per step.
-    expect(decisions.size).toBeLessThanOrEqual(2);
+    // Contradictory evidence makes no rule and no similar-mail flip: the third address
+    // keeps the built-in answer at every step, never a swing per step.
+    expect([...decisions]).toEqual([JSON.stringify({ by: "built-in", into: member("urgent", find("Your Evri delivery"), base) })]);
     expect(model.senderRules().every((rule) => rule.kind === "address")).toBe(true);
   });
 });

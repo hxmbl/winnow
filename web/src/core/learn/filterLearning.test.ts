@@ -147,54 +147,99 @@ describe("FilterLearning", () => {
     expect(model.decide(email, "shipping", signalsOf(email))).toEqual({ by: "message", into: true });
   });
 
-  // Owner decision (R3): one correction makes a rule for that exact address only. A rule
-  // for the whole domain needs corrections from at least two distinct addresses there.
-  it("makes an address rule from one correction, and a domain rule only from two addresses", () => {
-    const fromA = evri(1); // notifications@mail.evri.com
-    const fromB = mail({ sender: "tracking@evri.com", subject: "Your parcel is with your neighbour", body: "We left it at number 12." });
-    const laterB = mail({ sender: "tracking@evri.com", subject: "Spring offers from Evri", body: "Send for less." });
-    const laterA = evri(5);
-    const fromC = mail({ sender: "depot@evri.com", subject: "Your parcel is at the depot", body: "Collect it any time after 2pm." });
+  // Owner decision (R3), the Evri case: one correction makes a rule for that exact address
+  // only. A rule for the whole domain needs corrections from at least two distinct
+  // addresses there, all the same way; conflicting corrections make no domain rule.
+  describe("Evri: a sender rule covers one address until two addresses agree", () => {
+    // Every message here is a delivery the built-in rules miss (no shipping phrase), so
+    // under the old one-correction domain rule each would have moved into Deliveries.
+    const fromA = () => evri(1); // notifications@mail.evri.com
+    const fromB = (n = 0) =>
+      mail({
+        sender: "tracking@evri.com",
+        subject: `Your Evri delivery is coming tomorrow${n ? ` (${n})` : ""}`,
+        body: `Good news, Priya is bringing it between 13:00 and 14:00 on Wednesday, 13 May. Tracking: H01HYA00987654${30 + n}.`,
+      });
+    const fromC = () =>
+      mail({
+        sender: "depot@evri.com",
+        subject: "Your Evri delivery is coming on Friday",
+        body: "Good news, Lee is bringing it between 09:00 and 10:00 on Friday, 15 May. Tracking: H01HYA0055555501.",
+      });
+    const shipping = (model: FilterLearning, email: Email) =>
+      matchesBuiltin("shipping", email, model.apply(email, signalsOf(email), inboxOf(email)), profile);
 
-    // (a) One correction from address A moves A's later mail, and nothing from B.
-    const once = FilterLearning.empty().record(fromA, "shipping", true, 1);
-    expect(once.decide(laterA, "shipping", signalsOf(laterA))).toMatchObject({ by: "sender", into: true });
-    expect(once.senderRuleFor(laterB, "shipping")).toBeNull();
-    expect(once.decide(laterB, "shipping", signalsOf(laterB))).toEqual({ by: "built-in", into: false });
-    expect(once.senderRules()).toEqual([
-      { filter: "shipping", key: "notifications@mail.evri.com", kind: "address", into: true, count: 1 },
-    ]);
-
-    // (b) Corrections from two distinct addresses make the domain rule, which then
-    // covers a third address.
-    expect(MIN_DOMAIN_ADDRESSES).toBe(2);
-    const twice = once.record(fromB, "shipping", true, 2);
-    expect(twice.decide(fromC, "shipping", signalsOf(fromC))).toMatchObject({
-      by: "sender",
-      into: true,
-      rule: { key: "evri.com", kind: "domain", count: 2 },
+    it("starts with every one of them outside Deliveries", () => {
+      for (const email of [fromA(), fromB(), fromC()]) {
+        expect(email.sender.endsWith("evri.com")).toBe(true);
+        expect(matchesBuiltin("shipping", email, signalsOf(email), profile)).toBe(false);
+      }
+      expect(new Set([fromA().sender, fromB().sender, fromC().sender]).size).toBe(3);
     });
-    expect(twice.senderRules()).toEqual([{ filter: "shipping", key: "evri.com", kind: "domain", into: true, count: 2 }]);
-  });
 
-  it("makes no domain rule when corrections on the domain conflict", () => {
-    const fromA = evri(1);
-    const fromB = mail({ sender: "tracking@evri.com", subject: "Your parcel is with your neighbour", body: "We left it at number 12." });
-    const fromD = mail({ sender: "offers@evri.com", subject: "Spring offers from Evri", body: "Send for less." });
-    const fromC = mail({ sender: "depot@evri.com", subject: "Your parcel is at the depot", body: "Collect it any time after 2pm." });
-    const model = FilterLearning.empty()
-      .record(fromA, "shipping", true, 1)
-      .record(fromB, "shipping", true, 2)
-      .record(fromD, "shipping", false, 3);
-    // Two addresses in, one out: conflicting evidence never produces the broad rule.
-    expect(model.senderRuleFor(fromC, "shipping")).toBeNull();
-    expect(model.decide(fromC, "shipping", signalsOf(fromC)).by).not.toBe("sender");
-    // Each address keeps its own, unmixed rule.
-    expect(model.senderRules().map((rule) => [rule.key, rule.kind, rule.into])).toEqual([
-      ["notifications@mail.evri.com", "address", true],
-      ["offers@evri.com", "address", false],
-      ["tracking@evri.com", "address", true],
-    ]);
+    it("(a) one correction from address A moves A's later mail, and nothing from address B", () => {
+      const once = FilterLearning.empty().record(fromA(), "shipping", true, 1);
+      const laterA = evri(5);
+      const laterB = fromB(1);
+      expect(once.decide(laterA, "shipping", signalsOf(laterA))).toMatchObject({ by: "sender", into: true });
+      expect(shipping(once, laterA)).toBe(true);
+      expect(once.senderRuleFor(laterB, "shipping")).toBeNull();
+      expect(once.decide(laterB, "shipping", signalsOf(laterB), inboxOf(laterB))).toEqual({ by: "built-in", into: false });
+      expect(shipping(once, laterB)).toBe(false);
+      expect(once.senderRules()).toEqual([
+        { filter: "shipping", key: "notifications@mail.evri.com", kind: "address", into: true, count: 1 },
+      ]);
+    });
+
+    it("(b) corrections from two distinct addresses make the domain rule, which covers a third address", () => {
+      expect(MIN_DOMAIN_ADDRESSES).toBe(2);
+      const twice = FilterLearning.empty().record(fromA(), "shipping", true, 1).record(fromB(), "shipping", true, 2);
+      const third = fromC();
+      expect(twice.decide(third, "shipping", signalsOf(third))).toMatchObject({
+        by: "sender",
+        into: true,
+        rule: { key: "evri.com", kind: "domain", count: 2 },
+      });
+      expect(shipping(twice, third)).toBe(true);
+      expect(twice.senderRules()).toEqual([{ filter: "shipping", key: "evri.com", kind: "domain", into: true, count: 2 }]);
+      // The domain rule reaches mail with nothing else in common with what was corrected.
+      const plain = mail({ sender: "hello@evri.com", subject: "About your recent order", body: "Thanks for choosing us." });
+      expect(twice.decide(plain, "shipping", signalsOf(plain), inboxOf(plain))).toMatchObject({ by: "sender", rule: { key: "evri.com" } });
+      // Two corrections from the same address are still only that address: no domain rule.
+      const sameAddress = FilterLearning.empty().record(fromB(), "shipping", true, 1).record(fromB(2), "shipping", true, 2);
+      expect(sameAddress.senderRuleFor(third, "shipping")).toBeNull();
+      expect(sameAddress.senderRuleFor(plain, "shipping")).toBeNull();
+      expect(shipping(sameAddress, plain)).toBe(false);
+    });
+
+    it("(c) conflicting corrections on the domain block the domain rule", () => {
+      const offers = mail({ sender: "offers@evri.com", subject: "Spring offers from Evri", body: "Send for less this spring." });
+      const model = FilterLearning.empty()
+        .record(fromA(), "shipping", true, 1)
+        .record(fromB(), "shipping", true, 2)
+        .record(offers, "shipping", false, 3);
+      const third = fromC();
+      // Two addresses in, one out: conflicting evidence never produces the broad rule.
+      expect(model.senderRuleFor(third, "shipping")).toBeNull();
+      expect(model.decide(third, "shipping", signalsOf(third), inboxOf(third)).by).not.toBe("sender");
+      // So mail from a third address that shares nothing specific with the corrections
+      // stays where the built-in rules put it. (A third delivery with an Evri tracking
+      // number can still follow by similar mail, which "Why it's here" names as such.)
+      const plain = mail({ sender: "hello@evri.com", subject: "About your recent order", body: "Thanks for choosing us." });
+      expect(model.senderRuleFor(plain, "shipping")).toBeNull();
+      expect(model.decide(plain, "shipping", signalsOf(plain), inboxOf(plain))).toEqual({ by: "built-in", into: false });
+      expect(shipping(model, plain)).toBe(false);
+      expect(model.senderRules().some((rule) => rule.kind === "domain")).toBe(false);
+      // Each address keeps its own, unmixed rule.
+      expect(model.senderRules().map((rule) => [rule.key, rule.kind, rule.into])).toEqual([
+        ["notifications@mail.evri.com", "address", true],
+        ["offers@evri.com", "address", false],
+        ["tracking@evri.com", "address", true],
+      ]);
+      // And an address with corrections both ways has no rule of its own either.
+      const mixed = FilterLearning.empty().record(fromB(), "shipping", true, 1).record(fromB(3), "shipping", false, 2);
+      expect(mixed.senderRuleFor(fromB(4), "shipping")).toBeNull();
+    });
   });
 
   it("makes no rule for an address with corrections both ways", () => {
