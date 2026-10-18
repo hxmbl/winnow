@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build, preview } from "vite";
+import { smokeOffline } from "./smoke-offline.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -153,6 +154,27 @@ browser.newContext = async (options) => {
 };
 const watchedNewPage = browser.newPage.bind(browser);
 browser.newPage = async (options) => watchCsp(await watchedNewPage(options));
+
+// `WINNOW_SMOKE_ONLY=offline` runs only the undo-send-on-a-phone and offline-queue
+// checks (`smoke-offline.mjs`), for iterating on them; the full run includes them too.
+if (process.env.WINNOW_SMOKE_ONLY === "offline") {
+  const errors = [];
+  try {
+    await smokeOffline({ browser, URL, check, section, errors });
+    section("console");
+    check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+    check("no Content-Security-Policy violations", cspViolations.length === 0, cspViolations.slice(0, 3).join(" | "));
+  } catch (error) {
+    failures.push(`aborted: ${error?.message ?? error}`);
+    console.error(`\nSmoke run aborted: ${error?.stack ?? error}`);
+  } finally {
+    await browser.close();
+    await stopServer();
+  }
+  console.log(`\n${passed} passed, ${failures.length} failed`);
+  for (const line of failures) console.log(`  · ${line}`);
+  process.exit(failures.length > 0 ? 1 : 0);
+}
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -7929,6 +7951,8 @@ try {
     }
   }
   // END glass-and-version
+
+  await smokeOffline({ browser, URL, check, section, errors });
 
   // ── Console ────────────────────────────────────────────────────────────────
 
