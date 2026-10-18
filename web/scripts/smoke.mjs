@@ -7925,7 +7925,17 @@ try {
         ).filter(Boolean);
       }, phone);
       for (const region of regions) {
-        const r = await frostRatio(g, ctx, region);
+        // The demo list decides what sits under a pill at a given scroll; where the region
+        // happens to fall between two rows' lines there is no text to blur, so step the
+        // list on until some is (the pills themselves stay put), then go back.
+        let r = await frostRatio(g, ctx, region);
+        for (let step = 1; r.plain <= 0.5 && step <= 6; step += 1) {
+          await g.evaluate((by) => (document.querySelector("[data-row-count]").scrollTop = 600 + by), step * 14);
+          await g.waitForTimeout(300);
+          r = await frostRatio(g, ctx, region);
+        }
+        await g.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 600));
+        await g.waitForTimeout(300);
         check(
           `${kind}: row text under ${region.name} is really blurred (detail ${r.frosted} frosted vs ${r.plain} bare)`,
           r.plain > 0.5 && r.ratio < 0.5,
