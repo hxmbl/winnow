@@ -43,6 +43,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       store/        The store, its derived view, preferences.
       avatars/      Contact photos, Gravatar, BIMI logos, the local picture caches.
       data/         The demo mailbox seed.
+      offline/      The offline action queue (§5.10).
     platform/       The boundary. Two implementations (web.ts, desktop.ts), one interface.
     ui/             React components and the pure helpers beside them.
   scripts/          check-version.mjs, bump-version.mjs, smoke.mjs, bundle.mjs — see §11.
@@ -415,6 +416,27 @@ URI or origin. The secret never appears in an error, a warning or a log.
   fails. `demoMailbox(now)` shifts the whole seed onto the real clock so recency
   and day sections behave in a live run.
 
+### 5.10 `offline/` — the action queue, and undo send
+
+`queue.ts` wraps the session's backend (`bridge.backend()` returns it wrapped). Archive,
+trash, restore, read/unread, star, labels and send taken while `navigator.onLine` is
+false, or whose request got **no HTTP response** (`TypeError: Failed to fetch`,
+`GoogleUnreachable`), are kept in `winnow.offlineQueue.v1` and resolve at once, so the
+store's optimistic change stands. An *answered* refusal still rolls back. Replay is FIFO,
+one at a time, on `online`, before every sync, and on a 1 s → 60 s backoff; a newer
+star/read/move of a message replaces the older one. 404/410 drop quietly; 401 and
+`reauth_required` (`invalid_grant`) pause until the next connect or a sync that gets
+through, never on a timer. A raw `messages.send` whose answer was lost is never replayed
+(it is reported, and a new message reopens in the composer); a `drafts.send` is, since a second try on
+a sent draft is a 404. Every sync result has the queue laid over it, so a fresh reading
+cannot undo a waiting change on screen. Permanent delete is not queued. Sign-out clears
+it; a queue saved for another account is discarded. `ui/components/OfflineIndicator.tsx`
+is the "Offline: N changes waiting" line (`ui/offlineStatus.ts`).
+
+Undo send (`core/mail/undoSend.ts`, Settings → Compose → **Undo send window**, Off/5/10/20 s,
+10 s by default; a saved 30 s from ≤ 1.2.2 reads as 20 s): if the app closes in the window
+the message is **kept as a draft, not sent** — the safe choice, reasoned in that file.
+
 ---
 
 ## 6. `web/src/platform` — the boundary
@@ -634,6 +656,7 @@ judged as IPv4.
 | `winnow.learning.v1` | Weights + the 400-event log | never, by design |
 | `winnow.activeFilters.v1` | The active filter set | sign-out |
 | `winnow.mailbox.v1` | Which mailbox was last open | — |
+| `winnow.offlineQueue.v1` | Actions (and sends) waiting for the network, with the account they belong to | replay, sign-out |
 | `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
 | `winnow.gmail.cache.messages` | The mailbox, as plain JSON | sign-out |
 | `winnow.gmail.cache.cursor` | Gmail `historyId` | sign-out |
@@ -654,7 +677,7 @@ judged as IPv4.
 | --- | --- | --- |
 | Unit | `npm test` | Vitest, **node** environment, `src/**/*.test.ts` plus `../proxy/**/*.test.ts`. There are no component tests, and the glob says `.ts` not `.tsx` so nobody infers there should be. |
 | Gate | `npm run check` | typecheck + lint + lint:proxy + unit |
-| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. |
+| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail). |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |
 
 `web/scripts/`:
@@ -702,7 +725,7 @@ retry in §5.5, sanitiser limits in §5.8, sync caps in §5.5, proxy limits in �
 | `VITE_RENDER_PROXY` | build time | Turns on the Proxied view and its client. http/https only, read once. |
 | `__WINNOW_LOOPBACK_PORT__` | both hosts | Placeholder the web layer writes and Rust substitutes with a real ephemeral port. `oauth.rs` refuses a URL without it. |
 | `PORT`, `HOST`, `ALLOWED_ORIGINS` | proxy runtime | Bind address and the exact-origin CORS allow list. |
-| `WINNOW_PORT`, `WINNOW_URL`, `WINNOW_CHROMIUM` | smoke | Point the suite at another port, an existing server, or a system browser. |
+| `WINNOW_PORT`, `WINNOW_URL`, `WINNOW_CHROMIUM`, `WINNOW_SMOKE_ONLY` | smoke | Point the suite at another port, an existing server, or a system browser; `offline` runs only the offline/undo-send checks. |
 
 The repository's own secret gate is `.minesweep.yml` — `public-github` profile,
 `fail_on: high`, `min_confidence: 0.7`, no baseline — and it runs both in CI
