@@ -6862,7 +6862,19 @@ try {
 
       // j down a long way, then k back up: the open row is never under the header or the
       // pinned day, and focus scrolling keeps the same clearance.
+      // Back to the top, and wait for the windowed list to render it: until it does, the
+      // first row in the DOM is the top of the old window (a few rows down), and clicking
+      // "the first row" opened that one instead, so j/k ended a few rows down and the
+      // first avatar was left under the header (the sender-menu timeout below).
+      const listAtTop = () =>
+        d.waitForFunction(() => {
+          const scroller = document.querySelector("[data-row-count]");
+          const row = scroller?.querySelector("button[data-message-id]");
+          const chrome = document.querySelector("[data-list-chrome]")?.getBoundingClientRect().bottom ?? 0;
+          return scroller.scrollTop === 0 && row !== null && row.getBoundingClientRect().top >= chrome - 1;
+        }, null, { timeout: 5_000 });
       await d.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+      await listAtTop();
       await d.locator("[data-row-count] button[data-message-id]").first().click();
       await d.waitForTimeout(200);
       await d.locator("[data-reader-pane]").first().click({ position: { x: 5, y: 600 } }).catch(() => undefined);
@@ -6901,6 +6913,9 @@ try {
 
       // A selection stands in for the chips in the same slot: the header keeps its height.
       const before = (await geometry()).chromeBottom;
+      // The first avatar must be on screen, clear of the header, not just first in the DOM.
+      await d.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+      await listAtTop();
       const firstAvatar = d.locator("[data-row-count] [data-row-control='avatar']").first();
       await firstAvatar.click();
       await d.waitForTimeout(150);
