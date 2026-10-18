@@ -323,6 +323,78 @@ pub fn open_external(app: AppHandle, url: String) -> Result<()> {
         .map_err(|e| format!("could not open {url}: {e}"))
 }
 
+// ── Native Google sign-in (Android) ─────────────────────────────────────────
+
+/// The package name, the running APK's signing certificate (SHA-1) and whether Play
+/// services is usable, for the setup guide's Android step. `None` off Android, or when
+/// the plugin cannot say.
+#[tauri::command]
+pub async fn google_signin_info(app: AppHandle) -> Option<serde_json::Value> {
+    #[cfg(target_os = "android")]
+    {
+        crate::google_signin::call(&app, "signingInfo", serde_json::json!({}))
+            .await
+            .ok()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
+/// Sign in with Google Play services' account sheet; see `google_signin.rs`.
+///
+/// Never an `Err`: anything but a code or a cancel comes back as `unavailable`, and
+/// the web layer then runs the loopback flow, so a failure here costs the user
+/// nothing but the moment the sheet took.
+#[tauri::command]
+pub async fn google_signin_authorize(
+    app: AppHandle,
+    server_client_id: String,
+    scopes: Vec<String>,
+) -> serde_json::Value {
+    use crate::google_signin::{unavailable, AuthorizeRequest};
+
+    let request = match AuthorizeRequest::new(&server_client_id, &scopes) {
+        Ok(request) => request,
+        Err(reason) => return unavailable("failed", reason),
+    };
+    #[cfg(target_os = "android")]
+    {
+        crate::google_signin::call(&app, "authorize", request.payload())
+            .await
+            .unwrap_or_else(|e| unavailable("failed", e))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, request);
+        unavailable("unsupported", "native sign-in is Android only")
+    }
+}
+
+/// Open Google's consent page in a Custom Tab over the app (Android). Elsewhere an
+/// error, and the web layer uses `open_external` instead.
+#[tauri::command]
+pub async fn open_sign_in_tab(app: AppHandle, url: String) -> Result<()> {
+    let parsed = crate::google_signin::sign_in_tab_url(&url)?;
+    #[cfg(target_os = "android")]
+    {
+        crate::google_signin::call(
+            &app,
+            "openTab",
+            serde_json::json!({ "url": parsed.as_str() }),
+        )
+        .await
+        .map(|_| ())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, parsed);
+        Err("sign-in tabs are Android only".into())
+    }
+}
+
 // ── Files ───────────────────────────────────────────────────────────────────
 
 /// Ask where to save an attachment and write it there.

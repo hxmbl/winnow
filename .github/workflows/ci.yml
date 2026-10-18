@@ -14,6 +14,10 @@ on:
         description: 'On a v* tag: publish the release once every build is attached'
         type: boolean
         default: false
+      android_build:
+        description: 'On a branch: also build a debug APK and run the Android unit tests'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -103,6 +107,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       native: ${{ steps.filter.outputs.native }}
+      android: ${{ steps.filter.outputs.android }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -117,6 +122,9 @@ jobs:
             native:
               - 'native/**'
               - '.github/workflows/ci.yml'
+            android:
+              - 'native/src-tauri/gen/android/**'
+              - 'native/src-tauri/src/google_signin.rs'
 
   smoke:
     name: Smoke test
@@ -292,6 +300,87 @@ jobs:
 
       - name: Check (aarch64-linux-android)
         run: cargo check --target aarch64-linux-android
+
+  # The Kotlin side: a debug APK for one ABI (which compiles the Kotlin, the plugin
+  # included, against the Tauri Android library) and the JVM unit tests under
+  # gen/android/app/src/test. `android-check` above never compiles Kotlin, and the
+  # release job is the only other place that does, so a PR that touches the Android
+  # project runs this; any branch can ask for it with the `android_build` input.
+  android-build:
+    name: Android debug build and unit tests
+    needs: changes
+    if: >-
+      ${{ !cancelled() && (
+        (github.event_name == 'pull_request' && needs.changes.outputs.android == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.android_build && github.ref_type == 'branch')
+      ) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # The release job's NDK, so the two cannot build differently.
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install the NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${NDK_VERSION}" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri -> target
+          key: android-build
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Install Tauri CLI
+        run: cargo binstall tauri-cli --version "^2" --no-confirm
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      # Debug-signed, arm64 only: this proves the build, it ships nothing.
+      - name: Build debug APK
+        working-directory: native
+        run: cargo tauri android build --debug --apk --target aarch64
+
+      - name: Android unit tests
+        working-directory: native/src-tauri/gen/android
+        run: ./gradlew --no-daemon :app:testUniversalDebugUnitTest
 
   # The full release bundle (LTO, deb, AppImage) only where an artifact could matter.
   release:
