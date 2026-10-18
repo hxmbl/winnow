@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  labelHue,
+  labelLeaf,
+  labelsOn,
   applyLabelChange,
   filterLabels,
   isUserLabelId,
@@ -90,5 +93,28 @@ describe("listing", () => {
   it("filters by a case-insensitive substring", () => {
     expect(filterLabels(LABELS, "CLI").map((label) => label.id)).toEqual(["Label_2"]);
     expect(filterLabels(LABELS, " ")).toHaveLength(3);
+  });
+});
+
+describe("label chips", () => {
+  const names = new Map([
+    ["Label_1", "Travel"],
+    ["Label_3", "Work/Northwind"],
+    ["Label_2", "Receipts"],
+  ]);
+
+  it("names a message's labels in name order, skipping unknown and hidden ones", () => {
+    expect(labelsOn(["Label_3", "Label_1", "Label_9"], names).map((l) => l.name)).toEqual(["Travel", "Work/Northwind"]);
+    expect(labelsOn(["Label_3", "Label_1"], names, "Label_1").map((l) => l.name)).toEqual(["Work/Northwind"]);
+    expect(labelsOn(undefined, names)).toEqual([]);
+  });
+
+  it("shortens a nested name to its last part and colours a name the same way every time", () => {
+    expect(labelLeaf("Work/Northwind")).toBe("Northwind");
+    expect(labelLeaf("Travel")).toBe("Travel");
+    expect(labelHue("Travel")).toBe(labelHue("Travel"));
+    expect(labelHue("Travel")).toBeGreaterThanOrEqual(0);
+    expect(labelHue("Travel")).toBeLessThan(360);
+    expect(labelHue("Travel")).not.toBe(labelHue("Receipts"));
   });
 });

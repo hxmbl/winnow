@@ -121,3 +121,42 @@ export function filterLabels(labels: readonly UserLabel[], query: string): UserL
   if (!q) return [...labels];
   return labels.filter((label) => label.name.toLowerCase().includes(q));
 }
+
+/**
+ * The user labels on a message, as chips show them: by id from `labelIds`, named from
+ * `labels`, in name order, leaving out `hidden` (the label being browsed, which every row
+ * there carries) and any id the list does not know yet (made in Gmail since it was read).
+ */
+export function labelsOn(
+  labelIds: readonly string[] | undefined,
+  labels: ReadonlyMap<string, string>,
+  hidden: string | null = null,
+): UserLabel[] {
+  if (!labelIds || labelIds.length === 0) return [];
+  const on: UserLabel[] = [];
+  for (const id of labelIds) {
+    if (id === hidden) continue;
+    const name = labels.get(id);
+    if (name !== undefined) on.push({ id, name });
+  }
+  return sortLabels(on);
+}
+
+/** A nested label's last part (`Work/Northwind` → `Northwind`), for a narrow chip. */
+export function labelLeaf(name: string): string {
+  const parts = name.split("/").filter((part) => part.trim() !== "");
+  return parts[parts.length - 1]?.trim() ?? name;
+}
+
+/**
+ * A stable hue for a label's dot, from its name, so the same label is the same colour in
+ * every row and on every device without storing anything. FNV-1a over UTF-16 units.
+ */
+export function labelHue(name: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < name.length; i += 1) {
+    hash ^= name.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % 360;
+}
