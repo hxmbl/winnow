@@ -48,6 +48,46 @@ export type SignInFailure =
 /** What `beginSignIn` can hand back when there is no authorization code. */
 export type SignInResult = OAuthRedirect | SignInFailure;
 
+/** A native Android sign-in: Google Play services' account sheet, no browser. */
+export type NativeSignInRequest = {
+  /** The Web application client the code is issued to. */
+  serverClientId: string;
+  /** Every scope the session should end up with. */
+  scopes: string[];
+};
+
+/**
+ * Why a native sign-in did not produce a code. Every one of these ends in the browser
+ * flow; only `cancelled` (the user closed the sheet) stops the sign-in.
+ *
+ * - `unsupported`: not Android, or a build without the plugin.
+ * - `no_play_services`: Google Play services is missing, disabled or too old.
+ * - `developer_error`: Google refused the app — no Android client in the
+ *   `serverClientId`'s project matches this package name and signing certificate.
+ * - `network`: Play services could not reach Google.
+ * - `failed`: anything else, including a code Google did not hand back.
+ */
+export type NativeUnavailableReason =
+  | "unsupported"
+  | "no_play_services"
+  | "developer_error"
+  | "network"
+  | "failed";
+
+export type NativeSignInResult =
+  | { kind: "code"; code: string; grantedScopes: string[] }
+  | { kind: "cancelled" }
+  | { kind: "unavailable"; reason: NativeUnavailableReason; detail: string };
+
+/** What the setup guide shows for registering an Android client. Read at run time. */
+export type AppSigningInfo = {
+  packageName: string;
+  /** The running APK's signing certificate, `AA:BB:…`, or `null` when unreadable. */
+  sha1: string | null;
+  /** Whether Google Play services is usable on this phone. */
+  playServices: boolean;
+};
+
 export interface Platform {
   info(): Promise<PlatformInfo>;
 
@@ -77,6 +117,16 @@ export interface Platform {
    * made then fails without reaching Google. Optional; absent means "go now".
    */
   waitForForeground?(): Promise<unknown>;
+
+  /**
+   * Android only, optional: sign in through Google Play services instead of the
+   * browser. Never throws; anything but a code or a cancel is `unavailable`, and the
+   * session falls back to `beginSignIn`.
+   */
+  nativeGoogleSignIn?(request: NativeSignInRequest): Promise<NativeSignInResult>;
+
+  /** Android only, optional: the package name and signing certificate, for setup. */
+  appSigningInfo?(): Promise<AppSigningInfo | null>;
 
   // ── OS integration ───────────────────────────────────────────────────────
 

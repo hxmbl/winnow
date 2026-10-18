@@ -217,6 +217,13 @@ export type TokenSet = {
   /** Epoch milliseconds. Computed locally, never read from the response. */
   expiresAt: number;
   scope?: string;
+  /**
+   * The OAuth client the refresh token was issued to, when it is not the main client:
+   * set by a native Android sign-in, whose code belongs to the Web application client
+   * named as `serverClientId`. Google refreshes a token only for the client it was
+   * issued to. Absent means the main client.
+   */
+  clientId?: string;
 };
 
 /** Why an OAuth attempt failed, in terms the user can act on. */

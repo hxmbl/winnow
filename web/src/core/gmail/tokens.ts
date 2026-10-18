@@ -64,8 +64,12 @@ export type TokenManagerOptions = {
    * Winnow ships no client: the user pastes theirs into the setup screen, and it can
    * change or disappear while the app runs. Reading it per request rather than at
    * construction is what lets a changed client take effect without a reload.
+   *
+   * `issuedTo` is the stored session's `clientId`, when it has one: a native Android
+   * sign-in's tokens belong to a different client from the main one, and must be
+   * refreshed under that client.
    */
-  client?: () => Promise<{ clientId: string; clientSecret?: string } | null>;
+  client?: (issuedTo?: string) => Promise<{ clientId: string; clientSecret?: string } | null>;
   fetchImpl?: FetchLike;
 };
 
@@ -141,9 +145,9 @@ export class TokenManager {
   constructor(private readonly options: TokenManagerOptions) {}
 
   /** The client to send, from the resolver if there is one. Throws when there is none. */
-  private async resolveClient(): Promise<{ clientId: string; clientSecret?: string }> {
+  private async resolveClient(issuedTo?: string): Promise<{ clientId: string; clientSecret?: string }> {
     const resolved = this.options.client
-      ? await this.options.client()
+      ? await this.options.client(issuedTo)
       : this.options.clientId
         ? { clientId: this.options.clientId, clientSecret: this.options.clientSecret }
         : null;
@@ -306,7 +310,7 @@ export class TokenManager {
       throw error;
     }
 
-    const client = await this.resolveClient();
+    const client = await this.resolveClient(this.tokens?.clientId);
     const body = new URLSearchParams({
       client_id: client.clientId,
       refresh_token: refreshToken,
@@ -376,6 +380,7 @@ export class TokenManager {
       refreshToken: previous?.refreshToken,
       expiresAt: Date.now() + Math.max((payload.expires_in ?? 3600) * 1000, MIN_STORED_LIFETIME_MS),
       scope: payload.scope ?? previous?.scope,
+      ...(previous?.clientId ? { clientId: previous.clientId } : {}),
     };
 
     await this.adopt(next);
@@ -397,7 +402,33 @@ export class TokenManager {
       redirect_uri: args.redirectUri,
     });
     if (client.clientSecret) body.set("client_secret", client.clientSecret);
+    return this.requestTokens(body);
+  }
 
+  /**
+   * Exchange a native Android sign-in's server auth code.
+   *
+   * The code was issued by Google Play services to the Web application client named as
+   * `serverClientId`, so that client and its secret make the exchange. There is no PKCE
+   * verifier and no redirect: Google's own server-side samples send `redirect_uri` empty.
+   * The tokens remember the client (`clientId`), so every refresh uses it too.
+   */
+  async exchangeServerAuthCode(args: {
+    code: string;
+    client: { clientId: string; clientSecret: string };
+  }): Promise<TokenSet> {
+    const body = new URLSearchParams({
+      client_id: args.client.clientId,
+      client_secret: args.client.clientSecret,
+      code: args.code,
+      grant_type: "authorization_code",
+      redirect_uri: "",
+    });
+    return this.requestTokens(body, args.client.clientId);
+  }
+
+  /** POST a code exchange and adopt what comes back. Shared by both exchanges. */
+  private async requestTokens(body: URLSearchParams, issuedTo?: string): Promise<TokenSet> {
     let response: Response;
     try {
       response = await this.fetchImpl(GOOGLE_TOKEN_URL, {
@@ -425,13 +456,17 @@ export class TokenManager {
       scope?: string;
     };
 
+    // The old refresh token is a fallback only while the client stays the same: one
+    // issued to another client cannot be refreshed under this one.
+    const sameClient = (this.tokens?.clientId ?? undefined) === issuedTo;
     const tokens: TokenSet = {
       accessToken: payload.access_token,
       // A re-authorisation with `prompt=consent` always returns one; defensive
       // fallback avoids signing the user straight back out.
-      refreshToken: payload.refresh_token ?? this.tokens?.refreshToken,
+      refreshToken: payload.refresh_token ?? (sameClient ? this.tokens?.refreshToken : undefined),
       expiresAt: Date.now() + Math.max((payload.expires_in ?? 3600) * 1000, MIN_STORED_LIFETIME_MS),
       scope: payload.scope,
+      ...(issuedTo ? { clientId: issuedTo } : {}),
     };
 
     await this.adopt(tokens);

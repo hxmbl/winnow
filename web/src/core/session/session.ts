@@ -37,6 +37,7 @@ import {
   takePendingAuth,
 } from "./pendingAuth";
 import { parseRedirect, readOwnParams, stripRedirect } from "./redirect";
+import { browserFallbackScope, refreshClientFor, scopeList, sessionStrandedBy } from "./nativeSignIn";
 import {
   COMPOSE_SCOPE,
   DraftsScopeMissing,
@@ -49,7 +50,7 @@ import {
   isInsufficientScope,
 } from "../gmail/dto";
 import { buildAuthorizeUrl, createPkcePair, describeAuthError, stateMatches } from "../gmail/pkce";
-import type { PlatformInfo } from "../../platform/types";
+import type { NativeSignInResult, PlatformInfo } from "../../platform/types";
 import { NO_CLIENT_MESSAGE, TokenManager } from "../gmail/tokens";
 import { GmailClient } from "../gmail/client";
 import { GmailSyncEngine, type MailboxCache, type CursorStore } from "../gmail/sync";
@@ -468,7 +469,8 @@ export class GmailSession {
       store: platform.tokenStore(),
       // Read per request from the user's own store: Winnow ships no client, and the
       // user can change or remove theirs while the app runs.
-      client: () => this.credentials.read(),
+      // `issuedTo`: a native Android session is refreshed under the client it came from.
+      client: async (issuedTo) => refreshClientFor(await this.credentials.read(), issuedTo),
     });
 
     this.client = new GmailClient(
@@ -605,7 +607,8 @@ export class GmailSession {
    */
   async saveCredentials(next: OAuthClientCredentials): Promise<{ signedOut: boolean }> {
     const previous = await this.storedCredentials();
-    const changed = previous?.clientId !== next.clientId || previous?.clientSecret !== next.clientSecret;
+    const sessionClient = (await this.tokens.current().catch(() => null))?.clientId;
+    const changed = sessionStrandedBy(previous, next, sessionClient);
     let signedOut = false;
     if (changed && (await this.tokens.hasSession())) {
       await this.signOut();
@@ -630,7 +633,15 @@ export class GmailSession {
     // Any well-formed loopback URI will do: the made-up code is refused before the
     // redirect URI is compared.
     const redirectUri = nativeOAuth ? "http://127.0.0.1:1/winnow-oauth" : webRedirectUriFor(globalThis.location);
-    return testConnection(candidate, redirectUri);
+    const main = await testConnection(candidate, redirectUri);
+    if (!main.ok || !candidate.nativeAndroid) return main;
+    // The Android step's Web client too: the same made-up code, refused after the
+    // client and its secret are checked. The redirect is never compared.
+    const native = await testConnection(candidate.nativeAndroid, "https://localhost/winnow-oauth");
+    if (native.ok) {
+      return { ok: true, message: "Google recognised both clients. Connect to finish signing in." };
+    }
+    return { ok: false, message: `Android sign-in client: ${native.message}` };
   }
 
   /** The redirect URI the setup screen asks a web user to register. Empty on desktop. */
@@ -711,8 +722,14 @@ export class GmailSession {
     extra: Record<string, string> = {},
     intent: { purpose?: "contacts" | "drafts"; expectEmail?: string } = {},
   ): Promise<void> {
-    const clientId = (await this.storedCredentials())?.clientId;
+    const stored = await this.storedCredentials();
+    const clientId = stored?.clientId;
     if (!clientId) throw new GmailError(NO_CLIENT_MESSAGE, 0, "config");
+
+    const before = await this.tokens.current().catch(() => null);
+    const incremental = Boolean(intent.purpose);
+    if (await this.authorizeNatively(stored, scope, before, incremental)) return;
+    scope = browserFallbackScope(scope, before, incremental);
 
     const pkce = await createPkcePair();
     const redirectUri = await this.redirectUri();
@@ -797,6 +814,56 @@ export class GmailSession {
     }), { waitForForeground: () => this.waitForForeground() });
     this.writable = true;
   }
+
+  /**
+   * Try native Android sign-in (`nativeSignIn.ts`). True when it signed in; false when
+   * the browser flow should run instead. Throws only for a cancel.
+   *
+   * Every failure past the user's own "no" falls back, the exchange included: a wrong
+   * Web client secret, or an Android client Google accepted on the phone but not for
+   * this project, still leaves the browser sign-in that works. The reason is kept on
+   * `lastNativeFallback` for tests and nothing else; the user is not told.
+   */
+  private async authorizeNatively(
+    stored: OAuthClientCredentials | null,
+    scope: string,
+    before: { scope?: string } | null,
+    incremental: boolean,
+  ): Promise<boolean> {
+    const server = stored?.nativeAndroid;
+    if (!server || !this.platform.nativeGoogleSignIn) return false;
+
+    // An incremental grant asks again for everything the session holds: the native
+    // client may not be the one that granted it.
+    const scopes = scopeList(incremental ? before?.scope : undefined, scope);
+    let result: NativeSignInResult;
+    try {
+      result = await this.platform.nativeGoogleSignIn({ serverClientId: server.clientId, scopes });
+    } catch (error) {
+      result = { kind: "unavailable", reason: "failed", detail: error instanceof Error ? error.message : String(error) };
+    }
+    if (result.kind === "cancelled") throw new GmailError("Sign-in was cancelled.", 0, "declined");
+    if (result.kind === "unavailable") {
+      this.lastNativeFallback = `${result.reason}: ${result.detail}`;
+      return false;
+    }
+
+    const code = result.code;
+    try {
+      await exchangeWithRetry(() => this.tokens.exchangeServerAuthCode({ code, client: server }), {
+        waitForForeground: () => this.waitForForeground(),
+      });
+    } catch (error) {
+      this.lastNativeFallback = `exchange: ${error instanceof Error ? error.message : String(error)}`;
+      return false;
+    }
+    this.lastNativeFallback = null;
+    this.writable = true;
+    return true;
+  }
+
+  /** Why the last native sign-in fell back to the browser, or `null`. For tests. */
+  lastNativeFallback: string | null = null;
 
   /**
    * The redirect URI for this build.
