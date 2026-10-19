@@ -718,3 +718,63 @@ describe("filter pill colours", () => {
     expect(css).not.toContain("data-muted");
   });
 });
+
+/**
+ * The 1.3.2 contrast tweaks, held with a margin.
+ *
+ * The theme sweep measured two rounding-level misses on translucent planes the tests
+ * above cannot see: the phone drawer's Inbox count on its highlighted (glass over
+ * `surfaceSelected`) row was 4.47:1 in light Ember and Aurora, and the compose
+ * suggestions' grey address on the active row was 4.48:1 in the dark modes. Those planes
+ * cost a few hundredths against the opaque surface, so the tokens now clear AA on every
+ * opaque surface with room to spare; the old values fail these floors.
+ */
+describe("1.3.2 contrast margins", () => {
+  const ACCENT_FLOOR = 5;
+  const SUBTLE_FLOOR = 4.7;
+
+  it("pins the changed tokens", () => {
+    expect(ACCENTS.ember.light.accent).toBe("#9A430C");
+    expect(ACCENTS.aurora.light.accent).toBe("#096863");
+    expect(PALETTES.dark.color.inkSubtle).toBe("#A4A4A4");
+    expect(PALETTES.dark.color.inkMuted).toBe("#ADADAD");
+  });
+
+  for (const accent of ["ember", "aurora"] as const) {
+    it(`light/${accent}: the accent clears ${ACCENT_FLOOR}:1 on every opaque surface`, () => {
+      const color = paletteFor("light", accent).color.accent;
+      for (const backdrop of opaqueSurfaces("light", accent)) {
+        expect(contrastRatio(color, backdrop), `${color} on ${backdrop}`).toBeGreaterThanOrEqual(ACCENT_FLOOR);
+      }
+    });
+
+    it(`light/${accent}: white on the accent (buttons) keeps AA with a margin`, () => {
+      const { accent: hex, onAccent } = paletteFor("light", accent).color;
+      expect(contrastRatio(onAccent, hex)).toBeGreaterThanOrEqual(6);
+    });
+  }
+
+  it("the old light Ember and Aurora accents would miss the floor on the active row", () => {
+    for (const [accent, old] of [
+      ["ember", "#A2470D"],
+      ["aurora", "#0A6E68"],
+    ] as const) {
+      const { surfaceActive } = paletteFor("light", accent).color;
+      expect(contrastRatio(old, surfaceActive)).toBeLessThan(ACCENT_FLOOR);
+    }
+  });
+
+  for (const mode of ["dark", "oled"] as const) {
+    it(`${mode}: inkSubtle and inkMuted clear ${SUBTLE_FLOOR}:1 on the active row in every accent`, () => {
+      for (const accent of ACCENT_THEMES) {
+        const { inkSubtle, inkMuted, surfaceActive } = paletteFor(mode, accent).color;
+        expect(contrastRatio(inkSubtle, surfaceActive), `${accent} subtle`).toBeGreaterThanOrEqual(SUBTLE_FLOOR);
+        expect(contrastRatio(inkMuted, surfaceActive), `${accent} muted`).toBeGreaterThanOrEqual(SUBTLE_FLOOR);
+      }
+    });
+  }
+
+  it("dark: the old inkSubtle would miss the floor on the active row", () => {
+    expect(contrastRatio("#A0A0A0", PALETTES.dark.color.surfaceActive)).toBeLessThan(SUBTLE_FLOOR);
+  });
+});

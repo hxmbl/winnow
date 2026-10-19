@@ -26,6 +26,7 @@ import {
   pillAnnouncement,
   pillClock,
   pillText,
+  pillTop,
   returnsToSync,
   type PillNotice,
 } from "../statusPill";
@@ -57,6 +58,12 @@ type Props = {
   anchor: HTMLElement | null;
   /** The height of the chrome over the list's top (top bar or floating header), px. */
   inset: number;
+  /**
+   * A selector for something the pill must never cover: the phone demo strip, whose
+   * Connect Gmail button sat right where the pill rests. While it is on screen under the
+   * pill's place the pill drops below it, following it as the list scrolls.
+   */
+  avoid?: string;
 };
 
 /** The gap between the chrome and the pill, px: where a pull's result rests. */
@@ -64,13 +71,24 @@ const GAP = 16;
 
 type Place = { left: number; width: number; top: number } | null;
 
-/** Where the list's pane is on screen, or `null` while it is hidden. */
-function useAnchor(element: HTMLElement | null, inset: number): Place {
+/** Where the list's pane is on screen (and the pill's top in it), or `null` while hidden. */
+function useAnchor(element: HTMLElement | null, inset: number, avoid: string | undefined, active: boolean): Place {
   const [place, setPlace] = useState<Place>(null);
   useLayoutEffect(() => {
     const read = () => {
       const rect = element?.getBoundingClientRect();
-      const next = rect && rect.width > 0 && rect.height > 0 ? { left: rect.left, width: rect.width, top: rect.top + inset } : null;
+      const avoided = avoid && element ? document.querySelector(avoid)?.getBoundingClientRect() : undefined;
+      const next =
+        rect && rect.width > 0 && rect.height > 0
+          ? {
+              left: rect.left,
+              width: rect.width,
+              top: pillTop(
+                rect.top + inset + GAP,
+                avoided && avoided.height > 0 ? { top: avoided.top, bottom: avoided.bottom } : null,
+              ),
+            }
+          : null;
       setPlace((current) =>
         current?.left === next?.left && current?.width === next?.width && current?.top === next?.top ? current : next,
       );
@@ -79,11 +97,15 @@ function useAnchor(element: HTMLElement | null, inset: number): Place {
     const observer = typeof ResizeObserver === "undefined" || !element ? null : new ResizeObserver(read);
     if (element) observer?.observe(element);
     window.addEventListener("resize", read);
+    // The strip to avoid scrolls with the list: follow it while a notice shows.
+    const follow = Boolean(avoid) && active;
+    if (follow) document.addEventListener("scroll", read, { capture: true, passive: true });
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", read);
+      if (follow) document.removeEventListener("scroll", read, { capture: true });
     };
-  }, [element, inset]);
+  }, [element, inset, avoid, active]);
   return place;
 }
 
@@ -129,9 +151,9 @@ export function StatusPill(props: Props) {
     return () => window.clearInterval(timer);
   }, [shown?.kind]);
 
-  const place = useAnchor(props.anchor, props.inset);
+  const place = useAnchor(props.anchor, props.inset, props.avoid, shown !== null);
   const style: React.CSSProperties = place
-    ? { left: place.left, width: place.width, top: place.top + GAP }
+    ? { left: place.left, width: place.width, top: place.top }
     : { left: 0, right: 0, top: `max(${GAP}px, calc(env(safe-area-inset-top, 0px) + 8px))` };
 
   return (

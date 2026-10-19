@@ -257,8 +257,12 @@ const DARK: Palette = {
     ink: "#E3E3E3",
     inkBody: "#D4D4D4",
     /** Kept a visible step above `inkSubtle`; both must clear AA on `surfaceActive`. */
-    inkMuted: "#A9A9A9",
-    inkSubtle: "#A0A0A0",
+    inkMuted: "#ADADAD",
+    /**
+     * #A4A4A4 since 1.3.2 (was #A0A0A0, which measured 4.48:1 under the compose
+     * suggestions' active row): AA with a margin on `surfaceActive`, see `theme.test.ts`.
+     */
+    inkSubtle: "#A4A4A4",
     inkIcon: "#ABABAB",
     /** Held one step off `inkSubtle`, so a placeholder does not read as filled-in text. */
     inkPlaceholder: "#A0A0A0",
@@ -429,14 +433,14 @@ export const ACCENTS: Record<AccentTheme, AccentSpec> = {
    */
   ember: {
     label: "Ember",
-    light: { accent: "#A2470D", onAccent: "#FFFFFF", surfaceSelected: "#F8E0D2", danger: "#B8184A" },
+    light: { accent: "#9A430C", onAccent: "#FFFFFF", surfaceSelected: "#F8E0D2", danger: "#B8184A" },
     dark: { accent: "#F0964F", onAccent: "#191919", surfaceSelected: DARK_SELECTED, danger: "#FF80A4" },
     oled: { accent: "#F0964F", onAccent: "#000000", surfaceSelected: OLED_SELECTED, danger: "#FF80A4" },
   },
   /** Aurora: a cool teal. */
   aurora: {
     label: "Aurora",
-    light: { accent: "#0A6E68", onAccent: "#FFFFFF", surfaceSelected: "#D9F2EF" },
+    light: { accent: "#096863", onAccent: "#FFFFFF", surfaceSelected: "#D9F2EF" },
     dark: { accent: "#5ED6C5", onAccent: "#191919", surfaceSelected: DARK_SELECTED },
     oled: { accent: "#5ED6C5", onAccent: "#000000", surfaceSelected: OLED_SELECTED },
   },

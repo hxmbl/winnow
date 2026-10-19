@@ -28,11 +28,12 @@ export function settingsLayoutFor(width: number): SettingsLayout {
 }
 
 /**
- * The category column's width on the desktop layouts: about an eighth of the window,
- * never so narrow a category name breaks badly (160px) nor wider than the names need
- * (240px). The controls and the explanation share the rest, controls first.
+ * The category column's width on the desktop layouts: about a seventh of the window,
+ * never so narrow that the longest category name ("Hidden & muted senders") wraps
+ * (212px, with room for font differences) nor wider than the names need (248px).
+ * The controls and the explanation share the rest, controls first.
  */
-export const SETTINGS_NAV_WIDTH = "clamp(160px, 12.5vw, 240px)";
+export const SETTINGS_NAV_WIDTH = "clamp(212px, 15vw, 248px)";
 
 /** `grid-template-columns` for a desktop layout (the phone has no columns). */
 export function settingsColumns(layout: Exclude<SettingsLayout, "phone">): string {

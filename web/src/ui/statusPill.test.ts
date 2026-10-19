@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  pillTop,
+  PILL_HEIGHT,
   SYNC_RETURN_MS,
   currentNotice,
   isAction,
@@ -108,5 +110,29 @@ describe("the words", () => {
     expect(pillAnnouncement(sending(1))).not.toMatch(/\d/);
     expect(pillAnnouncement(flash(1))).toBe("Draft saved.");
     expect(pillAnnouncement(null)).toBe("");
+  });
+});
+
+describe("keeping off the demo strip", () => {
+  const rest = 76;
+  it("rests under the chrome with nothing to avoid", () => {
+    expect(pillTop(rest, null)).toBe(rest);
+  });
+  it("drops below the strip when it would cover it (Connect Gmail)", () => {
+    const strip = { top: 66, bottom: 118 };
+    const top = pillTop(rest, strip);
+    expect(top).toBe(126);
+    // Never overlapping: the pill starts below the strip's bottom edge.
+    expect(top).toBeGreaterThanOrEqual(strip.bottom);
+  });
+  it("follows a strip that is partly scrolled under the top bar", () => {
+    expect(pillTop(rest, { top: 40, bottom: 92 })).toBe(100);
+  });
+  it("stays put once the strip has scrolled away above it, or sits wholly below it", () => {
+    expect(pillTop(rest, { top: 10, bottom: rest })).toBe(rest);
+    expect(pillTop(rest, { top: rest + PILL_HEIGHT, bottom: rest + PILL_HEIGHT + 50 })).toBe(rest);
+  });
+  it("ignores an empty box", () => {
+    expect(pillTop(rest, { top: 80, bottom: 80 })).toBe(rest);
   });
 });

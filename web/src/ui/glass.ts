@@ -68,7 +68,7 @@ export const GLASS: Record<ThemeName, GlassRecipe> = {
   light: { base: "surface", rim: 0.62, text: 0.72, textOn: 0.76, bar: 0.72, fallback: 0.94 },
   // Light ink: the worst is something bright. The canvas (darker than the surface) is
   // the base, so the frost is a shade darker than the list and the ink keeps its edge.
-  dark: { base: "canvas", rim: 0.62, text: 0.68, textOn: 0.84, bar: 0.78, fallback: 0.94 },
+  dark: { base: "canvas", rim: 0.62, text: 0.68, textOn: 0.84, bar: 0.76, fallback: 0.94 },
   oled: { base: "surface", rim: 0.62, text: 0.62, textOn: 0.74, bar: 0.68, fallback: 0.94 },
 };
 
@@ -81,7 +81,7 @@ export const GLASS: Record<ThemeName, GlassRecipe> = {
  * `glass.test.ts` holds every chip, rest and on, to AA over each.
  */
 export const WORST_BACKDROPS: Record<ThemeName, readonly string[]> = {
-  light: ["#5028E2", "#74306A", "#A2470D", "#0A6E68", "black@0.6"],
+  light: ["#5028E2", "#74306A", "#9A430C", "#096863", "black@0.6"],
   dark: ["#B9A5FF", "#D4A3CE", "#F0964F", "#5ED6C5", "white@0.6"],
   oled: ["#B9A5FF", "#D4A3CE", "#F0964F", "#5ED6C5", "white@0.6"],
 };

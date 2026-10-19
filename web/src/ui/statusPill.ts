@@ -113,3 +113,23 @@ export function pillAnnouncement(notice: PillNotice | null): string {
       return notice.text;
   }
 }
+
+/** The pill's height, px (`h-10`), for keeping it off what it must not cover. */
+export const PILL_HEIGHT = 40;
+
+/**
+ * Where the pill's top goes, px from the window's top: at `rest` (under the top chrome),
+ * unless something it must not cover — the phone demo strip with its Connect Gmail
+ * button — would be under it there; then just below that, `gap` px clear. Something
+ * wholly above the rest place or wholly below the pill does not move it.
+ */
+export function pillTop(
+  rest: number,
+  avoid: { top: number; bottom: number } | null,
+  height: number = PILL_HEIGHT,
+  gap = 8,
+): number {
+  if (!avoid || avoid.bottom <= avoid.top) return rest;
+  const overlaps = avoid.top < rest + height && avoid.bottom > rest;
+  return overlaps ? avoid.bottom + gap : rest;
+}

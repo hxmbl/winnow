@@ -174,7 +174,7 @@ describe("popover placement", () => {
 describe("settings columns", () => {
   it("gives the categories about an eighth of the window, 160px to 240px", async () => {
     const { settingsNavWidthAt, settingsColumns, SETTINGS_NAV_WIDTH } = await import("./settingsView");
-    expect(SETTINGS_NAV_WIDTH).toBe("clamp(160px, 12.5vw, 240px)");
+    expect(SETTINGS_NAV_WIDTH).toBe("clamp(212px, 15vw, 248px)");
     expect(settingsNavWidthAt(1440)).toBe(180);
     expect(settingsNavWidthAt(900)).toBe(160);
     expect(settingsNavWidthAt(2400)).toBe(240);
