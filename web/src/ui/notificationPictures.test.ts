@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { LogoState } from "../core/avatars/logoCache";
 import type { Email } from "../core/model/email";
 import { NOTIFICATION_PICTURE_SIZE, notificationPictures } from "./notificationActions";
-import { orderPictures, pictureWants, resolveSenderPicture, type LogoSource, type SenderPictures } from "./senderPictures";
+import { orderPictures, pictureWants, remotePicturesPaused, resolveSenderPicture, senderPictureSources, type LogoSource, type SenderPictures } from "./senderPictures";
+import { readFileSync } from "node:fs";
 
 /** A source that answers `table` after a request, and records every address asked. */
 function source(table: Record<string, string | null>, { slow = false } = {}): LogoSource & { asked: string[] } {
@@ -107,5 +108,63 @@ describe("the pictures a batch of notifications carries", () => {
 
   it("before the app has published its sources (nothing mounted): no pictures", async () => {
     expect(await notificationPictures([mail()], false)).toEqual({});
+  });
+});
+
+describe("Remote images = Never pauses remote avatar lookups (1.3.3)", () => {
+  const build = (imagePolicy: "ask" | "always" | "never", photos = new Map<string, string>()) => {
+    const g = source({ [ADA]: GRAVATAR });
+    const l = source({ [ADA]: LOGO });
+    return { g, l, s: senderPictureSources({ photos, gravatars: g, logos: l, imagePolicy }) };
+  };
+
+  it("with both switches on, Never drops Gravatar and brand logos from the shared sources", () => {
+    const { s } = build("never");
+    expect(s.gravatars).toBeNull();
+    expect(s.logos).toBeNull();
+    expect(remotePicturesPaused("never")).toBe(true);
+    expect(remotePicturesPaused("ask")).toBe(false);
+  });
+
+  it("Ask and Always keep them, exactly as the switches say", () => {
+    for (const policy of ["ask", "always"] as const) {
+      const { s, g, l } = build(policy);
+      expect(s.gravatars).toBe(g);
+      expect(s.logos).toBe(l);
+    }
+  });
+
+  it("the avatar under Never: no lookup at all, monogram (no picture)", () => {
+    const { s, g, l } = build("never");
+    const wants = pictureWants(s, ADA, undefined, "Ada");
+    expect(wants).toEqual({ contactPhoto: undefined, wantGravatar: false, wantLogo: false });
+    expect(g.asked).toEqual([]);
+    expect(l.asked).toEqual([]);
+  });
+
+  it("a notification under Never: no Gravatar or logo request, no picture", async () => {
+    const { s, g, l } = build("never");
+    expect(await notificationPictures([mail()], false, s)).toEqual({});
+    expect(g.asked).toEqual([]);
+    expect(l.asked).toEqual([]);
+  });
+
+  it("a local contact photo still shows under Never, in the app and in a notification", async () => {
+    const { s, g } = build("never", new Map([[ADA, PHOTO]]));
+    expect(pictureWants(s, ADA).contactPhoto).toBe(PHOTO);
+    expect(await notificationPictures([mail()], false, s)).toEqual({ g1: PHOTO });
+    expect(g.asked).toEqual([]);
+  });
+
+  it("hidden lock-screen previews still suppress everything, whatever the policy", async () => {
+    const { s, g, l } = build("always", new Map([[ADA, PHOTO]]));
+    expect(await notificationPictures([mail()], true, s)).toEqual({});
+    expect(g.asked).toEqual([]);
+    expect(l.asked).toEqual([]);
+  });
+
+  it("App builds the avatar sources through the shared resolver with the image policy", () => {
+    const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+    expect(app).toMatch(/senderPictureSources\(\{[\s\S]*imagePolicy,[\s\S]*\}\)/);
   });
 });

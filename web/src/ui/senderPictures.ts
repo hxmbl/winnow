@@ -16,6 +16,7 @@ import { createContext, useContext, useEffect, useSyncExternalStore } from "reac
 import type { LogoState } from "../core/avatars/logoCache";
 import { senderDomain } from "../core/avatars/bimi";
 import { gravatarImageUrl, type ImageProbe } from "../core/avatars/gravatar";
+import type { ImagePolicy } from "../core/mail/imageConsent";
 
 /** What the cache exposes; the demo implements it from a fixed table. */
 export interface LogoSource {
@@ -33,6 +34,35 @@ export type SenderPictures = {
   /** `null` when brand logos are off. */
   logos: LogoSource | null;
 };
+
+/**
+ * The sources avatars and notification pictures may use under the current settings: the
+ * one place the switches are read, so the list, the reader and a notification cannot
+ * disagree.
+ *
+ * Gravatar and brand logos are remote lookups (a hashed address to Gravatar, a DNS query
+ * and a fetch from the sender's site), so **Remote images = Never turns both off** too,
+ * whatever their own switches say (1.3.3). Contact photos are the user's own Google
+ * contacts, already synced, and stay; with no picture the monogram (initials) is drawn.
+ */
+export function senderPictureSources(input: {
+  photos: ReadonlyMap<string, string>;
+  gravatars: LogoSource | null;
+  logos: LogoSource | null;
+  imagePolicy: ImagePolicy;
+}): SenderPictures {
+  const remote = input.imagePolicy !== "never";
+  return {
+    photos: input.photos,
+    gravatars: remote ? input.gravatars : null,
+    logos: remote ? input.logos : null,
+  };
+}
+
+/** Whether a remote picture switch (Gravatar, brand logos) is paused by Remote images. */
+export function remotePicturesPaused(imagePolicy: ImagePolicy): boolean {
+  return imagePolicy === "never";
+}
 
 const EMPTY: SenderPictures = { photos: new Map(), gravatars: null, logos: null };
 

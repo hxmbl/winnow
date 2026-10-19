@@ -41,6 +41,10 @@ import type { FilterLearning, LearnableFilter } from "../../core/learn/filterLea
 import { SmartFilterSettings } from "./SmartFilterSettings";
 import { SelectMenu } from "./SelectMenu";
 import { useShortcutsAvailable } from "../physicalKeyboard";
+import { remotePicturesPaused } from "../senderPictures";
+
+/** Under a remote-picture switch that is on but paused by Remote images = Never. */
+const REMOTE_PAUSED_HINT = "Paused: Remote images is set to Never";
 
 /** How often the desktop app checks for mail while closed. */
 const SYNC_INTERVALS: readonly { value: number; label: string }[] = [
@@ -590,10 +594,10 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               onChange={props.onImagePolicy}
             />
           </Row>
-          <Row setting="brandLogos">
+          <Row setting="brandLogos" hint={remotePicturesPaused(props.imagePolicy) && props.brandLogos ? REMOTE_PAUSED_HINT : undefined}>
             <Toggle checked={props.brandLogos} onChange={props.onBrandLogos} label="Show brand logos" />
           </Row>
-          <Row setting="gravatars">
+          <Row setting="gravatars" hint={remotePicturesPaused(props.imagePolicy) && props.gravatars ? REMOTE_PAUSED_HINT : undefined}>
             <Toggle checked={props.gravatars} onChange={props.onGravatars} label="Gravatar photos" />
           </Row>
         </Section>

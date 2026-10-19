@@ -118,7 +118,7 @@ import { mailtoAddress } from "./core/mail/unsubscribe";
 import { copyText } from "./ui/clipboard";
 import { CodeBar } from "./ui/components/CodeCopy";
 import { Avatar } from "./ui/components/Avatar";
-import { imageProbe, publishSenderPictures, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
+import { imageProbe, publishSenderPictures, senderPictureSources, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
 import { GravatarCache } from "./core/avatars/gravatar";
 import { contactPhotoMap } from "./core/avatars/photos";
 import { BrandLogoCache } from "./core/avatars/logoCache";
@@ -1191,13 +1191,17 @@ export function App({ store }: Props) {
   const isDemo = snapshot.contactsAccess === "demo";
   const brandLogos = preferences.brandLogos;
   const gravatars = preferences.gravatars;
+  // Remote images = Never pauses both remote lookups (`senderPictureSources`).
+  const imagePolicy = preferences.imagePolicy;
   const senderPictures = useMemo<SenderPictures>(
-    () => ({
-      photos,
-      gravatars: gravatars ? gravatarCache : null,
-      logos: brandLogos ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
-    }),
-    [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache],
+    () =>
+      senderPictureSources({
+        photos,
+        gravatars: gravatars ? gravatarCache : null,
+        logos: brandLogos ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
+        imagePolicy,
+      }),
+    [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache, imagePolicy],
   );
   // The same sources for a new-mail notification's sender picture (`announce`).
   useEffect(() => {
