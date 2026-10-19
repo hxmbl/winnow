@@ -21,7 +21,12 @@ import {
   insertDriveLinks,
   recipientAddresses,
   removeDriveLink,
-  shareDriveFiles,
+  driveFileId,
+  driveLinksForSend,
+  findDriveLinks,
+  recoverDriveFiles,
+  revokeShares,
+  shareForSend,
   shareFailureReason,
   shareWarning,
   type DriveFetch,
@@ -122,16 +127,24 @@ describe("the Drive client", () => {
     await expect(client.upload({ filename: "a", mimeType: "", bytes: new Uint8Array(1) })).rejects.toThrow(/did not say where/);
   });
 
-  it("shares as reader, without Drive's email, and reports the addresses that failed", async () => {
-    const { calls, client } = stub((call) =>
-      JSON.stringify(call.body).includes("nobody@")
-        ? { status: 400, body: '{"error":{"errors":[{"reason":"invalidSharingRequest"}]}}' }
-        : { status: 200, body: '{"id":"p"}' },
-    );
-    const failures = await client.shareWith("f1", ["ada@x.co", "nobody@nowhere.example"]);
-    expect(failures).toEqual([{ email: "nobody@nowhere.example", reason: "has no Google account Drive can share with" }]);
+  it("shares as reader, without Drive's email, and answers with the permission id", async () => {
+    const { calls, client } = stub(() => ({ status: 200, body: '{"id":"perm-1"}' }));
+    expect(await client.share("f1", "ada@x.co")).toBe("perm-1");
     expect(calls[0]!.url).toContain("sendNotificationEmail=false");
     expect(JSON.parse(String(calls[0]!.body))).toEqual({ type: "user", role: "reader", emailAddress: "ada@x.co" });
+  });
+
+  it("reads who can open a file, and takes one permission back (gone already is fine)", async () => {
+    const { calls, client } = stub((call) =>
+      call.method === "GET"
+        ? { status: 200, body: '{"permissions":[{"id":"o","type":"user","emailAddress":"me@x.co"}]}' }
+        : { status: call.url.endsWith("/gone") ? 404 : 204 },
+    );
+    expect(await client.permissions("f1")).toEqual([{ id: "o", type: "user", emailAddress: "me@x.co" }]);
+    await client.revoke("f1", "p1");
+    await client.revoke("f1", "gone");
+    expect(calls[1]).toMatchObject({ method: "DELETE" });
+    expect(calls[1]!.url).toBe("https://www.googleapis.com/drive/v3/files/f1/permissions/p1");
   });
 
   it("classifies the Drive API being off, with Google's switch", async () => {
@@ -153,10 +166,15 @@ describe("the Drive client", () => {
     expect(driveFailureNotice(new DriveApiDisabled(null)).url).toBe(DRIVE_API_LIBRARY_URL);
   });
 
-  it("does not report a whole-grant failure as one address", async () => {
-    const client = { shareWith: async () => { throw new DriveScopeMissing(); } };
+  it("does not report a whole-grant failure on Winnow's own link as one address", async () => {
+    const api = {
+      upload: async () => file,
+      permissions: async () => { throw new DriveScopeMissing(); },
+      share: async () => "p",
+      revoke: async () => undefined,
+    };
     await expect(
-      shareDriveFiles({ upload: async () => file, ...client }, [file], ["ada@x.co"]),
+      shareForSend(api, [{ id: "f1", link: file.link, own: true, name: file.name }], ["ada@x.co"]),
     ).rejects.toBeInstanceOf(DriveScopeMissing);
   });
 
@@ -167,19 +185,114 @@ describe("the Drive client", () => {
   });
 });
 
-describe("sharing at send time", () => {
-  it("groups failures by address, naming the files, and warns before send", async () => {
+describe("Drive links in a body", () => {
+  const own = "holiday.mov (40 MB) — https://drive.google.com/file/d/f1AAAAAAAAAA/view?usp=drivesdk";
+
+  it("reads the file id from every Drive and Docs URL shape, and nothing else", () => {
+    expect(driveFileId("https://drive.google.com/file/d/1AbC_def-GHIJ/view?usp=sharing")).toBe("1AbC_def-GHIJ");
+    expect(driveFileId("https://drive.google.com/open?id=1AbC_def-GHIJ")).toBe("1AbC_def-GHIJ");
+    expect(driveFileId("https://drive.google.com/uc?export=download&id=1AbC_def-GHIJ")).toBe("1AbC_def-GHIJ");
+    expect(driveFileId("https://drive.google.com/a/example.com/file/d/1AbC_def-GHIJ/view")).toBe("1AbC_def-GHIJ");
+    expect(driveFileId("https://docs.google.com/document/d/1AbC_def-GHIJ/edit")).toBe("1AbC_def-GHIJ");
+    expect(driveFileId("https://drive.usercontent.google.com/download?id=1AbC_def-GHIJ")).toBe("1AbC_def-GHIJ");
+    expect(driveFileId("https://drive.google.com/drive/folders/1AbC_def-GHIJ")).toBeNull();
+    expect(driveFileId("https://evil.example/file/d/1AbC_def-GHIJ/view")).toBeNull();
+    expect(driveFileId("https://drive.google.com.evil.example/file/d/1AbC_def-GHIJ/view")).toBeNull();
+  });
+
+  it("knows Winnow's own lines from a link someone pasted, in plain text", () => {
+    const body = `See below.\n\n${own}\nAnd the deck: https://drive.google.com/open?id=theirsXXXXXX.\n`;
+    expect(findDriveLinks(body)).toEqual([
+      { id: "f1AAAAAAAAAA", link: "https://drive.google.com/file/d/f1AAAAAAAAAA/view?usp=drivesdk", own: true, name: "holiday.mov" },
+      { id: "theirsXXXXXX", link: "https://drive.google.com/open?id=theirsXXXXXX", own: false },
+    ]);
+  });
+
+  it("reads the HTML body too: Winnow's line as Gmail's editor linked it, and every href", () => {
+    const html =
+      '<div>See below.</div><div>holiday.mov (40 MB) — <a href="https://drive.google.com/file/d/f1AAAAAAAAAA/view?usp=drivesdk">https://drive.google.com/file/d/f1AAAAAAAAAA/view?usp=drivesdk</a></div>' +
+      '<div><a href="https://drive.google.com/uc?export=download&amp;id=theirsYYYYYY">the deck</a></div>';
+    const links = findDriveLinks("See below.", html);
+    expect(links.map((link) => [link.id, link.own])).toEqual([
+      ["f1AAAAAAAAAA", true],
+      ["theirsYYYYYY", false],
+    ]);
+  });
+
+  it("rebuilds the composer's files from Winnow's lines, exactly, so the chip and its × work", () => {
+    const recovered = recoverDriveFiles(`Hi\n\n${own}\nraw.wav (4.5 MB) — https://drive.google.com/file/d/f2BBBBBBBBBB/view\n`);
+    expect(recovered.map((f) => [f.id, f.name, driveLinkLine(f)])).toEqual([
+      ["f1AAAAAAAAAA", "holiday.mov", own],
+      ["f2BBBBBBBBBB", "raw.wav", "raw.wav (4.5 MB) — https://drive.google.com/file/d/f2BBBBBBBBBB/view"],
+    ]);
+  });
+
+  it("shares at send what the body carries, with or without the composer's list", () => {
+    const body = `Hi\n\n${driveLinkLine(file)}\n${own}\nhttps://drive.google.com/file/d/theirsZZZZZZ/view`;
+    expect(driveLinksForSend({ body, driveFiles: [file] }).map((l) => [l.id, l.own])).toEqual([
+      ["f1", true],
+      ["f1AAAAAAAAAA", true],
+      ["theirsZZZZZZ", false],
+    ]);
+    expect(driveLinksForSend({ body: "nothing here" , driveFiles: [file] })).toEqual([]);
+  });
+});
+
+describe("sharing at dispatch", () => {
+  it("groups refusals on Winnow's own files by address, naming the files, for the warning", async () => {
     const demo = new DemoDriveClient(0);
-    const second = { ...file, id: "f2", name: "raw.wav" };
-    const problems = await shareDriveFiles(demo, [file, second], ["ada@x.co", "who@example.invalid"]);
+    const a = { id: "demo-drive-1", link: "https://drive.google.com/file/d/demo-drive-1/view", own: true, name: "holiday.mov" };
+    const b = { id: "demo-drive-2", link: "https://drive.google.com/file/d/demo-drive-2/view", own: true, name: "raw.wav" };
+    const { created, problems } = await shareForSend(demo, [a, b], ["ada@x.co", "who@example.invalid"]);
     expect(problems).toEqual([
       { email: "who@example.invalid", reason: "has no Google account Drive can share with", files: ["holiday.mov", "raw.wav"] },
+    ]);
+    expect(created.map((p) => [p.fileId, p.email])).toEqual([
+      ["demo-drive-1", "ada@x.co"],
+      ["demo-drive-2", "ada@x.co"],
     ]);
     const warning = shareWarning(problems);
     expect(warning.title).toBe("One recipient can't open the Drive link");
     expect(warning.body).toMatch(/who@example\.invalid/);
     expect(warning.body).toMatch(/Send anyway/);
-    expect(await shareDriveFiles(demo, [file], [])).toEqual([]);
+    expect((await shareForSend(demo, [a], [])).created).toEqual([]);
+  });
+
+  it("claims only the permissions it made: an address that can already open the file is left alone", async () => {
+    const demo = new DemoDriveClient(0);
+    const a = { id: "demo-drive-7", link: "x", own: true, name: "a" };
+    const first = await shareForSend(demo, [a], ["ada@x.co"]);
+    const second = await shareForSend(demo, [a], ["ada@x.co", "bob@x.co"]);
+    expect(first.created).toHaveLength(1);
+    expect(second.created.map((p) => p.email)).toEqual(["bob@x.co"]);
+  });
+
+  it("skips someone else's link without a word, whatever Drive says about it", async () => {
+    const { calls, client } = stub((call) =>
+      call.url.includes("theirs") ? { status: 404, body: '{"error":{"code":404,"message":"File not found"}}' } : { status: 403, body: "appNotAuthorizedToFile" },
+    );
+    const outcome = await shareForSend(
+      client,
+      [
+        { id: "theirsAAAAAA", link: "x", own: false },
+        { id: "otherBBBBBBB", link: "y", own: false },
+      ],
+      ["ada@x.co"],
+    );
+    expect(outcome).toEqual({ created: [], problems: [] });
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
+
+  it("takes back exactly what it is given, and says which it could not", async () => {
+    const demo = new DemoDriveClient(0);
+    const left = await revokeShares(demo, [
+      { fileId: "demo-drive-1", permissionId: "p1", email: "a@x.co" },
+      { fileId: "demo-drive-2", permissionId: "p2", email: "a@x.co" },
+    ]);
+    expect(left).toEqual([]);
+    expect(demo.revoked).toEqual(["p1", "p2"]);
+    const failing = { ...demo, upload: demo.upload, permissions: demo.permissions, share: demo.share, revoke: async () => { throw new Error("offline"); } };
+    expect(await revokeShares(failing, [{ fileId: "f", permissionId: "p", email: "a@x.co" }])).toHaveLength(1);
   });
 
   it("the demo uploads nothing and answers with a made-up link", async () => {

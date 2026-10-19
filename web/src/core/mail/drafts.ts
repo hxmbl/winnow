@@ -18,6 +18,7 @@
 
 import type { Contact, Draft, DraftAttachment, Email, GmailId } from "../model/email";
 import { forDeviceCopy, restorableAttachments } from "./attachments";
+import { recoverDriveFiles } from "../gmail/drive";
 
 /** What the composer is for. Matches `Composer`'s `mode`. */
 export type DraftMode = "reply" | "forward" | "new";
@@ -481,6 +482,7 @@ export function reopenDraft(email: Email, all: readonly Email[]): DraftReopen | 
     size: attachment.size,
     source: { gmailId: email.gmailId, attachmentId: attachment.id },
   }));
+  const driveFiles = recoverDriveFiles(email.body, email.bodyHtml);
   const draft: Draft = {
     to: addresses(email.to),
     cc: addresses(email.cc),
@@ -488,6 +490,10 @@ export function reopenDraft(email: Email, all: readonly Email[]): DraftReopen | 
     subject: email.subject,
     body: email.body,
     ...(attachments.length > 0 ? { attachments } : {}),
+    // The composer's list of Drive files is not part of a Gmail draft; Winnow's own
+    // "File name (size) — link" lines are, so the files come back from them (Send also
+    // reads the links off the body, so one that cannot be rebuilt here is still shared).
+    ...(driveFiles.length > 0 ? { driveFiles } : {}),
   };
   const context = gmailDraftContext(gmailDraft.id);
   const others = all.filter((candidate) => candidate.mailbox !== "drafts" && candidate.gmailId !== email.gmailId);

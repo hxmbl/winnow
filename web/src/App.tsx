@@ -59,7 +59,7 @@ import {
 import { attentionSentence } from "./core/classify/attention";
 import { formatRelative } from "./core/mail/datetime";
 import { resolveImageConsent } from "./core/mail/imageConsent";
-import type { Draft, GmailId } from "./core/model/email";
+import type { Draft, DrivePermissionRef, GmailId } from "./core/model/email";
 import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
@@ -129,17 +129,23 @@ import {
   DemoDriveClient,
   GOOGLE_PERMISSIONS_URL,
   driveFailureNotice,
-  driveFilesToShare,
   insertDriveLinks,
-  recipientAddresses,
   removeDriveLink,
-  shareDriveFiles,
+  revokeShares,
   shareWarning,
   type DriveAccess,
   type DriveApi,
   type ShareProblem,
 } from "./core/gmail/drive";
+import {
+  needsDriveGrant,
+  prepareDriveDispatch,
+  prepareQueuedShare,
+  queuedShareNotice,
+  type DriveDispatch,
+} from "./core/gmail/driveSend";
 import { DriveConsent } from "./ui/components/DriveConsent";
+import { DriveGrantNeeded } from "./ui/components/DriveGrantNeeded";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import type { OfflineQueue } from "./core/offline/queue";
 import { OfflineIndicator } from "./ui/components/OfflineIndicator";
@@ -219,6 +225,12 @@ type ComposerState = {
   fromDrafts?: { draftId: string; row: Email; baseline: Draft };
   /** Files a restored device copy could not bring back, said by the attachment area. */
   attachNotice?: string | null;
+  /**
+   * Drive permissions an attempt to send this message created and that are kept while it
+   * might still go (a failed send, or the share warning waiting on an answer). Taken back
+   * if the message is abandoned instead. See `core/gmail/driveSend`.
+   */
+  driveShares?: DrivePermissionRef[];
 };
 
 /**
@@ -226,7 +238,26 @@ type ComposerState = {
  * pressed, its autosave (still attached to the Gmail draft), and the message a reply
  * threads on.
  */
-type PendingSend = { composer: ComposerState; saver: DraftAutosaver | null; inReplyTo?: GmailId };
+type PendingSend = {
+  composer: ComposerState;
+  saver: DraftAutosaver | null;
+  inReplyTo?: GmailId;
+  /** What the user already answered about its Drive links (Send anyway on either dialog). */
+  drive?: SendDriveAnswers;
+  /** The Drive permissions this message holds once dispatch has shared (set by `deliver`). */
+  created?: DrivePermissionRef[];
+};
+
+/** Answers the user gave about a message's Drive links, carried into the send. */
+type SendDriveAnswers = { accepted?: boolean; waived?: boolean };
+
+/** A send stopped at dispatch for the user to answer about its Drive links. */
+class DriveSendHold extends Error {
+  constructor(readonly hold: Extract<DriveDispatch, { kind: "hold" }>) {
+    super("The Drive links need an answer before this message goes.");
+    this.name = "DriveSendHold";
+  }
+}
 
 /** What `startComposer` is given: the composer, less the state it owns itself. */
 type ComposerStart = Omit<ComposerState, "sending" | "error" | "status">;
@@ -529,6 +560,9 @@ export function App({ store }: Props) {
    * token when the account changes and after the opt-in. `null` before anyone is signed in.
    */
   const [driveAccess, setDriveAccess] = useState<DriveAccess | null>(null);
+  /** The same, for a send dispatched by a timer set before the grant changed. */
+  const driveAccessRef = useRef<DriveAccess | null>(null);
+  driveAccessRef.current = driveAccess;
   /** The bridge's offline queue, as state so the indicator mounts when it exists. */
   const [offlineQueue, setOfflineQueue] = useState<OfflineQueue | null>(null);
 
@@ -1385,12 +1419,35 @@ export function App({ store }: Props) {
     return account ? new LocalDrafts(deviceStorage(), account) : null;
   }, []);
 
+  // Drive (see the Drive links section below): which client, and taking permissions back.
+  const demoDriveRef = useRef<DemoDriveClient | null>(null);
+  /** The demo shows the same dialog once, and "allows" without asking Google. */
+  const demoDriveAllowedRef = useRef(false);
+  const driveApi = useCallback((): DriveApi | null => {
+    if (storeRef.current.getSnapshot().contactsAccess === "demo") {
+      demoDriveRef.current ??= new DemoDriveClient();
+      return demoDriveRef.current;
+    }
+    return sessionRef.current?.drive() ?? null;
+  }, []);
+  /** Take back Drive permissions a message made and then did not send. Best effort. */
+  const takeBackShares = useCallback(
+    (created: readonly DrivePermissionRef[] | undefined) => {
+      if (!created || created.length === 0) return;
+      const api = driveApi();
+      if (api) void revokeShares(api, created);
+    },
+    [driveApi],
+  );
+
   /**
    * Put the open composer away: `park` keeps what was written (Gmail draft and device
    * copy, with a "Draft saved." notice), `discard` deletes both. An untouched composer is
    * always discarded — there is nothing to keep.
    */
   const retireComposer = useCallback((current: ComposerState, how: "park" | "discard") => {
+    // Put away unsent: whatever an attempt to send it shared on Drive is taken back.
+    takeBackShares(current.driveShares);
     const saver = saverRef.current;
     saverRef.current = null;
     if (!saver) return;
@@ -1430,7 +1487,7 @@ export function App({ store }: Props) {
       });
     }
     s.flash("Draft saved.", DRAFT_NOTICE_MS);
-  }, [localDrafts]);
+  }, [localDrafts, takeBackShares]);
 
   /**
    * Open the composer, with its autosave.
@@ -1668,25 +1725,59 @@ export function App({ store }: Props) {
     "Send as a Drive link" is pressed, after `DriveConsent` has said in plain words what
     it allows; never at sign-in. The demo uploads nothing (`DemoDriveClient`).
   */
-  const demoDriveRef = useRef<DemoDriveClient | null>(null);
-  const driveApi = useCallback((): DriveApi | null => {
-    if (storeRef.current.getSnapshot().contactsAccess === "demo") {
-      demoDriveRef.current ??= new DemoDriveClient();
-      return demoDriveRef.current;
-    }
-    return sessionRef.current?.drive() ?? null;
-  }, []);
   /** The files waiting on the plain-words dialog before Google is asked. */
   const [driveConsent, setDriveConsent] = useState<File[] | null>(null);
   const [driveBusy, setDriveBusy] = useState<string | null>(null);
   const [driveProblem, setDriveProblem] = useState<{ message: string; url: string | null; label: string | null } | null>(
     null,
   );
-  /** Recipients Drive would not share with, asked about before the message goes. */
+  /**
+   * Recipients Drive would not share with, asked about before the message goes. Asked at
+   * dispatch (after the undo window), with the message back in the composer.
+   */
   const [confirmShares, setConfirmShares] = useState<{
     recipients: Pick<Draft, "to" | "cc" | "bcc">;
     problems: ShareProblem[];
   } | null>(null);
+  /**
+   * The message has Winnow's own Drive links but Winnow may not use Drive (signed out and
+   * back, or the permission removed at Google): allow again, or send anyway. `immediate`:
+   * asked at dispatch, so the undo window has already run.
+   */
+  const [confirmGrant, setConfirmGrant] = useState<{
+    recipients: Pick<Draft, "to" | "cc" | "bcc">;
+    immediate: boolean;
+  } | null>(null);
+
+  /** Whether Winnow may share Drive files now (the demo: allowed in its own dialog). */
+  const driveAllowed = useCallback(
+    () =>
+      storeRef.current.getSnapshot().contactsAccess === "demo"
+        ? demoDriveAllowedRef.current
+        : driveAccessRef.current === "granted",
+    [],
+  );
+
+  /**
+   * The offline queue's half of Drive links: a send queued before its links could be
+   * shared shares them just before it is replayed (`prepareQueuedShare`), and a queued
+   * send given up on takes back what it shared.
+   */
+  useEffect(() => {
+    if (!offlineQueue) return;
+    offlineQueue.setDriveHooks({
+      prepare: async (share) => {
+        const result = await prepareQueuedShare(sessionRef.current?.drive() ?? null, share);
+        const notice = queuedShareNotice(result);
+        if (notice) storeRef.current.setNotice(notice);
+      },
+      revoke: async (created) => {
+        const api = sessionRef.current?.drive();
+        if (api) await revokeShares(api, created);
+      },
+    });
+    return () => offlineQueue.setDriveHooks(null);
+  }, [offlineQueue]);
 
   /** Upload each file and add its "File name (size) — link" line to the draft. */
   const uploadToDrive = useCallback(
@@ -1725,8 +1816,6 @@ export function App({ store }: Props) {
     [driveApi],
   );
 
-  /** The demo shows the same dialog once, and "allows" without asking Google. */
-  const demoDriveAllowedRef = useRef(false);
   /** "Send as a Drive link": straight to the upload once allowed, the dialog first otherwise. */
   const sendAsDriveLink = useCallback(
     (files: File[]) => {
@@ -1800,12 +1889,28 @@ export function App({ store }: Props) {
    * row in Drafts goes, and a new message says it went. Throws when the send fails; the
    * caller decides where the error is shown.
    */
-  const deliver = useCallback(async ({ composer: sending, saver, inReplyTo }: PendingSend) => {
+  const deliver = useCallback(async (pending: PendingSend) => {
+    const { composer: sending, saver, inReplyTo } = pending;
+    // Drive links are shared here, at dispatch: after the undo window (or at once with
+    // it Off), never at Send-tap, so an undone message has shared nothing. A hold is
+    // thrown for the caller to put the message back and ask (`DriveSendHold`).
+    const dispatch = await prepareDriveDispatch(sending.draft, {
+      api: driveApi(),
+      online: globalThis.navigator?.onLine ?? true,
+      allowed: driveAllowed(),
+      accepted: pending.drive?.accepted,
+      waived: pending.drive?.waived,
+      prior: sending.driveShares,
+    });
+    if (dispatch.kind === "hold") throw new DriveSendHold(dispatch);
+    takeBackShares(dispatch.stale);
+    pending.created = dispatch.share?.created ?? [];
+    const outgoing: Draft = dispatch.share ? { ...sending.draft, driveShare: dispatch.share } : sending.draft;
     const draftId = (saver ? await saver.settle().catch(() => null) : null) ?? undefined;
     const s = storeRef.current;
     let simulated = false;
-    if (sending.mode === "new") ({ simulated } = await s.sendNew(sending.draft, draftId));
-    else if (inReplyTo) await s.sendReply(sending.draft, inReplyTo, draftId);
+    if (sending.mode === "new") ({ simulated } = await s.sendNew(outgoing, draftId));
+    else if (inReplyTo) await s.sendReply(outgoing, inReplyTo, draftId);
     else throw new Error("Couldn't find the message this replies to.");
     saver?.finish();
     if (saverRef.current === saver) saverRef.current = null;
@@ -1821,7 +1926,35 @@ export function App({ store }: Props) {
     // Said, because a closing sheet alone does not say whether it went. The demo says
     // what it did: nothing left the device.
     s.flash(simulated ? "Message sent (demo: saved to Sent on this device only)." : "Message sent.", SENT_NOTICE_MS);
-  }, []);
+  }, [driveAllowed, driveApi, takeBackShares]);
+
+  /**
+   * A send stopped at dispatch over its Drive links: the message comes back to the
+   * composer (one opened since is parked, as Undo does) with what it has shared so far,
+   * and the question is asked there.
+   */
+  const holdForDrive = useCallback(
+    (pending: PendingSend, hold: DriveSendHold["hold"]) => {
+      const current = composerRef.current;
+      const same = current?.context === pending.composer.context;
+      if (current && !same) retireComposer(current, "park");
+      if (!same) saverRef.current = pending.saver;
+      const back: ComposerState = {
+        ...pending.composer,
+        sending: false,
+        error: null,
+        status: pending.saver?.currentStatus ?? pending.composer.status,
+        driveShares: hold.created.length > 0 ? hold.created : undefined,
+      };
+      composerRef.current = back;
+      setComposer(back);
+      const { to, cc, bcc } = pending.composer.draft;
+      if (hold.reason === "problems") setConfirmShares({ recipients: { to, cc, bcc }, problems: hold.problems });
+      else if (hold.reason === "grant") setConfirmGrant({ recipients: { to, cc, bcc }, immediate: true });
+      else setDriveProblem(driveFailureNotice(hold.error));
+    },
+    [retireComposer],
+  );
 
   /**
    * The undo window ended: send. A failure puts the composer back with the error, as an
@@ -1835,8 +1968,14 @@ export function App({ store }: Props) {
       try {
         await deliver(pending);
       } catch (error) {
+        if (error instanceof DriveSendHold) {
+          holdForDrive(pending, error.hold);
+          return;
+        }
         const message = error instanceof Error ? error.message : "Couldn't send that message.";
         if (composerRef.current) {
+          // Kept as a draft, not retried: what it shared on Drive is taken back.
+          takeBackShares(pending.created);
           void pending.saver?.park();
           storeRef.current.setNotice(`${message} It was kept as a draft.`);
           return;
@@ -1847,12 +1986,14 @@ export function App({ store }: Props) {
           sending: false,
           error: message,
           status: pending.saver?.currentStatus ?? pending.composer.status,
+          // A failed send keeps its Drive permissions for the retry.
+          driveShares: pending.created && pending.created.length > 0 ? pending.created : pending.composer.driveShares,
         };
         composerRef.current = back;
         setComposer(back);
       }
     },
-    [deliver],
+    [deliver, holdForDrive, takeBackShares],
   );
 
   /**
@@ -1866,16 +2007,20 @@ export function App({ store }: Props) {
     if (!pending) return;
     const current = composerRef.current;
     if (current) retireComposer(current, "park");
+    // Undone: nothing it holds on Drive stays shared (sharing happens after the window,
+    // so this is only what an earlier, failed attempt kept, or anything that slipped in).
+    takeBackShares([...(pending.composer.driveShares ?? []), ...(pending.created ?? [])]);
     saverRef.current = pending.saver;
     const back: ComposerState = {
       ...pending.composer,
       sending: false,
       error: null,
       status: pending.saver?.currentStatus ?? pending.composer.status,
+      driveShares: undefined,
     };
     composerRef.current = back;
     setComposer(back);
-  }, [retireComposer]);
+  }, [retireComposer, takeBackShares]);
 
   /** "Send now" on the strip: skip the rest of the wait. */
   const sendWaitingNow = useCallback(() => {
@@ -1960,46 +2105,38 @@ export function App({ store }: Props) {
    * up saying "Sending" and shows a failure in place, as before.
    */
   const sendDraft = useCallback(
-    async (recipients?: Pick<Draft, "to" | "cc" | "bcc">, confirmedNoSubject = false, sharesChecked = false) => {
+    async (
+      recipients?: Pick<Draft, "to" | "cc" | "bcc">,
+      confirmedNoSubject = false,
+      answers: SendDriveAnswers & { immediate?: boolean } = {},
+    ) => {
       if (!composer || composer.sending) return;
       const draft = { ...composer.draft, ...(recipients ?? {}) };
       if (composer.mode === "new" && !confirmedNoSubject && needsSubjectConfirmation(draft)) {
         setConfirmNoSubject({ to: draft.to, cc: draft.cc, bcc: draft.bcc });
         return;
       }
-      // Drive links: shared with the recipients as readers before the message goes, so
-      // an address that can't receive the share is warned about while it can be fixed.
-      const toShare = driveFilesToShare(draft.body, draft.driveFiles);
-      if (toShare.length > 0 && !sharesChecked) {
-        const api = driveApi();
-        if (api) {
-          setDriveBusy("Sharing the Drive links…");
-          setDriveProblem(null);
-          try {
-            const problems = await shareDriveFiles(
-              api,
-              toShare,
-              recipientAddresses(draft.to.join(", "), draft.cc.join(", "), draft.bcc.join(", ")),
-            );
-            if (problems.length > 0) {
-              setConfirmShares({ recipients: { to: draft.to, cc: draft.cc, bcc: draft.bcc }, problems });
-              return;
-            }
-          } catch (error) {
-            setDriveProblem(driveFailureNotice(error));
-            return;
-          } finally {
-            setDriveBusy(null);
-          }
-        }
+      // Drive links: nothing is shared here (that happens at dispatch, in `deliver`). Only
+      // the check that needs no network: Winnow's own links, and no Drive permission to
+      // share them, asks first — allow again, or send anyway with the warning.
+      if (!answers.waived && needsDriveGrant(draft, driveAllowed())) {
+        setConfirmGrant({ recipients: { to: draft.to, cc: draft.cc, bcc: draft.bcc }, immediate: answers.immediate ?? false });
+        return;
       }
       const inReplyTo =
         composer.mode === "new" ? undefined : (composer.replyTo ?? snapshotRef.current.view.selected?.gmailId);
       if (composer.mode !== "new" && !inReplyTo) return;
       const saver = saverRef.current;
-      const pending: PendingSend = { composer: { ...composer, draft }, saver, inReplyTo };
+      const pending: PendingSend = {
+        composer: { ...composer, draft },
+        saver,
+        inReplyTo,
+        drive: { accepted: answers.accepted, waived: answers.waived },
+      };
 
-      const seconds = storeRef.current.getSnapshot().preferences.undoSendSeconds;
+      // An answer given at dispatch (the share warning, the grant dialog) comes after the
+      // undo window has already run: it sends now.
+      const seconds = answers.immediate ? 0 : storeRef.current.getSnapshot().preferences.undoSendSeconds;
       if (seconds > 0) {
         saver?.change(draft, { replyAll: composer.replyAll, initial: composer.initial });
         void saver?.flush();
@@ -2020,10 +2157,16 @@ export function App({ store }: Props) {
           setComposer(null);
         }
       } catch (error) {
+        if (error instanceof DriveSendHold) {
+          holdForDrive(pending, error.hold);
+          return;
+        }
         setComposer({
           ...composer,
           draft,
           sending: false,
+          // A failed send keeps its Drive permissions for the retry.
+          driveShares: pending.created && pending.created.length > 0 ? pending.created : composer.driveShares,
           error:
             error instanceof Error
               ? error.message
@@ -2033,8 +2176,49 @@ export function App({ store }: Props) {
         });
       }
     },
-    [composer, deliver, deliverPending, driveApi],
+    [composer, deliver, deliverPending, driveAllowed, holdForDrive],
   );
+
+  /**
+   * Keep editing, from either Drive question: this send is abandoned, so the permissions
+   * it made on Drive are taken back. A later Send shares again, with whoever it is to.
+   */
+  const keepEditingDrive = useCallback(() => {
+    const current = composerRef.current;
+    if (!current?.driveShares) return;
+    takeBackShares(current.driveShares);
+    const next: ComposerState = { ...current, driveShares: undefined };
+    composerRef.current = next;
+    setComposer(next);
+  }, [takeBackShares]);
+
+  /**
+   * "Allow Google Drive" on the question before a send: the same incremental consent as
+   * the first upload (on the web the page leaves for Google and the draft is kept; Send
+   * again on the way back), then the send goes on.
+   */
+  const allowDriveForSend = useCallback(async () => {
+    const asked = confirmGrant;
+    setConfirmGrant(null);
+    if (!asked) return;
+    if (storeRef.current.getSnapshot().contactsAccess === "demo") {
+      demoDriveAllowedRef.current = true;
+      await sendDraft(asked.recipients, true, { immediate: asked.immediate });
+      return;
+    }
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    setDriveProblem(null);
+    try {
+      const access = await bridge.grantDrive();
+      setDriveAccess(access);
+      driveAccessRef.current = access;
+      if (access === "granted") await sendDraft(asked.recipients, true, { immediate: asked.immediate });
+      else setDriveProblem({ message: "Google Drive was not allowed, so the links were not shared.", url: null, label: null });
+    } catch (error) {
+      setDriveProblem(driveFailureNotice(error));
+    }
+  }, [confirmGrant, sendDraft]);
 
   /**
    * Close the composer, or ask before throwing the draft away.
@@ -2753,6 +2937,7 @@ export function App({ store }: Props) {
     phoneConfirm !== null ||
     confirmNoSubject !== null ||
     confirmShares !== null ||
+    confirmGrant !== null ||
     driveConsent !== null ||
     restoreOffer !== null;
   const android = info?.os === "android";
@@ -4072,9 +4257,28 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onConfirm={() => {
             const { recipients } = confirmShares;
             setConfirmShares(null);
-            void sendDraft(recipients, true, true);
+            void sendDraft(recipients, true, { accepted: true, immediate: true });
           }}
-          onCancel={() => setConfirmShares(null)}
+          onCancel={() => {
+            setConfirmShares(null);
+            keepEditingDrive();
+          }}
+        />
+      )}
+
+      {confirmGrant && (
+        <DriveGrantNeeded
+          web={!isDemo && info?.kind !== "desktop" && !info?.nativeOAuth}
+          onAllow={() => void allowDriveForSend()}
+          onSendAnyway={() => {
+            const { recipients, immediate } = confirmGrant;
+            setConfirmGrant(null);
+            void sendDraft(recipients, true, { waived: true, immediate });
+          }}
+          onCancel={() => {
+            setConfirmGrant(null);
+            keepEditingDrive();
+          }}
         />
       )}
 

@@ -13,10 +13,19 @@
  * the token, never stored separately, so signing out (which revokes the grant at Google)
  * or removing Winnow at Google leaves nothing behind.
  *
- * **Sharing.** Each file is shared with the message's recipients as *reader*, without
- * Drive's own notification email (the message carries the link). An address Drive will
- * not share with — usually one with no Google account — is reported before the message
- * is sent (`shareWith` answers per address), so the user can decide.
+ * **Sharing at dispatch.** Each file is shared with the message's recipients as
+ * *reader*, without Drive's own notification email (the message carries the link). What
+ * is shared is read off the body that goes out (`driveLinksForSend`): Winnow's own
+ * "File name (size) — link" lines and any Drive file URL, plus the composer's
+ * `driveFiles` whose line is still there — so a draft reopened from Gmail's Drafts, which
+ * has lost the composer's list, still shares its links. `drive.file` reaches only files
+ * Winnow created, so a 403/404 on a link that is *not* one of Winnow's lines (someone
+ * else's Drive link pasted in) is skipped without a word; a failure on Winnow's own line
+ * is reported per address before the message goes (`shareForSend`), so the user can
+ * decide. Sharing happens when the message is actually dispatched — after the undo
+ * window, or when the offline queue replays it — never when Send is tapped, and each
+ * send records the permission ids it created (`DrivePermissionRef`), so a send that is
+ * abandoned takes back exactly those (`revokeShares`) and nothing an earlier send made.
  *
  * **Bring-your-own client.** Users bring their own OAuth client, so the Drive API has to
  * be turned on in their Cloud project. Google's 403 for that is classified here
@@ -28,8 +37,9 @@
 import { GmailError, GmailHttpError } from "./dto";
 import { apiActivationUrl, isApiDisabled, isScopeMissing } from "./people";
 import { formatBytes } from "./mime";
+import { plainTextFromHtml } from "../mail/html";
 import type { TokenProvider } from "./client";
-import type { DraftDriveFile } from "../model/email";
+import type { DraftDriveFile, DriveLinkRef, DrivePermissionRef } from "../model/email";
 
 /** Only the files Winnow creates. Nothing else in the user's Drive. */
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -97,16 +107,21 @@ export function driveFailureNotice(error: unknown): { message: string; url: stri
 /** An uploaded file (as the draft keeps it). */
 export type DriveFile = DraftDriveFile;
 
-/** One address Drive would not share with, and Google's reason in plain words. */
-export type ShareFailure = { email: string; reason: string };
 
 export type DriveFileInput = { filename: string; mimeType: string; bytes: Uint8Array };
+
+/** A permission already on a file, as far as sharing needs to know. */
+export type DrivePermission = { id: string; type: string; emailAddress?: string };
 
 /** What both the real client and the demo's do. */
 export interface DriveApi {
   upload(file: DriveFileInput, onProgress?: (fraction: number) => void): Promise<DriveFile>;
-  /** Share with each address as a reader. Resolves with the addresses that failed. */
-  shareWith(fileId: string, emails: readonly string[]): Promise<ShareFailure[]>;
+  /** Who can open the file already. Throws Google's answer (404 for a file not Winnow's). */
+  permissions(fileId: string): Promise<DrivePermission[]>;
+  /** Share with one address as a reader, without Drive's email. Resolves with the permission id. */
+  share(fileId: string, email: string): Promise<string>;
+  /** Take one permission back. A permission (or file) already gone is not an error. */
+  revoke(fileId: string, permissionId: string): Promise<void>;
 }
 
 /** The line a Drive file adds to a plain-text body: "File name (size) — link". */
@@ -233,25 +248,39 @@ export class DriveClient implements DriveApi {
     };
   }
 
-  async shareWith(fileId: string, emails: readonly string[]): Promise<ShareFailure[]> {
-    const failures: ShareFailure[] = [];
-    for (const email of emails) {
-      try {
-        await this.call(`${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions?sendNotificationEmail=false&fields=id`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json; charset=UTF-8" },
-          body: JSON.stringify({ type: "user", role: "reader", emailAddress: email }),
-        });
-      } catch (error) {
-        // The API being off, the scope gone or the session over is not about one address.
-        if (error instanceof DriveApiDisabled || error instanceof DriveScopeMissing) throw error;
-        if (error instanceof GmailError && error.kind === "reauth_required") throw error;
-        const status = error instanceof GmailHttpError ? error.status : 0;
-        const body = error instanceof GmailHttpError ? error.body : String(error);
-        failures.push({ email, reason: shareFailureReason(status, body) });
-      }
+  async permissions(fileId: string): Promise<DrivePermission[]> {
+    const { text } = await this.call(
+      `${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions?fields=permissions(id,type,emailAddress)&pageSize=100`,
+      { method: "GET" },
+    );
+    const parsed = JSON.parse(text || "{}") as { permissions?: DrivePermission[] };
+    return (parsed.permissions ?? []).filter((permission) => typeof permission?.id === "string");
+  }
+
+  async share(fileId: string, email: string): Promise<string> {
+    const { text } = await this.call(
+      `${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions?sendNotificationEmail=false&fields=id`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify({ type: "user", role: "reader", emailAddress: email }),
+      },
+    );
+    const parsed = JSON.parse(text || "{}") as { id?: string };
+    if (!parsed.id) throw new GmailError("Google Drive did not return the permission it made.", 0, "unknown");
+    return parsed.id;
+  }
+
+  async revoke(fileId: string, permissionId: string): Promise<void> {
+    try {
+      await this.call(`${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permissionId)}`, {
+        method: "DELETE",
+      });
+    } catch (error) {
+      // Already gone (the file deleted, or the permission removed by hand) is the goal.
+      if (error instanceof GmailHttpError && (error.status === 404 || error.status === 410)) return;
+      throw error;
     }
-    return failures;
   }
 }
 
@@ -262,6 +291,10 @@ export class DriveClient implements DriveApi {
  */
 export class DemoDriveClient implements DriveApi {
   private next = 0;
+  /** Permissions on the demo's own files, by file id. */
+  private readonly shared = new Map<string, DrivePermission[]>();
+  /** Every permission taken back, for the tests (and nothing else). */
+  readonly revoked: string[] = [];
   constructor(private readonly delayMs = 400) {}
 
   async upload(file: DriveFileInput, onProgress?: (fraction: number) => void): Promise<DriveFile> {
@@ -273,14 +306,37 @@ export class DemoDriveClient implements DriveApi {
     return { id, name: file.filename, size: file.bytes.byteLength, link: `https://drive.google.com/file/d/${id}/view` };
   }
 
-  async shareWith(_fileId: string, emails: readonly string[]): Promise<ShareFailure[]> {
-    return emails
-      .filter((email) => email.endsWith(".invalid"))
-      .map((email) => ({ email, reason: "has no Google account Drive can share with" }));
+  /** The demo "made" every `demo-drive-…` id; anything else is someone else's file. */
+  private own(fileId: string): DrivePermission[] {
+    if (!fileId.startsWith("demo-drive-")) throw new GmailHttpError(404, '{"error":{"code":404,"message":"File not found"}}');
+    let list = this.shared.get(fileId);
+    if (!list) this.shared.set(fileId, (list = []));
+    return list;
+  }
+
+  async permissions(fileId: string): Promise<DrivePermission[]> {
+    return [...this.own(fileId)];
+  }
+
+  async share(fileId: string, email: string): Promise<string> {
+    const list = this.own(fileId);
+    if (email.endsWith(".invalid")) {
+      throw new GmailHttpError(400, '{"error":{"errors":[{"reason":"invalidSharingRequest"}]}}');
+    }
+    this.next += 1;
+    const id = `demo-perm-${this.next}`;
+    list.push({ id, type: "user", emailAddress: email });
+    return id;
+  }
+
+  async revoke(fileId: string, permissionId: string): Promise<void> {
+    const list = this.shared.get(fileId);
+    if (list) this.shared.set(fileId, list.filter((permission) => permission.id !== permissionId));
+    this.revoked.push(permissionId);
   }
 }
 
-/** The draft's Drive files whose line is still in the body: the ones to share. */
+/** The draft's Drive files whose line is still in the body. */
 export function driveFilesToShare(
   body: string,
   files: readonly DriveFile[] | undefined,
@@ -288,31 +344,247 @@ export function driveFilesToShare(
   return (files ?? []).filter((file) => body.includes(driveLinkLine(file)));
 }
 
+// ── Links in a body ──────────────────────────────────────────────────────────
+
+/** A Drive file id: Google's are long runs of these characters. */
+const FILE_ID = "[A-Za-z0-9_-]{10,}";
+const ID_IN_PATH = new RegExp(`/(?:file|document|spreadsheets|presentation|forms|drawings)/(?:u/\\d+/)?d/(?:e/)?(${FILE_ID})`);
+const ID_IN_QUERY = new RegExp(`[?&]id=(${FILE_ID})`);
+/** A Drive or Docs URL, up to where a sentence or markup would end it. */
+const DRIVE_URL = /https?:\/\/(?:drive\.google\.com|docs\.google\.com|drive\.usercontent\.google\.com)\/[^\s<>"'()\]]+/g;
+/** Winnow's own line: "File name (size) — link", alone on its line. */
+const OWN_LINE = /^(.+?) \((\d+(?:\.\d)? (?:B|KB|MB|GB))\) \u2014 (https:\/\/\S+)\s*$/;
+
+/**
+ * The file id in a Drive URL (`/file/d/<id>`, `open?id=<id>`, `uc?id=`, Docs' `/d/<id>`,
+ * `drive.usercontent…?id=`), or `null` for anything else (a folder, another host).
+ */
+export function driveFileId(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!/^(?:drive|docs|drive\.usercontent)\.google\.com$/.test(parsed.hostname)) return null;
+  const tail = `${parsed.pathname}${parsed.search}`;
+  if (/\/folders\//.test(parsed.pathname)) return null;
+  return ID_IN_PATH.exec(tail)?.[1] ?? ID_IN_QUERY.exec(tail)?.[1] ?? null;
+}
+
+/** "26 MB" back to bytes, when `formatBytes` would write it again exactly. */
+function bytesOf(label: string): number | null {
+  const match = /^(\d+(?:\.\d)?) (B|KB|MB|GB)$/.exec(label);
+  if (!match) return null;
+  const power = { B: 0, KB: 1, MB: 2, GB: 3 }[match[2] as "B" | "KB" | "MB" | "GB"];
+  const bytes = Math.round(Number(match[1]) * 1024 ** power);
+  return formatBytes(bytes) === label ? bytes : null;
+}
+
+/** Winnow's own lines in a plain-text body, as the files they name. */
+function ownLines(text: string): { id: string; name: string; label: string; link: string }[] {
+  const out: { id: string; name: string; label: string; link: string }[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = OWN_LINE.exec(line.trim());
+    if (!match) continue;
+    const id = driveFileId(match[3]!);
+    if (id) out.push({ id, name: match[1]!, label: match[2]!, link: match[3]! });
+  }
+  return out;
+}
+
+/** `&amp;` and friends in an attribute, for an `href`. */
+function decodeAttribute(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&#0*38;/g, "&")
+    .replace(/&#x0*26;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;/g, "'");
+}
+
+/**
+ * Every Drive file link in a message, once per file. `text` is the plain-text body;
+ * `html`, when the message has one, is read too: its text (Winnow's lines survive
+ * Gmail's editor as text with the URL linked) and every `href`. A link is `own` when it
+ * sits on one of Winnow's "File name (size) — link" lines.
+ */
+export function findDriveLinks(text: string, html?: string): DriveLinkRef[] {
+  const found = new Map<string, DriveLinkRef>();
+  const add = (ref: DriveLinkRef) => {
+    const known = found.get(ref.id);
+    if (!known) found.set(ref.id, ref);
+    else if (ref.own && !known.own) found.set(ref.id, { ...ref });
+  };
+  const texts = [text, ...(html ? [plainTextFromHtml(html)] : [])];
+  for (const body of texts) {
+    for (const line of ownLines(body)) add({ id: line.id, link: line.link, own: true, name: line.name });
+    for (const match of body.matchAll(DRIVE_URL)) {
+      const link = match[0].replace(/[.,;:!?]+$/, "");
+      const id = driveFileId(link);
+      if (id) add({ id, link, own: false });
+    }
+  }
+  if (html) {
+    for (const match of html.matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+      const link = decodeAttribute(match[1] ?? match[2] ?? "");
+      const id = driveFileId(link);
+      if (id) add({ id, link, own: false });
+    }
+  }
+  return [...found.values()];
+}
+
+/**
+ * The files a draft reopened from Drafts names on Winnow's own lines, rebuilt as the
+ * composer's `driveFiles` so their chips come back. Only lines whose size reads back
+ * exactly, so the rebuilt line is the one in the body (and its × can take it out).
+ */
+export function recoverDriveFiles(text: string, html?: string): DriveFile[] {
+  const out = new Map<string, DriveFile>();
+  for (const body of [text, ...(html ? [plainTextFromHtml(html)] : [])]) {
+    for (const line of ownLines(body)) {
+      const size = bytesOf(line.label);
+      if (size === null || out.has(line.id)) continue;
+      const file = { id: line.id, name: line.name, size, link: line.link };
+      if (text.includes(driveLinkLine(file))) out.set(line.id, file);
+    }
+  }
+  return [...out.values()];
+}
+
+/**
+ * What a send shares, read off the body that goes out: the composer's `driveFiles` whose
+ * line is still there, Winnow's own lines, and any other Drive file link (not Winnow's,
+ * as far as anyone can tell: tried, and skipped quietly if Drive refuses).
+ */
+export function driveLinksForSend(draft: { body: string; driveFiles?: readonly DriveFile[] }): DriveLinkRef[] {
+  const out = new Map<string, DriveLinkRef>();
+  for (const file of driveFilesToShare(draft.body, draft.driveFiles)) {
+    out.set(file.id, { id: file.id, link: file.link, own: true, name: file.name });
+  }
+  for (const ref of findDriveLinks(draft.body)) {
+    const known = out.get(ref.id);
+    if (!known || (ref.own && !known.own)) out.set(ref.id, known ? { ...known, own: true } : ref);
+  }
+  return [...out.values()];
+}
+
+// ── Sharing at dispatch ─────────────────────────────────────────────────────
+
 /** An address Drive would not share with, and which files it could not open. */
 export type ShareProblem = { email: string; reason: string; files: string[] };
 
+/** What one dispatch's sharing did: the permissions it made, and what failed on Winnow's own links. */
+export type ShareOutcome = { created: DrivePermissionRef[]; problems: ShareProblem[] };
+
+/** The API off, the scope gone, the session over: not about one link or one address. */
+function wholeGrantFailure(error: unknown): boolean {
+  if (error instanceof DriveApiDisabled || error instanceof DriveScopeMissing) return true;
+  return error instanceof GmailError && error.kind === "reauth_required";
+}
+
+/** No HTTP answer at all: Drive could not be reached (offline). */
+export function driveUnreachable(error: unknown): boolean {
+  if (error instanceof TypeError) return /fetch|network|load failed|connection/i.test(error.message);
+  const shape = error as { name?: unknown; kind?: unknown } | null;
+  return !!shape && (shape.name === "GoogleUnreachable" || shape.kind === "network" || shape.kind === "timeout");
+}
+
 /**
- * Share each file with every recipient as a reader, and report per address what failed.
- * Called at send time, before the message leaves, so the user can be warned. A failure
- * that is not about one address (API off, scope gone, signed out) is thrown.
+ * Share each link with every recipient as a reader, at dispatch.
+ *
+ * Who can already open a file is read first, and only the missing addresses are shared
+ * with, so `created` is exactly what *this* send made (a permission an earlier send made
+ * is never claimed, and so never taken back by this one). A file anyone with the link
+ * can open needs nothing.
+ *
+ * A link that is not Winnow's (`own: false`) is skipped without a word on any refusal —
+ * `drive.file` cannot reach someone else's file, which is a 404 (or 403), and that is
+ * expected. A refusal on Winnow's own line is a `ShareProblem` per address. A failure
+ * that is not about one link (API off, scope gone, signed out) or no answer at all is
+ * thrown — after the permissions made so far are handed to `onCreated`, so the caller
+ * can still account for them.
  */
-export async function shareDriveFiles(
+export async function shareForSend(
   api: DriveApi,
-  files: readonly DriveFile[],
+  links: readonly DriveLinkRef[],
   recipients: readonly string[],
-): Promise<ShareProblem[]> {
+  onCreated?: (created: DrivePermissionRef[]) => void,
+): Promise<ShareOutcome> {
+  const created: DrivePermissionRef[] = [];
   const byEmail = new Map<string, ShareProblem>();
-  if (recipients.length === 0) return [];
-  for (const file of files) {
-    for (const failure of await api.shareWith(file.id, recipients)) {
-      const key = failure.email.toLowerCase();
-      const problem = byEmail.get(key) ?? { email: failure.email, reason: failure.reason, files: [] };
-      problem.files.push(file.name);
-      byEmail.set(key, problem);
+  const problem = (email: string, reason: string, name: string) => {
+    const key = email.toLowerCase();
+    const entry = byEmail.get(key) ?? { email, reason, files: [] };
+    if (!entry.files.includes(name)) entry.files.push(name);
+    byEmail.set(key, entry);
+  };
+  const people = [...new Set(recipients.map((email) => email.toLowerCase()))];
+  try {
+    if (people.length === 0) return { created, problems: [] };
+    for (const link of links) {
+      const name = link.name ?? link.link;
+      let existing: DrivePermission[];
+      try {
+        existing = await api.permissions(link.id);
+      } catch (error) {
+        if (driveUnreachable(error)) throw error;
+        if (!link.own) continue; // someone else's file: not Winnow's to share
+        if (wholeGrantFailure(error)) throw error;
+        const status = error instanceof GmailHttpError ? error.status : 0;
+        const body = error instanceof GmailHttpError ? error.body : String(error);
+        for (const email of people) problem(email, shareFailureReason(status, body), name);
+        continue;
+      }
+      if (existing.some((permission) => permission.type === "anyone")) continue;
+      const already = new Set(existing.map((permission) => (permission.emailAddress ?? "").toLowerCase()));
+      for (const email of people) {
+        if (already.has(email)) continue;
+        try {
+          const permissionId = await api.share(link.id, email);
+          created.push({ fileId: link.id, permissionId, email });
+        } catch (error) {
+          if (driveUnreachable(error)) throw error;
+          if (!link.own) break;
+          if (wholeGrantFailure(error)) throw error;
+          const status = error instanceof GmailHttpError ? error.status : 0;
+          const body = error instanceof GmailHttpError ? error.body : String(error);
+          problem(email, shareFailureReason(status, body), name);
+        }
+      }
+    }
+    return { created, problems: [...byEmail.values()] };
+  } finally {
+    onCreated?.(created);
+  }
+}
+
+/**
+ * Take back the permissions a send made, best effort, one at a time. Resolves with the
+ * ones that could not be taken back (nothing is thrown: an abandoned send must not
+ * become an error the user has to deal with).
+ */
+export async function revokeShares(api: DriveApi, created: readonly DrivePermissionRef[]): Promise<DrivePermissionRef[]> {
+  const left: DrivePermissionRef[] = [];
+  for (const permission of created) {
+    try {
+      await api.revoke(permission.fileId, permission.permissionId);
+    } catch {
+      left.push(permission);
     }
   }
-  return [...byEmail.values()];
+  return left;
 }
+
+/** The dialog before a send whose Drive links Winnow is not allowed to share. */
+export const DRIVE_GRANT_NEEDED = {
+  title: "Allow Google Drive to share the links?",
+  body:
+    "This message has Google Drive links that Winnow uploaded, but Winnow isn't allowed to use Google Drive right now (it was signed out or the permission was removed), so it can't share them with the recipients.",
+  sendAnywayWarning:
+    "If you send anyway, the recipients may not be able to open the link.",
+} as const;
 
 /** The warning before send when some recipients can't open the Drive links. */
 export function shareWarning(problems: readonly ShareProblem[]): { title: string; body: string } {
