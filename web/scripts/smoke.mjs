@@ -1072,10 +1072,12 @@ try {
     await page.evaluate(() => document.activeElement?.hasAttribute("data-setup-heading")),
   );
   check(
-    "step 2 links to the Gmail API, and the People API as optional",
+    "step 2 links to the Gmail API, and the People and Drive APIs as optional",
     (await consoleHref("gmail-api")) === "https://console.cloud.google.com/apis/library/gmail.googleapis.com" &&
       (await consoleHref("people-api")) === "https://console.cloud.google.com/apis/library/people.googleapis.com" &&
-      (await setup.getByText("Optional: the People API").count()) === 1,
+      (await consoleHref("drive-api")) === "https://console.cloud.google.com/apis/library/drive.googleapis.com" &&
+      (await setup.getByText("Optional: the People API").count()) === 1 &&
+      (await setup.getByText("Optional: the Google Drive API").count()) === 1,
   );
   await nextButton.click();
   check(
@@ -1088,8 +1090,8 @@ try {
     "and lists the exact scopes to add, each with a copy button, linked to Data access",
     (await setup.locator('[data-copy-value="scope-required"]').textContent())?.trim() === "https://www.googleapis.com/auth/gmail.modify" &&
       (await setup.locator('[data-copy-value="scope-optional"]').allTextContents()).map((t) => t.trim()).join(" ") ===
-        "https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly" &&
-      (await setup.locator("[data-setup-scopes] button[aria-label^='Copy scope']").count()) === 3 &&
+        "https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/drive.file" &&
+      (await setup.locator("[data-setup-scopes] button[aria-label^='Copy scope']").count()) === 4 &&
       (await consoleHref("scopes")) === "https://console.cloud.google.com/auth/scopes",
   );
   await setup.getByRole("button", { name: "Back" }).click();
@@ -6621,7 +6623,8 @@ try {
     const labels = await infos.evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-label")));
     check(
       "every setting has a (?) named for it",
-      JSON.stringify(labels) === JSON.stringify(["About Remote images", "About Show brand logos", "About Gravatar photos"]),
+      JSON.stringify(labels) ===
+        JSON.stringify(["About Remote images", "About Show brand logos", "About Gravatar photos", "About Big files as Drive links"]),
       JSON.stringify(labels),
     );
     check("and the explanations are not printed under the rows", !((await dialog.innerText()).includes("Cloudflare")));
@@ -6728,7 +6731,7 @@ try {
       backGlyph.chevron && backGlyph.glyph <= 24 && backGlyph.tap >= 44 && backGlyph.ink,
       JSON.stringify(backGlyph),
     );
-    check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 3 && !((await dialog.innerText()).includes("Cloudflare")));
+    check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 4 && !((await dialog.innerText()).includes("Cloudflare")));
     await dialog.locator('[data-setting-info="gravatars"]').tap();
     await s.waitForTimeout(150);
     const tip = s.locator('[data-setting-popover="gravatars"]');

@@ -159,7 +159,7 @@ const sampleShape = (page, sel, ms) =>
 
 /** Hold a press on `sel`'s centre for `holdMs` (mouse or touch) while sampling its shape. */
 async function heldPressShape(page, sel, { touch = false, holdMs = 900, cdp = null } = {}) {
-  const box = await page.locator(sel).boundingBox();
+  const box = await page.locator(sel).first().boundingBox();
   const x = Math.round(box.x + box.width / 2);
   const y = Math.round(box.y + box.height / 2);
   const sampling = sampleShape(page, sel, holdMs + 400);

@@ -623,6 +623,15 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `readerSplit.ts` | The reader's share of the width as a fraction (default 0.38, saved under `winnow.readerSplit.v1`), its 280 px list / 360 px reader minimums resolved per width, and the handle's key steps. |
 | `useStore.ts` / `useOnline.ts` / `usePhoneLayout.ts` | The three hooks. `useStore` caches the snapshot against the store's key; `usePhoneLayout` publishes the on-screen-keyboard inset as `--wn-keyboard`. |
 
+**1.3.3 additions.** `emailFit.ts` scales a fixed-width HTML email (a table or body wider
+than the reader) down to the reader's width, as mail clients do, instead of clipping it
+on a phone. Remote images = **Never** also pauses Gravatar and brand-logo lookups (in the
+app and in notification pictures; Settings shows a "Paused" hint on both rows). Smart
+filters apply to the open mailbox (Trash, Spam, Archive count and list their own mail;
+an empty chip steps back to All). The filter strip has no motion blur while scrolling,
+and a held chip stays a pill (a sheen, no press scale). Native notifications draw the
+sender's picture (desktop writes it to a cache file; Android Kotlin decodes the bytes).
+
 ### 7.3 What lives in `App.tsx` instead of the store
 
 Composer, its autosave and its discard confirmation (a desktop reply docked in the
@@ -934,6 +943,29 @@ drops (`onFiles`, desktop). A raw message over 4 MB goes to Gmail's media upload
 (`/upload/gmail/v1`, `multipart/related`) for send and for drafts create/update/send.
 
 Smoke: `scripts/smoke-attachments.mjs` (attachments, and labels staying gone), run by `smoke.mjs` and alone.
+
+**Big files as Drive links (1.3.3).** Gmail caps a message's attachments at 25 MB and its
+API has no Drive fallback, so `core/gmail/drive.ts` is one. Scope: `drive.file` only (the
+files Winnow itself creates; nothing else in the Drive), requested by incremental consent
+(`GmailSession.grantDrive`: `include_granted_scopes`, `login_hint`, the wrong-account
+refusal and web redirect shared with the drafts/contacts opt-ins) the first time the user
+presses **Send as a Drive link**, after `DriveConsent.tsx` has said in plain words what it
+allows and doesn't (`DRIVE_CONSENT`); never at sign-in. `driveAccess()` is read off the
+token, so sign-out's revoke takes it with everything else. Flow: `ComposerAttachments`
+keeps the files `oversizedFiles` refused and offers the button → App uploads (resumable:
+metadata POST, then the bytes to Google's `Location`) → `Draft.driveFiles` plus a
+"File name (size) — link" line in the body (`insertDriveLinks`; the Drive chip's × takes
+the line out, the Drive copy stays) → at Send, `shareDriveFiles` shares the files whose
+line is still in the body with To/Cc/Bcc as **reader**, `sendNotificationEmail=false`,
+and any address Drive refused is a "can't open the Drive link" warning before the message
+goes (Send anyway / Keep editing). Google's API-disabled 403 becomes `DriveApiDisabled`
+with a **Turn on the Drive API** link. The demo uses `DemoDriveClient` (no network; an
+`.invalid` address fails to share) and shows the consent dialog once. Settings → Privacy →
+**Big files as Drive links** (`driveLinks` preference, on) shows the grant and Stop; Google
+revokes only whole grants, so **Remove at Google** links to the account page. CSP adds
+`https://www.googleapis.com` (Drive v3 lives there; the Tauri CSP already had it). The
+setup guide and `docs/google-setup.md` have the optional Drive API step. Not done: a draft
+reopened from Gmail's Drafts loses `driveFiles` (its lines stay but are not shared).
 
 ---
 
