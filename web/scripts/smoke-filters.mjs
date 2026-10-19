@@ -277,6 +277,75 @@ try {
   }
   check("no console errors on phone", pErrors.length === 0, pErrors.slice(0, 3).join(" | "));
   await phone.close();
+
+  // ── Smart filters in another mailbox (1.3.3) ─────────────────────────────
+  section("desktop: smart filters apply to the open mailbox (Trash)");
+  {
+    const bctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const b = await bctx.newPage();
+    const bErrors = [];
+    b.on("pageerror", (error) => bErrors.push(String(error)));
+    await b.goto(URL, { waitUntil: "networkidle" });
+    await b.waitForSelector("[data-row-count] [data-row-id]");
+    const chips = () =>
+      b.evaluate(() =>
+        [...document.querySelectorAll("[data-list-chrome] [data-rail-scroller] > [data-rail-item].wn-pill")].map((item) => ({
+          key: item.getAttribute("data-rail-key"),
+          count: Number(item.querySelector(".wn-pill-count")?.textContent ?? "0"),
+          on: item.hasAttribute("data-on"),
+        })),
+      );
+    const subjects = () =>
+      b.evaluate(() => [...document.querySelectorAll("[data-row-count] button[data-message-id]")].map((el) => el.getAttribute("data-message-id")));
+    const inboxChips = await chips();
+    // Bin four inbox messages, so the bin holds a known mix.
+    for (let i = 0; i < 4; i += 1) {
+      await b.locator("[data-row-count] button[data-message-id]").first().click();
+      await b.waitForTimeout(150);
+      await b.keyboard.press("#");
+      await b.waitForTimeout(350);
+    }
+    await b.keyboard.press("Escape");
+    await b.locator("[data-sidebar-toggle]:visible").first().click();
+    await b.locator('[data-nav-folder="trash"]').first().click();
+    await b.waitForTimeout(600);
+    if ((await b.locator("[data-sidebar][data-open]").count()) > 0) await b.keyboard.press("Escape");
+    await b.waitForTimeout(300);
+    const binAll = new Set(await subjects());
+    const binChips = await chips();
+    check(
+      "Trash: the chips count Trash's mail, not the inbox's",
+      binAll.size > 0 && binChips.some((c) => c.count > 0) && JSON.stringify(binChips) !== JSON.stringify(inboxChips),
+      `${binAll.size} in Trash; ${JSON.stringify(binChips.map((c) => `${c.key}:${c.count}`))}`,
+    );
+    let checked = 0;
+    for (const chip of binChips.filter((c) => c.count > 0 && c.key !== "unsafe").slice(0, 4)) {
+      await b.locator(`[data-list-chrome] [data-rail-item][data-rail-key="${chip.key}"] button`).first().click();
+      await b.waitForTimeout(400);
+      const shown = await subjects();
+      check(
+        `Trash + ${chip.key}: the list is exactly the chip's ${chip.count}, all of it from Trash`,
+        shown.length === chip.count && shown.every((id) => binAll.has(id)),
+        `${shown.length} shown`,
+      );
+      await b.locator(`[data-list-chrome] [data-rail-item][data-rail-key="${chip.key}"] button`).first().click();
+      await b.waitForTimeout(300);
+      checked += 1;
+    }
+    check("at least one filter was tried in Trash", checked > 0);
+    // Why it's here, in Trash: a message a filter lists says why.
+    const first = binChips.find((c) => c.count > 0 && c.key !== "unsafe" && !c.key.startsWith("sender:"));
+    if (first) {
+      await b.locator(`[data-list-chrome] [data-rail-item][data-rail-key="${first.key}"] button`).first().click();
+      await b.waitForTimeout(400);
+      await b.locator("[data-row-count] button[data-message-id]").first().click();
+      await b.waitForTimeout(600);
+      const why = await b.locator("[data-reader] [data-why-here]").count();
+      check(`Trash + ${first.key}: the open message has Why it's here`, why === 1, `${why} block(s)`);
+    }
+    check("no page errors in Trash", bErrors.length === 0, bErrors.slice(0, 3).join(" | "));
+    await bctx.close();
+  }
 } catch (error) {
   failures.push(String(error?.stack ?? error));
   console.log(String(error?.stack ?? error));
