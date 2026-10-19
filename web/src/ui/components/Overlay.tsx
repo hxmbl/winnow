@@ -64,6 +64,15 @@ type Props = {
    * on screen, and any of them leaves Settings for that mailbox.
    */
   bottomInset?: string;
+  /**
+   * What is behind the panel. `scrim` (the default) dims the app and lets it show
+   * through: right for a sheet the user should see as over something. `opaque` paints
+   * the backdrop the chrome colour and carries that colour past the bottom edge, for a
+   * panel that *replaces* the screen (Settings on a phone): the panel still rises in, but
+   * over a surface the app cannot show through, in any frame of the motion, under the
+   * gesture bar, or while the viewport is resizing (keyboard, browser toolbar).
+   */
+  backdrop?: "scrim" | "opaque";
   className?: string;
   children: React.ReactNode;
 };
@@ -100,6 +109,7 @@ export function Sheet({
   activeDescendant,
   placement = "center",
   bottomInset,
+  backdrop = "scrim",
   className = "max-w-[520px]",
   children,
 }: Props) {
@@ -198,7 +208,8 @@ export function Sheet({
               // part the on-screen keyboard leaves) sits at the top rather than centred.
               "items-start justify-stretch"
             : "items-center justify-center p-4"
-      } bg-scrim`}
+      } ${backdrop === "opaque" ? "wn-backdrop-opaque" : "bg-scrim"}`}
+      data-backdrop={backdrop}
       style={bottomInset ? { bottom: bottomInset } : undefined}
       // A click handler on a div, which is only acceptable because this div is
       // genuinely a backdrop and genuinely dismissable — and it is *optional*, which is

@@ -917,6 +917,8 @@ export function App({ store }: Props) {
   // ── Actions ──────────────────────────────────────────────────────────────
 
   const selected = view.selected;
+  /** Settings on a phone replaces the mail outright (see the `main` below). */
+  const settingsCoversMail = phone && snapshot.overlay === "settings";
 
   /**
    * Announce the open message.
@@ -2912,7 +2914,20 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         Small screens replace one with the other: the reader covers the list outright,
         since there is no width for two regions.
       */}
-      <main ref={mainRef} className="flex min-h-0 flex-1">
+      {/*
+        On a phone Settings replaces the mail (an opaque sheet, the dock over it), so the
+        mail stops being painted while it is open: `invisible`, not unmounted or
+        `display: none`, so the list keeps its scroll position, its measurements and its
+        windowing, and comes back exactly as it was. Whatever the viewport does under the
+        sheet — the keyboard, a toolbar, the gesture bar, the sheet's own entrance — there
+        is no inbox there to show. Inert as well, so nothing behind takes focus or taps.
+      */}
+      <main
+        ref={mainRef}
+        data-covered={settingsCoversMail ? "" : undefined}
+        inert={settingsCoversMail}
+        className={`flex min-h-0 flex-1 ${settingsCoversMail ? "invisible" : ""}`}
+      >
         {/*
           The list.
 

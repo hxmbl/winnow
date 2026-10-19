@@ -1055,3 +1055,16 @@ div[data-row-count] {
     filter: none;
   }
 }
+
+/*
+ * A sheet that replaces the screen rather than sitting over it (`Sheet backdrop="opaque"`,
+ * Settings on a phone). The backdrop is the chrome colour, not the scrim, so the app
+ * underneath never shows through: not while the panel rises in (it starts transparent),
+ * not along the bottom edge under the gesture bar. The shadow repeats the backdrop
+ * below the window's bottom edge, so a viewport that grows before the next layout (the
+ * keyboard or a browser toolbar going away) uncovers more chrome, never the inbox.
+ */
+.wn-backdrop-opaque {
+  background: var(--wn-chrome);
+  box-shadow: 0 50vh 0 0 var(--wn-chrome);
+}

@@ -283,6 +283,12 @@ export function Settings(props: SettingsProps) {
           onClose={props.onClose}
           placement="fill"
           dismissOnBackdrop={false}
+          // Settings replaces the mail on a phone, so its backdrop is opaque chrome, not
+          // the translucent scrim: the panel rises in from transparent, and over a scrim
+          // the inbox showed through the sheet (its bottom edge included) for the length
+          // of the motion. The app also stops painting the mail while this is open
+          // (`main[data-covered]` in App), so nothing of the inbox can show below it.
+          backdrop="opaque"
           // To the screen's bottom edge, behind the floating dock: the dock floats, so a
           // sheet that stopped at the pill's top left the inbox showing round the pill
           // and under the home indicator. The scrollers pad their ends to clear the pill
