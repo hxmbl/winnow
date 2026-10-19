@@ -147,3 +147,10 @@ describe("undo send delay", () => {
     }
   });
 });
+
+describe("the Drive links preference", () => {
+  it("survives a restart as a boolean and is dropped otherwise", () => {
+    expect(revivePreferences({ driveLinks: false })?.driveLinks).toBe(false);
+    expect(revivePreferences({ driveLinks: "no" })?.driveLinks).toBeUndefined();
+  });
+});

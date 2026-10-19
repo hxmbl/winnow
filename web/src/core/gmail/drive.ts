@@ -34,8 +34,8 @@ import type { DraftDriveFile } from "../model/email";
 /** Only the files Winnow creates. Nothing else in the user's Drive. */
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
-const DRIVE_API = "https://www.googleapis.com/drive/v3";
-const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
+export const DRIVE_API = "https://www.googleapis.com/drive/v3";
+export const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 
 /** The Drive API's page in the Cloud console, for when Google's error names no project. */
 export const DRIVE_API_LIBRARY_URL = "https://console.cloud.google.com/apis/library/drive.googleapis.com";

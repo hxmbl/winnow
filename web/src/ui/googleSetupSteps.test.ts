@@ -25,6 +25,7 @@ describe("the Google setup walkthrough", () => {
       newProject: "https://console.cloud.google.com/projectcreate",
       gmailApi: "https://console.cloud.google.com/apis/library/gmail.googleapis.com",
       peopleApi: "https://console.cloud.google.com/apis/library/people.googleapis.com",
+      driveApi: "https://console.cloud.google.com/apis/library/drive.googleapis.com",
       consent: "https://console.cloud.google.com/apis/credentials/consent",
       scopes: "https://console.cloud.google.com/auth/scopes",
       testUsers: "https://console.cloud.google.com/auth/audience",
@@ -57,11 +58,12 @@ describe("the Google setup walkthrough", () => {
     expect(originOf("not a url")).toBe("");
   });
 
-  it("lists the exact scopes Winnow asks for, Gmail's required and the contacts' optional", () => {
+  it("lists the exact scopes Winnow asks for, Gmail's required, the contacts' and Drive's optional", () => {
     expect(SETUP_SCOPES.map((item) => [item.scope, item.required])).toEqual([
       ["https://www.googleapis.com/auth/gmail.modify", true],
       ["https://www.googleapis.com/auth/contacts.readonly", false],
       ["https://www.googleapis.com/auth/contacts.other.readonly", false],
+      ["https://www.googleapis.com/auth/drive.file", false],
     ]);
   });
 

@@ -16,7 +16,7 @@ link to the right Google Cloud page on each one.
 | Step | What you do | Google Cloud page |
 | --- | --- | --- |
 | 1 | Create a project | [New project](https://console.cloud.google.com/projectcreate) |
-| 2 | Turn on the Gmail API (and the People API, optional) | [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com) · [People API](https://console.cloud.google.com/apis/library/people.googleapis.com) |
+| 2 | Turn on the Gmail API (and the People and Drive APIs, optional) | [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com) · [People API](https://console.cloud.google.com/apis/library/people.googleapis.com) · [Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com) |
 | 3 | Set up the consent screen and add yourself as a test user | [Consent screen](https://console.cloud.google.com/apis/credentials/consent) · [Test users](https://console.cloud.google.com/auth/audience) |
 | 4 | Create the OAuth client | [Create client](https://console.cloud.google.com/apis/credentials/oauthclient) |
 | 5 | Paste or import it into Winnow | Winnow's setup sheet |
@@ -44,6 +44,12 @@ Already have a project you want to use? Select it in the project picker and go o
    page and choose **Enable**. Winnow uses it only for contact photos and recipient
    suggestions, which you turn on later in **Settings → Google contacts**. Winnow
    works without it; enabling it now saves a trip back.
+3. *Optional:* open the [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)
+   page and choose **Enable**. Winnow uses it only to send a file over Gmail's 25 MB
+   as a Drive link: it uploads that file to your Drive, shares it with the recipients
+   as viewers, and puts a "File name (size) — link" line in the message. It can only
+   ever reach the files it uploaded itself. If you skip this, Winnow tells you with a
+   **Turn on the Drive API** link the first time you try.
 
 ## Step 3. Set up the consent screen
 
@@ -71,9 +77,14 @@ and choose **Get started** if it asks.
    | `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, archive and send your mail |
    | `https://www.googleapis.com/auth/contacts.readonly` | only if you opt in, later | your saved contacts, in recipient suggestions (and their photos in sender avatars) |
    | `https://www.googleapis.com/auth/contacts.other.readonly` | only if you opt in, later | "other contacts" (people you've written to), in recipient suggestions |
+   | `https://www.googleapis.com/auth/drive.file` | only if you opt in, later | only the files you send as Drive links (over 25 MB); nothing else in your Drive |
 
    Sign-in asks for `gmail.modify` and nothing else. The two contact scopes are only
-   requested when you choose **Improve suggestions from Google contacts** in Settings.
+   requested when you choose **Improve suggestions from Google contacts** in Settings,
+   and `drive.file` only the first time you choose **Send as a Drive link** for a file
+   over 25 MB, after Winnow has said what it allows. **Settings → Privacy → Big files
+   as Drive links** shows whether it is allowed and turns the offer off; signing out
+   revokes it with everything else.
 
 ## Step 4. Create the OAuth client
 
@@ -224,4 +235,5 @@ on this device and picks up there next time; **Start over** clears it.
 | "This is a Web application client, which the desktop app can't use" | You downloaded the JSON of a Web application client. Create a **Desktop app** client and import its JSON. |
 | "This is a Desktop app client, which Winnow in the browser can't use" | Create a **Web application** client for the browser, or use the desktop app. |
 | No contact photos / suggestions | Connect them in Settings → Google contacts. If it says the People API is off, enable it in the project your client lives in (step 2). |
+| "The Google Drive API is turned off" when sending a big file as a link | Choose **Turn on the Drive API** (or enable it in step 2) in the project your client lives in, then try again. |
 | Signed out every week | Testing mode's 7-day refresh tokens, see above. |

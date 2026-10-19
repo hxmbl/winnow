@@ -30,7 +30,8 @@
  *     contact photos are https too. `data:` and `blob:` cover inline parts and local
  *     previews. Plain `http:` images stay blocked, as in the desktop build.
  *   - **Connections:** Gmail, Google's token and revoke endpoint, the People API (the
- *     optional contacts grant), Cloudflare's DNS-over-HTTPS resolver (only used when
+ *     optional contacts grant), Drive v3 on www.googleapis.com (the optional
+ *     `drive.file` grant: large files as links, upload and sharing), Cloudflare's DNS-over-HTTPS resolver (only used when
  *     Show brand logos is on), and the render proxy when the build was given one.
  *   - **Frames:** `'self'` — the reader's frames are `srcdoc`. **Objects:** none.
  *     **Base:** none — nothing sets a `<base>`, and the sanitiser strips a sender's.
@@ -40,11 +41,16 @@
  *     cannot carry it, and browsers ignore it there.
  */
 
-/** Gmail, OAuth (token exchange and revoke), and the People API. */
+/**
+ * Gmail, OAuth (token exchange and revoke), the People API, and Drive v3 (the optional
+ * `drive.file` grant for large files as links), which Google serves only from
+ * www.googleapis.com — what the token may do there is limited by its scopes.
+ */
 export const GOOGLE_CONNECT = [
   "https://gmail.googleapis.com",
   "https://oauth2.googleapis.com",
   "https://people.googleapis.com",
+  "https://www.googleapis.com",
 ] as const;
 
 /** Brand logos: the DNS-over-HTTPS resolver BIMI records are read through. */

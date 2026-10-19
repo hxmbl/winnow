@@ -3,7 +3,7 @@
  * opens.
  *
  * Five steps, in the order Google's console makes you take them: a project, the Gmail
- * API (and optionally the People API), the consent screen with yourself as a test user,
+ * API (and optionally the People and Drive APIs), the consent screen with yourself as a test user,
  * the client itself, and pasting it into Winnow. The links go straight to the console
  * page for that step, so nobody has to find it through the console's menus; the console
  * opens them in whichever project is selected, which is why step 1 says to keep the new
@@ -20,6 +20,7 @@
 import { apiLibraryUrl } from "../core/session/clientJson";
 import { GMAIL_SCOPE } from "../core/gmail/dto";
 import { CONTACTS_SCOPE, OTHER_CONTACTS_SCOPE } from "../core/gmail/people";
+import { DRIVE_FILE_SCOPE } from "../core/gmail/drive";
 import type { ClientKind } from "../core/session/credentials";
 
 const CONSOLE = "https://console.cloud.google.com";
@@ -32,6 +33,8 @@ export const CONSOLE_LINKS = {
   gmailApi: apiLibraryUrl("gmail.googleapis.com"),
   /** The People API's page: optional, for contact photos and suggestions. */
   peopleApi: apiLibraryUrl("people.googleapis.com"),
+  /** The Drive API's page: optional, for sending files over 25 MB as Drive links. */
+  driveApi: apiLibraryUrl("drive.googleapis.com"),
   /** The OAuth consent screen (now "Google Auth Platform"; the old address forwards). */
   consent: `${CONSOLE}/apis/credentials/consent`,
   /** Google Auth Platform → Data access, where the scopes are added. */
@@ -130,12 +133,14 @@ export function stepIndexOf(id: SetupStepId, steps: readonly SetupStep[] = SETUP
 /**
  * The scopes to add under Data access, exactly as Winnow asks for them. Gmail's one
  * scope covers reading, labels, drafts and sending; the two contact scopes are asked for
- * only when Google contacts is switched on in Settings.
+ * only when Google contacts is switched on in Settings, and `drive.file` only the first
+ * time a file over 25 MB is sent as a Drive link.
  */
 export const SETUP_SCOPES: readonly { scope: string; purpose: string; required: boolean }[] = [
   { scope: GMAIL_SCOPE, purpose: "Read, sort, draft and send your mail", required: true },
   { scope: CONTACTS_SCOPE, purpose: "Your contacts, for suggestions and photos", required: false },
   { scope: OTHER_CONTACTS_SCOPE, purpose: "People you've emailed, for suggestions", required: false },
+  { scope: DRIVE_FILE_SCOPE, purpose: "Only the files you send as Drive links", required: false },
 ];
 
 /**

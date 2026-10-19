@@ -802,6 +802,14 @@ export function GoogleSetup(props: Props) {
               </p>
               {consoleLink(CONSOLE_LINKS.peopleApi, "People API", "people-api")}
             </div>
+            <div data-setup-drive="" className="flex flex-col gap-1.5 rounded-pane border border-hairline bg-surface px-3 py-2.5">
+              <p className="text-meta font-medium text-ink-body">Optional: the Google Drive API</p>
+              <p className="text-meta text-ink-subtle">
+                For sending files over Gmail's 25 MB as Drive links. Winnow only ever reaches the files it
+                uploads for you, and asks the first time you use it. Skip it if you never send big files.
+              </p>
+              {consoleLink(CONSOLE_LINKS.driveApi, "Google Drive API", "drive-api")}
+            </div>
           </>
         );
       case "consent":

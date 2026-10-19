@@ -10,6 +10,7 @@ import {
   forDeviceCopy,
   isPdf,
   isPreviewableImage,
+  oversizedFiles,
   planAttachments,
   previewMimeType,
   removeAttachment,
@@ -125,5 +126,20 @@ describe("bytes", () => {
     const back = base64ToBytes(bytesToBase64(bytes));
     expect(back).toEqual(bytes);
     expect(bytesToBase64(new Uint8Array([104, 105]))).toBe("aGk=");
+  });
+});
+
+describe("files offered as a Drive link", () => {
+  it("are the ones refused for size, not the empty ones", () => {
+    const MB = 1024 * 1024;
+    const files = [
+      { filename: "small.pdf", size: 2 * MB },
+      { filename: "huge.mov", size: 30 * MB },
+      { filename: "folder", size: 0 },
+      { filename: "fits.txt", size: 1 * MB },
+    ];
+    expect(oversizedFiles([], files)).toEqual([1]);
+    expect(oversizedFiles([{ size: 24 * MB }], files)).toEqual([0, 1]);
+    expect(oversizedFiles([], [{ filename: "a", size: GMAIL_ATTACHMENT_LIMIT }])).toEqual([]);
   });
 });
