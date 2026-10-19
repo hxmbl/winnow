@@ -190,6 +190,12 @@ export const SETTINGS = {
     explanation:
       "Shows a sender's Gravatar picture when they are not in your contacts. Winnow sends Gravatar a hashed copy of each sender's address, not the address itself, but a hash of a common address can be guessed, so Gravatar can still learn who mails you. Off by default, and paused while Remote images is set to Never.",
   },
+  driveLinks: {
+    category: "privacy",
+    label: "Big files as Drive links",
+    explanation:
+      "For a file over Gmail's 25 MB, the composer offers to upload it to your Google Drive and send a link, shared with the recipients so they can view it. Winnow asks Google for this the first time you use it, never at sign-in, and only for the files it uploads itself: it cannot see anything else in your Drive. Stop turns the offer off on this device; signing out, or removing Winnow at Google's account page, takes the permission back.",
+  },
   notifications: {
     category: "sync",
     label: "Notify me about new mail",

@@ -124,6 +124,22 @@ import { contactPhotoMap } from "./core/avatars/photos";
 import { BrandLogoCache } from "./core/avatars/logoCache";
 import { dohResolver } from "./core/avatars/bimi";
 import { contactsFailureNotice } from "./core/gmail/people";
+import { cleanFilename } from "./core/mail/attachments";
+import {
+  DemoDriveClient,
+  GOOGLE_PERMISSIONS_URL,
+  driveFailureNotice,
+  driveFilesToShare,
+  insertDriveLinks,
+  recipientAddresses,
+  removeDriveLink,
+  shareDriveFiles,
+  shareWarning,
+  type DriveAccess,
+  type DriveApi,
+  type ShareProblem,
+} from "./core/gmail/drive";
+import { DriveConsent } from "./ui/components/DriveConsent";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import type { OfflineQueue } from "./core/offline/queue";
 import { OfflineIndicator } from "./ui/components/OfflineIndicator";
@@ -508,6 +524,11 @@ export function App({ store }: Props) {
   }, [store]);
 
   const sessionRef = useRef<SessionBridge | null>(null);
+  /**
+   * Whether the grant includes `drive.file` (large files as Drive links), read off the
+   * token when the account changes and after the opt-in. `null` before anyone is signed in.
+   */
+  const [driveAccess, setDriveAccess] = useState<DriveAccess | null>(null);
   /** The bridge's offline queue, as state so the indicator mounts when it exists. */
   const [offlineQueue, setOfflineQueue] = useState<OfflineQueue | null>(null);
 
@@ -879,6 +900,14 @@ export function App({ store }: Props) {
           // offer, from the copy kept on this device.
           if (completed.drafts === "declined") {
             store.setNotice(completed.draftsMessage ?? "Drafts were not allowed.");
+          }
+          // Back from the Drive opt-in: the web page had to leave, and a file that big
+          // is not kept on the device, so it is attached again by hand.
+          if (completed.drive === "declined") {
+            store.setNotice(completed.driveMessage ?? "Google Drive was not allowed.");
+          } else if (completed.drive === "granted") {
+            store.setNotice("Google Drive is allowed. Attach the file again to send it as a Drive link.");
+            setDriveAccess("granted");
           }
           void syncGoogleContacts(completed.contacts === "granted").then((problem) => {
             // Just granted, and it still cannot read them: say so now, not only in Settings.
@@ -1631,6 +1660,115 @@ export function App({ store }: Props) {
   /** "Send without a subject?" is up, holding the recipients Send was pressed with. */
   const [confirmNoSubject, setConfirmNoSubject] = useState<Pick<Draft, "to" | "cc" | "bcc"> | null>(null);
 
+  // ── Large files as Google Drive links ────────────────────────────────────
+
+  /*
+    A file over Gmail's 25 MB can go as a link to a copy in the user's Drive
+    (`core/gmail/drive`). The scope is `drive.file` alone, asked for the first time
+    "Send as a Drive link" is pressed, after `DriveConsent` has said in plain words what
+    it allows; never at sign-in. The demo uploads nothing (`DemoDriveClient`).
+  */
+  const demoDriveRef = useRef<DemoDriveClient | null>(null);
+  const driveApi = useCallback((): DriveApi | null => {
+    if (storeRef.current.getSnapshot().contactsAccess === "demo") {
+      demoDriveRef.current ??= new DemoDriveClient();
+      return demoDriveRef.current;
+    }
+    return sessionRef.current?.drive() ?? null;
+  }, []);
+  /** The files waiting on the plain-words dialog before Google is asked. */
+  const [driveConsent, setDriveConsent] = useState<File[] | null>(null);
+  const [driveBusy, setDriveBusy] = useState<string | null>(null);
+  const [driveProblem, setDriveProblem] = useState<{ message: string; url: string | null; label: string | null } | null>(
+    null,
+  );
+  /** Recipients Drive would not share with, asked about before the message goes. */
+  const [confirmShares, setConfirmShares] = useState<{
+    recipients: Pick<Draft, "to" | "cc" | "bcc">;
+    problems: ShareProblem[];
+  } | null>(null);
+
+  /** Upload each file and add its "File name (size) — link" line to the draft. */
+  const uploadToDrive = useCallback(
+    async (files: readonly File[]) => {
+      const api = driveApi();
+      if (!api) return;
+      setDriveProblem(null);
+      try {
+        for (const file of files) {
+          setDriveBusy(`Uploading ${file.name} to Google Drive…`);
+          const uploaded = await api.upload({
+            filename: cleanFilename(file.name),
+            mimeType: file.type,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          });
+          setComposer((current) =>
+            current
+              ? {
+                  ...current,
+                  draft: {
+                    ...current.draft,
+                    driveFiles: [...(current.draft.driveFiles ?? []).filter((f) => f.id !== uploaded.id), uploaded],
+                    body: insertDriveLinks(current.draft.body, [uploaded]),
+                  },
+                }
+              : current,
+          );
+        }
+      } catch (error) {
+        setDriveProblem(driveFailureNotice(error));
+        if (error instanceof Error && error.name === "DriveScopeMissing") setDriveAccess("not_granted");
+      } finally {
+        setDriveBusy(null);
+      }
+    },
+    [driveApi],
+  );
+
+  /** "Send as a Drive link": straight to the upload once allowed, the dialog first otherwise. */
+  const sendAsDriveLink = useCallback(
+    (files: File[]) => {
+      if (storeRef.current.getSnapshot().contactsAccess === "demo" || driveAccess === "granted") {
+        void uploadToDrive(files);
+      } else {
+        setDriveConsent(files);
+      }
+    },
+    [driveAccess, uploadToDrive],
+  );
+
+  /** "Continue to Google" in the dialog: incremental consent for `drive.file`, then the upload. */
+  const allowDrive = useCallback(async () => {
+    const files = driveConsent ?? [];
+    setDriveConsent(null);
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    setDriveProblem(null);
+    try {
+      // On the web this leaves the page; the way back is handled with the redirect.
+      const access = await bridge.grantDrive();
+      setDriveAccess(access);
+      if (access === "granted") await uploadToDrive(files);
+      else setDriveProblem({ message: "Google Drive was not allowed, so nothing was uploaded.", url: null, label: null });
+    } catch (error) {
+      setDriveProblem(driveFailureNotice(error));
+    }
+  }, [driveConsent, uploadToDrive]);
+
+  /** A Drive chip's remove: its line leaves the body. The copy in Drive is left alone. */
+  const removeDriveFile = useCallback((id: string) => {
+    setComposer((current) => {
+      if (!current) return current;
+      const file = current.draft.driveFiles?.find((f) => f.id === id);
+      if (!file) return current;
+      const draft = { ...current.draft, body: removeDriveLink(current.draft.body, file) };
+      const rest = (current.draft.driveFiles ?? []).filter((f) => f.id !== id);
+      if (rest.length > 0) draft.driveFiles = rest;
+      else delete draft.driveFiles;
+      return { ...current, draft };
+    });
+  }, []);
+
   /**
    * The message in its undo window (see `core/mail/undoSend`), and what the "Sending…"
    * strip shows: when it goes.
@@ -1814,12 +1952,38 @@ export function App({ store }: Props) {
    * up saying "Sending" and shows a failure in place, as before.
    */
   const sendDraft = useCallback(
-    async (recipients?: Pick<Draft, "to" | "cc" | "bcc">, confirmedNoSubject = false) => {
+    async (recipients?: Pick<Draft, "to" | "cc" | "bcc">, confirmedNoSubject = false, sharesChecked = false) => {
       if (!composer || composer.sending) return;
       const draft = { ...composer.draft, ...(recipients ?? {}) };
       if (composer.mode === "new" && !confirmedNoSubject && needsSubjectConfirmation(draft)) {
         setConfirmNoSubject({ to: draft.to, cc: draft.cc, bcc: draft.bcc });
         return;
+      }
+      // Drive links: shared with the recipients as readers before the message goes, so
+      // an address that can't receive the share is warned about while it can be fixed.
+      const toShare = driveFilesToShare(draft.body, draft.driveFiles);
+      if (toShare.length > 0 && !sharesChecked) {
+        const api = driveApi();
+        if (api) {
+          setDriveBusy("Sharing the Drive links…");
+          setDriveProblem(null);
+          try {
+            const problems = await shareDriveFiles(
+              api,
+              toShare,
+              recipientAddresses(draft.to.join(", "), draft.cc.join(", "), draft.bcc.join(", ")),
+            );
+            if (problems.length > 0) {
+              setConfirmShares({ recipients: { to: draft.to, cc: draft.cc, bcc: draft.bcc }, problems });
+              return;
+            }
+          } catch (error) {
+            setDriveProblem(driveFailureNotice(error));
+            return;
+          } finally {
+            setDriveBusy(null);
+          }
+        }
       }
       const inReplyTo =
         composer.mode === "new" ? undefined : (composer.replyTo ?? snapshotRef.current.view.selected?.gmailId);
@@ -1861,7 +2025,7 @@ export function App({ store }: Props) {
         });
       }
     },
-    [composer, deliver, deliverPending],
+    [composer, deliver, deliverPending, driveApi],
   );
 
   /**
@@ -1959,12 +2123,19 @@ export function App({ store }: Props) {
     const bridge = sessionRef.current;
     if (!bridge || !accountEmail) {
       setDraftsAccess(null);
+      setDriveAccess(null);
       return;
     }
     let live = true;
     bridge.draftsAccess().then(
       (access) => {
         if (live) setDraftsAccess(access);
+      },
+      () => {},
+    );
+    bridge.driveAccess().then(
+      (access) => {
+        if (live) setDriveAccess(access);
       },
       () => {},
     );
@@ -2573,6 +2744,8 @@ export function App({ store }: Props) {
     confirmDiscard ||
     phoneConfirm !== null ||
     confirmNoSubject !== null ||
+    confirmShares !== null ||
+    driveConsent !== null ||
     restoreOffer !== null;
   const android = info?.os === "android";
   useEffect(() => {
@@ -2794,6 +2967,18 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               adderRef={attachAdderRef}
               phone={phone}
               notice={composer.attachNotice ?? null}
+              drive={
+                preferences.driveLinks && (isDemo || driveAccess === "granted" || driveAccess === "not_granted")
+                  ? {
+                      onSendAsLink: sendAsDriveLink,
+                      busy: driveBusy,
+                      problem: driveProblem,
+                      onOpenHelp: (url) => void platform.openExternal(url),
+                    }
+                  : null
+              }
+              driveFiles={composer.draft.driveFiles ?? []}
+              onRemoveDriveFile={removeDriveFile}
               onChange={(next) =>
                 setComposer((current) => {
                   if (!current) return current;
@@ -3614,6 +3799,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           contactsBusy={contactsBusy}
           contactsError={contactsError}
           contactsProblem={contactsProblem}
+          driveLinks={preferences.driveLinks}
+          onDriveLinks={(value) => store.setPreferences({ driveLinks: value })}
+          driveAccess={isDemo ? "demo" : driveAccess}
+          onOpenGooglePermissions={() => void platform.openExternal(GOOGLE_PERMISSIONS_URL)}
           onOpenContactsHelp={(url) => void platform.openExternal(url)}
           onImproveSuggestions={onImproveSuggestions}
           version={info ? `${info.name} ${info.version}` : null}
@@ -3864,6 +4053,29 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             void sendDraft(recipients, true);
           }}
           onCancel={() => setConfirmNoSubject(null)}
+        />
+      )}
+
+      {confirmShares && (
+        <ConfirmDialog
+          {...shareWarning(confirmShares.problems)}
+          confirmLabel="Send anyway"
+          destructive={false}
+          onConfirm={() => {
+            const { recipients } = confirmShares;
+            setConfirmShares(null);
+            void sendDraft(recipients, true, true);
+          }}
+          onCancel={() => setConfirmShares(null)}
+        />
+      )}
+
+      {driveConsent && (
+        <DriveConsent
+          files={driveConsent}
+          web={info?.kind !== "desktop" && !info?.nativeOAuth}
+          onContinue={() => void allowDrive()}
+          onCancel={() => setDriveConsent(null)}
         />
       )}
 

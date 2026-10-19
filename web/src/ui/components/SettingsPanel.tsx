@@ -14,6 +14,7 @@ import { Sheet } from "./Overlay";
 import { InfoButton, RadioCards, Row, Section, SettingBlock, SettingLabel, Toggle } from "./SettingsControls";
 import { BINDINGS } from "../../core/mail/keybinds";
 import type { NotificationActions } from "../../core/notify/notifications";
+import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
 import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
@@ -201,6 +202,12 @@ export type SettingsProps = {
    */
   contactsProblem?: { message: string; url: string | null } | null;
   onOpenContactsHelp?: (url: string) => void;
+  /** "Big files as Drive links" in Privacy: the local offer switch, and the grant as Google has it. */
+  driveLinks: boolean;
+  onDriveLinks: (value: boolean) => void;
+  driveAccess: DriveAccess | null;
+  /** Google's account page, where the grant can be removed. */
+  onOpenGooglePermissions: () => void;
   /** Start the incremental-consent flow for the two contact scopes. */
   onImproveSuggestions: () => void;
   /** Which Winnow this is, for About: "Winnow 1.0.1", and where it runs. */
@@ -600,6 +607,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
           <Row setting="gravatars" hint={remotePicturesPaused(props.imagePolicy) && props.gravatars ? REMOTE_PAUSED_HINT : undefined}>
             <Toggle checked={props.gravatars} onChange={props.onGravatars} label="Gravatar photos" />
           </Row>
+          <DriveLinksRow props={props} />
         </Section>
       );
     case "sync":
@@ -871,6 +879,30 @@ function LearningHistory({ events }: { events: readonly FeedbackEvent[] }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Big files as Drive links (status words in `core/gmail/drive`). */
+function DriveLinksRow({ props }: { props: SettingsProps }) {
+  return (
+    <>
+      <Row setting="driveLinks" hint={driveLinksStatus(props.driveAccess, props.driveLinks)}>
+        <Toggle checked={props.driveLinks} onChange={props.onDriveLinks} label="Big files as Drive links" />
+      </Row>
+      {props.driveAccess === "granted" && (
+        <div data-drive-settings="" className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-drive-revoke=""
+            onClick={props.onOpenGooglePermissions}
+            className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            Remove at Google
+          </button>
+          <span className="text-meta text-ink-subtle">Google removes all of Winnow's access at once, so you'll sign in again.</span>
+        </div>
+      )}
+    </>
   );
 }
 
