@@ -39,5 +39,34 @@ export function movedNotice(label: string, into: boolean, count: number): string
   return into ? `${what} into ${label}.` : `${what} out of ${label}.`;
 }
 
+/** What one change did, as `Store.changeSmartFilters` reports it. */
+export type ChangeOutcome = { into: boolean; moved: number; unsafe: number; already: number };
+
+/**
+ * The status line after a click, saying only what really happened: "Moved" only when
+ * membership changed, and for unsafe mail — which learning never puts into a filter —
+ * what to do instead. `selected` is how many messages the picker was opened for.
+ */
+export function changeNotice(label: string, outcome: ChangeOutcome, selected: number): string {
+  const { into, moved, unsafe } = outcome;
+  const where = into ? `into ${label}` : `out of ${label}`;
+  const parts: string[] = [];
+  if (moved > 0) {
+    if (selected === 1) parts.push(`Moved ${where}.`);
+    else if (moved === selected) parts.push(`Moved ${moved} messages ${where}.`);
+    else parts.push(`Moved ${moved} of ${selected} messages ${where}.`);
+  }
+  if (unsafe > 0) {
+    if (selected === 1) parts.push(`This message looks unsafe. Mark it not spam first to put it in ${label}.`);
+    else if (unsafe === 1) parts.push(`One looks unsafe. Mark it not spam first to put it in ${label}.`);
+    else parts.push(`${unsafe} look unsafe. Mark them not spam first to put them in ${label}.`);
+  }
+  if (parts.length === 0) {
+    if (into) return selected === 1 ? `Already in ${label}.` : `All already in ${label}.`;
+    return selected === 1 ? `Not in ${label}.` : `None are in ${label}.`;
+  }
+  return parts.join(" ");
+}
+
 /** "Change smart filters…", the one name every entry point uses. */
 export const CHANGE_FILTERS_LABEL = "Change smart filters…";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clickInto, movedNotice, pickerRows, pickerTitle } from "./smartFilterPicker";
+import { changeNotice, clickInto, movedNotice, pickerRows, pickerTitle } from "./smartFilterPicker";
 import { learntSummary, ruleText } from "./smartFilterSettings";
 import { buildRowMenu } from "./menus";
 import { FilterLearning, LEARNABLE_FILTERS } from "../core/learn/filterLearning";
@@ -19,6 +19,31 @@ const email: Email = {
   urgent: false,
   attachments: [],
 };
+
+describe("the picker's status line (R7)", () => {
+  it("says Moved only when membership changed", () => {
+    expect(changeNotice("Deliveries", { into: true, moved: 1, unsafe: 0, already: 0 }, 1)).toBe("Moved into Deliveries.");
+    expect(changeNotice("Promos", { into: false, moved: 2, unsafe: 0, already: 0 }, 2)).toBe("Moved 2 messages out of Promos.");
+    expect(changeNotice("Promos", { into: true, moved: 2, unsafe: 0, already: 3 }, 5)).toBe("Moved 2 of 5 messages into Promos.");
+    expect(changeNotice("Urgent", { into: true, moved: 0, unsafe: 0, already: 1 }, 1)).toBe("Already in Urgent.");
+    expect(changeNotice("Urgent", { into: false, moved: 0, unsafe: 0, already: 1 }, 1)).toBe("Not in Urgent.");
+    for (const text of [
+      changeNotice("Urgent", { into: true, moved: 0, unsafe: 0, already: 1 }, 1),
+      changeNotice("Urgent", { into: true, moved: 0, unsafe: 1, already: 0 }, 1),
+    ]) {
+      expect(text).not.toMatch(/Moved/);
+    }
+  });
+
+  it("tells you to mark unsafe mail not spam first", () => {
+    expect(changeNotice("Important", { into: true, moved: 0, unsafe: 1, already: 0 }, 1)).toBe(
+      "This message looks unsafe. Mark it not spam first to put it in Important.",
+    );
+    expect(changeNotice("Important", { into: true, moved: 1, unsafe: 2, already: 0 }, 3)).toBe(
+      "Moved 1 of 3 messages into Important. 2 look unsafe. Mark them not spam first to put them in Important.",
+    );
+  });
+});
 
 describe("the picker", () => {
   it("lists every learnable filter in rail order, ticked from membership", () => {
@@ -60,8 +85,11 @@ describe("Settings → Smart filters", () => {
   });
 
   it("reads a sender rule as a sentence", () => {
-    const [rule] = FilterLearning.empty().record(email, "shipping", true, 1).senderRules();
-    expect(ruleText(rule)).toBe("Mail from anyone at evri.com goes in Deliveries (you moved 1 in)");
+    const once = FilterLearning.empty().record(email, "shipping", true, 1);
+    expect(ruleText(once.senderRules()[0])).toBe(`Mail from ${once.senderRules()[0].key} goes in Deliveries (you moved 1 in)`);
+    expect(once.senderRules()[0].kind).toBe("address");
+    const [rule] = once.record({ ...email, gmailId: "second", sender: "depot@evri.com" }, "shipping", true, 2).senderRules();
+    expect(ruleText(rule)).toBe("Mail from anyone at evri.com goes in Deliveries (you moved 2 in)");
     expect(ruleText({ filter: "promotional", key: "sam@gmail.com", kind: "address", into: false, count: 2 })).toBe(
       "Mail from sam@gmail.com stays out of Promos (you moved 2 out)",
     );

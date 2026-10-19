@@ -297,17 +297,31 @@ That is the only input; nothing is learned from opening or ignoring mail.
   category (`c:updates`) and up to 10 subject/preview words (`w:parcel`). Each has a
   phrase for "Why it's here". The sender is not a clue.
 - `filterLearning.ts` — `FilterLearning`, immutable. Decision order per learnable
-  filter: this message's own correction → a **sender rule** (balance of corrections for
-  the exact address, else for a company's registrable domain; gmail.com and other
-  shared domains never get a domain rule) → **per-filter naive Bayes** over the clues,
-  with the built-in answer as the prior at `BUILT_IN_ODDS = 3` to 1 and Laplace-
-  smoothed counts of your corrections, counting only clues you have corrected mail
-  with → the built-in rules. Learned answers flip the signal booleans (and
-  `importantOverride` for Important), so the rail, counts, badges and list agree. Twelve
-  filters are learnable (`LEARNABLE_FILTERS`); Starred, Unread, Files, the contact
+  filter: this message's own correction → a **sender rule** (an exact address from its
+  own corrections, one is enough; a registrable domain only with corrections from at
+  least `MIN_DOMAIN_ADDRESSES = 2` distinct addresses there; a sender or domain with
+  corrections both ways has no rule; the account's own domain — `northwind.example` in
+  the demo — and gmail.com-style shared domains never get a domain rule) → **per-filter
+  naive Bayes** over the clues, with the built-in answer as the prior at
+  `BUILT_IN_ODDS = 3` to 1. Generic clues (`c:*`, `h:no-reply`, `h:list-unsubscribe`,
+  `h:attachments`, `p:date`) never count; all words together count as one clue at most;
+  each clue is smoothed toward its rate in the inbox (`clueBackground`,
+  `BACKGROUND_WEIGHT = 2`) and never votes against the direction it was seen in more;
+  it may overturn the built-in answer only with `MIN_SUPPORT = 2` corrections sharing a
+  specific clue, and never takes mail out of Security or Important → the built-in
+  rules (`builtInSays`, the filter's full predicate). Learned answers are stored as
+  per-filter overrides (`EmailSignals.filterOverrides`), never by rewriting the
+  classifier's flags, so a correction changes exactly that filter; `inSignalFilter`
+  (signals.ts) is the one predicate the list, counts, badges and learning share, and
+  unsafe mail is never put into a filter. One "Change smart filters…" action records
+  only messages whose membership changes, in one `batch`, so it counts once per sender.
+  Star learning reads the raw classifier output (`baseSignals`). Twelve filters are
+  learnable (`LEARNABLE_FILTERS` = `SIGNAL_FILTERS`); Starred, Unread, Files, the contact
   buckets, Read later, Long reads and Unsafe are facts, not judgements, and are not.
-- `filterExplain.ts` — one line per filter the message is in: "In Deliveries because:
-  from evri.com, has an Evri tracking number, you moved 2 emails here". Words only.
+- `filterExplain.ts` — one line per filter the message is in, naming the path that
+  decided (`source`: message, sender, similar or built-in): "In Deliveries because:
+  from evri.com, has an Evri tracking number, you moved 2 emails here". Important's
+  built-in line names only what pushed it over the line. Words only.
 - Storage: `winnow.filterLearning.v1`, `{ version: 1, owner, corrections }`, capped at
   300 corrections, 20 clues each and 1,200 distinct clues (rarest words dropped first).
   Local only, never synced. Cleared on sign-out and when a different account connects

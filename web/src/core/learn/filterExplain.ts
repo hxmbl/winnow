@@ -4,22 +4,26 @@
  *   In Deliveries because: from evri.com, has a tracking number, you moved 2 similar emails here
  *
  * Built from the same decision the list uses (`FilterLearning.decide`) and the same
- * vocabulary the built-in rules match (`classify/heuristics.ts`), so the sentence can
- * never claim a reason the classifier did not act on. No scores, ever: a reason is a
- * thing about the message or a thing you did.
+ * vocabulary the built-in rules match (`classify/heuristics.ts`), so the sentence names
+ * the path that actually decided — your correction for the message, a sender rule,
+ * similar mail you corrected, or the built-in signals — and never a reason that had no
+ * part in it. Generic clues (Gmail's category, a no-reply address) are never a reason.
+ * No scores, ever: a reason is a thing about the message or a thing you did.
  */
 
 import type { Email } from "../model/email";
 import {
   BUILTIN_FILTERS,
   FILTER_LABELS,
+  IMPORTANT_THRESHOLD,
   isUnsafe,
   type BuiltinSmartFilter,
   type EmailSignals,
 } from "../model/signals";
 import type { UserProfile } from "../model/profile";
 import { matchesBuiltin } from "../classify/filters";
-import { contentBag, matchesSocialDomain } from "../classify/classify";
+import { contentBag, matchesSocialDomain, senderRankBonus } from "../classify/classify";
+import { STANDARD_WEIGHTS, type SignalWeights } from "../classify/weights";
 import {
   codesKeywords,
   eventsKeywords,
@@ -36,8 +40,26 @@ import {
   urgentKeywords,
 } from "../classify/heuristics";
 import { PhraseMatcher, type KeywordTable } from "../classify/text";
-import { SPECIFIC_TRACKING, cachedClues, clueKind, clueLabel, registrableDomain, senderAddress } from "./filterClues";
-import { isLearnable, type Decision, type FilterLearning, type LearnableFilter } from "./filterLearning";
+import {
+  SPECIFIC_TRACKING,
+  cachedClues,
+  clueKind,
+  clueLabel,
+  isGenericClue,
+  registrableDomain,
+  senderAddress,
+} from "./filterClues";
+import {
+  EMPTY_BACKGROUND,
+  isLearnable,
+  type ClueBackground,
+  type Decision,
+  type FilterLearning,
+  type LearnableFilter,
+} from "./filterLearning";
+
+/** Which path put the message in the filter: the same as `Decision["by"]`. */
+export type ReasonSource = Decision["by"];
 
 export type FilterReason = {
   filter: BuiltinSmartFilter;
@@ -47,6 +69,8 @@ export type FilterReason = {
   reasons: string[];
   /** "In Deliveries because: from evri.com, has a tracking number". */
   line: string;
+  /** What decided: your correction, a sender rule, similar mail, or the built-in rules. */
+  source: ReasonSource;
 };
 
 /** At most this many reasons in one line; more reads as a list, not a sentence. */
@@ -70,6 +94,7 @@ export function builtInReasons(
   email: Email,
   signals: EmailSignals,
   profile: UserProfile,
+  weights: SignalWeights = STANDARD_WEIGHTS,
 ): string[] {
   const text = contentBag(email);
   const action = `${email.subject} ${email.body}`;
@@ -122,16 +147,8 @@ export function builtInReasons(
       if (match) out.push(quote(match[0]));
       return out;
     }
-    case "important": {
-      const out: string[] = [];
-      if (email.starred) out.push("you starred it");
-      if (profile.topSenders.slice(0, 6).includes(email.sender)) out.push("you hear from this sender often");
-      if (signals.security) out.push("it is a security notice");
-      if (signals.urgentText) out.push("it reads as urgent");
-      if (signals.needsAction) out.push("it asks you to do something");
-      if (signals.finance) out.push("it is about money you owe or paid");
-      return out.length > 0 ? out : ["it stands out from your usual mail"];
-    }
+    case "important":
+      return importantReasons(email, signals, profile, weights);
     case "starred":
       return ["you starred it"];
     case "attachments":
@@ -153,12 +170,36 @@ export function builtInReasons(
   }
 }
 
+/**
+ * Why the built-in rules call a message Important: only what pushed it there. A message
+ * whose score falls short is Important because it asks for something; otherwise the
+ * reasons are the parts of the score that added to it. The sender counts only when its
+ * net contribution (the engagement bonus less any quiet-sender penalty) is above zero.
+ */
+function importantReasons(email: Email, signals: EmailSignals, profile: UserProfile, weights: SignalWeights): string[] {
+  if (signals.importanceScore < IMPORTANT_THRESHOLD) {
+    return signals.needsAction ? ["it asks you to do something"] : ["it stands out from your usual mail"];
+  }
+  const out: string[] = [];
+  if (email.starred && weights.starBoost > 0) out.push("you starred it");
+  const quiet = profile.quietSenders.includes(email.sender);
+  const senderNet = senderRankBonus(profile, email.sender, weights.topSenderBoost) - (quiet ? weights.quietContactPenalty : 0);
+  if (senderNet > 0) out.push(quiet ? "you engage with this sender's mail" : "you hear from this sender often");
+  if (signals.security && weights.security > 0) out.push("it is a security notice");
+  if (signals.urgentText && weights.urgency > 0) out.push("it reads as urgent");
+  if (signals.needsAction && weights.actionNeeded > 0) out.push("it asks you to do something");
+  if (signals.finance && weights.finance > 0) out.push("it is about money you owe or paid");
+  if (signals.promotional && email.urgent) out.push("the sender marked it urgent");
+  return out.length > 0 ? out : ["it stands out from your usual mail"];
+}
+
 /** Clue phrases, with the generic tracking number left out when a courier is named. */
 function cluePhrases(clues: readonly string[]): string[] {
   const specific = clues.some((clue) => SPECIFIC_TRACKING.has(clue));
   const strong = clues.filter((clue) => clueKind(clue) !== "word");
   const words = clues.filter((clue) => clueKind(clue) === "word");
   return [...strong, ...words]
+    .filter((clue) => !isGenericClue(clue))
     .filter((clue) => !(specific && clue === "p:tracking"))
     .map(clueLabel);
 }
@@ -185,8 +226,10 @@ function learnedReasons(decision: Decision, email: Email, model: FilterLearning,
       return out;
     }
     case "similar": {
+      // The specific clues that carried the decision, and the corrections behind it
+      // (counted the way the decision counted them). Never generic clues alone.
       const out = cluePhrases(decision.clues).slice(0, MAX_REASONS - 1);
-      if (decision.similar > 0) out.push(moved(decision.similar, true));
+      out.push(moved(decision.similar, true));
       return out;
     }
     case "built-in":
@@ -194,12 +237,20 @@ function learnedReasons(decision: Decision, email: Email, model: FilterLearning,
   }
 }
 
+/** What `explainFilters` reads besides the message: the same context the list used. */
+export type ExplainContext = {
+  /** The clue background the list's decision used (`clueBackground` of the inbox). */
+  background?: ClueBackground;
+  /** The sorting weights the importance score was computed with. */
+  weights?: SignalWeights;
+};
+
 /**
  * Every line for one message.
  *
  * `base` is what the built-in rules said; `learned` is what the list uses (the same
  * signals with the model applied). A filter is explained only when the message is in it
- * by `learned`, the way the list decides.
+ * by `learned`, the way the list decides, and by the path that decided it.
  */
 export function explainFilters(
   email: Email,
@@ -207,29 +258,30 @@ export function explainFilters(
   learned: EmailSignals,
   profile: UserProfile,
   model: FilterLearning,
+  context: ExplainContext = {},
 ): FilterReason[] {
+  const background = context.background ?? EMPTY_BACKGROUND;
+  const weights = context.weights ?? STANDARD_WEIGHTS;
   const out: FilterReason[] = [];
   const unsafe = isUnsafe(learned);
   for (const filter of BUILTIN_FILTERS) {
     if (SILENT.has(filter)) continue;
     if (unsafe && filter !== "unsafe") continue;
     if (!matchesBuiltin(filter, email, learned, profile)) continue;
-    let reasons: string[];
+    let reasons: string[] = [];
+    let source: ReasonSource = "built-in";
     if (isLearnable(filter)) {
-      const decision = model.decide(email, filter, base);
-      reasons = learnedReasons(decision, email, model, filter);
-      if (decision.by === "built-in" || reasons.length === 0) {
-        reasons = builtInReasons(filter, email, base, profile);
-        const backed = model.isEmpty ? 0 : model.similarCount(email, filter, true);
-        if (backed > 0) reasons = [...reasons.slice(0, MAX_REASONS - 1), moved(backed, true)];
+      const decision = model.decide(email, filter, base, background);
+      if (decision.by !== "built-in") {
+        source = decision.by;
+        reasons = learnedReasons(decision, email, model, filter);
       }
-    } else {
-      reasons = builtInReasons(filter, email, base, profile);
     }
+    if (source === "built-in") reasons = builtInReasons(filter, email, base, profile, weights);
     if (reasons.length === 0) reasons = ["its wording matches this filter"];
     const unique = [...new Set(reasons)].slice(0, MAX_REASONS);
     const label = FILTER_LABELS[filter];
-    out.push({ filter, label, reasons: unique, line: `In ${label} because: ${unique.join(", ")}` });
+    out.push({ filter, label, reasons: unique, line: `In ${label} because: ${unique.join(", ")}`, source });
   }
   return out;
 }

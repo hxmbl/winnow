@@ -106,7 +106,7 @@ try {
   await row(SIBLING).click();
   await page.waitForSelector("[data-reader] [data-why-here]");
   const why = (await page.locator("[data-reader] [data-why-line='shipping']").textContent()) ?? "";
-  check("the reader shows one line per filter", /In Deliveries because: from evri\.com, has an Evri tracking number, you moved 1 email here/.test(why), why);
+  check("the reader shows one line per filter", /In Deliveries because: from noreply@evri\.com, has an Evri tracking number, you moved 1 email here/.test(why), why);
   check("with no scores", !/\d+(\.\d+)?\s*%|score/i.test(await page.locator("[data-reader] [data-why-here]").innerText()));
   check("the reader shows the Deliveries tag", (await page.locator("[data-reader] [data-filter-tag='shipping']").count()) === 1);
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "filters-why.png") });
@@ -162,17 +162,19 @@ try {
   await page.waitForTimeout(150);
   const learnt = dialog.locator("[data-filter-learnt-row='shipping']");
   check("lists Deliveries with its corrections", /Deliveries.*1 correction/.test((await learnt.textContent()) ?? ""), await learnt.textContent());
-  check("and the evri.com sender rule", (await learnt.locator("[data-sender-rule='evri.com']").count()) === 1);
+  // One correction makes a rule for that exact address, never for all of evri.com.
+  check("and the noreply@evri.com sender rule", (await learnt.locator("[data-sender-rule='noreply@evri.com']").count()) === 1);
+  check("but no domain-wide rule from one correction", (await learnt.locator("[data-sender-rule='evri.com']").count()) === 0);
   check(
     "the multiselect untick is remembered for Important too",
     /Important.*2 corrections/.test((await dialog.locator("[data-filter-learnt-row='important']").textContent()) ?? ""),
   );
   check("no scores in Settings either", !/score|%/i.test(await dialog.locator("[data-setting='filterLearning']").innerText()));
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "filters-settings.png") });
-  await learnt.locator("[data-sender-rule-remove='evri.com']").click();
+  await learnt.locator("[data-sender-rule-remove='noreply@evri.com']").click();
   await page.waitForTimeout(150);
-  check("a sender rule can be removed", (await learnt.locator("[data-sender-rule='evri.com']").count()) === 0);
-  check("only that one", (await dialog.locator("[data-filter-learnt-row='important'] [data-sender-rule='evri.com']").count()) === 1);
+  check("a sender rule can be removed", (await learnt.locator("[data-sender-rule='noreply@evri.com']").count()) === 0);
+  check("only that one", (await dialog.locator("[data-filter-learnt-row='important'] [data-sender-rule='noreply@evri.com']").count()) === 1);
   await dialog.locator("[data-filter-reset='important']").click();
   await dialog.locator("[data-filter-reset-confirm='important']").click();
   await page.waitForTimeout(150);

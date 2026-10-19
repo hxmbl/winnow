@@ -86,7 +86,9 @@ import {
   FilterLearning,
   applyFilterLearning,
   builtInSays,
+  clueBackground,
   LEARNABLE_FILTERS,
+  type ClueBackground,
   type FilterLearningSnapshot,
   type LearnableFilter,
 } from "../learn/filterLearning";
@@ -921,8 +923,13 @@ export class WinnowStore {
     inbox: ReadonlySet<Email>;
     stats: ProfileStats;
     profile: UserProfile;
-    /** What the built-in rules said, before `filterLearning`; for "Why it's here". */
+    /**
+     * What the built-in rules said, before `filterLearning`: for "Why it's here" and for
+     * star learning, which must see the classifier's own output, never corrections.
+     */
     baseSignals: SignalMap;
+    /** How common each clue is in this inbox; the decision and its explanation share it. */
+    background: ClueBackground;
     signals: SignalMap;
     /**
      * The built-in answer per message *object*, for the incremental pass: a change to one
@@ -1046,8 +1053,9 @@ export class WinnowStore {
       for (const email of inboxForProfile) byEmail.set(email, baseSignals.get(email.id)!);
     }
     const filterLearning = state.filterLearning;
-    const signals = applyFilterLearning(inboxForProfile, baseSignals, filterLearning);
-    this.inboxCache = { all, weights, trash, blocked, filterLearning, inbox: inboxSet, stats, profile, baseSignals, signals, byEmail };
+    const background = clueBackground(inboxForProfile);
+    const signals = applyFilterLearning(inboxForProfile, baseSignals, filterLearning, background);
+    this.inboxCache = { all, weights, trash, blocked, filterLearning, inbox: inboxSet, stats, profile, baseSignals, background, signals, byEmail };
     return { profile, signals };
   }
 
@@ -2084,7 +2092,7 @@ export class WinnowStore {
     if (!email) return;
 
     const starred = !email.starred;
-    const signals = this.signalsFor(email);
+    const signals = this.rawSignalsFor(email);
     const learning = this.state.learning.recordStar(email, signals, starred, this.now());
 
     this.mutate(id, () => ({ ...email, starred }), async () => {
@@ -2600,6 +2608,22 @@ export class WinnowStore {
         this.markOpenedRead();
       }
     }
+  }
+
+  /**
+   * The classifier's own signals for a message, with no smart-filter correction in them:
+   * what star learning reads, so it learns from the score's real inputs and never from a
+   * filter the user corrected.
+   */
+  private rawSignalsFor(email: Email): EmailSignals {
+    if (email.mailbox === "inbox") {
+      this.inboxAnalysis();
+      const base = this.inboxCache?.baseSignals.get(email.id);
+      if (base) return base;
+    }
+    const { filterOverrides: _corrections, ...raw } = this.signalsFor(email);
+    void _corrections;
+    return raw;
   }
 
   /** Signals for a message, classifying it if the view has not yet. */
@@ -3150,23 +3174,50 @@ export class WinnowStore {
   }
 
   /**
-   * "Change smart filters…": record one correction per message per changed filter. The
-   * messages move at once, because a correction for a message decides that message.
+   * "Change smart filters…": record one correction per message whose membership the
+   * change actually alters — a message already where it was asked to be teaches nothing.
+   * The corrections share one batch, so the action counts once per sender. Those messages
+   * move at once, because a correction for a message decides that message.
+   *
+   * Returns, per change, how many messages moved and how many could not because they
+   * look unsafe (learning never puts unsafe mail into a filter), for the picker's status.
    */
-  changeSmartFilters(ids: readonly number[], changes: readonly { filter: LearnableFilter; into: boolean }[]): void {
-    if (changes.length === 0) return;
-    const { signals } = this.inboxAnalysis();
+  changeSmartFilters(
+    ids: readonly number[],
+    changes: readonly { filter: LearnableFilter; into: boolean }[],
+  ): SmartFilterChange[] {
+    if (changes.length === 0) return [];
+    const { profile, signals } = this.inboxAnalysis();
     let model = this.state.filterLearning;
     if (model.owner === null) model = model.withOwner(this.state.account?.email.toLowerCase() ?? "demo");
     const at = this.now();
-    for (const id of ids) {
-      const email = this.inboxEmail(id);
-      const signal = email ? signals.get(email.id) : undefined;
-      if (!email || !signal) continue;
-      for (const { filter, into } of changes) model = model.record(email, filter, into, at);
+    const batch = (this.smartFilterBatch = Math.max(this.smartFilterBatch + 1, at));
+    const results: SmartFilterChange[] = [];
+    for (const { filter, into } of changes) {
+      const result: SmartFilterChange = { filter, into, moved: 0, unsafe: 0, already: 0 };
+      for (const id of ids) {
+        const email = this.inboxEmail(id);
+        const signal = email ? signals.get(email.id) : undefined;
+        if (!email || !signal) continue;
+        if (matchesBuiltin(filter, email, signal, profile) === into) {
+          result.already += 1;
+          continue;
+        }
+        if (into && isUnsafe(signal)) {
+          result.unsafe += 1;
+          continue;
+        }
+        model = model.record(email, filter, into, at, batch);
+        result.moved += 1;
+      }
+      results.push(result);
     }
-    this.setFilterLearning(model);
+    if (model !== this.state.filterLearning) this.setFilterLearning(model);
+    return results;
   }
+
+  /** Increases with every "Change smart filters…" action, so each action is one batch. */
+  private smartFilterBatch = 0;
 
   /** "Why it's here" for one inbox message: one line per filter it is in. */
   explainSmartFilters(id: number): FilterReason[] {
@@ -3177,7 +3228,10 @@ export class WinnowStore {
     const base = cache?.baseSignals.get(id);
     const learned = cache?.signals.get(id);
     if (!cache || !base || !learned) return [];
-    return explainFilters(email, base, learned, cache.profile, this.state.filterLearning);
+    return explainFilters(email, base, learned, cache.profile, this.state.filterLearning, {
+      background: cache.background,
+      weights: cache.weights,
+    });
   }
 
   /** Whether the built-in rules alone would put this message in a filter. For tests and Settings. */
@@ -3197,6 +3251,18 @@ export class WinnowStore {
     this.setFilterLearning(this.state.filterLearning.reset(filter));
   }
 }
+
+/** What one "Change smart filters…" change did, for the picker's status line. */
+export type SmartFilterChange = {
+  filter: LearnableFilter;
+  into: boolean;
+  /** Messages whose membership changed. */
+  moved: number;
+  /** Messages that could not be put in, because they look unsafe. */
+  unsafe: number;
+  /** Messages already where the change asked for. */
+  already: number;
+};
 
 /**
  * A signal map for mail that is deliberately not classified.

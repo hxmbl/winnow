@@ -41,6 +41,18 @@ export function clueKind(clue: string): ClueKind {
   return "word";
 }
 
+/**
+ * Clues that most mail of every kind carries, so they say nothing about one filter:
+ * Gmail's category, a no-reply or List-Unsubscribe sender, attachments, a date. They are
+ * still read and stored, but similar-mail learning never counts them, and "Why it's here"
+ * never gives one as a reason.
+ */
+const GENERIC_CLUES: ReadonlySet<string> = new Set(["h:no-reply", "h:list-unsubscribe", "h:attachments", "p:date"]);
+
+export function isGenericClue(clue: string): boolean {
+  return clueKind(clue) === "category" || GENERIC_CLUES.has(clue);
+}
+
 // ── Patterns ────────────────────────────────────────────────────────────────
 
 /** UPS: `1Z`, then 16 letters and digits. */
