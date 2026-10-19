@@ -167,7 +167,11 @@ pub(crate) fn write_picture(picture: &str) -> Option<std::path::PathBuf> {
 pub(crate) fn write_picture_in(dir: &std::path::Path, picture: &str) -> Option<std::path::PathBuf> {
     use std::hash::{Hash, Hasher};
     let bytes = super::picture_bytes(picture)?;
-    let extension = if bytes.starts_with(b"\x89PNG") { "png" } else { "jpg" };
+    let extension = if bytes.starts_with(b"\x89PNG") {
+        "png"
+    } else {
+        "jpg"
+    };
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut hasher);
     std::fs::create_dir_all(dir).ok()?;

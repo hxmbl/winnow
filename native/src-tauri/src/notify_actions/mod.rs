@@ -131,7 +131,10 @@ impl NotificationBatch {
                 message.picture = None;
             }
             // Only bytes, never an address to fetch.
-            message.picture = message.picture.take().filter(|p| picture_bytes(p).is_some());
+            message.picture = message
+                .picture
+                .take()
+                .filter(|p| picture_bytes(p).is_some());
             message.title = clip(&message.title);
             message.subject = clip(&message.subject);
             message.preview = clip(&message.preview);
@@ -395,7 +398,10 @@ mod tests {
         assert_eq!(batch(PNG, true).sanitised().messages[0].picture, None);
         // A URL is never fetched natively: dropped, so the app icon shows.
         assert_eq!(
-            batch("https://example.test/a.png", false).sanitised().messages[0].picture,
+            batch("https://example.test/a.png", false)
+                .sanitised()
+                .messages[0]
+                .picture,
             None
         );
         // An older web layer sends no picture at all.
