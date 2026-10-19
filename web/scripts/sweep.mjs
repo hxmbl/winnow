@@ -15,6 +15,8 @@
  *   inbox · reader · drawer (phone dock menu / desktop sidebar) · settings (as it opens,
  *   then a long category scrolled to its end) · the Appearance picker · compose ·
  *   the status pill carrying an Undo · inbox clear (a fake Gmail with an empty inbox)
+ *   · the phone reader scrolled partway down a long message, its pill folded (extras,
+ *   both hands, light/dark/OLED)
  *
  * then each other setting or OS preference that changes how the app looks (sort order,
  * remote images, brand logos, Gravatar, reduced transparency, forced colours, a small
@@ -116,6 +118,18 @@ function plan() {
   // Left-handed mode mirrors the phone's reader pill and compose button (phone only).
   extra("left-handed-light", "light", "light", "phone", ["inbox", "reader", "drawer", "compose"], { prefs: { leftHanded: true } });
   extra("left-handed-oled", "oled", "dark", "phone", ["inbox", "reader", "drawer", "compose"], { prefs: { leftHanded: true } });
+  // A Settings dropdown open, phone and desktop, light and dark.
+  for (const device of ["phone", "desktop"]) {
+    extra("settings-dropdown-light", "light", "light", device, ["appearance-menu"]);
+    extra("settings-dropdown-dark", "dark", "dark", device, ["appearance-menu"]);
+  }
+  // The phone reader while reading down: the long demo newsletter scrolled partway, so the
+  // reader pill has folded to its ••• circle. Both hands, the three modes.
+  for (const mode of ["light", "dark", "oled"]) {
+    const scheme = mode === "light" ? "light" : "dark";
+    extra(`reader-scrolled-right-${mode}`, mode, scheme, "phone", ["reader-scrolled"]);
+    extra(`reader-scrolled-left-${mode}`, mode, scheme, "phone", ["reader-scrolled"], { prefs: { leftHanded: true } });
+  }
   extra("small-phone-dark", "dark", "dark", "phone-small", ["inbox", "drawer", "settings-end", "compose", "pill-undo"]);
   extra("tablet-light", "light", "light", "tablet", ["inbox", "reader", "drawer"]);
   return jobs.filter(
@@ -428,6 +442,33 @@ async function stage(page, cdp, job, screen) {
       await page.locator("[data-reader]").first().waitFor({ timeout: 5_000 });
       await settle(page, 700);
       return;
+    case "reader-scrolled": {
+      // The demo newsletter ("Introducing Hark Pro") is the longest message, over 1000px
+      // of scroll on a phone. The list is windowed, so scroll until its row is mounted.
+      const newsletter = page.locator(ROW, { hasText: "Introducing Hark Pro" }).first();
+      for (let step = 0; step < 40 && (await newsletter.count()) === 0; step += 1) {
+        await page.evaluate(() => {
+          const list = document.querySelector("[data-row-count]");
+          const scroller = list?.closest(".overflow-y-auto") ?? document.scrollingElement;
+          scroller.scrollTop += 400;
+        });
+        await page.waitForTimeout(120);
+      }
+      await newsletter.scrollIntoViewIfNeeded();
+      await tap(newsletter);
+      await page.locator("[data-reader]").first().waitFor({ timeout: 5_000 });
+      await settle(page, 700);
+      // Partway down, in steps, the way reading scrolls: the pill folds on the way down.
+      const scroller = page.locator("[data-reader] .overflow-y-auto").first();
+      for (const top of [60, 140, 240, 360, 480]) {
+        await scroller.evaluate((el, t) => (el.scrollTop = Math.min(t, el.scrollHeight - el.clientHeight - 40)), top);
+        await page.waitForTimeout(70);
+      }
+      await settle(page, 600);
+      const folded = await page.locator("[data-reader-pill]").getAttribute("data-reader-pill").catch(() => null);
+      if (folded !== "collapsed") throw new Error(`reader pill did not fold while scrolled (state ${folded})`);
+      return;
+    }
     case "drawer":
       if (phone) {
         await page.locator("[data-phone-dock] button[data-dock-expand]").tap();
@@ -439,6 +480,7 @@ async function stage(page, cdp, job, screen) {
       return;
     case "settings-top":
     case "settings-end":
+    case "appearance-menu":
     case "appearance": {
       if (phone) {
         await page.locator("[data-phone-dock] button[data-dock-expand]").tap();
@@ -452,14 +494,21 @@ async function stage(page, cdp, job, screen) {
       await dialog.waitFor({ timeout: 5_000 });
       await settle(page, 500);
       if (screen === "settings-top") return;
-      // Keyboard shortcuts: the longest category on every layout, so "the end" is a real scroll.
-      const category = screen === "appearance" ? "appearance" : "shortcuts";
+      // Keyboard shortcuts: the longest category, so "the end" is a real scroll. A touch
+      // phone with no keyboard has no such category (1.3.3), so Smart filters there.
+      const category = screen.startsWith("appearance") ? "appearance" : phone ? "filters" : "shortcuts";
       const tab = dialog.locator(`[role="tab"][data-category="${category}"]`);
       if ((await tab.count()) > 0) await tab.click();
       else await tap(dialog.locator(`[data-category="${category}"]`).first());
       await settle(page, 450);
       if (screen === "settings-end") {
         await scrollToEnd(page, '[role="dialog"][aria-label="Settings"]');
+        await settle(page, 300);
+      }
+      if (screen === "appearance-menu") {
+        // A Settings dropdown open (1.3.3): Mode's list under its pill.
+        await tap(page.locator('[data-select="theme-mode"]'));
+        await page.locator('[data-select-list="theme-mode"]').waitFor({ timeout: 5_000 });
         await settle(page, 300);
       }
       return;

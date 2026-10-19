@@ -109,6 +109,18 @@ async function openSettingsCategory(p, id) {
   await p.waitForTimeout(120);
 }
 
+/**
+ * Pick a value in a Settings dropdown (`SelectMenu`) the way a user would: open it, then
+ * choose the option by its visible label. Returns once the list has closed.
+ */
+export async function chooseFromSelect(p, id, label) {
+  await p.locator(`[data-select="${id}"]`).click();
+  const list = p.locator(`[role="listbox"][data-select-list="${id}"]`);
+  await list.waitFor({ timeout: 5_000 });
+  await list.locator('[role="option"]', { hasText: label }).first().click();
+  await list.waitFor({ state: "detached", timeout: 5_000 });
+}
+
 async function openServer() {
   if (EXTERNAL) {
     console.log(`· using ${URL} (WINNOW_URL) — not starting a server`);
@@ -1554,7 +1566,7 @@ try {
     await page.locator("#winnow-search").blur();
     await page.keyboard.press(",");
     await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
-    await page.getByRole("button", { name: label, exact: true }).click();
+    await chooseFromSelect(page, "sort-by", label);
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
   };
@@ -3210,7 +3222,15 @@ try {
    * to decline on every message, forever. So this is one setting with three values,
    * and the assertion is that picking one of them writes a value rather than a boolean.
    */
-  const imageChoices = page.locator('[role="radiogroup"][aria-label="Remote images"] [role="radio"]');
+  // A dropdown since 1.3.3 (`SelectMenu`): the trigger names the setting, the list
+  // holds the three values.
+  const imageTrigger = page.locator('[data-select="remote-images"]');
+  check(
+    "the image policy is a dropdown named for its setting",
+    (await imageTrigger.getAttribute("role")) === "combobox" && (await imageTrigger.getAttribute("aria-label")) === "Remote images",
+  );
+  await imageTrigger.click();
+  const imageChoices = page.locator('[role="listbox"][data-select-list="remote-images"] [role="option"]');
   check(
     "the image policy is a three-way choice, not a toggle",
     (await imageChoices.count()) === 3,
@@ -3220,7 +3240,18 @@ try {
   await page.waitForTimeout(250);
   check(
     "and it reports which one is in force",
-    (await imageChoices.filter({ hasText: "Always" }).getAttribute("aria-checked")) === "true",
+    (await imageTrigger.getAttribute("data-value")) === "always" && ((await imageTrigger.textContent()) ?? "").includes("Always"),
+  );
+  // Escape with the list open closes the list only; Settings stays.
+  await imageTrigger.press("ArrowDown");
+  await page.locator('[data-select-list="remote-images"]').waitFor({ timeout: 2_000 });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+  check(
+    "Escape in an open dropdown closes the list, not Settings, and focus returns to it",
+    (await page.locator('[data-select-list="remote-images"]').count()) === 0 &&
+      (await page.locator('[role="dialog"]').count()) === 1 &&
+      (await page.evaluate(() => document.activeElement?.getAttribute("data-select"))) === "remote-images",
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
@@ -3247,23 +3278,40 @@ try {
    */
   await page.keyboard.press(",");
   await openSettingsCategory(page, "appearance");
-  await page.waitForSelector('[role="radiogroup"][data-picker="winnow-theme-mode"]', { timeout: 5_000 });
-  const modeGroup = page.locator('[role="radiogroup"][data-picker="winnow-theme-mode"]');
+  await page.waitForSelector('[data-select="theme-mode"]', { timeout: 5_000 });
+  const modeTrigger = page.locator('[data-select="theme-mode"]');
+  const modeOptions = page.locator('[role="listbox"][data-select-list="theme-mode"] [role="option"]');
+  const chooseMode = (label) => chooseFromSelect(page, "theme-mode", label);
   const accentGroup = page.locator('[role="radiogroup"][data-picker="winnow-theme-accent"]');
-  const modeRadios = modeGroup.locator('[role="radio"]');
   const accentRadios = accentGroup.locator('[role="radio"]');
+  await modeTrigger.click();
+  const modeLabels = await modeOptions.allTextContents();
+  await page.keyboard.press("Escape");
   check(
-    "the mode picker offers System, Light, Dark and OLED",
-    JSON.stringify(await modeRadios.allTextContents()) === JSON.stringify(["System", "Light", "Dark", "OLED"]),
-    JSON.stringify(await modeRadios.allTextContents()),
+    "the mode dropdown offers System, Light, Dark and OLED",
+    JSON.stringify(modeLabels) === JSON.stringify(["System", "Light", "Dark", "OLED"]),
+    JSON.stringify(modeLabels),
   );
+  // The keyboard: ↓ opens on the current value, ↓ moves, Enter chooses (then back to System).
+  await modeTrigger.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  check(
+    "the mode dropdown works from the keyboard: ↓ opens, ↓ moves, Enter chooses and refocuses the trigger",
+    (await modeTrigger.getAttribute("data-value")) === "light" &&
+      (await page.evaluate(() => document.activeElement?.getAttribute("data-select"))) === "theme-mode",
+    await modeTrigger.getAttribute("data-value"),
+  );
+  await chooseMode("System");
   check(
     "the accent picker offers the curated accents, Space first",
     (await accentRadios.count()) >= 3 && ((await accentRadios.first().textContent()) ?? "").trim() === "Space",
     JSON.stringify(await accentRadios.allTextContents()),
   );
   check(
-    "both groups are labelled by a visible heading",
+    "the accent group is labelled by a visible heading",
     (await page.evaluate(() =>
       [...document.querySelectorAll('[role="radiogroup"][data-picker]')].every((group) => {
         const label = document.getElementById(group.getAttribute("aria-labelledby") ?? "");
@@ -3272,7 +3320,7 @@ try {
     )),
   );
   check(
-    "each group is one tab stop: only the checked radio is focusable",
+    "the accent group is one tab stop: only the checked radio is focusable",
     (await page.evaluate(() =>
       [...document.querySelectorAll('[role="radiogroup"][data-picker]')].every((group) => {
         const stops = [...group.querySelectorAll('[role="radio"]')].filter((radio) => radio.tabIndex === 0);
@@ -3288,7 +3336,7 @@ try {
     }));
 
   // Dark is Notion-like neutral grey: a #191919 canvas and untinted hover and selection.
-  await modeRadios.filter({ hasText: "Dark" }).click();
+  await chooseMode("Dark");
   await page.waitForTimeout(150);
   const darkTokens = await page.evaluate(() => {
     const style = document.documentElement.style;
@@ -3308,7 +3356,7 @@ try {
     JSON.stringify(darkTokens),
   );
 
-  await modeRadios.filter({ hasText: "OLED" }).click();
+  await chooseMode("OLED");
   await page.waitForTimeout(150);
   let state = await themeState();
   const oledStates = await page.evaluate(() =>
@@ -3324,7 +3372,7 @@ try {
   check(
     "choosing OLED paints true black",
     state.theme === "oled" && state.canvas === "rgb(0, 0, 0)" &&
-      (await modeRadios.filter({ hasText: "OLED" }).getAttribute("aria-checked")) === "true",
+      (await modeTrigger.getAttribute("data-value")) === "oled",
     JSON.stringify(state),
   );
 
@@ -3383,8 +3431,8 @@ try {
   // Put the world back: the rest of the run assumes the default theme.
   await page.keyboard.press(",");
   await openSettingsCategory(page, "appearance");
-  await page.waitForSelector('[role="radiogroup"][data-picker="winnow-theme-mode"]', { timeout: 5_000 });
-  await modeRadios.filter({ hasText: "System" }).click();
+  await page.waitForSelector('[data-select="theme-mode"]', { timeout: 5_000 });
+  await chooseMode("System");
   await accentRadios.filter({ hasText: "Space" }).click();
   await page.waitForTimeout(150);
   state = await themeState();
@@ -6397,15 +6445,18 @@ try {
     await r.keyboard.press(",");
     await r.waitForSelector('[role="dialog"][aria-label="Settings"]', { timeout: 5_000 });
     await openSettingsCategory(r, "compose");
-    const undoChoices = r.locator("[data-undo-send-choices] button");
+    const undoTrigger = r.locator('[data-select="undo-send"]');
+    await undoTrigger.click();
+    const undoChoices = await r.locator('[data-select-list="undo-send"] [role="option"]').allTextContents();
+    await r.keyboard.press("Escape");
     check(
-      "Settings → Compose offers the Undo send window as Off, 5s, 10s and 20s",
-      (await undoChoices.allTextContents()).join("|") === "Off|5s|10s|20s" &&
+      "Settings → Compose offers the Undo send window as Off, 5, 10 and 20 seconds",
+      undoChoices.join("|") === "Off|5 seconds|10 seconds|20 seconds" &&
         ((await r.locator('[data-setting="undoSend"]').first().textContent()) ?? "").includes("Undo send window"),
-      (await undoChoices.allTextContents()).join("|"),
+      undoChoices.join("|"),
     );
-    check("with 10s chosen by default", (await r.locator("[data-undo-send-choices] button[aria-pressed='true']").textContent()) === "10s");
-    await r.locator("[data-undo-send-choices] button", { hasText: "Off" }).click();
+    check("with 10 seconds chosen by default", (await undoTrigger.getAttribute("data-value")) === "10");
+    await chooseFromSelect(r, "undo-send", "Off");
     await r.waitForTimeout(150);
     check(
       "and Off is saved with the other preferences",
@@ -6618,7 +6669,20 @@ try {
     await dialog.waitFor({ timeout: 5_000 });
     await s.waitForTimeout(300);
     check("a phone opens Settings on its category list", (await s.locator('[data-settings-layout="phone"][data-settings-page="list"]').count()) === 1);
-    check("with every category", (await dialog.locator("button[data-category]").count()) === 10);
+    // Every category but Keyboard shortcuts: a touch-only phone with no real keyboard
+    // has no keys to press (1.3.3). A hardware key press brings it back for the session.
+    check(
+      "with every category but Keyboard shortcuts (touch only, no keyboard seen yet)",
+      (await dialog.locator("button[data-category]").count()) === 9 &&
+        (await dialog.locator('button[data-category="shortcuts"]').count()) === 0,
+    );
+    await s.keyboard.press("Shift");
+    await s.waitForTimeout(150);
+    check(
+      "a real key press (here Shift, which no soft keyboard sends) brings Keyboard shortcuts back",
+      (await dialog.locator('button[data-category="shortcuts"]').count()) === 1 &&
+        (await s.evaluate(() => sessionStorage.getItem("winnow.session.physicalKeyboard"))) === "1",
+    );
     const dockBox = await s.locator("[data-phone-dock] [data-phone-pill]").boundingBox();
     const dialogBox = await dialog.boundingBox();
     const currentTabs = await tabsNav.evaluateAll((tabs) => tabs.filter((tab) => tab.getAttribute("aria-current") === "page").length);
@@ -6636,6 +6700,22 @@ try {
       (await s.locator('[data-settings-page="category"]').count()) === 1 &&
         (await dialog.locator("[data-settings-title]").textContent()) === "Privacy" &&
         (await dialog.locator('[data-settings-back][aria-label="Back to Settings"]').count()) === 1,
+    );
+    const backGlyph = await dialog.locator("[data-settings-back]").evaluate((button) => {
+      const svg = button.querySelector("svg");
+      const r = svg?.getBoundingClientRect();
+      const b = button.getBoundingClientRect();
+      return {
+        chevron: svg?.classList.contains("lucide-chevron-left") ?? false,
+        glyph: r ? Math.round(r.width) : 0,
+        tap: Math.round(b.height),
+        ink: getComputedStyle(button).color === getComputedStyle(document.querySelector("[data-settings-title]")).color,
+      };
+    });
+    check(
+      "the back control is a small left chevron in full ink, with a full-height tap target",
+      backGlyph.chevron && backGlyph.glyph <= 24 && backGlyph.tap >= 44 && backGlyph.ink,
+      JSON.stringify(backGlyph),
     );
     check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 3 && !((await dialog.innerText()).includes("Cloudflare")));
     await dialog.locator('[data-setting-info="gravatars"]').tap();
@@ -7931,9 +8011,11 @@ try {
           const rb = b.getBoundingClientRect();
           return { x: ra.right - ra.height / 2, y: ra.top + 3, width: rb.left + rb.height / 2 - (ra.right - ra.height / 2), height: ra.height - 6, name: `the ends and gap between two of ${sel}` };
         };
+        // Since 1.3.3 a chip's frost stops at its own edge: the gaps are not frosted like a
+        // chip (desktop: nothing there; phone: only the rail's light haze), checked below.
         return (phone
           ? [rect("[data-phone-search]"), rect("[data-phone-pill]"), rect("[data-phone-chips] [data-rail-key]"), join("[data-phone-chips] [data-rail-key]")]
-          : [rect("[data-masthead-bar]"), rect("header [data-rail-key]"), join("header [data-rail-key]")]
+          : [rect("[data-masthead-bar]"), rect("header [data-rail-key]")]
         ).filter(Boolean);
       }, phone);
       for (const region of regions) {
@@ -7948,6 +8030,15 @@ try {
         }
         await g.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 600));
         await g.waitForTimeout(300);
+        if (region.name.startsWith("the ends and gap")) {
+          // The phone rail's haze: softened, yet not the band of frost it used to be.
+          check(
+            `${kind}: row text across ${region.name} is softened by the haze, not frosted into a band (detail ${r.frosted} hazed vs ${r.plain} bare)`,
+            r.plain > 0.5 && r.ratio < 0.9 && r.ratio > 0.3,
+            JSON.stringify(r),
+          );
+          continue;
+        }
         check(
           `${kind}: row text under ${region.name} is really blurred (detail ${r.frosted} frosted vs ${r.plain} bare)`,
           r.plain > 0.5 && r.ratio < 0.5,
@@ -8113,8 +8204,9 @@ try {
     );
     check("and plays the celebration once", (await empty.getAttribute("data-celebrating")) === "true");
     check(
-      "the illustration is the app mark, untouched, in a role=status that announces the line",
-      (await empty.locator(".inbox-clear__mark svg path").count()) === 4 &&
+      "the illustration is the app mark's leading plane on its own (1.3.3), in a role=status that announces the line",
+      (await empty.locator('.inbox-clear__mark svg[data-app-mark="single"] [data-plane="lead"] path').count()) === 2 &&
+        (await empty.locator(".inbox-clear__mark svg path").count()) === 2 &&
         (await empty.locator('[role="status"] [data-clear-headline]').count()) === 1,
     );
     check("no haptic on the desktop", (await c.evaluate(() => window.__buzz)) === 0);
@@ -8159,7 +8251,8 @@ try {
     const appearance = async (group, label) => {
       await c.keyboard.press(",");
       await openSettingsCategory(c, "appearance");
-      await c.locator(`[role="radiogroup"][data-picker="winnow-theme-${group}"] [role="radio"]`).filter({ hasText: label }).click();
+      if (group === "mode") await chooseFromSelect(c, "theme-mode", label);
+      else await c.locator(`[role="radiogroup"][data-picker="winnow-theme-${group}"] [role="radio"]`).filter({ hasText: label }).click();
       await c.keyboard.press("Escape");
       await c.waitForTimeout(250);
     };

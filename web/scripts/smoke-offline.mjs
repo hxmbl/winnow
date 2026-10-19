@@ -24,11 +24,14 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
     await dialog.waitFor({ timeout: 5_000 });
     await dialog.locator('[role="tab"][data-category="compose"]').click();
     await p.waitForTimeout(150);
-    const choices = await dialog.locator("[data-undo-send-choices] button").allTextContents();
+    const trigger = dialog.locator('[data-select="undo-send"]');
+    await trigger.click();
+    const choices = await p.locator('[data-select-list="undo-send"] [role="option"]').allTextContents();
+    await p.keyboard.press("Escape");
     check(
-      "Settings → Compose has the Undo send window: Off, 5s, 10s, 20s, with 10s chosen",
-      choices.join("|") === "Off|5s|10s|20s" &&
-        (await dialog.locator("[data-undo-send-choices] button[aria-pressed='true']").textContent()) === "10s" &&
+      "Settings → Compose has the Undo send window: Off, 5, 10, 20 seconds, with 10 chosen",
+      choices.join("|") === "Off|5 seconds|10 seconds|20 seconds" &&
+        (await trigger.getAttribute("data-value")) === "10" &&
         ((await dialog.locator('[data-setting="undoSend"]').first().textContent()) ?? "").includes("Undo send window"),
       choices.join("|"),
     );
