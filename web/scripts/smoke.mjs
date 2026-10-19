@@ -3213,6 +3213,17 @@ try {
   await page.keyboard.press(",");
   await page.waitForTimeout(400);
   await openSettingsCategory(page, "privacy");
+  {
+    // Big files as Drive links: the row is there with its status, and in the demo it
+    // says nothing is uploaded (no "Remove at Google": there is no grant to remove).
+    const settings = page.locator('[role="dialog"][aria-label="Settings"]');
+    const driveText = (await settings.textContent().catch(() => "")) ?? "";
+    check(
+      "Privacy lists Big files as Drive links with its status",
+      /Big files as Drive links/.test(driveText) && /Demo: nothing is uploaded/.test(driveText) &&
+        (await settings.locator("[data-drive-revoke]").count()) === 0,
+    );
+  }
   /*
    * The image setting is a radio group of three, not a switch.
    *

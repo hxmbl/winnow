@@ -11,6 +11,10 @@
  *     lightbox, Save as a download, Open for a PDF in a new tab; in compose, Attach,
  *     the chips with remove, the 25 MB refusal, a desktop drop, and the device copy
  *     keeping the files.
+ *   - Drive links (demo, no network): a file over 25 MB offers "Send as a Drive link",
+ *     which adds a Drive chip and the "File name (size) — link" line; Send warns about an
+ *     address Drive can't share with before anything goes; Settings → Privacy shows the
+ *     row. Nothing reaches Google.
  */
 
 import path from "node:path";
@@ -232,6 +236,71 @@ export async function attachmentsSmoke({ browser, url, check, section }) {
     );
 
     check("no page errors in compose attachments", errors.length === 0, errors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
+
+  // ── Drive links ────────────────────────────────────────────────────────────
+  section("drive links");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const p = await ctx.newPage();
+    const errors = [];
+    const google = [];
+    p.on("pageerror", (error) => errors.push(String(error)));
+    p.on("request", (request) => {
+      if (/googleapis\.com|accounts\.google\.com/.test(request.url())) google.push(request.url());
+    });
+    await p.goto(url, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-message-id]", { timeout: 10_000 });
+    await p.locator("[data-compose]:visible").click();
+    const sheet = p.locator('[role="dialog"][aria-label="New message"]');
+    await sheet.waitFor({ state: "visible", timeout: 5_000 });
+    const to = sheet.locator('input[aria-label="To"]');
+    for (const address of ["ada@example.com", "who@example.invalid"]) {
+      await to.fill(address);
+      await to.press("Enter");
+    }
+    await sheet.locator('input[aria-label="Subject"]').fill("The film").catch(() => undefined);
+    await sheet.locator('textarea[aria-label="Message"]').fill("Here it is.");
+    check("no Drive offer before a file is too big", (await sheet.locator("[data-drive-offer]").count()) === 0);
+    await sheet.locator("[data-attach-input]").setInputFiles([
+      { name: "film.mov", mimeType: "video/quicktime", buffer: Buffer.alloc(26 * MB, 0) },
+    ]);
+    const offer = sheet.locator("[data-drive-offer]");
+    await offer.waitFor({ timeout: 5_000 }).catch(() => undefined);
+    check("a file over 25 MB offers Send as a Drive link", (await offer.count()) === 1 && /Send as a Drive link/.test((await offer.textContent()) ?? ""));
+    await offer.click().catch(() => undefined);
+    // The demo is "allowed" already, so no consent dialog: straight to the made-up upload.
+    await sheet.locator('[data-drive-chip="film.mov"]').waitFor({ timeout: 5_000 }).catch(() => undefined);
+    check("the upload adds a Drive chip", (await sheet.locator('[data-drive-chip="film.mov"]').count()) === 1);
+    const body = await sheet.locator('textarea[aria-label="Message"]').inputValue();
+    check(
+      'and the line "File name (size) — link" after what was written',
+      /^Here it is\.\n\nfilm\.mov \(26 MB\) — https:\/\/drive\.google\.com\/file\/d\/demo-drive-\d+\/view\n?$/.test(body),
+      JSON.stringify(body),
+    );
+    check("the refusal is gone once it went as a link", (await sheet.locator("[data-attach-error]").count()) === 0);
+
+    await sheet.locator("button", { hasText: /^Send/ }).first().click();
+    const warning = p.locator('[role="dialog"][aria-label="One recipient can\'t open the Drive link"]');
+    await warning.waitFor({ timeout: 5_000 }).catch(() => undefined);
+    check(
+      "Send warns first about an address Drive can't share with",
+      (await warning.count()) === 1 && /who@example\.invalid/.test((await warning.textContent()) ?? ""),
+      (await warning.textContent().catch(() => "")) ?? "",
+    );
+    await warning.locator("button", { hasText: "Keep editing" }).click().catch(() => undefined);
+    await p.waitForTimeout(200);
+    check("Keep editing goes back to the message, unsent", (await sheet.count()) === 1 && (await warning.count()) === 0);
+
+    await sheet.locator('[data-drive-chip="film.mov"] [data-drive-remove]').click().catch(() => undefined);
+    check(
+      "removing the Drive chip takes its line out",
+      (await sheet.locator("[data-drive-chip]").count()) === 0 &&
+        !/drive\.google\.com/.test(await sheet.locator('textarea[aria-label="Message"]').inputValue()),
+    );
+    check("the demo never reached Google", google.length === 0, google.slice(0, 3).join(" | "));
+    check("no page errors in drive links", errors.length === 0, errors.slice(0, 3).join(" | "));
     await ctx.close();
   }
 }
