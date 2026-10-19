@@ -57,7 +57,7 @@ type Props = {
    * which is about *place* and belongs against the edge it emerges from — a panel floating
    * in the middle of the window says "dialog".
    */
-  placement?: "center" | "left" | "fill";
+  placement?: "center" | "left" | "fill" | "bottom";
   /**
    * Stop the backdrop this far above the window's bottom edge, leaving what is there
    * (the phone dock) visible and live. Settings on a phone uses it so the tabs stay
@@ -97,6 +97,8 @@ const SURFACE_ENTER = {
   left: "animate-drawer",
   // The phone composer: the whole window, so it rises like a sheet.
   fill: "animate-sheet",
+  // A phone's action sheet: rises from the bottom edge, as iOS's does.
+  bottom: "animate-rise",
 } as const;
 
 export function Sheet({
@@ -207,7 +209,10 @@ export function Sheet({
             ? // The whole screen, top-aligned, so a panel shorter than the window (the
               // part the on-screen keyboard leaves) sits at the top rather than centred.
               "items-start justify-stretch"
-            : "items-center justify-center p-4"
+            : placement === "bottom"
+              ? // An action sheet: against the bottom edge, clear of the gesture bar.
+                "items-end justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+              : "items-center justify-center p-4"
       } ${backdrop === "opaque" ? "wn-backdrop-opaque" : "bg-scrim"}`}
       data-backdrop={backdrop}
       style={bottomInset ? { bottom: bottomInset } : undefined}
@@ -356,5 +361,84 @@ export function SheetHeader({
         </svg>
       </button>
     </div>
+  );
+}
+
+export type SheetAction = {
+  /** Stable id, for tests (`data-action-sheet-item`). */
+  id: string;
+  label: string;
+  /** Red: this loses something. */
+  destructive?: boolean;
+  onSelect: () => void;
+};
+
+/**
+ * A phone's action sheet, as iOS draws one: the choices in one rounded group against the
+ * bottom edge, an optional line saying what is being decided, and Cancel on its own
+ * underneath, set apart and in bold, so the safe answer is the biggest and lowest target.
+ *
+ * Used where a tap on a phone would lose something (closing a written draft, deleting
+ * from the Trash for good, signing out): the destructive choice is red and never the
+ * focused one, Escape and a tap on the dimmed app both cancel, and focus starts on Cancel.
+ */
+export function ActionSheet({
+  label,
+  message,
+  actions,
+  onCancel,
+  cancelLabel = "Cancel",
+}: {
+  /** The accessible name (and the heading when there is no `message`). */
+  label: string;
+  /** A line above the choices, in small grey type. */
+  message?: string;
+  actions: readonly SheetAction[];
+  onCancel: () => void;
+  cancelLabel?: string;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const ITEM =
+    "flex min-h-[56px] w-full items-center justify-center px-4 text-read transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring";
+  return (
+    <Sheet
+      label={label}
+      onClose={onCancel}
+      onEscape={onCancel}
+      // Unlike a desktop confirmation, a tap above an action sheet is how iOS cancels it,
+      // and cancelling is always the safe answer here.
+      dismissOnBackdrop
+      initialFocus={cancelRef}
+      placement="bottom"
+      className="flex w-full max-w-[480px] flex-col gap-2"
+    >
+      <div data-action-sheet="" className="overflow-hidden rounded-pane bg-chrome shadow-lift">
+        {message && (
+          <p className="border-b border-hairline px-4 py-3 text-center text-meta text-ink-subtle">{message}</p>
+        )}
+        {actions.map((action, index) => (
+          <button
+            key={action.id}
+            type="button"
+            data-action-sheet-item={action.id}
+            onClick={action.onSelect}
+            className={`${ITEM} ${index > 0 ? "border-t border-hairline" : ""} ${
+              action.destructive ? "text-danger" : "text-accent"
+            }`}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+      <button
+        ref={cancelRef}
+        type="button"
+        data-action-sheet-item="cancel"
+        onClick={onCancel}
+        className={`${ITEM} rounded-pane bg-chrome font-semibold text-accent shadow-lift`}
+      >
+        {cancelLabel}
+      </button>
+    </Sheet>
   );
 }

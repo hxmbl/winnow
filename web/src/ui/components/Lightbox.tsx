@@ -89,7 +89,7 @@ export function Lightbox({
             alt={image.filename}
             data-lightbox-image=""
             draggable={false}
-            className="max-h-[78vh] min-w-0 max-w-full rounded-ctl border border-hairline bg-surface object-contain"
+            className="max-h-[78vh] min-w-0 max-w-full rounded-inset border border-hairline bg-surface object-contain"
           />
           {images.length > 1 && (
             <button type="button" onClick={() => step(1)} aria-label="Next picture" className={BUTTON}>

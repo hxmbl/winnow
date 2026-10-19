@@ -22,6 +22,22 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/*
+ * Shape tokens (`borderRadius` in `tailwind.config.js` reads these; `shape.ts` holds the
+ * same numbers for the tests). Controls are pills or circles; containers share one
+ * large radius; something nested in a padded container takes the radius less the
+ * padding (`--wn-radius-pad`, the containers' usual 4px), so the curves stay concentric.
+ * `:where(:root)` keeps this apart from the boot `:root` block that `theme.test.ts` reads.
+ */
+:where(:root) {
+  --wn-radius-control: 9999px;
+  --wn-radius-container: 16px;
+  --wn-radius-pad: 4px;
+  --wn-radius-inset: calc(var(--wn-radius-container) - var(--wn-radius-pad));
+  /* Half a 44px touch field: a pill on one line that does not balloon on two. */
+  --wn-radius-field: 22px;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -769,7 +785,7 @@ div[data-row-count] {
   bottom: var(--wn-dock-bottom);
   width: var(--wn-dock-pill-w);
   max-height: calc(100dvh - var(--wn-dock-bottom) - max(1rem, env(safe-area-inset-top, 0px)));
-  border-radius: 28px;
+  border-radius: var(--wn-radius-container);
   transform: none;
   opacity: 1;
   clip-path: inset(calc(100% - var(--wn-dock-h)) 0 0 0 round calc(var(--wn-dock-h) / 2));
@@ -778,7 +794,7 @@ div[data-row-count] {
     visibility 0s linear 200ms;
 }
 .wn-sidebar-panel[data-morph][data-open] {
-  clip-path: inset(0 0 0 0 round 28px);
+  clip-path: inset(0 0 0 0 round var(--wn-radius-container));
   transition:
     clip-path 300ms cubic-bezier(0.16, 1, 0.3, 1),
     visibility 0s;
@@ -906,6 +922,109 @@ div[data-row-count] {
 }
 
 /*
+ * The phone reader's action pill (`ReaderPill` in `Reader.tsx`, rules in `readerPill.ts`).
+ * Open it is five 48px circles in the glass; folded it is one circle as tall as the dock,
+ * the ••• handle. The fold is the width easing in from the far side while the buttons
+ * fade out and the handle fades in, all on the dock's own curve. Reduced motion: no
+ * width change (it simply is one size or the other), only the fade.
+ */
+.wn-reader-pill {
+  width: calc(5 * 48px + 4 * 2px + 12px + 2px);
+  overflow: hidden;
+  transition:
+    width 260ms var(--wn-glass-ease),
+    background-color var(--wn-glass-motion) var(--wn-glass-ease);
+}
+[data-reader-pill="collapsed"] .wn-reader-pill {
+  width: var(--wn-dock-h);
+}
+.wn-reader-pill-actions,
+.wn-reader-pill-handle {
+  transition: opacity 160ms var(--wn-glass-ease);
+}
+[data-reader-pill="collapsed"] .wn-reader-pill-actions,
+[data-reader-pill="open"] .wn-reader-pill-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wn-reader-pill {
+    transition: none !important;
+  }
+  .wn-reader-pill-actions,
+  .wn-reader-pill-handle {
+    transition-duration: 160ms !important;
+  }
+}
+/* The pill clips its contents, so its frost layer stays on itself (no 44px reach). */
+.wn-reader-pill::before {
+  --wn-glass-reach: 0px;
+}
+
+/*
+ * Left-handed (`data-hand="left"` on the root, phone only): the dock's compose button
+ * moves to the left edge and the pill to its right, and the menu panel that grows out
+ * of the pill follows it. The pill's own tabs keep their order (Inbox first), which the
+ * panel's layout above it is built around.
+ */
+:root[data-hand="left"] [data-dock-band]:not([data-phone-chips]) {
+  flex-direction: row-reverse;
+}
+:root[data-hand="left"] .wn-sidebar-panel[data-morph] {
+  left: calc(var(--wn-dock-left) + var(--wn-dock-h) + var(--wn-dock-gap));
+}
+
+/*
+ * Forced colours, the floating chrome as a whole (1.3.2, from the theme sweep).
+ *
+ * Each pill above is already the system canvas, but the gaps between them were not:
+ * with no frost to blur it, the list showed sharp through the spaces between the chips,
+ * between the chips and the dock, and around the phone's top bar, and row text ran into
+ * the chip labels and icons. So the bands that hold floating chrome are opaque `Canvas`
+ * too, with a `CanvasText` rule where they meet the list, and take the taps that would
+ * otherwise reach rows nobody can see. No transitions: under a forced palette a fading
+ * background is a frame of see-through.
+ */
+@media (forced-colors: active) {
+  [data-phone-topbar],
+  [data-phone-selection-slot],
+  [data-dock-band],
+  [data-list-chrome],
+  [data-sticky-day],
+  [data-status-pill] > * {
+    background: Canvas !important;
+    color: CanvasText;
+  }
+  [data-phone-topbar] {
+    border-bottom: 1px solid CanvasText;
+    pointer-events: auto;
+  }
+  [data-dock-band] {
+    pointer-events: auto;
+  }
+  [data-phone-chips][data-dock-band] {
+    margin-bottom: 0;
+    padding-bottom: 4px;
+    border-top: 1px solid CanvasText;
+  }
+  [data-phone-chips][data-dock-band].invisible {
+    border-top: 0;
+  }
+  [data-status-pill] > * {
+    border: 1px solid CanvasText;
+  }
+  .wn-glass,
+  .wn-pill.wn-chip-glass,
+  [data-dock-band] {
+    transition: none !important;
+  }
+  /* A disabled control still says it is one: the system's grey, not a faded fill. */
+  button:disabled {
+    color: GrayText;
+  }
+}
+
+/*
  * The logo's version toggle (`logoVersion.ts`): the bar's middle holds the search field
  * and "Winnow 1.2.2" stacked in one grid cell, and crossfades between them. The hidden
  * one is `visibility: hidden` once its fade is over, so it takes no taps and no Tab, but
@@ -968,8 +1087,8 @@ div[data-row-count] {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px;
-  border-radius: 6px;
+  padding: 3px 10px;
+  border-radius: var(--wn-radius-control);
   background: var(--wn-ink);
   color: var(--wn-canvas);
   font-size: 12px;
@@ -991,8 +1110,8 @@ div[data-row-count] {
 }
 
 .wn-tip-key {
-  padding: 0 4px;
-  border-radius: 4px;
+  padding: 0 5px;
+  border-radius: var(--wn-radius-control);
   background: color-mix(in srgb, var(--wn-canvas) 18%, transparent);
   font-family: inherit;
   font-size: 11px;

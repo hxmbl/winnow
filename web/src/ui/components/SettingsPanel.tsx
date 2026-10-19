@@ -129,6 +129,9 @@ export type SettingsProps = {
    */
   swipeActions: boolean | null;
   onSwipeActions: (value: boolean) => void;
+  /** Left-handed phone layout. Null hides the row (only the phone layout has thumb controls). */
+  leftHanded: boolean | null;
+  onLeftHanded: (value: boolean) => void;
   /** How long Send waits for Undo. 5s by default; see `Preferences.undoSendSeconds`. */
   undoSendSeconds: UndoSendSeconds;
   onUndoSendSeconds: (value: UndoSendSeconds) => void;
@@ -536,6 +539,11 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             value={props.accentTheme}
             onChange={props.onAccentTheme}
           />
+          {props.leftHanded !== null && (
+            <Row setting="leftHanded">
+              <Toggle checked={props.leftHanded} onChange={props.onLeftHanded} label="Left-handed" />
+            </Row>
+          )}
         </Section>
       );
     case "privacy":
@@ -633,7 +641,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
                     value={props.backgroundSyncInterval}
                     onChange={(event) => props.onBackgroundSyncInterval(Number(event.target.value))}
                     aria-label="Check for new mail every"
-                    className="rounded-ctl border border-hairline bg-surface px-3 py-1 text-meta font-semibold text-ink-body"
+                    className="rounded-ctl border border-hairline bg-surface px-4 py-1 text-meta font-semibold text-ink-body"
                   >
                     <option value={60}>Every minute</option>
                     <option value={300}>Every 5 minutes</option>
@@ -658,15 +666,23 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
       return (
         <Section>
           <SettingBlock setting="shortcutList">
-            <dl data-settings-shortcuts="" className="flex flex-col gap-1.5">
+            {/*
+              A two-column table no wider than it needs: the key, then what it does right
+              beside it, read left to right. (It was keys on the left and descriptions
+              right-aligned ~600px away on a wide window, which the eye could not follow.)
+            */}
+            <dl
+              data-settings-shortcuts=""
+              className="grid max-w-[34rem] grid-cols-[minmax(6rem,max-content)_minmax(0,1fr)] items-baseline gap-x-5 gap-y-1.5"
+            >
               {BINDINGS.map((binding) => (
-                <div key={binding.keys} className="flex items-baseline justify-between gap-4">
+                <div key={binding.keys} data-shortcut-row="" className="contents">
                   <dt>
-                    <kbd className="rounded-ctl border border-hairline bg-surface-sunken px-1.5 py-0.5 font-mono text-meta font-semibold text-ink-body">
+                    <kbd className="whitespace-nowrap rounded-ctl border border-hairline bg-surface-sunken px-2 py-0.5 font-mono text-meta font-semibold text-ink-body">
                       {binding.keys}
                     </kbd>
                   </dt>
-                  <dd className="flex-1 text-right text-meta text-ink-muted">{binding.help}</dd>
+                  <dd className="text-meta text-ink-muted">{binding.help}</dd>
                 </div>
               ))}
             </dl>
@@ -817,7 +833,7 @@ function LearningHistory({ events }: { events: readonly FeedbackEvent[] }) {
   return (
     <div
       id="winnow-learning-history"
-      className="mt-2 max-h-64 overflow-y-auto rounded-ctl border border-hairline bg-surface-sunken p-2"
+      className="mt-2 max-h-64 overflow-y-auto rounded-pane border border-hairline bg-surface-sunken p-2"
     >
       {events.length === 0 ? (
         <p className="px-2 py-3 text-center text-meta text-ink-subtle">

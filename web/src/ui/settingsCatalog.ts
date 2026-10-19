@@ -166,6 +166,12 @@ export const SETTINGS = {
     explanation:
       "The one colour Winnow uses for unread mail, the selection and the main action. Each accent is checked for contrast in light and dark. It changes nothing but colour.",
   },
+  leftHanded: {
+    category: "appearance",
+    label: "Left-handed",
+    explanation:
+      "On a phone, puts the controls you reach with your thumb on the left: the message actions pill, the compose button and the order of the dock. Off keeps them on the right. Saved on this device.",
+  },
   remoteImages: {
     category: "privacy",
     label: "Remote images",

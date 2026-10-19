@@ -42,7 +42,7 @@ export function SettingBlock({
       data-explained={explained ? "" : undefined}
       onPointerEnter={() => point(setting)}
       onFocus={() => point(setting)}
-      className={`-mx-3 rounded-ctl px-3 py-2.5 transition-colors ${explained ? "bg-surface-hover" : ""} ${className}`}
+      className={`-mx-3 rounded-pane px-3 py-2.5 transition-colors ${explained ? "bg-surface-hover" : ""} ${className}`}
     >
       {children}
     </div>

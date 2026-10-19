@@ -81,7 +81,7 @@ export function SmartFilterSettings({
             {learntSummary(model)}
           </p>
           {taught.length > 0 && (
-            <ul data-filter-learnt="" className="mt-3 flex flex-col divide-y divide-hairline-soft rounded-ctl border border-hairline">
+            <ul data-filter-learnt="" className="mt-3 flex flex-col divide-y divide-hairline-soft rounded-pane border border-hairline">
               {taught.map((filter) => (
                 <FilterLearnt
                   key={filter}

@@ -26,10 +26,26 @@ export default {
      * and the dock. `full` is kept for things that are genuinely round (a dot, a switch)
      * and is not a control radius.
      */
+    /*
+     * Shape language (1.3.2, the owner's "round/pill"): two radii and their nesting, from
+     * the custom properties in `index.css` (`--wn-radius-*`), so nothing picks its own.
+     *
+     *   ctl    every interactive control: a full pill, or a circle when it is icon-only
+     *          and square (buttons, fields, segmented controls, chips, menu-item and
+     *          suggestion highlights, the status pill).
+     *   pane   every container (sheets, dialogs, menus, cards, lists, the reader's HTML
+     *          card, multi-line fields): one large radius.
+     *   inset  something nested inside a padded container: the container's radius less
+     *          its padding, so the curves stay concentric.
+     *   field  a control that can grow to several lines (the To field once its chips
+     *          wrap): a pill's end radius on one line, a rounded box on more.
+     */
     borderRadius: {
       none: "0",
-      ctl: "6px",
-      pane: "12px",
+      ctl: "var(--wn-radius-control)",
+      pane: "var(--wn-radius-container)",
+      inset: "var(--wn-radius-inset)",
+      field: "var(--wn-radius-field)",
       full: "9999px",
     },
 
@@ -142,6 +158,8 @@ export default {
         // The sheet rising. Slightly slower, because a sheet is a bigger object
         // and a bigger object needs a little more time to arrive.
         sheet: "sheet 0.16s cubic-bezier(0.2, 0, 0, 1)",
+        // A phone's action sheet rising from the bottom edge.
+        rise: "rise 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
         /**
          * The navigation drawer coming out of the left edge.
          *
@@ -166,6 +184,10 @@ export default {
         sheet: {
           "0%": { opacity: "0", transform: "translateY(6px) scale(0.99)" },
           "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
+        rise: {
+          "0%": { opacity: "0", transform: "translateY(24px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
         },
         drawer: {
           "0%": { opacity: "0", transform: "translateX(-100%)" },

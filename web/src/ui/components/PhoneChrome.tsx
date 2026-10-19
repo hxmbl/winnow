@@ -363,6 +363,7 @@ export function PhoneDock({
       <div
         ref={chipsRef}
         data-phone-chips=""
+        data-dock-band=""
         inert={menuOpen || settingsOpen}
         className={`mb-1 ${menuOpen || settingsOpen ? "invisible" : ""}`}
       >
@@ -375,7 +376,7 @@ export function PhoneDock({
         />
       </div>
 
-      <div className="flex items-end gap-[var(--wn-dock-gap)] pb-[var(--wn-dock-bottom)] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)]">
+      <div data-dock-band="" className="flex items-end gap-[var(--wn-dock-gap)] pb-[var(--wn-dock-bottom)] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)]">
         <nav
           ref={pillRef}
           aria-label="Primary"

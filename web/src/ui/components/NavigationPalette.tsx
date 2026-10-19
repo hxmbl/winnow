@@ -84,7 +84,7 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
             <Icon size={15} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
             <span className="flex-1 font-medium">{label}</span>
             {count > 0 && (
-              <span className="rounded-ctl bg-surface-sunken px-1.5 text-meta font-semibold tabular-nums text-ink-muted">
+              <span className="rounded-full bg-surface-sunken px-1.5 text-meta font-semibold tabular-nums text-ink-muted">
                 {count}
               </span>
             )}

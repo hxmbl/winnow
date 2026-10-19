@@ -96,7 +96,7 @@ import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
 import { WhyHere } from "./ui/components/WhyHere";
 import { changeNotice } from "./ui/smartFilterPicker";
 import { Settings } from "./ui/components/SettingsPanel";
-import { ConfirmDialog } from "./ui/components/Overlay";
+import { ActionSheet, ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
 import { isSelectAll, selectAllScope } from "./ui/textSelection";
 import { SignInScreen } from "./ui/SignInScreen";
@@ -381,6 +381,16 @@ export function App({ store }: Props) {
   /** The two panes' container, which the reader split is a fraction of. */
   const mainRef = useRef<HTMLElement | null>(null);
   phoneRef.current = phone;
+  /**
+   * Left-handed: `data-hand="left"` on the root, which mirrors the thumb-anchored
+   * floating controls (the dock's compose button and pill, see `index.css`). Phone only.
+   */
+  const leftHanded = phone && preferences.leftHanded;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (leftHanded) root.setAttribute("data-hand", "left");
+    else root.removeAttribute("data-hand");
+  }, [leftHanded]);
 
   /**
    * The desktop's floating list header, measured: the list pads its top by this much so
@@ -996,6 +1006,17 @@ export function App({ store }: Props) {
     connectBusy: signingIn || resuming,
     onConnect: connectOrResume,
     onSignOut: () => {
+      // On a phone, asked first: signing out clears the mail kept on this device and
+      // revokes Winnow's access, and the menu row sits under the thumb.
+      if (phoneRef.current) {
+        setPhoneConfirm({
+          label: "Sign out?",
+          message: "Mail kept on this device is cleared, and Winnow's access to your Google account is revoked.",
+          action: "Sign Out",
+          run: () => void signOut(),
+        });
+        return;
+      }
       void signOut();
     },
     syncing: sync.busy,
@@ -1178,6 +1199,36 @@ export function App({ store }: Props) {
     }),
     [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache],
   );
+
+  /**
+   * A phone's second chance before something that cannot be taken back: deleting from
+   * the Trash for good, and signing out. On a phone those buttons sit where a thumb
+   * rests (the reader's bottom toolbar, the select bar, a long-press menu), and neither
+   * offers Undo, so iOS's rule applies: ask with an action sheet, the destructive choice
+   * in red. The desktop acts at once, as before (its keys and menus are deliberate).
+   */
+  const [phoneConfirm, setPhoneConfirm] = useState<{
+    label: string;
+    message: string;
+    action: string;
+    run: () => void;
+  } | null>(null);
+  /** Run `run`, or on a phone in the Trash ask first: it deletes `count` messages forever. */
+  const guardForever = useCallback((count: number, run: () => void) => {
+    if (!phoneRef.current || snapshotRef.current.mailbox !== "trash") {
+      run();
+      return;
+    }
+    const many = count > 1;
+    setPhoneConfirm({
+      label: many ? `Delete ${count} messages forever?` : "Delete this message forever?",
+      message: many
+        ? `These ${count} messages will be deleted permanently. This can't be undone.`
+        : "This message will be deleted permanently. This can't be undone.",
+      action: many ? `Delete ${count} Messages` : "Delete Message",
+      run,
+    });
+  }, []);
 
   const runBatch = useCallback((fn: (s: WinnowStore, ids: number[]) => void, keep = false) => {
     const ids = orderedSelection(
@@ -1851,6 +1902,16 @@ export function App({ store }: Props) {
     }
   }, [retireComposer]);
 
+  /** The action sheet's Save Draft: put the draft away, kept, as closing one from Drafts does. */
+  const saveAndCloseComposer = useCallback(() => {
+    setConfirmDiscard(false);
+    const current = composerRef.current;
+    if (!current) return;
+    retireComposer(current, "park");
+    composerRef.current = null;
+    setComposer(null);
+  }, [retireComposer]);
+
   /**
    * The autosave follows the draft. An untouched composer is not saved — opening a reply
    * and closing it again must not leave a draft in Gmail — and nothing is saved while a
@@ -2504,6 +2565,7 @@ export function App({ store }: Props) {
     snapshot.selectedId !== null ||
     setupOpen ||
     confirmDiscard ||
+    phoneConfirm !== null ||
     confirmNoSubject !== null ||
     restoreOffer !== null;
   const android = info?.os === "android";
@@ -2993,6 +3055,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         onDismissFlash={store.dismissFlash.bind(store)}
         anchor={listPane}
         inset={phone ? phoneBarHeight : listChromeHeight}
+        // The phone demo strip (Connect Gmail) heads the list right where the pill rests.
+        avoid={phone ? '[data-briefing="compact"]' : undefined}
       />
 
       {/*
@@ -3079,7 +3143,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     mailbox={snapshot.mailbox}
                     anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
                     onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveWithUndo(ids)))}
-                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids)))}
+                    onTrash={() => guardForever(selection.size, () => runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids))))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveManyWithUndo(ids, target))}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
@@ -3291,6 +3355,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           >
             <Reader
               onMailto={openMailto}
+              leftHanded={preferences.leftHanded}
               email={selected}
               conversation={view.conversation}
               signals={selected ? (view.signals.get(selected.id) ?? null) : null}
@@ -3341,10 +3406,14 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   const id = snap.view.selected?.id;
                   if (id !== undefined) exitRows([id], () => s.archiveWithUndo([id]));
                 }),
-                onTrash: act((s, snap) => {
-                  const id = snap.view.selected?.id;
-                  if (id !== undefined) exitRows([id], () => s.trashWithUndo([id]));
-                }),
+                onTrash: () =>
+                  guardForever(
+                    1,
+                    act((s, snap) => {
+                      const id = snap.view.selected?.id;
+                      if (id !== undefined) exitRows([id], () => s.trashWithUndo([id]));
+                    }),
+                  ),
                 onReply: openReply,
                 onForward: openForward,
                 onNotSpam: act((s, snap) => {
@@ -3482,6 +3551,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onMarkReadOnOpen={(value) => store.setPreferences({ markReadOnOpen: value })}
           swipeActions={phone ? preferences.swipeActions : null}
           onSwipeActions={(value) => store.setPreferences({ swipeActions: value })}
+          leftHanded={phone ? preferences.leftHanded : null}
+          onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           brandLogos={preferences.brandLogos}
@@ -3735,7 +3806,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 replyAll: () => composeFor(email.id, "replyAll"),
                 forward: () => composeFor(email.id, "forward"),
                 archive: () => runOn((s, ids) => s.archiveWithUndo(ids)),
-                trash: () => runOn((s, ids) => s.trashWithUndo(ids)),
+                trash: () => guardForever(menu.ids.length, () => runOn((s, ids) => s.trashWithUndo(ids))),
                 setRead: (read) => {
                   if (single && !read) toggleReadFor(email.id);
                   else store.setReadMany(menu.ids, read);
@@ -3789,7 +3860,40 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
       )}
 
-      {confirmDiscard && (
+      {/*
+        On a phone the question is an iOS action sheet, as Mail asks it: Delete Draft (red),
+        Save Draft, and Cancel apart at the bottom. The desktop keeps its dialog.
+      */}
+      {phoneConfirm && (
+        <ActionSheet
+          label={phoneConfirm.label}
+          message={phoneConfirm.message}
+          actions={[
+            {
+              id: "confirm",
+              label: phoneConfirm.action,
+              destructive: true,
+              onSelect: () => {
+                const { run } = phoneConfirm;
+                setPhoneConfirm(null);
+                run();
+              },
+            },
+          ]}
+          onCancel={() => setPhoneConfirm(null)}
+        />
+      )}
+      {confirmDiscard && phone && (
+        <ActionSheet
+          label="Discard this draft?"
+          actions={[
+            { id: "delete-draft", label: "Delete Draft", destructive: true, onSelect: () => resolveDiscard(true) },
+            { id: "save-draft", label: "Save Draft", onSelect: saveAndCloseComposer },
+          ]}
+          onCancel={() => resolveDiscard(false)}
+        />
+      )}
+      {confirmDiscard && !phone && (
         <ConfirmDialog
           title="Discard this draft?"
           body="What you have written will be lost, and the saved draft is deleted."

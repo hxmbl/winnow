@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowUp } from "lucide-react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { RecipientField } from "./RecipientField";
 import { normaliseRecipients, recipientProblem } from "../../core/mail/compose";
@@ -63,8 +64,11 @@ export type ComposerProps = {
   onClose: () => void;
   /**
    * The phone layout: the composer takes the whole screen above the on-screen keyboard
-   * (`--wn-keyboard`, see `useKeyboardInset`), and Send and Discard sit in a bar at its
-   * bottom edge — which, with the keyboard up, is directly above it.
+   * (`--wn-keyboard`, see `useKeyboardInset`), under a top bar laid out like iOS Mail's:
+   * Cancel at the leading edge, the title (the subject once there is one) in the middle,
+   * and Send, an accent circle with an up arrow, at the trailing edge. Nothing that sends
+   * or throws the draft away sits in the thumb zone above the keyboard; Cancel on a
+   * written draft asks (Delete Draft / Save Draft, an action sheet in `App.tsx`).
    */
   phone?: boolean;
   /**
@@ -293,6 +297,8 @@ export function Composer({
   }, [startsInTo, docked]);
 
   const title = mode === "reply" ? "Reply" : mode === "forward" ? "Forward" : "New message";
+  /** The phone bar's title, as iOS Mail's: the subject once there is one. */
+  const phoneTitle = subject.trim() !== "" ? subject.trim() : mode === "new" ? "New Message" : title;
   /*
     What will actually happen to the quoted text: it is *dropped* when you leave it alone
     and kept when you edit it, so both sentences say what the recipient will see.
@@ -351,7 +357,7 @@ export function Composer({
           }
         }}
       >
-      <div className={phone ? "flex flex-1 flex-col gap-3 px-4 py-3" : "flex flex-col gap-3 px-5 py-4"}>
+      <div className={phone ? "flex flex-1 flex-col gap-3 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3" : "flex flex-col gap-3 px-5 py-4"}>
         {/*
           Recipients.
 
@@ -439,7 +445,7 @@ export function Composer({
             aria-label="Subject"
             value={subject}
             onChange={(event) => onChange({ subject: event.target.value })}
-            className="min-w-0 flex-1 rounded-ctl border border-hairline bg-surface px-2.5 py-1.5 text-ui text-ink outline-none focus-visible:border-accent max-sm:min-h-10 max-sm:text-read"
+            className="min-w-0 flex-1 rounded-ctl border border-hairline bg-surface px-4 py-1.5 text-ui text-ink outline-none focus-visible:border-accent max-sm:min-h-10 max-sm:text-read"
           />
         </div>
 
@@ -452,7 +458,7 @@ export function Composer({
           // Send stays inside the sheet on a 900px window rather than below its fold.
           rows={phone ? 8 : docked ? 6 : mode === "new" ? 12 : 16}
           spellCheck
-          className={`selectable thin-scroll w-full rounded-ctl border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-none focus-visible:border-accent ${
+          className={`selectable thin-scroll w-full rounded-pane border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-none focus-visible:border-accent ${
             // 16px on a phone: iOS zooms into any focused field smaller than that.
             phone ? "min-h-[10rem] flex-1 resize-none text-read" : "resize-y text-ui"
           }`}
@@ -516,31 +522,6 @@ export function Composer({
         </div>
       )}
       </div>
-      {/*
-        The phone's action bar: outside the scroller, so it stays put at the bottom of the
-        sheet — directly above the keyboard when it is up. Discard on the left and Send
-        under the right thumb, both 44px tall.
-      */}
-      {phone && (
-        <div className="flex shrink-0 items-center gap-2 bg-canvas px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
-          <button
-            type="button"
-            onClick={onDiscard}
-            className="h-11 rounded-ctl bg-sheen px-5 text-ui font-semibold text-ink-body transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            Discard
-          </button>
-          <button
-            type="button"
-            onClick={trySend}
-            disabled={!canSend}
-            title={sendTitle}
-            className="h-11 flex-1 rounded-ctl bg-accent px-5 text-ui font-semibold text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            {sending ? "Sending…" : "Send"}
-          </button>
-        </div>
-      )}
     </>
   );
 
@@ -606,10 +587,88 @@ export function Composer({
           : "flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
       }
     >
-      <SheetHeader title={title} onClose={onClose} touch={phone}>
-        {headerControls}
-      </SheetHeader>
+      {phone ? (
+        <>
+          <PhoneComposerBar
+            title={phoneTitle}
+            onCancel={onClose}
+            onSend={trySend}
+            canSend={canSend}
+            sending={sending}
+            sendTitle={sendTitle}
+          />
+          {(mode === "reply" && onReplyAllChange) || draftStatusLabel(saveStatus) !== null ? (
+            <div data-composer-status="" className="flex shrink-0 items-center gap-2 px-4 pt-2">
+              {headerControls}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <SheetHeader title={title} onClose={onClose} touch={phone}>
+          {headerControls}
+        </SheetHeader>
+      )}
       {content}
     </Sheet>
+  );
+}
+
+/**
+ * The phone composer's top bar, after iOS Mail: Cancel leading, the title centred, Send
+ * trailing as an accent circle with an up arrow (disabled, and saying why in its title,
+ * until the recipients are sendable). In the top bar rather than above the keyboard, so
+ * neither sending nor throwing the draft away is one stray thumb away. Clear of the
+ * status bar (`safe-area-inset-top`); 44px targets.
+ */
+function PhoneComposerBar({
+  title,
+  onCancel,
+  onSend,
+  canSend,
+  sending,
+  sendTitle,
+}: {
+  title: string;
+  onCancel: () => void;
+  onSend: () => void;
+  canSend: boolean;
+  sending: boolean;
+  sendTitle: string;
+}) {
+  return (
+    <div
+      data-composer-bar=""
+      className="sticky top-0 z-10 grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-2 border-b border-hairline bg-chrome pb-1.5 pl-1.5 pr-2 pt-[max(0.375rem,env(safe-area-inset-top))]"
+    >
+      <button
+        type="button"
+        data-composer-cancel=""
+        onClick={onCancel}
+        className="flex h-11 items-center justify-self-start rounded-ctl px-3 text-read text-accent transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        Cancel
+      </button>
+      <h2 data-composer-title="" className="min-w-0 truncate text-center text-read font-semibold text-ink">
+        {title}
+      </h2>
+      <button
+        type="button"
+        data-composer-send=""
+        onClick={onSend}
+        disabled={!canSend}
+        title={sendTitle}
+        className="group flex h-11 w-11 items-center justify-center justify-self-end rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        <span
+          aria-hidden="true"
+          className={`flex h-8 w-8 items-center justify-center rounded-full bg-accent text-on-accent transition-opacity group-disabled:opacity-40 ${
+            sending ? "animate-pulse" : ""
+          }`}
+        >
+          <ArrowUp size={18} strokeWidth={2.4} />
+        </span>
+        <span className="sr-only">{sending ? "Sending…" : "Send"}</span>
+      </button>
+    </div>
   );
 }

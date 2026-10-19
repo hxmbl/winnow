@@ -277,6 +277,12 @@ export type Preferences = {
    */
   swipeActions: boolean;
   /**
+   * Left-handed: on a phone the thumb-anchored floating controls (the reader's action
+   * pill, the dock's compose button and pill order) are mirrored to the left edge. Off
+   * (right-handed) by default.
+   */
+  leftHanded: boolean;
+  /**
    * How long Send waits before the message goes out, so Undo can bring it back. `0` is
    * Off. See `core/mail/undoSend`: closing the app in the wait keeps it as a draft.
    */
@@ -311,6 +317,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   gravatars: false,
   markReadOnOpen: true,
   swipeActions: true,
+  leftHanded: false,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
   notificationActions: DEFAULT_NOTIFICATION_ACTIONS,

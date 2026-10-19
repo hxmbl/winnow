@@ -228,7 +228,7 @@ export function RecipientField({
           // The border lives on the wrapper because the chips are inside it, so the field
           // is one box. `focus-within` rather than `focus-visible` on the input: the focus
           // ring should follow the field the user is in, not the last thing they clicked.
-          className={`flex min-h-[36px] flex-wrap items-center gap-1.5 rounded-ctl border bg-surface px-1.5 py-1 transition-colors ${
+          className={`flex min-h-[36px] flex-wrap items-center gap-1.5 rounded-field border bg-surface px-2.5 py-1 transition-colors ${
             invalid.length > 0 ? "border-[var(--wn-danger)]" : "border-hairline"
           } focus-within:border-accent`}
         >
@@ -276,7 +276,8 @@ export function RecipientField({
             aria-describedby={invalid.length > 0 ? errorId : undefined}
             autoComplete="off"
             spellCheck={false}
-            placeholder={recipients.length === 0 ? "name@example.com, another@example.com" : ""}
+            // Short enough for a 360px phone; `text-ellipsis` ends it cleanly if it is ever cut.
+            placeholder={recipients.length === 0 ? "name@example.com" : ""}
             value={query}
             onFocus={() => setFocused(true)}
             onBlur={() => {
@@ -302,7 +303,7 @@ export function RecipientField({
             }}
             // `min-w-[7rem]` so the field does not collapse to nothing once chips fill the
             // row, and `grow` so there is always somewhere to type.
-            className="min-w-[7rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-ui text-ink outline-none placeholder:text-ink-placeholder max-sm:text-read"
+            className="min-w-[7rem] flex-1 text-ellipsis border-0 bg-transparent px-1 py-0.5 text-ui text-ink outline-none placeholder:text-ink-placeholder max-sm:text-read"
           />
         </div>
 
@@ -316,7 +317,7 @@ export function RecipientField({
             id={listboxId}
             role="listbox"
             aria-label="Suggested recipients"
-            className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[min(15rem,38vh)] thin-scroll overflow-y-auto rounded-ctl border border-hairline bg-surface p-1 shadow-lift"
+            className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[min(15rem,38vh)] thin-scroll overflow-y-auto rounded-pane border border-hairline bg-surface p-1 shadow-lift"
           >
             {suggestions.map((suggestion, position) => (
               <li
@@ -333,15 +334,21 @@ export function RecipientField({
                   inputRef.current?.focus();
                 }}
                 onMouseEnter={() => setActive(position)}
-                className={`flex cursor-pointer items-baseline gap-2 rounded-ctl px-2 py-2 ${
+                // The name has priority: the address gives way first (desktop), and on a
+                // phone the address goes under the name rather than squeezing it to a
+                // few letters beside a full address.
+                className={`flex cursor-pointer items-baseline gap-2 rounded-ctl px-3 py-2 max-sm:flex-col max-sm:items-stretch max-sm:gap-0 max-sm:px-4 ${
                   position === active ? "bg-surface-active" : ""
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate text-ui text-ink-body">
+                <span
+                  data-suggestion-name=""
+                  className="min-w-0 max-w-[60%] shrink-0 truncate text-ui text-ink-body max-sm:max-w-full"
+                >
                   {suggestion.name ?? suggestion.address}
                 </span>
                 {suggestion.name && (
-                  <span className="min-w-0 shrink truncate text-meta text-ink-subtle">
+                  <span data-suggestion-address="" className="min-w-0 flex-1 truncate text-meta text-ink-subtle">
                     {suggestion.address}
                   </span>
                 )}

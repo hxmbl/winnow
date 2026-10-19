@@ -80,7 +80,7 @@ export function SetupTroubleshoot({ kind, steps = SETUP_STEPS, onGoToStep }: { k
             spellCheck={false}
             onChange={(event) => setText(event.target.value)}
             placeholder="Error 400: redirect_uri_mismatch"
-            className="w-full resize-none rounded-ctl border border-hairline bg-surface px-2.5 py-1.5 font-mono text-meta text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent max-sm:text-ui"
+            className="w-full resize-none rounded-pane border border-hairline bg-surface px-2.5 py-1.5 font-mono text-meta text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent max-sm:text-ui"
             data-setup-google-said=""
           />
           <ul className="flex flex-wrap gap-1.5" aria-label="Common errors">

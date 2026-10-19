@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
-  ArrowLeft,
+  ChevronLeft,
   Ban,
   Check,
   CornerUpLeft,
@@ -61,7 +61,7 @@ function firstLine(body: string): string {
 }
 import { AttachmentList, type LoadedAttachment } from "./AttachmentList";
 import type { Mailbox } from "../../core/model/email";
-import { DOCK_SURFACE } from "./PhoneChrome";
+import { PILL_START, pillAfterScroll, pillOpened, pillOrder, type ReaderPillAction } from "../readerPill";
 import { AppMark } from "../AppMark";
 
 /**
@@ -267,7 +267,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
           senderName={senderName}
           onBlockSender={actions.onBlockSender}
           onChangeFilters={actions.onChangeFilters}
-          buttonClass="flex h-8 w-8 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          buttonClass="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         />
       </div>
     </div>
@@ -294,7 +294,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onCh
    * The phone reader's version: the menu opens *upward* from the action bar, its rows
    * are touch height, and it leads with star and read, which the bar has no room for.
    */
-  phone?: { starred: boolean; unread: boolean; onStar: () => void; onRead: () => void };
+  phone?: { starred: boolean; unread: boolean; onStar: () => void; onRead: () => void; leftHanded?: boolean };
   /** What the trigger shows. The icon alone unless the phone bar labels it. */
   buttonContent?: React.ReactNode;
 }) {
@@ -353,9 +353,11 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onCh
           aria-label="More actions"
           className={
             phone
-              ? // Flat, and the tone of the bar it rises from rather than of the message
-                // card under it: a tonal step, no border and no shadow.
-                "absolute bottom-full right-0 z-30 mb-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-pane bg-canvas p-1.5"
+              ? // Above the floating action pill, on the thumb's side. Fixed rather than
+                // absolute: the pill clips its own contents while it folds.
+                `fixed bottom-[calc(var(--wn-dock-bottom)+var(--wn-dock-h)+0.5rem)] z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-pane border border-hairline bg-chrome p-1.5 shadow-lift ${
+                  phone.leftHanded ? "left-[var(--wn-dock-left)]" : "right-[var(--wn-dock-right)]"
+                }`
               : "absolute right-0 top-8 z-30 w-60 rounded-pane border border-hairline bg-surface p-1 shadow-pane"
           }
         >
@@ -429,14 +431,18 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onCh
 }
 
 /**
- * The phone reader's action bar.
+ * The phone reader's actions: a floating glass pill under the thumb.
  *
- * The same verbs as the toolbar, moved to the bottom edge where a thumb already is, each
- * with its label under its icon like the tabs it replaces. Back leads, because leaving is
- * the most common thing to do with a message on a phone. Star and read go into More: six
- * targets of 48px is what a 390px screen holds without shrinking any of them.
+ * Bottom-right (bottom-left when left-handed), clear of the gesture bar, the same frost
+ * as the dock and the status pill. Ordered by reach (`readerPill.ts`): Archive, Delete
+ * and Reply nearest the thumb, Forward, then More furthest; star and read live in More.
+ * Back is the reader's top-left arrow (and Android's back gesture), not a pill slot.
+ *
+ * While you read down it folds to a single ••• circle that only opens it, and opens
+ * again on a scroll up, a tap, or at the end of the message. The fold is a width change
+ * with the buttons fading out; under reduced motion it is only the fade.
  */
-function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName, onClose }: {
+function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName, scroller, messageKey, leftHanded }: {
   starred: boolean;
   unread: boolean;
   mailbox: Mailbox;
@@ -445,68 +451,126 @@ function ReaderDock({ starred, unread, mailbox, actions, view, onViewChange, has
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
   senderName: string;
-  onClose: () => void;
+  /** The message's scroller, whose direction folds and opens the pill. */
+  scroller: React.RefObject<HTMLDivElement | null>;
+  /** Changes with the open message: a new message starts with the pill open. */
+  messageKey: string | number;
+  leftHanded: boolean;
 }) {
+  const [scroll, setScroll] = useState(PILL_START);
+  useEffect(() => {
+    setScroll(PILL_START);
+    const element = scroller.current;
+    if (!element) return;
+    const onScroll = () =>
+      setScroll((state) => pillAfterScroll(state, element.scrollTop, element.scrollHeight - element.clientHeight));
+    element.addEventListener("scroll", onScroll, { passive: true });
+    return () => element.removeEventListener("scroll", onScroll);
+  }, [scroller, messageKey]);
+  const collapsed = scroll.collapsed;
+
   const inSpam = mailbox === "spam";
   const archiveLabel =
     mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : "Restore";
-  const archiveShort = mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Inbox" : "Restore";
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
-  const trashShort = mailbox === "trash" ? "Delete" : "Trash";
 
   const BUTTON =
-    "flex min-h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-pane px-0.5 py-1.5 text-ink-muted transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
-  const LABEL = "max-w-full truncate text-meta font-medium";
-  const ICON = { size: 20, strokeWidth: 1.8, "aria-hidden": true } as const;
+    "flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-ink-body transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  const ICON = { size: 21, strokeWidth: 1.8, "aria-hidden": true } as const;
+
+  const button = (id: ReaderPillAction) => {
+    switch (id) {
+      case "archive":
+        return inSpam ? (
+          <button key={id} type="button" onClick={actions.onNotSpam} aria-label="Not spam — move to inbox" title="Not spam" className={BUTTON}>
+            <Undo2 {...ICON} />
+          </button>
+        ) : (
+          <button key={id} type="button" onClick={actions.onArchive} aria-label={archiveLabel} title={archiveLabel} className={BUTTON}>
+            {mailbox === "inbox" ? <Archive {...ICON} /> : <RotateCcw {...ICON} />}
+          </button>
+        );
+      case "trash":
+        // In the Trash this deletes for good: red, and on a phone it asks first (`App.tsx`).
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={actions.onTrash}
+            aria-label={trashLabel}
+            title={trashLabel}
+            data-destructive={mailbox === "trash" ? "" : undefined}
+            className={`${BUTTON} ${mailbox === "trash" ? "!text-danger" : ""}`}
+          >
+            <Trash2 {...ICON} />
+          </button>
+        );
+      case "reply":
+        return (
+          <button key={id} type="button" onClick={actions.onReply} aria-label="Reply to all" title="Reply" className={BUTTON}>
+            <CornerUpLeft {...ICON} />
+          </button>
+        );
+      case "forward":
+        return (
+          <button key={id} type="button" onClick={actions.onForward} aria-label="Forward" title="Forward" className={BUTTON}>
+            <Forward {...ICON} />
+          </button>
+        );
+      case "more":
+        return (
+          <MoreMenu
+            key={id}
+            view={view}
+            onViewChange={onViewChange}
+            hasHtml={hasHtml}
+            senderName={senderName}
+            onBlockSender={actions.onBlockSender}
+            onChangeFilters={actions.onChangeFilters}
+            buttonClass={BUTTON}
+            phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead, leftHanded }}
+            buttonContent={<MoreHorizontal {...ICON} />}
+          />
+        );
+    }
+  };
 
   return (
     <div
       data-reader-dock=""
-      className={`${DOCK_SURFACE} grid grid-cols-6 gap-0.5 px-2`}
+      data-reader-pill={collapsed ? "collapsed" : "open"}
+      data-hand={leftHanded ? "left" : "right"}
+      className={`pointer-events-none fixed bottom-[var(--wn-dock-bottom)] z-30 flex ${
+        leftHanded ? "left-[var(--wn-dock-left)] justify-start" : "right-[var(--wn-dock-right)] justify-end"
+      }`}
     >
-      <button type="button" onClick={onClose} aria-label="Back to the list" className={BUTTON}>
-        <ArrowLeft {...ICON} />
-        <span className={LABEL}>Back</span>
-      </button>
-      <button type="button" onClick={actions.onReply} aria-label="Reply to all" className={BUTTON}>
-        <CornerUpLeft {...ICON} />
-        <span className={LABEL}>Reply</span>
-      </button>
-      <button type="button" onClick={actions.onForward} aria-label="Forward" className={BUTTON}>
-        <Forward {...ICON} />
-        <span className={LABEL}>Forward</span>
-      </button>
-      {inSpam ? (
-        <button type="button" onClick={actions.onNotSpam} aria-label="Not spam — move to inbox" className={BUTTON}>
-          <Undo2 {...ICON} />
-          <span className={LABEL}>Not spam</span>
+      <div
+        role="toolbar"
+        aria-label="Message actions"
+        className="wn-glass wn-reader-pill pointer-events-auto relative h-[var(--wn-dock-h)] rounded-full"
+      >
+        <div
+          data-reader-pill-actions=""
+          inert={collapsed}
+          className={`wn-reader-pill-actions absolute inset-y-0 flex items-center gap-0.5 px-1.5 ${leftHanded ? "left-0" : "right-0"}`}
+        >
+          {pillOrder(leftHanded).map(button)}
+        </div>
+        <button
+          type="button"
+          data-reader-pill-handle=""
+          aria-label="Show message actions"
+          aria-expanded={!collapsed}
+          tabIndex={collapsed ? undefined : -1}
+          aria-hidden={collapsed ? undefined : true}
+          onClick={() => setScroll(pillOpened)}
+          className={`wn-reader-pill-handle absolute inset-y-0 flex w-[var(--wn-dock-h)] items-center justify-center rounded-full text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+            leftHanded ? "left-0" : "right-0"
+          }`}
+        >
+          <MoreHorizontal size={22} strokeWidth={2} aria-hidden="true" />
         </button>
-      ) : (
-        <button type="button" onClick={actions.onArchive} aria-label={archiveLabel} className={BUTTON}>
-          {mailbox === "inbox" ? <Archive {...ICON} /> : <RotateCcw {...ICON} />}
-          <span className={LABEL}>{archiveShort}</span>
-        </button>
-      )}
-      <button type="button" onClick={actions.onTrash} aria-label={trashLabel} className={BUTTON}>
-        <Trash2 {...ICON} />
-        <span className={LABEL}>{trashShort}</span>
-      </button>
-      <MoreMenu
-        view={view}
-        onViewChange={onViewChange}
-        hasHtml={hasHtml}
-        senderName={senderName}
-        onBlockSender={actions.onBlockSender}
-        onChangeFilters={actions.onChangeFilters}
-        buttonClass={BUTTON}
-        phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead }}
-        buttonContent={
-          <>
-            <MoreHorizontal {...ICON} />
-            <span className={LABEL}>More</span>
-          </>
-        }
-      />
+      </div>
     </div>
   );
 }
@@ -517,6 +581,8 @@ type Props = {
    * whatever the OS calls its mail client. Absent, the link goes to the OS like any other.
    */
   onMailto?: (url: string) => void;
+  /** Left-handed phone layout: the action pill sits bottom-left. */
+  leftHanded?: boolean;
   email: Email | null;
   conversation: readonly Email[];
   signals: EmailSignals | null;
@@ -595,6 +661,7 @@ export function Reader({
   sidebarOpen = false,
   onToggleSidebar,
   onMailto,
+  leftHanded = false,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -633,7 +700,7 @@ export function Reader({
         <p className="text-ui font-medium text-ink-body">Nothing selected</p>
         <p className="max-w-[24rem] text-meta text-ink-subtle">
           Pick something from the list, or press{" "}
-          <kbd className="rounded-ctl bg-sheen px-1 font-mono text-ink-muted">j</kbd>.
+          <kbd className="rounded-ctl bg-sheen px-1.5 font-mono text-ink-muted">j</kbd>.
         </p>
       </div>
     );
@@ -689,6 +756,19 @@ export function Reader({
           to the sender menu, as it is in the list. A button of its own; the name beside
           it stays selectable text.
         */}
+        {phone && (
+          // Back, top-left as on iOS: the action pill no longer carries it, and Android
+          // still has its back gesture.
+          <button
+            type="button"
+            data-reader-back=""
+            onClick={onClose}
+            aria-label="Back to the list"
+            className="-ml-3 flex h-11 w-9 shrink-0 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            <ChevronLeft size={26} strokeWidth={2.1} aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           data-reader-avatar=""
@@ -747,7 +827,7 @@ export function Reader({
       </div>
 
       <div ref={bodyRef} className="thin-scroll selectable min-h-0 flex-1 overflow-y-auto">
-        <article className="px-6 pb-8 pt-5">
+        <article className={`px-6 pt-5 ${phone ? "pb-[calc(var(--wn-dock-h)+var(--wn-dock-bottom)+1.5rem)]" : "pb-8"}`}>
           {/*
             The image decision, at the very top of the email.
 
@@ -994,7 +1074,7 @@ export function Reader({
       </div>
 
       {phone && (
-        <ReaderDock
+        <ReaderPill
           starred={email.starred}
           unread={email.unread}
           mailbox={mailbox}
@@ -1003,7 +1083,9 @@ export function Reader({
           onViewChange={setView}
           hasHtml={Boolean(email.bodyHtml)}
           senderName={displayName(email)}
-          onClose={onClose}
+          scroller={bodyRef}
+          messageKey={email.id}
+          leftHanded={leftHanded}
         />
       )}
     </div>

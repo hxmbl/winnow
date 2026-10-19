@@ -283,7 +283,7 @@ const Row = memo(function Row({
     <div
       data-row-id={email.id}
       data-checked={checked ? "" : undefined}
-      className={`group/row relative flex w-full items-start gap-2 rounded-ctl px-3 py-1.5 text-left transition-colors duration-150 [-webkit-touch-callout:none] ${
+      className={`group/row relative flex w-full items-start gap-2 rounded-pane px-3 py-1.5 text-left transition-colors duration-150 [-webkit-touch-callout:none] ${
         /*
          * Selection is the accent, washed into the surface: the one place in the list the
          * accent appears besides the unread dot, so the two are never confused with any
@@ -546,7 +546,7 @@ function SwipeBackdrop({ actions }: { actions: SwipeActions }) {
     <div
       data-swipe-backdrop=""
       aria-hidden="true"
-      className="group/swipe pointer-events-none absolute inset-0 flex items-center justify-between overflow-hidden rounded-ctl px-5 text-ui font-semibold data-[tone=accent]:bg-accent data-[tone=accent]:text-on-accent data-[tone=danger]:bg-danger data-[tone=danger]:text-[var(--wn-surface)]"
+      className="group/swipe pointer-events-none absolute inset-0 flex items-center justify-between overflow-hidden rounded-pane px-5 text-ui font-semibold data-[tone=accent]:bg-accent data-[tone=accent]:text-on-accent data-[tone=danger]:bg-danger data-[tone=danger]:text-[var(--wn-surface)]"
     >
       {/* The finger moved right: the left side is uncovered. */}
       <span data-swipe-side="right" className="hidden items-center gap-2 group-data-[dir=right]/swipe:flex">
@@ -1980,7 +1980,7 @@ function MessageList({
                     ref={observeItem}
                     // Only while its row is swiped: the clip would otherwise cut the star's
                     // touch target, which reaches a little past the row.
-                    className={swipedHere ? "relative overflow-hidden rounded-ctl" : undefined}
+                    className={swipedHere ? "relative overflow-hidden rounded-pane" : undefined}
                   >
                     {swipedHere && <SwipeBackdrop actions={swiping.actions} />}
                     <Row
