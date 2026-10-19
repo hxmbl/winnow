@@ -2,9 +2,10 @@
  * The two good-news empty states: a clear Inbox (or smart filter), and the quieter one
  * for an empty folder or filter. `ui/inboxClear.ts` decides which, and what they say.
  *
- * The clear state is an ambient-light illustration around the app mark — the mark is
- * drawn by `AppMark`, untouched, with a dashed flight trail behind it — and a line that
- * follows the time of day. When the last item has just been cleared, `celebrating` plays
+ * The clear state is an ambient-light illustration around the app mark — drawn by
+ * `AppMark` as one plane (`single`: the leading one, recentred, so the pair's second
+ * plane does not fly against the trail), with a dashed flight trail running up to its
+ * tail — and a line that follows the time of day. When the last item has just been cleared, `celebrating` plays
  * one gentle motion: the trail draws in, the mark settles at its end and the light
  * blooms. Its end state is the resting state, so dropping the class changes nothing on
  * screen, and under `prefers-reduced-motion` nothing moves at all.
@@ -73,13 +74,13 @@ export function InboxClear({
         <svg className="inbox-clear__trail" viewBox="0 0 240 150" fill="none">
           <path
             className="inbox-clear__path"
-            d="M 18 128 C 62 126 82 96 112 92 C 140 88 150 70 164 58"
+            d="M 18 128 C 62 126 82 96 112 92 C 132 89 142 77 149 67"
             pathLength={100}
           />
           <circle className="inbox-clear__dot" cx="18" cy="128" r="2.5" />
         </svg>
         <span className="inbox-clear__mark">
-          <AppMark size={64} />
+          <AppMark size={56} single />
         </span>
       </div>
       <div role="status" aria-live="polite" className="flex flex-col items-center gap-1.5">
