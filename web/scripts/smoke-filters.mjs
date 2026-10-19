@@ -109,6 +109,26 @@ try {
   check("the reader shows one line per filter", /In Deliveries because: from noreply@evri\.com, has an Evri tracking number, you moved 1 email here/.test(why), why);
   check("with no scores", !/\d+(\.\d+)?\s*%|score/i.test(await page.locator("[data-reader] [data-why-here]").innerText()));
   check("the reader shows the Deliveries tag", (await page.locator("[data-reader] [data-filter-tag='shipping']").count()) === 1);
+  {
+    // 1.3.3: at the bottom of the email, grouped with "Not where it belongs?", not under the sender.
+    const place = await page.evaluate(() => {
+      const why = document.querySelector("[data-reader] [data-why-here]");
+      const footer = why?.closest("[data-reader-filters-footer]");
+      const article = why?.closest("article");
+      const date = document.querySelector("[data-reader] [data-reader-date]");
+      return {
+        inFooter: Boolean(footer),
+        inArticle: Boolean(article),
+        withChange: Boolean(footer?.querySelector("[data-why-change]")),
+        belowDate: Boolean(why && date && why.getBoundingClientRect().top > date.getBoundingClientRect().bottom),
+      };
+    });
+    check(
+      "desktop: Why it's here is at the bottom of the email, grouped with Change smart filters",
+      place.inFooter && place.inArticle && place.withChange && place.belowDate,
+      JSON.stringify(place),
+    );
+  }
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "filters-why.png") });
   await page.locator('[data-reader] [aria-label="More"]').first().click();
   check("the reader overflow offers it too", (await page.locator("[data-reader-change-filters]").count()) === 1);
@@ -221,6 +241,40 @@ try {
   await p.waitForTimeout(200);
   check("a tap moves it", (await ppicker.locator("[data-filter-option='shipping']").getAttribute("aria-checked")) === "true");
   if (SHOTS) await p.screenshot({ path: path.join(SHOTS, "filters-phone-picker.png") });
+  {
+    // The reader on a phone: Why it's here at the bottom, clear of the floating reader pill.
+    await ppicker.locator("[data-filter-picker-done]").click();
+    await ppicker.waitFor({ state: "detached", timeout: 5_000 });
+    if ((await pbar.count()) > 0) await p.keyboard.press("Escape");
+    await p.waitForTimeout(200);
+    await p.locator("[data-message-id]").filter({ hasText: SIBLING }).first().click();
+    await p.waitForSelector("[data-reader] [data-why-here]", { timeout: 5_000 });
+    await p.evaluate(() => {
+      const body = document.querySelector("[data-reader] article")?.parentElement;
+      if (body) body.scrollTop = body.scrollHeight;
+    });
+    await p.waitForTimeout(500);
+    const place = await p.evaluate(() => {
+      const why = document.querySelector("[data-reader] [data-why-here]");
+      const footer = why?.closest("[data-reader-filters-footer]");
+      const pill = document.querySelector("[data-reader-pill]");
+      const f = footer?.getBoundingClientRect();
+      const pl = pill?.getBoundingClientRect();
+      return {
+        inFooter: Boolean(footer?.closest("article")),
+        footerBottom: f ? Math.round(f.bottom) : null,
+        pillTop: pl ? Math.round(pl.top) : null,
+        pillLeft: pl ? Math.round(pl.left) : null,
+        footerRight: f ? Math.round(f.right) : null,
+      };
+    });
+    check(
+      "phone: Why it's here is at the bottom of the email, and scrolled to the end it clears the reader pill",
+      place.inFooter && place.footerBottom !== null && place.pillTop !== null && place.footerBottom <= place.pillTop,
+      JSON.stringify(place),
+    );
+    if (SHOTS) await p.screenshot({ path: path.join(SHOTS, "filters-phone-why.png") });
+  }
   check("no console errors on phone", pErrors.length === 0, pErrors.slice(0, 3).join(" | "));
   await phone.close();
 } catch (error) {

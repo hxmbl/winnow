@@ -628,7 +628,10 @@ type Props = {
   onSenderMenu?: (trigger: HTMLElement) => void;
   /** The one-time code strip, drawn at the very top, above the sender. */
   codeBar?: React.ReactNode;
-  /** "Why it's here", under the message's filter tags (`WhyHere`). */
+  /**
+   * "Why it's here" (`WhyHere`): at the bottom of the email, grouped with the
+   * "Not where it belongs?" footer (1.3.3), not up under the sender.
+   */
   whyHere?: React.ReactNode;
   /**
    * The sidebar's toggle, for the medium-width layout (640–1023px) where the reader
@@ -822,7 +825,6 @@ export function Reader({
               ))}
             </div>
           )}
-          {whyHere && <div className="mt-2.5">{whyHere}</div>}
         </div>
       </div>
 
@@ -980,22 +982,29 @@ export function Reader({
           )}
 
           {/*
-            "Change smart filters…", after the message: the moment to say where it belongs
-            is once it has been read, and up in the header it sat between the sender and
-            the words, the first thing the eye met on every message.
+            "Why it's here" and "Change smart filters…", together after the message: the
+            moment to ask where it belongs is once it has been read, and up in the header
+            they sat between the sender and the words, the first thing the eye met on
+            every message (the owner moved "Why it's here" down here in 1.3.3). On a phone
+            the article's bottom padding keeps the group clear of the floating reader pill.
           */}
-          {actions.onChangeFilters && (
-            <div data-reader-filters-footer="" className="mt-8 flex max-w-[68ch] items-center gap-2 border-t border-hairline-soft pt-4">
-              <ListFilter size={13} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-ink-subtle" />
-              <p className="text-meta text-ink-subtle">Not where it belongs?</p>
-              <button
-                type="button"
-                data-why-change=""
-                onClick={actions.onChangeFilters}
-                className="rounded-ctl px-1.5 py-1 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              >
-                Change smart filters…
-              </button>
+          {(whyHere || actions.onChangeFilters) && (
+            <div data-reader-filters-footer="" className="mt-8 flex max-w-[68ch] flex-col gap-3 border-t border-hairline-soft pt-4">
+              {whyHere}
+              {actions.onChangeFilters && (
+                <div className="flex items-center gap-2">
+                  <ListFilter size={13} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-ink-subtle" />
+                  <p className="text-meta text-ink-subtle">Not where it belongs?</p>
+                  <button
+                    type="button"
+                    data-why-change=""
+                    onClick={actions.onChangeFilters}
+                    className="rounded-ctl px-1.5 py-1 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >
+                    Change smart filters…
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
