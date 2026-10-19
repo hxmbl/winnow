@@ -81,6 +81,9 @@ export type SessionBridge = {
   contactsSyncedAt(): Promise<number | null>;
 };
 
+/** How long a sign-out waits to take back a waiting send's Drive permissions. */
+const SIGN_OUT_REVOKE_MS = 3_000;
+
 /** Build a bridge over a `Platform`. */
 export function createSessionBridge(platform: Platform, store: WinnowStore): SessionBridge {
   const session = new GmailSession(platform, localCache());
@@ -137,6 +140,16 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
       session.backend().fetchAttachment(gmailId, attachmentId),
 
     async signOut(options) {
+      // A send still waiting is abandoned by the sign-out: take back the Drive
+      // permissions it made while the grant still works (bounded: never hold up a sign-out).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        offlineQueue.revokeQueuedShares(),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, SIGN_OUT_REVOKE_MS);
+        }),
+      ]);
+      clearTimeout(timer);
       offlineQueue.clear();
       await session.signOut(options);
       await store.signOut();

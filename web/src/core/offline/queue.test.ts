@@ -6,12 +6,13 @@ import {
   backoffDelay,
   classifyFailure,
   overlay,
+  type DriveHooks,
   type QueueDrop,
   type QueueStorage,
   type QueueTimers,
 } from "./queue";
 import { GmailError, GmailHttpError, GoogleUnreachable } from "../gmail/dto";
-import type { Draft, Email } from "../model/email";
+import type { Draft, DraftDriveShare, Email } from "../model/email";
 import type { MailBackend } from "../store/store";
 
 const offlineError = () => new TypeError("Failed to fetch");
@@ -432,6 +433,112 @@ describe("the offline queue", () => {
     await wrapped.toggleStar(1, true);
     expect(told).toBeGreaterThan(0);
     expect(queue.status()).not.toBe(before);
+  });
+});
+
+describe("queued sends with Drive links", () => {
+  const share = (): DraftDriveShare => ({
+    links: [{ id: "demo-drive-1", link: "https://drive.google.com/file/d/demo-drive-1/view", own: true, name: "film.mov" }],
+    recipients: ["b@example.com"],
+    state: "pending",
+    created: [],
+  });
+  const withShare = (subject: string, driveShare: DraftDriveShare): Draft => ({ ...draft(subject), driveShare });
+  function hooks() {
+    const log: string[] = [];
+    const drive: DriveHooks & { log: string[]; fail: unknown } = {
+      log,
+      fail: null,
+      async prepare(plan) {
+        log.push("prepare");
+        if (drive.fail) throw drive.fail;
+        plan.created = [...plan.created, { fileId: "demo-drive-1", permissionId: "perm-1", email: "b@example.com" }];
+        plan.state = "shared";
+      },
+      async revoke(created) {
+        log.push(`revoke ${created.map((p) => p.permissionId).join(",")}`);
+      },
+    };
+    return drive;
+  }
+
+  it("shares a pending send's links at replay, just before the send, and persists what it made", async () => {
+    const { wrapped, fake, queue, net, storage } = setup({ online: false });
+    const drive = hooks();
+    queue.setDriveHooks(drive);
+    const plan = share();
+    await wrapped.sendNew!(withShare("film", plan), "d1");
+    expect(drive.log).toEqual([]); // nothing shared while it only waits
+    net.online = true;
+    fake.state.failWith = () => new GmailHttpError(503, "busy");
+    queue.kick();
+    await settle();
+    expect(drive.log).toEqual(["prepare"]);
+    expect(JSON.parse(storage.data.get(OFFLINE_QUEUE_KEY)!).entries[0].action.draft.driveShare.created).toHaveLength(1);
+    // The Gmail half failed and retries: it keeps its permissions, and shares nothing twice.
+    fake.state.failWith = null;
+    queue.kick();
+    await settle();
+    expect(fake.calls).toEqual([["sendNew", "film", "d1"]]);
+    expect(drive.log).toEqual(["prepare"]);
+  });
+
+  it("a share that gets no answer backs off without marking a raw send attempted", async () => {
+    const { wrapped, fake, queue, net, timers, drops } = setup({ online: false });
+    const drive = hooks();
+    drive.fail = offlineError();
+    queue.setDriveHooks(drive);
+    await wrapped.sendNew!(withShare("raw", share()));
+    net.online = true;
+    queue.kick();
+    await settle();
+    expect(queue.status().state).toBe("backoff");
+    drive.fail = null;
+    timers.fire();
+    await settle();
+    expect(fake.calls).toEqual([["sendNew", "raw", undefined]]);
+    expect(drops).toEqual([]);
+  });
+
+  it("a send Gmail refused, with nobody waiting, takes back the permissions it created", async () => {
+    const { wrapped, fake, queue, net, drops } = setup({ online: false });
+    const drive = hooks();
+    queue.setDriveHooks(drive);
+    await wrapped.sendNew!(withShare("refused", share()), "d2");
+    net.online = true;
+    fake.state.failWith = (call) => (call[0] === "sendNew" ? new GmailHttpError(400, "invalid to") : null);
+    queue.kick();
+    await settle();
+    expect(drops).toHaveLength(1);
+    expect(drive.log).toEqual(["prepare", "revoke perm-1"]);
+  });
+
+  it("a send that may have gone (answer lost, draft gone) keeps them: a delivered link must open", async () => {
+    const { wrapped, fake, queue, net } = setup({ online: false });
+    const drive = hooks();
+    queue.setDriveHooks(drive);
+    await wrapped.sendNew!(withShare("maybe", share()));
+    net.online = true;
+    fake.state.failWith = () => offlineError();
+    queue.kick();
+    await settle();
+    expect(drive.log).toEqual(["prepare"]);
+    await wrapped.sendNew!(withShare("gone", { ...share(), state: "shared", created: [{ fileId: "f", permissionId: "p9", email: "b@example.com" }] }), "d404");
+    fake.state.failWith = () => new GmailHttpError(404, "no such draft");
+    queue.kick();
+    await settle();
+    expect(drive.log).toEqual(["prepare"]);
+  });
+
+  it("a sign-out takes back what waiting sends shared, before the queue is cleared", async () => {
+    const { wrapped, queue } = setup({ online: false });
+    const drive = hooks();
+    queue.setDriveHooks(drive);
+    await wrapped.sendNew!(withShare("waiting", { ...share(), state: "shared", created: [{ fileId: "f", permissionId: "p5", email: "b@example.com" }] }), "d5");
+    await queue.revokeQueuedShares();
+    queue.clear();
+    expect(drive.log).toEqual(["revoke p5"]);
+    expect(queue.status().waiting).toBe(0);
   });
 });
 

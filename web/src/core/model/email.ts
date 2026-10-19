@@ -113,10 +113,40 @@ export type Draft = {
    * send time, for the lines still in the body. See `core/gmail/drive.ts`.
    */
   driveFiles?: DraftDriveFile[];
+  /**
+   * Set only on the copy of a draft that is being dispatched, never on the composer's:
+   * the Drive links this send shares and what it has done about them. Carried into the
+   * offline queue so a send that could not reach Drive shares when it is replayed, and
+   * so an abandoned send can take back exactly the permissions it created. See
+   * `core/gmail/drive.ts` ("Sharing at dispatch").
+   */
+  driveShare?: DraftDriveShare;
 };
 
 /** A file Winnow uploaded to the user's Drive for this draft (only ever its own). */
 export type DraftDriveFile = { id: string; name: string; size: number; link: string };
+
+/**
+ * A Drive link found in a message: the file id, the link as written, and whether it is
+ * one of Winnow's own ("File name (size) — link" lines, or a file in `driveFiles`).
+ * A link that is not Winnow's may be anyone's; Drive refusing it is not reported.
+ */
+export type DriveLinkRef = { id: string; link: string; own: boolean; name?: string };
+
+/** One permission a send created: what an abandoned send takes back. */
+export type DrivePermissionRef = { fileId: string; permissionId: string; email: string };
+
+/**
+ * A dispatch's Drive sharing. `pending`: not shared yet (the send went to the offline
+ * queue before Drive could be reached; the queue shares at replay). `shared`: done, and
+ * `created` holds what it made. `waived`: the user chose Send anyway without the grant.
+ */
+export type DraftDriveShare = {
+  links: DriveLinkRef[];
+  recipients: string[];
+  state: "pending" | "shared" | "waived";
+  created: DrivePermissionRef[];
+};
 
 /**
  * A file attached to a draft: its bytes (standard base64, so the draft stays plain JSON

@@ -39,11 +39,19 @@
  * - **A sync sees the queue.** Until an action lands, a sync's fresh reading would
  *   undo it on screen, so the queue's actions are laid over every sync result.
  * - **Sign-out clears it**, and a queue saved for another account is discarded on load.
+ * - **Drive links share at replay.** A send whose Drive links could not be shared when
+ *   it was dispatched (Drive unreachable) carries `draft.driveShare` in `pending`; the
+ *   queue has the app share them (`DriveHooks.prepare`) just before the send is tried,
+ *   before it counts as attempted, so a share that gets no answer backs off like any
+ *   other and a raw send is not marked unsafe by it. A send that retries keeps what it
+ *   shared. A send Gmail *refused* (given up, nobody waiting) takes back the permissions
+ *   it created (`DriveHooks.revoke`); one that may have gone out (a lost answer, a 404
+ *   on its draft) keeps them, since a link in a delivered message must open.
  *
  * Pure apart from what it is handed: storage, the online test and the timers.
  */
 
-import type { Draft, Email, Mailbox } from "../model/email";
+import type { Draft, DraftDriveShare, DrivePermissionRef, Email, Mailbox } from "../model/email";
 import { forDeviceCopy } from "../mail/attachments";
 import type { MailBackend, SyncOutcome } from "../store/store";
 
@@ -94,6 +102,16 @@ export type OfflineQueueOptions = {
   storage?: QueueStorage | null;
   isOnline?: () => boolean;
   timers?: QueueTimers;
+};
+
+/**
+ * The app's Drive half of a send (the queue knows nothing about Drive): `prepare` shares
+ * a pending `driveShare` and records on it what it created (throwing only when Drive got
+ * no answer, or the session needs signing in again); `revoke` takes permissions back.
+ */
+export type DriveHooks = {
+  prepare(share: DraftDriveShare): Promise<void>;
+  revoke(created: readonly DrivePermissionRef[]): Promise<void>;
 };
 
 export type FailureClass = "no_response" | "conflict" | "auth" | "transient" | "fatal";
@@ -183,6 +201,7 @@ export class OfflineQueue {
   private readonly listeners = new Set<() => void>();
   private readonly dropListeners = new Set<(drop: QueueDrop) => void>();
   private snapshot: QueueStatus = { waiting: 0, sends: 0, state: "idle" };
+  private drive: DriveHooks | null = null;
 
   private readonly storage: QueueStorage | null;
   private readonly isOnline: () => boolean;
@@ -237,6 +256,25 @@ export class OfflineQueue {
         void this.flush();
       });
     return this.backendFor(inner);
+  }
+
+  /** The app's Drive sharing for queued sends (see `DriveHooks`); `null` to stop. */
+  setDriveHooks(hooks: DriveHooks | null): void {
+    this.drive = hooks;
+  }
+
+  /**
+   * Before a sign-out: take back the Drive permissions of every send still waiting,
+   * since `clear` is about to abandon them. Best effort; resolves either way.
+   */
+  async revokeQueuedShares(): Promise<void> {
+    const hooks = this.drive;
+    if (!hooks) return;
+    const created = this.entries.flatMap((entry) =>
+      entry.action.kind === "send" ? (entry.action.draft.driveShare?.created ?? []) : [],
+    );
+    if (created.length === 0) return;
+    await hooks.revoke(created).catch(() => undefined);
   }
 
   /** Sign-out: nothing queued for the account survives it. */
@@ -322,6 +360,7 @@ export class OfflineQueue {
     const inFlight = this.running ? this.entries[0] : undefined;
     this.entries = this.entries.filter((older) => {
       if (older === inFlight || !supersedes(action, older.action)) return true;
+      carryShares(older.action, action);
       this.settle(older.seq, "queued");
       return false;
     });
@@ -368,6 +407,31 @@ export class OfflineQueue {
         continue;
       }
       this.setState("replaying");
+      const share = entry.action.kind === "send" ? entry.action.draft.driveShare : undefined;
+      if (share?.state === "pending" && this.drive) {
+        try {
+          await this.drive.prepare(share);
+          this.persist();
+        } catch (error) {
+          this.persist();
+          if (this.inner !== inner) return;
+          if (classifyFailure(error) === "auth") {
+            this.setState("auth");
+            this.resolveAllQueued();
+            return;
+          }
+          // No answer from Drive: wait like any unreachable request (not attempted yet).
+          this.failures += 1;
+          this.setState("backoff");
+          this.resolveAllQueued();
+          this.cancelTimer();
+          this.timer = this.timers.set(() => {
+            this.timer = null;
+            void this.flush();
+          }, backoffDelay(this.failures));
+          return;
+        }
+      }
       entry.attempted = true;
       this.persist();
       try {
@@ -418,9 +482,12 @@ export class OfflineQueue {
         this.remove(entry);
         const waiter = this.waiters.get(entry.seq);
         if (waiter) {
+          // The app has the message back, and with it the permissions (a retry keeps them).
           this.waiters.delete(entry.seq);
           waiter.reject(error);
         } else {
+          // Given up with nobody waiting: the message never went, so neither do its links.
+          this.revokeShares(entry.action);
           this.drop(entry, error instanceof Error ? error.message : "A change made offline did not save.");
         }
       }
@@ -449,6 +516,16 @@ export class OfflineQueue {
   }
 
   // ── Bookkeeping ───────────────────────────────────────────────────────────
+
+  /** Take back what an abandoned send shared, best effort and not waited on. */
+  private revokeShares(action: QueuedAction): void {
+    if (action.kind !== "send") return;
+    const share = action.draft.driveShare;
+    if (!share || share.created.length === 0 || !this.drive) return;
+    const created = share.created;
+    share.created = [];
+    void this.drive.revoke(created).catch(() => undefined);
+  }
 
   private remove(entry: Entry): void {
     this.entries = this.entries.filter((candidate) => candidate !== entry);
@@ -555,6 +632,19 @@ function forStorage(action: QueuedAction): QueuedAction {
   const { attachments: all, ...rest } = action.draft;
   const attachments = forDeviceCopy(all);
   return { ...action, draft: attachments ? { ...rest, attachments } : rest };
+}
+
+/**
+ * A newer send of the same draft replaces an older one: what the older shared becomes the
+ * newer's, so it is neither lost (never taken back) nor taken back from under the newer.
+ */
+function carryShares(older: QueuedAction, next: QueuedAction): void {
+  if (older.kind !== "send" || next.kind !== "send") return;
+  const was = older.draft.driveShare;
+  const now = next.draft.driveShare;
+  if (!was || was.created.length === 0 || !now) return;
+  const seen = new Set(now.created.map((permission) => `${permission.fileId}/${permission.permissionId}`));
+  now.created = [...now.created, ...was.created.filter((permission) => !seen.has(`${permission.fileId}/${permission.permissionId}`))];
 }
 
 function isAction(value: unknown): value is QueuedAction {
