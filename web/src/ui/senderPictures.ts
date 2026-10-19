@@ -63,35 +63,102 @@ export function isRelayedName(name: string | undefined): boolean {
  * cached is still kept as the fallback). `size` is the avatar's, in CSS pixels.
  */
 export function useSenderPictures(address: string, photo?: string, name?: string, size = 32): string[] {
-  const { photos, gravatars, logos } = useContext(SenderPicturesContext);
-  const contactPhoto = photo ?? photos.get(address.trim().toLowerCase());
-  const wantPicture = !contactPhoto && address !== "" && !isRelayedName(name);
-  const wantGravatar = gravatars !== null && wantPicture;
-  const gravatarVersion = useSyncExternalStore(
-    wantGravatar ? gravatars.subscribe : noopSubscribe,
-    wantGravatar ? gravatars.getVersion : zero,
-    zero,
-  );
-  const gravatar: LogoState = wantGravatar ? gravatars.peek(address) : { kind: "none" };
+  const sources = useContext(SenderPicturesContext);
+  const { contactPhoto, wantGravatar, wantLogo } = pictureWants(sources, address, photo, name);
+  const gravatars = wantGravatar ? sources.gravatars : null;
+  const logos = wantLogo ? sources.logos : null;
+  const gravatarVersion = useSyncExternalStore(gravatars ? gravatars.subscribe : noopSubscribe, gravatars ? gravatars.getVersion : zero, zero);
+  const gravatar: LogoState = gravatars ? gravatars.peek(address) : { kind: "none" };
   useEffect(() => {
-    if (wantGravatar && gravatar.kind === "unknown") void gravatars.request(address);
-  }, [wantGravatar, gravatar.kind, gravatars, address, gravatarVersion]);
+    if (gravatars && gravatar.kind === "unknown") void gravatars.request(address);
+  }, [gravatar.kind, gravatars, address, gravatarVersion]);
 
-  const wantLogo = logos !== null && wantPicture;
-  const askLogo = wantLogo && gravatar.kind === "none";
-  const version = useSyncExternalStore(
-    wantLogo ? logos.subscribe : noopSubscribe,
-    wantLogo ? logos.getVersion : zero,
-    zero,
-  );
-  const state: LogoState = wantLogo ? logos.peek(address) : { kind: "none" };
+  const askLogo = logos !== null && gravatar.kind === "none";
+  const version = useSyncExternalStore(logos ? logos.subscribe : noopSubscribe, logos ? logos.getVersion : zero, zero);
+  const state: LogoState = logos ? logos.peek(address) : { kind: "none" };
   // `version` is in the dependencies so a still-unknown sender asks again whenever the
   // cache changes: after the network comes back (`retryFailed`), or after its queued
   // lookup was dropped. A request that is already in flight or cached costs nothing.
   useEffect(() => {
-    if (askLogo && state.kind === "unknown") void logos.request(address);
+    if (askLogo && logos && state.kind === "unknown") void logos.request(address);
   }, [askLogo, state.kind, logos, address, version]);
   return orderPictures(contactPhoto, gravatar, state, size);
+}
+
+/**
+ * Which sources a sender's picture may come from under the current settings: the one
+ * decision both the avatar (`useSenderPictures`) and a notification's picture
+ * (`resolveSenderPicture`) make, so they can never disagree. Gravatar only when
+ * "Gravatar photos" is on, the brand logo only when "Show brand logos" is on (each is
+ * `null` in `sources` when off), neither when there is a contact photo or the sender was
+ * relayed ("Ana via Book Club").
+ */
+export function pictureWants(
+  sources: SenderPictures,
+  address: string,
+  photo?: string,
+  name?: string,
+): { contactPhoto: string | undefined; wantGravatar: boolean; wantLogo: boolean } {
+  const contactPhoto = photo ?? sources.photos.get(address.trim().toLowerCase());
+  const wantPicture = !contactPhoto && address !== "" && !isRelayedName(name);
+  return {
+    contactPhoto,
+    wantGravatar: sources.gravatars !== null && wantPicture,
+    wantLogo: sources.logos !== null && wantPicture,
+  };
+}
+
+/**
+ * A sender's picture outside React, for a new-mail notification: the avatar's own
+ * rules (`pictureWants`, then `orderPictures`), waiting for a lookup the avatar would
+ * have started (Gravatar first, the logo only once Gravatar says none) up to `waitMs`,
+ * then the best URL, or `null` for the monogram (a notification shows the app icon).
+ * With both switches off and no contact photo this never touches the network.
+ */
+export async function resolveSenderPicture(
+  sources: SenderPictures,
+  address: string,
+  name: string | undefined,
+  size: number,
+  waitMs = 1500,
+): Promise<string | null> {
+  const { contactPhoto, wantGravatar, wantLogo } = pictureWants(sources, address, undefined, name);
+  const settle = async (source: LogoSource): Promise<LogoState> => {
+    const now = source.peek(address);
+    if (now.kind !== "unknown") return now;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      source.request(address).catch(() => null),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, waitMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    return source.peek(address);
+  };
+  const gravatar: LogoState = wantGravatar && sources.gravatars ? await settle(sources.gravatars) : { kind: "none" };
+  const logo: LogoState =
+    wantLogo && sources.logos
+      ? gravatar.kind === "none"
+        ? await settle(sources.logos)
+        : sources.logos.peek(address)
+      : { kind: "none" };
+  return orderPictures(contactPhoto, gravatar, logo, size)[0] ?? null;
+}
+
+/**
+ * The sources the app is drawing avatars from right now, published by `App` so a
+ * notification (built outside React, `notificationActions.ts`) uses the same ones.
+ * Until `App` mounts, nothing: no pictures.
+ */
+let currentSources: SenderPictures = EMPTY;
+
+export function publishSenderPictures(sources: SenderPictures): void {
+  currentSources = sources;
+}
+
+export function currentSenderPictures(): SenderPictures {
+  return currentSources;
 }
 
 /**

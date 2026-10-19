@@ -16,6 +16,33 @@ import {
 } from "../core/notify/notifications";
 import type { WinnowStore } from "../core/store/store";
 import type { Platform } from "../platform/types";
+import { MAX_MESSAGE_NOTIFICATIONS } from "../core/notify/notifications";
+import { displayName } from "../core/model/email";
+import { currentSenderPictures, resolveSenderPicture, type SenderPictures } from "./senderPictures";
+
+/** A notification's picture size: Android's large icon and the desktop's, in px. */
+export const NOTIFICATION_PICTURE_SIZE = 96;
+
+/**
+ * Each shown message's sender picture, by Gmail id, under the avatar's own rules and
+ * the sources the app is drawing avatars from. Nothing at all while previews are hidden
+ * (not even a lookup).
+ */
+export async function notificationPictures(
+  emails: readonly Email[],
+  hidePreview: boolean,
+  sources: SenderPictures = currentSenderPictures(),
+): Promise<Record<string, string>> {
+  if (hidePreview) return {};
+  const out: Record<string, string> = {};
+  await Promise.all(
+    emails.slice(0, MAX_MESSAGE_NOTIFICATIONS).map(async (email) => {
+      const url = await resolveSenderPicture(sources, email.sender, displayName(email), NOTIFICATION_PICTURE_SIZE).catch(() => null);
+      if (url) out[email.gmailId] = url;
+    }),
+  );
+  return out;
+}
 
 // ── Reply requests ────────────────────────────────────────────────────────
 
@@ -46,8 +73,11 @@ export async function announce(store: WinnowStore, platform: Platform, emails: r
   // Only Android replies from the notification itself; elsewhere Reply opens the
   // composer, so the header blocks (a profile read each) would be built for nothing.
   const info = await platform.info().catch(() => null);
-  const heads = info?.os === "android" ? await store.notificationReplyHeads(emails.slice(0, 5)) : {};
-  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, heads));
+  const [heads, pictures] = await Promise.all([
+    info?.os === "android" ? store.notificationReplyHeads(emails.slice(0, 5)) : Promise.resolve({}),
+    notificationPictures(emails, preferences.notificationHidePreview),
+  ]);
+  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, heads, pictures));
 }
 
 // ── Presses and kept replies ──────────────────────────────────────────────

@@ -164,6 +164,9 @@ export const webPlatform: WebPlatform = {
       const notification = new NotificationCtor(message.title, {
         body: mail.hidePreview ? "New message" : message.subject,
         tag: `winnow-${message.gmailId}`,
+        // The sender's avatar picture, under the same settings as the app's avatars;
+        // none (the browser's own icon) when there is none or previews are hidden.
+        ...(message.picture && !mail.hidePreview ? { icon: message.picture } : {}),
       });
       notification.onclick = () => {
         notification.close();

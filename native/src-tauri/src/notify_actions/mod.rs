@@ -89,6 +89,11 @@ pub struct MessageNotice {
     /// The composer's header block for a reply (see `plan.rs`). Absent: no inline reply.
     #[serde(default)]
     pub reply_head: Option<String>,
+    /// The sender's picture URL, resolved by the web layer under the avatar settings
+    /// (`resolveSenderPicture`); absent or null: none. Carried through to the platform
+    /// unchanged; not drawn by the native notifications yet.
+    #[serde(default)]
+    pub picture: Option<String>,
 }
 
 /// Everything one sync wants to announce.
@@ -113,7 +118,12 @@ impl NotificationBatch {
     pub fn sanitised(mut self) -> Self {
         self.messages.retain(|m| plan::valid_gmail_id(&m.gmail_id));
         self.messages.truncate(MAX_CHILDREN);
+        let hide_preview = self.hide_preview;
         for message in &mut self.messages {
+            // A hidden preview hides who it is from; a picture would say it.
+            if hide_preview {
+                message.picture = None;
+            }
             message.title = clip(&message.title);
             message.subject = clip(&message.subject);
             message.preview = clip(&message.preview);
@@ -310,6 +320,7 @@ mod tests {
             preview: "x".repeat(500),
             received_at: 0,
             reply_head: Some(head()),
+            picture: None,
         }
     }
 
@@ -329,6 +340,29 @@ mod tests {
             serde_json::from_str(r#"{"total":1,"summaryTitle":"x","messages":[]}"#).unwrap();
         assert_eq!(bare.actions, ActionSet::default());
         assert!(!bare.hide_preview);
+    }
+
+    #[test]
+    fn the_picture_is_carried_and_dropped_when_previews_are_hidden() {
+        let mut with_picture = notice("p1");
+        with_picture.picture = Some("https://example.test/a.png".into());
+        let batch = |hide_preview: bool| NotificationBatch {
+            total: 1,
+            summary_title: "Ada".into(),
+            summary_body: String::new(),
+            messages: vec![with_picture.clone()],
+            actions: ActionSet::default(),
+            hide_preview,
+        };
+        assert_eq!(
+            batch(false).sanitised().messages[0].picture.as_deref(),
+            Some("https://example.test/a.png")
+        );
+        assert_eq!(batch(true).sanitised().messages[0].picture, None);
+        // An older web layer sends no picture at all.
+        let old: MessageNotice =
+            serde_json::from_str(r#"{"messageId":1,"gmailId":"a","title":"Ada"}"#).unwrap();
+        assert_eq!(old.picture, None);
     }
 
     #[test]

@@ -108,7 +108,7 @@ describe("webPlatform background polling", () => {
 });
 
 describe("webPlatform notifications", () => {
-  type Shown = { title: string; options: { body?: string; tag?: string }; onclick: (() => void) | null; closed: boolean };
+  type Shown = { title: string; options: { body?: string; tag?: string; icon?: string }; onclick: (() => void) | null; closed: boolean };
   const shown: Shown[] = [];
   beforeEach(() => {
     shown.length = 0;
@@ -116,7 +116,7 @@ describe("webPlatform notifications", () => {
       static permission = "granted";
       static requestPermission = async () => "granted";
       onclick: (() => void) | null = null;
-      constructor(title: string, options: { body?: string; tag?: string }) {
+      constructor(title: string, options: { body?: string; tag?: string; icon?: string }) {
         const entry: Shown = { title, options, onclick: null, closed: false };
         shown.push(entry);
         Object.defineProperty(this, "onclick", {
@@ -140,8 +140,8 @@ describe("webPlatform notifications", () => {
     summaryTitle: "7 new messages",
     summaryBody: "Ada, Bob",
     messages: [
-      { messageId: 1, gmailId: "a1", threadId: null, title: "Ada", subject: "Plan", preview: "", receivedAt: 0, replyHead: null },
-      { messageId: 2, gmailId: "b2", threadId: null, title: "Bob", subject: "Lunch", preview: "", receivedAt: 0, replyHead: null },
+      { messageId: 1, gmailId: "a1", threadId: null, title: "Ada", subject: "Plan", preview: "", receivedAt: 0, replyHead: null, picture: "/demo-avatars/ada.svg" },
+      { messageId: 2, gmailId: "b2", threadId: null, title: "Bob", subject: "Lunch", preview: "", receivedAt: 0, replyHead: null, picture: null },
     ],
     actions: { reply: true, trash: true, read: true },
     hidePreview,
@@ -166,5 +166,12 @@ describe("webPlatform notifications", () => {
   it("names no subject when previews are hidden", async () => {
     await webPlatform.notifyNewMail(batch(true));
     expect(shown.map((entry) => entry.options.body)).toEqual(["New message", "New message", ""]);
+    // Nor whose it is: no sender picture either.
+    expect(shown.map((entry) => entry.options.icon)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("uses the sender's picture as the icon when there is one, and nothing otherwise", async () => {
+    await webPlatform.notifyNewMail(batch(false));
+    expect(shown.map((entry) => entry.options.icon)).toEqual(["/demo-avatars/ada.svg", undefined, undefined]);
   });
 });

@@ -44,6 +44,12 @@ export type MessageNotice = {
   receivedAt: number;
   /** The composer's header block for a reply; `null` means no inline reply. */
   replyHead: string | null;
+  /**
+   * The sender's picture, resolved exactly as the app's avatar is under the current
+   * settings (`resolveSenderPicture` in `ui/senderPictures.ts`); `null` for none (the
+   * app icon), and always `null` while lock-screen previews are hidden.
+   */
+  picture: string | null;
 };
 
 export type NotificationBatch = {
@@ -88,6 +94,7 @@ export function buildNotificationBatch(
   emails: readonly Email[],
   settings: Pick<NotificationSettings, "notificationActions" | "notificationHidePreview">,
   replyHeads: Readonly<Record<string, string>> = {},
+  pictures: Readonly<Record<string, string>> = {},
 ): NotificationBatch {
   const shown = emails.slice(0, MAX_MESSAGE_NOTIFICATIONS);
   const total = emails.length;
@@ -108,6 +115,8 @@ export function buildNotificationBatch(
       preview: previewOf(email),
       receivedAt: email.receivedAt,
       replyHead: settings.notificationActions.reply ? replyHeads[email.gmailId] ?? null : null,
+      // Who it is from is exactly what a hidden preview hides; a face or a logo says it.
+      picture: settings.notificationHidePreview ? null : pictures[email.gmailId] ?? null,
     })),
     actions: { ...settings.notificationActions },
     hidePreview: settings.notificationHidePreview,

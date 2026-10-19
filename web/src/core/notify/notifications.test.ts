@@ -72,6 +72,7 @@ describe("the batch", () => {
         preview: "Hi there,",
         receivedAt: 1_000,
         replyHead: "HEAD",
+        picture: null,
       },
     ]);
   });
@@ -96,6 +97,14 @@ describe("the batch", () => {
     expect(batch.actions).toEqual({ reply: false, trash: true, read: false });
     expect(batch.hidePreview).toBe(true);
     expect(batch.messages[0].replyHead).toBeNull();
+  });
+
+  it("carries each message's sender picture, and none at all while previews are hidden", () => {
+    const pictures = { "18a": "https://gravatar.com/avatar/x?d=404&s=192" };
+    expect(buildNotificationBatch([mail()], SETTINGS, {}, pictures).messages[0].picture).toBe(pictures["18a"]);
+    expect(buildNotificationBatch([mail({ gmailId: "18b" })], SETTINGS, {}, pictures).messages[0].picture).toBeNull();
+    const hidden = { ...SETTINGS, notificationHidePreview: true };
+    expect(buildNotificationBatch([mail()], hidden, {}, pictures).messages[0].picture).toBeNull();
   });
 
   it("previews the first line that is not a quote", () => {

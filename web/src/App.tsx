@@ -118,7 +118,7 @@ import { mailtoAddress } from "./core/mail/unsubscribe";
 import { copyText } from "./ui/clipboard";
 import { CodeBar } from "./ui/components/CodeCopy";
 import { Avatar } from "./ui/components/Avatar";
-import { imageProbe, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
+import { imageProbe, publishSenderPictures, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
 import { GravatarCache } from "./core/avatars/gravatar";
 import { contactPhotoMap } from "./core/avatars/photos";
 import { BrandLogoCache } from "./core/avatars/logoCache";
@@ -1199,6 +1199,10 @@ export function App({ store }: Props) {
     }),
     [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache],
   );
+  // The same sources for a new-mail notification's sender picture (`announce`).
+  useEffect(() => {
+    publishSenderPictures(senderPictures);
+  }, [senderPictures]);
 
   /**
    * A phone's second chance before something that cannot be taken back: deleting from

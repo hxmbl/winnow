@@ -494,6 +494,7 @@ describe("notifyNewMail()", () => {
         preview: "Hi",
         receivedAt: 1,
         replyHead: null,
+        picture: null,
       },
     ],
     actions: { reply: true, trash: false, read: true },
