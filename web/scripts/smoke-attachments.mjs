@@ -12,7 +12,7 @@
  *     the chips with remove, the 25 MB refusal, a desktop drop, and the device copy
  *     keeping the files.
  *   - Drive links (demo, no network): a file over 25 MB offers "Send as a Drive link",
- *     which adds a Drive chip and the "File name (size) — link" line; Send warns about an
+ *     then the plain-words consent dialog, then a Drive chip and the "File name (size) — link" line; Send warns about an
  *     address Drive can't share with before anything goes; Settings → Privacy shows the
  *     row. Nothing reaches Google.
  */
@@ -270,7 +270,17 @@ export async function attachmentsSmoke({ browser, url, check, section }) {
     await offer.waitFor({ timeout: 5_000 }).catch(() => undefined);
     check("a file over 25 MB offers Send as a Drive link", (await offer.count()) === 1 && /Send as a Drive link/.test((await offer.textContent()) ?? ""));
     await offer.click().catch(() => undefined);
-    // The demo is "allowed" already, so no consent dialog: straight to the made-up upload.
+    // The plain-words dialog comes before anything is asked (the demo then "allows"
+    // without Google and makes up the upload).
+    const consent = p.locator("[data-drive-consent]");
+    await consent.waitFor({ timeout: 5_000 }).catch(() => undefined);
+    const consentText = (await consent.textContent().catch(() => "")) ?? "";
+    check(
+      "a plain-words dialog says what Drive access allows and what it doesn't, before asking",
+      /Winnow will be able to/.test(consentText) && /Winnow won't be able to/.test(consentText) && /anything else in your Drive/.test(consentText),
+      consentText.slice(0, 160),
+    );
+    await p.locator("[data-drive-consent-continue]").click().catch(() => undefined);
     await sheet.locator('[data-drive-chip="film.mov"]').waitFor({ timeout: 5_000 }).catch(() => undefined);
     check("the upload adds a Drive chip", (await sheet.locator('[data-drive-chip="film.mov"]').count()) === 1);
     const body = await sheet.locator('textarea[aria-label="Message"]').inputValue();

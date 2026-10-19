@@ -15,6 +15,8 @@
  *   inbox · reader · drawer (phone dock menu / desktop sidebar) · settings (as it opens,
  *   then a long category scrolled to its end) · the Appearance picker · compose ·
  *   the status pill carrying an Undo · inbox clear (a fake Gmail with an empty inbox)
+ *   · Drive links: consent dialog, chip and line, share warning, Settings → Privacy
+ *     with Remote images = Never (extras)
  *   · the phone reader scrolled partway down a long message, its pill folded (extras,
  *   both hands, light/dark/OLED)
  *
@@ -129,6 +131,14 @@ function plan() {
     const scheme = mode === "light" ? "light" : "dark";
     extra(`reader-scrolled-right-${mode}`, mode, scheme, "phone", ["reader-scrolled"]);
     extra(`reader-scrolled-left-${mode}`, mode, scheme, "phone", ["reader-scrolled"], { prefs: { leftHanded: true } });
+  }
+  // Large files as Drive links (1.3.3): the consent dialog, the chip and link line, the
+  // share warning, and Settings → Privacy, phone and desktop, light and dark. Remote
+  // images = Never on Privacy, so its "Paused" hints show too.
+  for (const device of ["phone", "desktop"]) {
+    extra("drive-light", "light", "light", device, ["drive-consent", "drive-compose", "drive-warning"]);
+    extra("drive-dark", "dark", "dark", device, ["drive-consent", "drive-compose", "drive-warning"]);
+    extra("privacy-never-light", "light", "light", device, ["privacy"], { prefs: { imagePolicy: "never", brandLogos: true, gravatars: true } });
   }
   extra("small-phone-dark", "dark", "dark", "phone-small", ["inbox", "drawer", "settings-end", "compose", "pill-undo"]);
   extra("tablet-light", "light", "light", "tablet", ["inbox", "reader", "drawer"]);
@@ -519,6 +529,56 @@ async function stage(page, cdp, job, screen) {
       await page.locator("[data-composer]").first().waitFor({ timeout: 5_000 });
       await settle(page, 600);
       return;
+    case "drive-consent":
+    case "drive-compose":
+    case "drive-warning": {
+      // Drive links (demo, no network): a 26 MB file, "Send as a Drive link", the consent
+      // dialog, the chip and link line, then Send's warning for an address Drive can't share with.
+      if (phone) await page.locator("[data-compose-fab]:visible").first().tap();
+      else await page.locator("[data-compose]:visible").first().click();
+      const sheet = page.locator("[data-composer]").first();
+      await sheet.waitFor({ timeout: 5_000 });
+      const to = sheet.locator('input[aria-label="To"]');
+      for (const address of ["ada@example.com", "who@example.invalid"]) {
+        await to.fill(address);
+        await to.press("Enter");
+      }
+      await sheet.locator('input[aria-label="Subject"]').fill("The film").catch(() => undefined);
+      await sheet.locator('textarea[aria-label="Message"]').fill("Here it is.");
+      await sheet.locator("[data-attach-input]").setInputFiles([
+        { name: "film.mov", mimeType: "video/quicktime", buffer: Buffer.alloc(26 * 1024 * 1024, 0) },
+      ]);
+      await tap(sheet.locator("[data-drive-offer]"));
+      await page.locator("[data-drive-consent]").waitFor({ timeout: 5_000 });
+      await settle(page, 400);
+      if (screen === "drive-consent") return;
+      await tap(page.locator("[data-drive-consent-continue]"));
+      await sheet.locator("[data-drive-chip]").waitFor({ timeout: 5_000 });
+      await settle(page, 400);
+      if (screen === "drive-compose") return;
+      if (phone) await tap(page.locator("[data-composer] [aria-label='Send'], [data-composer] button:has-text('Send')").first());
+      else await sheet.locator("button", { hasText: /^Send/ }).first().click();
+      await page.locator('[role="dialog"][aria-label*="open the Drive link"]').waitFor({ timeout: 5_000 });
+      await settle(page, 400);
+      return;
+    }
+    case "privacy": {
+      if (phone) {
+        await page.locator("[data-phone-dock] button[data-dock-expand]").tap();
+        await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+        await page.waitForTimeout(350);
+        await page.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').tap();
+      } else {
+        await page.keyboard.press(",");
+      }
+      const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+      await dialog.waitFor({ timeout: 5_000 });
+      const tab = dialog.locator('[role="tab"][data-category="privacy"]');
+      if ((await tab.count()) > 0) await tab.click();
+      else await tap(dialog.locator('[data-category="privacy"]').first());
+      await settle(page, 450);
+      return;
+    }
     case "pill-undo":
       if (phone) {
         await swipe(page, cdp, page.locator(ROW).nth(1));

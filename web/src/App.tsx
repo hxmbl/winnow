@@ -1725,10 +1725,13 @@ export function App({ store }: Props) {
     [driveApi],
   );
 
+  /** The demo shows the same dialog once, and "allows" without asking Google. */
+  const demoDriveAllowedRef = useRef(false);
   /** "Send as a Drive link": straight to the upload once allowed, the dialog first otherwise. */
   const sendAsDriveLink = useCallback(
     (files: File[]) => {
-      if (storeRef.current.getSnapshot().contactsAccess === "demo" || driveAccess === "granted") {
+      const demo = storeRef.current.getSnapshot().contactsAccess === "demo";
+      if ((demo && demoDriveAllowedRef.current) || (!demo && driveAccess === "granted")) {
         void uploadToDrive(files);
       } else {
         setDriveConsent(files);
@@ -1741,6 +1744,11 @@ export function App({ store }: Props) {
   const allowDrive = useCallback(async () => {
     const files = driveConsent ?? [];
     setDriveConsent(null);
+    if (storeRef.current.getSnapshot().contactsAccess === "demo") {
+      demoDriveAllowedRef.current = true;
+      await uploadToDrive(files);
+      return;
+    }
     const bridge = sessionRef.current;
     if (!bridge) return;
     setDriveProblem(null);
@@ -4073,7 +4081,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       {driveConsent && (
         <DriveConsent
           files={driveConsent}
-          web={info?.kind !== "desktop" && !info?.nativeOAuth}
+          web={!isDemo && info?.kind !== "desktop" && !info?.nativeOAuth}
           onContinue={() => void allowDrive()}
           onCancel={() => setDriveConsent(null)}
         />
