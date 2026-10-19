@@ -166,10 +166,9 @@ pub(crate) fn picture_bytes(picture: &str) -> Option<Vec<u8>> {
     let (signature, data): (&[u8], &str) =
         if let Some(rest) = picture.strip_prefix("data:image/png;base64,") {
             (b"\x89PNG\r\n\x1a\n", rest)
-        } else if let Some(rest) = picture.strip_prefix("data:image/jpeg;base64,") {
-            (b"\xff\xd8\xff", rest)
         } else {
-            return None;
+            let rest = picture.strip_prefix("data:image/jpeg;base64,")?;
+            (b"\xff\xd8\xff", rest)
         };
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data)
