@@ -87,7 +87,7 @@ describe("swipe to Trash", () => {
     const snap = store.getSnapshot();
     expect(snap.all.find((email) => email.id === row.id)?.mailbox).toBe("trash");
     expect(snap.view.threads.some((candidate) => candidate.representative.id === row.id)).toBe(false);
-    expect(snap.undo).toEqual({ label: "Moved to Trash." });
+    expect(snap.undo).toMatchObject({ label: "Moved to Trash." });
   });
 
   it("Undo puts the mailbox and the unread flag back, and clears the strip", () => {
@@ -134,7 +134,7 @@ describe("swipe to Trash", () => {
     store.setMailbox("trash");
     const id = store.view.threads[0]!.representative.id;
     store.moveWithUndo(id, "inbox");
-    expect(store.getSnapshot().undo).toEqual({ label: "Moved to Inbox." });
+    expect(store.getSnapshot().undo).toMatchObject({ label: "Moved to Inbox." });
     expect(store.getSnapshot().all.find((email) => email.id === id)?.mailbox).toBe("inbox");
     store.undoLast();
     expect(store.getSnapshot().all.find((email) => email.id === id)?.mailbox).toBe("trash");
@@ -157,7 +157,7 @@ describe("swipe to discard a draft", () => {
     await store.refreshDrafts();
     store.discardDraftWithUndo(11);
     expect(store.getSnapshot().drafts.map((row) => row.id)).toEqual([12]);
-    expect(store.getSnapshot().undo).toEqual({ label: "Draft discarded." });
+    expect(store.getSnapshot().undo).toMatchObject({ label: "Draft discarded." });
     // A listing meanwhile does not bring it back.
     await store.refreshDrafts();
     expect(store.getSnapshot().drafts.map((row) => row.id)).toEqual([12]);

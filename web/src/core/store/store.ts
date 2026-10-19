@@ -347,6 +347,12 @@ export type StoreState = {
   error: string | null;
   /** A transient message: "3 messages failed to download". */
   notice: string | null;
+  /**
+   * A short-lived word about something the user just did ("Draft saved.", "Message
+   * sent."), shown in the status pill and gone by itself after its time. `at` orders it
+   * against the other notices the pill could show: the newest wins.
+   */
+  flash: { text: string; at: number } | null;
 
   account: { email: string } | null;
 
@@ -412,19 +418,15 @@ export type StoreState = {
 
   syncing: boolean;
   /**
-   * A single undo, offered by whatever can be taken back.
+   * A single undo, offered by whatever can be taken back: a swipe's Trash or Restore, a
+   * draft discarded with a swipe. Shown in the status pill with its Undo button.
    *
-   * `null` most of the time, and that is the point: an undo strip that is always on
-   * screen is a banner, and a banner you cannot act on is noise. Only one action is
-   * offered at a time, because the things that *do* have a natural inverse do not need
-   * one — a star is a toggle, a move is answered by the message reappearing, a filter
-   * has its own pill.
-   *
-   * Mark all read used to be its one producer and has been removed (opening a message
-   * marks it read; mass-marking let mail look read that never was). The slot and the
-   * strip stay for the next verb with no on-screen inverse.
+   * `null` most of the time, and that is the point: an Undo that is always on screen is
+   * a banner, and a banner you cannot act on is noise. Only one action is offered at a
+   * time — a new offer lets the previous one go — so the pill's Undo always takes back
+   * the action it names. `at` orders it against the pill's other notices.
    */
-  undo: { label: string } | null;
+  undo: { label: string; at: number } | null;
   /**
    * What the sync is doing, for the status line. `null` when not syncing.
    *
@@ -816,6 +818,7 @@ export class WinnowStore {
       status: options.backend ? "loading" : "ready",
       error: null,
       notice: null,
+      flash: null,
       account: null,
       googleContacts: options.backend ? [] : this.seedContacts,
       contactsAccess: options.backend ? "unavailable" : "demo",
@@ -2368,7 +2371,7 @@ export class WinnowStore {
         this.set({ undo: null });
       }, commitAfterMs);
     }
-    this.set({ undo: { label } });
+    this.set({ undo: { label, at: Date.now() } });
   }
 
   /** Let the offered undo go: its commit (if any) runs. The strip is the caller's. */
@@ -3014,6 +3017,29 @@ export class WinnowStore {
     this.set({ notice: message });
   }
 
+  private flashTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Say, for `ms`, what the user's last action did ("Draft saved."): the status pill
+   * shows it and it goes by itself. A newer flash replaces it, with its own time.
+   */
+  flash(text: string, ms: number): void {
+    if (this.flashTimer) clearTimeout(this.flashTimer);
+    const flash = { text, at: Date.now() };
+    this.flashTimer = setTimeout(() => {
+      this.flashTimer = null;
+      if (this.state.flash === flash) this.set({ flash: null });
+    }, ms);
+    this.set({ flash });
+  }
+
+  /** Take the flash down before its time. */
+  dismissFlash(): void {
+    if (this.flashTimer) clearTimeout(this.flashTimer);
+    this.flashTimer = null;
+    if (this.state.flash !== null) this.set({ flash: null });
+  }
+
   setError(message: string | null): void {
     this.set({ error: message });
   }
@@ -3050,6 +3076,7 @@ export class WinnowStore {
       overlay: "none",
       syncing: false,
       undo: null,
+      flash: null,
       syncPhase: null,
       syncFraction: null,
       syncStage: null,
@@ -3119,6 +3146,7 @@ export class WinnowStore {
       overlay: "none",
       syncing: false,
       undo: null,
+      flash: null,
       syncPhase: null,
       syncFraction: null,
       syncStage: null,
