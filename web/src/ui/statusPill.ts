@@ -69,6 +69,15 @@ export function noticeKey(notice: PillNotice): string {
   return `${notice.kind}:${notice.at}`;
 }
 
+/**
+ * The time to read a notice at: the last tick, but never before the notice itself. The
+ * pill outlives its notices and its clock only ticks during a countdown, so a send's
+ * first paint would otherwise count from a stale tick ("Sending in 11s…" on a 10s wait).
+ */
+export function pillClock(tick: number, notice: PillNotice | null): number {
+  return notice ? Math.max(tick, notice.at) : tick;
+}
+
 /** "Sending in 8s…", or "Sending…" in the last moment. */
 export function sendingText(deadline: number, now: number): string {
   const left = Math.max(0, Math.ceil((deadline - now) / 1000));

@@ -24,6 +24,7 @@ import {
   currentNotice,
   noticeKey,
   pillAnnouncement,
+  pillClock,
   pillText,
   returnsToSync,
   type PillNotice,
@@ -113,8 +114,9 @@ export function StatusPill(props: Props) {
   const shown: PillNotice | null =
     live ?? (beat === null ? null : { kind: "sync", at: beat, text: props.syncLine, ok: props.syncOk });
 
-  // The countdown ticks only while a send is waiting.
-  const [now, setNow] = useState(() => Date.now());
+  // The countdown ticks only while a send is waiting (`pillClock` keeps a stale tick out).
+  const [tick, setNow] = useState(() => Date.now());
+  const now = pillClock(tick, shown);
   useEffect(() => {
     if (shown?.kind !== "sending") return;
     setNow(Date.now());

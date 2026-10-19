@@ -5,6 +5,7 @@ import {
   isAction,
   noticeKey,
   pillAnnouncement,
+  pillClock,
   pillText,
   returnsToSync,
   sendingText,
@@ -84,6 +85,14 @@ describe("the words", () => {
     expect(sendingText(10_000, 9_100)).toBe("Sending in 1s…");
     expect(sendingText(10_000, 10_000)).toBe("Sending…");
     expect(sendingText(10_000, 12_000)).toBe("Sending…");
+  });
+
+  it("never counts a new send from a stale tick", () => {
+    // The pill's clock last ticked a minute ago; a 10s send starts now.
+    const notice = sending(60_000, 70_000);
+    expect(pillText(notice, pillClock(0, notice))).toBe("Sending in 10s…");
+    expect(pillClock(65_000, notice)).toBe(65_000);
+    expect(pillClock(5, null)).toBe(5);
   });
 
   it("says each notice as it is", () => {

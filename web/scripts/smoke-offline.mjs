@@ -64,7 +64,7 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
       };
     });
     check(
-      "on a phone, Send holds the message under a Sending… strip whose Undo is on screen and tappable",
+      "on a phone, Send holds the message under a Sending… pill whose Undo is on screen and tappable",
       placed?.inView === true && placed.reachable === true && /Sending in (9|10)s/.test(placed.text),
       JSON.stringify(placed),
     );
