@@ -46,7 +46,8 @@ export type Command =
   | { type: "blurText" }
   | { type: "toggleShortcutsOverlay" }
   | { type: "openSettings" }
-  | { type: "toggleSidebar" };
+  | { type: "toggleSidebar" }
+  | { type: "undo" };
 
 /** The modifiers as the router sees them, plus the key itself. */
 export type KeyModifiers = {
@@ -105,6 +106,11 @@ export type KeyContext = {
   hasActionTarget: boolean;
   /** How many pills are in the rail, so `1`–`9` can be bounds-checked. */
   railCount: number;
+  /**
+   * The status pill is offering an Undo, so `z` (and Ctrl+Z / ⌘Z) can take it. Optional
+   * so a caller with no undo need not say so; unset means none is on offer.
+   */
+  undoAvailable?: boolean;
 };
 
 export const DEFAULT_CONTEXT: KeyContext = {
@@ -302,6 +308,16 @@ export const BINDINGS: readonly Binding[] = [
     command: { type: "trash" },
   },
   {
+    // Gmail's `z`. Only with an Undo on offer in the status pill, and it takes that one
+    // (the newest) and nothing older. Ctrl+Z / ⌘Z do the same outside a text field;
+    // see `commandForKey`, which lets that one modifier through for it.
+    keys: "z",
+    help: "Undo the last move (also Ctrl+Z / ⌘Z)",
+    matches: { keys: ["z"] },
+    when: ({ event, context }) => event.shiftKey !== true && context.undoAvailable === true,
+    command: { type: "undo" },
+  },
+  {
     keys: "u / m",
     help: "Mark read or unread",
     matches: { keys: ["u", "m"] },
@@ -441,6 +457,13 @@ const PALETTE_BINDINGS: readonly Binding[] = [
   },
 ];
 
+/** Ctrl+Z or ⌘Z alone: one of the two, no Shift (redo) and no Alt. */
+function isUndoChord(key: string, event: KeyModifiers): boolean {
+  if (key !== "z" && key !== "Z") return false;
+  if (event.shiftKey || event.altKey) return false;
+  return (event.ctrlKey ?? false) !== (event.metaKey ?? false);
+}
+
 /**
  * Resolve a key event to a command, or `null` to let it through. Every table
  * lives in this file, so the cheat sheet, toolbar hints and router cannot drift.
@@ -453,7 +476,15 @@ export function commandForKey(
   // 1. Nothing is routed before the app is ready.
   if (!context.ready) return null;
 
-  // 2. Never intercept a system shortcut.
+  // 2. Never intercept a system shortcut — with one exception: Ctrl+Z / ⌘Z takes the
+  //    pill's Undo, but only outside every text field, the composer and the modals, and
+  //    only while an Undo is on offer. Anywhere else it is left to the platform, so
+  //    typing's own undo is never taken over, and with nothing to undo it passes through.
+  if (isUndoChord(key, event)) {
+    const free =
+      !context.composerOpen && !context.textEditing && !context.overlayVisible && !context.navigationVisible;
+    return free && context.undoAvailable === true ? { type: "undo" } : null;
+  }
   if (event.ctrlKey || event.altKey || event.metaKey) return null;
 
   // 3. A text field owns the keyboard — except Escape, which leaves it. The

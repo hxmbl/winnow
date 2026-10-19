@@ -671,6 +671,20 @@ export interface PlatformBridge {
 
 type Listener = () => void;
 
+/**
+ * What the pill says after a move that can be undone, in the swipe's words: "Moved to
+ * Trash." / "Archived." for one message, "Moved 5 to Trash." / "Archived 5." for a
+ * batch, and "Moved 5." when a batch went to more than one place.
+ */
+export function undoLabel(destinations: readonly Mailbox[]): string {
+  const count = destinations.length;
+  const first = destinations[0];
+  const same = destinations.every((to) => to === first);
+  if (!same) return `Moved ${count}.`;
+  if (first === "archive") return count === 1 ? "Archived." : `Archived ${count}.`;
+  return count === 1 ? `Moved to ${MAILBOX_LABEL[first]}.` : `Moved ${count} to ${MAILBOX_LABEL[first]}.`;
+}
+
 /** How a mutation can be undone. */
 type Undo = () => void;
 
@@ -2402,23 +2416,86 @@ export class WinnowStore {
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!email || email.mailbox === mailbox) return;
     if (email.mailbox === "sent" && mailbox !== "trash") return;
-    const previousMailbox = email.mailbox;
-    const previousUnread = email.unread;
-    const markedSender = mailbox === "trash" && !this.trashSenders.includes(email.sender);
-    this.move(id, mailbox);
+    this.movesWithUndo([{ id, to: mailbox }]);
+  }
+
+  /**
+   * Archive with Undo: `e`, the reader's and the selection bar's Archive, the row menu.
+   * Each message goes where `archive` sends it (out of the inbox, back from the archive,
+   * nothing from Sent), and one offer takes back every one of them.
+   */
+  archiveWithUndo(ids: Iterable<number>): void {
+    const moves: { id: number; to: Mailbox }[] = [];
+    for (const id of new Set(ids)) {
+      const email = this.state.all.find((candidate) => candidate.id === id);
+      if (!email || email.mailbox === "sent") continue;
+      moves.push({ id, to: email.mailbox === "inbox" ? "archive" : "inbox" });
+    }
+    this.movesWithUndo(moves);
+  }
+
+  /**
+   * Trash with Undo: `#`/Delete, the reader's and the selection bar's Trash, the row
+   * menu. What `trash` means is kept: in Drafts it discards (one draft with Undo, as the
+   * swipe does; several at once as before, without), and in the Trash it deletes for
+   * good, which nothing can take back, so it offers nothing.
+   */
+  trashWithUndo(ids: Iterable<number>): void {
+    const list = [...new Set(ids)];
+    if (this.state.mailbox === "drafts") {
+      if (list.length === 1 && this.draftRow(list[0])) this.discardDraftWithUndo(list[0]);
+      else void this.discardDrafts(list);
+      return;
+    }
+    const moves: { id: number; to: Mailbox }[] = [];
+    for (const id of list) {
+      const email = this.state.all.find((candidate) => candidate.id === id);
+      if (!email) continue;
+      if (email.mailbox === "trash") this.deletePermanently(id);
+      else moves.push({ id, to: "trash" });
+    }
+    this.movesWithUndo(moves);
+  }
+
+  /** Move to a chosen mailbox with Undo: the selection bar's and row menu's Move, Not spam. */
+  moveManyWithUndo(ids: Iterable<number>, mailbox: Mailbox): void {
+    this.movesWithUndo([...new Set(ids)].map((id) => ({ id, to: mailbox })));
+  }
+
+  /**
+   * Make a set of moves and offer one Undo for all of them. Each goes through `move`;
+   * Undo puts back, per message, the mailbox and unread flag it had, and only for a
+   * message still where this action put it (one moved on since is left alone), and
+   * takes back the trash marks this action added. A newer offer lets this one go, as
+   * ever, so each Undo takes back its own action and nothing else.
+   */
+  private movesWithUndo(moves: readonly { id: number; to: Mailbox }[]): void {
+    const done: { id: number; to: Mailbox; from: Mailbox; unread: boolean }[] = [];
+    const markedSenders = new Set<string>();
+    for (const { id, to } of moves) {
+      const email = this.state.all.find((candidate) => candidate.id === id);
+      if (!email || email.mailbox === to) continue;
+      if (to === "trash" && !this.trashSenders.includes(email.sender)) markedSenders.add(email.sender);
+      done.push({ id, to, from: email.mailbox, unread: email.unread });
+      this.move(id, to);
+    }
+    if (done.length === 0) return;
     const backend = this.backend;
-    this.offerUndo(`Moved to ${MAILBOX_LABEL[mailbox]}.`, () => {
-      const now = this.state.all.find((candidate) => candidate.id === id);
-      if (!now || now.mailbox !== mailbox || this.backend !== backend) return;
-      if (markedSender) this.trashSenders = this.trashSenders.filter((sender) => sender !== email.sender);
-      this.mutate(
-        id,
-        () => ({ ...now, mailbox: previousMailbox, unread: previousUnread }),
-        async () => {
-          await this.backend?.moveToMailbox(id, previousMailbox === "sent" ? "archive" : previousMailbox);
-        },
-        { previousMailbox: mailbox, previousUnread: now.unread },
-      );
+    this.offerUndo(undoLabel(done.map((move) => move.to)), () => {
+      if (this.backend !== backend) return;
+      if (markedSenders.size > 0) this.trashSenders = this.trashSenders.filter((sender) => !markedSenders.has(sender));
+      for (const move of done) {
+        const now = this.state.all.find((candidate) => candidate.id === move.id);
+        if (!now || now.mailbox !== move.to) continue;
+        this.mutate(
+          move.id,
+          () => ({ ...now, mailbox: move.from, unread: move.unread }),
+          async () => {
+            await this.backend?.moveToMailbox(move.id, move.from === "sent" ? "archive" : move.from);
+          },
+          { previousMailbox: move.to, previousUnread: now.unread },
+        );
+      }
     });
   }
 

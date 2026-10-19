@@ -2173,6 +2173,7 @@ export function App({ store }: Props) {
         // pills take digits too. Counting the store's list would make `7` address a pill
         // that is not there.
         railCount: rail.length,
+        undoAvailable: snap.undo !== null,
       };
 
       const command = commandForKey(event.key, keyContext, {
@@ -2198,8 +2199,8 @@ export function App({ store }: Props) {
       // With rows selected, the message verbs act on all of them.
       if (batch.size > 0 && (command.type === "archive" || command.type === "trash" || command.type === "toggleRead")) {
         const ids = orderedSelection(batch, snap.view.threads.map((row) => row.representative.id));
-        if (command.type === "archive") s.archiveMany(ids);
-        else if (command.type === "trash") s.trashMany(ids);
+        if (command.type === "archive") s.archiveWithUndo(ids);
+        else if (command.type === "trash") s.trashWithUndo(ids);
         else s.setReadMany(ids, snap.all.some((email) => batch.has(email.id) && email.unread));
         if (command.type !== "toggleRead") setSelection(EMPTY_SELECTION);
         return;
@@ -2245,10 +2246,10 @@ export function App({ store }: Props) {
           // inbox, unarchives from the archive and restores from the bin, and doing
           // that in one place is what keeps the optimistic update, the undo and the
           // server call agreeing about what happened.
-          if (selectedId !== undefined) exitRows([selectedId], () => s.archive(selectedId));
+          if (selectedId !== undefined) exitRows([selectedId], () => s.archiveWithUndo([selectedId]));
           break;
         case "trash":
-          if (selectedId !== undefined) exitRows([selectedId], () => s.trash(selectedId));
+          if (selectedId !== undefined) exitRows([selectedId], () => s.trashWithUndo([selectedId]));
           break;
         case "toggleRead":
           if (selectedId !== undefined) toggleReadRef.current(selectedId);
@@ -2297,6 +2298,10 @@ export function App({ store }: Props) {
           break;
         case "toggleSidebar":
           setSidebarOpen((open) => !open);
+          break;
+        case "undo":
+          // The pill's newest offer, exactly as its Undo button takes it.
+          s.undoLast();
           break;
         case "openSettings":
           s.setOverlay(snap.overlay === "settings" ? "none" : "settings");
@@ -2987,10 +2992,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     count={selection.size}
                     mailbox={snapshot.mailbox}
                     anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
-                    onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveMany(ids)))}
-                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashMany(ids)))}
+                    onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveWithUndo(ids)))}
+                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids)))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
-                    onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+                    onMove={(target) => runBatch((s, ids) => s.moveManyWithUndo(ids, target))}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
@@ -3050,10 +3055,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     count={selection.size}
                     mailbox={snapshot.mailbox}
                     anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
-                    onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveMany(ids)))}
-                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashMany(ids)))}
+                    onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveWithUndo(ids)))}
+                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids)))}
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
-                    onMove={(target) => runBatch((s, ids) => s.moveMany(ids, target))}
+                    onMove={(target) => runBatch((s, ids) => s.moveManyWithUndo(ids, target))}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
@@ -3248,11 +3253,11 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 }),
                 onArchive: act((s, snap) => {
                   const id = snap.view.selected?.id;
-                  if (id !== undefined) exitRows([id], () => s.archive(id));
+                  if (id !== undefined) exitRows([id], () => s.archiveWithUndo([id]));
                 }),
                 onTrash: act((s, snap) => {
                   const id = snap.view.selected?.id;
-                  if (id !== undefined) exitRows([id], () => s.trash(id));
+                  if (id !== undefined) exitRows([id], () => s.trashWithUndo([id]));
                 }),
                 onReply: openReply,
                 onForward: openForward,
@@ -3261,7 +3266,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   // `store.move` does — so it inherits the optimistic update, the undo,
                   // and the label pair Gmail needs (drop SPAM, add INBOX) rather than
                   // needing a third code path for the same operation.
-                  if (snap.view.selected) s.move(snap.view.selected.id, "inbox");
+                  if (snap.view.selected) s.moveManyWithUndo([snap.view.selected.id], "inbox");
                 }),
                 onShowOriginal: () => {
                   // Opened in the system browser, which is a different origin from the
@@ -3643,13 +3648,13 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 reply: () => composeFor(email.id, "reply"),
                 replyAll: () => composeFor(email.id, "replyAll"),
                 forward: () => composeFor(email.id, "forward"),
-                archive: () => runOn((s, ids) => s.archiveMany(ids)),
-                trash: () => runOn((s, ids) => s.trashMany(ids)),
+                archive: () => runOn((s, ids) => s.archiveWithUndo(ids)),
+                trash: () => runOn((s, ids) => s.trashWithUndo(ids)),
                 setRead: (read) => {
                   if (single && !read) toggleReadFor(email.id);
                   else store.setReadMany(menu.ids, read);
                 },
-                move: (target) => runOn((s, ids) => s.moveMany(ids, target)),
+                move: (target) => runOn((s, ids) => s.moveManyWithUndo(ids, target)),
                 changeFilters: smartFiltersHere ? () => openFilterPicker(menu.ids) : undefined,
                 toggleMuteSender: toggleMute,
                 findFrom: showAll,

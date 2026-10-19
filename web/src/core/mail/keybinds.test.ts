@@ -20,7 +20,7 @@ import {
 function reachableCommandTypes(): Set<string> {
   const types = new Set<string>();
   const keys = [
-    ..."jkoseurfmuhc#/,?!123456789[".split(""),
+    ..."jkoseurfmuhcz#/,?!123456789[".split(""),
     "Enter",
     "Escape",
     "ArrowUp",
@@ -92,6 +92,7 @@ const REACHABLE_CONTEXTS: readonly KeyContext[] = [
   context({ composerOpen: true, hasActionTarget: true, railCount: 9, viewerOpen: true }),
   context({ textEditing: true }),
   context({ textEditing: true, composerOpen: true }),
+  context({ hasActionTarget: true, undoAvailable: true }),
 ];
 
 describe("commandForKey — not ready", () => {
@@ -444,6 +445,8 @@ describe("the cheat sheet", () => {
       Escape: context({ viewerOpen: true, hasActionTarget: true }),
       // Digits need a rail to address.
       "1": context({ railCount: 9, hasActionTarget: true }),
+      // Undo needs an offer in the status pill.
+      z: context({ hasActionTarget: true, undoAvailable: true }),
     };
 
     for (const binding of BINDINGS) {
@@ -489,6 +492,7 @@ describe("the cheat sheet", () => {
       "toggleShortcutsOverlay",
       "openSettings",
       "toggleSidebar",
+      "undo",
     ];
 
     for (const type of expected) {
@@ -631,5 +635,34 @@ describe("the sidebar shortcut on other layouts", () => {
     expect(commandForKey("ü", DEFAULT_CONTEXT, { code: "BracketLeft", altKey: true })).toBeNull();
     expect(commandForKey("ü", { ...DEFAULT_CONTEXT, textEditing: true }, { code: "BracketLeft" })).toBeNull();
     expect(commandForKey("ü", DEFAULT_CONTEXT, { code: "KeyU" })).toBeNull();
+  });
+});
+
+describe("the undo key", () => {
+  const offer = { ...DEFAULT_CONTEXT, undoAvailable: true };
+  it("z takes the pill's Undo, only while one is on offer", () => {
+    expect(commandForKey("z", offer)).toEqual({ type: "undo" });
+    expect(commandForKey("z", DEFAULT_CONTEXT)).toBeNull();
+    expect(commandForKey("z", offer, { shiftKey: true })).toBeNull();
+  });
+  it("Ctrl+Z and ⌘Z do the same outside a text field", () => {
+    expect(commandForKey("z", offer, { ctrlKey: true })).toEqual({ type: "undo" });
+    expect(commandForKey("z", offer, { metaKey: true })).toEqual({ type: "undo" });
+    expect(commandForKey("Z", offer, { ctrlKey: true })).toEqual({ type: "undo" });
+  });
+  it("never takes typing's own undo, a redo, or a chord with nothing to undo", () => {
+    expect(commandForKey("z", { ...offer, textEditing: true }, { ctrlKey: true })).toBeNull();
+    expect(commandForKey("z", { ...offer, composerOpen: true }, { metaKey: true })).toBeNull();
+    expect(commandForKey("z", { ...offer, textEditing: true })).toBeNull();
+    expect(commandForKey("z", { ...offer, overlayVisible: true }, { ctrlKey: true })).toBeNull();
+    expect(commandForKey("z", { ...offer, navigationVisible: true }, { ctrlKey: true })).toBeNull();
+    expect(commandForKey("z", offer, { ctrlKey: true, shiftKey: true })).toBeNull();
+    expect(commandForKey("z", offer, { ctrlKey: true, metaKey: true })).toBeNull();
+    expect(commandForKey("z", offer, { ctrlKey: true, altKey: true })).toBeNull();
+    expect(commandForKey("z", DEFAULT_CONTEXT, { ctrlKey: true })).toBeNull();
+  });
+  it("is on the cheat sheet, and other system chords still pass through", () => {
+    expect(BINDINGS.some((binding) => binding.keys === "z" && /undo/i.test(binding.help))).toBe(true);
+    expect(commandForKey("e", { ...offer, hasActionTarget: true }, { ctrlKey: true })).toBeNull();
   });
 });
