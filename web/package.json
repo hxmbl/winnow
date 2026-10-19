@@ -15,6 +15,7 @@
     "check": "npm run typecheck && npm run lint && npm run lint:proxy && npm run test",
     "smoke": "npm run build && node scripts/smoke.mjs && node scripts/smoke-android.mjs && node scripts/smoke-filters.mjs && node scripts/smoke-notifications.mjs",
     "leaks": "npm run build && node scripts/leaks.mjs",
+    "sweep": "npm run build && node scripts/sweep.mjs",
     "tauri:dev": "cd ../native && cargo tauri dev",
     "tauri:build": "node scripts/bundle.mjs",
     "proxy": "node --experimental-strip-types ../proxy/server.ts",

@@ -22,6 +22,7 @@ Pods/
 node_modules/
 web/dist/
 web/dist-gmailtest/
+web/.sweep/
 *.tsbuildinfo
 web/.env.local
 

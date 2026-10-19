@@ -46,7 +46,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       offline/      The offline action queue (§5.10).
     platform/       The boundary. Two implementations (web.ts, desktop.ts), one interface.
     ui/             React components and the pure helpers beside them.
-  scripts/          check-version.mjs, bump-version.mjs, smoke.mjs, bundle.mjs — see §11.
+  scripts/          check-version.mjs, bump-version.mjs, smoke.mjs, sweep.mjs, bundle.mjs — see §11.
 native/src-tauri/   Tauri v2 shell. Rust. Native bits only. README.md there explains
                    the IPC naming rule, the loopback port and why the build is a
                    script.
@@ -811,6 +811,7 @@ judged as IPv4.
 | Gate | `npm run check` | typecheck + lint + lint:proxy + unit |
 | Smart filters | `node scripts/smoke-filters.mjs` | Targeted smoke for "Change smart filters…", "Why it's here" and Settings → Smart filters. Own `vite preview` on 4350 (`WINNOW_PORT`); `WINNOW_SHOTS=dir` writes screenshots. |
 | End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs` and `smoke-notifications.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`. |
+| Theme sweep | `npm run sweep` | Manual, never in `npm run smoke` or CI. `scripts/sweep.mjs` photographs every mode (light, dark, OLED; `system` once each way) × every accent in `ACCENT_THEMES` (read from `core/model/appearance.ts`, so a new accent is swept for free) on a phone (390×844, Android UA, safe-area insets) and a desktop (1440×900): inbox, reader, drawer, Settings top and scrolled to the end, the Appearance picker, compose, the status pill with Undo, and inbox clear (the shared fake Gmail with an empty inbox). Then the settings and OS preferences that change the look (sort, remote images, brand logos, Gravatar, reduced transparency, forced colours, a small phone, a tablet) once each. Checks as it goes — page/console errors, text clipped without an ellipsis or pushed off-screen, sideways scroll, and WCAG AA for primary and pill/chip text measured against the pixels behind it (a second shot with text hidden, so glass counts) — and writes contact sheets per mode × device, `sweep.pdf` and `sweep-report.md`. Reports, never fails on a finding. `WINNOW_SWEEP_OUT` (default `web/.sweep`, git-ignored), `WINNOW_SWEEP_PHASE=capture\|sheets`, `WINNOW_SWEEP_MODES` / `WINNOW_SWEEP_DEVICES` for a subset, `WINNOW_SWEEP_JOBS` (3); port 4573 by default. |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |
 
 `web/scripts/`:
@@ -834,6 +835,10 @@ judged as IPv4.
   swipe actions work through real CDP touches (left trashes with Undo, right toggles
   read, short springs back, vertical scrolls, edge zones and the setting turn it off),
   and that the console stayed empty.
+- `sweep.mjs` — the theme sweep above. Each combination writes its own
+  `results/<id>.json`, so it runs in chunks (`WINNOW_SWEEP_MODES=oled`) and the
+  `sheets` phase stitches whatever is there; sheets and the PDF are drawn by
+  Chromium itself, so it needs nothing beyond Playwright.
 - `smoke-android.mjs` — the setup walkthrough's Android step and native sign-in's
   fallback, against the same build with a stand-in for Tauri's IPC reporting
   `os: "android"`: the step's package name and SHA-1, field validation, the Web
@@ -854,7 +859,7 @@ out and nothing else would have caught it:
 
 ## 12. Environment and named constants
 
-The environment surface is four variables and one build-time constant. Every
+The environment surface is a handful of variables and one build-time constant. Every
 numeric constant worth knowing is quoted in the section that owns it: quota and
 retry in §5.5, sanitiser limits in §5.8, sync caps in §5.5, proxy limits in §9.
 
@@ -864,6 +869,7 @@ retry in §5.5, sanitiser limits in §5.8, sync caps in §5.5, proxy limits in �
 | `__WINNOW_LOOPBACK_PORT__` | both hosts | Placeholder the web layer writes and Rust substitutes with a real ephemeral port. `oauth.rs` refuses a URL without it. |
 | `PORT`, `HOST`, `ALLOWED_ORIGINS` | proxy runtime | Bind address and the exact-origin CORS allow list. |
 | `WINNOW_PORT`, `WINNOW_URL`, `WINNOW_CHROMIUM`, `WINNOW_SMOKE_ONLY` | smoke | Point the suite at another port, an existing server, or a system browser; `offline` runs only the offline/undo-send checks. |
+| `WINNOW_SWEEP_OUT`, `WINNOW_SWEEP_PHASE`, `WINNOW_SWEEP_MODES`, `WINNOW_SWEEP_DEVICES`, `WINNOW_SWEEP_JOBS` | sweep | Output directory, capture or sheets only, a subset of modes (or `extras`) and devices, parallel contexts. `WINNOW_PORT` (4573) and `WINNOW_CHROMIUM` apply too. |
 
 The repository's own secret gate is `.minesweep.yml` — `public-github` profile,
 `fail_on: high`, `min_confidence: 0.7`, no baseline — and it runs both in CI
