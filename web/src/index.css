@@ -630,11 +630,7 @@ button.wn-glass:active,
     pointer-events: none;
     -webkit-backdrop-filter: var(--wn-glass-filter);
     backdrop-filter: var(--wn-glass-filter);
-    clip-path: inset(
-      var(--wn-glass-reach) calc(var(--wn-glass-reach) - var(--wn-glass-join-end, 0px))
-        var(--wn-glass-reach) calc(var(--wn-glass-reach) - var(--wn-glass-join-start, 0px))
-        round var(--wn-glass-corners, var(--wn-glass-radius, 9999px))
-    );
+    clip-path: inset(var(--wn-glass-reach) round var(--wn-glass-radius, 9999px));
   }
 }
 /*
@@ -648,30 +644,12 @@ button.wn-glass:active,
  *   readable), and the rail's end padding is at least that reach (`FilterStrip`), so
  *   the layer past the last chip ends inside the rail's own end and adds no scroll.
  *
- * And in the rail the frost is one band: each item's layer reaches half the gap towards
- * its neighbours (plus the 1px hairline: the layer is placed on the padding box), meeting
- * edge to edge (an overlap would saturate twice and show as a line), square where they meet and round only at the rail's two ends, so text
- * in the gaps (and in the corners beside a chip's rounded ends) is as frosted as under a
- * chip's middle. The tint, hairline and lift stay on each chip: the pills still read as
- * pills, on a frost that does not stop between them.
+ * In the rail each chip's frost stops at the chip's own rounded edge (1.3.3). It used to
+ * reach half the gap towards its neighbours so the frost ran as one band under the whole
+ * rail, but that band showed: a filled strip, cut off square above and below the chips,
+ * joining them up. Behind the chips there is now only `.wn-rail-haze` (below): a light
+ * blur with no tint, faded out at the top and bottom, the same on every screen.
  */
-[data-rail-scroller] > .wn-glass,
-[data-rail-scroller] > .wn-chip-glass {
-  --wn-glass-join-start: calc(var(--wn-rail-gap, 0px) / 2 + 1px);
-  --wn-glass-join-end: calc(var(--wn-rail-gap, 0px) / 2 + 1px);
-  --wn-glass-corners: 0;
-}
-[data-rail-scroller] > :is(.wn-glass, .wn-chip-glass):not(:is(.wn-glass, .wn-chip-glass) ~ *) {
-  --wn-glass-join-start: 0px;
-  --wn-glass-corners: 9999px 0 0 9999px;
-}
-[data-rail-scroller] > :is(.wn-glass, .wn-chip-glass):last-child {
-  --wn-glass-join-end: 0px;
-  --wn-glass-corners: 0 9999px 9999px 0;
-}
-[data-rail-scroller] > :is(.wn-glass, .wn-chip-glass):not(:is(.wn-glass, .wn-chip-glass) ~ *):last-child {
-  --wn-glass-corners: 9999px;
-}
 [data-phone-chrome],
 [data-phone-dock],
 [data-list-chrome],
@@ -679,6 +657,37 @@ button.wn-glass:active,
 [data-pull-indicator] {
   overflow-x: clip;
 }
+/*
+ * The phone chip rail's haze (1.3.3): what is left in the gaps between the chips. A light
+ * blur of whatever scrolls behind them and nothing else: no tint, no fill, no hairline,
+ * and masked to fade out above and below the chips, so it has no edge to see. Over an
+ * empty plane (inbox clear) it is invisible, and over rows it softens their text, the
+ * same on every screen and state, which is the point: it used to be there on some
+ * screens and not others. Behind the chips (`z-index: -1`, first in paint order), so each
+ * chip's own frost lies over it.
+ */
+.wn-rail-haze {
+  position: relative;
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .wn-rail-haze::before {
+    content: "";
+    position: absolute;
+    inset: -12px 0;
+    z-index: -1;
+    pointer-events: none;
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .wn-rail-haze::before {
+    content: none;
+  }
+}
+
 /* No blur to read through: the same tint, nearly opaque. */
 @supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and
   (background: color-mix(in srgb, red 50%, transparent)) {
@@ -742,6 +751,15 @@ button.wn-glass:active,
   .wn-pill.wn-chip-glass {
     background-color: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
   }
+}
+/*
+ * Dark and OLED chips, more vibrant (1.3.3): with the brighter recipe (`theme.ts`), the
+ * top highlight is lifted toward white and the hairline takes the chip's own hue, light,
+ * so each chip has a lit edge instead of a grey one. Paint only: contrast is the fill's.
+ */
+:root:is([data-theme="dark"], [data-theme="oled"]) .wn-pill.wn-chip-glass {
+  --wn-glass-sheen: rgb(255 255 255 / 0.16);
+  border-color: hsl(var(--pill-h) calc(var(--pill-s) * 1%) 78% / 0.24);
 }
 /* Hover is a sheen over the tint: a `filter` here would cut the frost off from the list. */
 .wn-pill.wn-chip-glass:hover {

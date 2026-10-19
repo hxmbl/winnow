@@ -82,7 +82,7 @@ const SURFACE_TOKENS = [
   "chrome",
 ] as const;
 
-const INK_TOKENS = ["ink", "inkBody", "inkMuted", "inkSubtle", "inkIcon", "inkPlaceholder"] as const;
+const INK_TOKENS = ["ink", "inkStrong", "inkBody", "inkMuted", "inkSubtle", "inkIcon", "inkPlaceholder"] as const;
 
 /** Every mode × accent theme. Named, so a typo cannot silently test nothing. */
 const COMBOS: { mode: ThemeName; accent: AccentTheme; name: string }[] = MODES.flatMap((mode) =>

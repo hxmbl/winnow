@@ -246,8 +246,8 @@ export const FilterStrip = memo(function FilterStrip({
         // and takes it back with a negative margin: it lays out exactly as before. At its
         // end the padding is at least that reach, so the last chip's layer ends inside the
         // rail's own end instead of lengthening its scroll.
-        // `--wn-rail-gap` is the gap between the chips, which their frost layers bridge
-        // (half each) so the frost is one band under the rail (`index.css`).
+        // `--wn-rail-gap` is the gap between the chips. Their frost stops at each chip;
+        // on the phone the gaps get only the rail's light haze (`.wn-rail-haze`).
         className={`wn-rail-scroller no-scrollbar relative flex items-center overflow-x-auto ${
           touch
             ? "pointer-events-none -my-[44px] gap-[var(--wn-rail-gap)] py-[52px] [--wn-rail-gap:0.5rem] pl-[var(--wn-dock-left)] pr-[max(var(--wn-dock-right),var(--wn-glass-reach))] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"

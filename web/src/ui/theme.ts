@@ -133,6 +133,8 @@ const LIGHT: Palette = {
     // ── Text ────────────────────────────────────────────────────
     /** Headlines — sender name, subject. */
     ink: "#18162B",
+    /** The strongest ink. Light has none stronger than `ink`; the dark modes use white. */
+    inkStrong: "#18162B",
     /** Long-form body copy. */
     inkBody: "#37334F",
     /** Secondary metadata: addresses, timestamps. Clears AA on every plane it sits on. */
@@ -255,6 +257,12 @@ const DARK: Palette = {
 
     /** About 87% white, written opaque so the contrast test can measure it. */
     ink: "#E3E3E3",
+    /**
+     * Pure white, for the smart-filter chips' labels only (1.3.3): the chips were made
+     * more vibrant (brighter, fully saturated fills) and #E3E3E3 no longer cleared AA on
+     * the brightest "on" fills; white does, with a margin. See `pill` below.
+     */
+    inkStrong: "#FFFFFF",
     inkBody: "#D4D4D4",
     /** Kept a visible step above `inkSubtle`; both must clear AA on `surfaceActive`. */
     inkMuted: "#ADADAD",
@@ -322,10 +330,12 @@ const DARK: Palette = {
   },
 
   /**
-   * Darker and less saturated than light's: a bright yellow at light's alphas lifts the
-   * dark plane so far that #E3E3E3 text on it misses AA.
+   * More vibrant since 1.3.3 (the owner asked for more life in the dark chips): the full
+   * saturation of each hue, a lighter tone, and stronger fills, with white labels and
+   * counts (`inkStrong`) so the brightest "on" fill (amber, hovered) still clears AA.
+   * Was lightness 55, saturation 0.7, rest 0.16, on 0.34 with #E3E3E3 text.
    */
-  pill: { lightness: 55, saturation: 0.7, rest: 0.16, on: 0.34, ring: 0.55, ink: "ink", inkOn: "ink", count: "ink", textLightness: 68 },
+  pill: { lightness: 58, saturation: 1, rest: 0.2, on: 0.4, ring: 0.7, ink: "inkStrong", inkOn: "inkStrong", count: "inkStrong", textLightness: 68 },
 };
 
 /**

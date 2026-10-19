@@ -137,9 +137,8 @@ describe("the frost layer reaches past each pill", () => {
     // as its middle does.
     expect(before).toMatch(/inset:\s*calc\(-1 \* var\(--wn-glass-reach\)\);/);
     expect(before).toMatch(/backdrop-filter:\s*var\(--wn-glass-filter\)/);
-    expect(before).toMatch(
-      /clip-path:\s*inset\(\s*var\(--wn-glass-reach\) calc\(var\(--wn-glass-reach\) - var\(--wn-glass-join-end, 0px\)\)\s*var\(--wn-glass-reach\) calc\(var\(--wn-glass-reach\) - var\(--wn-glass-join-start, 0px\)\)\s*round var\(--wn-glass-corners, var\(--wn-glass-radius, 9999px\)\)/,
-    );
+    // Clipped back to the pill's own rounded shape on every side, chips included.
+    expect(before).toMatch(/clip-path:\s*inset\(var\(--wn-glass-reach\) round var\(--wn-glass-radius, 9999px\)\);/);
     expect(before).toMatch(/z-index:\s*-1/);
     // The chip's own rule no longer carries a backdrop-filter: it would make the chip a
     // backdrop root, and its frost layer would see nothing.
@@ -158,16 +157,19 @@ describe("the frost layer reaches past each pill", () => {
     }
   });
 
-  it("frosts the rail as one band: the layers bridge the gaps, square where they meet, round at the rail's ends", () => {
-    const items = /\[data-rail-scroller\] > \.wn-glass,\s*\[data-rail-scroller\] > \.wn-chip-glass\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    // Half the gap each, plus the 1px hairline (the layer sits on the padding box).
-    expect(items).toMatch(/--wn-glass-join-start:\s*calc\(var\(--wn-rail-gap, 0px\) \/ 2 \+ 1px\);/);
-    expect(items).toMatch(/--wn-glass-join-end:\s*calc\(var\(--wn-rail-gap, 0px\) \/ 2 \+ 1px\);/);
-    expect(items).toMatch(/--wn-glass-corners:\s*0;/);
-    expect(css).toMatch(/:not\(:is\(\.wn-glass, \.wn-chip-glass\) ~ \*\)\s*\{\s*--wn-glass-join-start:\s*0px;\s*--wn-glass-corners:\s*9999px 0 0 9999px;/);
-    expect(css).toMatch(/:last-child\s*\{\s*--wn-glass-join-end:\s*0px;\s*--wn-glass-corners:\s*0 9999px 9999px 0;/);
-    // The gap the layers bridge is the gap the rail lays out with.
-    expect(strip.match(/gap-\[var\(--wn-rail-gap\)\]/g)?.length).toBe(2);
+  it("frosts each chip on its own: no band joining them, only an untinted, edgeless haze in the gaps", () => {
+    // 1.3.3: the old one-band frost (layers bridging the gaps) showed as a filled strip.
+    expect(css).not.toMatch(/--wn-glass-join-(start|end)/);
+    expect(css).not.toMatch(/--wn-glass-corners/);
+    const haze = /\.wn-rail-haze::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(haze).toMatch(/backdrop-filter:\s*blur\([1-8]px\);/);
+    // A blur only: no saturate or brightness, no fill, no hairline, and faded at both edges.
+    expect(haze).not.toMatch(/saturate|brightness|background|border|box-shadow/);
+    expect(haze).toMatch(/mask-image:\s*linear-gradient\(to bottom, transparent,[^;]*transparent\);/);
+    expect(haze).toMatch(/z-index:\s*-1/);
+    // On the phone rail, the one place chips float over the list.
+    const phone = readFileSync(new URL("./components/PhoneChrome.tsx", import.meta.url), "utf8");
+    expect(phone).toMatch(/data-phone-chips=""[\s\S]{0,200}wn-rail-haze/);
   });
 
   it("never puts a filter on a glass pill (hover is a sheen), which would cut its frost off", () => {

@@ -365,7 +365,7 @@ export function PhoneDock({
         data-phone-chips=""
         data-dock-band=""
         inert={menuOpen || settingsOpen}
-        className={`mb-1 ${menuOpen || settingsOpen ? "invisible" : ""}`}
+        className={`wn-rail-haze mb-1 ${menuOpen || settingsOpen ? "invisible" : ""}`}
       >
         <FilterStrip
           pills={pills}
