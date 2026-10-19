@@ -1283,9 +1283,9 @@ const EMAIL_BASELINE_RULES: readonly Rule[] = [
   ],
   [
     "table",
-    // A wide message scrolls rather than being cut off (see `MessageBody`): an
-    // auto-layout table sizes to its contents, so a `max-width: 100%` resolving
-    // against that content width never binds.
+    // Often does not bind: an auto-layout table sizes to its contents, so a nested
+    // `width:640px` table ignores it. A message still wider than the reader is zoomed
+    // to fit by `MessageBody` (`ui/emailFit.ts`), as mail clients do.
     `max-width: 100%;`,
   ],
   ["td, th", `word-break: break-word; overflow-wrap: anywhere;`],

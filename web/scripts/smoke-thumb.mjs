@@ -261,6 +261,22 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
     await newsletter.tap();
     await p.waitForSelector("[data-reader-pill]", { timeout: 5_000 });
     await p.waitForTimeout(700);
+    if (!leftHanded) {
+      // 1.3.3: the newsletter is a 640px fixed-width table; on a phone it is zoomed to
+      // the card's width (as mail clients do), not cut off at its right edge.
+      const fit = await p.evaluate(() => {
+        const el = document.querySelector("[data-reader] [data-wn-email]");
+        const card = el.parentElement.getBoundingClientRect();
+        let right = 0;
+        for (const child of el.querySelectorAll("table, img, h1, p")) right = Math.max(right, child.getBoundingClientRect().right);
+        return { fit: Number(el.dataset.wnFit ?? 1), zoom: el.style.zoom, cardRight: Math.round(card.right), contentRight: Math.round(right), overflowX: el.style.overflowX };
+      });
+      check(
+        "phone: the fixed-width newsletter is scaled to fit the reader (nothing past the card's right edge)",
+        fit.fit < 1 && fit.fit >= 0.4 && fit.contentRight <= fit.cardRight && fit.overflowX === "",
+        JSON.stringify(fit),
+      );
+    }
     const pill = await p.locator("[data-reader-dock] .wn-reader-pill").boundingBox();
     check(
       `${tag}: the pill sits at the bottom ${leftHanded ? "left" : "right"}, above the safe area`,
@@ -383,5 +399,44 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
     });
     check("“Hidden & muted senders” is one line in the category column", senders.height <= senders.line * 1.5, JSON.stringify(senders));
     await ctx.close();
+  }
+
+  // ── Fixed-width HTML mail fits; responsive mail is left alone (1.3.3) ─────
+  section("reader: fixed-width HTML email fits the width");
+  {
+    const { ctx, p } = await phonePage(browser, URL, errors);
+    await p.locator("[data-row-count] button[data-message-id]").first().tap();
+    await p.waitForSelector("[data-reader] [data-wn-email]", { timeout: 5_000 });
+    await p.waitForTimeout(500);
+    const plain = await p.evaluate(() => {
+      const el = document.querySelector("[data-reader] [data-wn-email]");
+      return { fit: el.dataset.wnFit ?? null, zoom: el.style.zoom, fits: el.scrollWidth <= el.clientWidth + 2 };
+    });
+    check("phone: a responsive message is not zoomed", plain.fit === null && plain.zoom === "" && plain.fits, JSON.stringify(plain));
+    await ctx.close();
+    const desk = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const d = await desk.newPage();
+    d.on("pageerror", (error) => errors.push(String(error)));
+    await d.goto(URL, { waitUntil: "networkidle" });
+    await d.waitForSelector("[data-row-count] [data-row-id]");
+    await d.locator("#winnow-search").fill("Hark Pro");
+    await d.waitForTimeout(400);
+    await d.locator("[data-row-count] button[data-message-id]", { hasText: "Introducing Hark Pro" }).first().click();
+    await d.waitForSelector("[data-reader] [data-wn-email]", { timeout: 5_000 });
+    await d.waitForTimeout(500);
+    const wide = await d.evaluate(() => {
+      const el = document.querySelector("[data-reader] [data-wn-email]");
+      const card = el.parentElement.getBoundingClientRect();
+      let right = 0;
+      for (const child of el.querySelectorAll("table, img")) right = Math.max(right, child.getBoundingClientRect().right);
+      const why = document.querySelector("[data-reader] [data-why-here]")?.getBoundingClientRect();
+      return { fit: Number(el.dataset.wnFit ?? 1), cardRight: Math.round(card.right), contentRight: Math.round(right), cardBottom: Math.round(card.bottom), whyTop: why ? Math.round(why.top) : null };
+    });
+    check(
+      "desktop: the newsletter fits its pane (never past the card) and Why it's here stays below it",
+      wide.fit > 0.4 && wide.contentRight <= wide.cardRight && (wide.whyTop === null || wide.whyTop >= wide.cardBottom),
+      JSON.stringify(wide),
+    );
+    await desk.close();
   }
 }

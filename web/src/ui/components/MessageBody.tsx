@@ -20,7 +20,7 @@
  * reference is still counted and stated.
  */
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, useRef, type RefObject } from "react";
 import { Server } from "lucide-react";
 import {
   emailDocument,
@@ -32,6 +32,7 @@ import {
   type ProxiedRender,
 } from "../../core/mail/proxy";
 import type { Email } from "../../core/model/email";
+import { fitScale, overflowAfterFit } from "../emailFit";
 
 /**
  * Which of the forms a message body is being shown in.
@@ -102,17 +103,69 @@ function PlainText({ email }: { email: Email }) {
  * what Gmail and Apple Mail both do, and what keeps a `#333`-on-`#fff` newsletter legible
  * inside a dark reader.**
  *
- * **It scrolls sideways, and that is the standard answer.** HTML mail is laid out in
- * fixed-width tables (600px traditionally), usually wider than the pane, and the choice
- * is between scrolling and silently cutting off the right-hand column of every
- * newsletter. `overflow-x-auto` rather than `auto`, because a vertically-scrolling frame
- * inside a vertically-scrolling pane is a scroll trap.
+ * **A fixed-width message is shrunk to fit, as mail clients do (1.3.3).** HTML mail is
+ * laid out in fixed-width tables (600–640px), wider than a phone, and the container's
+ * `contain: paint` (which keeps a sender's markup in its box) used to cut the right-hand
+ * column off. `useFitToWidth` measures the message and zooms it down to the card's width
+ * (`ui/emailFit.ts`); a message that already fits is left alone. Only past the smallest
+ * legible scale, or where `zoom` is unsupported, does it scroll sideways instead.
  *
  * **The click handler is what makes an inlined link safe to click.** The click is taken
  * here and handed to the caller, which opens it in the system browser. The URL is read
  * off the rendered anchor, so it is the value that survived the sanitiser by
  * construction.
  */
+/**
+ * Zoom the message in `ref` down to its container's width when its content is wider.
+ *
+ * Measured at zoom 1 on every change that can move either width: the message, the
+ * card's width (ResizeObserver; height changes, including the ones this causes, are
+ * ignored) and an image arriving. Writes go straight to the element, no React state.
+ */
+function useFitToWidth(ref: RefObject<HTMLDivElement | null>, html: string) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const zoomable = globalThis.CSS?.supports?.("zoom", "0.5") ?? false;
+    const fit = () => {
+      el.style.removeProperty("zoom");
+      el.style.removeProperty("overflow-x");
+      delete el.dataset.wnFit;
+      const available = el.clientWidth;
+      const natural = el.scrollWidth;
+      const scale = zoomable ? fitScale(natural, available) : 1;
+      if (scale < 1) {
+        el.style.zoom = String(scale);
+        el.dataset.wnFit = String(scale);
+      }
+      if (overflowAfterFit(natural, available, scale)) el.style.overflowX = "auto";
+    };
+    fit();
+    const parent = el.parentElement;
+    let parentWidth = parent?.clientWidth ?? -1;
+    const observer =
+      typeof ResizeObserver === "undefined" || !parent
+        ? null
+        : new ResizeObserver(() => {
+            // Unzoomed, the message's own box is the card's content width.
+            const width = parent.clientWidth;
+            if (width !== parentWidth) {
+              parentWidth = width;
+              fit();
+            }
+          });
+    if (observer && parent) observer.observe(parent);
+    const onLoad = (event: Event) => {
+      if ((event.target as Element | null)?.tagName === "IMG") fit();
+    };
+    el.addEventListener("load", onLoad, true);
+    return () => {
+      observer?.disconnect();
+      el.removeEventListener("load", onLoad, true);
+    };
+  }, [ref, html]);
+}
+
 function RichBody({
   html,
   onOpenLink,
@@ -121,6 +174,7 @@ function RichBody({
   onOpenLink: (url: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  useFitToWidth(containerRef, html);
 
   // Add copy buttons to code blocks after the HTML is rendered
   useEffect(() => {
@@ -213,7 +267,7 @@ function RichBody({
     // The card is a wrapper because the email baseline zeroes the container's own
     // padding (it must, for the "as sent" document's body), which left the text flush
     // against the card's edge.
-    <div className="selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline bg-white px-6 py-5">
+    <div className="selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline bg-white px-4 py-4 sm:px-6 sm:py-5">
       <div
         ref={containerRef}
         data-wn-email=""
