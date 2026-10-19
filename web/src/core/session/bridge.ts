@@ -12,6 +12,7 @@ import {
 import type { Platform } from "../../platform/types";
 import type { MailBackend, WinnowStore } from "../store/store";
 import type { GoogleContact } from "../contacts/google";
+import type { DriveAccess, DriveApi } from "../gmail/drive";
 import type { ConnectionTest, OAuthClientCredentials } from "./credentials";
 import { OfflineQueue } from "../offline/queue";
 
@@ -66,6 +67,12 @@ export type SessionBridge = {
   draftsAccess(): Promise<DraftsAccess>;
   /** Ask for drafts through incremental consent; on the web this navigates away. */
   grantDrafts(): Promise<DraftsAccess>;
+  /** Whether the grant includes `drive.file` (large attachments as Drive links). */
+  driveAccess(): Promise<DriveAccess>;
+  /** Ask for `drive.file` through incremental consent; on the web this navigates away. */
+  grantDrive(): Promise<DriveAccess>;
+  /** Drive on this session's tokens, for uploading and sharing a large attachment. */
+  drive(): DriveApi;
   /** The address book as last stored, without the network. */
   cachedContacts(): Promise<GoogleContact[]>;
   /** Fetch what changed. `null` when there is no grant. */
@@ -142,6 +149,12 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
     draftsAccess: () => session.draftsAccess(),
 
     grantDrafts: () => session.grantDrafts(),
+
+    driveAccess: () => session.driveAccess(),
+
+    grantDrive: () => session.grantDrive(),
+
+    drive: () => session.drive(),
 
     cachedContacts: () => session.contacts.cached(),
 

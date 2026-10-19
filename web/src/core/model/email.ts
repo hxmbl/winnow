@@ -107,7 +107,16 @@ export type Draft = {
    * `core/mail/attachments.ts` for the 25 MB cap and how much of this the device copy keeps.
    */
   attachments?: DraftAttachment[];
+  /**
+   * Files too big for Gmail that went to the user's Google Drive instead, each with a
+   * "File name (size) — link" line in the body. Shared with the recipients as readers at
+   * send time, for the lines still in the body. See `core/gmail/drive.ts`.
+   */
+  driveFiles?: DraftDriveFile[];
 };
+
+/** A file Winnow uploaded to the user's Drive for this draft (only ever its own). */
+export type DraftDriveFile = { id: string; name: string; size: number; link: string };
 
 /**
  * A file attached to a draft: its bytes (standard base64, so the draft stays plain JSON

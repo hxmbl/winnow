@@ -56,6 +56,7 @@ import { NO_CLIENT_MESSAGE, TokenManager } from "../gmail/tokens";
 import { GmailClient } from "../gmail/client";
 import { GmailSyncEngine, type MailboxCache, type CursorStore } from "../gmail/sync";
 import { CONTACT_SCOPES, PeopleClient, PeopleScopeMissing, hasContactScopes } from "../gmail/people";
+import { DRIVE_FILE_SCOPE, DriveClient, hasDriveScope, type DriveAccess, type DriveApi } from "../gmail/drive";
 import {
   GoogleContactsSync,
   localContactsStore,
@@ -330,6 +331,9 @@ export type CompletedWebRedirect = {
   /** Set when the redirect was the drafts opt-in, the same way as `contacts`. */
   drafts?: DraftsAccess | "declined";
   draftsMessage?: string;
+  /** Set when the redirect was the Drive opt-in (large files as links), the same way. */
+  drive?: DriveAccess | "declined";
+  driveMessage?: string;
 };
 
 /** The refusal for a contacts consent approved for a different Google account. */
@@ -338,7 +342,10 @@ function wrongAccountMessage(actual: string, expected: string, what = "Google co
 }
 
 /** Google's refusal, worded for what was being asked. */
-function describeOAuthError(error: string, purpose?: "contacts" | "drafts"): string {
+function describeOAuthError(error: string, purpose?: "contacts" | "drafts" | "drive"): string {
+  if (purpose === "drive" && error === "access_denied") {
+    return "Google Drive was not allowed, so the file was not sent as a link. Nothing was uploaded.";
+  }
   if (purpose === "contacts" && error === "access_denied") {
     return "Google contacts were not connected. Suggestions keep coming from your mail.";
   }
@@ -586,6 +593,47 @@ export class GmailSession {
     return this.draftsAccess();
   }
 
+  /**
+   * Whether the stored grant includes `drive.file` (large attachments as Drive links).
+   * Read from the token, never stored apart from it: a sign-out revokes it with the rest.
+   */
+  async driveAccess(): Promise<DriveAccess> {
+    const current = await this.tokens.current();
+    if (!current) return "unavailable";
+    return hasDriveScope(current.scope) ? "granted" : "not_granted";
+  }
+
+  /**
+   * Ask for `drive.file` alone on top of the existing grant, the first time the user
+   * chooses "Send as a Drive link": the drafts opt-in's incremental consent, with the
+   * same wrong-account refusal. Never part of sign-in. On the web the page navigates away.
+   */
+  async grantDrive(): Promise<DriveAccess> {
+    const before = await this.tokens.current();
+    if (!before) {
+      throw new GmailError("Sign in to Gmail before allowing Google Drive.", 401, "reauth_required");
+    }
+    const expected = (await this.client.profile()).emailAddress;
+    await this.authorize(
+      DRIVE_FILE_SCOPE,
+      { include_granted_scopes: "true", login_hint: expected },
+      { purpose: "drive", expectEmail: expected },
+    );
+    const actual = (await this.profileAfterAuthorize()).emailAddress;
+    if (actual.toLowerCase() !== expected.toLowerCase()) {
+      await this.tokens.adopt(before);
+      throw new GmailError(wrongAccountMessage(actual, expected, "Google Drive was"), 0, "declined");
+    }
+    return this.driveAccess();
+  }
+
+  /** A Drive client on this session's tokens (the same one-refresh-after-401 rule). */
+  drive(): DriveApi {
+    return new DriveClient(() => this.tokens.validAccessToken(), {
+      onUnauthorized: () => this.tokens.forceRefresh(),
+    });
+  }
+
   /** The stored OAuth client, or `null` when the user has not set one up. */
   async storedCredentials(): Promise<OAuthClientCredentials | null> {
     try {
@@ -716,7 +764,7 @@ export class GmailSession {
   private async authorize(
     scope: string,
     extra: Record<string, string> = {},
-    intent: { purpose?: "contacts" | "drafts"; expectEmail?: string } = {},
+    intent: { purpose?: "contacts" | "drafts" | "drive"; expectEmail?: string } = {},
   ): Promise<void> {
     const stored = await this.storedCredentials();
     const clientId = stored?.clientId;
@@ -936,6 +984,16 @@ export class GmailSession {
           draftsMessage: describeOAuthError(redirect.error, "drafts"),
         };
       }
+      if (declined?.purpose === "drive" && (await this.tokens.hasSession())) {
+        this.scrubAddressBar();
+        const profile = await this.client.profile();
+        return {
+          email: profile.emailAddress,
+          view: shared,
+          drive: "declined",
+          driveMessage: describeOAuthError(redirect.error, "drive"),
+        };
+      }
       if (declined?.purpose === "contacts" && (await this.tokens.hasSession())) {
         // Declining the contacts opt-in is not a failed sign-in: the Gmail session is
         // untouched, so the app comes back exactly as it was, minus the code in the URL.
@@ -1004,6 +1062,19 @@ export class GmailSession {
         };
       }
       return { email: profile.emailAddress, view: shared, drafts: await this.draftsAccess() };
+    }
+    if (pending.purpose === "drive") {
+      const expectedEmail = pending.expectEmail;
+      if (expectedEmail && before && profile.emailAddress.toLowerCase() !== expectedEmail.toLowerCase()) {
+        await this.tokens.adopt(before);
+        return {
+          email: expectedEmail,
+          view: shared,
+          drive: "declined",
+          driveMessage: wrongAccountMessage(profile.emailAddress, expectedEmail, "Google Drive was"),
+        };
+      }
+      return { email: profile.emailAddress, view: shared, drive: await this.driveAccess() };
     }
     if (pending.purpose !== "contacts") return { email: profile.emailAddress, view: shared };
 

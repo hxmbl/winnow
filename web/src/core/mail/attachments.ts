@@ -76,6 +76,18 @@ export function planAttachments(
   return { accepted, error: parts.length > 0 ? parts.join(" ") : null };
 }
 
+/**
+ * The files `planAttachments` refuses for size alone (not the empty ones), by index:
+ * the ones the composer offers to send as a Google Drive link instead.
+ */
+export function oversizedFiles(
+  existing: readonly Pick<DraftAttachment, "size">[] | undefined,
+  files: readonly { filename: string; size: number }[],
+): number[] {
+  const { accepted } = planAttachments(existing, files);
+  return files.flatMap((file, index) => (file.size > 0 && !accepted.includes(index) ? [index] : []));
+}
+
 /** Files that were read, as draft attachments after `existing`. */
 export function attachFiles(
   existing: readonly DraftAttachment[] | undefined,

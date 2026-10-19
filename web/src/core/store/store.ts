@@ -283,6 +283,13 @@ export type Preferences = {
    */
   leftHanded: boolean;
   /**
+   * Offer "Send as a Drive link" for a file over Gmail's 25 MB. On by default, but it does
+   * nothing until the user allows `drive.file` (asked the first time, never at sign-in).
+   * Settings → Privacy → Stop turns it off on this device; the grant itself goes with a
+   * sign-out, or at Google's account page. See `core/gmail/drive`.
+   */
+  driveLinks: boolean;
+  /**
    * How long Send waits before the message goes out, so Undo can bring it back. `0` is
    * Off. See `core/mail/undoSend`: closing the app in the wait keeps it as a draft.
    */
@@ -318,6 +325,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   markReadOnOpen: true,
   swipeActions: true,
   leftHanded: false,
+  driveLinks: true,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
   notificationActions: DEFAULT_NOTIFICATION_ACTIONS,
