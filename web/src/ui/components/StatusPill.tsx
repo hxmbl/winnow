@@ -47,8 +47,14 @@ type Props = {
   onUndoSend: () => void;
   onSendNow: () => void;
   onDismissFlash: () => void;
-  /** The list's pane: the pill centres over it, under `inset`. */
-  anchorRef: React.RefObject<HTMLElement | null>;
+  /**
+   * The list's pane: the pill centres over it, under `inset`. The element itself, not a
+   * ref: this component sits before the list in the tree, so its layout effect runs
+   * before the list's ref is attached. With a ref it found nothing whenever it mounted
+   * again with the same `inset` (back from the sign-in or "Couldn't reach Gmail"
+   * screen), and fell back to the top of the window, over the phone's top bar.
+   */
+  anchor: HTMLElement | null;
   /** The height of the chrome over the list's top (top bar or floating header), px. */
   inset: number;
 };
@@ -59,10 +65,9 @@ const GAP = 16;
 type Place = { left: number; width: number; top: number } | null;
 
 /** Where the list's pane is on screen, or `null` while it is hidden. */
-function useAnchor(anchorRef: React.RefObject<HTMLElement | null>, inset: number): Place {
+function useAnchor(element: HTMLElement | null, inset: number): Place {
   const [place, setPlace] = useState<Place>(null);
   useLayoutEffect(() => {
-    const element = anchorRef.current;
     const read = () => {
       const rect = element?.getBoundingClientRect();
       const next = rect && rect.width > 0 && rect.height > 0 ? { left: rect.left, width: rect.width, top: rect.top + inset } : null;
@@ -78,7 +83,7 @@ function useAnchor(anchorRef: React.RefObject<HTMLElement | null>, inset: number
       observer?.disconnect();
       window.removeEventListener("resize", read);
     };
-  }, [anchorRef, inset]);
+  }, [element, inset]);
   return place;
 }
 
@@ -124,7 +129,7 @@ export function StatusPill(props: Props) {
     return () => window.clearInterval(timer);
   }, [shown?.kind]);
 
-  const place = useAnchor(props.anchorRef, props.inset);
+  const place = useAnchor(props.anchor, props.inset);
   const style: React.CSSProperties = place
     ? { left: place.left, width: place.width, top: place.top + GAP }
     : { left: 0, right: 0, top: `max(${GAP}px, calc(env(safe-area-inset-top, 0px) + 8px))` };

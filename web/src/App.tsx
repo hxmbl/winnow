@@ -401,6 +401,16 @@ export function App({ store }: Props) {
   }, []);
   /** The list's pane, where the phone's pull to refresh listens. */
   const listPaneRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * The list's pane as state too, for what must re-measure when the element itself
+   * arrives (the status pill): a ref changes without a render, so a component that reads
+   * it in an effect before the ref is attached never sees it.
+   */
+  const [listPane, setListPane] = useState<HTMLDivElement | null>(null);
+  const attachListPane = useCallback((element: HTMLDivElement | null) => {
+    listPaneRef.current = element;
+    setListPane(element);
+  }, []);
   /** What is waiting on you, for the pull's result; null when nothing is. */
   const attentionRef = useRef<string | null>(null);
   /** A wheel over the floating header scrolls the list under it, except over the rail. */
@@ -2888,7 +2898,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         onUndoSend={undoSend}
         onSendNow={sendWaitingNow}
         onDismissFlash={store.dismissFlash.bind(store)}
-        anchorRef={listPaneRef}
+        anchor={listPane}
         inset={phone ? phoneBarHeight : listChromeHeight}
       />
 
@@ -2912,7 +2922,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           because there the reader is a pane beside the list rather than a replacement.
         */}
         <div
-          ref={listPaneRef}
+          ref={attachListPane}
           className={`${
             selected ? "hidden lg:flex" : "flex"
           } relative min-h-0 min-w-0 flex-1 flex-col bg-surface`}
