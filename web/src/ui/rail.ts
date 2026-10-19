@@ -11,6 +11,7 @@
 
 import {
   FILTER_LABELS,
+  PERMANENT_FILTERS,
   type BuiltinSmartFilter,
   type FilterId,
 } from "../core/model/signals";
@@ -81,7 +82,17 @@ export function buildPills(
     });
   }
 
-  return [...buckets, ...senders];
+  // Zero-count chips (1.3.3): a pill that would show nothing and is not on goes, unless
+  // it is one of the pinned pair, which keeps its place (the rail does not reshuffle
+  // and the digit shortcuts do not move) and is drawn dimmed instead (`FilterStrip`,
+  // `data-empty`). An active pill always stays, whatever its count: it is the control
+  // that turns the filter off. Other buckets already need a match to be ranked at all.
+  const active = new Set(activeFilters.map((filter) => (filter.kind === "builtin" ? `b:${filter.id}` : `s:${filter.sender}`)));
+  const keep = (pill: PillItem) =>
+    pill.count > 0 ||
+    active.has(pill.id.kind === "builtin" ? `b:${pill.id.id}` : `s:${pill.id.sender}`) ||
+    (pill.id.kind === "builtin" && (PERMANENT_FILTERS as readonly string[]).includes(pill.id.id));
+  return [...buckets, ...senders].filter(keep);
 }
 
 /**

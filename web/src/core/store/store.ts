@@ -500,8 +500,16 @@ export type MailboxView = {
   searchBags: SearchBags;
   result: InboxResult;
   threads: ThreadRow[];
-  /** The rail, with activated buckets hoisted above the volume ranking. */
+  /** The rail, ranked over the open mailbox, with activated buckets kept on it. */
   rail: BuiltinSmartFilter[];
+  /**
+   * How many messages in the *open mailbox* each bucket holds, before search and filters:
+   * the numbers on the pills (1.3.3; they were inbox-wide wherever you were). `unsafe`
+   * is counted even though the inbox hides those rows with no filter on.
+   */
+  railCounts: ReadonlyMap<BuiltinSmartFilter, number>;
+  /** Messages per sender in the open mailbox, for the sender pills. */
+  railSenderCounts: ReadonlyMap<string, number>;
   /**
    * How many inbox messages land in each bucket.
    *
@@ -1095,6 +1103,33 @@ export class WinnowStore {
     return { profile, signals };
   }
 
+  /** Base classification per message object for non-inbox mailboxes; see `mailboxSignals`. */
+  private readonly mailboxBase = new WeakMap<Email, { profile: UserProfile; weights: StoreState["learning"]["weights"]; signal: EmailSignals }>();
+
+  /**
+   * A non-inbox mailbox, classified for smart filters with the inbox's profile and
+   * weights, then what has been learned applied over it. Memoised per message object
+   * and profile, so switching back and forth, or one message changing, reclassifies only
+   * what changed.
+   */
+  private mailboxSignals(emails: readonly Email[], profile: UserProfile): SignalMap {
+    const weights = this.state.learning.weights;
+    const base = new Map<number, EmailSignals>();
+    for (const email of emails) {
+      const hit = this.mailboxBase.get(email);
+      let signal = hit && hit.profile === profile && hit.weights === weights ? hit.signal : undefined;
+      if (!signal) {
+        signal = classifyEmail(email, profile, weights);
+        this.mailboxBase.set(email, { profile, weights, signal });
+      }
+      base.set(email.id, signal);
+    }
+    const learning = this.state.filterLearning;
+    if (learning.isEmpty) return base;
+    const background = this.inboxCache?.background ?? EMPTY_BACKGROUND;
+    return applyFilterLearning(emails, base, learning, background);
+  }
+
   private derive(): MailboxView {
     const state = this.state;
     const blocked = new Set(state.preferences.blockedSenders.map((s) => s.toLowerCase()));
@@ -1112,14 +1147,18 @@ export class WinnowStore {
     const { profile, signals: inboxSignals } = this.inboxAnalysis();
     const inboxForProfile = visible.filter((email) => email.mailbox === "inbox");
 
-    // The inbox is classified once and reused when the inbox is open — the common case.
-    // Every *other* mailbox is left unclassified and rendered as `NEUTRAL_SIGNALS`:
-    // classifying it and then applying the inbox's own filter rules is how the bin and
-    // the spam folder ended up showing zero messages, since the rule that hides spam is
-    // a rule about what belongs in your inbox. It is also the honest answer — a trashed
-    // message is not "quiet personal mail", it is mail already dealt with.
+    // Smart filters apply to whichever mailbox is open (1.3.3), classified with the
+    // inbox's profile and what has been learned: the inbox's signals are reused there,
+    // every other mailbox is classified on demand (`mailboxSignals`, memoised per
+    // message). Only the inbox holds back unsafe mail with no filter on (`hideUnsafe`
+    // below): applying that rule to the bin or the spam folder is how they once showed
+    // nothing. Drafts are the user's own and stay unclassified.
     const signals =
-      state.mailbox === "inbox" ? inboxSignals : neutralSignalsFor(mailboxEmails);
+      state.mailbox === "inbox"
+        ? inboxSignals
+        : state.mailbox === "drafts"
+          ? neutralSignalsFor(mailboxEmails)
+          : this.mailboxSignals(mailboxEmails, profile);
 
     // Only when a search is running. See `searchBags`: the pipeline builds a bag on
     // demand, so the unsearched case is a fast path, not a different code path.
@@ -1134,18 +1173,30 @@ export class WinnowStore {
       searchQuery: state.searchQuery,
       sortBy: state.preferences.sortBy,
       searchBags,
+      hideUnsafe: state.mailbox === "inbox",
     });
 
     const threads = groupThreads(result.emails);
 
-    // The rail is ranked against the *inbox*, not the current view, so opening the bin
-    // does not change which buckets are pinned.
-    const rail = rankFilters(inboxForProfile, inboxSignals, profile);
+    // The rail is ranked and counted over the *open mailbox* (1.3.3), before search and
+    // filters: a pill's number is how many messages in this mailbox it would show, so
+    // the count, the list a filter gives and "Why it's here" all agree. The permanent
+    // pair stays pinned wherever you are.
+    const railEmails = state.mailbox === "drafts" ? [] : mailboxEmails;
+    const rail = rankFilters(railEmails, signals, profile);
     const railWithActive = this.orderedRail(rail);
+    const railCounts =
+      state.mailbox === "inbox"
+        ? countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits)
+        : countAllFilters(railEmails, signals, profile, this.filterHits);
+    const railSenderCounts = new Map<string, number>();
+    for (const email of railEmails) {
+      railSenderCounts.set(email.sender, (railSenderCounts.get(email.sender) ?? 0) + 1);
+    }
 
-    // The same inbox the rail was ranked against; see `inboxCounts`. A pill count is a
-    // claim about the user's mail, not the current result set.
-    const inboxCounts = countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits);
+    // Over the inbox whatever is open: the drawer's and the triage line's claims.
+    const inboxCounts =
+      state.mailbox === "inbox" ? railCounts : countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits);
 
     const attention = summarizeAttention(inboxForProfile, inboxSignals, state.now);
 
@@ -1198,6 +1249,8 @@ export class WinnowStore {
       result,
       threads,
       rail: railWithActive,
+      railCounts,
+      railSenderCounts,
       inboxCounts,
       inboxSenderCounts,
       inboxThreadCount,
@@ -3346,7 +3399,7 @@ export class WinnowStore {
   /** "Why it's here" for one inbox message: one line per filter it is in. */
   explainSmartFilters(id: number): FilterReason[] {
     const email = this.inboxEmail(id);
-    if (!email) return [];
+    if (!email) return this.explainInMailbox(id);
     this.inboxAnalysis();
     const cache = this.inboxCache;
     const base = cache?.baseSignals.get(id);
@@ -3355,6 +3408,25 @@ export class WinnowStore {
     return explainFilters(email, base, learned, cache.profile, this.state.filterLearning, {
       background: cache.background,
       weights: cache.weights,
+    });
+  }
+
+  /**
+   * "Why it's here" for a message in another mailbox (1.3.3): the same explanation, from
+   * the classification that mailbox's smart filters use (`mailboxSignals`). Drafts have
+   * none.
+   */
+  private explainInMailbox(id: number): FilterReason[] {
+    const email = this.state.all.find((candidate) => candidate.id === id);
+    if (!email || email.mailbox === "inbox") return [];
+    const { profile } = this.inboxAnalysis();
+    const cache = this.inboxCache;
+    const weights = this.state.learning.weights;
+    const base = classifyEmail(email, profile, weights);
+    const learned = this.mailboxSignals([email], profile).get(id) ?? base;
+    return explainFilters(email, base, learned, profile, this.state.filterLearning, {
+      background: cache?.background ?? EMPTY_BACKGROUND,
+      weights: cache?.weights ?? weights,
     });
   }
 

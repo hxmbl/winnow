@@ -802,6 +802,14 @@ button.wn-glass[data-rail-item]:active {
     inset 0 1px 0 var(--wn-glass-sheen),
     var(--wn-glass-lift);
 }
+/*
+ * A pinned chip with nothing in the open mailbox (`data-empty`, 1.3.3): its words and
+ * count fall back to the muted ink. Colour only: opacity or a filter on the chip would
+ * cut its frost off from the list.
+ */
+.wn-pill[data-empty] {
+  color: var(--wn-inkMuted);
+}
 /* "All", on the rail beside the chips: plain glass, no hue. */
 .wn-chip-plain {
   border-radius: 999px;

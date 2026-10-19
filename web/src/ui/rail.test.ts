@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 /**
  * The filter rail's contents.
  *
@@ -27,6 +28,53 @@ const SENDER_COUNTS = new Map<string, number>([
 
 const ids = (pills: ReturnType<typeof buildPills>) =>
   pills.map((pill) => (pill.id.kind === "sender" ? pill.id.sender : pill.id.id));
+
+describe("zero-count chips (1.3.3)", () => {
+  const ZERO = new Map<BuiltinSmartFilter, number>([
+    ["important", 0],
+    ["shipping", 0],
+    ["needs_action", 2],
+    ["unsafe", 0],
+  ]);
+  const RAIL0: BuiltinSmartFilter[] = ["important", "shipping", "needs_action", "unsafe"];
+  const SENDER0 = new Map<string, number>([["ada@example.com", 3]]);
+
+  it("drops an empty, inactive Unsafe and sender pill", () => {
+    const pills = buildPills(RAIL0, ZERO, ["ada@example.com", "grace@example.com"], SENDER0, []);
+    expect(ids(pills)).toEqual(["important", "shipping", "needs_action", "ada@example.com"]);
+  });
+
+  it("keeps the pinned pair at zero (drawn dimmed), so the rail and its digits do not move", () => {
+    const pills = buildPills(RAIL0, ZERO, [], SENDER0, []);
+    expect(pills.slice(0, 2).map((p) => [ids([p])[0], p.count])).toEqual([
+      ["important", 0],
+      ["shipping", 0],
+    ]);
+  });
+
+  it("keeps any active pill at zero: it is the control that turns the filter off", () => {
+    const pills = buildPills(RAIL0, ZERO, ["grace@example.com"], SENDER0, [
+      { kind: "builtin", id: "unsafe" },
+      senderFilter("grace@example.com"),
+    ]);
+    expect(ids(pills)).toContain("unsafe");
+    expect(ids(pills)).toContain("grace@example.com");
+  });
+
+  it("an empty inbox (inbox clear) shows only the pinned pair, dimmed", () => {
+    const empty = new Map<BuiltinSmartFilter, number>();
+    expect(ids(buildPills(["important", "shipping", "unsafe"], empty, [], new Map(), []))).toEqual(["important", "shipping"]);
+  });
+
+  it("FilterStrip marks a zero-count pill as empty, dimming its text and not its glass", () => {
+    const strip = readFileSync(new URL("./components/FilterStrip.tsx", import.meta.url), "utf8");
+    expect(strip).toMatch(/data-empty=\{count === 0 && !on \? "" : undefined\}/);
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    const rule = /\.wn-pill\[data-empty\][^{]*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/color:/);
+    expect(rule).not.toMatch(/opacity|filter/);
+  });
+});
 
 describe("buildPills", () => {
   it("puts the buckets first, in the store's order", () => {

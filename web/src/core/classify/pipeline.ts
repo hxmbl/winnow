@@ -56,6 +56,12 @@ export type InboxQuery = {
   searchQuery: string;
   sortBy: SortBy;
   searchBags?: SearchBags;
+  /**
+   * With no filter on, hold back unsafe mail. The inbox's rule (true, the default): in
+   * the spam folder or the bin, mail that looks unsafe is what the folder is *for*, and
+   * hiding it there is how those lists once showed nothing.
+   */
+  hideUnsafe?: boolean;
 };
 
 export type InboxResult = {
@@ -90,6 +96,7 @@ function signalFor(
  */
 export function runInboxQuery(query: InboxQuery): InboxResult {
   const { emails, profile, signals, filters, searchQuery, sortBy } = query;
+  const hideUnsafe = query.hideUnsafe ?? true;
   const bags = query.searchBags;
 
   const tokens = searchQuery
@@ -115,7 +122,7 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
       const signal = signalFor(signals, email);
       return filters.every((filter) => matchesFilter(filter, email, signal, profile));
     });
-  } else {
+  } else if (hideUnsafe) {
     // No filter: hide spam, so the default inbox stays clean.
     rows = rows.filter((email) => !isUnsafe(signalFor(signals, email)));
   }

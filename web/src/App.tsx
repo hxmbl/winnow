@@ -915,23 +915,21 @@ export function App({ store }: Props) {
   // ── Derived view ─────────────────────────────────────────────────────────
 
   /**
-   * The rail's data, from the store's own inbox-wide counts.
-   *
-   * A count on a pill is a claim about your mail, not about the current result set, and
-   * the rail is ranked against the inbox precisely so it stays put when you change
-   * mailbox — so both denominators are computed in the store, the only place that knows
-   * which set the rail was ranked against.
+   * The rail's data, from the store's counts over the open mailbox (1.3.3): a pill's
+   * number is how many messages in this mailbox it would show, before search and other
+   * filters. Computed in the store, the only place that knows which set the rail was
+   * ranked against.
    */
   const pills = useMemo(
     () =>
       buildPills(
         view.rail,
-        view.inboxCounts,
+        view.railCounts,
         view.profile.topSenders,
-        view.inboxSenderCounts,
+        view.railSenderCounts,
         snapshot.activeFilters,
       ),
-    [view.rail, view.inboxCounts, view.profile.topSenders, view.inboxSenderCounts, snapshot.activeFilters],
+    [view.rail, view.railCounts, view.profile.topSenders, view.railSenderCounts, snapshot.activeFilters],
   );
 
   // What the list's empty state needs to tell a clear Inbox from an empty folder.
@@ -3396,7 +3394,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 ) : null
               }
               whyHere={
-                selected?.mailbox === "inbox" ? (
+                // Every mailbox but Drafts has smart filters (1.3.3), so every one can say why.
+                selected && selected.mailbox !== "drafts" ? (
                   <WhyHere reasons={store.explainSmartFilters(selected.id)} />
                 ) : null
               }
