@@ -360,6 +360,8 @@ That is the only input; nothing is learned from opening or ignoring mail.
 | `pkce.ts` | RFC 7636 PKCE plus `state`, `buildAuthorizeUrl`, `parseRedirect`, `stateMatches`. The verifier never leaves the app; only the challenge does. |
 | `pool.ts` | `mapPool` and `TaskQueue` — bounded concurrency, in place of Gmail's `/batch` endpoint (a pool reuses the ordinary request path, including the quota bucket). |
 | `people.ts` | The People API client for the two contact listings, with its own quota bucket (60/min) and typed errors: `ExpiredSyncToken`, `PeopleScopeMissing`, `PeopleApiDisabled`. |
+| `drive.ts` | Drive v3 for big files as links (`drive.file` only): resumable upload, permissions read/share/revoke, Drive links found in a body (text and HTML), `shareForSend` / `revokeShares`, the demo's `DemoDriveClient`. See §13a. |
+| `driveSend.ts` | The decision around Drive at dispatch: `needsDriveGrant` (Send-tap, no network), `prepareDriveDispatch` (share, or hold for the user), `prepareQueuedShare` (the offline queue's replay). See §13a. |
 | `syncFake.ts` | Test-only fake with real latency. Not imported by the app; it lives beside the engine because the parallel and bench suites share it. |
 
 **Quota and retry numbers, in one place** (`client.ts`): `MAX_PAGE_SIZE = 200`,
@@ -488,7 +490,9 @@ star/read/move of a message replaces the older one. 404/410 drop quietly; 401 an
 through, never on a timer. A raw `messages.send` whose answer was lost is never replayed
 (it is reported, and a new message reopens in the composer); a `drafts.send` is, since a second try on
 a sent draft is a 404. Every sync result has the queue laid over it, so a fresh reading
-cannot undo a waiting change on screen. A label change queued by 1.3.0-beta is dropped
+cannot undo a waiting change on screen. A send whose Drive links were not shared yet
+(`Draft.driveShare` `pending`) shares them just before its replay, and a queued send Gmail
+refused takes back the permissions it created (§13a, Big files as Drive links). A label change queued by 1.3.0-beta is dropped
 on load, never replayed (§13a). A waiting send's files are written
 under the drafts' device-copy budget (`forDeviceCopy`), so one big file cannot overflow
 `localStorage` and leave the queue unsaved; this session keeps every byte. Permanent delete is not queued. Sign-out clears
@@ -499,6 +503,8 @@ Undo send (`core/mail/undoSend.ts`, Settings → Compose → **Undo send window*
 10 s by default; a saved 30 s from ≤ 1.2.2 reads as 20 s; "Sending in Ns… Undo · Send now"
 in the status pill): if the app closes in the window
 the message is **kept as a draft, not sent** — the safe choice, reasoned in that file.
+Drive links are shared only when the window ends (§13a), so nothing in the window has
+shared anything yet.
 
 ---
 
@@ -942,7 +948,7 @@ composer's attach button, chips and refusal line; `Composer` only renders it and
 drops (`onFiles`, desktop). A raw message over 4 MB goes to Gmail's media upload endpoint
 (`/upload/gmail/v1`, `multipart/related`) for send and for drafts create/update/send.
 
-Smoke: `scripts/smoke-attachments.mjs` (attachments, and labels staying gone), run by `smoke.mjs` and alone.
+Smoke: `scripts/smoke-attachments.mjs` (attachments, Drive links — sharing only at dispatch, a chipless Drive line shared from the body, someone else's link skipped, the missing-permission dialog — and labels staying gone), run by `smoke.mjs` and alone.
 
 **Big files as Drive links (1.3.3).** Gmail caps a message's attachments at 25 MB and its
 API has no Drive fallback, so `core/gmail/drive.ts` is one. Scope: `drive.file` only (the
@@ -955,17 +961,67 @@ token, so sign-out's revoke takes it with everything else. Flow: `ComposerAttach
 keeps the files `oversizedFiles` refused and offers the button → App uploads (resumable:
 metadata POST, then the bytes to Google's `Location`) → `Draft.driveFiles` plus a
 "File name (size) — link" line in the body (`insertDriveLinks`; the Drive chip's × takes
-the line out, the Drive copy stays) → at Send, `shareDriveFiles` shares the files whose
-line is still in the body with To/Cc/Bcc as **reader**, `sendNotificationEmail=false`,
-and any address Drive refused is a "can't open the Drive link" warning before the message
-goes (Send anyway / Keep editing). Google's API-disabled 403 becomes `DriveApiDisabled`
+the line out, the Drive copy stays) → shared with To/Cc/Bcc as **reader**,
+`sendNotificationEmail=false`, when the message is dispatched (below). Google's
+API-disabled 403 becomes `DriveApiDisabled`
 with a **Turn on the Drive API** link. The demo uses `DemoDriveClient` (no network; an
 `.invalid` address fails to share) and shows the consent dialog once. Settings → Privacy →
 **Big files as Drive links** (`driveLinks` preference, on) shows the grant and Stop; Google
 revokes only whole grants, so **Remove at Google** links to the account page. CSP adds
 `https://www.googleapis.com` (Drive v3 lives there; the Tauri CSP already had it). The
-setup guide and `docs/google-setup.md` have the optional Drive API step. Not done: a draft
-reopened from Gmail's Drafts loses `driveFiles` (its lines stay but are not shared).
+setup guide and `docs/google-setup.md` have the optional Drive API step.
+
+*What is shared: the body.* The composer's `driveFiles` is not part of a Gmail draft, so
+Send reads the links off the body that goes out (`driveLinksForSend`): `driveFiles` whose
+line is still there, Winnow's own "File name (size) — link" lines, and any other Drive
+file URL (`driveFileId`: `/file/d/<id>`, `open?id=`, `uc?id=`, Docs' `/d/<id>`,
+`drive.usercontent…?id=`; not folders). `findDriveLinks` reads plain text and HTML (its
+text and every `href`); `reopenDraft` rebuilds `driveFiles` from the saved message's own
+lines (`recoverDriveFiles`, text and HTML) so the chips come back. `shareForSend` reads a
+file's permissions first and shares only the addresses missing, so it knows exactly which
+permission ids *this* send created. `drive.file` reaches only files Winnow made, so a
+403/404 (or any refusal) on a link that is **not** one of Winnow's lines — someone else's
+pasted link — is skipped silently; a refusal on Winnow's own line is the "can't open the
+Drive link" warning (Send anyway / Keep editing). Whole-grant failures (API off, scope
+gone, signed out) on Winnow's links are thrown, never per-address.
+
+*Missing grant.* At Send-tap, with no network, `needsDriveGrant`: Winnow's own links and
+no `drive.file` on the token (or the demo not yet allowed) opens `DriveGrantNeeded` before
+anything is scheduled — **Allow Google Drive** (the same incremental consent as the first
+upload; on the web the page leaves and the user presses Send again), **Send anyway**
+(warned in so many words that recipients may not be able to open the link; nothing is
+shared, `driveShare.state = "waived"`), or Keep editing. A token that loses the scope
+between tap and dispatch holds the send at dispatch with the same dialog. Someone else's
+link alone never asks.
+
+*Sharing order (chosen).* Sharing happens at **actual dispatch**, never at Send-tap:
+`App.deliver` calls `prepareDriveDispatch` (`core/gmail/driveSend.ts`) when the undo
+window ends (or Send now, or at once with Undo send Off), before the Gmail send. So Undo,
+a close in the window (kept as a draft) or a discard has shared nothing. A share
+warning or a lost grant at dispatch *holds* the send (`DriveSendHold`): the message comes
+back to the composer (one opened since is parked, as Undo does) with the dialog; Send
+anyway there sends at once (the window already ran). Offline (or Drive unanswered) at
+dispatch, the draft goes to the offline queue with `Draft.driveShare` `pending`, and the
+queue has the app share it (`OfflineQueue.setDriveHooks` → `prepareQueuedShare`) just
+before replaying the send and **before** marking it attempted, so a share with no answer
+backs off like any request and never makes a raw send "unsafe to replay". Nobody is there
+to ask at replay, so refusals become a notice and the message goes.
+
+*Revocation (chosen).* Each send carries the permission ids it created
+(`DraftDriveShare.created`, `ComposerState.driveShares`), persisted with a queued send.
+Taken back (`revokeShares`, best effort, never an error): Keep editing on either Drive
+dialog; the composer discarded or put away as a draft after an attempt; Undo (defensive:
+only an earlier attempt's kept shares can exist then); a failed send parked because
+another composer was open; a queued send Gmail **refused** with nobody waiting; a
+sign-out with sends still waiting (`revokeQueuedShares`, up to 3 s, before the tokens
+go). Kept: a send that fails and is retried (the composer keeps them, the retry adds only
+what is missing and takes back those for a recipient or link no longer on the message);
+a queued send retried after a transient failure; a queued send that may have gone out (a
+lost answer, a 404 on its draft) — a link in a delivered message must open; a newer
+queued send of the same draft inherits an older one's. Changing the Google account
+(credentials removed) wipes the tokens first, so nothing can be taken back then. The
+demo uses `DemoDriveClient` throughout (own files are `demo-drive-…`, anything else 404s)
+and never calls Google; CSP and leak rules are unchanged.
 
 ---
 

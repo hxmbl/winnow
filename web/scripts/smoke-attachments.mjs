@@ -12,9 +12,12 @@
  *     the chips with remove, the 25 MB refusal, a desktop drop, and the device copy
  *     keeping the files.
  *   - Drive links (demo, no network): a file over 25 MB offers "Send as a Drive link",
- *     then the plain-words consent dialog, then a Drive chip and the "File name (size) — link" line; Send warns about an
- *     address Drive can't share with before anything goes; Settings → Privacy shows the
- *     row. Nothing reaches Google.
+ *     then the plain-words consent dialog, then a Drive chip and the "File name (size) — link" line; Send shares
+ *     nothing during the undo window and then warns about an address Drive can't share
+ *     with before the message goes; a Drive line with no chip (a draft reopened from
+ *     Drafts) is shared from the body, someone else's Drive link is skipped quietly; a
+ *     message with Winnow's Drive links and no Drive permission asks before it is
+ *     scheduled (allow, or send anyway with a warning). Nothing reaches Google.
  */
 
 import path from "node:path";
@@ -293,9 +296,17 @@ export async function attachmentsSmoke({ browser, url, check, section }) {
 
     await sheet.locator("button", { hasText: /^Send/ }).first().click();
     const warning = p.locator('[role="dialog"][aria-label="One recipient can\'t open the Drive link"]');
+    const pendingStrip = p.locator("[data-send-pending]");
+    await pendingStrip.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check(
+      "Send shares nothing at the tap: the message waits out its undo window first",
+      (await pendingStrip.count()) === 1 && (await warning.count()) === 0,
+    );
+    // "Send now" ends the window: dispatch, which is when the links are shared.
+    await pendingStrip.locator("[data-send-now]").click().catch(() => undefined);
     await warning.waitFor({ timeout: 5_000 }).catch(() => undefined);
     check(
-      "Send warns first about an address Drive can't share with",
+      "at dispatch, an address Drive can't share with is asked about before the message goes",
       (await warning.count()) === 1 && /who@example\.invalid/.test((await warning.textContent()) ?? ""),
       (await warning.textContent().catch(() => "")) ?? "",
     );
@@ -309,8 +320,80 @@ export async function attachmentsSmoke({ browser, url, check, section }) {
       (await sheet.locator("[data-drive-chip]").count()) === 0 &&
         !/drive\.google\.com/.test(await sheet.locator('textarea[aria-label="Message"]').inputValue()),
     );
+
+    // A draft reopened from Drafts has its Drive line but no chip: Send shares from the
+    // body. Someone else's Drive link beside it is skipped without a word.
+    const message = sheet.locator('textarea[aria-label="Message"]');
+    await message.fill(
+      "Here it is.\n\nfilm.mov (26 MB) — https://drive.google.com/file/d/demo-drive-77/view\n" +
+        "And the deck: https://drive.google.com/open?id=someoneElse1234567\n",
+    );
+    check("a pasted Drive line has no chip (as a reopened draft that lost its list)", (await sheet.locator("[data-drive-chip]").count()) === 0);
+    await sheet.locator("button", { hasText: /^Send/ }).first().click();
+    await pendingStrip.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    await pendingStrip.locator("[data-send-now]").click().catch(() => undefined);
+    await warning.waitFor({ timeout: 5_000 }).catch(() => undefined);
+    const bodyWarning = (await warning.textContent().catch(() => "")) ?? "";
+    check(
+      "the body's own Drive line is shared at dispatch, and only Drive's refusal for it is asked about",
+      (await warning.count()) === 1 && /who@example\.invalid/.test(bodyWarning) && !/ada@example\.com/.test(bodyWarning),
+      bodyWarning,
+    );
+    await warning.locator("button", { hasText: "Send anyway" }).click().catch(() => undefined);
+    await sheet.waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
+    check("Send anyway sends it at once (the undo window already ran)", (await sheet.count()) === 0 && (await warning.count()) === 0);
+
     check("the demo never reached Google", google.length === 0, google.slice(0, 3).join(" | "));
     check("no page errors in drive links", errors.length === 0, errors.slice(0, 3).join(" | "));
+    await ctx.close();
+  }
+
+  // ── Drive links without the Drive permission ──────────────────────────────
+  section("drive links without the permission");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const p = await ctx.newPage();
+    const errors = [];
+    const google = [];
+    p.on("pageerror", (error) => errors.push(String(error)));
+    p.on("request", (request) => {
+      if (/googleapis\.com|accounts\.google\.com/.test(request.url())) google.push(request.url());
+    });
+    await p.goto(url, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-message-id]", { timeout: 10_000 });
+    await p.locator("[data-compose]:visible").click();
+    const sheet = p.locator('[role="dialog"][aria-label="New message"]');
+    await sheet.waitFor({ state: "visible", timeout: 5_000 });
+    const to = sheet.locator('input[aria-label="To"]');
+    await to.fill("ada@example.com");
+    await to.press("Enter");
+    await sheet.locator('input[aria-label="Subject"]').fill("The film again").catch(() => undefined);
+    // Drive was never allowed in this session (the demo's stand-in for a revoked grant).
+    await sheet
+      .locator('textarea[aria-label="Message"]')
+      .fill("Here it is.\n\nfilm.mov (26 MB) — https://drive.google.com/file/d/demo-drive-5/view\n");
+    await sheet.locator("button", { hasText: /^Send/ }).first().click();
+    const ask = p.locator("[data-drive-grant-needed]");
+    await ask.waitFor({ timeout: 5_000 }).catch(() => undefined);
+    const askText = (await ask.textContent().catch(() => "")) ?? "";
+    check(
+      "a message with Winnow's Drive links and no Drive permission asks before it is scheduled",
+      (await ask.count()) === 1 &&
+        (await p.locator("[data-send-pending]").count()) === 0 &&
+        /may not be able to open the link/.test(askText) &&
+        (await p.locator("[data-drive-grant-allow]").count()) === 1 &&
+        (await p.locator("[data-drive-grant-send-anyway]").count()) === 1,
+      askText.slice(0, 200),
+    );
+    await p.locator("[data-drive-grant-send-anyway]").click().catch(() => undefined);
+    const strip = p.locator("[data-send-pending]");
+    await strip.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check("Send anyway goes on to the undo window", (await strip.count()) === 1 && (await ask.count()) === 0);
+    await strip.locator("[data-send-undo]").click().catch(() => undefined);
+    await sheet.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    check("and Undo still brings it back", (await sheet.count()) === 1);
+    check("without the permission, nothing reached Google", google.length === 0, google.slice(0, 3).join(" | "));
+    check("no page errors without the permission", errors.length === 0, errors.slice(0, 3).join(" | "));
     await ctx.close();
   }
 }
