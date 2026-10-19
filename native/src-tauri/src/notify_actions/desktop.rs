@@ -51,6 +51,13 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
             } else {
                 n.body(&format!("{}\n{}", message.subject, message.preview));
             }
+            // The sender's picture: Linux's `image-path` hint (drawn as the notification's
+            // image by GNOME, KDE, dunst and mako), Windows's toast image. A picture that
+            // cannot be written leaves the app icon.
+            let picture = message.picture.as_deref().and_then(write_picture);
+            if let Some(path) = picture.as_deref() {
+                n.image_path(&path.to_string_lossy());
+            }
             n.action("default", "Open");
             if actions.reply {
                 n.action("reply", "Reply");
@@ -88,6 +95,10 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
             #[cfg(target_os = "linux")]
             if let Some(shown) = app.try_state::<Shown>() {
                 shown.0.lock().remove(&id);
+            }
+            // The notification has closed; its picture is not needed any more.
+            if let Some(path) = picture {
+                let _ = std::fs::remove_file(path);
             }
         });
     }
@@ -141,6 +152,30 @@ pub fn confirm(app: &AppHandle, result: &ActionResult) {
     let _ = app;
 }
 
+/// Where notification pictures are written: a private folder under the temp dir.
+fn picture_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("winnow-notify")
+}
+
+/// Write a picture data URL's bytes to a file the notification server can read, named
+/// by a hash of the bytes. `None` for anything [`super::picture_bytes`] rejects, or when
+/// the file cannot be written.
+pub(crate) fn write_picture(picture: &str) -> Option<std::path::PathBuf> {
+    write_picture_in(&picture_dir(), picture)
+}
+
+pub(crate) fn write_picture_in(dir: &std::path::Path, picture: &str) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let bytes = super::picture_bytes(picture)?;
+    let extension = if bytes.starts_with(b"\x89PNG") { "png" } else { "jpg" };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    std::fs::create_dir_all(dir).ok()?;
+    let path = dir.join(format!("{:016x}.{extension}", hasher.finish()));
+    std::fs::write(&path, &bytes).ok()?;
+    Some(path)
+}
+
 fn base() -> notify_rust::Notification {
     let mut n = notify_rust::Notification::new();
     n.appname("Winnow");
@@ -170,7 +205,18 @@ fn base() -> notify_rust::Notification {
 
 #[cfg(test)]
 mod tests {
-    use super::action_name;
+    use super::{action_name, write_picture_in};
+
+    #[test]
+    fn a_picture_is_written_as_its_bytes_and_a_url_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        let path = write_picture_in(dir.path(), png).expect("written");
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+        assert!(std::fs::read(&path).unwrap().starts_with(b"\x89PNG"));
+        assert!(write_picture_in(dir.path(), "https://example.test/a.png").is_none());
+        assert!(write_picture_in(dir.path(), "data:image/png;base64,aGVsbG8=").is_none());
+    }
 
     #[test]
     fn only_known_actions_reach_the_webview() {

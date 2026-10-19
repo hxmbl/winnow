@@ -44,6 +44,94 @@ export async function notificationPictures(
   return out;
 }
 
+// ── Pictures for the native notifications ─────────────────────────────────
+
+/**
+ * The longest picture (as a data URL) handed to a native notification. Rust and Kotlin
+ * enforce the same cap (`MAX_PICTURE_CHARS` in `notify_actions/mod.rs`); a 96px PNG is
+ * usually 5–20 KB.
+ */
+export const NATIVE_PICTURE_MAX_CHARS = 200_000;
+
+/**
+ * Whether `value` is a picture a native notification will draw: a base64 PNG or JPEG
+ * data URL under the cap. The native side never fetches anything (Rust has no TLS client,
+ * and a background fetch from Android would reach a sender's server with no say from the
+ * app's rules), so a URL is never one.
+ */
+export function isNativePicture(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= NATIVE_PICTURE_MAX_CHARS &&
+    /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)
+  );
+}
+
+/** Draw a picture URL to a `size`-px square PNG data URL, or `null` when it cannot be. */
+export type Rasterise = (url: string, size: number) => Promise<string | null>;
+
+/**
+ * The webview's rasteriser: the same anonymous, referrer-less image load the avatar
+ * makes (so nothing new reaches anyone), centre-cropped into a square canvas. A picture
+ * that fails to load, takes over `timeoutMs`, or taints the canvas (a server without
+ * CORS) answers `null`, and the notification shows the app icon instead.
+ */
+export function canvasRasterise(timeoutMs = 3000): Rasterise {
+  return (url, size) =>
+    new Promise<string | null>((resolve) => {
+      if (typeof Image === "undefined" || typeof document === "undefined") return resolve(null);
+      const img = new Image();
+      const timer = setTimeout(() => resolve(null), timeoutMs);
+      const done = (value: string | null) => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+      img.crossOrigin = "anonymous";
+      img.referrerPolicy = "no-referrer";
+      img.decoding = "async";
+      img.onerror = () => done(null);
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = size;
+          canvas.height = size;
+          const context = canvas.getContext("2d");
+          const w = img.naturalWidth || size;
+          const h = img.naturalHeight || size;
+          if (!context) return done(null);
+          const side = Math.min(w, h);
+          context.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
+          const data = canvas.toDataURL("image/png");
+          done(isNativePicture(data) ? data : null);
+        } catch {
+          // A tainted canvas throws on `toDataURL`.
+          done(null);
+        }
+      };
+      img.src = url;
+    });
+}
+
+/**
+ * The resolved pictures, made drawable by a native notification: each URL rasterised to
+ * a small PNG data URL in the webview, under the same rules that resolved it. A picture
+ * that cannot be drawn is left out (the app icon shows), never passed on as a URL.
+ */
+export async function nativePictures(
+  pictures: Readonly<Record<string, string>>,
+  rasterise: Rasterise = canvasRasterise(),
+  size = NOTIFICATION_PICTURE_SIZE,
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(
+    Object.entries(pictures).map(async ([id, url]) => {
+      const drawn = isNativePicture(url) ? url : await rasterise(url, size).catch(() => null);
+      if (isNativePicture(drawn)) out[id] = drawn;
+    }),
+  );
+  return out;
+}
+
 // ── Reply requests ────────────────────────────────────────────────────────
 
 /**
@@ -77,7 +165,9 @@ export async function announce(store: WinnowStore, platform: Platform, emails: r
     info?.os === "android" ? store.notificationReplyHeads(emails.slice(0, 5)) : Promise.resolve({}),
     notificationPictures(emails, preferences.notificationHidePreview),
   ]);
-  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, heads, pictures));
+  // Native notifications (Android, desktop) draw a picture from its bytes, never a URL.
+  const shown = info?.kind === "desktop" ? await nativePictures(pictures) : pictures;
+  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, heads, shown));
 }
 
 // ── Presses and kept replies ──────────────────────────────────────────────

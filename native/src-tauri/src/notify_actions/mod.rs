@@ -35,6 +35,10 @@ pub const MAX_CHILDREN: usize = 5;
 /// Display strings are cut here: a notification is not a reader.
 const MAX_TEXT: usize = 240;
 
+/// The longest picture data URL accepted, in characters (`NATIVE_PICTURE_MAX_CHARS` in
+/// the web layer's `notificationActions.ts`).
+pub const MAX_PICTURE_CHARS: usize = 200_000;
+
 /// The plugin's name, as Tauri registers it.
 pub const PLUGIN_NAME: &str = "winnow-notify";
 
@@ -89,9 +93,11 @@ pub struct MessageNotice {
     /// The composer's header block for a reply (see `plan.rs`). Absent: no inline reply.
     #[serde(default)]
     pub reply_head: Option<String>,
-    /// The sender's picture URL, resolved by the web layer under the avatar settings
-    /// (`resolveSenderPicture`); absent or null: none. Carried through to the platform
-    /// unchanged; not drawn by the native notifications yet.
+    /// The sender's picture, resolved by the web layer under the avatar settings
+    /// (`resolveSenderPicture`) and rasterised there to a small PNG/JPEG data URL
+    /// (`nativePictures`); absent or null: none. Drawn as the large icon on Android and
+    /// the notification image on Linux/Windows; macOS's grouped notification has none.
+    /// Never fetched here: anything but a valid data URL is dropped by [`sanitised`].
     #[serde(default)]
     pub picture: Option<String>,
 }
@@ -124,6 +130,8 @@ impl NotificationBatch {
             if hide_preview {
                 message.picture = None;
             }
+            // Only bytes, never an address to fetch.
+            message.picture = message.picture.take().filter(|p| picture_bytes(p).is_some());
             message.title = clip(&message.title);
             message.subject = clip(&message.subject);
             message.preview = clip(&message.preview);
@@ -142,6 +150,28 @@ impl NotificationBatch {
         self.total = self.total.max(self.messages.len() as u32);
         self
     }
+}
+
+/// The image bytes in a picture data URL (`data:image/png;base64,…` or JPEG), or `None`
+/// for anything else: a URL, another type, bad base64, too long, or bytes that do not
+/// start with the type's signature.
+pub(crate) fn picture_bytes(picture: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    if picture.len() > MAX_PICTURE_CHARS {
+        return None;
+    }
+    let (signature, data): (&[u8], &str) =
+        if let Some(rest) = picture.strip_prefix("data:image/png;base64,") {
+            (b"\x89PNG\r\n\x1a\n", rest)
+        } else if let Some(rest) = picture.strip_prefix("data:image/jpeg;base64,") {
+            (b"\xff\xd8\xff", rest)
+        } else {
+            return None;
+        };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()?;
+    bytes.starts_with(signature).then_some(bytes)
 }
 
 fn clip(value: &str) -> String {
@@ -343,26 +373,48 @@ mod tests {
     }
 
     #[test]
-    fn the_picture_is_carried_and_dropped_when_previews_are_hidden() {
-        let mut with_picture = notice("p1");
-        with_picture.picture = Some("https://example.test/a.png".into());
-        let batch = |hide_preview: bool| NotificationBatch {
+    fn the_picture_is_carried_as_bytes_and_dropped_when_previews_are_hidden() {
+        const PNG: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        let with = |picture: &str| {
+            let mut n = notice("p1");
+            n.picture = Some(picture.into());
+            n
+        };
+        let batch = |picture: &str, hide_preview: bool| NotificationBatch {
             total: 1,
             summary_title: "Ada".into(),
             summary_body: String::new(),
-            messages: vec![with_picture.clone()],
+            messages: vec![with(picture)],
             actions: ActionSet::default(),
             hide_preview,
         };
         assert_eq!(
-            batch(false).sanitised().messages[0].picture.as_deref(),
-            Some("https://example.test/a.png")
+            batch(PNG, false).sanitised().messages[0].picture.as_deref(),
+            Some(PNG)
         );
-        assert_eq!(batch(true).sanitised().messages[0].picture, None);
+        assert_eq!(batch(PNG, true).sanitised().messages[0].picture, None);
+        // A URL is never fetched natively: dropped, so the app icon shows.
+        assert_eq!(
+            batch("https://example.test/a.png", false).sanitised().messages[0].picture,
+            None
+        );
         // An older web layer sends no picture at all.
         let old: MessageNotice =
             serde_json::from_str(r#"{"messageId":1,"gmailId":"a","title":"Ada"}"#).unwrap();
         assert_eq!(old.picture, None);
+    }
+
+    #[test]
+    fn only_png_or_jpeg_bytes_with_their_signature_are_pictures() {
+        assert!(picture_bytes("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==").is_some());
+        assert!(picture_bytes("data:image/jpeg;base64,/9j/4AAQSkZJRg==").is_some());
+        // Declared PNG, but the bytes are not one.
+        assert!(picture_bytes("data:image/png;base64,aGVsbG8=").is_none());
+        assert!(picture_bytes("data:image/svg+xml;base64,PHN2Zz4=").is_none());
+        assert!(picture_bytes("data:image/png;base64,!!!").is_none());
+        assert!(picture_bytes("https://gravatar.com/avatar/x").is_none());
+        let long = format!("data:image/png;base64,{}", "A".repeat(MAX_PICTURE_CHARS));
+        assert!(picture_bytes(&long).is_none());
     }
 
     #[test]

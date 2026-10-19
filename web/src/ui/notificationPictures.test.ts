@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { LogoState } from "../core/avatars/logoCache";
 import type { Email } from "../core/model/email";
-import { NOTIFICATION_PICTURE_SIZE, notificationPictures } from "./notificationActions";
-import { orderPictures, pictureWants, remotePicturesPaused, resolveSenderPicture, senderPictureSources, type LogoSource, type SenderPictures } from "./senderPictures";
+import { NATIVE_PICTURE_MAX_CHARS, NOTIFICATION_PICTURE_SIZE, announce, isNativePicture, nativePictures, notificationPictures } from "./notificationActions";
+import type { WinnowStore } from "../core/store/store";
+import type { Platform } from "../platform/types";
+import { orderPictures, pictureWants, publishSenderPictures, remotePicturesPaused, resolveSenderPicture, senderPictureSources, type LogoSource, type SenderPictures } from "./senderPictures";
 import { readFileSync } from "node:fs";
 
 /** A source that answers `table` after a request, and records every address asked. */
@@ -166,5 +168,66 @@ describe("Remote images = Never pauses remote avatar lookups (1.3.3)", () => {
   it("App builds the avatar sources through the shared resolver with the image policy", () => {
     const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
     expect(app).toMatch(/senderPictureSources\(\{[\s\S]*imagePolicy,[\s\S]*\}\)/);
+  });
+});
+
+describe("native notifications get the picture as bytes, never a URL (1.3.3)", () => {
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  it("accepts only a small base64 PNG or JPEG data URL", () => {
+    expect(isNativePicture(PNG)).toBe(true);
+    expect(isNativePicture("data:image/jpeg;base64,/9j/4AAQ")).toBe(true);
+    expect(isNativePicture(GRAVATAR)).toBe(false);
+    expect(isNativePicture("data:image/svg+xml;base64,PHN2Zz4=")).toBe(false);
+    expect(isNativePicture("data:image/png;base64,abc<script>")).toBe(false);
+    expect(isNativePicture(`data:image/png;base64,${"A".repeat(NATIVE_PICTURE_MAX_CHARS)}`)).toBe(false);
+    expect(isNativePicture(null)).toBe(false);
+  });
+
+  it("rasterises each resolved URL at the notification size, and drops one that fails", async () => {
+    const asked: [string, number][] = [];
+    const rasterise = async (url: string, size: number) => {
+      asked.push([url, size]);
+      if (url === LOGO) throw new Error("tainted");
+      return url === GRAVATAR ? PNG : null;
+    };
+    const out = await nativePictures({ g1: GRAVATAR, g2: LOGO, g3: PHOTO, g4: PNG }, rasterise);
+    expect(out).toEqual({ g1: PNG, g4: PNG });
+    expect(asked).toEqual([
+      [GRAVATAR, NOTIFICATION_PICTURE_SIZE],
+      [LOGO, NOTIFICATION_PICTURE_SIZE],
+      [PHOTO, NOTIFICATION_PICTURE_SIZE],
+    ]);
+  });
+
+  it("a rasteriser that answers something that is not a PNG/JPEG data URL is ignored", async () => {
+    expect(await nativePictures({ g1: GRAVATAR }, async () => GRAVATAR)).toEqual({});
+  });
+
+  it("announce hands the desktop/Android platform no URL, and the web platform the URL", async () => {
+    publishSenderPictures(sources({ photos: new Map([[ADA, PHOTO]]) }));
+    try {
+      const sent: { kind: string; pictures: (string | null)[] }[] = [];
+      for (const kind of ["desktop", "web"] as const) {
+        const store = {
+          getSnapshot: () => ({ preferences: { notificationHidePreview: false, notificationActions: { reply: true, read: true, trash: true } } }),
+          notificationReplyHeads: async () => ({}),
+        } as unknown as WinnowStore;
+        const platform = {
+          info: async () => ({ kind, os: kind === "web" ? "web" : "linux" }),
+          notifyNewMail: async (batch: { messages: { picture: string | null }[] }) => {
+            sent.push({ kind, pictures: batch.messages.map((m) => m.picture) });
+          },
+        } as unknown as Platform;
+        await announce(store, platform, [mail()]);
+      }
+      // No canvas in the test environment: the desktop's rasterising fails, so it gets none.
+      expect(sent).toEqual([
+        { kind: "desktop", pictures: [null] },
+        { kind: "web", pictures: [PHOTO] },
+      ]);
+    } finally {
+      publishSenderPictures(sources());
+    }
   });
 });

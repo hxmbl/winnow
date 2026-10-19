@@ -5,15 +5,19 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.graphics.drawable.IconCompat
 import app.winnow.android.R
 import org.json.JSONObject
 
@@ -47,6 +51,10 @@ object MailNotifier {
   const val EXTRA_REPLY_HEAD = "winnow.replyHead"
   const val EXTRA_ACTIONS = "winnow.actions"
   const val EXTRA_HIDE = "winnow.hidePreview"
+  const val EXTRA_PICTURE = "winnow.picture"
+
+  /** Same cap as Rust's `MAX_PICTURE_CHARS` and the web layer's `NATIVE_PICTURE_MAX_CHARS`. */
+  private const val MAX_PICTURE_CHARS = 200_000
 
   /** If Rust has not answered a press by then, the notification says so. */
   private const val WATCHDOG_MS = 60_000L
@@ -93,6 +101,8 @@ object MailNotifier {
         putString(EXTRA_REPLY_HEAD, if (m.isNull("replyHead")) null else m.optString("replyHead"))
         putInt(EXTRA_ACTIONS, flags)
         putBoolean(EXTRA_HIDE, hide)
+        // Bytes as a data URL (Rust has already dropped anything else); never with a hidden preview.
+        if (!hide && !m.isNull("picture")) putString(EXTRA_PICTURE, m.optString("picture"))
       }
       post(context, extras.getInt(EXTRA_NOTIFICATION_ID), message(context, extras))
       lines.add("${m.optString("title")}  ${m.optString("subject")}")
@@ -129,7 +139,12 @@ object MailNotifier {
     val hide = extras.getBoolean(EXTRA_HIDE, false)
     val text = if (preview.isEmpty()) subject else "$subject\n$preview"
 
-    val sender = Person.Builder().setName(title.ifEmpty { "Someone" }).build()
+    // The sender's picture, when the web layer sent one and the preview is not hidden:
+    // the large icon and the MessagingStyle person's icon. Anything undecodable: none.
+    val picture = if (hide) null else pictureBitmap(extras.getString(EXTRA_PICTURE))
+    val senderBuilder = Person.Builder().setName(title.ifEmpty { "Someone" })
+    if (picture != null) senderBuilder.setIcon(IconCompat.createWithBitmap(picture))
+    val sender = senderBuilder.build()
     val style = NotificationCompat.MessagingStyle(Person.Builder().setName("You").build())
       .setConversationTitle(subject.ifEmpty { null })
       .addMessage(text, extras.getLong(EXTRA_RECEIVED_AT).takeIf { it > 0 } ?: System.currentTimeMillis(), sender)
@@ -144,6 +159,7 @@ object MailNotifier {
       .setAutoCancel(true)
       .setOnlyAlertOnce(true)
       .setContentIntent(open(context, id, "winnow://message/${extras.getLong(EXTRA_MESSAGE_ID)}"))
+    if (picture != null) builder.setLargeIcon(picture)
     val receivedAt = extras.getLong(EXTRA_RECEIVED_AT)
     if (receivedAt > 0) builder.setWhen(receivedAt).setShowWhen(true)
     if (hide) {
@@ -178,6 +194,25 @@ object MailNotifier {
       )
     }
     return builder.build()
+  }
+
+  /**
+   * A `data:image/png|jpeg;base64,` picture as a bitmap, or null: no picture, too long,
+   * another scheme (never fetched here), bad base64 or bytes Android cannot decode.
+   */
+  fun pictureBitmap(picture: String?): Bitmap? {
+    if (picture == null || picture.length > MAX_PICTURE_CHARS) return null
+    val comma = picture.indexOf(',')
+    val header = if (comma > 0) picture.substring(0, comma) else return null
+    if (header != "data:image/png;base64" && header != "data:image/jpeg;base64") return null
+    return try {
+      val bytes = Base64.decode(picture.substring(comma + 1), Base64.DEFAULT)
+      BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    } catch (e: IllegalArgumentException) {
+      null
+    } catch (e: OutOfMemoryError) {
+      null
+    }
   }
 
   // ── While Rust works, and after ──────────────────────────────────────────
@@ -319,7 +354,9 @@ object MailNotifier {
   private fun broadcast(context: Context, extras: Bundle, action: String, mutable: Boolean = false): PendingIntent {
     val intent = Intent(context, NotifyActionReceiver::class.java)
       .setAction("app.winnow.android.notify.$action")
-      .putExtras(extras)
+      // Not the picture: up to tens of KB per button would weigh on the binder, and a
+      // notification rebuilt after an action can do without it.
+      .putExtras(Bundle(extras).apply { remove(EXTRA_PICTURE) })
       .putExtra(EXTRA_ACTION, action)
     // RemoteInput fills the reply into the intent, which needs a mutable PendingIntent
     // (Android 12+); everything else is immutable.
