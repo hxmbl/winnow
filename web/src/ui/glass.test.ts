@@ -181,7 +181,10 @@ describe("a held chip stays a pill (1.3.3)", () => {
   const css = readFileSync(new URL("../index.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   /** Every rule whose selector names a pressed chip, with its declarations. */
   const pressedChipRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .filter(([, selector]) => /(wn-chip-glass|data-rail-item)[^,{]*:active|wn-chip-glass[^,{]*:has\(> button:active\)/.test(selector))
+    // `:not([data-rail-item])` is the exclusion from the shared press scale, not a chip.
+    .filter(([, selector]) =>
+      /(wn-chip-glass|(?<!:not\()\[data-rail-item\])[^,{]*:active|wn-chip-glass[^,{]*:has\(> button:active\)/.test(selector),
+    )
     .map(([, selector, body]) => ({ selector: selector.trim(), body }));
 
   it("no press rule scales or reshapes a smart-filter chip", () => {
@@ -192,7 +195,10 @@ describe("a held chip stays a pill (1.3.3)", () => {
   });
 
   it("the shared glass press scale excludes the rail's items", () => {
-    const scale = [...css.matchAll(/([^{}]+)\{\s*transform:\s*scale\(0\.97\);?\s*\}/g)].map(([, selector]) => selector);
+    // The shared glass press (other controls, like back-to-top, keep their own scale).
+    const scale = [...css.matchAll(/([^{}]+)\{\s*transform:\s*scale\(0\.97\);?\s*\}/g)]
+      .map(([, selector]) => selector)
+      .filter((selector) => /wn-glass|wn-chip-glass/.test(selector));
     expect(scale.length).toBeGreaterThan(0);
     for (const selector of scale) {
       expect(selector).not.toMatch(/\.wn-pill\.wn-chip-glass:active/);

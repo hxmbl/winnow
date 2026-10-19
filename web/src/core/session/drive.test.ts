@@ -64,6 +64,8 @@ const cache = {
 
 let grantedScope: string;
 let profileEmail: string;
+/** Profiles answered in turn (the last one repeats), when set. */
+let profiles: string[];
 let revoked: string[];
 
 function installGoogle(): void {
@@ -80,7 +82,8 @@ function installGoogle(): void {
       );
     }
     if (url.pathname.endsWith("/users/me/profile")) {
-      return new Response(JSON.stringify({ emailAddress: profileEmail, historyId: "1" }), { status: 200 });
+      const email = profiles.length > 1 ? profiles.shift()! : (profiles[0] ?? profileEmail);
+      return new Response(JSON.stringify({ emailAddress: email, historyId: "1" }), { status: 200 });
     }
     return new Response("not stubbed", { status: 500 });
   });
@@ -103,6 +106,7 @@ beforeEach(() => {
   storedClient = { clientId: "desktop.apps.googleusercontent.com" };
   grantedScope = `${GMAIL_SCOPE} ${DRIVE_FILE_SCOPE}`;
   profileEmail = "me@example.com";
+  profiles = [];
   revoked = [];
   installGoogle();
 });
@@ -139,21 +143,8 @@ describe("the Drive grant", () => {
   it("refuses a consent approved for another account and keeps the old grant", async () => {
     const { session, tokens } = sessionWith();
     const before = tokens.current();
-    let calls = 0;
-    vi.stubGlobal("fetch", async (input: string) => {
-      const url = new URL(String(input));
-      if (url.origin === "https://oauth2.googleapis.com") {
-        return new Response(
-          JSON.stringify({ access_token: "other", refresh_token: "r2", expires_in: 3600, scope: grantedScope }),
-          { status: 200 },
-        );
-      }
-      calls += 1;
-      return new Response(
-        JSON.stringify({ emailAddress: calls === 1 ? "me@example.com" : "someone@else.com", historyId: "1" }),
-        { status: 200 },
-      );
-    });
+    // The client keeps the fetch it was built with, so the stub answers in turn.
+    profiles = ["me@example.com", "someone@else.com"];
     await expect(session.grantDrive()).rejects.toThrow(/someone@else\.com/);
     expect(tokens.current()?.accessToken).toBe(before?.accessToken);
     expect(await session.driveAccess()).toBe("not_granted");

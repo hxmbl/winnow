@@ -40,12 +40,17 @@ describe("smart filters in the open mailbox", () => {
     expect(inTrash).toBeGreaterThan(0);
     const buckets = filled(store);
     expect(buckets.length).toBeGreaterThan(0);
+    // The binned junk: a pill's count leaves it out, and a statement-about-the-message
+    // filter (starred, security, contacts…) still lists it, by design (`matchesBuiltin`).
+    store.toggleFilter(builtinFilter("unsafe"));
+    const unsafe = new Set(store.view.emails.map((email) => email.id));
+    store.toggleFilter(builtinFilter("unsafe"));
     for (const id of buckets) {
       const count = store.view.railCounts.get(id)!;
       expect(count).toBeLessThanOrEqual(inTrash);
       store.toggleFilter(builtinFilter(id));
-      // The list a filter gives is exactly the count on its pill, all from the bin.
-      expect(store.view.emails.length).toBe(count);
+      // The list a filter gives is the count on its pill (plus any junk), all from the bin.
+      expect(store.view.emails.filter((email) => !unsafe.has(email.id)).length).toBe(count);
       for (const email of store.view.emails) expect(email.mailbox).toBe("trash");
       store.toggleFilter(builtinFilter(id));
     }
