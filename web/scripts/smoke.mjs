@@ -2038,6 +2038,32 @@ try {
   // Undo send holds it first; Send now skips the wait, and a failed send brings the
   // composer back with its draft and the reason.
   check("⌘⏎ puts the reply in its undo window", (await page.locator("[data-send-pending]").count()) === 1);
+  {
+    // On the desktop the status pill floats over the list, under its floating header,
+    // centred on the list column, and pushes nothing in the layout.
+    const placed = await page.evaluate(() => {
+      const el = document.querySelector("[data-status-pill='sending']");
+      const face = el?.querySelector(".wn-glass");
+      const header = document.querySelector("[data-list-chrome]");
+      const list = document.querySelector("[data-row-count]")?.parentElement;
+      if (!el || !face || !header || !list) return null;
+      const box = face.getBoundingClientRect();
+      const h = header.getBoundingClientRect();
+      const centre = (box.left + box.right) / 2;
+      return {
+        fixed: getComputedStyle(el).position === "fixed",
+        underHeader: box.top >= h.bottom - 1,
+        overList: centre > h.left && centre < h.right && Math.abs(centre - (h.left + h.right) / 2) < 24,
+        undo: el.querySelector("[data-send-undo]") !== null && el.querySelector("[data-send-now]") !== null,
+        countdown: /Sending in \d+s/.test(el.textContent ?? ""),
+      };
+    });
+    check(
+      "and the status pill says so under the list's header, with Undo and Send now",
+      placed !== null && Object.values(placed).every(Boolean),
+      JSON.stringify(placed),
+    );
+  }
   await page.locator("[data-send-now]").click();
   await page.locator('[data-composer] [role="alert"]').first().waitFor({ timeout: 5_000 }).catch(() => undefined);
   check(
@@ -2603,7 +2629,7 @@ try {
     // Undo send (10s by default): the message waits under a "Sending… Undo" strip, and
     // Undo brings it back to the composer exactly as it was — nothing has left.
     const sendingStrip = page.locator("[data-send-pending]");
-    check("and holds the message under a Sending… Undo strip", (await sendingStrip.count()) === 1,
+    check("and holds the message under a Sending… Undo pill", (await sendingStrip.count()) === 1,
       String(await sendingStrip.textContent().catch(() => "none")));
     check("which counts down", /Sending in \d+s/.test((await sendingStrip.textContent().catch(() => "")) ?? ""));
     await sendingStrip.locator("[data-send-undo]").click();
@@ -2617,18 +2643,18 @@ try {
     check("and the strip goes", (await sendingStrip.count()) === 0);
     await page.waitForTimeout(5_500);
     check("and nothing was sent in the meantime",
-      !(((await page.locator("[data-notice-text]").textContent().catch(() => "")) ?? "").includes("Message sent")));
+      !(((await page.locator("[data-pill-text]").textContent().catch(() => "")) ?? "").includes("Message sent")));
 
     // Sending again, then Send now on the strip: it goes without waiting the rest out.
     await newSend().click();
     await newSheet().waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
     await sendingStrip.locator("[data-send-now]").click();
-    await page.locator("[data-notice-text]", { hasText: "Message sent" }).waitFor({ timeout: 5_000 }).catch(() => undefined);
+    await page.locator("[data-pill-text]", { hasText: "Message sent" }).waitFor({ timeout: 5_000 }).catch(() => undefined);
     check("Send now on the strip sends at once", (await sendingStrip.count()) === 0);
     check(
       "and confirms it went",
-      ((await page.locator("[data-notice-text]").textContent().catch(() => "")) ?? "").includes("Message sent"),
-      String(await page.locator("[data-notice-text]").textContent().catch(() => "no notice")),
+      ((await page.locator("[data-pill-text]").textContent().catch(() => "")) ?? "").includes("Message sent"),
+      String(await page.locator("[data-pill-text]").textContent().catch(() => "no notice")),
     );
     check("and puts up no error", (await page.locator('div[role="alert"]').count()) === 0);
 
@@ -5042,15 +5068,76 @@ try {
       check("a swipe left takes the message out of the list", (await rowById(id).count()) === 0 && (await rowCount()) === before - 1, `${before} → ${await rowCount()}`);
       check("and nothing opened", (await p.locator("[data-reader]").count()) === 0);
       const label = p.locator("[data-undo-label]");
-      check("the undo strip says it went to the Trash", (await label.count()) === 1 && /Trash/.test((await label.textContent()) ?? ""));
-      await p.locator('[role="status"]:has([data-undo-label]) button', { hasText: /^Undo$/ }).click({ timeout: 3_000 }).catch(() => undefined);
+      check("the status pill says it went to the Trash", (await label.count()) === 1 && /Trash/.test((await label.textContent()) ?? ""));
+      // The pill is the sync pill's glass, floating: under the top bar, clear of the
+      // chips and the dock, inside the screen, pushing nothing down, and Undo is the
+      // thing under a finger at its centre.
+      const pill = await p.evaluate(() => {
+        const el = document.querySelector("[data-status-pill='undo']");
+        const face = el?.querySelector(".wn-glass");
+        const undo = el?.querySelector("[data-pill-undo]");
+        const bar = document.querySelector("[data-phone-topbar]");
+        const chips = [...document.querySelectorAll("[data-phone-pill], [data-phone-chips] [data-rail-item]")].map((n) => n.getBoundingClientRect()).filter((r) => r.height > 0);
+        if (!el || !face || !undo || !bar) return null;
+        const box = face.getBoundingClientRect();
+        const u = undo.getBoundingClientRect();
+        const hit = document.elementFromPoint(u.left + u.width / 2, u.top + u.height / 2);
+        return {
+          fixed: getComputedStyle(el).position === "fixed",
+          rounded: parseFloat(getComputedStyle(face).borderTopLeftRadius) >= box.height / 2 - 1,
+          belowBar: box.top >= bar.getBoundingClientRect().bottom - 1,
+          clearOfDock: chips.every((r) => box.bottom <= r.top || box.top >= r.bottom),
+          inside: box.left >= 0 && box.right <= innerWidth,
+          undoReachable: hit === undo || undo.contains(hit),
+          announced: (document.querySelector("[data-pill-announce]")?.textContent ?? "").includes("Undo is available"),
+        };
+      });
+      check(
+        "it is the frosted pill, fixed under the top bar, clear of the dock, with Undo tappable",
+        pill !== null && Object.values(pill).every(Boolean),
+        JSON.stringify(pill),
+      );
+      await p.locator("[data-status-pill] [data-pill-undo]").click({ timeout: 3_000 }).catch(() => undefined);
       await p.waitForTimeout(300);
       check("Undo puts it back", (await rowById(id).count()) === 1 && (await rowCount()) === before);
-      check("and clears the strip", (await p.locator("[data-undo-label]").count()) === 0);
+      check("and clears the offer", (await p.locator("[data-undo-label]").count()) === 0);
       check(
         "with the row drawn where it belongs, not left translated",
         (await rowById(id).evaluate((el) => el.style.transform)) === "",
       );
+      check(
+        "and the pill goes back to the sync status",
+        ((await p.locator("[data-status-pill='sync'] [data-pill-text]").textContent().catch(() => "")) ?? "").includes("Demo mailbox"),
+        String(await p.locator("[data-status-pill]").getAttribute("data-status-pill").catch(() => "none")),
+      );
+      await p.waitForFunction(() => !document.querySelector("[data-status-pill]"), null, { timeout: 4_000 }).catch(() => undefined);
+      check("then goes away", (await p.locator("[data-status-pill]").count()) === 0);
+      // Dismiss lets the offer go, and the pill goes back to the sync status too.
+      const again = await rows.nth(2).getAttribute("data-row-id");
+      const at2 = await middleOf(again);
+      await drag({ x: at2.x + 60, y: at2.y, dx: -240 });
+      await p.locator("[data-status-pill='undo'] [data-pill-dismiss]").click({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(200);
+      check(
+        "Dismiss takes the offer down, leaving the message in the Trash",
+        (await p.locator("[data-undo-label]").count()) === 0 && (await rowById(again).count()) === 0 &&
+          (await p.locator("[data-status-pill='sync']").count()) === 1,
+      );
+      // Newest wins: a second swipe replaces the first offer, and Undo takes back the second.
+      const first = await rows.nth(2).getAttribute("data-row-id");
+      const atA = await middleOf(first);
+      await drag({ x: atA.x + 60, y: atA.y, dx: -240 });
+      const second = await rows.nth(2).getAttribute("data-row-id");
+      const atB = await middleOf(second);
+      await drag({ x: atB.x + 60, y: atB.y, dx: -240 });
+      check("a second action replaces the first in the pill", (await p.locator("[data-status-pill='undo']").count()) === 1);
+      await p.locator("[data-status-pill] [data-pill-undo]").click({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(300);
+      check(
+        "and its Undo takes back its own action, not the first",
+        (await rowById(second).count()) === 1 && (await rowById(first).count()) === 0,
+      );
+
     }
 
     // Swipe right: read and unread, snapping back.
@@ -5144,7 +5231,7 @@ try {
       const at = await middleOf(id);
       await drag({ x: at.x + 60, y: at.y, dx: -240, settle: 120 });
       check("with reduced motion a swipe commits at once", (await rowById(id).count()) === 0);
-      await p.locator('[role="status"]:has([data-undo-label]) button', { hasText: /^Undo$/ }).click({ timeout: 3_000 }).catch(() => undefined);
+      await p.locator("[data-status-pill] [data-pill-undo]").click({ timeout: 3_000 }).catch(() => undefined);
       await p.waitForTimeout(200);
       await p.emulateMedia({ reducedMotion: "no-preference" });
     }
@@ -7083,7 +7170,7 @@ try {
     const held = await drag(start.x, start.y, down(220), { holdAt: indicator });
     const spinning = await indicator();
     await q.waitForFunction(() => document.querySelector("[data-pull-indicator]")?.getAttribute("data-pull-indicator") === "done", null, { timeout: 8_000 }).catch(() => undefined);
-    const resultText = (await q.locator("[data-pull-result]").textContent().catch(() => "")) ?? "";
+    const resultText = (await q.locator("[data-status-pill='sync'] [data-pill-text]").textContent().catch(() => "")) ?? "";
     check(
       "past ~70px it arms, and letting go syncs (the Sync now action) with a spinner, then says so",
       held === "armed" && ["syncing", "done"].includes(spinning) && historyCalls > before && /^Synced just now/.test(resultText.trim()),

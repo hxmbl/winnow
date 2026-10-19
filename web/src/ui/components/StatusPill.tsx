@@ -1,0 +1,215 @@
+/**
+ * The status pill (the rules are `statusPill.ts`).
+ *
+ * The same frosted pill as a pull to refresh's "Synced just now" (`.wn-glass`,
+ * `.wn-glass-bar`, full round, meta weight), at the same place: centred over the list,
+ * just under its top chrome — the phone's top bar or the desktop's floating list
+ * header. When the list is not on screen (a phone reading a message, or a narrow
+ * window with the reader over the list) it centres on the window under the safe area
+ * instead. Up top, it never meets the phone's dock, its chips or the gesture bar.
+ *
+ * Fixed rather than in the layout, so a notice never pushes the mail down the way the
+ * old strips did. It holds one notice at a time, newest first, and its buttons act on
+ * that notice alone. After a notice it says the sync status for a beat, then goes.
+ *
+ * Accessibility: one polite live region, always mounted, says each notice once (not
+ * every tick of a countdown) and that Undo is there; the pill itself is ordinary
+ * buttons in reading order. Reduced motion: the global rule makes the entrance instant.
+ */
+
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
+import {
+  SYNC_RETURN_MS,
+  currentNotice,
+  noticeKey,
+  pillAnnouncement,
+  pillText,
+  returnsToSync,
+  type PillNotice,
+} from "../statusPill";
+
+type Props = {
+  /** The send in its undo window, if any. */
+  sending: { deadline: number; at: number } | null;
+  /** The store's undo offer. */
+  undo: { label: string; at: number } | null;
+  /** The store's flash. */
+  flash: { text: string; at: number } | null;
+  /** A pull to refresh's result, while it shows. */
+  pull: { text: string; ok: boolean; at: number } | null;
+  /** The sync status line and whether it is bad news, for the beat after a notice. */
+  syncLine: string;
+  syncOk: boolean;
+  onUndo: () => void;
+  onDismissUndo: () => void;
+  onUndoSend: () => void;
+  onSendNow: () => void;
+  onDismissFlash: () => void;
+  /** The list's pane: the pill centres over it, under `inset`. */
+  anchorRef: React.RefObject<HTMLElement | null>;
+  /** The height of the chrome over the list's top (top bar or floating header), px. */
+  inset: number;
+};
+
+/** The gap between the chrome and the pill, px: where a pull's result rests. */
+const GAP = 16;
+
+type Place = { left: number; width: number; top: number } | null;
+
+/** Where the list's pane is on screen, or `null` while it is hidden. */
+function useAnchor(anchorRef: React.RefObject<HTMLElement | null>, inset: number): Place {
+  const [place, setPlace] = useState<Place>(null);
+  useLayoutEffect(() => {
+    const element = anchorRef.current;
+    const read = () => {
+      const rect = element?.getBoundingClientRect();
+      const next = rect && rect.width > 0 && rect.height > 0 ? { left: rect.left, width: rect.width, top: rect.top + inset } : null;
+      setPlace((current) =>
+        current?.left === next?.left && current?.width === next?.width && current?.top === next?.top ? current : next,
+      );
+    };
+    read();
+    const observer = typeof ResizeObserver === "undefined" || !element ? null : new ResizeObserver(read);
+    if (element) observer?.observe(element);
+    window.addEventListener("resize", read);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", read);
+    };
+  }, [anchorRef, inset]);
+  return place;
+}
+
+export function StatusPill(props: Props) {
+  const { sending, undo, flash, pull } = props;
+  const candidates: (PillNotice | null)[] = [
+    sending && { kind: "sending", at: sending.at, deadline: sending.deadline },
+    undo && { kind: "undo", at: undo.at, label: undo.label },
+    flash && { kind: "flash", at: flash.at, text: flash.text },
+    pull && { kind: "sync", at: pull.at, text: pull.text, ok: pull.ok },
+  ];
+  const live = currentNotice(candidates);
+
+  // The beat after a notice: the sync status, then nothing.
+  const [beat, setBeat] = useState<number | null>(null);
+  const previous = useRef<PillNotice | null>(null);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = live;
+    if (live !== null) {
+      setBeat(null);
+      return;
+    }
+    if (!returnsToSync(before, live)) return;
+    const at = Date.now();
+    setBeat(at);
+    const timer = window.setTimeout(() => setBeat((current) => (current === at ? null : current)), SYNC_RETURN_MS);
+    return () => window.clearTimeout(timer);
+    // `live` is rebuilt every render; its identity is its key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live === null ? null : noticeKey(live)]);
+
+  const shown: PillNotice | null =
+    live ?? (beat === null ? null : { kind: "sync", at: beat, text: props.syncLine, ok: props.syncOk });
+
+  // The countdown ticks only while a send is waiting.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (shown?.kind !== "sending") return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [shown?.kind]);
+
+  const place = useAnchor(props.anchorRef, props.inset);
+  const style: React.CSSProperties = place
+    ? { left: place.left, width: place.width, top: place.top + GAP }
+    : { left: 0, right: 0, top: `max(${GAP}px, calc(env(safe-area-inset-top, 0px) + 8px))` };
+
+  return (
+    <>
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-pill-announce="">
+        {pillAnnouncement(live)}
+      </p>
+      {shown && (
+        <div
+          data-status-pill={shown.kind}
+          className="pointer-events-none fixed z-[35] flex justify-center px-4"
+          style={style}
+        >
+          <div
+            key={noticeKey(shown)}
+            {...(shown.kind === "sending" ? { "data-send-pending": "" } : {})}
+            className={`wn-glass wn-glass-bar pointer-events-auto flex h-10 max-w-full animate-appear items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
+              shown.kind === "sync" ? "pr-4" : "pr-1"
+            } ${shown.kind === "sync" && !shown.ok ? "text-danger" : "text-ink-body"}`}
+          >
+            <span
+              data-pill-text=""
+              {...(shown.kind === "undo" ? { "data-undo-label": "" } : {})}
+              className="selectable min-w-0 truncate tabular-nums"
+              title={pillText(shown, now)}
+            >
+              {pillText(shown, now)}
+            </span>
+            {shown.kind === "undo" && (
+              <>
+                <PillButton onClick={props.onUndo} primary data="data-pill-undo">
+                  Undo
+                </PillButton>
+                <PillButton onClick={props.onDismissUndo} label="Dismiss" data="data-pill-dismiss">
+                  <X size={14} strokeWidth={2.2} aria-hidden="true" />
+                </PillButton>
+              </>
+            )}
+            {shown.kind === "sending" && (
+              <>
+                <PillButton onClick={props.onUndoSend} primary data="data-send-undo">
+                  Undo
+                </PillButton>
+                <PillButton onClick={props.onSendNow} data="data-send-now">
+                  Send now
+                </PillButton>
+              </>
+            )}
+            {shown.kind === "flash" && (
+              <PillButton onClick={props.onDismissFlash} label="Dismiss" data="data-pill-dismiss">
+                <X size={14} strokeWidth={2.2} aria-hidden="true" />
+              </PillButton>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PillButton({
+  onClick,
+  primary = false,
+  label,
+  data,
+  children,
+}: {
+  onClick: () => void;
+  primary?: boolean;
+  label?: string;
+  data: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      {...{ [data]: "" }}
+      className={`flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full px-2.5 font-semibold transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+        primary ? "text-accent" : "text-ink-subtle hover:text-ink"
+      } ${label ? "px-0" : ""}`}
+    >
+      {children}
+    </button>
+  );
+}

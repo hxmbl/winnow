@@ -194,9 +194,12 @@ Two behaviours worth knowing before touching it:
 - **Every mutation goes through `mutate()`,** which snapshots for `undoLast()`
   and drops the read cursor when the row under it leaves the screen. An undo that
   cannot restore exactly what it touched is not an undo.
-- **The undo strip has one slot** (`state.undo`, `offerUndo`). Its producers are the
-  phone's swipes: `moveWithUndo` (Trash, and Restore from the Trash) and
-  `discardDraftWithUndo`. A draft discard only reaches Gmail when the offer is *let
+- **The undo offer has one slot** (`state.undo`, `offerUndo`, stamped with `at`), shown
+  in the status pill (`ui/components/StatusPill.tsx`). Its producers are the phone's
+  swipes and a notification's Delete: `moveWithUndo` (Trash, and Restore from the Trash)
+  and `discardDraftWithUndo`. A short word about the last action ("Draft saved.",
+  "Message sent.") is `flash(text, ms)` (`state.flash`), gone by itself; the persistent
+  `notice` strip stays for what is not about an action (a capped mailbox, a failure). A draft discard only reaches Gmail when the offer is *let
   go* — dismissed, replaced by a newer offer, left by a mailbox change, or after
   `DRAFT_DISCARD_UNDO_MS = 10 s` — and a listing in the meantime keeps the row out.
   Sign-out and the demo drop the offer without committing, so the draft survives.
@@ -489,7 +492,8 @@ it; a queue saved for another account is discarded. `ui/components/OfflineIndica
 is the "Offline: N changes waiting" line (`ui/offlineStatus.ts`).
 
 Undo send (`core/mail/undoSend.ts`, Settings → Compose → **Undo send window**, Off/5/10/20 s,
-10 s by default; a saved 30 s from ≤ 1.2.2 reads as 20 s): if the app closes in the window
+10 s by default; a saved 30 s from ≤ 1.2.2 reads as 20 s; "Sending in Ns… Undo · Send now"
+in the status pill): if the app closes in the window
 the message is **kept as a draft, not sent** — the safe choice, reasoned in that file.
 
 ---
@@ -580,7 +584,8 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `menuPlacement.ts` | `placeMenu` and `MenuAnchor` as pure geometry, kept out of the component module so they test without React. |
 | `NavigationPalette.tsx` | The `!` palette: inbox, spam, trash, sent, drafts, settings. It is a `menu`, not a `dialog`. |
 | `PhoneChrome.tsx` | `PhoneTopBar` and `PhoneDock`. Below `sm` the masthead is replaced, not squeezed; all targets are 44 px. The top bar is one row, the mark then search (placeholder "Search <list>"); the list's name and count are a visually hidden `h1`, so mail starts higher. Since 1.2.3 it floats over the list like the dock (`data-phone-chrome`, the mark and search each their own glass, no band): `App.tsx` measures it and passes the height to `MessageList` as `topInset`, the demo strip moves into the list's `lead`, and the pull indicator comes down from under it. The mark is the version toggle (`logoVersion.ts`, shared with `Masthead`): it crossfades search for "Winnow <version>" (`PlatformInfo.version`, never a literal), `aria-pressed`, a haptic tick on the phone; search stays mounted, and `/` or focusing it brings it back. The dock floats over the list (after Linear's Android app): a glass pill with two icon-only tabs (Inbox with its unread badge, Sent) and an Expand chevron ("More mailboxes", `aria-expanded`), the compose circle beside it, the filter chips floating above, and a small glass "Top" pill ("Back to top") centred above the chips once the list is more than a screen down (`backToTopVisible`; hidden over the expanded panel, a selection or an overlay, and taking no taps while hidden; while shown it counts in `--wn-phone-dock`, so the last row clears it). Expand opens the menu panel; Inbox tapped while current scrolls the list to the top. It publishes `--wn-phone-tabs` (pill top, where Settings' sheet stops) and `--wn-phone-dock` (chrome top, the list's end padding in `index.css`). Geometry is `--wn-dock-*` in `index.css`, shared with the panel. |
-| `PullRefresh.tsx` | Pull-to-refresh on the phone's list, which replaces the briefing strip once an account is connected (the demo and a disconnected phone keep a compact one-line strip with Connect Gmail). Past the threshold it ticks, then spins on the same action as Sync now, shows "Synced just now · N waiting on you" or the error, and retracts. The rules live in `pullRefresh.ts`. |
+| `PullRefresh.tsx` | Pull-to-refresh on the phone's list, which replaces the briefing strip once an account is connected (the demo and a disconnected phone keep a compact one-line strip with Connect Gmail). Past the threshold it ticks, then spins on the same action as Sync now and hands the result ("Synced just now · N waiting on you", or the error) to the status pill, which says it in the same place and glass. The rules live in `pullRefresh.ts`. |
+| `StatusPill.tsx` | The one in-app notification surface: the pull's frosted pill (`.wn-glass.wn-glass-bar`, full round), fixed and centred over the list's pane just under its chrome (the phone's top bar or the desktop's floating header, `+16px`), or under the window's safe area when the list is hidden (a phone reading, a narrow window with the reader open), so it never meets the dock or its chips and pushes nothing down. It shows one notice, newest first: a send in its undo window (Undo, Send now, a countdown), the store's undo offer (Undo, Dismiss), a flash (Dismiss) or a pull's result; when an action notice ends it says the sync line for `SYNC_RETURN_MS`, then goes. One always-mounted polite live region says each notice once (never the countdown). Rules in `statusPill.ts`. |
 | `SelectionBar.tsx` | The batch bar, using the same `archiveLabel` and `moveTargets` helpers as the row menu so the two cannot disagree. |
 | `Avatar.tsx` | Contact photo → Gravatar → BIMI logo → monogram. Every picture is an `<img>`; the monogram stays present under a loaded logo so a transparent logo does not let the letter through. |
 | `ShortcutSheet.tsx` | The cheat sheet, rendered from `BINDINGS`. |
@@ -597,6 +602,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `selection.ts` | Selection arithmetic and the `LongPress` state machine (`LONG_PRESS_MS = 450`, `TOUCH_SLOP = 10`, `EDGE_SCROLL_ZONE = 40`). |
 | `swipe.ts` | Swipe actions as pure logic: `SwipeGesture` (edge zones `EDGE_PX = 24`, axis lock after `AXIS_LOCK_PX = 10`, commit past `COMMIT_FRACTION = 0.38` of the row or a fling ≥ `FLING_VELOCITY = 0.6` px/ms over ≥ 40 px) and `swipeActionsFor`, which says what each direction does per mailbox: left is Trash, right toggles read; in Trash left restores to the Inbox; in Drafts left discards (with Undo) and right does nothing. Touch only, phone layout only, off in select mode and under any menu, sheet or dialog; Settings → Reading → Swipe actions turns it off. |
 | `pullRefresh.ts` | Pull-to-refresh as pure logic: `pullAllowed` (connected, list at the top, no dock panel, selection, overlay or sync under way), `pullIntent` on `swipe.ts`'s axis lock so a pull and a row swipe never both fire, the rubber band `pullDistance` (threshold `PULL_THRESHOLD = 70`, max `PULL_MAX`), the threshold tick and the phases. |
+| `statusPill.ts` | The status pill as pure logic: `currentNotice` (newest wins; a tie goes to a waiting send, then an undo, a flash, the sync line; an older notice still on offer comes back when the newer goes), `returnsToSync`, `noticeKey`, the countdown text and the screen-reader announcement. |
 | `windowing.ts` | Variable-height windowing arithmetic (`ESTIMATED_ROW_HEIGHT = 53`, `OVERSCAN = 6`). No fixed-height virtualiser, because rows are 53–82 px. |
 | `syncStatus.ts` | The sync line and button text as one pure function, with a documented precedence order. |
 | `bodyViews.ts` | Which "Show as" options exist for this message — two instead of four when there is no HTML part. |

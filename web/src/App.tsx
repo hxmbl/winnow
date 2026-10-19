@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { LogIn, RefreshCw, X } from "lucide-react";
+import { LogIn, RefreshCw } from "lucide-react";
 import {
   NO_CURSOR,
   readoutIndex,
@@ -77,6 +77,7 @@ import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { logoViewAfter, type LogoView } from "./ui/logoVersion";
 import { PullRefresh } from "./ui/components/PullRefresh";
+import { PULL_RESULT_MS } from "./ui/pullRefresh";
 import { scrollListToTop } from "./ui/listScroll";
 import { viewKey } from "./ui/inboxClear";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
@@ -89,7 +90,7 @@ import { ReaderSplitHandle } from "./ui/components/ReaderSplitHandle";
 import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer } from "./ui/components/Composer";
-import { SendingStrip } from "./ui/components/SendingStrip";
+import { StatusPill } from "./ui/components/StatusPill";
 import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
 import { WhyHere } from "./ui/components/WhyHere";
 import { changeNotice } from "./ui/smartFilterPicker";
@@ -1229,11 +1230,7 @@ export function App({ store }: Props) {
         if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
       });
     }
-    const message = "Draft saved.";
-    s.setNotice(message);
-    setTimeout(() => {
-      if (s.getSnapshot().notice === message) s.dismissNotice();
-    }, DRAFT_NOTICE_MS);
+    s.flash("Draft saved.", DRAFT_NOTICE_MS);
   }, [localDrafts]);
 
   /**
@@ -1469,7 +1466,17 @@ export function App({ store }: Props) {
    * strip shows: when it goes.
    */
   const delayedSendRef = useRef(new DelayedSend<PendingSend>());
-  const [sendWait, setSendWait] = useState<{ deadline: number; seconds: number } | null>(null);
+  const [sendWait, setSendWait] = useState<{ deadline: number; seconds: number; at: number } | null>(null);
+  /** A pull to refresh's result, which the status pill says for `PULL_RESULT_MS`. */
+  const [pullResult, setPullResult] = useState<{ ok: boolean; text: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!pullResult) return;
+    const timer = window.setTimeout(
+      () => setPullResult((current) => (current === pullResult ? null : current)),
+      PULL_RESULT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [pullResult]);
 
   /**
    * Hand a message to Gmail, sending its saved draft when there is one (so no orphan is
@@ -1497,11 +1504,7 @@ export function App({ store }: Props) {
     if (sending.mode !== "new") return;
     // Said, because a closing sheet alone does not say whether it went. The demo says
     // what it did: nothing left the device.
-    const message = simulated ? "Message sent (demo: saved to Sent on this device only)." : "Message sent.";
-    s.setNotice(message);
-    setTimeout(() => {
-      if (s.getSnapshot().notice === message) s.dismissNotice();
-    }, SENT_NOTICE_MS);
+    s.flash(simulated ? "Message sent (demo: saved to Sent on this device only)." : "Message sent.", SENT_NOTICE_MS);
   }, []);
 
   /**
@@ -1663,7 +1666,7 @@ export function App({ store }: Props) {
         composerRef.current = null;
         setComposer(null);
         delayedSendRef.current.schedule(pending, seconds * 1000, (value) => void deliverPending(value));
-        setSendWait({ deadline: Date.now() + seconds * 1000, seconds });
+        setSendWait({ deadline: Date.now() + seconds * 1000, seconds, at: Date.now() });
         return;
       }
 
@@ -2847,18 +2850,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         </div>
       )}
 
-      {/*
-        The undo strip.
-
-        For a verb with no inverse on screen (`state.undo`). Mark all read, its first
-        user, has been removed; the strip stays for the next one.
-
-        Positioned below the notices rather than over the list, since it appears precisely
-        when the user is mid-triage. It does not expire on a timer — an action, a two-second
-        pause, and a gone toast is worse than no toast, because the user learns the
-        affordance is unreliable — but waits for an explicit dismissal, a different action,
-        or a navigation.
-      */}
       {filterPicker && (
         <SmartFilterPicker
           count={filterPicker.length}
@@ -2875,35 +2866,31 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
       )}
 
-      {sendWait && <SendingStrip deadline={sendWait.deadline} onUndo={undoSend} onSendNow={sendWaitingNow} />}
       <OfflineIndicator queue={offlineQueue} />
 
-      {snapshot.undo && (
-        <div
-          role="status"
-          // Re-keyed per action, so the strip arrives with the same short rise every time
-          // something is archived or trashed rather than only the first time.
-          key={snapshot.undo.label}
-          className="flex animate-appear items-center justify-center gap-3 px-4 py-1.5 text-meta"
-        >
-          <span data-undo-label="" className="selectable min-w-0 truncate text-ink-muted">{snapshot.undo.label}</span>
-          <button
-            type="button"
-            onClick={store.undoLast.bind(store)}
-            className="shrink-0 rounded-ctl bg-sheen px-2.5 py-0.5 font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            Undo
-          </button>
-          <button
-            type="button"
-            onClick={store.dismissUndo.bind(store)}
-            aria-label="Dismiss"
-            className="shrink-0 rounded-ctl p-1 text-ink-subtle transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            <X size={12} strokeWidth={2.2} aria-hidden="true" />
-          </button>
-        </div>
-      )}
+      {/*
+        The status pill: the one place an action says what it did and offers Undo
+        ("Moved to Trash.", "Draft discarded.", "Sending in 8s…", "Draft saved."), and
+        where a pull to refresh says how it went. Newest wins; see `ui/statusPill.ts`.
+        An undo offer does not expire on a timer — an action, a two-second pause and a
+        gone Undo is worse than none, because the user learns it is unreliable — but
+        waits for Undo, Dismiss, a newer action or a change of mailbox.
+      */}
+      <StatusPill
+        sending={sendWait}
+        undo={snapshot.undo}
+        flash={snapshot.flash}
+        pull={pullResult}
+        syncLine={sync.line}
+        syncOk={sync.tone !== "error"}
+        onUndo={store.undoLast.bind(store)}
+        onDismissUndo={store.dismissUndo.bind(store)}
+        onUndoSend={undoSend}
+        onSendNow={sendWaitingNow}
+        onDismissFlash={store.dismissFlash.bind(store)}
+        anchorRef={listPaneRef}
+        inset={phone ? phoneBarHeight : listChromeHeight}
+      />
 
       {/*
         One surface, two regions.
@@ -3074,6 +3061,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               syncing={sync.busy}
               top={phoneBarHeight}
               onRefresh={() => storeRef.current.refresh()}
+              onResult={(outcome) => setPullResult({ ...outcome, at: Date.now() })}
               result={() => {
                 const after = storeRef.current.getSnapshot();
                 if (after.error) return { ok: false, text: after.error };

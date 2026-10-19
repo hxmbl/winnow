@@ -5,8 +5,9 @@
  * very top syncs instead, the same action as the desktop's Sync now. A small frosted
  * circle (`.wn-glass`) with the sync icon comes down from under the top bar, turning
  * with the pull; past the line a haptic tick says letting go will sync; then it spins
- * while the sync runs, widens to say how it went ("Synced just now", with what is
- * waiting on you, or the error) and retracts.
+ * while the sync runs, and hands over to the status pill (`StatusPill`), which says how it
+ * went ("Synced just now", with what is waiting on you, or the error) in the same place
+ * and the same glass, so a pull's result and an action's Undo are one surface.
  *
  * Touch events on the list's pane, not pointer events: the rows' swipes are pointer
  * events, and the two share one axis lock, so a touch is only ever one of them. Once a
@@ -45,6 +46,8 @@ type Props = {
   onRefresh: () => Promise<unknown> | void;
   /** After the sync: what to say. Read once it has finished, so it is the new line. */
   result: () => { ok: boolean; text: string };
+  /** The result, for the status pill to say. */
+  onResult: (outcome: { ok: boolean; text: string }) => void;
   /**
    * Where the list's visible top is, in px from the pane's top: the floating top bar's
    * height, since the list now runs up under it. The indicator comes down from there.
@@ -52,14 +55,13 @@ type Props = {
   top?: number;
 };
 
-export function PullRefresh({ containerRef, context, syncing, onRefresh, result, top = 0 }: Props) {
+export function PullRefresh({ containerRef, context, syncing, onRefresh, result, onResult, top = 0 }: Props) {
   const [phase, setPhase] = useState<PullPhase>("idle");
   const [distance, setDistance] = useState(0);
-  const [text, setText] = useState("");
 
   // The gesture reads the latest props through a ref, so its listeners attach once.
-  const live = useRef({ context, syncing, onRefresh, result });
-  live.current = { context, syncing, onRefresh, result };
+  const live = useRef({ context, syncing, onRefresh, result, onResult });
+  live.current = { context, syncing, onRefresh, result, onResult };
   const busy = useRef(false);
 
   useEffect(() => {
@@ -124,7 +126,7 @@ export function PullRefresh({ containerRef, context, syncing, onRefresh, result,
         .catch(() => undefined)
         .then(() => {
           const outcome = live.current.result();
-          setText(outcome.text);
+          live.current.onResult(outcome);
           setPhase(outcome.ok ? "done" : "error");
           timer = window.setTimeout(() => {
             busy.current = false;
@@ -152,13 +154,13 @@ export function PullRefresh({ containerRef, context, syncing, onRefresh, result,
   const dragging = phase === "pulling" || phase === "armed";
   const settled = phase === "done" || phase === "error";
   const shown = phase !== "idle";
-  // Fades in over the first 40px of the pull.
-  const opacity = dragging ? Math.min(1, distance / 40) : shown ? 1 : 0;
+  // Fades in over the first 40px of the pull; settled, the status pill has taken over.
+  const opacity = dragging ? Math.min(1, distance / 40) : shown && !settled ? 1 : 0;
 
   return (
     <div
       data-pull-indicator={phase}
-      aria-hidden={settled ? undefined : true}
+      aria-hidden="true"
       className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center"
       style={{
         top,
@@ -170,24 +172,16 @@ export function PullRefresh({ containerRef, context, syncing, onRefresh, result,
       }}
     >
       <div
-        role={settled ? "status" : undefined}
-        aria-live={settled ? "polite" : undefined}
-        className={`wn-glass wn-glass-bar flex h-10 min-w-10 items-center justify-center gap-2 rounded-full text-meta font-semibold ${
-          settled ? "max-w-[calc(100vw-2rem)] px-4" : "w-10"
-        } ${phase === "error" ? "text-danger" : "text-ink-body"}`}
+        className="wn-glass wn-glass-bar flex h-10 w-10 items-center justify-center rounded-full text-ink-body"
         data-dragging={dragging ? "" : undefined}
       >
-        {!settled && (
-          <RefreshCw
-            size={18}
-            strokeWidth={2.2}
-            aria-hidden="true"
-            className={`shrink-0 ${phase === "syncing" ? "animate-spin" : ""} ${phase === "armed" ? "text-accent" : ""}`}
-            style={phase === "syncing" ? undefined : { transform: `rotate(${pullRotation(distance)}deg)` }}
-          />
-        )}
-        {phase === "syncing" && <span className="sr-only">Syncing…</span>}
-        {settled && <span data-pull-result="" className="truncate">{text}</span>}
+        <RefreshCw
+          size={18}
+          strokeWidth={2.2}
+          aria-hidden="true"
+          className={`shrink-0 ${phase === "syncing" ? "animate-spin" : ""} ${phase === "armed" ? "text-accent" : ""}`}
+          style={phase === "syncing" ? undefined : { transform: `rotate(${pullRotation(distance)}deg)` }}
+        />
       </div>
     </div>
   );
