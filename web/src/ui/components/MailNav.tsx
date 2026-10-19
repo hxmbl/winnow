@@ -72,6 +72,13 @@ export type NavProps = {
   /** Signed-in address, or null in the demo. */
   accountEmail: string | null;
   signingIn: boolean;
+  /**
+   * What the demo's connect item says: "Connect Gmail", or "Back to your inbox" when
+   * this device still holds a session (`ui/demoResume.ts`). Defaults by `signingIn`.
+   */
+  connectLabel?: string;
+  /** The connect item is busy (a sign-in or a resume under way). Defaults to `signingIn`. */
+  connectBusy?: boolean;
   onConnect: () => void;
   onSignOut: () => void;
   syncing: boolean;
@@ -222,9 +229,9 @@ function accountMenu(props: NavProps, onNavigate?: () => void): MenuEntry[] {
       {
         kind: "item",
         id: "connect",
-        label: props.signingIn ? "Waiting for Google…" : "Connect Gmail",
+        label: props.connectLabel ?? (props.signingIn ? "Waiting for Google…" : "Connect Gmail"),
         icon: LogIn,
-        disabled: props.signingIn,
+        disabled: props.connectBusy ?? props.signingIn,
         onSelect: then(props.onConnect),
       },
     ];

@@ -30,6 +30,13 @@ export type SessionBridge = {
   hasSession(): Promise<boolean>;
   /** The signed-in address. */
   accountEmail(): Promise<string>;
+  /**
+   * The signed-in address, read from Gmail, throwing (a `GmailError`) when the stored
+   * session no longer works: unlike `accountEmail`, which falls back to a placeholder so a
+   * launch still opens the cached mail. The demo's "Back to your inbox" asks this before
+   * it lets the store leave the demo, so an expired grant never reaches `connect`.
+   */
+  verifiedAccountEmail(): Promise<string>;
   /** Run the OAuth flow to completion. Throws a `GmailError` on any failure. */
   signIn(): Promise<{ email: string }>;
   /** Finish a sign-in delivered via redirect. Returns null if no redirect. */
@@ -108,6 +115,8 @@ export function createSessionBridge(platform: Platform, store: WinnowStore): Ses
         return "your account";
       }
     },
+
+    verifiedAccountEmail: () => session.accountEmail(),
 
     signIn: () => session.signIn(),
 

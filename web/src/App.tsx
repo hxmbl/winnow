@@ -91,6 +91,7 @@ import { ShortcutSheet } from "./ui/components/ShortcutSheet";
 import { NavigationPalette } from "./ui/components/NavigationPalette";
 import { Composer } from "./ui/components/Composer";
 import { StatusPill } from "./ui/components/StatusPill";
+import { demoCtaLabel, resumeFailure } from "./ui/demoResume";
 import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
 import { WhyHere } from "./ui/components/WhyHere";
 import { changeNotice } from "./ui/smartFilterPicker";
@@ -699,8 +700,10 @@ export function App({ store }: Props) {
    */
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  const connectFromDemo = useCallback(async () => {
-    setConnectError(null);
+  const connectFromDemo = useCallback(async (reason?: string) => {
+    // `reason`: why a sign-in is needed after all (an expired session), said beside the
+    // button for as long as the sign-in takes.
+    setConnectError(reason ?? null);
     try {
       await signIn();
       // A link the user arrived on is honoured here too: signing in from a shared
@@ -712,6 +715,104 @@ export function App({ store }: Props) {
       );
     }
   }, [signIn, applySharedLink]);
+
+  /*
+    Enter the demo.
+
+    Not a lesser path — Winnow's product *is* the classification — but a *mode*, so it
+    goes through `markDemoMode`, which drops the backend rather than just swapping the
+    message array.
+  */
+  const enterDemo = useCallback(() => {
+    const demo = demoMailbox();
+    store.replaceAll(demo.emails);
+    store.markDemoMode(demo.now, demo.drafts);
+  }, [store]);
+
+  /**
+   * "Back to your inbox", from the demo, when this device still holds the account's
+   * session (the app boots into the demo, and "Use the demo inbox" leads back to it).
+   * Adopts that session the way a launch does — the cached mail, the drafts' owner and
+   * contacts access come with it, nothing is revoked — instead of sending a signed-in
+   * user through Google's sign-in again. An expired or revoked session falls back to the
+   * ordinary sign-in (the button becomes "Sign in again", with the reason beside it); an
+   * unreachable Google keeps the session for another try. See `ui/demoResume.ts`.
+   */
+  const [resumable, setResumable] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const resumeAccount = useCallback(async () => {
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    setConnectError(null);
+    setResuming(true);
+    let reauth: string | null = null;
+    try {
+      if (!(await bridge.hasSession())) {
+        // Gone since the button was drawn: this is a first sign-in after all.
+        reauth = "";
+      } else {
+        // Asked first, while the demo is still on screen: `connect` takes the store out
+        // of the demo the moment it starts, so a grant that turns out to be gone would
+        // land on "Couldn't reach Gmail" instead of staying here with the reason. The
+        // profile read is the only call to Google a resume makes before the sync.
+        const email = await bridge.verifiedAccountEmail();
+        try {
+          await store.connect(bridge.backend(), { email });
+        } catch (error) {
+          // The grant went in the moment between the profile read and the sync: back to
+          // the demo, so the reason and "Sign in again" have somewhere to be. Anything
+          // else (a network drop mid-sync) is the connected app's own "Try again".
+          if (resumeFailure(error).reauth) enterDemo();
+          throw error;
+        }
+        void syncGoogleContacts();
+      }
+    } catch (error) {
+      const failure = resumeFailure(error);
+      if (failure.reauth) reauth = failure.message;
+      else setConnectError(failure.message);
+    } finally {
+      setResuming(false);
+    }
+    if (reauth === "") {
+      setResumable(false);
+      await connectFromDemo();
+    } else if (reauth !== null) {
+      setResumable(false);
+      setSessionExpired(true);
+      setConnectError(reauth);
+    }
+  }, [store, syncGoogleContacts, connectFromDemo, enterDemo]);
+  const connectOrResume = useCallback(() => {
+    void (resumable ? resumeAccount() : connectFromDemo());
+  }, [resumable, resumeAccount, connectFromDemo]);
+
+  // Whether the demo can offer "Back to your inbox": asked whenever the demo is what is
+  // on screen, once the launch's own restore has finished (it adopts a working session
+  // itself), so it follows a sign-out, an expired grant and "Use the demo inbox".
+  const inDemo = snapshot.account === null && snapshot.status !== "signed_out";
+  useEffect(() => {
+    if (!inDemo || restoringSession) return;
+    const bridge = sessionRef.current;
+    if (!bridge) {
+      setResumable(false);
+      return;
+    }
+    let live = true;
+    void bridge.hasSession().then(
+      (has) => {
+        if (!live) return;
+        setResumable(has);
+        if (has) setSessionExpired(false);
+      },
+      () => live && setResumable(false),
+    );
+    return () => {
+      live = false;
+    };
+  }, [inDemo, restoringSession, snapshot.status]);
+  const demoCta = demoCtaLabel({ resumable, signingIn, resuming, expired: sessionExpired });
 
   /**
    * Build the session bridge and adopt any existing session.
@@ -891,9 +992,9 @@ export function App({ store }: Props) {
     },
     accountEmail: snapshot.account?.email ?? null,
     signingIn,
-    onConnect: () => {
-      void connectFromDemo();
-    },
+    connectLabel: demoCta,
+    connectBusy: signingIn || resuming,
+    onConnect: connectOrResume,
     onSignOut: () => {
       void signOut();
     },
@@ -2414,19 +2515,6 @@ export function App({ store }: Props) {
   // ── Render ───────────────────────────────────────────────────────────────
 
   /*
-    Enter the demo.
-
-    Not a lesser path — Winnow's product *is* the classification — but a *mode*, so it
-    goes through `markDemoMode`, which drops the backend rather than just swapping the
-    message array.
-  */
-  const enterDemo = useCallback(() => {
-    const demo = demoMailbox();
-    store.replaceAll(demo.emails);
-    store.markDemoMode(demo.now, demo.drafts);
-  }, [store]);
-
-  /*
     The Google account sheet: set up, change or remove the user's own OAuth client.
     Rendered from both the sign-in screen and the app, because "Continue with Google"
     and "Connect Gmail" both lead here when no client is stored.
@@ -2687,15 +2775,14 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             {snapshot.account === null ? (
               <button
                 type="button"
-                onClick={() => {
-                  void connectFromDemo();
-                }}
-                disabled={signingIn}
+                onClick={connectOrResume}
+                disabled={signingIn || resuming}
+                data-demo-cta={resumable ? "resume" : "connect"}
                 // The demo's one primary action, so it is the one filled control in view.
                 className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
-                {signingIn ? "Waiting for Google…" : "Connect Gmail"}
+                {demoCta}
               </button>
             ) : (
               <button
@@ -2736,14 +2823,13 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       </p>
       <button
         type="button"
-        onClick={() => {
-          void connectFromDemo();
-        }}
-        disabled={signingIn}
+        onClick={connectOrResume}
+        disabled={signingIn || resuming}
+        data-demo-cta={resumable ? "resume" : "connect"}
         className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
-        {signingIn ? "Waiting for Google…" : "Connect Gmail"}
+        {demoCta}
       </button>
     </div>
   );
