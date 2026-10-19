@@ -474,6 +474,11 @@ export async function smokeFixes({ browser, URL, check, section, errors, shots =
     await p.locator('[data-sidebar] [data-nav-account] button[aria-haspopup="menu"]').tap();
     await p.waitForTimeout(300);
     await p.locator('[data-menu-item="sign-out"]').dispatchEvent("click");
+    // On a phone Sign out asks first (an action sheet); confirm it.
+    const confirmSignOut = p.locator('[data-action-sheet-item="confirm"]');
+    await confirmSignOut.waitFor({ timeout: 3_000 });
+    check("on a phone Sign out asks first", (await confirmSignOut.textContent())?.trim() === "Sign Out", await confirmSignOut.textContent());
+    await confirmSignOut.tap();
     await p.getByRole("button", { name: /demo/i }).first().waitFor({ timeout: 8_000 });
     await p.getByRole("button", { name: /demo/i }).first().tap();
     await p.waitForSelector("[data-row-count] [data-row-id]");

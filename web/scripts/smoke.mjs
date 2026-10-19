@@ -32,6 +32,7 @@ import { attachmentsSmoke } from "./smoke-attachments.mjs";
 import { topEmail } from "./smoke-top-email.mjs";
 import { smokeMotion } from "./smoke-motion.mjs";
 import { smokeFixes } from "./smoke-fixes.mjs";
+import { smokeThumb } from "./smoke-thumb.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -164,10 +165,13 @@ browser.newPage = async (options) => watchCsp(await watchedNewPage(options));
 // `WINNOW_SMOKE_ONLY=fixes` runs only `smoke-fixes.mjs` (phone Settings and menu edges,
 // Undo beyond the swipes, the status pill after a remount, the demo's way back).
 // `WINNOW_SMOKE_SHOTS=<dir>` also saves its screenshots there.
-if (process.env.WINNOW_SMOKE_ONLY === "fixes") {
+// `WINNOW_SMOKE_ONLY=thumb` runs only `smoke-thumb.mjs` (the 1.3.2 sweep fixes, phone
+// compose top bar, Trash confirmations, the reader pill and left-handed mode, shapes).
+if (process.env.WINNOW_SMOKE_ONLY === "fixes" || process.env.WINNOW_SMOKE_ONLY === "thumb") {
   const errors = [];
   try {
-    await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
+    if (process.env.WINNOW_SMOKE_ONLY === "thumb") await smokeThumb({ browser, URL, check, section, errors });
+    else await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
     section("console");
     check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
   } catch (error) {
@@ -708,8 +712,8 @@ try {
     };
   });
   check(
-    "it floats 8px from the left and top edges with a 12px radius, a hairline and no shadow",
-    sideShape.left === 8 && sideShape.top === 8 && sideShape.radius === "12px" && sideShape.shadow === "none" && sideShape.border === "1px",
+    "it floats 8px from the left and top edges with the 16px container radius, a hairline and no shadow",
+    sideShape.left === 8 && sideShape.top === 8 && sideShape.radius === "16px" && sideShape.shadow === "none" && sideShape.border === "1px",
     JSON.stringify(sideShape),
   );
   check(
@@ -2731,8 +2735,8 @@ try {
     );
     const phoneSendBox = await phoneSheet.locator("button", { hasText: /^Send$/ }).boundingBox();
     check(
-      "with Send at the bottom, a full touch target",
-      Boolean(phoneSendBox) && phoneSendBox.height >= 44 && phoneSendBox.y + phoneSendBox.height >= 844 - 16,
+      "with Send in its top bar at the trailing edge (iOS Mail), a full touch target",
+      Boolean(phoneSendBox) && phoneSendBox.height >= 44 && phoneSendBox.y <= 80 && phoneSendBox.x + phoneSendBox.width >= 390 - 16,
       JSON.stringify(phoneSendBox),
     );
     check("and the pencil is gone under it", (await p.locator("[data-compose-fab]").count()) === 0);
@@ -3987,7 +3991,8 @@ try {
     "the panel is the pill grown upward: same left edge, width and bottom, a tall rounded panel",
     Math.abs(phoneSide.side.left - phoneSide.pill.left) <= 1 && Math.abs(phoneSide.side.right - phoneSide.pill.right) <= 1 &&
       Math.abs(phoneSide.side.bottom - phoneSide.pill.bottom) <= 1 && phoneSide.side.top < phoneSide.height * 0.75 &&
-      phoneSide.radius >= 20 && /inset\(0(px)?( 0(px)?)*/.test(phoneSide.clip),
+      // Grown, it takes the containers' shared 16px radius (the shape tokens).
+      phoneSide.radius === 16 && /inset\(0(px)?( 0(px)?)*/.test(phoneSide.clip),
     JSON.stringify(phoneSide),
   );
   check(
@@ -4117,22 +4122,35 @@ try {
   const readerDock = page.locator("[data-reader-dock]");
   const readerDockBox = await box(readerDock);
   check(
-    "the reader's actions sit on the bottom edge",
-    Boolean(readerDockBox) && Math.abs(readerDockBox.y + readerDockBox.height - 844) <= 1,
+    "the reader's actions float in a pill at the bottom-right, under the thumb, clear of the edge",
+    Boolean(readerDockBox) &&
+      readerDockBox.y + readerDockBox.height <= 844 - 8 &&
+      readerDockBox.y + readerDockBox.height >= 844 - 40 &&
+      readerDockBox.x + readerDockBox.width >= 390 - 24 &&
+      readerDockBox.width < 390 - 40,
     JSON.stringify(readerDockBox),
   );
   const readerButtons = await Promise.all(
-    (await readerDock.locator("button").all()).map(async (b) => ({
+    (await readerDock.locator("[data-reader-pill-actions] button").all()).map(async (b) => ({
       label: await b.getAttribute("aria-label"),
       box: await b.boundingBox(),
     })),
   );
   check(
-    "back, reply, forward, archive, trash and more, each a full touch target",
-    readerButtons.length === 6 &&
-      readerButtons[0].label === "Back to the list" &&
+    "more, forward, reply, trash and archive (most-used nearest the thumb), each a full touch target",
+    readerButtons.map(({ label }) => label).join("|") === "More|Forward|Reply to all|Move to trash|Archive" &&
       readerButtons.every(({ box: b }) => b && b.width >= MIN_TARGET && b.height >= MIN_TARGET),
     JSON.stringify(readerButtons.map(({ label, box: b }) => [label, b && Math.round(b.width), b && Math.round(b.height)])),
+  );
+  const readerBack = await box(page.locator("[data-reader-back]"));
+  // A sign-in code message leads with its copy-code bar; Back heads the header under it.
+  const codeBarLocator = page.locator("[data-reader] [data-code-bar]");
+  const codeBarBox = (await codeBarLocator.count()) > 0 ? await box(codeBarLocator) : null;
+  const backTop = codeBarBox ? codeBarBox.y + codeBarBox.height : 0;
+  check(
+    "and Back is at the reader's top-left (under the code bar, when there is one)",
+    Boolean(readerBack) && readerBack.y - backTop <= 80 && readerBack.y >= backTop - 1 && readerBack.x <= 24 && readerBack.height >= MIN_TARGET,
+    JSON.stringify({ readerBack, codeBarBox }),
   );
 
   // Star and read moved into More on the phone, so prove they are still there.
@@ -4312,8 +4330,8 @@ try {
   const phoneSend = phone.locator('[role="dialog"] button', { hasText: /^Send$/ });
   const sendBox = await phoneSend.boundingBox();
   check(
-    "and Send sits at its bottom edge, a full touch target",
-    Boolean(sendBox) && sendBox.height >= MIN_TARGET && sendBox.y + sendBox.height >= 844 - 16,
+    "and Send sits top-right in its bar, out of the thumb zone, a full touch target",
+    Boolean(sendBox) && sendBox.height >= MIN_TARGET && sendBox.y <= 80 && sendBox.x + sendBox.width >= 390 - 16,
     JSON.stringify(sendBox),
   );
   check(
@@ -4993,7 +5011,7 @@ try {
         (b) => !/, unread,/.test(b.getAttribute("aria-label")),
       ),
     );
-    await p.locator("[data-reader-dock] button[aria-label='Back to the list']").tap();
+    await p.locator("[data-reader-back]").tap();
     await p.waitForTimeout(150);
     const readId = await rows.nth(readIndex).getAttribute("data-row-id");
     await tap(readIndex);
@@ -6426,9 +6444,9 @@ try {
       }),
     );
     check(
-      "the categories an eighth of the window (180px), the rest 60/40 controls and explanation, left to right, full height",
+      "the categories 15% of the window (216px, so no name wraps), the rest 60/40 controls and explanation, left to right, full height",
       columns.every(Boolean) &&
-        Math.abs(columns[0].width - 180) <= 2 && Math.abs(columns[1].width - 756) <= 12 && Math.abs(columns[2].width - 504) <= 12 &&
+        Math.abs(columns[0].width - 216) <= 2 && Math.abs(columns[1].width - 734) <= 12 && Math.abs(columns[2].width - 490) <= 12 &&
         columns[0].x === 0 && columns[1].x > columns[0].x && columns[2].x > columns[1].x &&
         columns.every((column) => column.height === 900),
       JSON.stringify(columns),
@@ -8036,6 +8054,7 @@ try {
   await topEmail({ browser, url: URL, check, section });
   await smokeMotion({ browser, url: URL, check, section, errors });
   await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
+  await smokeThumb({ browser, URL, check, section, errors });
 
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");

@@ -10,7 +10,7 @@
  * - Archiving a row leaves a short-lived ghost that nothing can find; menus pop in.
  * - Crossing the phone breakpoint with the sidebar open keeps focus inside it; the
  *   phone's menu shows its Inbox row (the pill's frost used to cover it).
- * - Settings' category column is about an eighth of the window, 160–240px; on a phone
+ * - Settings' category column is 15% of the window, 212–248px; on a phone
  *   Settings fills the screen behind the dock, with no mail showing round it.
  *
  * Its own module so it can run alone (`node scripts/smoke-motion.mjs`, serving `dist/`
@@ -382,9 +382,9 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     // ── Settings' category column.
     section("settings: the category column");
     for (const [width, layout, expected] of [
-      [1440, "three", 180],
-      [1000, "two", 160],
-      [2200, "three", 240],
+      [1440, "three", 216],
+      [1000, "two", 212],
+      [2200, "three", 248],
     ]) {
       await p.setViewportSize({ width, height: 900 });
       await settle(p, 200);

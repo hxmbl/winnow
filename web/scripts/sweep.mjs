@@ -113,6 +113,9 @@ function plan() {
     extra("reduced-transparency-oled", "oled", "dark", device, ["inbox", "drawer", "pill-undo"], { media: { reducedTransparency: true } });
     extra("forced-colors", "light", "light", device, ["inbox", "reader", "drawer", "settings-top", "compose"], { media: { forcedColors: true } });
   }
+  // Left-handed mode mirrors the phone's reader pill and compose button (phone only).
+  extra("left-handed-light", "light", "light", "phone", ["inbox", "reader", "drawer", "compose"], { prefs: { leftHanded: true } });
+  extra("left-handed-oled", "oled", "dark", "phone", ["inbox", "reader", "drawer", "compose"], { prefs: { leftHanded: true } });
   extra("small-phone-dark", "dark", "dark", "phone-small", ["inbox", "drawer", "settings-end", "compose", "pill-undo"]);
   extra("tablet-light", "light", "light", "tablet", ["inbox", "reader", "drawer"]);
   return jobs.filter(
