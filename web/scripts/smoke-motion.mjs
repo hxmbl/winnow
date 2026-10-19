@@ -88,30 +88,38 @@ const listTop = (page) => page.evaluate(() => Math.round(document.querySelector(
 const railLeft = (page, scope) =>
   page.evaluate((sel) => Math.round(document.querySelector(`${sel} [data-rail-scroller]`).scrollLeft), scope);
 
-/** Scroll the list `steps` frames by `by` px each; report the strip's state at frame `at`. */
-const flingList = (page, by, steps, at) =>
+/**
+ * Scroll the list `steps` frames by `by` px each, reading every frame the filters on the
+ * strip's chips, their words and their frost (`::before`): what a motion blur would change.
+ * Reports each distinct reading, so a crisp strip answers with exactly one.
+ */
+const flingList = (page, by, steps, scope = "[data-list-chrome]") =>
   page.evaluate(
-    ({ by, steps, at }) =>
+    ({ by, steps, scope }) =>
       new Promise((resolve) => {
         const list = document.querySelector("[data-row-count]");
-        const rail = document.querySelector("[data-list-chrome] [data-rail-scroller]");
+        const rail = document.querySelector(`${scope} [data-rail-scroller]`);
+        const read = () =>
+          JSON.stringify([...rail.querySelectorAll("[data-rail-item]")].slice(0, 4).map((item) => {
+            const chip = item.matches("button") ? item : item.querySelector("button");
+            const word = chip?.firstElementChild;
+            const s = chip ? getComputedStyle(chip) : null;
+            const before = chip ? getComputedStyle(chip, "::before") : null;
+            return [s?.filter, s?.backdropFilter, before?.backdropFilter, before?.filter, word ? getComputedStyle(word).filter : null, rail.getAttribute("style")];
+          }));
+        const seen = new Set([read()]);
+        const start = list.scrollTop;
         let n = 0;
-        let seen = null;
-        let ever = false;
         const step = () => {
           list.scrollTop += by;
           n += 1;
-          ever ||= rail.hasAttribute("data-rail-moving");
-          if (n === at) {
-            const span = rail.querySelector("[data-rail-item] button > *");
-            seen = { moving: rail.hasAttribute("data-rail-moving"), filter: getComputedStyle(span).filter, blur: rail.style.getPropertyValue("--wn-rail-blur") };
-          }
+          seen.add(read());
           if (n < steps) requestAnimationFrame(step);
-          else resolve({ seen, ever });
+          else resolve({ readings: [...seen], moved: Math.abs(list.scrollTop - start) });
         };
         requestAnimationFrame(step);
       }),
-    { by, steps, at },
+    { by, steps, scope },
   );
 
 export async function smokeMotion({ browser, url, check, section, errors = [] }) {
@@ -254,24 +262,21 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     await settle(p, 300);
     check("a scroll gesture in a gap does not scroll the list", (await listTop(p)) === 0, `${await listTop(p)}px`);
 
-    // ── Motion blur while the list scrolls.
-    section("filter strip: motion blur while the list scrolls");
+    // ── No motion blur while the list scrolls (1.3.3: it read as smearing). The chips,
+    //    their words and their frost keep one filter reading through a fast fling.
+    section("filter strip: crisp while the list scrolls (no motion blur)");
     const restFilter = await p.evaluate((sel) => getComputedStyle(document.querySelector(`${sel} [data-rail-item] button > *`)).filter, rail);
-    check("at rest the chips are crisp: no filter at all", restFilter === "none", restFilter);
+    check("at rest the chips' words are crisp: no filter at all", restFilter === "none", restFilter);
     // Big steps: a headless page on a busy machine can draw ten frames a second.
-    const { seen: during } = await flingList(p, 180, 8, 6);
-    const blurPx = parseFloat(/blur\(([\d.]+)px\)/.exec(during?.filter ?? "")?.[1] ?? "0");
-    check("scrolling fast, the chips' words blur a little (under 1px)", Boolean(during?.moving) && blurPx > 0 && blurPx <= 1, JSON.stringify(during));
-    await settle(p, 900);
-    const after = await p.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      return { moving: el.hasAttribute("data-rail-moving"), filter: getComputedStyle(el.querySelector("[data-rail-item] button > *")).filter };
-    }, rail);
-    check("and crisp again once the list stops", !after.moving && after.filter === "none", JSON.stringify(after));
-    await p.emulateMedia({ reducedMotion: "reduce" });
-    const { ever } = await flingList(p, -180, 8, 0);
-    check("with reduced motion there is no blur", ever === false);
-    await p.emulateMedia({ reducedMotion: "no-preference" });
+    const fling = await flingList(p, 180, 10);
+    check(
+      "a fast list fling changes no filter or backdrop-filter on the chips (one reading)",
+      fling.moved > 0 && fling.readings.length === 1 && !/blur\(0\.\d|data-rail-moving/.test(fling.readings[0]),
+      `moved ${fling.moved}px, ${fling.readings.length} readings: ${fling.readings.join(" | ").slice(0, 400)}`,
+    );
+    const moving = await p.evaluate((sel) => document.querySelector(sel).hasAttribute("data-rail-moving"), rail);
+    check("the strip never marks itself moving", moving === false);
+    await settle(p, 300);
 
     // ── Animations.
     section("small animations");
@@ -420,6 +425,19 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     const scope = "[data-phone-dock]";
     const gap = await gapPoint(p, scope);
     check("phone: the gap between two chips belongs to the strip", Boolean(gap?.catcher), JSON.stringify(gap));
+    for (const scheme of ["light", "dark"]) {
+      await p.emulateMedia({ colorScheme: scheme });
+      await settle(p, 200);
+      const phoneFling = await flingList(p, 160, 10, scope);
+      check(
+        `phone (${scheme}): a fast list fling leaves the chips crisp (one filter reading, no blur)`,
+        phoneFling.moved > 0 && phoneFling.readings.length === 1,
+        `moved ${phoneFling.moved}px, ${phoneFling.readings.length} readings`,
+      );
+      await p.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+      await settle(p, 300);
+    }
+    await p.emulateMedia({ colorScheme: "light" });
     await p.touchscreen.tap(gap.x, gap.y);
     await settle(p, 300);
     check("a tap in a gap opens nothing under it", (await p.locator("article h1").count()) === 0);

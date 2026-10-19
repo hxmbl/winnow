@@ -1,7 +1,7 @@
 /**
  * How the filter strip moves, as numbers the tests can check without a DOM.
  *
- * Three pieces, all used by `FilterStrip`:
+ * Two pieces, both used by `FilterStrip`:
  *
  * - **Smoothing.** A wheel or trackpad over the strip sets a *target* scroll position;
  *   each animation frame closes a share of the distance to it (`smoothStep`), so a mouse
@@ -10,9 +10,10 @@
  * - **Rubber band.** Past either end the strip gives a little and springs back: the
  *   overshoot is damped (`rubberBand`, the curve iOS uses), so pulling twice as far
  *   moves it much less than twice as far, and it never travels more than `RUBBER_MAX`.
- * - **Motion blur.** While the list scrolls, the strip blurs in proportion to how fast
- *   (`blurForVelocity`): nothing below a walking pace, at most `BLUR_MAX` px, and crisp
- *   again the moment the list stops.
+ *
+ * There is deliberately no third: the chips stay crisp while the list scrolls under them.
+ * A scroll-linked motion blur on their words (1.3.2) read as smearing, and was removed in
+ * 1.3.3; the haze behind the strip is static.
  */
 
 import { wheelPixels } from "./rail";
@@ -99,31 +100,6 @@ export function splitOvershoot(wanted: number, max: number): { scroll: number; o
   if (wanted < 0) return { scroll: 0, overshoot: wanted };
   if (wanted > top) return { scroll: top, overshoot: wanted - top };
   return { scroll: wanted, overshoot: 0 };
-}
-
-/** The strongest motion blur, in px. Subtle on purpose: the pills stay legible. */
-export const BLUR_MAX = 0.9;
-/** List speed (px per ms) below which there is no blur at all. ~0.6 = 600px/s. */
-export const BLUR_FROM = 0.6;
-/** List speed (px per ms) at which the blur is at its strongest. */
-export const BLUR_FULL = 4;
-
-/** The strip's blur, in px rounded to tenths, for a list moving at `pxPerMs` (either sign). */
-export function blurForVelocity(pxPerMs: number): number {
-  const speed = Math.abs(pxPerMs);
-  if (!Number.isFinite(speed) || speed <= BLUR_FROM) return 0;
-  const t = Math.min(1, (speed - BLUR_FROM) / (BLUR_FULL - BLUR_FROM));
-  return Math.round(t * BLUR_MAX * 10) / 10;
-}
-
-/**
- * Velocity from two scroll readings, smoothed with the last estimate so one uneven frame
- * does not flash the blur on. `dtMs` of 0 (two events in one frame) keeps the last value.
- */
-export function nextVelocity(previous: number, deltaPx: number, dtMs: number): number {
-  if (dtMs <= 0) return previous;
-  const instant = deltaPx / Math.min(dtMs, 100);
-  return previous * 0.4 + instant * 0.6;
 }
 
 /**

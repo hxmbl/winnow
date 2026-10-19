@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
-  BLUR_MAX,
   RUBBER_MAX,
   SPRING_BACK_MS,
-  blurForVelocity,
   glideDone,
   glideFrom,
-  nextVelocity,
   rubberBand,
   smoothStep,
   splitOvershoot,
   springBack,
   wheelDelta,
 } from "./railMotion";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("smoothStep", () => {
   it("closes part of the distance each frame and lands exactly", () => {
@@ -68,24 +70,16 @@ describe("splitOvershoot", () => {
   });
 });
 
-describe("blurForVelocity", () => {
-  it("is crisp at rest and at a slow scroll", () => {
-    expect(blurForVelocity(0)).toBe(0);
-    expect(blurForVelocity(0.3)).toBe(0);
-    expect(blurForVelocity(Number.NaN)).toBe(0);
+describe("no motion blur (1.3.3)", () => {
+  it("the strip's motion module exports nothing scroll-speed linked", async () => {
+    const mod: Record<string, unknown> = await import("./railMotion");
+    expect(Object.keys(mod).filter((k) => /blur|velocity/i.test(k))).toEqual([]);
   });
-  it("grows with speed, either direction, capped and subtle", () => {
-    expect(blurForVelocity(2)).toBeGreaterThan(0);
-    expect(blurForVelocity(-2)).toBe(blurForVelocity(2));
-    expect(blurForVelocity(50)).toBe(BLUR_MAX);
-    expect(BLUR_MAX).toBeLessThanOrEqual(1);
-  });
-});
-
-describe("nextVelocity", () => {
-  it("smooths one uneven reading and ignores a zero-length frame", () => {
-    expect(nextVelocity(0, 160, 16)).toBeCloseTo(6, 5);
-    expect(nextVelocity(2, 10, 0)).toBe(2);
+  it("no stylesheet rule or hook filters the chips while the list scrolls", () => {
+    const css = readFileSync(path.join(here, "../index.css"), "utf8");
+    expect(css).not.toMatch(/data-rail-moving|--wn-rail-blur/);
+    const hook = readFileSync(path.join(here, "components/useRailMotion.ts"), "utf8");
+    expect(hook).not.toMatch(/addEventListener\("scroll"|--wn-rail-blur|railMoving/);
   });
 });
 
