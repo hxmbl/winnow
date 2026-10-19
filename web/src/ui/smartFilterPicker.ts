@@ -33,12 +33,6 @@ export function pickerTitle(count: number): string {
   return count === 1 ? "Smart filters" : `Smart filters for ${count} messages`;
 }
 
-/** What the picker says once something has moved, for the status line. */
-export function movedNotice(label: string, into: boolean, count: number): string {
-  const what = count === 1 ? "Moved" : `Moved ${count} messages`;
-  return into ? `${what} into ${label}.` : `${what} out of ${label}.`;
-}
-
 /** What one change did, as `Store.changeSmartFilters` reports it. */
 export type ChangeOutcome = { into: boolean; moved: number; unsafe: number; already: number };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeNotice, clickInto, movedNotice, pickerRows, pickerTitle } from "./smartFilterPicker";
+import { changeNotice, clickInto, pickerRows, pickerTitle } from "./smartFilterPicker";
 import { learntSummary, ruleText } from "./smartFilterSettings";
 import { buildRowMenu } from "./menus";
 import { FilterLearning, LEARNABLE_FILTERS } from "../core/learn/filterLearning";
@@ -60,11 +60,9 @@ describe("the picker", () => {
     expect(clickInto("all")).toBe(false);
   });
 
-  it("says what moved", () => {
+  it("titles the picker by how many messages it is for", () => {
     expect(pickerTitle(1)).toBe("Smart filters");
     expect(pickerTitle(3)).toBe("Smart filters for 3 messages");
-    expect(movedNotice("Deliveries", true, 1)).toBe("Moved into Deliveries.");
-    expect(movedNotice("Promos", false, 2)).toBe("Moved 2 messages out of Promos.");
   });
 
   it("is in the row menu only where it is offered", () => {
