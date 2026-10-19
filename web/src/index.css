@@ -569,15 +569,19 @@ html[data-resizing] iframe {
     opacity var(--wn-glass-motion) var(--wn-glass-ease),
     transform var(--wn-glass-motion) var(--wn-glass-ease);
 }
-button.wn-glass:active,
-.wn-pill.wn-chip-glass:active,
+/*
+ * Not the smart-filter chips (nor "All" beside them): a transform on a chip makes it a
+ * stacking context mid-transition, and its frost layer (`::before`, clipped to the pill
+ * by `clip-path`) briefly drew square under a held press (1.3.3). A chip answers a press
+ * with a sheen instead (below, `[data-rail-item]:active`), so its shape never changes.
+ */
+button.wn-glass:not([data-rail-item]):active,
 .wn-glass-bar button:active,
 [data-phone-pill] button:active {
   transform: scale(0.97);
 }
 @media (prefers-reduced-motion: reduce) {
-  button.wn-glass:active,
-  .wn-pill.wn-chip-glass:active,
+  button.wn-glass:not([data-rail-item]):active,
   .wn-glass-bar button:active,
   [data-phone-pill] button:active {
     transform: none;
@@ -771,6 +775,29 @@ button.wn-glass:active,
 .wn-pill.wn-chip-glass[data-on]:hover {
   box-shadow:
     inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
+    inset 0 0 0 999px var(--wn-sheen),
+    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-lift);
+}
+/*
+ * Pressed (and held, and long-pressed): a deeper sheen, never a transform or a radius
+ * change, so the chip stays a pill from press to release.
+ */
+.wn-pill.wn-chip-glass:active,
+.wn-pill.wn-chip-glass:has(> button:active),
+button.wn-glass[data-rail-item]:active {
+  transform: none;
+  box-shadow:
+    inset 0 0 0 999px var(--wn-sheen),
+    inset 0 0 0 999px var(--wn-sheen),
+    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-lift);
+}
+.wn-pill.wn-chip-glass[data-on]:active,
+.wn-pill.wn-chip-glass[data-on]:has(> button:active) {
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
+    inset 0 0 0 999px var(--wn-sheen),
     inset 0 0 0 999px var(--wn-sheen),
     inset 0 1px 0 var(--wn-glass-sheen),
     var(--wn-glass-lift);
@@ -1174,6 +1201,19 @@ div[data-row-count] {
 }
 .wn-rail-scroller {
   overscroll-behavior: contain;
+}
+/*
+ * No browser press highlight on the chips (1.3.3). Android's WebView and Chrome draw a
+ * tap highlight under a held finger, a rectangle that ignores the pill's radius, so a
+ * held chip looked square until it went away. The chip's own pressed sheen is the
+ * feedback; a long press opens no callout and selects no text.
+ */
+.wn-rail-scroller,
+.wn-rail-scroller *,
+.wn-pill,
+.wn-glass {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 /*

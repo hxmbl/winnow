@@ -176,3 +176,31 @@ describe("the frost layer reaches past each pill", () => {
     expect(css).not.toMatch(/\.wn-chip-glass:hover\s*\{[^}]*\bfilter:/);
   });
 });
+
+describe("a held chip stays a pill (1.3.3)", () => {
+  const css = readFileSync(new URL("../index.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  /** Every rule whose selector names a pressed chip, with its declarations. */
+  const pressedChipRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selector]) => /(wn-chip-glass|data-rail-item)[^,{]*:active|wn-chip-glass[^,{]*:has\(> button:active\)/.test(selector))
+    .map(([, selector, body]) => ({ selector: selector.trim(), body }));
+
+  it("no press rule scales or reshapes a smart-filter chip", () => {
+    expect(pressedChipRules.length).toBeGreaterThan(0);
+    for (const rule of pressedChipRules) {
+      expect(rule.body, rule.selector).not.toMatch(/transform:\s*scale|border-radius|clip-path/);
+    }
+  });
+
+  it("the shared glass press scale excludes the rail's items", () => {
+    const scale = [...css.matchAll(/([^{}]+)\{\s*transform:\s*scale\(0\.97\);?\s*\}/g)].map(([, selector]) => selector);
+    expect(scale.length).toBeGreaterThan(0);
+    for (const selector of scale) {
+      expect(selector).not.toMatch(/\.wn-pill\.wn-chip-glass:active/);
+      expect(selector).toMatch(/button\.wn-glass:not\(\[data-rail-item\]\):active/);
+    }
+  });
+
+  it("the browser's square tap highlight is off on the chips", () => {
+    expect(css).toMatch(/\.wn-rail-scroller \*,[\s\S]{0,60}-webkit-tap-highlight-color: transparent/);
+  });
+});

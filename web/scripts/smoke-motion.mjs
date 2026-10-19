@@ -122,6 +122,59 @@ const flingList = (page, by, steps, scope = "[data-list-chrome]") =>
     { by, steps, scope },
   );
 
+/**
+ * Sample a chip's shape every frame for `ms`: its corner radius against half its height,
+ * any transform, the frost layer's clip and the tap highlight. Started before a press and
+ * awaited after the release, so it covers press, hold and release.
+ */
+const sampleShape = (page, sel, ms) =>
+  page.evaluate(
+    ({ sel, ms }) =>
+      new Promise((resolve) => {
+        const el = document.querySelector(sel);
+        const end = performance.now() + ms;
+        const bad = [];
+        let frames = 0;
+        let pressedSeen = false;
+        const step = () => {
+          frames += 1;
+          const cs = getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          const radius = parseFloat(cs.borderTopLeftRadius) || 0;
+          const before = getComputedStyle(el, "::before").clipPath;
+          pressedSeen ||= el.matches(":active, :has(:active)");
+          const pill = radius >= r.height / 2 - 0.5;
+          const flat = cs.transform === "none";
+          const clipOk = before === "none" || /round/.test(before);
+          const highlight = cs.webkitTapHighlightColor;
+          const noHighlight = !highlight || /rgba\(0, 0, 0, 0\)|transparent/.test(highlight);
+          if (!(pill && flat && clipOk && noHighlight) && bad.length < 3) bad.push({ radius, h: r.height, transform: cs.transform, before, highlight });
+          if (performance.now() < end) requestAnimationFrame(step);
+          else resolve({ frames, bad, pressedSeen });
+        };
+        requestAnimationFrame(step);
+      }),
+    { sel, ms },
+  );
+
+/** Hold a press on `sel`'s centre for `holdMs` (mouse or touch) while sampling its shape. */
+async function heldPressShape(page, sel, { touch = false, holdMs = 900, cdp = null } = {}) {
+  const box = await page.locator(sel).boundingBox();
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  const sampling = sampleShape(page, sel, holdMs + 400);
+  await page.waitForTimeout(50);
+  if (touch) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  else {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+  }
+  await page.waitForTimeout(holdMs);
+  if (touch) await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  else await page.mouse.up();
+  return sampling;
+}
+
 export async function smokeMotion({ browser, url, check, section, errors = [] }) {
   section("filter strip: input stays on the strip");
   {
@@ -277,6 +330,24 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     const moving = await p.evaluate((sel) => document.querySelector(sel).hasAttribute("data-rail-moving"), rail);
     check("the strip never marks itself moving", moving === false);
     await settle(p, 300);
+
+    // ── A held press keeps every chip a pill (1.3.3: they went square for a moment).
+    section("filter strip: a held press keeps the chip a pill");
+    await p.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+    await settle(p, 300);
+    {
+      const chipSel = `${rail} > [data-rail-item].wn-pill`;
+      const held = await heldPressShape(p, chipSel);
+      check(
+        "desktop: pressing and holding a chip with the mouse never changes its radius, transform or frost clip",
+        held.frames > 5 && held.bad.length === 0 && held.pressedSeen,
+        JSON.stringify(held),
+      );
+      await p.keyboard.press("Escape");
+      // Undo the toggle the click made.
+      await p.locator(chipSel).first().locator("button").first().click();
+      await settle(p, 300);
+    }
 
     // ── Animations.
     section("small animations");
@@ -438,6 +509,32 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
       await settle(p, 300);
     }
     await p.emulateMedia({ colorScheme: "light" });
+    for (const appearance of ["light", "dark", "oled"]) {
+      await p.evaluate((appearance) => {
+        const raw = localStorage.getItem("winnow.preferences.v1");
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), appearance }));
+      }, appearance);
+      await p.reload({ waitUntil: "networkidle" });
+      await p.waitForSelector("[data-row-count] [data-row-id]");
+      await settle(p, 300);
+      const touchCdp = await ctx.newCDPSession(p);
+      const chipSel = `${scope} [data-rail-scroller] > [data-rail-item].wn-pill`;
+      const held = await heldPressShape(p, chipSel, { touch: true, holdMs: 1000, cdp: touchCdp });
+      check(
+        `phone (${appearance}): a long press on a chip keeps it a pill (radius, no transform, no tap highlight)`,
+        held.frames > 5 && held.bad.length === 0,
+        JSON.stringify(held),
+      );
+      await p.keyboard.press("Escape");
+      await settle(p, 300);
+    }
+    await p.evaluate(() => {
+      const raw = localStorage.getItem("winnow.preferences.v1");
+      localStorage.setItem("winnow.preferences.v1", JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), appearance: "light" }));
+    });
+    await p.reload({ waitUntil: "networkidle" });
+    await p.waitForSelector("[data-row-count] [data-row-id]");
+    await settle(p, 300);
     await p.touchscreen.tap(gap.x, gap.y);
     await settle(p, 300);
     check("a tap in a gap opens nothing under it", (await p.locator("article h1").count()) === 0);
