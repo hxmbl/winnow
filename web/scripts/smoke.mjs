@@ -31,6 +31,7 @@ import { smokeOffline } from "./smoke-offline.mjs";
 import { attachmentsSmoke } from "./smoke-attachments.mjs";
 import { topEmail } from "./smoke-top-email.mjs";
 import { smokeMotion } from "./smoke-motion.mjs";
+import { smokeFixes } from "./smoke-fixes.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -160,6 +161,27 @@ browser.newPage = async (options) => watchCsp(await watchedNewPage(options));
 
 // `WINNOW_SMOKE_ONLY=offline` runs only the undo-send-on-a-phone and offline-queue
 // checks (`smoke-offline.mjs`), for iterating on them; the full run includes them too.
+// `WINNOW_SMOKE_ONLY=fixes` runs only `smoke-fixes.mjs` (phone Settings and menu edges,
+// Undo beyond the swipes, the status pill after a remount, the demo's way back).
+// `WINNOW_SMOKE_SHOTS=<dir>` also saves its screenshots there.
+if (process.env.WINNOW_SMOKE_ONLY === "fixes") {
+  const errors = [];
+  try {
+    await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
+    section("console");
+    check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+  } catch (error) {
+    failures.push(`aborted: ${error?.message ?? error}`);
+    console.error(`\nSmoke run aborted: ${error?.stack ?? error}`);
+  } finally {
+    await browser.close();
+    await stopServer();
+  }
+  console.log(`\n${passed} passed, ${failures.length} failed`);
+  for (const line of failures) console.log(`  · ${line}`);
+  process.exit(failures.length > 0 ? 1 : 0);
+}
+
 if (process.env.WINNOW_SMOKE_ONLY === "offline") {
   const errors = [];
   try {
@@ -8013,6 +8035,7 @@ try {
   // can also run alone (`node scripts/smoke-top-email.mjs`).
   await topEmail({ browser, url: URL, check, section });
   await smokeMotion({ browser, url: URL, check, section, errors });
+  await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
 
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");
