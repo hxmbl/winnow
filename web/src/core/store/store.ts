@@ -87,6 +87,7 @@ import {
   applyFilterLearning,
   builtInSays,
   clueBackground,
+  EMPTY_BACKGROUND,
   LEARNABLE_FILTERS,
   type ClueBackground,
   type FilterLearningSnapshot,
@@ -1019,6 +1020,8 @@ export class WinnowStore {
     // new. Archiving one message in a 3,000-message inbox used to reclassify all 3,000,
     // because it moved that sender's count and so the profile.
     const incremental = hit !== null && hit.weights === weights && hit.blocked === blocked;
+    /** The same message objects in the inbox as last time: the clue background still holds. */
+    let sameInbox = false;
     let stats: ProfileStats;
     let profile: UserProfile;
     let baseSignals: SignalMap;
@@ -1027,6 +1030,7 @@ export class WinnowStore {
       const removed: Email[] = [];
       for (const email of hit.inbox) if (!inboxSet.has(email)) removed.push(email);
       const added = inboxForProfile.filter((email) => !hit.inbox.has(email));
+      sameInbox = removed.length === 0 && added.length === 0;
       stats = updateProfileStats(hit.stats, removed, added, this.trashRecords());
       const built = profileFromStats(stats);
       const unchanged = sameProfile(hit.profile, built);
@@ -1053,7 +1057,15 @@ export class WinnowStore {
       for (const email of inboxForProfile) byEmail.set(email, baseSignals.get(email.id)!);
     }
     const filterLearning = state.filterLearning;
-    const background = clueBackground(inboxForProfile);
+    // The clue background is only read by learning, so with nothing learned it is not
+    // built at all; otherwise it is kept while the inbox holds the same message objects
+    // (a star, a weight-free re-derive), since `clueBackground`'s own memo is keyed on
+    // the array and `inboxForProfile` is a fresh one every pass.
+    const background = filterLearning.isEmpty
+      ? EMPTY_BACKGROUND
+      : sameInbox && hit !== null && hit.background !== EMPTY_BACKGROUND
+        ? hit.background
+        : clueBackground(inboxForProfile);
     const signals = applyFilterLearning(inboxForProfile, baseSignals, filterLearning, background);
     this.inboxCache = { all, weights, trash, blocked, filterLearning, inbox: inboxSet, stats, profile, baseSignals, background, signals, byEmail };
     return { profile, signals };
