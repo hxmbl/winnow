@@ -71,9 +71,13 @@ export function moveCategory(
   }
 }
 
-/** Every category, in order. A function so a host could one day hide one. */
-export function visibleCategories(): CategoryId[] {
-  return CATEGORIES.map((category) => category.id);
+/**
+ * The categories, in order. Keyboard shortcuts is left out on a touch-only device until a
+ * real keyboard has been used (`shortcuts: false`, see `physicalKeyboard.ts`): a list of
+ * keys nobody can press is clutter on a phone.
+ */
+export function visibleCategories({ shortcuts = true }: { shortcuts?: boolean } = {}): CategoryId[] {
+  return CATEGORIES.map((category) => category.id).filter((id) => shortcuts || id !== "shortcuts");
 }
 
 // ── Explanation panel ───────────────────────────────────────────────────────

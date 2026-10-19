@@ -9,12 +9,12 @@
  */
 
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { ArrowLeft, Check, ChevronRight, RotateCcw } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Sheet } from "./Overlay";
 import { InfoButton, RadioCards, Row, Section, SettingBlock, SettingLabel, Toggle } from "./SettingsControls";
 import { BINDINGS } from "../../core/mail/keybinds";
 import type { NotificationActions } from "../../core/notify/notifications";
-import { categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
+import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
   INFO_CLOSED,
@@ -31,7 +31,7 @@ import {
   type SettingsLayout,
 } from "../settingsView";
 import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
-import { UNDO_SEND_CHOICES, undoSendLabel, type UndoSendSeconds } from "../../core/mail/undoSend";
+import { UNDO_SEND_CHOICES, type UndoSendSeconds } from "../../core/mail/undoSend";
 import { FILTER_LABELS } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
 import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
@@ -39,6 +39,16 @@ import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
 import type { FilterLearning, LearnableFilter } from "../../core/learn/filterLearning";
 import { SmartFilterSettings } from "./SmartFilterSettings";
+import { SelectMenu } from "./SelectMenu";
+import { useShortcutsAvailable } from "../physicalKeyboard";
+
+/** How often the desktop app checks for mail while closed. */
+const SYNC_INTERVALS: readonly { value: number; label: string }[] = [
+  { value: 60, label: "Every minute" },
+  { value: 300, label: "Every 5 minutes" },
+  { value: 900, label: "Every 15 minutes" },
+  { value: 3600, label: "Every hour" },
+];
 
 /** The notification buttons Settings can switch, in the order a notification shows them. */
 const NOTIFICATION_BUTTONS: readonly { key: keyof NotificationActions; label: string }[] = [
@@ -243,7 +253,8 @@ export function Settings(props: SettingsProps) {
   /** The phone's two screens: the category list, or one category's page. */
   const [phonePage, setPhonePage] = useState<"list" | "category">("list");
   const [info, dispatchInfo] = useReducer(infoReducer, INFO_CLOSED);
-  const categories = visibleCategories();
+  const shortcutsAvailable = useShortcutsAvailable();
+  const categories = visibleCategories({ shortcuts: shortcutsAvailable });
   const tabRefs = useRef(new Map<CategoryId, HTMLButtonElement | null>());
   const pageHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const listButtonRefs = useRef(new Map<CategoryId, HTMLButtonElement | null>());
@@ -264,6 +275,12 @@ export function Settings(props: SettingsProps) {
     setExplain((state) => selectCategory(state, category));
     dispatchInfo({ type: "outside" });
   };
+
+  // A category that is not offered here (Keyboard shortcuts on a touch-only device with
+  // no keyboard yet) is never the one shown.
+  useEffect(() => {
+    if (!categories.includes(explain.category)) setExplain((state) => selectCategory(state, categories[0]));
+  }, [categories, explain.category]);
 
   // The phone's page change moves focus with it: into the page's heading going in, back
   // to the category's row coming out, so a screen reader is never left on a removed node.
@@ -341,9 +358,12 @@ export function Settings(props: SettingsProps) {
                       setPhonePage("list");
                       dispatchInfo({ type: "outside" });
                     }}
-                    className="flex h-11 w-11 items-center justify-center rounded-ctl text-ink-icon transition-colors active:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    // A small chevron in full ink (the owner's call, 1.3.3): small, so it
+                    // does not compete with the title, but never faint. The 44px tap
+                    // target stays; only the drawn glyph is small.
+                    className="flex h-11 w-9 items-center justify-center rounded-ctl text-ink transition-colors active:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >
-                    <ArrowLeft size={20} aria-hidden="true" />
+                    <ChevronLeft size={22} strokeWidth={2.4} aria-hidden="true" />
                   </button>
                   <h2
                     ref={pageHeadingRef}
@@ -499,35 +519,32 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
       return (
         <Section>
           <Row setting="undoSend">
-            <div data-undo-send-choices="" className="flex gap-1 rounded-ctl border border-hairline p-0.5">
-              {UNDO_SEND_CHOICES.map((seconds) => (
-                <button
-                  key={seconds}
-                  type="button"
-                  onClick={() => props.onUndoSendSeconds(seconds)}
-                  aria-pressed={props.undoSendSeconds === seconds}
-                  aria-label={seconds === 0 ? "Undo send off" : `Wait ${seconds} seconds`}
-                  className={`rounded-ctl px-2 py-1 text-meta font-semibold tabular-nums transition-colors ${
-                    props.undoSendSeconds === seconds ? "bg-surface-active text-ink" : "text-ink-muted hover:text-ink-body"
-                  }`}
-                >
-                  {undoSendLabel(seconds)}
-                </button>
-              ))}
-            </div>
+            <SelectMenu
+              id="undo-send"
+              label={SETTINGS.undoSend.label}
+              options={UNDO_SEND_CHOICES.map((seconds) => ({
+                value: seconds,
+                label: seconds === 0 ? "Off" : `${seconds} seconds`,
+                ariaLabel: seconds === 0 ? "Undo send off" : `Wait ${seconds} seconds`,
+              }))}
+              value={props.undoSendSeconds}
+              onChange={props.onUndoSendSeconds}
+            />
           </Row>
         </Section>
       );
     case "appearance":
       return (
         <Section>
-          <RadioCards
-            id="winnow-theme-mode"
-            setting="themeMode"
-            options={APPEARANCES.map((option) => ({ value: option, label: APPEARANCE_LABELS[option] }))}
-            value={props.appearance}
-            onChange={props.onAppearance}
-          />
+          <Row setting="themeMode">
+            <SelectMenu
+              id="theme-mode"
+              label={SETTINGS.themeMode.label}
+              options={APPEARANCES.map((option) => ({ value: option, label: APPEARANCE_LABELS[option] }))}
+              value={props.appearance}
+              onChange={props.onAppearance}
+            />
+          </Row>
           <RadioCards
             id="winnow-theme-accent"
             setting="accent"
@@ -557,29 +574,21 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             and that is not the same as "never": somebody who has been asked three times
             wants their mail to look like mail.
 
-            A segmented control rather than three buttons because it is one setting with
-            three values.
+            A dropdown since 1.3.3 (it was a segmented control): one setting with three
+            values, and "Ask each time" made the row too wide for a phone.
           */}
           <Row setting="remoteImages">
-            <div role="radiogroup" aria-label="Remote images" className="flex items-center gap-0.5 rounded-ctl bg-sheen p-0.5">
-              {IMAGE_POLICY_CHOICES.map((choice) => (
-                <button
-                  key={choice.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={props.imagePolicy === choice.value}
-                  disabled={!props.canLoadRemoteContent && choice.value !== "never"}
-                  onClick={() => props.onImagePolicy(choice.value)}
-                  className={`rounded-ctl px-2.5 py-1 text-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 ${
-                    props.imagePolicy === choice.value
-                      ? "bg-surface text-ink shadow-pane"
-                      : "text-ink-muted hover:text-ink-body"
-                  }`}
-                >
-                  {choice.label}
-                </button>
-              ))}
-            </div>
+            <SelectMenu
+              id="remote-images"
+              label={SETTINGS.remoteImages.label}
+              options={IMAGE_POLICY_CHOICES.map((choice) => ({
+                value: choice.value,
+                label: choice.label,
+                disabled: !props.canLoadRemoteContent && choice.value !== "never",
+              }))}
+              value={props.imagePolicy}
+              onChange={props.onImagePolicy}
+            />
           </Row>
           <Row setting="brandLogos">
             <Toggle checked={props.brandLogos} onChange={props.onBrandLogos} label="Show brand logos" />
@@ -637,17 +646,13 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               </Row>
               {props.backgroundSync && (
                 <Row setting="syncInterval">
-                  <select
+                  <SelectMenu
+                    id="sync-interval"
+                    label="Check for new mail every"
+                    options={SYNC_INTERVALS}
                     value={props.backgroundSyncInterval}
-                    onChange={(event) => props.onBackgroundSyncInterval(Number(event.target.value))}
-                    aria-label="Check for new mail every"
-                    className="rounded-ctl border border-hairline bg-surface px-4 py-1 text-meta font-semibold text-ink-body"
-                  >
-                    <option value={60}>Every minute</option>
-                    <option value={300}>Every 5 minutes</option>
-                    <option value={900}>Every 15 minutes</option>
-                    <option value={3600}>Every hour</option>
-                  </select>
+                    onChange={props.onBackgroundSyncInterval}
+                  />
                 </Row>
               )}
             </>
@@ -719,21 +724,13 @@ function ReadingSettings({ props }: { props: SettingsProps }) {
     <>
       <Section>
         <Row setting="sortBy">
-          <div className="flex gap-1 rounded-ctl border border-hairline p-0.5">
-            {SORT_OPTIONS.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => props.onSortBy(option.id)}
-                aria-pressed={props.sortBy === option.id}
-                className={`rounded-ctl px-2.5 py-1 text-meta font-semibold transition-colors ${
-                  props.sortBy === option.id ? "bg-surface-active text-ink" : "text-ink-muted hover:text-ink-body"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <SelectMenu
+            id="sort-by"
+            label={SETTINGS.sortBy.label}
+            options={SORT_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+            value={props.sortBy}
+            onChange={props.onSortBy}
+          />
         </Row>
         <Row setting="markReadOnOpen">
           <Toggle checked={props.markReadOnOpen} onChange={props.onMarkReadOnOpen} label="Mark as read when opened" />

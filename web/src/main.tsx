@@ -32,7 +32,12 @@ import { DEFAULT_ACCENT_THEME, DEFAULT_APPEARANCE } from "./core/model/appearanc
 import type { LearningSnapshot } from "./core/learn/learning";
 import type { Email, Mailbox } from "./core/model/email";
 import { announce, saveKeptReplies, wireNotifications } from "./ui/notificationActions";
+import { watchPhysicalKeyboard } from "./ui/physicalKeyboard";
 import "./index.css";
+
+// From the first key press, not from when Settings opens: Keyboard shortcuts shows on a
+// touch device once a real keyboard has been used this session (`physicalKeyboard.ts`).
+watchPhysicalKeyboard();
 
 const container = document.getElementById("root");
 if (!container) throw new Error("no #root element to mount into");
