@@ -318,15 +318,26 @@ try {
       binAll.size > 0 && binChips.some((c) => c.count > 0) && JSON.stringify(binChips) !== JSON.stringify(inboxChips),
       `${binAll.size} in Trash; ${JSON.stringify(binChips.map((c) => `${c.key}:${c.count}`))}`,
     );
+    // The binned junk: a chip's count leaves it out, and the filters that state a fact
+    // about the message (Promos, contacts, Security…) still list it, by design
+    // (`matchesBuiltin`), so the list is the chip's count plus any junk.
+    const unsafe = new Set();
+    if (binChips.some((c) => c.key === "unsafe" && c.count > 0)) {
+      await b.locator('[data-list-chrome] [data-rail-item][data-rail-key="unsafe"] button').first().click();
+      await b.waitForTimeout(400);
+      for (const id of await subjects()) unsafe.add(id);
+      await b.locator('[data-list-chrome] [data-rail-item][data-rail-key="unsafe"] button').first().click();
+      await b.waitForTimeout(300);
+    }
     let checked = 0;
     for (const chip of binChips.filter((c) => c.count > 0 && c.key !== "unsafe").slice(0, 4)) {
       await b.locator(`[data-list-chrome] [data-rail-item][data-rail-key="${chip.key}"] button`).first().click();
       await b.waitForTimeout(400);
       const shown = await subjects();
       check(
-        `Trash + ${chip.key}: the list is exactly the chip's ${chip.count}, all of it from Trash`,
-        shown.length === chip.count && shown.every((id) => binAll.has(id)),
-        `${shown.length} shown`,
+        `Trash + ${chip.key}: the list is the chip's ${chip.count} (plus any junk), all of it from Trash`,
+        shown.filter((id) => !unsafe.has(id)).length === chip.count && shown.every((id) => binAll.has(id)),
+        `${shown.length} shown, ${unsafe.size} junk in Trash`,
       );
       await b.locator(`[data-list-chrome] [data-rail-item][data-rail-key="${chip.key}"] button`).first().click();
       await b.waitForTimeout(300);

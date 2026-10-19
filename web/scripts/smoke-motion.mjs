@@ -334,6 +334,9 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     // ── A held press keeps every chip a pill (1.3.3: they went square for a moment).
     section("filter strip: a held press keeps the chip a pill");
     await p.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 0));
+    // The strip back at its start: the glide checks above left it scrolled, with the first
+    // chip under the leading mark, where a press at its centre lands on something else.
+    await p.evaluate((sel) => (document.querySelector(sel).scrollLeft = 0), rail);
     await settle(p, 300);
     {
       const chipSel = `${rail} > [data-rail-item].wn-pill`;
