@@ -188,6 +188,7 @@ The public surface is ~80 methods, grouped:
 | Bodies | `loadBody`, `prefetchBodies`, `hasLoadedBody`, `scheduleReclassify` |
 | Offline storage | `saveMailboxOffline`, `declineMailboxStorage`, `dismissStoragePrompt` |
 | Learning | `resetLearning`, `setPreferences`, `setSortBy`, `setGoogleContacts` |
+| Snooze and send later (1.4.0, §13b) | `snooze`, `unsnooze`, `wakeDue`, `isSnoozed`, `snoozeFor`, `scheduleSend`, `cancelSchedule`, `updateScheduled`, `claimScheduled`, `scheduledSend`, `scheduledSends`, `accountKey` |
 
 Two behaviours worth knowing before touching it:
 
@@ -341,7 +342,7 @@ That is the only input; nothing is learned from opening or ignoring mail.
 
 | File | Holds |
 | --- | --- |
-| `email.ts` | `Email` (product view) vs `RawEmail` (wire view), `Mailbox = "inbox" \| "archive" \| "sent" \| "drafts" \| "trash" \| "spam"`, `MAILBOX_LABEL`, `EmailCategory`, `Contact`, `Attachment`, `Draft`, plus the loaded-body helpers (`isBodyLoaded`, `keepLoadedBody`, `withLoadedBody`) and `withCode`. |
+| `email.ts` | `Email` (product view) vs `RawEmail` (wire view), `Mailbox = "inbox" \| "archive" \| "sent" \| "drafts" \| "trash" \| "spam" \| "snoozed" \| "scheduled"` (the last two are views, `VIEW_MAILBOXES`, never a message's own `mailbox`; `MAILBOXES` is the six places), `MAILBOX_LABEL`, `EmailCategory`, `Contact`, `Attachment`, `Draft`, plus the loaded-body helpers (`isBodyLoaded`, `keepLoadedBody`, `withLoadedBody`) and `withCode`. |
 | `signals.ts` | `BUILTIN_FILTERS` (21, in rail-catalog order), `FILTER_LABELS`, `PERMANENT_FILTERS = ["important", "shipping"]`, `NAVIGATION_ITEMS`, `UNSAFE_THRESHOLD = 0.4`, `IMPORTANT_THRESHOLD = 56`, `isUnsafe`, `isImportant`, `badgeFilters` (the chips in a reader) and `rowIndicators` (the at-most-one word a list row carries). |
 | `profile.ts` | `buildUserProfile(inbox, trash)`, also built incrementally (`profileStats` → `updateProfileStats` → `profileFromStats`, integer counts per category so both paths agree exactly; `sendersReclassifiedBy` names the senders a profile change reclassifies): per-sender trash bias (unbounded in the profile, clamped to `MAX_TRASH_BIAS = 0.35` where used), top six correspondents, the quiet tail, and first-time senders. Deterministic, and ties break on the sender name — a ranking that hides mail cannot be a shuffle. |
 | `appearance.ts` | `APPEARANCES` (`system \| light \| dark \| oled`) and `ACCENT_THEMES` (`space \| plum \| ember \| aurora`). Names live in `core` because the store persists them and `core` does not import from `ui`. |
@@ -352,7 +353,7 @@ That is the only input; nothing is learned from opening or ignoring mail.
 | File | Job |
 | --- | --- |
 | `dto.ts` | The API's JSON and nothing else, plus `GMAIL_API`, `GOOGLE_TOKEN_URL`, `GOOGLE_AUTH_URL`, the base64url codec, `GMAIL_SCOPE`, and `LABEL`. API changes land here and in `mapper.ts`, nowhere else. |
-| `client.ts` | The typed `fetch` wrapper. Owns quota pacing and retries. Every verb Winnow uses: `profile`, `list`, `message`, `messageBodyHtml`, `history`, `addLabels`/`removeLabels`, `archive`, `markRead`, `setStarred`, `trash`, `restore`, `markNotSpam`, `deletePermanently`, `send`, `attachment`, `draft`, `listDrafts`, `createDraft`, `updateDraft`, `sendDraft`, `deleteDraft`. |
+| `client.ts` | The typed `fetch` wrapper. Owns quota pacing and retries. Every verb Winnow uses: `profile`, `list`, `message`, `messageBodyHtml`, `history`, `addLabels`/`removeLabels`, `archive`, `markRead`, `setStarred`, `trash`, `restore`, `markNotSpam`, `deletePermanently`, `send`, `attachment`, `draft`, `listDrafts`, `createDraft`, `updateDraft`, `sendDraft`, `deleteDraft`, and (1.4.0, §13b) `modify` (add and remove labels in one call) and `ensureLabel`, which only ever finds or makes `Winnow/Snoozed`. |
 | `sync.ts` | `GmailSyncEngine`: full vs incremental, the cursor, the five capped views, batching, partial publishing. Also defines the two interfaces everything else is written against: `MailboxCache` and `CursorStore`. |
 | `mapper.ts` | Gmail message → `Email`. Parses `From` rather than trusting it, prefers plain text over HTML, keeps attachments as metadata, and uses `internalDate` over the `Date:` header. |
 | `mime.ts` | RFC 822 out: `buildMime`, `messageIdFor`, `replyReferences`. Getting `Message-ID` / `In-Reply-To` / `References` wrong threads the reply in the sender's account and nowhere else. |
@@ -453,6 +454,9 @@ URI or origin. The secret never appears in an error, a warning or a log.
 | `unsubscribe.ts` | RFC 2369 + RFC 8058. Keeps at most one https URL and one mailto; `oneClick` is only set when the POST header says so, and Winnow never sends the POST (CORS would refuse it from a web page). |
 | `imageConsent.ts` | `ImagePolicy = "ask" \| "always" \| "never"` and `resolveImageConsent`. Three states because there are three intentions, and a grant is for one message id only. |
 | `proxy.ts` | The optional render proxy client. The base URL is read once from the **build-time** `VITE_RENDER_PROXY` constant, http/https only — a runtime setting pointing the app at an arbitrary URL is a remote-administration hole. The returned document is mounted in `sandbox=""`. |
+| `when.ts` | The times snooze and send later offer, in local time (`whenPresets`: Later today = +3 h rounded up to the half hour, Tomorrow 9:00, This weekend = Saturday 9:00, Next week = Monday 9:00, each left out when it would lie), `formatWhen` ("Today, 18:00"), the date/time fields' codec and `wentLate` (`LATE_AFTER_MS` = 2 min). |
+| `snooze.ts` | Snooze records (`SNOOZED_LABEL = "Winnow/Snoozed"`), what is due, early wakes on a reply, abandoned snoozes, woken places (`WOKE_TTL_MS` = 7 days) and `SnoozeOverlay`. §13b. |
+| `scheduledSend.ts` | Scheduled-send records (device copy of the draft via `forDeviceCopy`), due/claim (`CLAIM_MS`), and the Scheduled view's rows (`scheduledRow`). §13b. |
 | `keybinds.ts` | `BINDINGS` as data, plus the router. Four imperative carve-outs: not ready, system modifiers, text editing, and modal grammars for the cheat sheet and the mailbox palette. `Masthead` prints its toolbar hints from the same array, so a button cannot advertise a shortcut the router will not take. |
 
 ### 5.9 `avatars/` and `data/`
@@ -581,10 +585,11 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
 | `Masthead.tsx` | Sidebar toggle (a panel icon), the mark as the version toggle (`logoVersion.ts`), search, position readout, prev/next, Compose (no Mark all read anywhere: opening a message marks it read), and the `FilterStrip`. It floats over the list, like the phone's dock: the bar is a rounded glass pill (`.wn-glass.wn-glass-bar`) inset from the pane, each chip its own glass pill (`FilterStrip` `floating`), no band behind either, and the selection bar takes the chips' slot (`replaceRail`) so the header keeps its height. `App.tsx` measures it (`data-list-chrome`) and passes the height to `MessageList` as `topInset` (top padding, `scroll-padding-top`, the pinned day below it, the cursor's reveal clearing it); the briefing is the list's in-flow `lead`, scrolled away with the mail. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
 | `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. With `touch` (the phone) it is the floating rail instead: no band, no fades, each chip its own frosted glass pill (`.wn-chip-glass`, its frost clipped to the chip since 1.3.3) at the dock's side insets, over `.wn-rail-haze` (PhoneChrome: a 5px blur with no tint, masked to fade out above and below, so the gaps soften what is behind and show no band), and taps between chips fall through to the list. |
-| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other five mailboxes in `MAILBOX_ORDER` (Drafts among them), an account footer carrying Settings, and the progressive scrim blur. On a phone it is the dock's pill grown upward (`data-morph`: same left edge, width and bottom as the pill, revealed by a `clip-path` from the pill's shape, in the dock's frost) with no app-name header, icon rows, the current mailbox on a pill and the list upside down (account + round Settings gear on top, a divider, then Spam, Trash, Drafts, Archive and Sent (`PANEL_ORDER`), Inbox last on the pill's line, stopping a cell short so the dock's Expand chevron sits beside it on top of the panel); the scrim uses the same four-layer recipe as the desktop, spreading from the middle of the panel's right edge. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
+| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other mailboxes in `MAILBOX_ORDER` (Snoozed, Archive, Sent, Drafts, Scheduled, Trash, Spam; the two 1.4.0 views count what they hold), an account footer carrying Settings, and the progressive scrim blur. On a phone it is the dock's pill grown upward (`data-morph`: same left edge, width and bottom as the pill, revealed by a `clip-path` from the pill's shape, in the dock's frost) with no app-name header, icon rows, the current mailbox on a pill and the list upside down (account + round Settings gear on top, a divider, then Spam, Trash, Scheduled, Drafts, Snoozed, Archive and Sent (`PANEL_ORDER`), Inbox last on the pill's line, stopping a cell short so the dock's Expand chevron sits beside it on top of the panel); the scrim uses the same four-layer recipe as the desktop, spreading from the middle of the panel's right edge. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
 | `SettingsPanel.tsx` | Settings. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. Keyboard shortcuts is left out on a touch-only device until a hardware key is pressed (`physicalKeyboard.ts`, kept for the session). |
 | `SelectMenu.tsx` + `selectMenu.ts` | The Settings dropdown for many-valued settings (sort, undo send, remote images, mode, sync interval): a pill trigger (`role="combobox"`) and a listbox on the menu surface, placed by `placeMenu`; ↓↑ Home End, type-ahead, Enter/Space, Escape (closes the list, not Settings). On/off stays a switch, Accent stays swatch cards. |
-| `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send and Discard, the Reply / Reply all toggle and the draft status. Three layouts: docked at the bottom of the reader pane (desktop reply and forward, not modal, its own Escape), a centred sheet (desktop new message), full screen (phone, everything). |
+| `WhenPicker.tsx` | "Pick date & time…" for snooze and send later (`WhenPicker`: native date and time fields, refused in words when past) and `ScheduledSheet`, a Scheduled row opened (Edit, Send now, Cancel schedule). |
+| `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send (with Send later beside it since 1.4.0: a split chevron on the desktop, a clock and a long press on the phone's Send circle; the menu says Winnow must be open) and Discard, the Reply / Reply all toggle and the draft status. Three layouts: docked at the bottom of the reader pane (desktop reply and forward, not modal, its own Escape), a centred sheet (desktop new message), full screen (phone, everything). |
 | `GoogleSetup.tsx` | The five-step BYO-client guide: console deep links, exact scopes and redirect URI with copy buttons, ticks and a resumable half-finished setup (`setupProgress.ts`), "Continue in demo" on every step; paste, import by file, drop or paste-into-field; test; save; connect. |
 | `SetupTroubleshoot.tsx` | `SetupFix` (a Google error as a plain fix plus a link back to its step) and "Google showed an error?" on step 5, which explains text pasted off Google's own error pages. Both read `core/session/googleErrors.ts`. |
 | `InboxClear.tsx` + `InboxClear.css` | The good-news empty states. Clear (Inbox empty, or only held-back junk left, or one smart filter worked to the end): `AppMark single` (only the leading plane, recentred) at the end of a dashed trail in accent light, a time-of-day line, and a one-time motion plus a phone haptic when the last row goes (`useClearCelebration.ts`; nothing moves under reduced motion). Quiet (empty folder, or filters that match nothing): one line and the remedy. `inboxClear.ts` decides which and what they say; search keeps `MessageList`'s own remedy screen. |
@@ -812,6 +817,8 @@ judged as IPv4.
 | `winnow.activeFilters.v1` | The active filter set | sign-out |
 | `winnow.mailbox.v1` | Which mailbox was last open | — |
 | `winnow.offlineQueue.v1` | Actions (and sends) waiting for the network, with the account they belong to | replay, sign-out |
+| `winnow.snooze.v1` | Snoozed conversations (account, message ids, wake time) and woken places, `core/mail/snooze.ts` via `core/store/keyedStorage.ts` | wake / unsnooze; this account's on sign-out |
+| `winnow.scheduledSend.v1` | Messages to send later (account, time, Gmail draft id, device copy of the draft), `core/mail/scheduledSend.ts` via `keyedStorage` | sent / cancelled / Edit; this account's on sign-out |
 | `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
 | `winnow.gmail.cache.messages` | The mailbox, as plain JSON | sign-out |
 | `winnow.gmail.cache.cursor` | Gmail `historyId` | sign-out |
@@ -835,7 +842,7 @@ judged as IPv4.
 | Unit | `npm test` | Vitest, **node** environment, `src/**/*.test.ts` plus `../proxy/**/*.test.ts`. There are no component tests, and the glob says `.ts` not `.tsx` so nobody infers there should be. |
 | Gate | `npm run check` | typecheck + lint + lint:proxy + unit |
 | Smart filters | `node scripts/smoke-filters.mjs` | Targeted smoke for "Change smart filters…", "Why it's here" and Settings → Smart filters. Own `vite preview` on 4350 (`WINNOW_PORT`); `WINNOW_SHOTS=dir` writes screenshots. |
-| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs` and `smoke-notifications.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`; `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names). |
+| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs` and `smoke-notifications.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`; `WINNOW_SMOKE_ONLY=schedule` runs only `scripts/smoke-schedule.mjs` (1.4.0 on the demo: snooze from the row menu with Undo, `b`, the reader's button and its picker, the selection bar and the phone reader pill; the Snoozed mailbox and Unsnooze; waking at the time with Playwright's fake clock and on the next open; Send later from the desktop split button and the phone top bar; the Scheduled mailbox's Edit, Send now and Cancel schedule; a send at its time and one late; Settings → Compose's copy), also run by `smoke.mjs` and alone (port 4351); `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names). |
 | Theme sweep | `npm run sweep` | Manual, never in `npm run smoke` or CI. `scripts/sweep.mjs` photographs every mode (light, dark, OLED; `system` once each way) × every accent in `ACCENT_THEMES` (read from `core/model/appearance.ts`, so a new accent is swept for free) on a phone (390×844, Android UA, safe-area insets) and a desktop (1440×900): inbox, reader, drawer, Settings top and scrolled to the end, the Appearance picker, compose, the status pill with Undo, and inbox clear (the shared fake Gmail with an empty inbox). Then the settings and OS preferences that change the look (sort, remote images, brand logos, Gravatar, reduced transparency, forced colours, left-handed on a phone, a small phone, a tablet) once each, a Settings dropdown open (phone and desktop, light and dark), and the phone reader scrolled partway down the long demo newsletter with its pill folded (both hands × light/dark/OLED). Checks as it goes — page/console errors, text clipped without an ellipsis or pushed off-screen, sideways scroll, and WCAG AA for primary and pill/chip text measured against the pixels behind it (a second shot with text hidden, so glass counts) — and writes contact sheets per mode × device, `sweep.pdf` and `sweep-report.md`. Reports, never fails on a finding. `WINNOW_SWEEP_OUT` (default `web/.sweep`, git-ignored), `WINNOW_SWEEP_PHASE=capture\|sheets`, `WINNOW_SWEEP_MODES` / `WINNOW_SWEEP_DEVICES` for a subset, `WINNOW_SWEEP_JOBS` (3); port 4573 by default. |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |
 
@@ -926,9 +933,12 @@ is hard to see.
 **No labels.** Labels were removed from the UI after 1.3.0-beta: the owner's call is that
 they are for people who stay on Gmail. There are no chips, no Labels section in the
 sidebar or the dock menu, no label views and no Label as…. Winnow never changes the
-account's labels: the Gmail client has no `labels.list`, `labels.create`,
-`threads.modify` or `batchModify` (`core/session/draftFiles.test.ts` pins their absence),
-and a label change an older build left in the offline queue is dropped, not replayed.
+account's labels, with one exception since 1.4.0: snoozing puts Winnow's own
+`Winnow/Snoozed` on (made on first use) so snoozed mail is visible and recoverable in any
+client (§13b). The client's only label calls are `ensureLabel`, which refuses any other
+name, and `modify`; there is no general `labels.list`/`labels.create` wrapper,
+`threads.modify` or `batchModify` (`core/session/draftFiles.test.ts` pins both), and a
+label change an older build left in the offline queue is dropped, not replayed.
 System labels (INBOX, SENT, TRASH, SPAM, STARRED, UNREAD, DRAFT, CATEGORY_*) still drive
 the mailboxes, star, read state and categories through `addLabels`/`removeLabels`.
 
@@ -1022,6 +1032,69 @@ queued send of the same draft inherits an older one's. Changing the Google accou
 (credentials removed) wipes the tokens first, so nothing can be taken back then. The
 demo uses `DemoDriveClient` throughout (own files are `demo-drive-…`, anything else 404s)
 and never calls Google; CSP and leak rules are unchanged.
+
+---
+
+## 13b. Snooze and send later (1.4.0)
+
+Gmail's API exposes neither of Gmail's own features, so both are built from what it does
+have, and **both keep their times on this device**: nothing on Google's side knows, so
+**Winnow has to be running** at the time. If it is closed, a wake or a send happens on the
+next open, and the status pill says it went late. The Send later menu, the custom-time
+picker and Settings → Compose → **Send later and snooze** (`settingsCatalog.ts`) say so.
+
+*Storage.* `core/store/keyedStorage.ts`: one key per feature (`winnow.snooze.v1`,
+`winnow.scheduledSend.v1`), built in `storageKey`, the one place an account scope goes
+for multi-account. Every record also names its account (`WinnowStore.accountKey()`: the
+address, or `demo`), so the demo's never act on a real account (a demo message must never
+reach Gmail) and one account's never list in another's. Sign-out drops the leaving
+account's records (the mail stays archived under its label; a scheduled message stays a
+Gmail draft); the demo's stay.
+
+*Snooze* (`core/mail/snooze.ts`, `WinnowStore.snooze`/`unsnooze`/`wakeDue`). Snoozing a
+row takes its whole conversation's Inbox messages out (archived optimistically through
+`mutate`) and calls `MailBackend.setSnoozed` (session: `Winnow/Snoozed` on, `INBOX` off,
+one `messages.modify`; the label id looked up or made once per session). If that fails
+(offline, refused) it falls back to a plain archive, which the offline queue carries; if
+even that is refused the record goes and the rollback runs. One Undo in the status pill
+("Snoozed until Tomorrow, 09:00."). From the Inbox, the Archive, or Snoozed (a new time).
+`SnoozeOverlay` is laid over every `all` that enters the store (in `set`, the one door),
+so a sync that still lists a snoozed message in the Inbox cannot bring it back, and a
+woken message in the Inbox is dated by when it woke, so it sorts at the top and the row
+shows that time (for up to `WOKE_TTL_MS`, while it stays in the Inbox). Snoozed mail is
+listed in Snoozed only, not in Archive. Waking (`wakeDue`: on start, after every sync
+including the 10 s poll, on focus/visibility, and on `App`'s 15 s timer, which is the
+demo's only clock) re-adds `INBOX` and `UNREAD`, takes the label off, marks the rows
+new, and flashes "A snoozed conversation is back in your Inbox." (with "It was due …,
+while Winnow was closed." when late). A new message in a snoozed conversation wakes it
+early; a snooze whose messages all went to Trash/Spam elsewhere is dropped. Moving a
+snoozed message anywhere ends its snooze; in Snoozed, `e`/Archive is **Unsnooze** (to the
+Inbox now, read state kept, Undo snoozes again). Entry points: row menu **Snooze ▸**
+(`menus.ts` `snoozeEntries`), the reader bar's Snooze, the selection bar, `b`, and the
+phone reader pill (`readerPill.ts`: Archive, Delete, Reply, Snooze, Forward, More).
+
+*Send later* (`core/mail/scheduledSend.ts`, `App.scheduleDraft`/`dispatchScheduled`).
+The composer's Send later (presets or a custom time) runs Send's checks (subject, Drive
+grant), saves the Gmail draft (`DraftAutosaver.settle`), records `{ sendAt, draftId,
+draft, replyTo, … }`, parks the saver and drops the device copy (so no "Restore your
+unsent draft?"). A scheduled draft is kept out of Drafts and listed in Scheduled.
+At the time `App.runDue` (same moments as waking, once the session is ready) claims the
+send (`claimScheduled`, so a second window does not send it too) and hands it to
+`deliver` with `draftId`: Drive links shared at dispatch, `drafts.send` (keeping the
+reply's thread), the offline queue when offline. The undo window is not run again: the
+time was the user's choice and Cancel schedule is its undo. The pill says "Sent “…” as
+scheduled." or "… late: it was due …, while Winnow was closed." A failure keeps the
+schedule with its reason (the row says Not sent) and stops retrying until Send now or
+Edit; a 404 on the draft (sent or deleted elsewhere) ends it with a notice. Scheduled
+rows open `ScheduledSheet`: **Edit** cancels the schedule and reopens the draft as a
+sheet on the same Gmail draft; **Send now**; **Cancel schedule** (it stays a draft; in the
+demo it is put into Drafts). The demo simulates the send (filed into Sent, on its thread).
+Files beyond the drafts' device budget survive only in this session's memory; after a
+restart such a send stops with "… too big to keep on this device. Open it with Edit…".
+
+Tests: `core/mail/{when,snooze,scheduledSend}.test.ts`, `core/store/keyedStorage.test.ts`,
+`core/store/snoozeSchedule.test.ts`, the label calls in `core/session/draftFiles.test.ts`,
+menus/reader/pill/keybind tests; smoke: `scripts/smoke-schedule.mjs`.
 
 ---
 
