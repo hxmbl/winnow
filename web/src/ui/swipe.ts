@@ -57,10 +57,13 @@ export function removesRow(action: SwipeAction): boolean {
  *     do by accident); right still toggles read.
  *   - **Drafts**: left discards the draft, with Undo; right does nothing, since a draft
  *     has no read state.
+ *   - **Scheduled**: nothing either way.
  */
 export function swipeActionsFor(mailbox: string, unread: boolean): SwipeActions {
   const read: SwipeAction = unread ? "markRead" : "markUnread";
   if (mailbox === "drafts") return { left: "discard", right: null };
+  // A scheduled send is not mail yet: its row is opened (Edit, Send now, Cancel), not swiped.
+  if (mailbox === "scheduled") return { left: null, right: null };
   if (mailbox === "trash") return { left: "restore", right: read };
   return { left: "trash", right: read };
 }

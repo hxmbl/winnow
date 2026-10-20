@@ -12,14 +12,17 @@
  *   Find emails from … · Find emails with this subject
  *   Open in Gmail
  *
- * Left out, deliberately: *Forward as attachment* (the composer sends text only), *Snooze*
- * and *Add to tasks* (no snooze store and no Tasks scope). Gmail's *Mute* mutes a
+ * Left out, deliberately: *Forward as attachment* (the composer sends text only) and
+ * *Add to tasks* (no Tasks scope). *Snooze ▸* is there since 1.4.0 (`core/mail/snooze.ts`). Gmail's *Mute* mutes a
  * conversation; Winnow has no thread mute, so the slot is *Mute sender*, the same local
  * mute the avatar menu offers. There is no *Label as…*: Winnow has no labels (they are
  * for people who stay on Gmail), and it never changes the account's labels.
  */
 
 import {
+  AlarmClock,
+  AlarmClockOff,
+  CalendarClock,
   Archive,
   ArchiveRestore,
   AtSign,
@@ -50,6 +53,7 @@ import type { LucideIcon } from "lucide-react";
 import type { MenuEntry } from "./menuPlacement";
 import { MAILBOX_LABEL, type Mailbox } from "../core/model/email";
 import { shortcutFor, type Command } from "../core/mail/keybinds";
+import type { WhenPreset } from "../core/mail/when";
 
 /** The first key a command is bound to, as a menu prints it: `# / ⌫` → `#`. */
 export function menuHint(command: Command["type"]): string | undefined {
@@ -97,12 +101,65 @@ export type RowMenuInput = {
     openDraft?: () => void;
     /** Drafts rows: delete the Gmail draft. */
     discardDraft?: () => void;
+    /** Snooze until a preset time (`whenPresets`). Absent where snoozing means nothing. */
+    snooze?: (at: number) => void;
+    /** Snooze: "Pick date & time…". */
+    snoozeCustom?: () => void;
+    /** The Snoozed view: back to the Inbox now. */
+    unsnooze?: () => void;
   };
+  /** The snooze presets on offer now, for the Snooze submenu. */
+  snoozePresets?: readonly WhenPreset[];
 };
+
+/** Where snoozing is offered: mail in the Inbox, the Archive, or Snoozed (a new time). */
+export function canSnooze(mailbox: Mailbox): boolean {
+  return mailbox === "inbox" || mailbox === "archive" || mailbox === "snoozed";
+}
+
+/**
+ * The snooze choices, as menu items: the presets with their time on the right, then
+ * "Pick date & time…". Shared by the row menu's submenu, the reader's Snooze button, the
+ * selection bar, the phone reader pill and `b`, so all five offer the same thing.
+ */
+export function snoozeEntries(
+  presets: readonly WhenPreset[],
+  onPick: (at: number) => void,
+  onCustom: () => void,
+): MenuEntry[] {
+  return tidy([
+    ...presets.map((preset) => ({
+      kind: "item" as const,
+      id: `snooze-${preset.id}`,
+      label: preset.label,
+      hint: preset.detail,
+      onSelect: () => onPick(preset.at),
+    })),
+    divider("snooze-d"),
+    { kind: "item", id: "snooze-custom", label: "Pick date & time…", icon: CalendarClock, onSelect: onCustom },
+  ]);
+}
+
+/** A Scheduled row's menu: edit it (which cancels the schedule), send it now, or cancel. */
+export function buildScheduledMenu(actions: { edit?: () => void; sendNow?: () => void; cancel: () => void }, count = 1): MenuEntry[] {
+  const single = count === 1;
+  const entries: MenuEntry[] = [];
+  if (single && actions.edit) entries.push({ kind: "item", id: "scheduled-edit", label: "Edit", icon: FilePen, onSelect: actions.edit });
+  if (single && actions.sendNow) entries.push({ kind: "item", id: "scheduled-send", label: "Send now", icon: Send, onSelect: actions.sendNow });
+  entries.push({
+    kind: "item",
+    id: "scheduled-cancel",
+    label: single ? "Cancel schedule" : `Cancel ${count} schedules`,
+    icon: AlarmClockOff,
+    onSelect: actions.cancel,
+  });
+  return entries;
+}
 
 /** What `archive` does in this mailbox, as a menu says it. `null` in Sent. */
 export function archiveLabel(mailbox: Mailbox): { label: string; restore: boolean } | null {
-  if (mailbox === "sent" || mailbox === "drafts") return null;
+  if (mailbox === "sent" || mailbox === "drafts" || mailbox === "scheduled") return null;
+  if (mailbox === "snoozed") return { label: "Unsnooze", restore: true };
   if (mailbox === "inbox") return { label: "Archive", restore: false };
   if (mailbox === "spam") return { label: "Not spam", restore: true };
   return { label: "Move to Inbox", restore: true };
@@ -111,7 +168,7 @@ export function archiveLabel(mailbox: Mailbox): { label: string; restore: boolea
 /** Where "Move to" can send messages from `mailbox`. Sent is Gmail's, not a destination. */
 export function moveTargets(mailbox: Mailbox): Mailbox[] {
   // A draft is not a message yet: it can be opened, sent or discarded, not filed.
-  if (mailbox === "drafts") return [];
+  if (mailbox === "drafts" || mailbox === "scheduled") return [];
   return (["inbox", "archive", "spam", "trash"] as const).filter((m) => m !== mailbox);
 }
 
@@ -123,6 +180,8 @@ export const MAILBOX_ICON: Record<Mailbox, LucideIcon> = {
   trash: Trash2,
   sent: Send,
   drafts: FilePen,
+  snoozed: AlarmClock,
+  scheduled: CalendarClock,
 };
 
 export function buildRowMenu(input: RowMenuInput): MenuEntry[] {
@@ -165,9 +224,19 @@ export function buildRowMenu(input: RowMenuInput): MenuEntry[] {
       kind: "item",
       id: "archive",
       label: single ? archive.label : `${archive.label}${plural}`,
-      icon: archive.restore ? ArchiveRestore : Archive,
+      icon: mailbox === "snoozed" ? AlarmClockOff : archive.restore ? ArchiveRestore : Archive,
       hint: menuHint("archive"),
-      onSelect: actions.archive,
+      onSelect: mailbox === "snoozed" && actions.unsnooze ? actions.unsnooze : actions.archive,
+    });
+  }
+  if (canSnooze(mailbox) && actions.snooze && actions.snoozeCustom) {
+    entries.push({
+      kind: "item",
+      id: "snooze",
+      label: mailbox === "snoozed" ? "Change snooze time" : single ? "Snooze" : `Snooze${plural}`,
+      icon: AlarmClock,
+      hint: menuHint("snooze"),
+      submenu: snoozeEntries(input.snoozePresets ?? [], actions.snooze, actions.snoozeCustom),
     });
   }
   entries.push(

@@ -1,8 +1,9 @@
 /**
  * Attachments, from the session's side: a draft's file reopened from Drafts is read from
  * Gmail once and kept, because the draft's own attachment ids die with its next save.
- * And labels: Winnow has no way to change the account's labels at all (UI removed in
- * 1.3.x; the Gmail client and the backend were stripped of the calls with it).
+ * And labels: Winnow has no way to change the account's labels (UI removed in 1.3.x; the
+ * Gmail client and the backend were stripped of the calls with it), with one exception
+ * since 1.4.0: its own `Winnow/Snoozed`, which snoozing makes and puts on (and nothing else).
  *
  * Google is a stub `fetch` routed by URL, as in `drafts.test.ts`.
  */
@@ -98,6 +99,7 @@ let requests: Request[];
 let draftStatus: number;
 let draftBody: string;
 let grantedScope: string;
+let labels: { id: string; name: string }[];
 
 function installGoogle(): void {
   vi.stubGlobal("fetch", async (input: string, init?: { method?: string; body?: string }) => {
@@ -120,6 +122,11 @@ function installGoogle(): void {
     if (path.includes("/attachments/")) {
       return new Response(JSON.stringify({ data: "SGVsbG8", size: 5 }), { status: 200 });
     }
+    if (path === "/users/me/labels") {
+      if (method === "POST") return new Response(JSON.stringify({ id: "Label_9", name: "Winnow/Snoozed" }), { status: 200 });
+      return new Response(JSON.stringify({ labels }), { status: 200 });
+    }
+    if (/^\/users\/me\/messages\/[^/]+\/modify$/.test(path)) return new Response("{}", { status: 200 });
     if (path === "/users/me/messages/send") {
       return new Response(JSON.stringify({ id: "m-2", threadId: "t-2" }), { status: 200 });
     }
@@ -146,6 +153,7 @@ beforeEach(() => {
   draftStatus = 200;
   draftBody = JSON.stringify({ id: "d-1", message: { id: "m-1", threadId: "t-1" } });
   grantedScope = `${GMAIL_SCOPE} ${COMPOSE_SCOPE}`;
+  labels = [{ id: "INBOX", name: "INBOX" }];
   installGoogle();
 });
 
@@ -153,13 +161,46 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("labels are not Winnow's to change", () => {
+describe("labels are not Winnow's to change, but for its own Winnow/Snoozed", () => {
   it("offers no way to list, make or change the account's labels", () => {
     const { session } = sessionWith();
     const backend = session.backend() as unknown as Record<string, unknown>;
     for (const name of ["listLabels", "createLabel", "modifyLabels"]) expect(backend[name]).toBeUndefined();
     const client = GmailClient.prototype as unknown as Record<string, unknown>;
     for (const name of ["labels", "createLabel", "modifyThread", "batchModify"]) expect(client[name]).toBeUndefined();
+  });
+
+  it("refuses to make any label but Winnow/Snoozed", async () => {
+    const client = new GmailClient(async () => "access");
+    await expect(client.ensureLabel("Receipts")).rejects.toThrow(/only makes its own Winnow\/Snoozed/);
+    expect(requests.filter((r) => r.path === "/users/me/labels")).toEqual([]);
+  });
+
+  it("snoozing makes the label once, then labels the message and takes it out of the Inbox", async () => {
+    const { session } = sessionWith();
+    const backend = session.backend();
+    await backend.setSnoozed!("g-orig", true);
+    await backend.setSnoozed!("g-sib", true);
+    const made = requests.filter((r) => r.path === "/users/me/labels");
+    expect(made.map((r) => r.method)).toEqual(["GET", "POST"]);
+    expect(made[1]!.body).toMatchObject({ name: "Winnow/Snoozed" });
+    const modifies = requests.filter((r) => r.path.endsWith("/modify"));
+    expect(modifies.map((r) => r.path)).toEqual(["/users/me/messages/g-orig/modify", "/users/me/messages/g-sib/modify"]);
+    expect(modifies[0]!.body).toEqual({ addLabelIds: ["Label_9"], removeLabelIds: ["INBOX"] });
+  });
+
+  it("waking takes the label off and puts the message back in the Inbox, unread when asked", async () => {
+    labels = [{ id: "Label_3", name: "Winnow/Snoozed" }];
+    const { session } = sessionWith();
+    const backend = session.backend();
+    await backend.setSnoozed!("g-orig", false, { unread: true });
+    await backend.setSnoozed!("g-sib", false, { toInbox: false });
+    expect(requests.filter((r) => r.path === "/users/me/labels").map((r) => r.method)).toEqual(["GET"]);
+    const modifies = requests.filter((r) => r.path.endsWith("/modify")).map((r) => r.body);
+    expect(modifies).toEqual([
+      { addLabelIds: ["INBOX", "UNREAD"], removeLabelIds: ["Label_3"] },
+      { addLabelIds: [], removeLabelIds: ["Label_3"] },
+    ]);
   });
 });
 

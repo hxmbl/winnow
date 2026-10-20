@@ -8,7 +8,7 @@
  */
 
 import { useRef, useState } from "react";
-import { Archive, ArchiveRestore, FolderInput, ListFilter, MailMinus, MailOpen, Trash2, X } from "lucide-react";
+import { AlarmClock, AlarmClockOff, Archive, ArchiveRestore, FolderInput, ListFilter, MailMinus, MailOpen, Trash2, X } from "lucide-react";
 import type { Mailbox } from "../../core/model/email";
 import { MAILBOX_LABEL } from "../../core/model/email";
 import { archiveLabel, moveTargets } from "../menus";
@@ -26,6 +26,8 @@ type Props = {
   onMove: (mailbox: Mailbox) => void;
   /** "Change smart filters…" for the selection. Absent outside the inbox. */
   onChangeFilters?: () => void;
+  /** Open the snooze choices beside `trigger`. Absent where snoozing means nothing. */
+  onSnooze?: (trigger: HTMLElement) => void;
   onClear: () => void;
 };
 
@@ -39,9 +41,13 @@ export function SelectionBar({
   onSetRead,
   onMove,
   onChangeFilters,
+  onSnooze,
   onClear,
 }: Props) {
   const archive = archiveLabel(mailbox);
+  // Scheduled sends are not mail yet: the one thing to do with several is cancel them.
+  const scheduled = mailbox === "scheduled";
+  const trashText = scheduled ? "Cancel schedule" : mailbox === "trash" ? "Delete forever" : "Delete";
   const moveButton = useRef<HTMLButtonElement>(null);
   const [moveAnchor, setMoveAnchor] = useState<MenuAnchor | null>(null);
 
@@ -77,20 +83,41 @@ export function SelectionBar({
       <span className="flex-1" />
       {archive && (
         <button type="button" onClick={onArchive} aria-label={phone ? archive.label : undefined} className={button}>
-          {archive.restore ? <ArchiveRestore size={iconSize} strokeWidth={1.9} aria-hidden="true" /> : <Archive size={iconSize} strokeWidth={1.9} aria-hidden="true" />}
+          {mailbox === "snoozed" ? (
+            <AlarmClockOff size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+          ) : archive.restore ? (
+            <ArchiveRestore size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+          ) : (
+            <Archive size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+          )}
           {label(archive.label)}
+        </button>
+      )}
+      {onSnooze && (
+        <button
+          type="button"
+          data-selection-snooze=""
+          aria-haspopup="menu"
+          onClick={(event) => onSnooze(event.currentTarget)}
+          aria-label={phone ? "Snooze" : undefined}
+          title="Snooze (b)"
+          className={button}
+        >
+          <AlarmClock size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+          {label("Snooze")}
         </button>
       )}
       <button
         type="button"
         onClick={onTrash}
-        aria-label={phone ? (mailbox === "trash" ? "Delete forever" : "Delete") : undefined}
+        aria-label={phone ? trashText : undefined}
         data-destructive={mailbox === "trash" ? "" : undefined}
         className={`${button} ${mailbox === "trash" ? "!text-danger" : ""}`}
       >
-        <Trash2 size={iconSize} strokeWidth={1.9} aria-hidden="true" />
-        {label(mailbox === "trash" ? "Delete forever" : "Delete")}
+        {scheduled ? <AlarmClockOff size={iconSize} strokeWidth={1.9} aria-hidden="true" /> : <Trash2 size={iconSize} strokeWidth={1.9} aria-hidden="true" />}
+        {label(trashText)}
       </button>
+      {!scheduled && (
       <button
         type="button"
         onClick={() => onSetRead(anyUnread)}
@@ -100,6 +127,8 @@ export function SelectionBar({
         {anyUnread ? <MailOpen size={iconSize} strokeWidth={1.9} aria-hidden="true" /> : <MailMinus size={iconSize} strokeWidth={1.9} aria-hidden="true" />}
         {label(anyUnread ? "Mark read" : "Mark unread")}
       </button>
+      )}
+      {!scheduled && (
       <button
         ref={moveButton}
         type="button"
@@ -112,6 +141,7 @@ export function SelectionBar({
         <FolderInput size={iconSize} strokeWidth={1.9} aria-hidden="true" />
         {label("Move to")}
       </button>
+      )}
       {onChangeFilters && (
         <button
           type="button"

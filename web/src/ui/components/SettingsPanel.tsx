@@ -150,6 +150,11 @@ export type SettingsProps = {
   /** How long Send waits for Undo. 5s by default; see `Preferences.undoSendSeconds`. */
   undoSendSeconds: UndoSendSeconds;
   onUndoSendSeconds: (value: UndoSendSeconds) => void;
+  /** What send later and snooze hold on this device, for the Compose row (1.4.0). */
+  scheduledCount?: number;
+  snoozedCount?: number;
+  /** Open the Scheduled list (closing Settings). */
+  onOpenScheduled?: () => void;
   /** Brand logos from BIMI in avatars. Off by default; see `Preferences.brandLogos`. */
   brandLogos: boolean;
   onBrandLogos: (value: boolean) => void;
@@ -541,6 +546,23 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               value={props.undoSendSeconds}
               onChange={props.onUndoSendSeconds}
             />
+          </Row>
+          <Row
+            setting="sendLater"
+            hint={`${props.scheduledCount ?? 0} scheduled · ${props.snoozedCount ?? 0} snoozed, on this device`}
+          >
+            {props.onOpenScheduled ? (
+              <button
+                type="button"
+                data-settings-open-scheduled=""
+                onClick={props.onOpenScheduled}
+                className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Open Scheduled
+              </button>
+            ) : (
+              <span />
+            )}
           </Row>
         </Section>
       );

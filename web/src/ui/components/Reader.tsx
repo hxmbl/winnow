@@ -10,6 +10,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  AlarmClock,
+  AlarmClockOff,
   Archive,
   ChevronLeft,
   Ban,
@@ -96,6 +98,8 @@ type Actions = {
   onForward: () => void;
   /** Mark the current message not-spam. Only offered in the spam folder. */
   onNotSpam: () => void;
+  /** Open the snooze choices beside `trigger`. Absent where snoozing means nothing. */
+  onSnooze?: (trigger: HTMLElement) => void;
   onShowOriginal: () => void;
   onBlockSender: () => void;
   /** Open "Change smart filters…" for this message. Absent outside the inbox. */
@@ -135,12 +139,13 @@ const QUIET_BUTTON =
  * is drawn by CSS on hover and keyboard focus after a short delay, faster than a native
  * `title`, and never takes layout space.
  */
-function ActionButton({ action, onClick, children, tipStart = false }: { action: ReaderAction; onClick: () => void; children: React.ReactNode; tipStart?: boolean }) {
+function ActionButton({ action, onClick, children, tipStart = false }: { action: ReaderAction; onClick: (trigger: HTMLElement) => void; children: React.ReactNode; tipStart?: boolean }) {
   const key = ariaKey(action.keys);
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(event) => onClick(event.currentTarget)}
+      aria-haspopup={action.id === "snooze" ? "menu" : undefined}
       aria-label={action.label}
       aria-pressed={action.pressed ?? undefined}
       aria-keyshortcuts={key ?? undefined}
@@ -183,11 +188,12 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
   sidebarOpen: boolean;
   onToggleSidebar?: () => void;
 }) {
-  const list = readerActions(mailbox, { starred, unread });
-  const run: Record<ReaderActionId, () => void> = {
+  const list = readerActions(mailbox, { starred, unread }).filter((action) => action.id !== "snooze" || actions.onSnooze);
+  const run: Record<ReaderActionId, (trigger: HTMLElement) => void> = {
     reply: actions.onReply,
     forward: actions.onForward,
     archive: actions.onArchive,
+    snooze: (trigger) => actions.onSnooze?.(trigger),
     notSpam: actions.onNotSpam,
     trash: actions.onTrash,
     read: actions.onRead,
@@ -201,9 +207,11 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
       case "forward":
         return <Forward {...ICON} />;
       case "archive":
-        return mailbox === "inbox" ? <Archive {...ICON} /> : <RotateCcw {...ICON} />;
+        return mailbox === "inbox" ? <Archive {...ICON} /> : mailbox === "snoozed" ? <AlarmClockOff {...ICON} /> : <RotateCcw {...ICON} />;
       case "notSpam":
         return <Undo2 {...ICON} />;
+      case "snooze":
+        return <AlarmClock {...ICON} />;
       case "trash":
         return <Trash2 {...ICON} />;
       case "read":
@@ -471,7 +479,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
 
   const inSpam = mailbox === "spam";
   const archiveLabel =
-    mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : "Restore";
+    mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : mailbox === "snoozed" ? "Unsnooze" : "Restore";
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
 
   const BUTTON =
@@ -509,6 +517,22 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
         return (
           <button key={id} type="button" onClick={actions.onReply} aria-label="Reply to all" title="Reply" className={BUTTON}>
             <CornerUpLeft {...ICON} />
+          </button>
+        );
+      case "snooze":
+        if (!actions.onSnooze || !(mailbox === "inbox" || mailbox === "archive" || mailbox === "snoozed")) return null;
+        return (
+          <button
+            key={id}
+            type="button"
+            data-reader-pill-snooze=""
+            aria-haspopup="menu"
+            onClick={(event) => actions.onSnooze?.(event.currentTarget)}
+            aria-label={mailbox === "snoozed" ? "Change snooze time" : "Snooze"}
+            title="Snooze"
+            className={BUTTON}
+          >
+            <AlarmClock {...ICON} />
           </button>
         );
       case "forward":

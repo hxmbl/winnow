@@ -142,6 +142,12 @@ export const SETTINGS = {
     explanation:
       "After you press Send, the message waits this long with an Undo button before it goes, and Undo brings it back to the composer as it was. Nothing is recalled: the message simply has not left yet. If Winnow closes during the wait, the message is not sent but kept as a draft, in Gmail and on this device, and offered back next time. Off sends at once.",
   },
+  sendLater: {
+    category: "compose",
+    label: "Send later and snooze",
+    explanation:
+      "Gmail does not let other apps schedule a send or snooze mail, so Winnow keeps the time on this device: a scheduled message waits in Gmail's Drafts, and snoozed mail is archived with the label Winnow/Snoozed. Winnow has to be open to send or bring them back at that time; if it is closed, they happen the next time you open it, and the status pill says the message went late. Opening Winnow on another device does not send them or bring them back, and signing out forgets the times (the drafts and the label stay in Gmail).",
+  },
   resetSorting: {
     category: "reading",
     label: "Reset sorting",

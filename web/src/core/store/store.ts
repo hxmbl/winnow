@@ -103,9 +103,35 @@ import {
   type Appearance,
 } from "../model/appearance";
 import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
+import { keyedStorage, type KeyValueBacking, type KeyedStorage } from "./keyedStorage";
+import {
+  SnoozeOverlay,
+  abandonedSnoozes,
+  addSnooze,
+  dueSnoozes,
+  markWoke,
+  parseSnoozes,
+  pruneWoke,
+  removeSnooze,
+  repliedSnoozes,
+  snoozeKeyFor,
+  snoozedById,
+  type SnoozeRecord,
+  type SnoozeState,
+} from "../mail/snooze";
+import {
+  addSchedule,
+  parseSchedules,
+  removeSchedule,
+  scheduledRow,
+  serializeSchedules,
+  updateSchedule,
+  type ScheduledSend,
+} from "../mail/scheduledSend";
+import { formatWhen } from "../mail/when";
 
-/** The six mailboxes, in the order the sidebar shows them. */
-export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "archive", "sent", "drafts", "trash", "spam"];
+/** The mailboxes, in the order the sidebar shows them; Snoozed and Scheduled are views (1.4.0). */
+export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "snoozed", "archive", "sent", "drafts", "scheduled", "trash", "spam"];
 
 /**
  * Which half of a sync is running, for the status line.
@@ -124,6 +150,13 @@ export const NO_CURSOR = -1;
  * offer is neither taken nor let go sooner.
  */
 export const DRAFT_DISCARD_UNDO_MS = 10_000;
+
+/** How long the pill says a snooze woke. */
+export const WAKE_FLASH_MS = 6_000;
+/** A wake later than this after its time happened because the app was closed then. */
+export const LATE_WAKE_MS = 2 * 60 * 1000;
+/** How long a window's claim on a due scheduled send holds (`claimScheduled`). */
+export const CLAIM_HOLD_MS = 2 * 60 * 1000;
 
 /**
  * How often the list's reference clock is refreshed.
@@ -392,6 +425,14 @@ export type StoreState = {
   drafts: Email[];
   /** A drafts listing is in flight. */
   draftsLoading: boolean;
+  /**
+   * Snoozed conversations and the messages that woke, for every account this device has
+   * seen (each record names its own; see `core/mail/snooze.ts`). Mirrors
+   * `winnow.snooze.v1`.
+   */
+  snoozes: SnoozeState;
+  /** Messages waiting to be sent later (`core/mail/scheduledSend.ts`). Mirrors `winnow.scheduledSend.v1`. */
+  scheduled: readonly ScheduledSend[];
   /** The messages in the current mailbox, newest first. */
   mailbox: Mailbox;
 
@@ -598,6 +639,16 @@ export interface MailBackend {
   setRead(id: number, read: boolean): Promise<void>;
   deletePermanently(id: number): Promise<void>;
   /**
+   * Snooze or wake one message in Gmail (`core/mail/snooze.ts`): snoozing puts the
+   * `Winnow/Snoozed` label on and takes `INBOX` off; waking takes the label off and puts
+   * `INBOX` back (unless `toInbox` is false: an Undo of a snooze from the Archive), with
+   * `UNREAD` when `unread`. By Gmail id, because a message being woken
+   * may not be in this device's cache. Optional: without it the store files the message
+   * with `moveToMailbox` instead, which is what a failure falls back to as well (the
+   * offline queue carries that one).
+   */
+  setSnoozed?(gmailId: string, snoozed: boolean, options?: { unread?: boolean; toInbox?: boolean }): Promise<void>;
+  /**
    * Send a reply. With `draftId`, the composer's saved Gmail draft is what is sent
    * (`drafts.send`), so nothing is left behind in Drafts.
    */
@@ -719,6 +770,11 @@ export type StoreOptions = {
   seedTrash?: readonly TrashRecord[];
   /** The demo's drafts, for the Drafts mailbox. */
   seedDrafts?: readonly Email[];
+  /**
+   * Where snoozes and scheduled sends are kept. `globalThis.localStorage` by default;
+   * tests hand in a memory backing (or `() => null` for none).
+   */
+  storage?: () => KeyValueBacking | null;
   backend?: MailBackend;
   platform?: PlatformBridge;
   preferences?: Partial<Preferences>;
@@ -844,7 +900,15 @@ export class WinnowStore {
   /** Drafts discarded with Undo still on offer: a listing landing meanwhile keeps them out. */
   private pendingDiscards = new Set<string>();
 
+  /** `winnow.snooze.v1` and `winnow.scheduledSend.v1`. */
+  private readonly snoozeSlot: KeyedStorage;
+  private readonly scheduleSlot: KeyedStorage;
+  /** Lays the snoozes over every reading of the mailbox; see `set`. */
+  private readonly snoozeOverlay = new SnoozeOverlay();
+
   constructor(options: StoreOptions = {}) {
+    this.snoozeSlot = keyedStorage("snooze", options.storage);
+    this.scheduleSlot = keyedStorage("scheduledSend", options.storage);
     this.backend = options.backend;
     this.platform = options.platform;
     this.seedContacts = options.seedContacts ?? [];
@@ -862,6 +926,8 @@ export class WinnowStore {
       all: seed,
       drafts: options.backend ? [] : (options.seedDrafts ?? []).slice(),
       draftsLoading: false,
+      snoozes: parseSnoozes(this.snoozeSlot.read()),
+      scheduled: parseSchedules(this.scheduleSlot.read()),
       mailbox: "inbox",
       activeFilters: [],
       searchQuery: "",
@@ -888,6 +954,7 @@ export class WinnowStore {
       storagePrompt: null,
       now: options.now ?? Date.now(),
     };
+    this.state = { ...this.state, all: this.overlaid(this.state.all) };
   }
 
   /**
@@ -1164,7 +1231,7 @@ export class WinnowStore {
     const signals =
       state.mailbox === "inbox"
         ? inboxSignals
-        : state.mailbox === "drafts"
+        : state.mailbox === "drafts" || state.mailbox === "scheduled"
           ? neutralSignalsFor(mailboxEmails)
           : this.mailboxSignals(mailboxEmails, profile);
 
@@ -1173,7 +1240,7 @@ export class WinnowStore {
     const searching = state.searchQuery.trim().length > 0;
     const searchBags = searching ? buildSearchBags(mailboxEmails) : new Map<number, string>();
 
-    const result = runInboxQuery({
+    const queried = runInboxQuery({
       emails: mailboxEmails,
       profile,
       signals,
@@ -1183,6 +1250,12 @@ export class WinnowStore {
       searchBags,
       hideUnsafe: state.mailbox === "inbox",
     });
+    // Snoozed and Scheduled are lists of times: whatever comes back (or goes) soonest
+    // leads, whatever the sort setting says about mail.
+    const result =
+      state.mailbox === "snoozed" || state.mailbox === "scheduled"
+        ? { ...queried, emails: [...queried.emails].sort((a, b) => timedAt(a) - timedAt(b)) }
+        : queried;
 
     const threads = groupThreads(result.emails);
 
@@ -1190,7 +1263,7 @@ export class WinnowStore {
     // filters: a pill's number is how many messages in this mailbox it would show, so
     // the count, the list a filter gives and "Why it's here" all agree. The permanent
     // pair stays pinned wherever you are.
-    const railEmails = state.mailbox === "drafts" ? [] : mailboxEmails;
+    const railEmails = state.mailbox === "drafts" || state.mailbox === "scheduled" ? [] : mailboxEmails;
     const rail = rankFilters(railEmails, signals, profile);
     const railWithActive = this.orderedRail(rail);
     const railCounts =
@@ -1269,7 +1342,9 @@ export class WinnowStore {
       unreadCount: mailboxEmails.filter((email) => email.unread).length,
       totalCount: mailboxEmails.length,
       otherMailboxCount:
-        state.mailbox === "drafts" ? visible.length : visible.length - mailboxEmails.length,
+        state.mailbox === "drafts" || state.mailbox === "scheduled"
+          ? visible.length
+          : visible.length - mailboxEmails.length,
       contacts: this.contacts(),
     };
   }
@@ -1315,6 +1390,13 @@ export class WinnowStore {
    */
   private set(patch: Partial<StoreState>, persist?: PersistPatch): void {
     this.state = { ...this.state, ...patch };
+    // Every reading of the mailbox (a sync, a partial, an optimistic change, the demo)
+    // has the snoozes laid over it here, the one door `all` comes in by, so a snoozed
+    // message can never flash back into the Inbox between a sync and a wake.
+    if (patch.all !== undefined || patch.snoozes !== undefined || patch.account !== undefined) {
+      const all = this.overlaid(this.state.all);
+      if (all !== this.state.all) this.state = { ...this.state, all };
+    }
     this.notify();
     if (persist) this.onPersist?.(persist);
   }
@@ -1484,6 +1566,7 @@ export class WinnowStore {
     this.draftsGeneration += 1;
     if (this.state.mailbox === "drafts") void this.refreshDrafts();
     await this.runSync({ initial: true });
+    this.wakeDue();
     // The retained connection only exists so a *failed* connect can be retried;
     // keeping it would let "Try again" resurrect a revoked session.
     this.pendingConnect = null;
@@ -1501,6 +1584,396 @@ export class WinnowStore {
     // would spend quota on a folder nobody is looking at.
     if (this.state.mailbox === "drafts") void this.refreshDrafts();
     await this.runSync({ initial: false });
+    // A sync is one of the moments snoozes wake (the poll runs it every 10 s while focused).
+    this.wakeDue();
+  }
+
+  // ── Snooze and send later ─────────────────────────────────────────────────
+
+  /**
+   * Whose snoozes and scheduled sends apply now: the signed-in account's address, or
+   * `demo`. Records carry it, so the demo's never act on a real account (a scheduled demo
+   * message must never reach Gmail) and an account's never show in another's lists.
+   */
+  accountKey(): string {
+    if (!this.backend) return "demo";
+    return this.state.account?.email.toLowerCase() ?? "";
+  }
+
+  private overlaid(all: Email[]): Email[] {
+    return this.snoozeOverlay.apply(all, this.state.snoozes, this.accountKey());
+  }
+
+  private snoozedCache: { snoozes: SnoozeState; account: string; map: Map<string, SnoozeRecord> } | null = null;
+
+  /** This account's snoozes, by Gmail id. */
+  private snoozedMap(): Map<string, SnoozeRecord> {
+    const account = this.accountKey();
+    const cached = this.snoozedCache;
+    if (cached && cached.snoozes === this.state.snoozes && cached.account === account) return cached.map;
+    const map = snoozedById(this.state.snoozes, account);
+    this.snoozedCache = { snoozes: this.state.snoozes, account, map };
+    return map;
+  }
+
+  /** A Snoozed row's copy of each message, stable per message object. */
+  private readonly snoozedRowCache = new WeakMap<Email, Email>();
+
+  /** The Snoozed view: the archived messages this device is holding, each with its wake time. */
+  private snoozedRows(visible: readonly Email[]): Email[] {
+    const map = this.snoozedMap();
+    if (map.size === 0) return [];
+    const rows: Email[] = [];
+    for (const email of visible) {
+      const record = email.mailbox === "archive" ? map.get(email.gmailId) : undefined;
+      if (!record) continue;
+      let row = this.snoozedRowCache.get(email);
+      if (!row || row.snoozedUntil !== record.wakeAt) {
+        row = { ...email, snoozedUntil: record.wakeAt };
+        this.snoozedRowCache.set(email, row);
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  private scheduledCache: { sends: readonly ScheduledSend[]; account: string; self: string; rows: Email[] } | null = null;
+
+  /** The Scheduled view's rows, one per send of this account. */
+  private scheduledRows(): Email[] {
+    const account = this.accountKey();
+    const self = this.state.account?.email ?? DEMO_ACCOUNT.email;
+    const cached = this.scheduledCache;
+    if (cached && cached.sends === this.state.scheduled && cached.account === account && cached.self === self) return cached.rows;
+    const rows = this.state.scheduled
+      .filter((send) => send.account === account)
+      .map((send) => scheduledRow(send, { email: self, name: this.backend ? undefined : DEMO_ACCOUNT.name }));
+    this.scheduledCache = { sends: this.state.scheduled, account, self, rows };
+    return rows;
+  }
+
+  /**
+   * The Drafts rows, without the drafts waiting to be sent later: those are listed in
+   * Scheduled, and opening one there is how it is edited.
+   */
+  private listedDrafts(): Email[] {
+    const account = this.accountKey();
+    const waiting = new Set(
+      this.state.scheduled.filter((send) => send.account === account && send.draftId).map((send) => send.draftId!),
+    );
+    if (waiting.size === 0) return this.state.drafts;
+    return this.state.drafts.filter((row) => !waiting.has(row.gmailDraft?.id ?? ""));
+  }
+
+  private saveSnoozes(snoozes: SnoozeState, extra: Partial<StoreState> = {}): void {
+    this.snoozeSlot.write(snoozes);
+    this.set({ snoozes, ...extra });
+  }
+
+  /** Whether a message is snoozed on this device for the current account. */
+  isSnoozed(gmailId: string): boolean {
+    return this.snoozedMap().has(gmailId);
+  }
+
+  /** The snooze holding a message, for the reader's "Snoozed until …". */
+  snoozeFor(gmailId: string): SnoozeRecord | null {
+    return this.snoozedMap().get(gmailId) ?? null;
+  }
+
+  /**
+   * Snooze the conversations of `ids` until `wakeAt`: each conversation's Inbox messages
+   * leave the Inbox now (archived, with the `Winnow/Snoozed` label) and come back at the
+   * time, unread, at the top. From the Inbox, the Archive, or Snoozed (a new time). One
+   * Undo for all of them, in the status pill. Returns how many conversations it snoozed.
+   */
+  snooze(ids: Iterable<number>, wakeAt: number, { undo = true }: { undo?: boolean } = {}): number {
+    const account = this.accountKey();
+    if (!account) return 0;
+    const now = this.now();
+    const map = this.snoozedMap();
+    const records = new Map<string, SnoozeRecord>();
+    const moved: { email: Email; from: Mailbox }[] = [];
+    for (const id of new Set(ids)) {
+      const email = this.state.all.find((candidate) => candidate.id === id);
+      if (!email || (email.mailbox !== "inbox" && email.mailbox !== "archive")) continue;
+      const key = snoozeKeyFor(email);
+      if (records.has(key)) continue;
+      const previous = map.get(email.gmailId);
+      const members = this.state.all.filter(
+        (other) =>
+          other.id === email.id ||
+          (email.threadId !== undefined && other.threadId === email.threadId && other.mailbox === "inbox") ||
+          (previous !== undefined && previous.gmailIds.includes(other.gmailId)),
+      );
+      const gmailIds = [...new Set([...members.map((m) => m.gmailId), ...(previous?.gmailIds ?? [])])];
+      records.set(key, {
+        key,
+        account,
+        gmailIds,
+        wakeAt,
+        snoozedAt: now,
+        from: previous?.from ?? email.mailbox,
+        subject: email.subject,
+      });
+      for (const member of members) moved.push({ email: member, from: previous ? previous.from : member.mailbox });
+    }
+    if (records.size === 0) return 0;
+    let snoozes = this.state.snoozes;
+    for (const record of records.values()) snoozes = addSnooze(snoozes, record);
+    this.saveSnoozes(snoozes);
+    for (const { email } of moved) this.snoozeInGmail(email);
+    const backend = this.backend;
+    const keys = [...records.keys()];
+    if (!undo) return records.size;
+    this.offerUndo(
+      `Snoozed until ${formatWhen(wakeAt, now)}.`,
+      () => {
+        if (this.backend !== backend) return;
+        this.releaseSnoozes(keys, { restore: new Map(moved.map((m) => [m.email.gmailId, m])) });
+      },
+    );
+    return records.size;
+  }
+
+  /** One message into its snooze: out of the Inbox now, labelled in Gmail. */
+  private snoozeInGmail(email: Email): void {
+    const backend = this.backend;
+    const label = async () => {
+      if (!backend) return;
+      if (backend.setSnoozed) {
+        try {
+          await backend.setSnoozed(email.gmailId, true);
+          return;
+        } catch {
+          // No label (offline, or Gmail refused it): archiving is the part that matters,
+          // and the offline queue carries that one.
+        }
+      }
+      if (email.mailbox === "inbox") await backend.moveToMailbox(email.id, "archive");
+    };
+    if (email.mailbox !== "inbox") {
+      void label().catch(() => undefined);
+      return;
+    }
+    this.mutate(
+      email.id,
+      () => ({ ...email, mailbox: "archive" }),
+      async () => {
+        try {
+          await label();
+        } catch (error) {
+          // Gmail refused even the archive: the snooze did not happen, so the record goes
+          // before the rollback puts the message back.
+          this.forgetSnoozed([email.gmailId]);
+          throw error;
+        }
+      },
+      { previousMailbox: "inbox", previousUnread: email.unread },
+    );
+  }
+
+  /** Drop messages from their snoozes, without moving anything. */
+  private forgetSnoozed(gmailIds: readonly string[]): void {
+    const ids = new Set(gmailIds);
+    const account = this.accountKey();
+    let changed = false;
+    const snoozed = this.state.snoozes.snoozed
+      .map((record) => {
+        if (record.account !== account || !record.gmailIds.some((id) => ids.has(id))) return record;
+        changed = true;
+        return { ...record, gmailIds: record.gmailIds.filter((id) => !ids.has(id)) };
+      })
+      .filter((record) => record.gmailIds.length > 0);
+    if (changed) this.saveSnoozes({ ...this.state.snoozes, snoozed });
+  }
+
+  /**
+   * Bring snoozed conversations back. Woken (`wake`): to the Inbox, unread, placed at
+   * `wokeAt`. Unsnoozed by hand: to the Inbox at the top, read state kept. Undone
+   * (`restore`): back where each message was, read state as it was, label off.
+   */
+  private releaseSnoozes(
+    keys: readonly string[],
+    how: { wake?: Map<string, number>; restore?: Map<string, { email: Email; from: Mailbox }> } = {},
+  ): string[] {
+    const account = this.accountKey();
+    const now = this.now();
+    const records = this.state.snoozes.snoozed.filter((r) => r.account === account && keys.includes(r.key));
+    if (records.length === 0) return [];
+    let snoozes = this.state.snoozes;
+    for (const record of records) snoozes = removeSnooze(snoozes, account, record.key);
+    const woken: string[] = [];
+    const placed = new Map<string, number>();
+    for (const record of records) {
+      for (const gmailId of record.gmailIds) {
+        const restore = how.restore?.get(gmailId);
+        if (restore && restore.from !== "inbox") continue;
+        woken.push(gmailId);
+        placed.set(gmailId, how.wake?.get(record.key) ?? now);
+      }
+    }
+    if (!how.restore) {
+      for (const [gmailId, at] of placed) snoozes = markWoke(snoozes, account, [gmailId], at);
+    }
+    const ids = new Set(records.flatMap((r) => r.gmailIds));
+    const recent = how.wake
+      ? new Set([...this.state.recentIds, ...this.state.all.filter((e) => ids.has(e.gmailId)).map((e) => e.id)])
+      : this.state.recentIds;
+    this.saveSnoozes(snoozes, { recentIds: recent });
+
+    const backend = this.backend;
+    for (const gmailId of ids) {
+      const restore = how.restore?.get(gmailId);
+      const toInbox = !restore || restore.from === "inbox";
+      const unread = how.wake ? true : restore ? restore.email.unread : undefined;
+      const email = this.state.all.find((candidate) => candidate.gmailId === gmailId);
+      const call = async () => {
+        if (!backend) return;
+        if (backend.setSnoozed) {
+          try {
+            await backend.setSnoozed(gmailId, false, { unread: unread === true, toInbox });
+            return;
+          } catch {
+            // Fall back to the plain move (queued when offline); the label may stay.
+          }
+        }
+        if (!email) return;
+        if (toInbox) await backend.moveToMailbox(email.id, "inbox");
+        if (unread === true) await backend.setRead(email.id, false);
+      };
+      if (!email) {
+        void call().catch(() => undefined);
+        continue;
+      }
+      if (!toInbox) {
+        void call().catch(() => undefined);
+        continue;
+      }
+      this.mutate(
+        email.id,
+        () => ({ ...email, mailbox: "inbox", unread: unread ?? email.unread }),
+        call,
+        { previousMailbox: email.mailbox, previousUnread: email.unread },
+      );
+    }
+    return woken;
+  }
+
+  /**
+   * Unsnooze by hand (the Snoozed view's Unsnooze): the conversations of `ids` go back to
+   * the Inbox now, at the top, with Undo (which snoozes them again until the same time).
+   */
+  unsnooze(ids: Iterable<number>): number {
+    const map = this.snoozedMap();
+    const records = new Map<string, SnoozeRecord>();
+    for (const id of ids) {
+      const email = this.state.all.find((candidate) => candidate.id === id);
+      const record = email ? map.get(email.gmailId) : undefined;
+      if (record) records.set(record.key, record);
+    }
+    if (records.size === 0) return 0;
+    const taken = [...records.values()];
+    this.releaseSnoozes([...records.keys()]);
+    const backend = this.backend;
+    this.offerUndo(taken.length === 1 ? "Unsnoozed." : `Unsnoozed ${taken.length}.`, () => {
+      if (this.backend !== backend) return;
+      for (const record of taken) {
+        const targets = this.state.all.filter((email) => record.gmailIds.includes(email.gmailId)).map((e) => e.id);
+        this.snooze(targets, record.wakeAt, { undo: false });
+      }
+    });
+    return records.size;
+  }
+
+  /**
+   * Wake whatever is due: snoozes whose time has passed (late if the app was closed then)
+   * and conversations a new message has woken early; drop snoozes whose mail went to the
+   * Trash elsewhere, and woken places that no longer matter. Run on start, after every
+   * sync, on focus and on the app's timer. Returns how many conversations woke.
+   */
+  wakeDue(): number {
+    const account = this.accountKey();
+    if (!account) return 0;
+    const now = this.now();
+    const all = this.state.all;
+    let snoozes = this.state.snoozes;
+    for (const record of abandonedSnoozes(snoozes, account, all)) snoozes = removeSnooze(snoozes, account, record.key);
+    snoozes = pruneWoke(snoozes, all, now);
+    const due = new Map<string, SnoozeRecord>();
+    for (const record of dueSnoozes(snoozes, account, now)) due.set(record.key, record);
+    const replied = repliedSnoozes(snoozes, account, all, now).filter((record) => !due.has(record.key));
+    if (snoozes !== this.state.snoozes) this.saveSnoozes(snoozes);
+    if (due.size === 0 && replied.length === 0) return 0;
+    // Placed at the moment it came back: the chosen time when Winnow was open then, the
+    // next open when it was closed (so a late wake still lands at the top, not below the
+    // mail that arrived while it was away).
+    const wake = new Map<string, number>();
+    for (const record of due.values()) wake.set(record.key, now);
+    for (const record of replied) wake.set(record.key, now);
+    this.releaseSnoozes([...wake.keys()], { wake });
+    const count = wake.size;
+    const late = [...due.values()].filter((record) => now - record.wakeAt > LATE_WAKE_MS);
+    const text =
+      count === 1 ? "A snoozed conversation is back in your Inbox." : `${count} snoozed conversations are back in your Inbox.`;
+    this.flash(
+      late.length > 0
+        ? `${text} It was due ${formatWhen(Math.min(...late.map((r) => r.wakeAt)), now)}, while Winnow was closed.`
+        : text,
+      WAKE_FLASH_MS,
+    );
+    return count;
+  }
+
+  /** This account's scheduled sends, soonest first. */
+  scheduledSends(): ScheduledSend[] {
+    const account = this.accountKey();
+    return this.state.scheduled.filter((send) => send.account === account);
+  }
+
+  /** The scheduled send behind a Scheduled row (by row id), or by its own id. */
+  scheduledSend(idOrRow: string | number): ScheduledSend | null {
+    if (typeof idOrRow === "string") return this.state.scheduled.find((send) => send.id === idOrRow) ?? null;
+    const row = this.scheduledRows().find((email) => email.id === idOrRow);
+    return row?.scheduled ? (this.state.scheduled.find((send) => send.id === row.scheduled!.id) ?? null) : null;
+  }
+
+  private saveSchedules(scheduled: ScheduledSend[]): void {
+    this.scheduleSlot.write(serializeSchedules(scheduled));
+    const selectedGone =
+      this.state.mailbox === "scheduled" &&
+      this.state.selectedId !== null &&
+      !scheduled.some((send) => scheduledRow(send, { email: "" }).id === this.state.selectedId);
+    this.set({ scheduled, ...(selectedGone ? { selectedId: null } : {}) });
+  }
+
+  /** Record a message to send later (replacing an earlier time for the same draft). */
+  scheduleSend(send: ScheduledSend): void {
+    this.saveSchedules(addSchedule(this.state.scheduled, send));
+  }
+
+  /** Cancel a schedule; the draft stays a draft. Returns what was cancelled. */
+  cancelSchedule(id: string): ScheduledSend | null {
+    const send = this.scheduledSend(id);
+    if (!send) return null;
+    this.saveSchedules(removeSchedule(this.state.scheduled, id));
+    return send;
+  }
+
+  updateScheduled(id: string, patch: Partial<Pick<ScheduledSend, "claimedAt" | "problem" | "sendAt" | "draftId">>): void {
+    if (!this.state.scheduled.some((send) => send.id === id)) return;
+    this.saveSchedules(updateSchedule(this.state.scheduled, id, patch));
+  }
+
+  /**
+   * Claim a due send for this window, so a second window of the app does not send it
+   * too: read what storage says now (another window may have claimed it a moment ago),
+   * and write the claim. `false` when someone else holds it.
+   */
+  claimScheduled(id: string, now: number = this.now()): boolean {
+    const stored = parseSchedules(this.scheduleSlot.read()).find((send) => send.id === id);
+    if (stored?.claimedAt !== undefined && now - stored.claimedAt <= CLAIM_HOLD_MS) return false;
+    this.updateScheduled(id, { claimedAt: now });
+    return true;
   }
 
   // ── Drafts ────────────────────────────────────────────────────────────────
@@ -1889,11 +2362,21 @@ export class WinnowStore {
   /** The messages the list draws from (before filters and search). */
   private listedIn(visible: readonly Email[]): Email[] {
     const state = this.state;
-    return state.mailbox === "drafts" ? state.drafts : visible.filter((email) => email.mailbox === state.mailbox);
+    if (state.mailbox === "drafts") return this.listedDrafts();
+    if (state.mailbox === "scheduled") return this.scheduledRows();
+    if (state.mailbox === "snoozed") return this.snoozedRows(visible);
+    // Snoozed mail is archived in Gmail, but it is away, not filed: it lists in Snoozed only.
+    const snoozed = state.mailbox === "archive" ? this.snoozedMap() : null;
+    if (snoozed && snoozed.size > 0) {
+      return visible.filter((email) => email.mailbox === "archive" && !snoozed.has(email.gmailId));
+    }
+    return visible.filter((email) => email.mailbox === state.mailbox);
   }
 
   /** Whether a message (not a draft) is in what the list draws from. */
   private isListed(email: Email): boolean {
+    if (this.state.mailbox === "snoozed") return email.mailbox === "archive" && this.snoozedMap().has(email.gmailId);
+    if (this.state.mailbox === "archive" && email.mailbox === "archive") return !this.snoozedMap().has(email.gmailId);
     return email.mailbox === this.state.mailbox;
   }
 
@@ -2254,6 +2737,24 @@ export class WinnowStore {
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!email || email.mailbox === mailbox) return;
 
+    // Moving a snoozed message anywhere ends its snooze: it is filed now. Back to the
+    // Inbox takes the label off too (`setSnoozed`); elsewhere the label stays on it.
+    if (this.snoozedMap().has(email.gmailId)) {
+      this.forgetSnoozed([email.gmailId]);
+      const backend = this.backend;
+      if (mailbox === "inbox" && backend?.setSnoozed) {
+        this.mutate(
+          id,
+          () => ({ ...email, mailbox, unread: false }),
+          async () => {
+            await backend.setSnoozed!(email.gmailId, false).catch(() => backend.moveToMailbox(id, mailbox));
+          },
+          { previousMailbox: email.mailbox, previousUnread: email.unread },
+        );
+        return;
+      }
+    }
+
     const previousMailbox = email.mailbox;
     const previousUnread = email.unread;
 
@@ -2493,6 +2994,11 @@ export class WinnowStore {
    * nothing from Sent), and one offer takes back every one of them.
    */
   archiveWithUndo(ids: Iterable<number>): void {
+    // In Snoozed, `e` and the bars' first button are Unsnooze: back to the Inbox now.
+    if (this.state.mailbox === "snoozed") {
+      this.unsnooze(ids);
+      return;
+    }
     const moves: { id: number; to: Mailbox }[] = [];
     for (const id of new Set(ids)) {
       const email = this.state.all.find((candidate) => candidate.id === id);
@@ -3248,6 +3754,20 @@ export class WinnowStore {
    * Keeping the second group is why a user can sign back in and find the app tuned.
    */
   async signOut(): Promise<void> {
+    // Snoozes and scheduled sends name this account's mail, so they go with it (the
+    // snoozed mail stays archived under its label in Gmail; a scheduled message stays a
+    // draft there). The demo's are the demo's and stay.
+    const leaving = this.backend ? this.accountKey() : null;
+    if (leaving) {
+      const snoozes: SnoozeState = {
+        snoozed: this.state.snoozes.snoozed.filter((r) => r.account !== leaving),
+        woke: this.state.snoozes.woke.filter((r) => r.account !== leaving),
+      };
+      this.snoozeSlot.write(snoozes);
+      const scheduled = this.state.scheduled.filter((send) => send.account !== leaving);
+      this.scheduleSlot.write(serializeSchedules(scheduled));
+      this.state = { ...this.state, snoozes, scheduled };
+    }
     // Kept across the boundary rather than spread back afterwards, since `this.state` is
     // replaced wholesale below and anything not in `keep` is gone.
     const keep = {
@@ -3479,6 +3999,11 @@ export type SmartFilterChange = {
 function sameSignals(a: EmailSignals, b: EmailSignals): boolean {
   const keys = Object.keys(a) as (keyof EmailSignals)[];
   return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+}
+
+/** When a row of Snoozed or Scheduled happens: the list's order. */
+function timedAt(email: Email): number {
+  return email.snoozedUntil ?? email.scheduled?.sendAt ?? email.receivedAt;
 }
 
 function neutralSignalsFor(emails: readonly Email[]): SignalMap {
