@@ -892,7 +892,7 @@ export function App({ store }: Props) {
       setSessionExpired(true);
       setConnectError(reauth);
     }
-  }, [store, syncGoogleContacts, connectFromDemo, enterDemo]);
+  }, [syncGoogleContacts, connectFromDemo, enterDemo]);
   const connectOrResume = useCallback(() => {
     void (resumable ? resumeAccount() : connectFromDemo());
   }, [resumable, resumeAccount, connectFromDemo]);
