@@ -120,10 +120,11 @@ export const LIQUID: Record<ThemeName, LiquidRecipe> = {
 /**
  * The refraction (`#wn-liquid` in `index.html`, Chromium only). The edge map is built
  * inside the filter from the glass's own box, in px (`userSpaceOnUse`), so the bend is
- * the same on a 40px chip and a 390px dock: within `edge` px of a side the backdrop is
+ * the same on a 40px chip and a 390px dock: within ~10px of a side the backdrop is
  * pulled inward, up to `scale / 2` px at the very edge, and the middle is untouched.
- * `fringe` splits the bend per colour channel (red, green, blue) for a faint chromatic
- * edge. Only the backdrop bends, never the glass's own text, and the tint over it still
+ * One displacement, no per-channel chromatic fringe: three passes (and the blends to
+ * join them) made the filter heavy enough to stall frames under the desktop bar, where
+ * the version toggle's crossfade missed its time, so the fringe went. Only the backdrop bends, never the glass's own text, and the tint over it still
  * carries the AA arithmetic above.
  *
  * (The first draft painted the map as an image with `primitiveUnits="objectBoundingBox"`:
@@ -138,13 +139,13 @@ export const LIQUID_FILTER = {
   edge: 3,
   /** How hard the edge's slope drives the map (the arithmetic `k2`/`k3`). */
   gain: 1,
-  /** Displacement scale per channel, red, green, blue (px; the bend is half of it). */
-  fringe: [16, 14.5, 13] as const,
+  /** Displacement scale, px: the bend at the very edge is half of it. */
+  scale: 14,
 } as const;
 
 /** The largest bend, in px, at the very edge of the glass. */
 export function liquidMaxBend(): number {
-  return Math.max(...LIQUID_FILTER.fringe) / 2;
+  return LIQUID_FILTER.scale / 2;
 }
 
 /**

@@ -291,9 +291,10 @@ describe("Liquid Glass on the floating chrome (1.4)", () => {
       expect(body).toMatch(new RegExp(`in="toTop" in2="toBottom" operator="arithmetic" k2="${gain}" k3="-${gain}" k4="0.5"`));
     });
 
-    it("splits the bend per colour channel by `fringe`, and bends at most a few px", () => {
+    it("bends once (no per-channel passes, which stalled frames), and at most a few px", () => {
       const scales = [...body.matchAll(/<feDisplacementMap[^>]*scale="([\d.]+)"/g)].map(([, n]) => Number(n));
-      expect(scales).toEqual([...LIQUID_FILTER.fringe]);
+      expect(scales).toEqual([LIQUID_FILTER.scale]);
+      expect(body).not.toMatch(/<feBlend/);
       expect(liquidMaxBend()).toBeGreaterThanOrEqual(4);
       expect(liquidMaxBend()).toBeLessThanOrEqual(10);
     });

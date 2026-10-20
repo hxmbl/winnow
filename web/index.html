@@ -37,7 +37,8 @@
       The edge map is built from the glass's own box, in px: the box's alpha, softened
       (blur 5), differentiated across +/-3px into R (x) and G (y) around a neutral 0.5,
       so within ~10px of a side the backdrop is pulled inward and the middle is untouched,
-      on any size of glass. Then three displacements, one per channel, for a faint fringe.
+      on any size of glass. Then one displacement (a per-channel fringe cost three, and
+      stalled frames).
     -->
     <svg class="wn-svg-defs" width="0" height="0" aria-hidden="true" focusable="false">
       <filter id="wn-liquid" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
@@ -54,14 +55,7 @@
         <feComposite in="toTop" in2="toBottom" operator="arithmetic" k2="1" k3="-1" k4="0.5" result="slopeY" />
         <feColorMatrix in="slopeY" type="matrix" values="0 0 0 0 0  0 0 0 1 0  0 0 0 0 0  0 0 0 0 1" result="mapY" />
         <feComposite in="mapX" in2="mapY" operator="arithmetic" k2="1" k3="1" result="map" />
-        <feDisplacementMap in="SourceGraphic" in2="map" scale="16" xChannelSelector="R" yChannelSelector="G" result="bendR" />
-        <feColorMatrix in="bendR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="red" />
-        <feDisplacementMap in="SourceGraphic" in2="map" scale="14.5" xChannelSelector="R" yChannelSelector="G" result="bendG" />
-        <feColorMatrix in="bendG" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="green" />
-        <feDisplacementMap in="SourceGraphic" in2="map" scale="13" xChannelSelector="R" yChannelSelector="G" result="bendB" />
-        <feColorMatrix in="bendB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="blue" />
-        <feBlend in="red" in2="green" mode="screen" result="redGreen" />
-        <feBlend in="redGreen" in2="blue" mode="screen" />
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="14" xChannelSelector="R" yChannelSelector="G" />
       </filter>
     </svg>
     <div id="root"></div>
