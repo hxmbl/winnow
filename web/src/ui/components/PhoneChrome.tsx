@@ -70,6 +70,8 @@ export type PhoneTopBarProps = {
   onToggleLogo: () => void;
   /** Search was focused some other way: it shows search again. */
   onSearchFocus: () => void;
+  /** 1.4.0: the open account's avatar, which opens the account switcher. */
+  accountButton?: React.ReactNode;
 };
 
 export function PhoneTopBar({
@@ -84,6 +86,7 @@ export function PhoneTopBar({
   logoView,
   onToggleLogo,
   onSearchFocus,
+  accountButton,
 }: PhoneTopBarProps) {
   const showVersion = logoView === "version";
   return (
@@ -165,6 +168,7 @@ export function PhoneTopBar({
             {showVersion ? versionText(version) : ""}
           </p>
         </div>
+        {accountButton}
       </div>
     </header>
   );

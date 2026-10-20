@@ -332,8 +332,10 @@ That is the only input; nothing is learned from opening or ignoring mail.
   built-in line names only what pushed it over the line. Words only.
 - Storage: `winnow.filterLearning.v1`, `{ version: 1, owner, corrections }`, capped at
   300 corrections, 20 clues each and 1,200 distinct clues (rarest words dropped first).
-  Local only, never synced. Cleared on sign-out and when a different account connects
-  (the demo's corrections are dropped on the first real connect).
+  Local only, never synced. Per account since 1.4.0 (`winnow.filterLearning.v1@<id>`,
+  §5.6 *Accounts*): erased with that account's sign-out; a correction set whose `owner`
+  is another address is still dropped (the demo's corrections are dropped on the first
+  real connect).
 - The demo has two Evri deliveries (`demo-missed-delivery-1/2`) the built-in rules miss
   on purpose; correcting the first moves the second by the sender rule.
 - Targeted smoke: `node web/scripts/smoke-filters.mjs` (port 4350 by default).
@@ -398,7 +400,7 @@ the store can be driven by a demo seed with no session at all.
 | File | Job |
 | --- | --- |
 | `session.ts` | `localCache()` and `GmailSession`. Sign-in, refresh, contacts grant, `signOut`, and `backend()` — the object the store talks to. |
-| `bridge.ts` | `SessionBridge`: a flat façade the UI uses, plus the two side effects the session cannot do (`store.signOut` when the client changes or the user signs out). `accountEmail` falls back to a placeholder so a launch still opens the cached mail; `verifiedAccountEmail` throws instead, for the demo's "Back to your inbox", which must know the session works before the store leaves the demo. |
+| `bridge.ts` | `SessionBridge`: a flat façade the UI uses, plus the two side effects the session cannot do (`store.signOut` when the client changes or the user signs out). Since 1.4.0 it holds one `GmailSession` per account (each over its own scoped cache, cursor, contacts and token store) and `bridge.accounts` (`switchTo`, `add`, `signOut(id)`, `signOutAll`, `setColor`, `setNotify`, `checkInactive`); every other method acts on the open account. `accountEmail` falls back to a placeholder so a launch still opens the cached mail; `verifiedAccountEmail` throws instead, for the demo's "Back to your inbox", which must know the session works before the store leaves the demo. |
 | `credentials.ts` | The user's own OAuth client: validation, the two stores (web `localStorage`, desktop keychain), and `testConnection`, which posts a deliberately invalid code and reads the verdict. |
 | `clientJson.ts` | Import of Google's downloaded `client_secret_….json`. 64 KB cap, and the exact list of refusals and warnings below. |
 | `redirect.ts` | Web-only redirect parsing as pure functions over a query string. A code with no `state` returns `null`. |
@@ -406,6 +408,9 @@ the store can be driven by a demo seed with no session at all.
 | `errors.ts` | `describeFailure` — the message and hint for each failure kind. |
 | `googleErrors.ts` | Google's setup errors (redirect_uri_mismatch, not a test user, API disabled, invalid_client, missing secret, org_internal, admin policy, …) mapped to a plain title, the fix, and the setup step that makes it. `explainGoogleText` reads a code out of pasted text. |
 | `nativeSignIn.ts` | Native Android sign-in's pure decisions. Two clients can own a session now: the main (Desktop app) client, or the Web application client native sign-in names as `serverClientId`, which `TokenSet.clientId` records. `refreshClientFor` picks the one to refresh under; `sessionStrandedBy` says when saving a client must sign out; `browserFallbackScope` re-asks for the session's scopes when the browser's client is not the one that granted them. `GmailSession.authorize` tries `platform.nativeGoogleSignIn` first when a Web client is stored, and falls back to the browser on anything but a code or a cancel, the exchange included. |
+| `accounts.ts` | Multi-account (1.4.0): the registry `winnow.accounts.v1` (`{ version: 1, active, accounts: [{ id, email, color, notify, addedAt }] }`, `AccountRegistry`, `MAX_ACCOUNTS = 5`), the namespace rule `accountKey(key, id)` = `<key>@<id>` with `id` a random `[a-z0-9]{4,24}` never derived from the address, `ACCOUNT_SCOPED_KEYS` (every key one account owns), `scopedStorage` (a `Storage` view that reads and writes the scoped copy and passes shared keys through), `tokenSecretName` / `webTokenKey`, and the colour palette (`ACCOUNT_COLORS`: the four accents plus `rose`, so five accounts can all differ). |
+| `accountMigration.ts` | The one-time move from 1.3.5's single unscoped account, run by `bridge.prepare()` before anything reads an account's data. See *Accounts* below. |
+| `lightSync.ts` | The light sync of an account that is not open: its unread count and the new mail to notify about, nothing else. See *Accounts* below. |
 | `exchangeRetry.ts` | The end of a native sign-in on a WebView that may be paused (Android, behind the browser): before the code exchange and the profile read, wait for `platform.waitForForeground`, and resend only an attempt that got no HTTP response (`GoogleUnreachable`, or a bare fetch `TypeError` for the profile), backing off 0.5/1.5/3 s. `invalid_grant` and every other answer from Google are never resent. Out of attempts → `SignInUnreachable`: "Couldn't reach Google to finish signing in. Check your connection and try again." |
 
 **The offline cache** (`localCache`). A `Map<GmailId, Email>` mirror in memory,
@@ -417,6 +422,57 @@ rather than return; a failure is recorded and surfaced by `flush()` instead of
 being swallowed. Past roughly 2,000 messages the origin's ~5 MB quota is the
 ceiling, and `persistCache()` is the answer: it asks for persistent storage and
 reports honestly when the write still did not stick.
+
+**Accounts (1.4.0).** Up to five Google accounts on one device, one open at a time.
+
+- **Namespacing.** Everything an account owns is stored as `<key>@<id>`
+  (`ACCOUNT_SCOPED_KEYS`: the message cache and cursor, the offline queue, Google
+  contacts, brand logos, Gravatars, learning, smart-filter corrections, active filters,
+  last mailbox, light-sync state). Drafts were already one key per address
+  (`winnow.drafts.v1:<address>`). Tokens live in the platform's token store under
+  `gmail.tokens@<id>` (keychain, same service) or `winnow.gmail.tokens@<id>` (web). No
+  account's data can be read through another's keys. `null` as the id is the device
+  itself: the demo, and anything learned with nobody signed in, under the old unscoped
+  keys (`store/accountState.ts`, `keyFor`).
+- **Shared on purpose:** the OAuth client (one client, many grants), the preferences
+  (appearance, sort, notification settings, hidden and muted senders: they describe the
+  person, not an account), the setup guide's progress and the reader split.
+- **Migration from 1.3.5** (`migrateToAccounts`): with no registry and a stored session,
+  the account gets an id (recorded first in `winnow.accounts.migration`, so an
+  interrupted run resumes into the same namespace), each scoped key is copied to
+  `<key>@<id>`, the tokens are written to the account's own entry, the registry is
+  written naming it active, and only then are the old copies deleted. Nobody signs in
+  again; the address is filled in from the learning's owner or the queue's account, or
+  on the first profile read. A locked keychain or a failed token write defers it to the
+  next launch, moving and deleting nothing. A mail cache too big to copy within the
+  quota is dropped with its cursor instead of deferring (copy-then-delete needs it twice
+  over, so a big mailbox would defer on every launch); the first sync is then a full one.
+  Signed out under 1.3.5: an empty registry, and the learning stays the device's until
+  the first account added adopts it (`adoptDeviceLearning`).
+- **Light sync** (`LightSync`): an account that is not open keeps nothing in memory and
+  writes nothing to its cache. `bridge.accounts.checkInactive()` runs on every
+  background tick: one `messages.list` for `in:inbox is:unread` per account (5 quota
+  units), compared with the unread ids the last check saw (`winnow.lightSync.v1@<id>`);
+  new ids get one metadata read each, newest first, at most five, for the notification.
+  The first check after an account is added or left only records what is there (`seed`),
+  so mail already waiting is not news. The count feeds the switcher; failures stay quiet
+  until the account is opened.
+- **Switching** loads the account's own state (`WinnowStore.enterAccount`: learning,
+  filters, mailbox) and cache; a sync of an account that has since been left paints
+  nothing.
+- **Adding** asks Google's chooser (`prompt=select_account consent`) after the first
+  account; adding an account already here switches to it; a sixth is refused.
+- **Sign-out of one account** revokes its grant and erases exactly its namespace,
+  learning included, and its device drafts (`wipeAccountStorage`); the next account
+  opens, or the app is signed out when it was the last. Sign out of all does each.
+- **Owner decisions, 1.4.0:** at most five accounts (`MAX_ACCOUNTS`); notifications
+  for accounts that are not open are on by default; each account is told apart by a
+  colour dot (switcher, Settings), changeable; there is no "All inboxes" view, one
+  account is open at a time; signing out of an account erases its whole namespace,
+  learning and smart-filter corrections included; preferences are shared.
+- **Replies go out from the account that received the message** (`mail/fromAccount.ts`,
+  the composer's From picker); a reply sent from another account goes as a new message
+  carrying the original's `In-Reply-To`/`References` (thread ids belong to one mailbox).
 
 **`signOut()` order matters:** tokens → contacts → pending auth → message cache
 → cursor. The cursor is last for a specific reason — a cursor left over an empty
@@ -522,7 +578,7 @@ of them properly:
 | Method | Browser | Desktop |
 | --- | --- | --- |
 | `info()` | constant `WEB_INFO` | `invoke("app_info")`, memoised |
-| `tokenStore()` | `localStorage["winnow.gmail.tokens"]` | keychain `gmail.tokens` |
+| `tokenStore(id?)` | `localStorage["winnow.gmail.tokens@<id>"]` (no id: 1.3.5's `winnow.gmail.tokens`, read only by the migration) | keychain `gmail.tokens@<id>` (no id: `gmail.tokens`, likewise) |
 | `credentialStore()` | `localStorage["winnow.google.oauthClient"]` | keychain `google.oauth-client` |
 | `beginSignIn()` | `sessionStorage` + `location.assign` | `oauth_begin` / `open_external` / `oauth_await` on an ephemeral loopback port |
 | `cancelSignIn()` | drop the session key | `oauth_cancel` |
@@ -557,6 +613,13 @@ Supporting files:
 - `web.ts` adds `readRedirectFromLocation()` and `pendingSignInState()`;
   `desktop.ts` adds `onDeepLink()`, `onTrayAction()`, and Android's `onBackButton()` /
   `exitApp()`.
+
+**Accounts at the boundary (1.4.0).** `notifyNewMail` carries the batch's account
+(`{ id, label }`, the label only with more than one account signed in), every
+`winnow://notification-action` event names its account, `desktop.ts`'s `keptReplies`
+reads anything that is not an array as none, and `deep_link_launch` returns the links the
+OS launched the app with so a cold start from a notification's tap is not lost (`main.tsx`
+asks once it is listening; an older shell answers nothing).
 
 **The IPC naming rule, which has cost real time.** Tauri rewrites *argument* keys
 from camelCase to snake_case but never rewrites *return values*. So `AppInfo` has
@@ -768,6 +831,31 @@ How a press is done:
   window, so page script cannot reach `http`, and `Http.kt` refuses any host but
   `gmail.googleapis.com` and `oauth2.googleapis.com`.
 
+**Accounts (1.4.0).** A batch names its account (`NotificationAccount`, an id that fails
+`plan::valid_account_id` is dropped), and the address is appended to the body when more
+than one account is signed in. Notifications for accounts that are not open are on by
+default (Settings → Google account, per account: `AccountRecord.notify`); they come from
+the light sync. Native presses act with that account's tokens only
+(`plan::tokens_secret_for`: `gmail.tokens@<id>`; no account means 1.3.5's entry, which the
+migration empties, so an old notification fails as signed out rather than acting on
+whichever account is there). On Android each account has its own group and summary
+(`MailNotifier.groupFor` / `summaryIdFor`) and a message's notification id includes the
+account. Deep links (`parseDeepLink` / `messageLink` in `core/notify/notifications.ts`,
+`messageUri` / `inboxUri` in Kotlin):
+
+- `winnow://message/<id>?account=<acct>&gmail=<gmailId>`: a tap switches to that
+  account, fetches the message if it is not cached and opens it (on a phone in the
+  full-screen reader; Back returns to that account's inbox).
+- `winnow://open?account=<acct>&view=inbox`: a summary opens that account's inbox.
+- 1.3.5's links (no account) still open in the open account. An action on an account
+  that is not open runs there (natively, or by switching) and its light sync catches up;
+  an account no longer on the device gets "That account isn't signed in on this device
+  any more."
+
+Linux and Windows summaries emit an `inbox` action with the account. macOS still shows one
+grouped notification whose tap only reveals the window: it carries no account or message,
+so it cannot deep-link (unverified on a Mac).
+
 What only a device can tell (untested here: no emulator, no macOS or Windows host):
 RemoteInput on Android 12–15, the receiver with the process killed, the deep link from a
 cold start (`get_current` may fire before the webview listens), `Channel` delivery after
@@ -809,27 +897,35 @@ judged as IPv4.
 
 ## 10. Where state lives
 
+Since 1.4.0, every key below marked *per account* is stored as `<key>@<id>` (§5.6,
+*Accounts*); the unscoped spelling is 1.3.5's, which the migration moves, and for the
+learning, filter and mailbox keys it is also the device's own copy (the demo, nobody
+signed in). "Sign-out" means signing out of that account, which erases its namespace.
+
 | Key | Holds | Cleared by |
 | --- | --- | --- |
-| `winnow.preferences.v1` | Appearance, sort, image policy, blocked/muted senders | never, by design |
-| `winnow.learning.v1` | Weights + the 400-event log | never, by design |
-| `winnow.filterLearning.v1` | Smart-filter corrections (sender rules and clues are derived from them) | sign-out, another account connecting, Settings → Smart filters reset |
-| `winnow.activeFilters.v1` | The active filter set | sign-out |
-| `winnow.mailbox.v1` | Which mailbox was last open | — |
-| `winnow.offlineQueue.v1` | Actions (and sends) waiting for the network, with the account they belong to | replay, sign-out |
-| `winnow.snooze.v1` | Snoozed conversations (account, message ids, wake time) and woken places, `core/mail/snooze.ts` via `core/store/keyedStorage.ts` | wake / unsnooze; this account's on sign-out |
-| `winnow.scheduledSend.v1` | Messages to send later (account, time, Gmail draft id, device copy of the draft), `core/mail/scheduledSend.ts` via `keyedStorage` | sent / cancelled / Edit; this account's on sign-out |
+| `winnow.accounts.v1` | The registry: active id, and each account's id, address, colour, notify flag, added time (max 5) | an account's sign-out removes its entry |
+| `winnow.accounts.migration` | The id a 1.3.5 migration is moving into, while it runs | the migration's end |
+| `winnow.lightSync.v1` *(per account)* | The unread inbox ids the last light sync saw | sign-out |
+| `winnow.preferences.v1` | Appearance, sort, image policy, notification settings, blocked/muted senders: shared by every account | never, by design |
+| `winnow.learning.v1` *(per account)* | Weights + the 400-event log | that account's sign-out (owner decision, 1.4.0: learning goes with the account) |
+| `winnow.filterLearning.v1` *(per account)* | Smart-filter corrections (sender rules and clues are derived from them) | sign-out, a snapshot owned by another address, Settings → Smart filters reset |
+| `winnow.activeFilters.v1` *(per account)* | The active filter set | sign-out |
+| `winnow.mailbox.v1` *(per account)* | Which mailbox was last open | — |
+| `winnow.offlineQueue.v1` *(per account)* | Actions (and sends) waiting for the network, with the account they belong to | replay, sign-out |
+| `winnow.snooze.v1` *(shared; records carry their account)* | Snoozed conversations (account, message ids, wake time) and woken places, `core/mail/snooze.ts` via `core/store/keyedStorage.ts` | wake / unsnooze; this account's on sign-out |
+| `winnow.scheduledSend.v1` *(shared; records carry their account)* | Messages to send later (account, time, Gmail draft id, device copy of the draft), `core/mail/scheduledSend.ts` via `keyedStorage` | sent / cancelled / Edit; this account's on sign-out |
 | `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
-| `winnow.gmail.cache.messages` | The mailbox, as plain JSON | sign-out |
-| `winnow.gmail.cache.cursor` | Gmail `historyId` | sign-out |
-| `winnow.google.contacts.v1` | The People API snapshot | sign-out, revocation |
-| `winnow.brandLogos.v1` | Cached BIMI answers | sign-out, setting off |
-| `winnow.gravatars.v1` | Cached Gravatar answers, by sender address | sign-out, setting off |
+| `winnow.gmail.cache.messages` *(per account)* | The mailbox, as plain JSON | sign-out |
+| `winnow.gmail.cache.cursor` *(per account)* | Gmail `historyId` | sign-out |
+| `winnow.google.contacts.v1` *(per account)* | The People API snapshot | sign-out, revocation |
+| `winnow.brandLogos.v1` *(per account)* | Cached BIMI answers | sign-out, setting off |
+| `winnow.gravatars.v1` *(per account)* | Cached Gravatar answers, by sender address | sign-out, setting off |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
 | `winnow.google.setupProgress` | A half-finished setup: step, ticks, client ID draft (never the secret) | saving or removing the client, Start over |
-| `winnow.gmail.tokens` | Tokens (web only) | sign-out, which also revokes the grant at Google |
+| `winnow.gmail.tokens@<id>` | An account's tokens (web only; 1.3.5's unscoped key is migrated) | that account's sign-out, which also revokes the grant at Google |
 | `winnow.pendingAuth`, `winnow.pendingState` | PKCE verifier, sign-in state (`sessionStorage`) | read, or 15 min |
-| keychain `gmail.tokens`, `google.oauth-client` | The same two, on desktop and Android | sign-out (revoked at Google first, from the web layer) / setup |
+| keychain `gmail.tokens@<id>`, `google.oauth-client` | The same two, on desktop and Android (one token entry per account) | sign-out (revoked at Google first, from the web layer) / setup |
 | `winnow.mutedFilters.v1` | Retired — deleted on launch | — |
 | Android `SharedPreferences` `winnow.notify` / `pendingReplies` | Replies typed into a notification that are not yet sent or in Drafts | released by the web layer once saved to Drafts |
 
@@ -842,7 +938,8 @@ judged as IPv4.
 | Unit | `npm test` | Vitest, **node** environment, `src/**/*.test.ts` plus `../proxy/**/*.test.ts`. There are no component tests, and the glob says `.ts` not `.tsx` so nobody infers there should be. |
 | Gate | `npm run check` | typecheck + lint + lint:proxy + unit |
 | Smart filters | `node scripts/smoke-filters.mjs` | Targeted smoke for "Change smart filters…", "Why it's here" and Settings → Smart filters. Own `vite preview` on 4350 (`WINNOW_PORT`); `WINNOW_SHOTS=dir` writes screenshots. |
-| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs` and `smoke-notifications.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`; `WINNOW_SMOKE_ONLY=schedule` runs only `scripts/smoke-schedule.mjs` (1.4.0 on the demo: snooze from the row menu with Undo, `b`, the reader's button and its picker, the selection bar and the phone reader pill; the Snoozed mailbox and Unsnooze; waking at the time with Playwright's fake clock and on the next open; Send later from the desktop split button and the phone top bar; the Scheduled mailbox's Edit, Send now and Cancel schedule; a send at its time and one late; Settings → Compose's copy), also run by `smoke.mjs` and alone (port 4351); `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names). |
+| Accounts | `node scripts/smoke-accounts.mjs` | Targeted smoke for multi-account against a fake Google that knows two accounts by bearer token: a 1.3.5 session migrating with no sign-in (data moved into its namespace), Add account through Google's chooser (and a duplicate switched to), one-tap switching, a reply going out from the account that received the message, and on the Android app (a stand-in for Tauri's IPC) a notification's deep link switching account, fetching an uncached message into the full-screen reader, Back to that inbox, a summary's inbox link and a cold start from a tap (`deep_link_launch`). Own `vite preview` on 4362 (`WINNOW_PORT`). |
+| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs`, `smoke-notifications.mjs` and `smoke-accounts.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`; `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names). |
 | Theme sweep | `npm run sweep` | Manual, never in `npm run smoke` or CI. `scripts/sweep.mjs` photographs every mode (light, dark, OLED; `system` once each way) × every accent in `ACCENT_THEMES` (read from `core/model/appearance.ts`, so a new accent is swept for free) on a phone (390×844, Android UA, safe-area insets) and a desktop (1440×900): inbox, reader, drawer, Settings top and scrolled to the end, the Appearance picker, compose, the status pill with Undo, and inbox clear (the shared fake Gmail with an empty inbox). Then the settings and OS preferences that change the look (sort, remote images, brand logos, Gravatar, reduced transparency, forced colours, left-handed on a phone, a small phone, a tablet) once each, a Settings dropdown open (phone and desktop, light and dark), and the phone reader scrolled partway down the long demo newsletter with its pill folded (both hands × light/dark/OLED). Checks as it goes — page/console errors, text clipped without an ellipsis or pushed off-screen, sideways scroll, and WCAG AA for primary and pill/chip text measured against the pixels behind it (a second shot with text hidden, so glass counts) — and writes contact sheets per mode × device, `sweep.pdf` and `sweep-report.md`. Reports, never fails on a finding. `WINNOW_SWEEP_OUT` (default `web/.sweep`, git-ignored), `WINNOW_SWEEP_PHASE=capture\|sheets`, `WINNOW_SWEEP_MODES` / `WINNOW_SWEEP_DEVICES` for a subset, `WINNOW_SWEEP_JOBS` (3); port 4573 by default. |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |
 
@@ -876,6 +973,10 @@ judged as IPv4.
   `os: "android"`: the step's package name and SHA-1, field validation, the Web
   client saved beside the Desktop one, and DEVELOPER_ERROR going on to the loopback
   flow. `npm run smoke` runs it after `smoke.mjs`; it runs alone too (port 4174).
+- Smokes that seed a signed-in session write 1.3.5's unscoped `winnow.gmail.tokens`
+  (and the Android stand-in's keychain `gmail.tokens`) on purpose: every signed-in run
+  goes through the migration. Anything they *read back* about an account is under the
+  namespaced key: look up `winnow.accounts.v1`'s `active` and read `<key>@<id>`.
 
 The four tests worth reading first, because each exists because a real bug got
 out and nothing else would have caught it:

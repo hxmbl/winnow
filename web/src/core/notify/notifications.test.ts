@@ -5,6 +5,8 @@ import {
   buildNotificationBatch,
   draftForKeptReply,
   handleNotificationAction,
+  messageLink,
+  parseDeepLink,
   notifiable,
   notificationReplyDraft,
   parseKeptReply,
@@ -164,16 +166,30 @@ describe("the reply a notification sends", () => {
 });
 
 describe("a press", () => {
-  function deps(cached: Partial<Email> | null = { id: 9, unread: true, mailbox: "inbox" }) {
+  function deps(cached: Partial<Email> | null = { id: 9, unread: true, mailbox: "inbox" }, options: { accounts?: string[]; open?: string } = {}) {
     const calls: string[] = [];
+    let open = options.open ?? "acct1";
     const d: NotificationActionDeps = {
       focusWindow: () => void calls.push("focusWindow"),
-      focusMessage: (id) => {
-        calls.push(`focus:${id}`);
+      ...(options.accounts
+        ? {
+            openAccount: async (id: string) => {
+              if (!options.accounts!.includes(id)) return false;
+              if (open !== id) calls.push(`switch:${id}`);
+              open = id;
+              return true;
+            },
+            isOpen: (id: string) => open === id,
+            refreshAccount: (id: string) => void calls.push(`light:${id}`),
+          }
+        : {}),
+      openMessage: async (gmailId, id) => {
+        calls.push(`open:${gmailId}:${id}`);
         return cached !== null;
       },
+      openInbox: () => void calls.push("inbox"),
       openReply: () => void calls.push("openReply"),
-      find: () => (cached ? (cached as Email) : undefined),
+      find: async () => (cached ? (cached as Email) : undefined),
       setRead: (id, read) => void calls.push(`setRead:${id}:${read}`),
       trashWithUndo: (id) => void calls.push(`trash:${id}`),
       refresh: () => void calls.push("refresh"),
@@ -181,54 +197,84 @@ describe("a press", () => {
     };
     return { d, calls };
   }
-  const press = (action: NotificationActionEvent["action"], origin: NotificationActionEvent["origin"] = "desktop") =>
-    ({ action, messageId: 9, gmailId: "g9", origin }) as NotificationActionEvent;
+  const press = (action: NotificationActionEvent["action"], origin: NotificationActionEvent["origin"] = "desktop", account?: string) =>
+    ({ action, messageId: 9, gmailId: "g9", origin, ...(account ? { account } : {}) }) as NotificationActionEvent;
 
-  it("opens the message on a tap", () => {
+  it("opens that exact message on a tap (fetched by the store when not cached)", async () => {
     const { d, calls } = deps();
-    expect(handleNotificationAction(press("open"), d)).toBe("opened");
-    expect(calls).toEqual(["focusWindow", "focus:9"]);
+    expect(await handleNotificationAction(press("open"), d)).toBe("opened");
+    expect(calls).toEqual(["focusWindow", "open:g9:9"]);
   });
 
-  it("opens the composer on the message for Reply on the desktop", () => {
+  it("opens the composer on the message for Reply on the desktop", async () => {
     const { d, calls } = deps();
-    expect(handleNotificationAction(press("reply"), d)).toBe("reply opened");
-    expect(calls).toEqual(["focusWindow", "focus:9", "openReply"]);
+    expect(await handleNotificationAction(press("reply"), d)).toBe("reply opened");
+    expect(calls).toEqual(["focusWindow", "open:g9:9", "openReply"]);
   });
 
-  it("does not open a composer on the wrong message when the original is gone", () => {
+  it("does not open a composer on the wrong message when the original is gone", async () => {
     const { d, calls } = deps(null);
-    expect(handleNotificationAction(press("reply"), d)).toBe("focused");
+    expect(await handleNotificationAction(press("reply"), d)).toBe("focused");
     expect(calls).not.toContain("openReply");
   });
 
-  it("marks read through the store and confirms", () => {
+  it("marks read through the store and confirms", async () => {
     const { d, calls } = deps();
-    handleNotificationAction(press("read"), d);
+    await handleNotificationAction(press("read"), d);
     expect(calls).toEqual(["setRead:9:true", "confirm:9:Marked as read:false"]);
   });
 
-  it("moves to Trash with Undo, never a permanent delete", () => {
+  it("moves to Trash with Undo, never a permanent delete", async () => {
     const { d, calls } = deps();
-    handleNotificationAction(press("trash"), d);
+    await handleNotificationAction(press("trash"), d);
     expect(calls).toEqual(["trash:9", "confirm:9:Moved to Trash:false"]);
     // Already in the Trash: the app's own Delete would destroy it there, so nothing.
     const binned = deps({ id: 9, unread: true, mailbox: "trash" });
-    handleNotificationAction(press("trash"), binned.d);
+    await handleNotificationAction(press("trash"), binned.d);
     expect(binned.calls.some((call) => call.startsWith("trash:"))).toBe(false);
     expect(binned.calls.at(-1)).toContain(":true");
   });
 
-  it("says so when the message is not loaded", () => {
+  it("says so when the message cannot be found", async () => {
     const { d, calls } = deps(null);
-    expect(handleNotificationAction(press("read"), d)).toBe("not cached");
+    expect(await handleNotificationAction(press("read"), d)).toBe("not cached");
     expect(calls).toEqual(["confirm:9:Couldn't do that. Open Winnow:true"]);
   });
 
-  it("only refreshes for an Android press, which the phone already carried out", () => {
+  it("only refreshes for an Android press, which the phone already carried out", async () => {
     const { d, calls } = deps();
-    handleNotificationAction({ ...press("trash", "android"), outcome: "done" }, d);
+    await handleNotificationAction({ ...press("trash", "android"), outcome: "done" }, d);
     expect(calls).toEqual(["refresh"]);
+  });
+
+  it("switches to the notification's account before opening its message", async () => {
+    const { d, calls } = deps(undefined, { accounts: ["acct1", "acct2"], open: "acct1" });
+    expect(await handleNotificationAction(press("open", "web", "acct2"), d)).toBe("opened");
+    expect(calls).toEqual(["focusWindow", "switch:acct2", "open:g9:9"]);
+  });
+
+  it("acts on the right account for Mark read and Delete, and leaves its inbox open", async () => {
+    const { d, calls } = deps(undefined, { accounts: ["acct1", "acct2"], open: "acct1" });
+    await handleNotificationAction(press("read", "desktop", "acct2"), d);
+    expect(calls).toEqual(["switch:acct2", "setRead:9:true", "confirm:9:Marked as read:false"]);
+  });
+
+  it("refuses a press for an account that was signed out", async () => {
+    const { d, calls } = deps(undefined, { accounts: ["acct1"], open: "acct1" });
+    expect(await handleNotificationAction(press("open", "desktop", "gone1"), d)).toBe("unknown account");
+    expect(calls.some((call) => call.startsWith("open:"))).toBe(false);
+  });
+
+  it("opens the account's inbox for a summary of several messages", async () => {
+    const { d, calls } = deps(undefined, { accounts: ["acct1", "acct2"], open: "acct1" });
+    expect(await handleNotificationAction({ ...press("inbox", "web", "acct2"), messageId: 0, gmailId: "" }, d)).toBe("inbox opened");
+    expect(calls).toEqual(["focusWindow", "switch:acct2", "inbox"]);
+  });
+
+  it("an Android action on an account that is not open catches that account up, not the open one", async () => {
+    const { d, calls } = deps(undefined, { accounts: ["acct1", "acct2"], open: "acct1" });
+    await handleNotificationAction({ ...press("read", "android", "acct2"), outcome: "done" }, d);
+    expect(calls).toEqual(["light:acct2"]);
   });
 
   it("validates what arrives over IPC", () => {
@@ -239,10 +285,44 @@ describe("a press", () => {
       origin: "android",
       outcome: "failed",
     });
+    expect(parseNotificationAction({ action: "open", messageId: 3, gmailId: "a", origin: "desktop", account: "acct2" })?.account).toBe("acct2");
+    // An account id that is not one is dropped, never passed on.
+    expect(parseNotificationAction({ action: "open", messageId: 3, gmailId: "a", origin: "desktop", account: "../x" })?.account).toBeUndefined();
     expect(parseNotificationAction({ action: "delete", messageId: 3, origin: "desktop" })).toBeNull();
     expect(parseNotificationAction({ action: "read", messageId: 1.5, origin: "desktop" })).toBeNull();
     expect(parseNotificationAction({ action: "read", messageId: 1, origin: "elsewhere" })).toBeNull();
     expect(parseNotificationAction("read")).toBeNull();
+  });
+});
+
+describe("deep links", () => {
+  it("round-trips a notification's message link, account and Gmail id included", () => {
+    const link = messageLink(42, "abc123", "acct2");
+    expect(link).toBe("winnow://message/42?account=acct2&gmail=abc123");
+    expect(parseDeepLink(link)).toEqual({ kind: "message", messageId: 42, gmailId: "abc123", account: "acct2" });
+  });
+
+  it("still reads 1.3.5's links", () => {
+    expect(parseDeepLink("winnow://message/42")).toEqual({ kind: "message", messageId: 42, gmailId: "" });
+    expect(parseDeepLink("winnow://open")).toEqual({ kind: "open" });
+    expect(parseDeepLink("winnow://signed-in")).toEqual({ kind: "signed-in" });
+  });
+
+  it("a summary's link opens the account's inbox", () => {
+    expect(parseDeepLink("winnow://open?account=acct2&view=inbox")).toEqual({ kind: "inbox", account: "acct2" });
+  });
+
+  it("drops what it cannot trust", () => {
+    expect(parseDeepLink("winnow://message/42?account=../../x&gmail=a/b")).toEqual({ kind: "message", messageId: 42, gmailId: "" });
+    expect(parseDeepLink("https://example.com/message/1")).toBeNull();
+    expect(parseDeepLink("winnow://message/notanumber")).toBeNull();
+  });
+
+  it("a batch names its account, and the address only when there is more than one", () => {
+    const email = { id: 1, gmailId: "g1", sender: "a@b.co", name: "Ada", subject: "Hi", body: "x", receivedAt: 1, unread: true, mailbox: "inbox" } as Email;
+    const settings = { notificationActions: { reply: true, trash: true, read: true }, notificationHidePreview: false };
+    expect(buildNotificationBatch([email], settings, {}, {}, { id: "acct2", label: "two@x.co" }).account).toEqual({ id: "acct2", label: "two@x.co" });
+    expect(buildNotificationBatch([email], settings).account).toBeNull();
   });
 });
 

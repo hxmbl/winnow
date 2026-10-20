@@ -52,6 +52,13 @@ object MailNotifier {
   const val EXTRA_ACTIONS = "winnow.actions"
   const val EXTRA_HIDE = "winnow.hidePreview"
   const val EXTRA_PICTURE = "winnow.picture"
+  /** The account the notification is for (1.4.0), and its address when several are signed in. */
+  const val EXTRA_ACCOUNT = "winnow.account"
+  const val EXTRA_ACCOUNT_LABEL = "winnow.accountLabel"
+
+  /** `accounts.ts`'s `isAccountId`; anything else is treated as no account. */
+  private val ACCOUNT_ID = Regex("^[a-z0-9]{4,24}$")
+  fun validAccount(id: String?): String? = id?.takeIf { ACCOUNT_ID.matches(it) }
 
   /** Same cap as Rust's `MAX_PICTURE_CHARS` and the web layer's `NATIVE_PICTURE_MAX_CHARS`. */
   private const val MAX_PICTURE_CHARS = 200_000
@@ -66,10 +73,33 @@ object MailNotifier {
   /** Presses Rust is working on, by request id: the original message, for restore and the watchdog. */
   private val inFlight = HashMap<String, Bundle>()
 
-  fun idFor(gmailId: String): Int {
-    val id = ("winnow:$gmailId").hashCode()
+  /** One notification per message per account: the same Gmail id in two accounts is two messages. */
+  fun idFor(gmailId: String, account: String? = null): Int {
+    val id = (if (account == null) "winnow:$gmailId" else "winnow:$account:$gmailId").hashCode()
+    return if (id == SUMMARY_ID || id == summaryIdFor(account)) id + 1 else id
+  }
+
+  /** Each account has its own group and summary, so one account's summary never lists another's mail. */
+  fun groupFor(account: String?): String = if (account == null) GROUP else "$GROUP.$account"
+
+  fun summaryIdFor(account: String?): Int {
+    if (account == null) return SUMMARY_ID
+    val id = ("winnow-summary:$account").hashCode()
     return if (id == SUMMARY_ID) id + 1 else id
   }
+
+  /** `messageLink` in the web layer's `notifications.ts`: the exact message, in its account. */
+  fun messageUri(messageId: Long, gmailId: String?, account: String?): String {
+    val builder = Uri.Builder().scheme("winnow").authority("message").appendPath(messageId.toString())
+    if (account != null) builder.appendQueryParameter("account", account)
+    if (!gmailId.isNullOrEmpty()) builder.appendQueryParameter("gmail", gmailId)
+    return builder.build().toString()
+  }
+
+  /** A summary of several messages opens the account's inbox. */
+  fun inboxUri(account: String?): String =
+    if (account == null) "winnow://open" else "winnow://open?account=$account&view=inbox"
+
 
   // ── Showing ──────────────────────────────────────────────────────────────
 
@@ -83,6 +113,9 @@ object MailNotifier {
       (if (actions?.optBoolean("trash", true) != false) 2 else 0) or
       (if (actions?.optBoolean("read", true) != false) 4 else 0)
     val hide = batch.optBoolean("hidePreview", false)
+    val accountJson = batch.optJSONObject("account")
+    val account = validAccount(accountJson?.optString("id"))
+    val label = if (account != null && accountJson?.isNull("label") == false) accountJson.optString("label").ifEmpty { null } else null
 
     val lines = ArrayList<String>()
     for (i in 0 until messages.length()) {
@@ -90,7 +123,9 @@ object MailNotifier {
       val gmailId = m.optString("gmailId")
       if (gmailId.isEmpty()) continue
       val extras = Bundle().apply {
-        putInt(EXTRA_NOTIFICATION_ID, idFor(gmailId))
+        putInt(EXTRA_NOTIFICATION_ID, idFor(gmailId, account))
+        if (account != null) putString(EXTRA_ACCOUNT, account)
+        if (label != null) putString(EXTRA_ACCOUNT_LABEL, label)
         putLong(EXTRA_MESSAGE_ID, m.optLong("messageId"))
         putString(EXTRA_GMAIL_ID, gmailId)
         putString(EXTRA_THREAD_ID, if (m.isNull("threadId")) null else m.optString("threadId"))
@@ -118,14 +153,15 @@ object MailNotifier {
         .setContentTitle(title)
         .setContentText(if (hide) null else batch.optString("summaryBody"))
         .setStyle(if (hide) null else style)
-        .setGroup(GROUP)
+        .setGroup(groupFor(account))
         .setGroupSummary(true)
         .setCategory(NotificationCompat.CATEGORY_EMAIL)
         .setAutoCancel(true)
         .setOnlyAlertOnce(true)
-        .setContentIntent(open(context, SUMMARY_ID, "winnow://open"))
+        .setContentIntent(open(context, summaryIdFor(account), inboxUri(account)))
+      if (label != null) summary.setSubText(label)
       if (hide) summary.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicVersion(context, title))
-      post(context, SUMMARY_ID, summary.build())
+      post(context, summaryIdFor(account), summary.build())
     }
   }
 
@@ -137,6 +173,8 @@ object MailNotifier {
     val preview = extras.getString(EXTRA_PREVIEW).orEmpty()
     val flags = extras.getInt(EXTRA_ACTIONS, 7)
     val hide = extras.getBoolean(EXTRA_HIDE, false)
+    val account = validAccount(extras.getString(EXTRA_ACCOUNT))
+    val label = extras.getString(EXTRA_ACCOUNT_LABEL)
     val text = if (preview.isEmpty()) subject else "$subject\n$preview"
 
     // The sender's picture, when the web layer sent one and the preview is not hidden:
@@ -154,11 +192,14 @@ object MailNotifier {
       .setContentTitle(title)
       .setContentText(subject)
       .setStyle(style)
-      .setGroup(GROUP)
+      .setGroup(groupFor(account))
       .setCategory(NotificationCompat.CATEGORY_EMAIL)
       .setAutoCancel(true)
       .setOnlyAlertOnce(true)
-      .setContentIntent(open(context, id, "winnow://message/${extras.getLong(EXTRA_MESSAGE_ID)}"))
+      // The exact message, in its account: the app opens it in the reader (fetching it
+      // first if the cache does not have it yet).
+      .setContentIntent(open(context, id, messageUri(extras.getLong(EXTRA_MESSAGE_ID), extras.getString(EXTRA_GMAIL_ID), account)))
+    if (label != null) builder.setSubText(label)
     if (picture != null) builder.setLargeIcon(picture)
     val receivedAt = extras.getLong(EXTRA_RECEIVED_AT)
     if (receivedAt > 0) builder.setWhen(receivedAt).setShowWhen(true)
@@ -272,13 +313,14 @@ object MailNotifier {
   }
 
   private fun failure(context: Context, extras: Bundle?, id: Int, title: String, text: String): android.app.Notification {
-    val target = extras?.getLong(EXTRA_MESSAGE_ID)?.let { "winnow://message/$it" } ?: "winnow://open"
+    val account = validAccount(extras?.getString(EXTRA_ACCOUNT))
+    val target = extras?.getLong(EXTRA_MESSAGE_ID)?.let { messageUri(it, extras.getString(EXTRA_GMAIL_ID), account) } ?: inboxUri(account)
     return NotificationCompat.Builder(context, CHANNEL)
       .setSmallIcon(R.drawable.ic_stat_winnow)
       .setContentTitle(title)
       .setContentText(text)
       .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-      .setGroup(GROUP)
+      .setGroup(groupFor(account))
       .setCategory(NotificationCompat.CATEGORY_ERROR)
       .setAutoCancel(true)
       .setOnlyAlertOnce(true)
@@ -291,16 +333,17 @@ object MailNotifier {
   private fun status(context: Context, extras: Bundle, title: String, text: String?): NotificationCompat.Builder {
     val id = extras.getInt(EXTRA_NOTIFICATION_ID)
     val messageId = extras.getLong(EXTRA_MESSAGE_ID, -1)
+    val account = validAccount(extras.getString(EXTRA_ACCOUNT))
     return NotificationCompat.Builder(context, CHANNEL)
       .setSmallIcon(R.drawable.ic_stat_winnow)
       .setContentTitle(title)
       .setContentText(text ?: extras.getString(EXTRA_TITLE))
-      .setGroup(GROUP)
+      .setGroup(groupFor(account))
       .setCategory(NotificationCompat.CATEGORY_EMAIL)
       .setOnlyAlertOnce(true)
       .setSilent(true)
       .setAutoCancel(true)
-      .setContentIntent(open(context, id, if (messageId >= 0) "winnow://message/$messageId" else "winnow://open"))
+      .setContentIntent(open(context, id, if (messageId >= 0) messageUri(messageId, extras.getString(EXTRA_GMAIL_ID), account) else inboxUri(account)))
       .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
       .setPublicVersion(publicVersion(context, title))
   }
@@ -322,12 +365,17 @@ object MailNotifier {
 
   fun cancel(context: Context, id: Int) {
     val manager = NotificationManagerCompat.from(context)
+    // The last child of its account's group gone: that group's summary goes too, or it
+    // lingers over nothing. The group is read before the child is cancelled.
+    val system = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) context.getSystemService(NotificationManager::class.java) else null
+    val group = system?.activeNotifications?.firstOrNull { it.id == id }?.notification?.group
     manager.cancel(id)
-    // The last child gone: the summary goes too, or it lingers over nothing.
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      val system = context.getSystemService(NotificationManager::class.java)
-      val children = system?.activeNotifications?.count { it.id != SUMMARY_ID && it.id != id && it.notification.group == GROUP } ?: 0
-      if (children == 0) manager.cancel(SUMMARY_ID)
+    if (system != null && group != null) {
+      val active = system.activeNotifications
+      val isSummary = { n: android.app.Notification -> (n.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0 }
+      val summary = active.firstOrNull { it.notification.group == group && isSummary(it.notification) }
+      val children = active.count { it.id != id && it.notification.group == group && !isSummary(it.notification) }
+      if (children == 0 && summary != null) manager.cancel(summary.id)
     }
   }
 

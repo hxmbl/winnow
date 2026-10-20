@@ -169,7 +169,12 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
 
     const rowFor = (n) => p.locator("[data-message-id]", { hasText: `Offline check ${n}` });
     const indicator = p.locator("[data-offline-queue]");
-    const queued = () => p.evaluate(() => JSON.parse(localStorage.getItem("winnow.offlineQueue.v1") ?? "null")?.entries?.length ?? 0);
+    // The queue is the active account's (1.4.0): `winnow.offlineQueue.v1@<id>`.
+    const queued = () =>
+      p.evaluate(() => {
+        const id = JSON.parse(localStorage.getItem("winnow.accounts.v1") ?? "null")?.active;
+        return JSON.parse((id && localStorage.getItem(`winnow.offlineQueue.v1@${id}`)) ?? "null")?.entries?.length ?? 0;
+      });
     check("online with nothing waiting, there is no offline line", (await indicator.count()) === 0);
 
     await ctx.setOffline(true);

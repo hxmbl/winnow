@@ -52,6 +52,7 @@ class NotifyActionReceiver : BroadcastReceiver() {
           .put("subject", extras.getString(MailNotifier.EXTRA_SUBJECT))
           .put("replyHead", extras.getString(MailNotifier.EXTRA_REPLY_HEAD))
           .put("reply", reply)
+          .put("account", MailNotifier.validAccount(extras.getString(MailNotifier.EXTRA_ACCOUNT)))
           .put("at", System.currentTimeMillis()),
       )
     }
@@ -73,6 +74,8 @@ class NotifyActionReceiver : BroadcastReceiver() {
     request.put("threadId", extras.getString(MailNotifier.EXTRA_THREAD_ID))
     request.put("replyHead", extras.getString(MailNotifier.EXTRA_REPLY_HEAD))
     request.put("reply", reply)
+    // The notification's account: Rust acts with that account's tokens (`plan::tokens_secret_for`).
+    MailNotifier.validAccount(extras.getString(MailNotifier.EXTRA_ACCOUNT))?.let { request.put("account", it) }
     try {
       handler.send(request)
     } catch (_: Exception) {

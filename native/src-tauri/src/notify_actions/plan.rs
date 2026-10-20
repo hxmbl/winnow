@@ -29,6 +29,27 @@ pub const CLIENT_SECRET: &str = "google.oauth-client";
 /// Refresh this long before the recorded expiry, as `tokens.ts` does.
 const EXPIRY_SKEW_MS: i64 = 60_000;
 
+/// An account namespace (1.4.0, `accounts.ts`'s `isAccountId`): `[a-z0-9]{4,24}`.
+pub fn valid_account_id(id: &str) -> bool {
+    (4..=24).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+/// The keychain entry holding an account's tokens (`tokenSecretName` in `accounts.ts`):
+/// `gmail.tokens@<id>` under the same service. No account (a notification posted by
+/// 1.3.5): the old single entry, which the 1.4.0 migration empties, so such a press
+/// fails as "signed out" rather than acting on whichever account happens to be there.
+/// A malformed id is refused, never used to build a name.
+pub fn tokens_secret_for(account: Option<&str>) -> Option<String> {
+    match account {
+        None => Some(TOKENS_SECRET.to_string()),
+        Some(id) if valid_account_id(id) => Some(format!("{TOKENS_SECRET}@{id}")),
+        Some(_) => None,
+    }
+}
+
 /// Gmail ids are hex today; anything outside this set never reaches a URL.
 pub fn valid_gmail_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
@@ -52,6 +73,9 @@ pub struct ActionRequest {
     pub reply_head: Option<String>,
     #[serde(default)]
     pub reply: Option<String>,
+    /// The account the notification was for (1.4.0); its tokens are the ones used.
+    #[serde(default)]
+    pub account: Option<String>,
 }
 
 /// What to do, once the request has been validated.
@@ -618,6 +642,7 @@ mod tests {
             thread_id: Some("18c0ff00".into()),
             reply_head: Some(head()),
             reply: reply.map(str::to_string),
+            account: None,
         }
     }
 
@@ -670,6 +695,21 @@ mod tests {
             .find(|(k, _)| k == "Authorization")
             .unwrap()
             .1
+    }
+
+    #[test]
+    fn each_account_acts_with_its_own_tokens() {
+        assert_eq!(
+            tokens_secret_for(Some("acct2")).as_deref(),
+            Some("gmail.tokens@acct2")
+        );
+        assert_eq!(tokens_secret_for(None).as_deref(), Some("gmail.tokens"));
+        // Never a name built from something that is not an account id.
+        assert_eq!(tokens_secret_for(Some("../x")), None);
+        assert_eq!(tokens_secret_for(Some("ACCT")), None);
+        assert_eq!(tokens_secret_for(Some("ab")), None);
+        assert!(valid_account_id("a1b2c3d4e5"));
+        assert!(!valid_account_id(&"a".repeat(25)));
     }
 
     #[test]
@@ -932,5 +972,11 @@ mod tests {
         let parsed: ActionRequest = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.notification_id, -5);
         assert_eq!(parsed.parse_action(), Some(Action::Reply("yo".into())));
+        assert_eq!(parsed.account, None);
+        let tagged: ActionRequest = serde_json::from_str(
+            r#"{"requestId":"a","action":"read","notificationId":1,"gmailId":"abc","account":"acct2"}"#,
+        )
+        .unwrap();
+        assert_eq!(tagged.account.as_deref(), Some("acct2"));
     }
 }

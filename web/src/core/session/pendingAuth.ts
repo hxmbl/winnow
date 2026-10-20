@@ -34,6 +34,12 @@ interface PendingAuth {
   purpose?: "contacts" | "drafts" | "drive";
   /** For the contacts opt-in: the account that asked, so a different one can be refused. */
   expectEmail?: string;
+  /**
+   * The account namespace whose session started this trip (1.4.0): the redirect back is
+   * finished by that account's session, so its tokens land in its own store. `pending`
+   * for an account being added, whose address is not known until the profile read.
+   */
+  account?: string;
 }
 
 /** `sessionStorage` may throw outright when storage is disabled. */
@@ -98,6 +104,11 @@ export function takePendingAuth(state: string): PendingAuth | null {
   const found = entries.find((entry) => entry.state === state) ?? null;
   if (found) writeAll(entries.filter((entry) => entry.state !== state));
   return found;
+}
+
+/** The namespace a pending sign-in belongs to, without taking it (the exchange takes it). */
+export function peekPendingAccount(state: string): string | null {
+  return readAll().find((entry) => entry.state === state)?.account ?? null;
 }
 
 /** Forget a sign-in the user declined, so the entry cannot linger. */

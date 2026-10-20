@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KeptReply } from "../core/notify/notifications";
 import type { WinnowStore } from "../core/store/store";
 import type { Platform } from "../platform/types";
-import { saveKeptReplies } from "./notificationActions";
+import { provideAccountRouter, resetAccountRouter, routeNotificationAction, saveKeptReplies } from "./notificationActions";
 
 const KEPT = {
   requestId: "req-1",
@@ -23,6 +23,7 @@ function fakes() {
   let phone = [KEPT];
   const store = {
     getSnapshot: () => ({ status: "ready" }),
+    currentAccountId: () => null,
     saveKeptReplies: async (kept: readonly KeptReply[]) => {
       saved.push([...kept]);
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -55,5 +56,51 @@ describe("replies a phone kept", () => {
     // A later run starts afresh, and finds nothing left on the phone.
     await saveKeptReplies(store, platform);
     expect(saved).toHaveLength(1);
+  });
+});
+
+describe("a notification's press, routed to its account", () => {
+  it("waits for the launch to restore, switches to the account, then opens the exact message", async () => {
+    resetAccountRouter();
+    const calls: string[] = [];
+    let open = "acct1xx";
+    let restored: () => void = () => {};
+    const ready = new Promise<void>((resolve) => (restored = resolve));
+    const store = {
+      openMessage: async (gmailId: string) => {
+        calls.push(`open:${open}:${gmailId}`);
+        return true;
+      },
+      getSnapshot: () => ({ all: [] }),
+    } as unknown as WinnowStore;
+    const platform = { focusWindow: async () => void calls.push("focus") } as unknown as Platform;
+    // Pressed before the app is up (a cold start from the notification).
+    const done = routeNotificationAction(store, platform, { action: "open", messageId: 5, gmailId: "g5", origin: "desktop", account: "acct2xx" });
+    provideAccountRouter({
+      ready: () => ready,
+      isOpen: (id) => id === open,
+      openAccount: async (id) => {
+        calls.push(`switch:${id}`);
+        open = id;
+        return true;
+      },
+      refreshAccount: async () => {},
+      refreshInactive: async () => {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual([]);
+    restored();
+    expect(await done).toBe("opened");
+    expect(calls).toEqual(["focus", "switch:acct2xx", "open:acct2xx:g5"]);
+    resetAccountRouter();
+  });
+
+  it("a reply kept for another account waits on the phone until that account is open", async () => {
+    const { store, platform, saved, released } = fakes();
+    const elsewhere = { ...KEPT, requestId: "req-2", account: "acct2xx" };
+    (platform as unknown as { keptReplies: () => Promise<unknown[]> }).keptReplies = async () => [elsewhere];
+    await saveKeptReplies(store, platform);
+    expect(saved).toEqual([]);
+    expect(released).toEqual([]);
   });
 });

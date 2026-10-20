@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { exit, onBackButtonPress } from "@tauri-apps/api/app";
 import type { TokenSet } from "../core/gmail/dto";
 import type { TokenStore } from "../core/gmail/tokens";
+import { tokenSecretName } from "../core/session/accounts";
 import {
   KEYCHAIN_CREDENTIALS_NAME,
   normaliseCredentials,
@@ -99,8 +100,8 @@ export const desktopPlatform: Platform = {
     return infoPromise;
   },
 
-  tokenStore(): TokenStore {
-    return keychainTokenStore();
+  tokenStore(account?: string): TokenStore {
+    return account ? keychainTokenStore(tokenSecretName(account)) : keychainTokenStore();
   },
 
   credentialStore(): CredentialStore {
@@ -203,7 +204,9 @@ export const desktopPlatform: Platform = {
   },
 
   async keptReplies(): Promise<unknown[]> {
-    return invoke<unknown[]>("notify_kept_replies").catch(() => []);
+    // An array or nothing: a shell without the command answers `null`.
+    const kept = await invoke<unknown[] | null>("notify_kept_replies").catch(() => []);
+    return Array.isArray(kept) ? kept : [];
   },
 
   async releaseKeptReplies(requestIds: readonly string[]): Promise<void> {
@@ -275,6 +278,20 @@ export const desktopPlatform: Platform = {
 };
 
 export const desktopPlatformExtras = {
+  /**
+   * The links the OS launched the app for (`deep_link_launch`): asked once the webview
+   * listens, since the shell's own event for a cold start fires before it does. Empty
+   * when there are none, or from a shell that predates the command.
+   */
+  async launchLinks(): Promise<string[]> {
+    try {
+      const urls = await invoke<unknown>("deep_link_launch");
+      return Array.isArray(urls) ? urls.filter((url): url is string => typeof url === "string") : [];
+    } catch {
+      return [];
+    }
+  },
+
   onDeepLink(handler: (url: string) => void): () => void {
     let cancelled = false;
     let unlisten: (() => void) | null = null;

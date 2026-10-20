@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronsUpDown, LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
+import { ChevronsUpDown, LogIn, LogOut, RefreshCw, Settings, Users } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { Avatar } from "./Avatar";
 import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
@@ -86,6 +86,10 @@ export type NavProps = {
   onRefresh: () => void;
   settingsOpen: boolean;
   onOpenSettings: () => void;
+  /** 1.4.0: open the account switcher (the account menu's Switch account…). */
+  onOpenAccounts?: () => void;
+  /** 1.4.0: the open account's avatar in the desktop header, which opens the switcher. */
+  accountButton?: React.ReactNode;
 };
 
 /** The account, as the footer names it. */
@@ -238,6 +242,9 @@ function accountMenu(props: NavProps, onNavigate?: () => void): MenuEntry[] {
   }
   return [
     { kind: "item", id: "sync", label: props.syncLabel, icon: RefreshCw, disabled: props.syncing, onSelect: then(props.onRefresh) },
+    ...(props.onOpenAccounts
+      ? [{ kind: "item" as const, id: "accounts", label: "Switch account…", icon: Users, onSelect: then(props.onOpenAccounts) }]
+      : []),
     { kind: "divider", id: "d1" },
     { kind: "item", id: "sign-out", label: "Sign out", icon: LogOut, danger: true, onSelect: then(props.onSignOut) },
   ];
@@ -683,7 +690,8 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline">
                 <AppMark size={22} />
               </span>
-              <span className="text-read font-semibold text-ink">Winnow</span>
+              <span className="flex-1 text-read font-semibold text-ink">Winnow</span>
+              {props.accountButton}
             </div>
           )}
           {touch && <AccountFooter {...props} touch={touch} onNavigate={onClose} />}

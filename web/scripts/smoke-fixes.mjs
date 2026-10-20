@@ -592,7 +592,11 @@ async function demoChecks({ browser, URL, check, section, errors }) {
         googleSignIns === 0 &&
         state.tokenCalls === tokenCallsBefore &&
         (await p.locator("[data-demo-cta]").count()) === 0 &&
-        (await p.evaluate(() => Boolean(localStorage.getItem("winnow.gmail.tokens")))),
+        // 1.4.0: the tokens are the active account's, `<key>@<id>` in the registry.
+        (await p.evaluate(() => {
+          const id = JSON.parse(localStorage.getItem("winnow.accounts.v1") ?? "null")?.active;
+          return Boolean(id && localStorage.getItem(`winnow.gmail.tokens@${id}`));
+        })),
       JSON.stringify({ googleSignIns, tokenCalls: state.tokenCalls, profileCalls: state.profileCalls }),
     );
     await ctx.close();
