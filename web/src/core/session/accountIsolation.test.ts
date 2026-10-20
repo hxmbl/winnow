@@ -15,6 +15,7 @@ import {
   MAX_ACCOUNTS,
   accountKey,
   loadAccounts,
+  persistAccounts,
   saveAccounts,
   scopedStorage,
   webTokenKey,
@@ -436,6 +437,123 @@ describe("migration from 1.3.5", () => {
     expect(storage.get("winnow.offlineQueue.v1@migr4ted")).toContain("ada@one.example");
     expect((await tokensFor("migr4ted").read())?.accessToken).toBe("access-legacy");
     for (const key of ACCOUNT_SCOPED_KEYS) expect(storage.has(key)).toBe(false);
+  });
+
+  /** Storage whose writes of the registry fail (`throw`) or vanish (`drop`) while `mode` says so. */
+  function registryFails(mode: { now: "throw" | "drop" | "ok" }) {
+    return {
+      getItem: (k: string) => globalThis.localStorage.getItem(k),
+      removeItem: (k: string) => globalThis.localStorage.removeItem(k),
+      setItem: (k: string, v: string) => {
+        if (k === ACCOUNTS_STORAGE_KEY && mode.now === "throw") throw new DOMException("quota", "QuotaExceededError");
+        if (k === ACCOUNTS_STORAGE_KEY && mode.now === "drop") return;
+        globalThis.localStorage.setItem(k, v);
+      },
+    };
+  }
+  const legacyKeys = () => new Map([...storage].filter(([key]) => (ACCOUNT_SCOPED_KEYS as readonly string[]).includes(key) || key === "winnow.gmail.tokens"));
+
+  for (const failure of ["throw", "drop"] as const) {
+    it(`a registry write that fails (${failure}) defers it: no legacy key or token goes, and the next launch finishes it`, async () => {
+      seedLegacy();
+      const before = legacyKeys();
+      const mode: { now: "throw" | "drop" | "ok" } = { now: failure };
+      const outcome = await migrateToAccounts({ storage: registryFails(mode), legacyTokens: legacyTokens(), tokensFor, newId: () => "migr4ted" });
+      expect(outcome.kind).toBe("deferred");
+      expect(legacyKeys()).toEqual(before);
+      expect((await legacyTokens().read())?.accessToken).toBe("access-legacy");
+      // The copies are owned: the id they sit under is still recorded for the retry.
+      expect(storage.get(MIGRATION_ID_KEY)).toBe("migr4ted");
+      expect(storage.has(ACCOUNTS_STORAGE_KEY)).toBe(false);
+
+      mode.now = "ok";
+      const retry = await migrateToAccounts({ storage: registryFails(mode), legacyTokens: legacyTokens(), tokensFor, newId: () => "other111" });
+      expect(retry).toMatchObject({ kind: "migrated", account: { id: "migr4ted" } });
+      expect(loadAccounts(globalThis.localStorage).active).toBe("migr4ted");
+      expect((await tokensFor("migr4ted").read())?.accessToken).toBe("access-legacy");
+      expect(await legacyTokens().read()).toBeNull();
+      for (const key of ACCOUNT_SCOPED_KEYS) expect(storage.has(key)).toBe(false);
+      expect([...storage.keys()].some((key) => key.endsWith("@other111"))).toBe(false);
+    });
+  }
+
+  it("signed out under 1.3.5 with a registry write that fails: nothing is deleted, and the next launch retries", async () => {
+    seedLegacy();
+    storage.delete("winnow.gmail.tokens");
+    const before = new Map(storage);
+    const mode: { now: "throw" | "drop" | "ok" } = { now: "throw" };
+    expect((await migrateToAccounts({ storage: registryFails(mode), legacyTokens: legacyTokens(), tokensFor })).kind).toBe("deferred");
+    expect(new Map(storage)).toEqual(before);
+    mode.now = "ok";
+    expect((await migrateToAccounts({ storage: registryFails(mode), legacyTokens: legacyTokens(), tokensFor })).kind).toBe("signed-out");
+    expect(storage.has("winnow.gmail.cache.messages")).toBe(false);
+  });
+
+  it("the tokens are copied, and read back, before the legacy ones go", async () => {
+    seedLegacy();
+    const events: string[] = [];
+    const legacy: TokenStore = {
+      ...legacyTokens(),
+      clear: async () => {
+        events.push("clear legacy");
+        await legacyTokens().clear();
+      },
+    };
+    const traced = (id: string): TokenStore => ({
+      ...tokensFor(id),
+      write: async (t) => {
+        events.push("write account");
+        await tokensFor(id).write(t);
+      },
+    });
+    expect((await migrateToAccounts({ storage: globalThis.localStorage, legacyTokens: legacy, tokensFor: traced, newId: () => "migr4ted" })).kind).toBe("migrated");
+    expect(events).toEqual(["write account", "clear legacy"]);
+  });
+
+  it("a token write that does not stick defers it, deleting nothing", async () => {
+    seedLegacy();
+    const before = legacyKeys();
+    const forgetful = (id: string): TokenStore => ({ ...tokensFor(id), write: async () => {} });
+    expect((await migrateToAccounts({ storage: globalThis.localStorage, legacyTokens: legacyTokens(), tokensFor: forgetful, newId: () => "migr4ted" })).kind).toBe("deferred");
+    expect(legacyKeys()).toEqual(before);
+    expect(storage.has(ACCOUNTS_STORAGE_KEY)).toBe(false);
+  });
+
+  it("an id that cannot be recorded defers it before anything is copied", async () => {
+    seedLegacy();
+    const before = new Map(storage);
+    const noId = {
+      getItem: (k: string) => globalThis.localStorage.getItem(k),
+      removeItem: (k: string) => globalThis.localStorage.removeItem(k),
+      setItem: (k: string, v: string) => {
+        if (k === MIGRATION_ID_KEY) throw new DOMException("quota", "QuotaExceededError");
+        globalThis.localStorage.setItem(k, v);
+      },
+    };
+    expect((await migrateToAccounts({ storage: noId, legacyTokens: legacyTokens(), tokensFor, newId: () => "migr4ted" })).kind).toBe("deferred");
+    expect(new Map(storage)).toEqual(before);
+  });
+
+  it("the device's learning is adopted only once the account's copy is written", () => {
+    storage.set("winnow.learning.v1", JSON.stringify({ version: 1, weights: { starBoost: 31 }, events: [] }));
+    const refusing = {
+      getItem: (k: string) => globalThis.localStorage.getItem(k),
+      removeItem: (k: string) => globalThis.localStorage.removeItem(k),
+      setItem: () => {
+        throw new DOMException("quota", "QuotaExceededError");
+      },
+    };
+    adoptDeviceLearning(refusing, "first111");
+    expect(storage.get("winnow.learning.v1")).toContain("31");
+  });
+
+  it("persistAccounts says whether the registry is really there", () => {
+    const snapshot = { version: 1 as const, active: null, accounts: [] };
+    expect(persistAccounts(globalThis.localStorage, snapshot)).toBe(true);
+    expect(persistAccounts(registryFails({ now: "throw" }), snapshot)).toBe(false);
+    storage.delete(ACCOUNTS_STORAGE_KEY);
+    expect(persistAccounts(registryFails({ now: "drop" }), snapshot)).toBe(false);
+    expect(persistAccounts(null, snapshot)).toBe(false);
   });
 
   it("signed out under 1.3.5: no account, and the learning stays the device's until the first account adopts it", async () => {

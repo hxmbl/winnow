@@ -189,12 +189,27 @@ export function hasAccountsRecord(storage: KeyValueStorage | null): boolean {
   }
 }
 
-export function saveAccounts(storage: KeyValueStorage | null, snapshot: AccountsSnapshot): void {
+/**
+ * Write the registry and read it back: `true` only when storage now holds exactly this
+ * snapshot. For a caller that deletes something on the strength of the registry being
+ * there (the migration from 1.3.5): a refused write, or one a host quietly drops, is
+ * `false`, never swallowed.
+ */
+export function persistAccounts(storage: KeyValueStorage | null, snapshot: AccountsSnapshot): boolean {
+  if (!storage) return false;
+  const raw = JSON.stringify(snapshot);
   try {
-    storage?.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(snapshot));
+    storage.setItem(ACCOUNTS_STORAGE_KEY, raw);
+    return storage.getItem(ACCOUNTS_STORAGE_KEY) === raw;
   } catch {
-    // A full quota: the registry stays in memory for this run.
+    return false;
   }
+}
+
+/** The registry's write-through: best effort, since nothing is deleted on the strength of it. */
+export function saveAccounts(storage: KeyValueStorage | null, snapshot: AccountsSnapshot): void {
+  // A full quota: the registry stays in memory for this run.
+  persistAccounts(storage, snapshot);
 }
 
 /** Why an account could not be added. */
