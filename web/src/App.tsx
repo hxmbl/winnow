@@ -1124,6 +1124,8 @@ export function App({ store }: Props) {
       glass={phone}
       onOpen={() => {
         setAccountError(null);
+        // From the sidebar's header: the sidebar makes way for the sheet.
+        setSidebarOpen(false);
         setAccountsOpen(true);
       }}
     />
@@ -1174,7 +1176,10 @@ export function App({ store }: Props) {
     },
     settingsOpen: snapshot.overlay === "settings",
     onOpenSettings: () => store.setOverlay("settings"),
-    onOpenAccounts: () => setAccountsOpen(true),
+    onOpenAccounts: () => {
+      setSidebarOpen(false);
+      setAccountsOpen(true);
+    },
     accountButton,
   };
 
