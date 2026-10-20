@@ -28,11 +28,12 @@ export type PillItem = {
    */
   hue: PillHue;
   /**
-   * The number on the pill: what tapping it would list (before search).
+   * The number on the pill: what tapping it would list.
    *
-   * With nothing on, how many messages in the open mailbox the bucket holds. With a
-   * filter on (1.4.0) it is faceted: an off pill counts the current result it also
-   * matches (what the list becomes with it added, since filters AND), an on pill the
+   * With nothing on and no search, how many messages in the open mailbox the bucket
+   * holds. With a filter on or a search running (1.4.0) it is faceted: an off pill
+   * counts the current (searched) result it also matches (what the list becomes with it
+   * added, since filters AND with each other and with the search), an on pill the
    * current result. See `countFacets`.
    */
   count: number;
@@ -46,7 +47,8 @@ export function buildPills(
   senderCounts: ReadonlyMap<string, number>,
   activeFilters: readonly FilterId[],
   /**
-   * The store's faceted counts (`MailboxView.railFacets`), `null` with nothing on. They
+   * The store's faceted counts (`MailboxView.railFacets`), `null` with nothing on and no
+   * search. They
    * replace the number shown; which pills the rail keeps is still decided by `counts`,
    * so turning a filter on dims a pill that no longer narrows anything to 0 rather than
    * taking it off the rail and moving every digit after it.

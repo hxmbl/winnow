@@ -198,16 +198,22 @@ export function listedFiltersFor(email: Email, signal: EmailSignals, profile: Us
  * counts the messages the list would show if it were turned on as well — the current
  * result that it also matches — and a pill that is *on* counts the current result
  * itself. Both are the list's own semantics (`matchesFilter`, no spam guard), so the
- * number on a pill is exactly what tapping it gives, before search like every rail count.
+ * number on a pill is exactly what tapping it gives (under the search too, below).
  *
  * One exception, from `toggleFilter`: Unsafe is exclusive, so turning it on *replaces*
  * the set. While it is off its count is what Unsafe alone lists, not the intersection.
  *
- * `null` with nothing active: the rail then shows the plain per-bucket counts
- * (`countAllFilters`), unchanged.
+ * With a search running (1.4.0) the caller passes only the search's matches (the list's
+ * own test, `matchesSearch`) and `searching`, so every count above is also ANDed with
+ * the search, nothing on included: an off pill counts search ∧ filters ∧ pill, an on
+ * pill the current (searched) result, and an off Unsafe what Unsafe alone lists under
+ * the search, since `toggleFilter` replaces the filters and leaves the query alone.
+ *
+ * `null` with nothing active and no search: the rail then shows the plain per-bucket
+ * counts (`countAllFilters`), unchanged.
  */
 export type FacetCounts = {
-  /** Messages the active set admits: the current result before search. */
+  /** Messages the active set admits: the current result (searched, while searching). */
   total: number;
   builtin: ReadonlyMap<BuiltinSmartFilter, number>;
   /** By lowercased sender, as sender filters match (`matchesFilter`). */
@@ -221,8 +227,14 @@ export function countFacets(
   active: readonly FilterId[],
   /** Per-message memo of `listedFiltersFor`, like `countAllFilters`'s. */
   memo?: WeakMap<Email, { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }>,
+  /**
+   * True while a search is running (1.4.0): `emails` are then the search's matches,
+   * and the counts are faceted even with nothing on, since every pill must count what
+   * tapping it gives under that search rather than the plain bucket size.
+   */
+  searching = false,
 ): FacetCounts | null {
-  if (active.length === 0) return null;
+  if (active.length === 0 && !searching) return null;
   const builtinActive = active.flatMap((filter) => (filter.kind === "builtin" ? [filter.id] : []));
   const senderActive = active.flatMap((filter) => (filter.kind === "sender" ? [filter.sender.toLowerCase()] : []));
   const unsafeOn = builtinActive.includes("unsafe");

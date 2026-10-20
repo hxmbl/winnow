@@ -64,6 +64,8 @@ import {
   conversationFor,
   groupThreads,
   runInboxQuery,
+  searchTokens,
+  matchesSearch,
   type InboxResult,
   type SearchBags,
   type ThreadRow,
@@ -571,9 +573,10 @@ export type MailboxView = {
   /** Messages per sender in the open mailbox, for the sender pills. */
   railSenderCounts: ReadonlyMap<string, number>;
   /**
-   * The pills' numbers once a filter is on (1.4.0), faceted on the active set: an off
-   * pill counts what the list would show with it turned on too (AND, see `countFacets`),
-   * an on pill the current result. `null` with nothing active, when the pills show
+   * The pills' numbers once a filter is on or a search is running (1.4.0), faceted on
+   * the active set and the search: an off pill counts what the list would show with it
+   * turned on too (search AND filters AND pill, see `countFacets`), an on pill the
+   * current result. `null` with nothing active and no search, when the pills show
    * `railCounts` as before. `railCounts` still decides which pills the rail keeps, so
    * narrowing the list dims a pill to 0 rather than pulling it off the rail.
    */
@@ -1117,27 +1120,40 @@ export class WinnowStore {
    */
   private facetCache: {
     filters: readonly FilterId[];
+    /** The search's tokens, joined: a keystroke that changes them is one rescan. */
+    search: string;
     profile: UserProfile;
     emails: readonly Email[];
     signals: readonly (EmailSignals | undefined)[];
     facets: FacetCounts | null;
   } | null = null;
 
-  private facetsFor(emails: readonly Email[], signals: ReadonlyMap<number, EmailSignals>, profile: UserProfile): FacetCounts | null {
+  private facetsFor(
+    emails: readonly Email[],
+    signals: ReadonlyMap<number, EmailSignals>,
+    profile: UserProfile,
+    searchBags: SearchBags,
+  ): FacetCounts | null {
     const filters = this.state.activeFilters;
-    if (filters.length === 0) return null;
+    // The list's own tokens and test (`searchTokens` / `matchesSearch`), over the bags
+    // this pass already built for the list, so a chip searches exactly as the list does.
+    const tokens = searchTokens(this.state.searchQuery);
+    if (filters.length === 0 && tokens.length === 0) return null;
+    const search = tokens.join(" ");
     const hit = this.facetCache;
     if (
       hit &&
       hit.filters === filters &&
+      hit.search === search &&
       hit.profile === profile &&
       hit.emails.length === emails.length &&
       emails.every((email, i) => hit.emails[i] === email && hit.signals[i] === signals.get(email.id))
     ) {
       return hit.facets;
     }
-    const facets = countFacets(emails, signals, profile, filters, this.listedHits);
-    this.facetCache = { filters, profile, emails, signals: emails.map((email) => signals.get(email.id)), facets };
+    const searched = tokens.length > 0 ? emails.filter((email) => matchesSearch(email, tokens, searchBags)) : emails;
+    const facets = countFacets(searched, signals, profile, filters, this.listedHits, tokens.length > 0);
+    this.facetCache = { filters, search, profile, emails, signals: emails.map((email) => signals.get(email.id)), facets };
     return facets;
   }
 
@@ -1348,7 +1364,7 @@ export class WinnowStore {
     const threads = groupThreads(result.emails);
 
     // The rail is ranked and counted over the *open mailbox* (1.3.3), before search and
-    // filters: a pill's number is how many messages in this mailbox it would show, so
+    // filters (the numbers shown facet on both, `railFacets` below): a pill's number is how many messages in this mailbox it would show, so
     // the count, the list a filter gives and "Why it's here" all agree. The permanent
     // pair stays pinned wherever you are.
     const railEmails = state.mailbox === "drafts" || state.mailbox === "scheduled" ? [] : mailboxEmails;
@@ -1362,7 +1378,11 @@ export class WinnowStore {
     for (const email of railEmails) {
       railSenderCounts.set(email.sender, (railSenderCounts.get(email.sender) ?? 0) + 1);
     }
-    const railFacets = this.facetsFor(railEmails, signals, profile);
+    // Faceted on the active filters and, while a search runs (1.4.0), on the search: a
+    // chip's number is then what tapping it lists under that query. Which chips stay is
+    // still `rail` / `railCounts` (the plain mailbox ranking), so typing never reshuffles
+    // the rail; a chip the search empties dims in place. `inboxCounts` stay plain.
+    const railFacets = this.facetsFor(railEmails, signals, profile, searchBags);
 
     // Over the inbox whatever is open: the drawer's and the triage line's claims.
     const inboxCounts =

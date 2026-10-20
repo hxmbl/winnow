@@ -312,8 +312,8 @@ export const FilterStrip = memo(function FilterStrip({
             data-rail-key={key}
             data-on={on ? "" : undefined}
             // A pinned bucket with nothing in this mailbox (1.3.3), or, with a filter on, an
-            // off pill that adding would empty the list (1.4.0, faceted counts): dimmed text,
-            // same glass.
+            // off pill that adding would empty the list, or a search empties (1.4.0, faceted
+            // counts): dimmed text, same glass.
             data-empty={count === 0 && !on ? "" : undefined}
             // The pill's identity only; the mode's recipe turns it into a fill.
             style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}

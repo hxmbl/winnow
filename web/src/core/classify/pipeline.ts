@@ -33,6 +33,22 @@ export function buildSearchBags(emails: readonly Email[]): SearchBags {
 }
 
 /**
+ * The search's tokens: the query trimmed, lowercased and split on whitespace. Empty
+ * means no search is running. Shared with the rail's faceted counts (`countFacets`
+ * via the store), so a chip's number searches exactly as the list does.
+ */
+export function searchTokens(searchQuery: string): string[] {
+  return searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** The list's search test: every token is in the message's bag (AND across tokens). */
+export function matchesSearch(email: Email, tokens: readonly string[], bags?: SearchBags): boolean {
+  if (tokens.length === 0) return true;
+  const hay = bags?.get(email.id) ?? inboxSearchBag(email);
+  return tokens.every((token) => hay.includes(token));
+}
+
+/**
  * Why the list is empty — drives which empty state the UI shows.
  *
  *   - `mailbox` — no mail here. The remedy is to sync.
@@ -99,20 +115,13 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
   const hideUnsafe = query.hideUnsafe ?? true;
   const bags = query.searchBags;
 
-  const tokens = searchQuery
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
+  const tokens = searchTokens(searchQuery);
 
   // 1. Search. `hay` is only read when a query is active, so an unfiltered
   //    inbox never builds a single bag.
   let rows = emails;
   if (tokens.length > 0) {
-    rows = rows.filter((email) => {
-      const hay = bags?.get(email.id) ?? inboxSearchBag(email);
-      return tokens.every((token) => hay.includes(token));
-    });
+    rows = rows.filter((email) => matchesSearch(email, tokens, bags));
   }
 
   // 2. Filters. Several active buckets narrow the list, so AND.

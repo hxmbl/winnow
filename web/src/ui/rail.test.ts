@@ -335,4 +335,19 @@ describe("faceted counts (1.4.0)", () => {
   it("without facets (nothing on) it is unchanged", () => {
     expect(buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, [], null)).toEqual(buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, []));
   });
+
+  it("under a search with nothing on (1.4.0): facets drive every number, the plain counts still decide the rail", () => {
+    const plain = buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, []);
+    const searched = buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, [], FACETS);
+    expect(ids(searched)).toEqual(ids(plain));
+    for (const pill of searched) {
+      const want = pill.id.kind === "builtin" ? (FACETS.builtin.get(pill.id.id) ?? 0) : (FACETS.senders.get(pill.id.sender.toLowerCase()) ?? 0);
+      expect(pill.count).toBe(want);
+    }
+    // A search that matches nothing: every chip 0, none removed.
+    const empty = { total: 0, builtin: new Map<BuiltinSmartFilter, number>(), senders: new Map<string, number>() };
+    const none = buildPills(RAIL, COUNTS, SENDERS, SENDER_COUNTS, [], empty);
+    expect(ids(none)).toEqual(ids(plain));
+    expect(none.every((p) => p.count === 0)).toBe(true);
+  });
 });

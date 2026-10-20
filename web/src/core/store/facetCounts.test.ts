@@ -12,17 +12,18 @@ import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 import { builtinFilter, filterKey, senderFilter, type FilterId } from "../model/signals";
 import { buildPills } from "../../ui/rail";
 
-function demoStore(filters: readonly FilterId[] = [], mailbox?: "trash") {
+function demoStore(filters: readonly FilterId[] = [], mailbox?: "trash", search = "") {
   const store = new WinnowStore({ seed: [...DEMO_EMAILS], seedTrash: DEMO_TRASH });
   store.attach({ onPersist: () => undefined });
   if (mailbox) store.setMailbox(mailbox);
+  if (search) store.setSearchQuery(search);
   for (const filter of filters) store.toggleFilter(filter);
   return store;
 }
 
-/** Messages the list shows for a set of toggles, before search. */
-function listed(filters: readonly FilterId[], mailbox?: "trash"): number {
-  return demoStore(filters, mailbox).view.emails.length;
+/** Messages the list shows for a set of toggles (and a search, if given). */
+function listed(filters: readonly FilterId[], mailbox?: "trash", search = ""): number {
+  return demoStore(filters, mailbox, search).view.emails.length;
 }
 
 function pillsOf(store: WinnowStore) {
@@ -112,5 +113,96 @@ describe("faceted rail counts", () => {
     expect(store.view.railFacets).toBe(before);
     store.toggleFilter(builtinFilter("important"));
     expect(store.view.railFacets).not.toBe(before);
+  });
+
+  describe("under a search (1.4.0)", () => {
+    // Broad, narrow, two tokens, and one whose Security hit is unsafe (the list hides it
+    // with nothing on; tapping Security lists it, so the chip must count it).
+    const SEARCHES = ["the", "order", "you re", "security", "  ACCOUNT "];
+    const SEARCH_COMBOS: FilterId[][] = [[], ...COMBOS];
+
+    for (const search of SEARCHES) {
+      for (const combo of SEARCH_COMBOS) {
+        const name = `"${search}" + ${combo.map(filterKey).join(" + ") || "nothing"}`;
+        it(`${name}: every chip's number is what tapping it lists under the search`, () => {
+          const store = demoStore(combo, undefined, search);
+          const result = store.view.emails.length;
+          if (combo.length > 0) expect(store.view.railFacets?.total).toBe(result);
+          const pills = pillsOf(store);
+          expect(pills.length).toBeGreaterThan(0);
+          for (const pill of pills) {
+            const on = combo.some((filter) => filterKey(filter) === filterKey(pill.id));
+            if (on) expect(pill.count, `${filterKey(pill.id)} (on)`).toBe(result);
+            else expect(pill.count, `${filterKey(pill.id)} (off)`).toBe(listed([...combo, pill.id], undefined, search));
+          }
+        });
+      }
+    }
+
+    it("the chips stay put while typing: which chips appear is the plain mailbox ranking", () => {
+      const plain = pillsOf(demoStore()).map((p) => filterKey(p.id));
+      for (const search of ["t", "th", "the", "invoice", "zzzz-nothing"]) {
+        const store = demoStore([], undefined, search);
+        expect(pillsOf(store).map((p) => filterKey(p.id)), search).toEqual(plain);
+      }
+      // A search that matches nothing dims every chip to 0, none removed.
+      const none = pillsOf(demoStore([], undefined, "zzzz-nothing"));
+      expect(none.every((p) => p.count === 0)).toBe(true);
+    });
+
+    it("the search actually changes the numbers (not the plain counts)", () => {
+      const plain = demoStore();
+      const searched = demoStore([], undefined, "order");
+      const important = (s: WinnowStore) => pillsOf(s).find((p) => p.id.kind === "builtin" && p.id.id === "important")!.count;
+      expect(important(searched)).toBeLessThan(important(plain));
+    });
+
+    it("an off Unsafe chip counts Unsafe alone under the search (the search survives the toggle)", () => {
+      for (const search of ["security", "you"]) {
+        const store = demoStore([builtinFilter("unread")], undefined, search);
+        expect(store.view.railFacets?.builtin.get("unsafe"), search).toBe(listed([builtinFilter("unsafe")], undefined, search));
+      }
+    });
+
+    it("leaves the drawer's inboxCounts and the plain railCounts alone", () => {
+      const plain = demoStore();
+      const searched = demoStore([], undefined, "order");
+      expect([...searched.view.inboxCounts]).toEqual([...plain.view.inboxCounts]);
+      expect([...searched.view.railCounts]).toEqual([...plain.view.railCounts]);
+    });
+
+    it("clearing the search drops back to no facets (nothing on)", () => {
+      const store = demoStore([], undefined, "order");
+      expect(store.view.railFacets).not.toBeNull();
+      store.setSearchQuery("");
+      expect(store.view.railFacets).toBeNull();
+    });
+
+    it("is memoised per query: a bump that moves nothing reuses the facets, a keystroke recounts", () => {
+      const store = demoStore([], undefined, "or");
+      const before = store.view.railFacets;
+      store.select(store.view.emails[0]!.id);
+      expect(store.view.railFacets).toBe(before);
+      // Same tokens (whitespace, case): no rescan.
+      store.setSearchQuery("  OR ");
+      expect(store.view.railFacets).toBe(before);
+      store.setSearchQuery("ord");
+      expect(store.view.railFacets).not.toBe(before);
+    });
+
+    it("applies in another mailbox (Trash) the same way", () => {
+      const seeded = demoStore();
+      for (const email of seeded.view.emails.filter((_, i) => i % 2 === 0)) seeded.trash(email.id);
+      seeded.setMailbox("trash");
+      seeded.setSearchQuery("the");
+      const result = seeded.view.emails.length;
+      expect(result).toBeGreaterThan(0);
+      for (const pill of pillsOf(seeded)) {
+        seeded.toggleFilter(pill.id);
+        expect(pill.count, filterKey(pill.id)).toBe(seeded.view.emails.length);
+        seeded.toggleFilter(pill.id);
+      }
+      expect(seeded.view.emails.length).toBe(result);
+    });
   });
 });
