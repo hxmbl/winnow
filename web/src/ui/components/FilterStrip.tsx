@@ -38,14 +38,14 @@ type Props = {
    */
   leading?: React.ReactNode;
   /**
-   * The phone's floating rail: 44px pills for a thumb, each one its own frosted glass
-   * chip (`.wn-chip-glass`) with no band behind the rail, so the list scrolls visibly
+   * The phone's floating rail: 44px pills for a thumb, each one its own Liquid Glass
+   * chip (`.wn-chip-glass.wn-liquid`) with no band behind the rail, so the list scrolls visibly
    * underneath. Inset at the sides like the dock's pill, and swiped, never stepped.
    */
   touch?: boolean;
   /**
    * The desktop's floating rail, over the list like the phone's: every chip its own glass
-   * pill (`.wn-chip-glass`, the phone's recipe) at desktop size, no band and no edge fades
+   * pill (`.wn-chip-glass.wn-liquid`, the phone's recipe) at desktop size, no band and no edge fades
    * (a fade to the surface colour would be a band over moving mail, and a mask would be a
    * backdrop root that leaves the chips' blur nothing to blur). A chip running off an end
    * says "more" as on the phone, and the step button there is a small round glass button
@@ -240,19 +240,17 @@ export const FilterStrip = memo(function FilterStrip({
         // Touch: the rail is transparent and lets taps between the chips through to the
         // list; the vertical padding keeps the chips' shadows from being clipped by the
         // scroller, and the side padding matches the dock's insets.
-        // Glass (touch and floating): the scroller would clip each chip's frost layer,
-        // which reaches 44px past the chip (`--wn-glass-reach` in `index.css`) so the blur
-        // has the rows around it to pull from. So the rail pads itself by that much more
-        // and takes it back with a negative margin: it lays out exactly as before. At its
-        // end the padding is at least that reach, so the last chip's layer ends inside the
-        // rail's own end instead of lengthening its scroll.
+        // Glass (touch and floating): each chip frosts what is behind its own box (the
+        // frost is on the chip itself since 1.4), so the rail only needs room for the
+        // chips' soft shadow, which the scroller would otherwise clip: 20px more above
+        // and below, taken back with a negative margin, so it lays out exactly as before.
         // `--wn-rail-gap` is the gap between the chips. Their frost stops at each chip;
         // on the phone the gaps get only the rail's light haze (`.wn-rail-haze`).
         className={`wn-rail-scroller no-scrollbar relative flex items-center overflow-x-auto ${
           touch
-            ? "pointer-events-none -my-[44px] gap-[var(--wn-rail-gap)] py-[52px] [--wn-rail-gap:0.5rem] pl-[var(--wn-dock-left)] pr-[max(var(--wn-dock-right),var(--wn-glass-reach))] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
+            ? "pointer-events-none -my-[20px] gap-[var(--wn-rail-gap)] py-[28px] [--wn-rail-gap:0.5rem] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
             : floating
-              ? "pointer-events-none -my-[44px] gap-[var(--wn-rail-gap)] pl-0.5 pr-[var(--wn-glass-reach)] [--wn-rail-gap:0.375rem] py-[50px] [&>*]:pointer-events-auto"
+              ? "pointer-events-none -my-[20px] gap-[var(--wn-rail-gap)] pl-0.5 pr-2 [--wn-rail-gap:0.375rem] py-[26px] [&>*]:pointer-events-auto"
               : "gap-1"
         }`}
 
@@ -295,7 +293,7 @@ export const FilterStrip = memo(function FilterStrip({
             type="button"
             data-rail-item=""
             onClick={onClear}
-            className={`${touch ? "wn-glass h-11 px-4" : floating ? "wn-glass h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+            className={`${touch ? "wn-glass wn-liquid h-11 px-4" : floating ? "wn-glass wn-liquid h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             <span>All</span>
           </button>
@@ -317,7 +315,7 @@ export const FilterStrip = memo(function FilterStrip({
             data-empty={count === 0 && !on ? "" : undefined}
             // The pill's identity only; the mode's recipe turns it into a fill.
             style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}
-            className={`wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150 ${glass ? "wn-chip-glass" : ""}`}
+            className={`wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150 ${glass ? "wn-chip-glass wn-liquid" : ""}`}
           >
             <button
               type="button"

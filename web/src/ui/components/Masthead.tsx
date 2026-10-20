@@ -3,7 +3,7 @@
  * where you are in the list beside it, then the filter rail on its own row.
  *
  * It floats over the list, like the phone's dock: the top row is a rounded glass bar
- * (`.wn-glass.wn-glass-bar`) inset from the pane's edges, each smart-filter chip is its
+ * (`.wn-glass.wn-glass-bar.wn-liquid`, Liquid Glass since 1.4) inset from the pane's edges, each smart-filter chip is its
  * own glass pill (`FilterStrip` `floating`), and there is no band behind either, so the
  * list scrolls visibly underneath. The header itself takes no pointer events; only the
  * bar, the chips and the slot below them (`below`, the selection bar) do. The list pads
@@ -128,7 +128,7 @@ export function Masthead({
     <header data-masthead="" data-floating="" className="pointer-events-none flex flex-col gap-1 px-2.5 pt-2.5">
       <div
         data-masthead-bar=""
-        className="wn-glass wn-glass-bar pointer-events-auto flex h-[52px] min-w-0 items-center gap-3 rounded-full pl-2 pr-2"
+        className="wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-[52px] min-w-0 items-center gap-3 rounded-full pl-2 pr-2"
       >
         {/*
           The sidebar's toggle, at the edge the sidebar slides in from: a panel icon now,

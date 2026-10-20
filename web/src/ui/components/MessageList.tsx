@@ -601,7 +601,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   // the loudest thing in a list that is meant to be read quietly. Inset to the sender
   // column, so the label sits over the names rather than over the unread gutter.
   return (
-    <div className="flex items-baseline gap-2 bg-surface pb-1 pl-[68px] pr-3 pt-4 text-meta">
+    <div className="flex items-baseline gap-2 pb-1 pl-[68px] pr-3 pt-4 text-meta">
       <span className="font-semibold text-ink-muted">{label}</span>
       <span className="tabular-nums text-ink-subtle">{count}</span>
     </div>
@@ -692,7 +692,7 @@ function Empty({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       {remedy ? (
         <>
           <p className="max-w-[26rem] text-ui text-ink-body">{remedy.body}</p>
@@ -1859,7 +1859,7 @@ function MessageList({
     return (
       <div
         data-list-empty=""
-        className="flex min-h-0 flex-1 flex-col bg-surface"
+        className="flex min-h-0 flex-1 flex-col"
         style={{ "--wn-top-chrome": `${band}px`, paddingTop: "var(--wn-top-chrome)" } as React.CSSProperties}
       >
         {lead}
@@ -1891,7 +1891,7 @@ function MessageList({
         // No scroll anchoring: the list places its own window (spacer + measured rows), and
         // the browser's anchoring fought it, snapping a programmatic or flung scroll back by
         // a few hundred px and, with reduced motion, flip-flopping between two offsets.
-        className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4 [overflow-anchor:none]"
+        className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain pb-4 [overflow-anchor:none]"
         // Under floating chrome: the rows start below it, and anything the browser
         // scrolls into view itself (Tab onto a row) stops below it and the pinned day.
         // `--wn-top-chrome` is the measured chrome (a ResizeObserver on it in the app) plus
@@ -2045,7 +2045,7 @@ function MessageList({
             </span>
           </div>
         ) : (
-          <div data-sticky-day="" className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-surface px-1.5">
+          <div data-sticky-day="" className="wn-backdrop pointer-events-none absolute inset-x-0 top-0 z-10 px-1.5">
             <SectionHeader label={stickyHeader.label} count={stickyHeader.count} />
           </div>
         ))}

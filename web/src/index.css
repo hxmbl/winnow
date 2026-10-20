@@ -513,15 +513,22 @@ html[data-resizing] iframe {
 }
 
 /*
- * Light frost (`glass.ts` has the numbers and why). The tint is the mode's glass base at
- * `--wn-glass-text` opacity on the dock and the panel, both of which carry icons or words
- * across their whole face; a chip is frost at `--wn-glass-rim` with a plate at the text
- * opacity behind its label. A hairline edge and an inner highlight on top, and a soft
- * shadow in the mode's scrim colour, so it reads as raised in every mode.
+ * The glass (1.4: one universal recipe; `glass.ts` has the numbers and why).
+ *
+ * The tint is the mode's glass base at `--wn-glass-text` opacity on the dock and the
+ * panel, both of which carry icons or words across their whole face; a chip is frost at
+ * `--wn-glass-rim` with a plate at the text opacity behind its label. The frost is light
+ * (`--wn-glass-filter`, the owner's ask) and sits straight on the element. A hairline
+ * edge and an inner highlight on top (`--wn-glass-edge`), and a soft shadow in the mode's
+ * scrim colour, so it reads as raised in every mode.
+ *
+ * Nothing above a glass may be a backdrop root (opacity < 1, filter, mask, clip-path,
+ * backdrop-filter, or will-change of those), or its frost sees only that ancestor: the
+ * chip's hover is a sheen, not `filter: brightness`, for that reason.
  */
 :root {
-  /* The floating glass's frost: a strong blur so what passes under reads as colour, not shapes. */
-  --wn-glass-filter: blur(22px) saturate(1.8);
+  /* The light frost, on the glass itself. `GLASS_BLUR` in `glass.ts`. */
+  --wn-glass-filter: blur(6px) saturate(1.8);
   /* Pills settle rather than snap: background, opacity and the press scale. */
   --wn-glass-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --wn-glass-motion: 200ms;
@@ -537,12 +544,24 @@ html[data-resizing] iframe {
     0 10px 30px -10px rgb(16 12 52 / 0.2);
   --wn-glass-sheen: rgb(255 255 255 / 0.75);
 }
+/*
+ * The edge light, declared on the glass itself (not `:root`) so a chip's own
+ * `--wn-glass-sheen` (dark and OLED, below) is the one it reads; `:where` keeps it at
+ * zero specificity, so `.wn-liquid`'s rim (later, also `:where`) replaces it.
+ */
+:where(.wn-glass, .wn-chip-glass) {
+  --wn-glass-edge: inset 0 1px 0 var(--wn-glass-sheen);
+}
 .wn-glass {
   background: var(--wn-glass-base, var(--wn-surface));
   border: 1px solid var(--wn-hairline);
   box-shadow:
-    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-edge),
     var(--wn-glass-lift);
+}
+.wn-glass:not(.wn-sidebar-panel),
+.wn-pill.wn-chip-glass {
+  position: relative;
 }
 
 /*
@@ -570,10 +589,9 @@ html[data-resizing] iframe {
     transform var(--wn-glass-motion) var(--wn-glass-ease);
 }
 /*
- * Not the smart-filter chips (nor "All" beside them): a transform on a chip makes it a
- * stacking context mid-transition, and its frost layer (`::before`, clipped to the pill
- * by `clip-path`) briefly drew square under a held press (1.3.3). A chip answers a press
- * with a sheen instead (below, `[data-rail-item]:active`), so its shape never changes.
+ * Not the smart-filter chips (nor "All" beside them): a chip answers a press with a
+ * sheen instead (below, `[data-rail-item]:active`), so its shape never changes from
+ * press to release (1.3.3).
  */
 button.wn-glass:not([data-rail-item]):active,
 .wn-glass-bar button:active,
@@ -592,83 +610,20 @@ button.wn-glass:not([data-rail-item]):active,
   .wn-glass {
     background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
   }
-  /* The sidebar panel is large and clips its own overflow: its frost stays on itself. */
-  .wn-glass.wn-sidebar-panel {
+  .wn-glass,
+  .wn-pill.wn-chip-glass {
     -webkit-backdrop-filter: var(--wn-glass-filter);
     backdrop-filter: var(--wn-glass-filter);
   }
 }
 
 /*
- * The frost itself, on an oversized layer behind each pill.
- *
- * A backdrop-filter only samples what is directly behind its own box and clamps at the
- * edges, so on a pill a few dozen pixels tall a 22px blur hardly smears anything that
- * runs across it: a line of row text under the chips, the dock or the top bar stayed
- * readable and sharp through the glass while avatars (big soft shapes) looked frosted.
- * So the filter lives on `::before`, reaching `--wn-glass-reach` past the pill on every
- * side so the blur has real pixels to pull from, then clipped back to the pill's own
- * rounded shape. It sits at z-index -1 with the pill not a stacking context, so it
- * paints under the pill's tint and hairline, which lie over it as before.
- *
- * Nothing between it and the list may be a backdrop root (opacity < 1, filter, mask,
- * clip-path, backdrop-filter, or will-change of those): the chip's hover is a sheen,
- * not `filter: brightness`, for that reason. A scroller clips it, so the chip rail
- * pads itself by the reach (`FilterStrip`).
- */
-:root {
-  --wn-glass-reach: 44px;
-}
-.wn-glass:not(.wn-sidebar-panel),
-.wn-pill.wn-chip-glass {
-  position: relative;
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
-  (background: color-mix(in srgb, red 50%, transparent)) {
-  .wn-glass:not(.wn-sidebar-panel)::before,
-  .wn-pill.wn-chip-glass::before {
-    content: "";
-    position: absolute;
-    inset: calc(-1 * var(--wn-glass-reach));
-    z-index: -1;
-    pointer-events: none;
-    -webkit-backdrop-filter: var(--wn-glass-filter);
-    backdrop-filter: var(--wn-glass-filter);
-    clip-path: inset(var(--wn-glass-reach) round var(--wn-glass-radius, 9999px));
-  }
-}
-/*
- * The layer is paint only, but it still counts as layout overflow, so two things keep it
- * from widening anything:
- *
- * - The floating chrome clips the layers sideways, at the screen's (or the pane's) edges,
- *   so they never widen the page; up and down they stay free.
- * - In the chip rail (a sideways scroller) the layers keep their full sideways reach
- *   (without it the blur clamps at a chip's rounded ends and text crossing them stays
- *   readable), and the rail's end padding is at least that reach (`FilterStrip`), so
- *   the layer past the last chip ends inside the rail's own end and adds no scroll.
- *
- * In the rail each chip's frost stops at the chip's own rounded edge (1.3.3). It used to
- * reach half the gap towards its neighbours so the frost ran as one band under the whole
- * rail, but that band showed: a filled strip, cut off square above and below the chips,
- * joining them up. Behind the chips there is now only `.wn-rail-haze` (below): a light
- * blur with no tint, faded out at the top and bottom, the same on every screen.
- */
-[data-phone-chrome],
-[data-phone-dock],
-[data-list-chrome],
-[data-sticky-day],
-[data-pull-indicator] {
-  overflow-x: clip;
-}
-/*
- * The phone chip rail's haze (1.3.3): what is left in the gaps between the chips. A light
- * blur of whatever scrolls behind them and nothing else: no tint, no fill, no hairline,
- * and masked to fade out above and below the chips, so it has no edge to see. Over an
- * empty plane (inbox clear) it is invisible, and over rows it softens their text, the
- * same on every screen and state, which is the point: it used to be there on some
- * screens and not others. Behind the chips (`z-index: -1`, first in paint order), so each
- * chip's own frost lies over it.
+ * The phone chip rail's haze (1.3.3, a deliberate outlier): what is left in the gaps
+ * between the chips. A light blur of whatever scrolls behind them and nothing else: no
+ * tint, no fill, no hairline, and masked to fade out above and below the chips, so it
+ * has no edge to see. Over an empty plane (inbox clear) it is invisible, and over rows it
+ * softens their text, the same on every screen and state. Behind the chips
+ * (`z-index: -1`, first in paint order), so each chip's own frost lies over it.
  */
 .wn-rail-haze {
   position: relative;
@@ -711,6 +666,119 @@ button.wn-glass:not([data-rail-item]):active,
 }
 
 /*
+ * Liquid Glass (1.4), on the small floating chrome: the dock pill, the compose circle,
+ * the filter chips, the reader pill, the desktop's floating top bar and the status
+ * pill. Always alongside `.wn-glass` or `.wn-chip-glass` (or, for compose, the accent),
+ * whose tint it keeps: the AA arithmetic in `glass.test.ts` holds as it is. It adds:
+ *
+ * - a lit rim: bright at the top left, soft at the bottom right, with a faint inner glow
+ *   (`--wn-glass-edge`, `LIQUID` in `glass.ts`);
+ * - a sheen across the face (`::after`, under the content);
+ * - in Chromium, an edge-only refraction (`#wn-liquid`, `index.html`): within ~10px of
+ *   each side the backdrop bends inward, the middle and the glass's own text never do.
+ *
+ * Elsewhere it is the lean frost with the rim and sheen. Apple's native material, where
+ * WebKit offers it, replaces all of it (the guarded block below).
+ */
+:where(.wn-liquid) {
+  --wn-glass-edge:
+    inset 1px 1px 0 color-mix(in srgb, #fff var(--wn-liquid-rim-light, 50%), transparent),
+    inset -1px -1px 0 color-mix(in srgb, #fff var(--wn-liquid-rim-shade, 15%), transparent),
+    inset 0 0 12px color-mix(in srgb, #fff var(--wn-liquid-glow, 5%), transparent);
+}
+.wn-liquid {
+  position: relative;
+  isolation: isolate;
+}
+.wn-liquid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #fff var(--wn-liquid-sheen, 6%), transparent),
+    transparent 40%,
+    transparent 70%,
+    color-mix(in srgb, #fff calc(var(--wn-liquid-sheen, 6%) * 0.35), transparent)
+  );
+}
+/* The compose circle: the accent, a little translucent, with the same rim and lift. */
+.wn-liquid-accent {
+  --wn-liquid-sheen: var(--wn-liquid-accent-sheen, 8%);
+  --wn-liquid-glow: 0%;
+  background-color: var(--wn-accent);
+  box-shadow:
+    var(--wn-glass-edge),
+    var(--wn-glass-lift);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+  (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-liquid-accent {
+    background-color: color-mix(in srgb, var(--wn-accent) var(--wn-liquid-accent, 86%), transparent);
+    -webkit-backdrop-filter: var(--wn-glass-filter);
+    backdrop-filter: var(--wn-glass-filter);
+  }
+}
+/*
+ * Chromium (Android WebView, WebView2, Chrome): the refraction. The other engines parse
+ * `url()` here too without bending anything, so Gecko and WebKit are ruled out by name.
+ */
+@supports (backdrop-filter: url(#wn-liquid)) and (not (-moz-appearance: none)) and (not (font: -apple-system-body)) {
+  .wn-glass.wn-liquid,
+  .wn-pill.wn-chip-glass.wn-liquid,
+  .wn-liquid-accent.wn-liquid {
+    backdrop-filter: var(--wn-glass-filter) url(#wn-liquid);
+  }
+}
+
+/* WebKit with Apple's native glass enabled: a guarded progressive enhancement. */
+@supports (-apple-visual-effect: -apple-system-glass-material) {
+  .wn-glass,
+  .wn-liquid {
+    -apple-visual-effect: -apple-system-glass-material;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: var(--wn-glass-lift);
+  }
+  .wn-liquid::after { display: none; }
+}
+/* Under the native material a chip still says which filter it is: its hue stays. */
+@supports (-apple-visual-effect: -apple-system-glass-material) {
+  .wn-pill.wn-chip-glass.wn-liquid {
+    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest)));
+  }
+  .wn-pill.wn-chip-glass.wn-liquid[data-on] {
+    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on)));
+  }
+}
+
+/*
+ * The accent's wash (1.4): the list's backdrop, faintly in the accent's hue, so the glass
+ * over it has a colour to frost and an accent is more than its buttons. Two soft radial
+ * glows over the surface (`WASH` in `glass.ts`: per mode, faint enough that every row ink
+ * keeps AA at their strongest; OLED stays near black). Viewport-anchored
+ * (`background-attachment: fixed`) on the few planes that carry it, none of which scroll,
+ * so the list pane and the pinned day line up seamlessly; the rows inside the scroller
+ * are transparent and scroll over it.
+ */
+.wn-backdrop {
+  background-color: var(--wn-surface);
+  background-image:
+    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--wn-accent) var(--wn-wash-near, 0%), transparent), transparent),
+    radial-gradient(100% 65% at 0% 100%, color-mix(in srgb, var(--wn-accent) var(--wn-wash-far, 0%), transparent), transparent);
+  background-attachment: fixed;
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .wn-backdrop {
+    background-image: none;
+  }
+}
+
+/*
  * A smart-filter chip, floating on its own above the dock. Its colour is still
  * `.wn-pill`'s tint (identity hue, the mode's recipe), laid over the glass rather than
  * over a band: the rail has no background at all, and the list scrolls visibly
@@ -723,7 +791,7 @@ button.wn-glass:not([data-rail-item]):active,
   background-color: var(--wn-glass-base, var(--wn-surface));
   background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest)));
   box-shadow:
-    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-edge),
     var(--wn-glass-lift);
 }
 .wn-pill.wn-chip-glass[data-on] {
@@ -731,7 +799,7 @@ button.wn-glass:not([data-rail-item]):active,
   background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on)));
   box-shadow:
     inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
-    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-edge),
     var(--wn-glass-lift);
 }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
@@ -769,14 +837,14 @@ button.wn-glass:not([data-rail-item]):active,
 .wn-pill.wn-chip-glass:hover {
   box-shadow:
     inset 0 0 0 999px var(--wn-sheen),
-    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-edge),
     var(--wn-glass-lift);
 }
 .wn-pill.wn-chip-glass[data-on]:hover {
   box-shadow:
     inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
     inset 0 0 0 999px var(--wn-sheen),
-    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-edge),
     var(--wn-glass-lift);
 }
 /*
@@ -790,7 +858,7 @@ button.wn-glass[data-rail-item]:active {
   box-shadow:
     inset 0 0 0 999px var(--wn-sheen),
     inset 0 0 0 999px var(--wn-sheen),
-    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-edge),
     var(--wn-glass-lift);
 }
 .wn-pill.wn-chip-glass[data-on]:active,
@@ -799,7 +867,7 @@ button.wn-glass[data-rail-item]:active {
     inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
     inset 0 0 0 999px var(--wn-sheen),
     inset 0 0 0 999px var(--wn-sheen),
-    inset 0 1px 0 var(--wn-glass-sheen),
+    var(--wn-glass-edge),
     var(--wn-glass-lift);
 }
 /*
@@ -880,12 +948,8 @@ div[data-row-count] {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
-/*
- * And its frost layer (`::before`, which reaches 44px past the pill) goes with it: left
- * on, it frosted over the panel's Inbox row, which sits on the pill's line, and the row
- * was there to tap but could not be seen.
- */
-:root .wn-glass[data-phone-pill][data-expanded]::before {
+/* And its liquid sheen goes with it, so nothing is left over the panel's Inbox row. */
+:root .wn-glass[data-phone-pill][data-expanded]::after {
   content: none;
 }
 
@@ -926,23 +990,15 @@ div[data-row-count] {
   }
 }
 
-/* Raised but solid: the compose button beside the pill, in the accent. */
-.wn-raised {
-  box-shadow:
-    0 1px 2px var(--wn-scrim),
-    0 8px 24px -8px var(--wn-scrim);
-}
-:root[data-theme="light"] .wn-raised {
-  box-shadow:
-    0 1px 2px rgb(16 12 52 / 0.1),
-    0 8px 24px -8px rgb(16 12 52 / 0.3);
-}
-
-/* Reduced transparency: the floating glass is solid, the chips keep only their tint. */
+/* Reduced transparency: the floating glass is solid (compose, the solid accent), the chips keep only their tint. */
 @media (prefers-reduced-transparency: reduce) {
-  .wn-glass:not(.wn-sidebar-panel)::before,
-  .wn-pill.wn-chip-glass::before {
+  .wn-liquid::after {
     display: none;
+  }
+  .wn-liquid-accent {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background-color: var(--wn-accent) !important;
   }
   .wn-glass,
   .wn-pill.wn-chip-glass {
@@ -961,9 +1017,12 @@ div[data-row-count] {
   }
 }
 @media (forced-colors: active) {
-  .wn-glass:not(.wn-sidebar-panel)::before,
-  .wn-pill.wn-chip-glass::before {
+  .wn-liquid::after {
     display: none;
+  }
+  .wn-liquid-accent {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
   .wn-glass,
   .wn-pill.wn-chip-glass {
@@ -982,6 +1041,8 @@ div[data-row-count] {
  * width change (it simply is one size or the other), only the fade.
  */
 .wn-reader-pill {
+  /* Over a message, where a photo can be solid: the bars' higher tint keeps its icons at 3:1. */
+  --wn-glass-text: var(--wn-glass-bar, 80%);
   width: calc(5 * 48px + 4 * 2px + 12px + 2px);
   overflow: hidden;
   transition:
@@ -989,6 +1050,8 @@ div[data-row-count] {
     background-color var(--wn-glass-motion) var(--wn-glass-ease);
 }
 [data-reader-pill="collapsed"] .wn-reader-pill {
+  /* Over a message, where a photo can be solid: the bars' higher tint keeps its icons at 3:1. */
+  --wn-glass-text: var(--wn-glass-bar, 80%);
   width: var(--wn-dock-h);
 }
 .wn-reader-pill-actions,
@@ -1009,11 +1072,6 @@ div[data-row-count] {
     transition-duration: 160ms !important;
   }
 }
-/* The pill clips its contents, so its frost layer stays on itself (no 44px reach). */
-.wn-reader-pill::before {
-  --wn-glass-reach: 0px;
-}
-
 /*
  * Left-handed (`data-hand="left"` on the root, phone only): the dock's compose button
  * moves to the left edge and the pill to its right, and the menu panel that grows out
@@ -1235,4 +1293,13 @@ div[data-row-count] {
 .wn-backdrop-opaque {
   background: var(--wn-chrome);
   box-shadow: 0 50vh 0 0 var(--wn-chrome);
+}
+
+/* The defs for the glass's SVG filter (`index.html`): in the document, out of the layout. */
+.wn-svg-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
 }

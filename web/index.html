@@ -29,6 +29,41 @@
     <title>Winnow</title>
   </head>
   <body>
+    <!--
+      Liquid Glass's refraction (`.wn-liquid` in `src/index.css`, numbers in
+      `src/ui/glass.ts` LIQUID_FILTER, held to each other by `glass.test.ts`). Used only by
+      Chromium's `backdrop-filter: url(#wn-liquid)`; everywhere else it is inert.
+
+      The edge map is built from the glass's own box, in px: the box's alpha, softened
+      (blur 5), differentiated across +/-3px into R (x) and G (y) around a neutral 0.5,
+      so within ~10px of a side the backdrop is pulled inward and the middle is untouched,
+      on any size of glass. Then three displacements, one per channel, for a faint fringe.
+    -->
+    <svg class="wn-svg-defs" width="0" height="0" aria-hidden="true" focusable="false">
+      <filter id="wn-liquid" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+        <feFlood flood-color="#fff" result="white" />
+        <feComposite in="white" in2="SourceAlpha" operator="in" result="box" />
+        <feGaussianBlur in="box" stdDeviation="5 0" edgeMode="none" result="softX" />
+        <feOffset in="softX" dx="-3" result="toLeft" />
+        <feOffset in="softX" dx="3" result="toRight" />
+        <feComposite in="toLeft" in2="toRight" operator="arithmetic" k2="1" k3="-1" k4="0.5" result="slopeX" />
+        <feColorMatrix in="slopeX" type="matrix" values="0 0 0 1 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1" result="mapX" />
+        <feGaussianBlur in="box" stdDeviation="0 5" edgeMode="none" result="softY" />
+        <feOffset in="softY" dy="-3" result="toTop" />
+        <feOffset in="softY" dy="3" result="toBottom" />
+        <feComposite in="toTop" in2="toBottom" operator="arithmetic" k2="1" k3="-1" k4="0.5" result="slopeY" />
+        <feColorMatrix in="slopeY" type="matrix" values="0 0 0 0 0  0 0 0 1 0  0 0 0 0 0  0 0 0 0 1" result="mapY" />
+        <feComposite in="mapX" in2="mapY" operator="arithmetic" k2="1" k3="1" result="map" />
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="16" xChannelSelector="R" yChannelSelector="G" result="bendR" />
+        <feColorMatrix in="bendR" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="red" />
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="14.5" xChannelSelector="R" yChannelSelector="G" result="bendG" />
+        <feColorMatrix in="bendG" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="green" />
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="13" xChannelSelector="R" yChannelSelector="G" result="bendB" />
+        <feColorMatrix in="bendB" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="blue" />
+        <feBlend in="red" in2="green" mode="screen" result="redGreen" />
+        <feBlend in="redGreen" in2="blue" mode="screen" />
+      </filter>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
