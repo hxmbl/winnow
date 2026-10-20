@@ -393,7 +393,7 @@ mod tests {
         assert!(batch.hide_preview);
         assert_eq!(batch.account, None);
         assert_eq!(batch.messages[0].thread_id.as_deref(), Some("def"));
-        let tagged: NotificationBatch = serde_json::from_str(
+        let tagged: NotificationBatch = serde_json::from_str::<NotificationBatch>(
             r#"{"account":{"id":"acct2","label":"two@x.co"},"total":1,"summaryTitle":"x","messages":[]}"#,
         )
         .unwrap()
