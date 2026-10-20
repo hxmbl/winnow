@@ -1667,8 +1667,12 @@ export class WinnowStore {
 
     try {
       const result = await backend.sync({
-        onPartial: (emails) => this.applyPartial(emails, initial),
+        // 1.4.0: a sync of an account that has since been left paints nothing.
+        onPartial: (emails) => {
+          if (this.backend === backend) this.applyPartial(emails, initial);
+        },
         onProgress: (progress) => {
+          if (this.backend !== backend) return;
           // Progress arrives on the engine's schedule, so it is written to state
           // *without* notifying: a first sync of two thousand messages would otherwise
           // re-render two thousand times to move a percentage. A phase change is
@@ -1697,6 +1701,9 @@ export class WinnowStore {
         },
       });
 
+      // Another account opened (or the app signed out) while this ran: its answer is
+      // not this screen's.
+      if (this.backend !== backend) return;
       const recent = new Set<number>();
       if (!initial) {
         for (const email of result.emails) {
@@ -1740,6 +1747,7 @@ export class WinnowStore {
       await this.applyPlatform();
       this.prefetchInbox();
     } catch (error) {
+      if (this.backend !== backend) return;
       this.set({
         status: "error",
         syncing: false,
