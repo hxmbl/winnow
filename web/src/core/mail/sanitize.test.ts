@@ -15,10 +15,12 @@ import {
   emailDocument,
   emailDocumentCss,
   inlineEmailCss,
+  inlineEmailDarkCss,
   sanitizeCss,
   sanitizeMailHtml,
   type SanitizeOptions,
 } from "./sanitize";
+import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE, contrast, parseColor } from "./emailDark";
 
 /** Sanitise with remote content allowed — the "user said yes" case. */
 const allowed: SanitizeOptions = { allowRemote: true };
@@ -802,5 +804,62 @@ describe("decoded css is re-escaped before it is emitted", () => {
     const doc = emailDocument("<p>x</p>", ["p{}</style><img src=x>"]);
     expect(doc.match(/<\/style/gi)).toHaveLength(2);
     expect(doc.slice(doc.search(/<\/style/i))).not.toContain("<img");
+  });
+});
+
+
+// ── Email dark mode's adaptive path (1.4.0) ──────────────────────────────────
+
+describe("recolour", () => {
+  const recolour = DARK_EMAIL_PALETTE;
+  const hex = (html: string, pattern: RegExp) => pattern.exec(html)?.[1] ?? "";
+
+  it("changes nothing when it is not asked for", () => {
+    const html = '<table bgcolor="#ffffff"><tr><td style="color:#333;background:#fff">Hi</td></tr></table>';
+    expect(clean(html)).toBe(clean(html, { recolour: undefined }));
+    expect(clean(html)).toContain('bgcolor="#ffffff"');
+    expect(clean(html)).toContain("color:#333;background:#fff");
+  });
+
+  it("recolours style attributes, bgcolor and color, to AA on the surface", () => {
+    const out = clean('<table bgcolor="#FFFFFF"><tr><td style="color:#333333;border-top:1px solid #eeeeee">Hi</td></tr></table><hr color="#000">', { recolour });
+    expect(out).toContain(`bgcolor="${recolour.surface.toLowerCase()}"`);
+    const text = hex(out, /color:(#[0-9a-f]{6})/);
+    expect(contrast(parseColor(text)!, parseColor(recolour.surface)!)).toBeGreaterThanOrEqual(4.5);
+    expect(out).not.toMatch(/#eeeeee/i);
+    expect(out).not.toContain('color="#000"');
+  });
+
+  it("holds text to AA against its own element's bgcolor", () => {
+    const out = clean('<td bgcolor="#FFC107" style="color:#000000">Buy</td>', { recolour: OLED_EMAIL_PALETTE });
+    const bg = hex(out, /bgcolor="(#[0-9a-f]{6})"/);
+    const text = hex(out, /color:(#[0-9a-f]{6})/);
+    expect(contrast(parseColor(text)!, parseColor(bg)!)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("leaves images, links and the withheld-image promise exactly as they were", () => {
+    const html = '<img src="https://t.example/p.gif" style="background:#fff"><a href="https://x.example" style="color:#1a73e8">x</a>';
+    const plain = sanitizeMailHtml(html, blocked);
+    const dark = sanitizeMailHtml(html, { ...blocked, recolour });
+    expect(dark.blockedRemote).toBe(plain.blockedRemote);
+    expect(dark.html).toContain('data-wn-blocked-src="https://t.example/p.gif"');
+    expect(dark.html).not.toMatch(/\ssrc="http/);
+    expect(dark.html).toContain('href="https://x.example"');
+    expect(dark.html).not.toMatch(/filter|invert/);
+  });
+
+  it("cannot be used to smuggle markup through a colour", () => {
+    const html = '<td bgcolor="&quot;><script>x</script>" style="color:red&quot; onclick=&quot;x">t</td>';
+    const out = clean(html, { recolour });
+    expect(out).not.toContain("<script");
+    // The same escaped attributes as without recolouring: only the colour token moved.
+    expect(out.replace(/color:#[0-9a-f]{6}/, "color:red")).toBe(clean(html));
+  });
+
+  it("has a dark baseline that only ever names the container", () => {
+    const css = inlineEmailDarkCss(recolour);
+    for (const rule of css.split("\n")) expect(rule.startsWith("[data-wn-email][data-wn-dark]")).toBe(true);
+    expect(css).toContain(`color: ${recolour.ink}`);
+    expect(css).toContain(`background: ${recolour.surface}`);
   });
 });
