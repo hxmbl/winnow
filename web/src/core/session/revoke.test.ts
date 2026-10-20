@@ -75,7 +75,7 @@ const signedIn = (): TokenSet => ({ accessToken: "a", refreshToken: REFRESH, exp
 describe("signing out through the bridge", () => {
   it("revokes exactly once, with the refresh token in the body", async () => {
     const tokens = memoryTokens(signedIn());
-    const store = { signOut: vi.fn(async () => {}), setAccounts: () => {} } as unknown as WinnowStore;
+    const store = { signOut: vi.fn(async () => {}), setAccounts: () => {}, keepAccountRecords: () => {}, forgetAccountRecords: () => {} } as unknown as WinnowStore;
     const bridge = createSessionBridge(platform(tokens.store), store);
     await bridge.prepare();
     expect(await bridge.hasSession()).toBe(true);
@@ -95,7 +95,7 @@ describe("signing out through the bridge", () => {
 
   it("revokes nothing for the demo", async () => {
     const tokens = memoryTokens(signedIn());
-    const bridge = createSessionBridge(platform(tokens.store), { signOut: async () => {}, setAccounts: () => {} } as unknown as WinnowStore);
+    const bridge = createSessionBridge(platform(tokens.store), { signOut: async () => {}, setAccounts: () => {}, keepAccountRecords: () => {}, forgetAccountRecords: () => {} } as unknown as WinnowStore);
     await bridge.prepare();
     await bridge.signOut({ revoke: false });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -104,7 +104,7 @@ describe("signing out through the bridge", () => {
   });
 
   it("revokes nothing when there is no session at all", async () => {
-    const bridge = createSessionBridge(platform(memoryTokens(null).store), { signOut: async () => {}, setAccounts: () => {} } as unknown as WinnowStore);
+    const bridge = createSessionBridge(platform(memoryTokens(null).store), { signOut: async () => {}, setAccounts: () => {}, keepAccountRecords: () => {}, forgetAccountRecords: () => {} } as unknown as WinnowStore);
     await bridge.signOut();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requests).toHaveLength(0);

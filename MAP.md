@@ -191,7 +191,7 @@ The public surface is ~80 methods, grouped:
 | Bodies | `loadBody`, `prefetchBodies`, `hasLoadedBody`, `scheduleReclassify` |
 | Offline storage | `saveMailboxOffline`, `declineMailboxStorage`, `dismissStoragePrompt` |
 | Learning | `resetLearning`, `setPreferences`, `setSortBy`, `setGoogleContacts` |
-| Snooze and send later (1.4.0, §13b) | `snooze`, `unsnooze`, `wakeDue`, `isSnoozed`, `snoozeFor`, `scheduleSend`, `cancelSchedule`, `updateScheduled`, `claimScheduled`, `scheduledSend`, `scheduledSends`, `accountKey` |
+| Snooze and send later (1.4.0, §13b) | `snooze`, `unsnooze`, `wakeDue`, `isSnoozed`, `snoozeFor`, `scheduleSend`, `cancelSchedule`, `updateScheduled`, `claimScheduled`, `permitScheduled`, `forgetAccountRecords`, `keepAccountRecords`, `scheduledSend`, `scheduledSends`, `accountKey` |
 
 Two behaviours worth knowing before touching it:
 
@@ -447,19 +447,27 @@ reports honestly when the write still did not stick.
   the account gets an id (recorded first in `winnow.accounts.migration`, so an
   interrupted run resumes into the same namespace), each scoped key is copied to
   `<key>@<id>`, the tokens are written to the account's own entry, the registry is
-  written naming it active, and only then are the old copies deleted. Nobody signs in
+  written naming it active, and only then are the old copies deleted. The id, the
+  tokens and the registry are each read back first (`persistAccounts` for the
+  registry; the normal write-through, `saveAccounts`, stays best effort): any that did
+  not stick defers the migration, deleting nothing, so the legacy session is intact and
+  the next launch retries into the same id. Nobody signs in
   again; the address is filled in from the learning's owner or the queue's account, or
   on the first profile read. A locked keychain or a failed token write defers it to the
   next launch, moving and deleting nothing. A mail cache too big to copy within the
   quota is dropped with its cursor instead of deferring (copy-then-delete needs it twice
   over, so a big mailbox would defer on every launch); the first sync is then a full one.
-  Signed out under 1.3.5: an empty registry, and the learning stays the device's until
-  the first account added adopts it (`adoptDeviceLearning`).
+  Signed out under 1.3.5: an empty registry (unwritten: deferred, nothing deleted), and
+  the learning stays the device's until the first account added adopts it
+  (`adoptDeviceLearning`, which removes the device copy only once the account's reads back).
 - **Light sync** (`LightSync`): an account that is not open keeps nothing in memory and
   writes nothing to its cache. `bridge.accounts.checkInactive()` runs on every
   background tick: one `messages.list` for `in:inbox is:unread` per account (5 quota
   units), compared with the unread ids the last check saw (`winnow.lightSync.v1@<id>`);
   new ids get one metadata read each, newest first, at most five, for the notification.
+  An id counts as seen once its read settles (read, 404, or `MAX_LOOKUP_ATTEMPTS` = 3
+  failed checks); a read that fails otherwise stays new (`retry` counts in the record),
+  so the next check notifies it, once. One check at a time per account.
   The first check after an account is added or left only records what is there (`seed`),
   so mail already waiting is not news. The count feeds the switcher; failures stay quiet
   until the account is opened.
@@ -469,7 +477,10 @@ reports honestly when the write still did not stick.
 - **Adding** asks Google's chooser (`prompt=select_account consent`) after the first
   account; adding an account already here switches to it; a sixth is refused.
 - **Sign-out of one account** revokes its grant and erases exactly its namespace,
-  learning included, and its device drafts (`wipeAccountStorage`); the next account
+  learning included, and its device drafts (`wipeAccountStorage`), and its snoozes and
+  scheduled sends in the shared records, by address, plus sends going out from it by id
+  (`WinnowStore.forgetAccountRecords`); every publish of the registry also drops records
+  of addresses it no longer has (`keepAccountRecords`); the next account
   opens, or the app is signed out when it was the last. Sign out of all does each.
 - **Owner decisions, 1.4.0:** at most five accounts (`MAX_ACCOUNTS`); notifications
   for accounts that are not open are on by default; each account is told apart by a
@@ -946,8 +957,8 @@ signed in). "Sign-out" means signing out of that account, which erases its names
 | `winnow.activeFilters.v1` *(per account)* | The active filter set | sign-out |
 | `winnow.mailbox.v1` *(per account)* | Which mailbox was last open | — |
 | `winnow.offlineQueue.v1` *(per account)* | Actions (and sends) waiting for the network, with the account they belong to | replay, sign-out |
-| `winnow.snooze.v1` *(shared; records carry their account)* | Snoozed conversations (account, message ids, wake time) and woken places, `core/mail/snooze.ts` via `core/store/keyedStorage.ts` | wake / unsnooze; this account's on sign-out |
-| `winnow.scheduledSend.v1` *(shared; records carry their account)* | Messages to send later (account, time, Gmail draft id, device copy of the draft), `core/mail/scheduledSend.ts` via `keyedStorage` | sent / cancelled / Edit; this account's on sign-out |
+| `winnow.snooze.v1` *(shared; records carry their account)* | Snoozed conversations (account, message ids, wake time) and woken places, `core/mail/snooze.ts` via `core/store/keyedStorage.ts` | wake / unsnooze; an account's on its sign-out or removal |
+| `winnow.scheduledSend.v1` *(shared; records carry their account)* | Messages to send later (account, time, Gmail draft id, device copy of the draft), `core/mail/scheduledSend.ts` via `keyedStorage` | sent / cancelled / Edit; an account's on its sign-out or removal |
 | `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
 | `winnow.gmail.cache.messages` *(per account)* | The mailbox, as plain JSON | sign-out |
 | `winnow.gmail.cache.cursor` *(per account)* | Gmail `historyId` | sign-out |
@@ -1212,7 +1223,11 @@ The composer's Send later (presets or a custom time) runs Send's checks (subject
 grant), saves the Gmail draft (`DraftAutosaver.settle`), records `{ sendAt, draftId,
 draft, replyTo, … }`, parks the saver and drops the device copy (so no "Restore your
 unsent draft?"). A scheduled draft is kept out of Drafts and listed in Scheduled.
-At the time `App.runDue` (same moments as waking, once the session is ready) claims the
+A send scheduled with another signed-in account in From keeps it (`from`, the account
+id; its Gmail draft is that account's) and goes out through that account.
+At the time `App.runDue` (same moments as waking, once the session is ready) checks the
+send again (`permitScheduled` / `scheduleVerdict`: only the open account's; one whose
+account, or `from` account, is no longer here is dropped, never sent), claims the
 send (`claimScheduled`, so a second window does not send it too) and hands it to
 `deliver` with `draftId`: Drive links shared at dispatch, `drafts.send` (keeping the
 reply's thread), the offline queue when offline. The undo window is not run again: the

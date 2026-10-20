@@ -272,6 +272,48 @@ describe("signing out of one account", () => {
     expect(loadAccounts(globalThis.localStorage).accounts).toEqual([]);
   });
 
+  /** Snoozes and sends for both accounts (and the demo), under the shared keys. */
+  function seedSharedRecords(): void {
+    const send = (id: string, account: string, extra: Record<string, unknown> = {}) => ({
+      id, account, sendAt: 1, scheduledAt: 1, mode: "new", context: `c-${id}`, draftId: null,
+      draft: { to: ["x@example.com"], cc: [], bcc: [], subject: `secret ${id}`, body: `body ${id}` }, ...extra,
+    });
+    storage.set("winnow.scheduledSend.v1", JSON.stringify({ sends: [send("ada", "ada@one.example"), send("bob", "bob@two.example"), send("ada-via-bob", "ada@one.example", { from: B }), send("demo", "demo")] }));
+    const snooze = (key: string, account: string) => ({ key, account, gmailIds: [key], wakeAt: 9e15, snoozedAt: 1, from: "inbox" });
+    storage.set("winnow.snooze.v1", JSON.stringify({ snoozed: [snooze("s-ada", "ada@one.example"), snooze("s-bob", "bob@two.example")], woke: [{ gmailId: "w-bob", account: "bob@two.example", wokeAt: 1 }] }));
+  }
+  const sharedRecords = () => ({
+    sends: (JSON.parse(storage.get("winnow.scheduledSend.v1") ?? "{}").sends ?? []).map((r: { id: string }) => r.id).sort(),
+    snoozed: (JSON.parse(storage.get("winnow.snooze.v1") ?? "{}").snoozed ?? []).map((r: { key: string }) => r.key),
+    woke: (JSON.parse(storage.get("winnow.snooze.v1") ?? "{}").woke ?? []).map((r: { gmailId: string }) => r.gmailId),
+  });
+
+  for (const which of ["inactive", "open"] as const) {
+    it(`signing out of the ${which} account purges its scheduled sends and snoozes from the shared records`, async () => {
+      await seedTwoAccounts();
+      seedSharedRecords();
+      const store = new WinnowStore();
+      const bridge = createSessionBridge(fakePlatform(), store, { storage: globalThis.localStorage });
+      await bridge.prepare();
+      if (which === "open") saveAccounts(globalThis.localStorage, { ...loadAccounts(globalThis.localStorage), active: B });
+      bridge.accounts.registry.reload();
+      await bridge.accounts.openActive();
+      await bridge.accounts.signOut(B, { revoke: false });
+      expect(sharedRecords()).toEqual({ sends: ["ada", "demo"], snoozed: ["s-ada"], woke: [] });
+      expect(storage.get("winnow.scheduledSend.v1")).not.toContain("secret bob");
+    });
+  }
+
+  it("records of an account no longer in the registry are dropped at launch, never sent", async () => {
+    await seedTwoAccounts();
+    seedSharedRecords();
+    saveAccounts(globalThis.localStorage, { ...loadAccounts(globalThis.localStorage), accounts: loadAccounts(globalThis.localStorage).accounts.filter((a) => a.id === A) });
+    const store = new WinnowStore();
+    const bridge = createSessionBridge(fakePlatform(), store, { storage: globalThis.localStorage });
+    await bridge.prepare();
+    expect(sharedRecords()).toEqual({ sends: ["ada", "demo"], snoozed: ["s-ada"], woke: [] });
+  });
+
   it("switching accounts clears nothing of either", async () => {
     await seedTwoAccounts();
     const store = new WinnowStore();
