@@ -112,7 +112,7 @@ const APPEARANCE_LABELS: Record<Appearance, string> = {
   system: "System",
   light: "Light",
   dark: "Dark",
-  oled: "OLED",
+  oled: "Very dark",
 };
 
 /** One accent theme as the picker shows it: its name and a swatch in the current mode. */

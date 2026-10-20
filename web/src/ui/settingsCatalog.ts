@@ -164,7 +164,7 @@ export const SETTINGS = {
     category: "appearance",
     label: "Mode",
     explanation:
-      "System follows your device between light and dark. OLED is dark on true black, which saves power on OLED screens but makes edges harder to see. This is saved on this device only.",
+      "System follows your device between light and dark. Very dark is dark on true black, which saves power on OLED screens but makes edges harder to see. This is saved on this device only.",
   },
   accent: {
     category: "appearance",
