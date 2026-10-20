@@ -33,10 +33,27 @@
  *     (the message sits on its own light page, so a dark-mode block would put light
  *     text on white). Nested at-rules inside `@media` are dropped.
  *
+ * **Email dark mode (1.4.0)** passes `dark`, and three things change:
+ *
+ *   - `own`: an `@media (prefers-color-scheme: dark)` block is *unwrapped* — the
+ *     feature is taken out of the query (`screen and (prefers-color-scheme: dark)` is
+ *     `@media screen`; alone it becomes plain rules), so it applies whenever the
+ *     reader is dark. The app's theme decides, not the OS: a dark app on a light OS is
+ *     still dark. Later in the sheet than the light rules, so it wins as the sender
+ *     meant. `prefers-color-scheme: light` blocks are still dropped.
+ *   - `adaptive`: every ordinary rule's colours are recoloured (`emailDark.ts`).
+ *   - both: `[data-ogsc]`/`[data-ogsb]`-prefixed selectors (Outlook.com's dark hooks)
+ *     lose the prefix and apply, unrecoloured. Without `dark` they are dropped, which
+ *     changes nothing: no element in the reader carries those attributes.
+ *
  * Pure: no DOM, so `core/`'s node test environment covers it.
  */
 
 import { stripForbiddenDeclarations } from "./sanitize";
+import { recolourDeclarations, type DarkPalette } from "./emailDark";
+
+/** Email dark mode, as the sheet sees it. See the module comment. */
+export type SheetDark = { mode: "own" | "adaptive"; palette: DarkPalette };
 
 /** Past this, the rest of a sender's sheet is ignored. Newsletters run 5–40 KB. */
 export const MAX_SCOPED_CSS = 120_000;
@@ -205,9 +222,14 @@ export function scopeSelector(
   return { selector: `${scope} ${rest}`, onScope: false };
 }
 
+/** Outlook.com's dark hooks: `[data-ogsc] .x`, `[data-ogsb] .x`. */
+const OUTLOOK_HOOK = /^\s*\[\s*data-ogs[cb]\s*\]\s*/i;
+
 /** The declarations, with the forbidden ones neutralised and, on the scope, filtered. */
-function cleanDeclarations(body: string, onScope: boolean): string {
-  const safe = stripForbiddenDeclarations(body);
+function cleanDeclarations(body: string, onScope: boolean, recolour?: DarkPalette): string {
+  const safe = recolour
+    ? recolourDeclarations(stripForbiddenDeclarations(body), recolour)
+    : stripForbiddenDeclarations(body);
   if (!onScope) return safe.trim();
   return safe
     .split(";")
@@ -221,28 +243,55 @@ function cleanDeclarations(body: string, onScope: boolean): string {
 }
 
 /** A list of style rules, each fenced; rules that fence to nothing disappear. */
-function scopeRules(css: string, scope: string): string {
+function scopeRules(css: string, scope: string, dark?: SheetDark, fromDarkBlock = false): string {
   const out: string[] = [];
+  // Colours a sender chose for dark are theirs; only ordinary rules are recoloured.
+  const recolour = dark?.mode === "adaptive" && !fromDarkBlock ? dark.palette : undefined;
   for (const { prelude, body } of topLevelBlocks(css)) {
     if (prelude.startsWith("@")) continue; // nested at-rule, or one we do not keep
     if (body.includes("{")) continue; // CSS nesting: not something mail relies on
     const selectors = splitSelectorList(prelude);
     if (!selectors) continue;
-    const scoped = selectors.map((s) => scopeSelector(s, scope)).filter((s) => s !== null);
-    if (scoped.length === 0) continue;
-
-    const inner = scoped.filter((s) => !s.onScope).map((s) => s.selector);
-    const outer = scoped.filter((s) => s.onScope).map((s) => s.selector);
-    if (inner.length > 0) {
-      const declarations = cleanDeclarations(body, false);
-      if (declarations !== "") out.push(`${inner.join(", ")} { ${declarations} }`);
-    }
-    if (outer.length > 0) {
-      const declarations = cleanDeclarations(body, true);
-      if (declarations !== "") out.push(`${scope} { ${declarations} }`);
+    // Outlook's hooks: applied, unprefixed, in a dark reader; dropped otherwise.
+    const plain = selectors.filter((s) => !OUTLOOK_HOOK.test(s));
+    const hooked = dark
+      ? selectors.filter((s) => OUTLOOK_HOOK.test(s)).map((s) => s.replace(OUTLOOK_HOOK, "") || "body")
+      : [];
+    for (const [group, palette] of [[plain, recolour], [hooked, undefined]] as const) {
+      const scoped = group.map((s) => scopeSelector(s, scope)).filter((s) => s !== null);
+      if (scoped.length === 0) continue;
+      const inner = scoped.filter((s) => !s.onScope).map((s) => s.selector);
+      const outer = scoped.filter((s) => s.onScope).map((s) => s.selector);
+      if (inner.length > 0) {
+        const declarations = cleanDeclarations(body, false, palette);
+        if (declarations !== "") out.push(`${inner.join(", ")} { ${declarations} }`);
+      }
+      if (outer.length > 0) {
+        const declarations = cleanDeclarations(body, true, palette);
+        if (declarations !== "") out.push(`${scope} { ${declarations} }`);
+      }
     }
   }
   return out.join("\n");
+}
+
+/**
+ * A dark-scheme `@media` prelude with the feature taken out: `""` when nothing is left
+ * (the rules apply unconditionally), the remaining query otherwise, null when the
+ * prelude is not a dark-scheme query.
+ */
+export function unwrapDarkQuery(prelude: string): string | null {
+  const query = prelude.replace(/^@media/i, "").trim();
+  // A list (`a, b`) is an "or": unwrapping one branch would be wrong for the other.
+  if (query.includes(",") || /[{};]/.test(query)) return null;
+  const parts = query.split(/\s+and\s+/i).map((part) => part.trim()).filter((part) => part !== "");
+  const isDark = (part: string) => /^\(\s*prefers-color-scheme\s*:\s*dark\s*\)$/i.test(part);
+  if (!parts.some(isDark)) return null;
+  const rest = parts.filter((part) => !isDark(part));
+  if (rest.some((part) => /prefers-color-scheme/i.test(part))) return null;
+  // `screen` / `only screen` / `all` alone is every screen the reader is on.
+  if (rest.length === 0 || (rest.length === 1 && /^(?:only\s+)?(?:screen|all)$/i.test(rest[0]))) return "";
+  return rest.join(" and ");
 }
 
 /** Which `@media` preludes are kept. */
@@ -257,17 +306,27 @@ function keepMedia(prelude: string): boolean {
  * The sender's (already sanitised) sheets, fenced under `scope`. Empty when nothing
  * survives.
  */
-export function scopeSenderCss(sheets: readonly string[], scope: string): string {
+export function scopeSenderCss(sheets: readonly string[], scope: string, dark?: SheetDark): string {
   const css = sheets.join("\n").slice(0, MAX_SCOPED_CSS);
   const out: string[] = [];
   for (const { prelude, body } of topLevelBlocks(css)) {
     if (prelude.startsWith("@")) {
-      if (!/^@media\b/i.test(prelude) || !keepMedia(prelude)) continue;
-      const rules = scopeRules(body, scope);
+      if (!/^@media\b/i.test(prelude)) continue;
+      if (dark?.mode === "own") {
+        const unwrapped = unwrapDarkQuery(prelude);
+        if (unwrapped !== null) {
+          const rules = scopeRules(body, scope, dark, true);
+          if (rules === "") continue;
+          out.push(unwrapped === "" ? rules : `@media ${unwrapped} {\n${rules}\n}`);
+          continue;
+        }
+      }
+      if (!keepMedia(prelude)) continue;
+      const rules = scopeRules(body, scope, dark);
       if (rules !== "") out.push(`${prelude} {\n${rules}\n}`);
       continue;
     }
-    const rules = scopeRules(`${prelude} {${body}}`, scope);
+    const rules = scopeRules(`${prelude} {${body}}`, scope, dark);
     if (rules !== "") out.push(rules);
   }
   // The input was emitted escaped; this keeps the promise for anything we composed.

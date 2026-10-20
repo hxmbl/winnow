@@ -21,12 +21,19 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useState, useRef, type RefObject } from "react";
-import { Server } from "lucide-react";
+import { Moon, Server, Sun } from "lucide-react";
 import {
   emailDocument,
   inlineEmailCss,
+  inlineEmailDarkCss,
   sanitizeMailHtml,
 } from "../../core/mail/sanitize";
+import {
+  detectOwnDarkStyles,
+  emailDarkMode,
+  type DarkPalette,
+  type EmailDarkMode,
+} from "../../core/mail/emailDark";
 import {
   renderThroughProxy,
   type ProxiedRender,
@@ -67,6 +74,7 @@ function useSanitised(
   email: Email,
   imagesAllowed: boolean,
   inlineParts: Record<string, string> | undefined,
+  recolour: DarkPalette | undefined,
 ) {
   return useMemo(
     () =>
@@ -78,8 +86,10 @@ function useSanitised(
         // in its `@media` rules, and without them a phone draws the desktop table and
         // the fit zoom shrinks it to half size.
         collectStyles: true,
+        // Email dark mode's adaptive path recolours inline colours while sanitising.
+        recolour,
       }),
-    [email.bodyHtml, imagesAllowed, inlineParts],
+    [email.bodyHtml, imagesAllowed, inlineParts, recolour],
   );
 }
 
@@ -103,7 +113,9 @@ function PlainText({ email }: { email: Email }) {
  *
  * **The container is the message's own page — a light surface with a hairline, which is
  * what Gmail and Apple Mail both do, and what keeps a `#333`-on-`#fff` newsletter legible
- * inside a dark reader.**
+ * inside a dark reader.** Unless email dark mode (1.4.0) is drawing it dark: then the card
+ * is the theme's surface and the sender's colours are honoured or re-mapped
+ * (`core/mail/emailDark.ts`), never a blunt invert.
  *
  * **A fixed-width message is shrunk to fit, as mail clients do (1.3.3).** HTML mail is
  * laid out in fixed-width tables (600–640px), wider than a phone, and the container's
@@ -172,18 +184,29 @@ function RichBody({
   html,
   stylesheets,
   onOpenLink,
+  dark,
 }: {
   html: string;
   stylesheets: readonly string[];
   onOpenLink: (url: string) => void;
+  /** Email dark mode, when this message is being drawn dark. */
+  dark: { mode: Exclude<EmailDarkMode, "off">; palette: DarkPalette } | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scope = sheetScope(useId());
+  const darkMode = dark?.mode;
+  const darkPalette = dark?.palette;
   // The sender's sheet, every selector fenced under this one message. See `scopedSheet.ts`.
   const senderCss = useMemo(
-    () => scopeSenderCss(stylesheets, scope.selector),
-    [stylesheets, scope.selector],
+    () =>
+      scopeSenderCss(
+        stylesheets,
+        scope.selector,
+        darkMode && darkPalette ? { mode: darkMode, palette: darkPalette } : undefined,
+      ),
+    [stylesheets, scope.selector, darkMode, darkPalette],
   );
+  const darkCss = useMemo(() => (darkPalette ? inlineEmailDarkCss(darkPalette) : ""), [darkPalette]);
   // Re-fit when the sheet changes too: its media rules can change the natural width.
   useFitToWidth(containerRef, html + senderCss);
 
@@ -278,13 +301,22 @@ function RichBody({
     // The card is a wrapper because the email baseline zeroes the container's own
     // padding (it must, for the "as sent" document's body), which left the text flush
     // against the card's edge.
-    <div className="selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline bg-white px-4 py-4 sm:px-6 sm:py-5">
+    //
+    // In email dark mode the card is the theme's surface instead of white, and the
+    // container carries `data-wn-dark` for `inlineEmailDarkCss`.
+    <div
+      data-wn-email-card=""
+      className={`selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline px-4 py-4 sm:px-6 sm:py-5 ${dark ? "" : "bg-white"}`}
+      style={dark ? { background: dark.palette.surface } : undefined}
+    >
+      {darkCss !== "" && <style data-wn-dark-styles="" dangerouslySetInnerHTML={{ __html: darkCss }} />}
       {senderCss !== "" && (
         <style data-wn-sender-styles="" dangerouslySetInnerHTML={{ __html: senderCss }} />
       )}
       <div
         ref={containerRef}
         data-wn-email=""
+        {...(dark ? { "data-wn-dark": dark.mode } : {})}
         {...{ [scope.attribute]: scope.value }}
         onClick={(event) => {
           const anchor = (event.target as HTMLElement).closest?.("a[href]");
@@ -401,7 +433,37 @@ type Props = {
   onOpenLink: (url: string) => void;
   /** Which form to show. Owned by the reader, whose menu picks it. */
   view: BodyView;
+  /**
+   * Email dark mode (1.4.0): the palette to draw the rich form in, or null when the
+   * reader is light or Settings → Appearance → Email dark mode is off. The reader can
+   * still ask for this one message's original colours with the sun/moon button.
+   */
+  emailDark?: DarkPalette | null;
 };
+
+/**
+ * "Show original colours" / "Show in dark": the per-message escape hatch, beside the
+ * card, so a message the recolouring got wrong is one tap from the sender's own look.
+ * Not persisted: the next message opens dark again.
+ */
+function DarkToggle({ original, onToggle }: { original: boolean; onToggle: () => void }) {
+  const label = original ? "Show in dark" : "Show original colours";
+  return (
+    <div className="mb-1.5 flex justify-end">
+      <button
+        type="button"
+        data-wn-dark-toggle=""
+        aria-pressed={original}
+        title={label}
+        onClick={onToggle}
+        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-meta font-medium text-ink-muted transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        {original ? <Moon size={13} strokeWidth={1.9} aria-hidden="true" /> : <Sun size={13} strokeWidth={1.9} aria-hidden="true" />}
+        {label}
+      </button>
+    </div>
+  );
+}
 
 /**
  * A message body, and the control that picks its form.
@@ -410,11 +472,19 @@ type Props = {
  * preference would need a fourth `Preferences` key, a migration and a Settings control,
  * for a thing most readers change once.
  */
-export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, view }: Props) {
+export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, view, emailDark = null }: Props) {
   const bodyHtml = email.bodyHtml;
 
   const hasHtml = Boolean(bodyHtml);
-  const sanitised = useSanitised(email, imagesAllowed, inlineParts);
+
+  // Email dark mode: which path this message takes, and the reader's per-message
+  // "original colours", back to dark when the message changes.
+  const [original, setOriginal] = useState(false);
+  useEffect(() => setOriginal(false), [email.id]);
+  const own = useMemo(() => (bodyHtml ? detectOwnDarkStyles(bodyHtml, []) : null), [bodyHtml]);
+  const mode = emailDarkMode(emailDark !== null && !original, own);
+  const darkFor = emailDark && mode !== "off" ? { mode, palette: emailDark } : null;
+  const sanitised = useSanitised(email, imagesAllowed, inlineParts, mode === "adaptive" && emailDark ? emailDark : undefined);
 
   /**
    * The proxy's document, fetched when this form is on screen.
@@ -453,7 +523,10 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
         </p>
       )}
 
-      {shown === "rich" && <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} />}
+      {emailDark && hasHtml && (shown === "rich" || (shown === "proxied" && proxied === null)) && (
+        <DarkToggle original={original} onToggle={() => setOriginal((was) => !was)} />
+      )}
+      {shown === "rich" && <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} dark={darkFor} />}
       {shown === "plain" && <PlainText email={email} />}
       {shown === "sent" && <AsSent email={email} imagesAllowed={imagesAllowed} />}
       {shown === "proxied" &&
@@ -467,7 +540,7 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
               The render proxy is not answering, so this message is being rendered here
               instead.
             </p>
-            <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} />
+            <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} dark={darkFor} />
           </div>
         ) : (
           <Proxied

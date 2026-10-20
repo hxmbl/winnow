@@ -18,6 +18,7 @@
  */
 
 import { decodeEntities } from "./html.ts";
+import { parseColor, recolourAttribute, recolourDeclarations, type DarkPalette, type Rgba } from "./emailDark.ts";
 
 // ── The allowlists ──────────────────────────────────────────────────────────
 
@@ -910,6 +911,15 @@ export type SanitizeOptions = {
    * a remote address at all.
    */
   rewriteUrls?: ReadonlyMap<string, string>;
+  /**
+   * Email dark mode's adaptive path (`emailDark.ts`): every colour the sender wrote in
+   * a `style` attribute, `bgcolor` or `color` is re-mapped for this dark palette while
+   * sanitising. Absent — light mode, the setting off, "Show original colours", or a
+   * message with its own dark styles — and the output is exactly what it always was.
+   * The replacements are colours this code formats, so nothing a sender wrote gains a
+   * way past the allowlist.
+   */
+  recolour?: DarkPalette;
 };
 
 export type SanitizedMail = {
@@ -954,7 +964,7 @@ const DEFAULTS: SanitizeOptions = { allowRemote: false };
  */
 export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions> = {}): SanitizedMail {
   const settings = { ...DEFAULTS, ...options };
-  const { allowRemote, inlineParts, rewriteUrls } = settings;
+  const { allowRemote, inlineParts, rewriteUrls, recolour } = settings;
 
   // One lowercased copy of the body, for the element-boundary search: lowercasing
   // per dropped element made a newsletter full of buttons quadratic in its own size.
@@ -1105,6 +1115,14 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
     // decorative lie the click handler cannot honour.
     let href = false;
 
+    // The element's own `bgcolor`, so a text colour beside it is held to AA against it.
+    let elementBackground: Rgba | null = null;
+    if (recolour) {
+      const bg = parsed.attributes.find((a) => a.name === "bgcolor");
+      const raw = bg ? decodeEntities(bg.value).trim() : "";
+      elementBackground = raw ? (parseColor(raw) ?? (/^[0-9a-f]{6}$/i.test(raw) ? parseColor(`#${raw}`) : null)) : null;
+    }
+
     for (const attribute of parsed.attributes) {
       const allowed =
         GLOBAL_ATTRS.has(attribute.name) ||
@@ -1156,7 +1174,10 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
         case "style": {
           const resolved = sanitizeStyleAttribute(value, allowRemote, rewriteUrls);
           if (resolved.blocked) blockedRemote += 1;
-          if (resolved.value) attrs.push(`style="${escapeAttribute(resolved.value)}"`);
+          const styled = resolved.value && recolour
+            ? recolourDeclarations(resolved.value, recolour, elementBackground)
+            : resolved.value;
+          if (styled) attrs.push(`style="${escapeAttribute(styled)}"`);
           break;
         }
         case "width":
@@ -1173,6 +1194,15 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
             // a dropped `width` is always wrong.
             attrs.push(`${attribute.name}="${Math.min(numeric, MAX_DIMENSION)}"`);
           }
+          break;
+        }
+        case "bgcolor":
+        case "color": {
+          const decoded = decodeEntities(value);
+          const out = recolour
+            ? recolourAttribute(decoded, attribute.name === "bgcolor" ? "background" : "text", recolour, elementBackground)
+            : decoded;
+          attrs.push(`${attribute.name}="${escapeAttribute(out)}"`);
           break;
         }
         case "target":
@@ -1240,7 +1270,9 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
  * **The container keeps a light surface in both themes, on purpose.** A white
  * newsletter (`color: #333`, `background: #fff`) rendered in dark-mode grey is
  * unreadable; like Gmail and Apple Mail, the message keeps the sender's own surface
- * and the app puts chrome around it.
+ * and the app puts chrome around it. Email dark mode (1.4.0) is the one exception, and
+ * it does not change this list: it adds [`inlineEmailDarkCss`] on top and recolours the
+ * sender's colours to match (`emailDark.ts`).
  */
 const CONTAINER = "--container";
 
@@ -1374,6 +1406,27 @@ export function emailDocumentCss(): string {
  */
 export function inlineEmailCss(): string {
   return serialiseBaseline(`[${CONTAINER_ATTRIBUTE}]`);
+}
+
+/**
+ * Email dark mode's baseline (1.4.0): the same container drawn on the theme's surface
+ * with the theme's ink, and the few baseline rules that name a light colour (links,
+ * quotes, code, rules, the withheld-image box) given dark ones. Every selector carries
+ * `[data-wn-dark]` as well, so it outranks the light baseline and still loses to the
+ * sender's own (scoped, later) rules and inline styles, which `emailDark.ts` recolours.
+ * Used for both dark paths: a message with its own dark styles still needs a dark page.
+ */
+export function inlineEmailDarkCss(palette: DarkPalette): string {
+  const scope = `[${CONTAINER_ATTRIBUTE}][data-wn-dark]`;
+  return [
+    `${scope} { color: ${palette.ink}; background: ${palette.surface}; color-scheme: dark; }`,
+    `${scope} a { color: ${palette.link}; }`,
+    `${scope} blockquote { border-left-color: #4A4A4A; color: #B8B8B8; }`,
+    `${scope} pre { background: rgba(255, 255, 255, 0.07); }`,
+    `${scope} hr { border-top-color: rgba(255, 255, 255, 0.16); }`,
+    `${scope} img[data-wn-blocked-src] { border-color: #5A5A5A; background: rgba(255, 255, 255, 0.06); }`,
+    `${scope} [data-wn-copy-button] button { background: #333333; color: ${palette.ink}; }`,
+  ].join("\n");
 }
 
 /**

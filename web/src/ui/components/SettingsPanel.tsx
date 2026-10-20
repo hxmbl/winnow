@@ -152,6 +152,9 @@ export type SettingsProps = {
   /** Left-handed phone layout. Null hides the row (only the phone layout has thumb controls). */
   leftHanded: boolean | null;
   onLeftHanded: (value: boolean) => void;
+  /** Email dark mode: message bodies drawn dark in the dark modes. See `Preferences.emailDarkMode`. */
+  emailDarkMode: boolean;
+  onEmailDarkMode: (value: boolean) => void;
   /** How long Send waits for Undo. 5s by default; see `Preferences.undoSendSeconds`. */
   undoSendSeconds: UndoSendSeconds;
   onUndoSendSeconds: (value: UndoSendSeconds) => void;
@@ -604,6 +607,9 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             value={props.accentTheme}
             onChange={props.onAccentTheme}
           />
+          <Row setting="emailDarkMode">
+            <Toggle checked={props.emailDarkMode} onChange={props.onEmailDarkMode} label={SETTINGS.emailDarkMode.label} />
+          </Row>
           {props.leftHanded !== null && (
             <Row setting="leftHanded">
               <Toggle checked={props.leftHanded} onChange={props.onLeftHanded} label="Left-handed" />
