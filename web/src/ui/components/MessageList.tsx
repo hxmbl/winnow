@@ -298,10 +298,10 @@ const Row = memo(function Row({
       data-checked={checked ? "" : undefined}
       className={`group/row relative flex w-full items-start gap-2 rounded-pane px-3 py-1.5 text-left transition-colors duration-150 [-webkit-touch-callout:none] ${
         /*
-         * Selection is the accent, washed into the surface: the one place in the list the
-         * accent appears besides the unread dot, so the two are never confused with any
-         * other state. A row in the multi-selection gets the same wash; the check in the
-         * avatar slot is what tells it from the open message.
+         * Selection is a neutral step (`surface-selected`, the same for every accent since
+         * 1.4.0), so the unread dot stays the list's one spot of accent and the two are
+         * never confused. A row in the multi-selection gets the same fill; the check in
+         * the avatar slot is what tells it from the open message.
          */
         selected || checked ? "bg-surface-selected" : "hover:bg-surface-hover"
       }`}

@@ -14,9 +14,10 @@
  *
  * The monogram is not a colour per sender. The old list painted every row a different
  * hue, which made a column of confetti beside the names; here there are two tones, both
- * from the palette — the neutral `surface-active` and the accent washed into the surface
- * (`surface-selected`) — picked by a stable hash of the address, so the column has a
- * little rhythm without becoming a legend nobody asked to learn.
+ * neutral steps from the palette — `surface-active` and the lighter `surface-selected`
+ * (until 1.4.0 the accent washed into the surface; the accent is now for what you act
+ * on) — picked by a stable hash of the address, so the column has a little rhythm
+ * without becoming a legend nobody asked to learn.
  */
 
 import { useState } from "react";
@@ -26,7 +27,7 @@ import { avatarInitial, avatarTone, type AvatarTone } from "../avatar";
 
 const TONE_CLASS: Record<AvatarTone, string> = {
   neutral: "bg-surface-active text-ink-muted",
-  accent: "bg-surface-selected text-ink-body",
+  soft: "bg-surface-selected text-ink-body",
 };
 
 type Props = {

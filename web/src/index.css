@@ -59,7 +59,7 @@ body,
  */
 :root {
   --wn-boot-canvas: #f1f1f3;
-  --wn-boot-ink: #18162b;
+  --wn-boot-ink: #18181c;
   color-scheme: light;
 }
 
@@ -795,10 +795,10 @@ button.wn-glass:not([data-rail-item]):active,
 }
 
 /*
- * The accent's wash (1.4): the list's backdrop, faintly in the accent's hue, so the glass
- * over it has a colour to frost and an accent is more than its buttons. Two soft radial
- * glows over the surface (`WASH` in `glass.ts`: per mode, faint enough that every row ink
- * keeps AA at their strongest; OLED stays near black). Viewport-anchored
+ * The accent's wash (1.4): the list's backdrop, barely perceptibly in the accent's hue, so
+ * the glass over it has a trace of colour to frost. Two soft radial glows over the surface
+ * (`WASH` in `glass.ts`: per mode, 7%/6% at most, so it never reads as a tinted app and
+ * every row ink keeps AA at their strongest). The only large area the accent reaches. Viewport-anchored
  * (`background-attachment: fixed`) on the few planes that carry it, none of which scroll,
  * so the list pane and the pinned day line up seamlessly; the rows inside the scroller
  * are transparent and scroll over it.

@@ -244,7 +244,7 @@ describe("the avatar monogram", () => {
   it("gives a sender the same one of two tones every time", () => {
     expect(avatarTone("Ada@Example.com")).toBe(avatarTone("ada@example.com"));
     const tones = new Set(["a@x.y", "b@x.y", "c@x.y", "d@x.y", "e@x.y", "f@x.y"].map(avatarTone));
-    expect([...tones].every((tone) => tone === "neutral" || tone === "accent")).toBe(true);
+    expect([...tones].every((tone) => tone === "neutral" || tone === "soft")).toBe(true);
     expect(tones.size).toBe(2);
   });
 });

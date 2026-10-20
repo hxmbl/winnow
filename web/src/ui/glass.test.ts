@@ -348,11 +348,14 @@ describe("the accent's wash behind the list (1.4)", () => {
   });
 
   for (const scheme of MODES) {
-    it(`${scheme}: OLED stays near black, and the wash is faint everywhere`, () => {
+    it(`${scheme}: the wash is kept but barely there (1.4.0: subtle, not a tinted app)`, () => {
       const { near, far } = WASH[scheme];
       expect(near).toBeGreaterThan(0);
       expect(far).toBeGreaterThan(0);
-      expect(Math.max(near, far)).toBeLessThanOrEqual(scheme === "oled" ? 0.1 : 0.16);
+      expect(far).toBeLessThanOrEqual(near);
+      // Light 7%/6%, dark about 6%/5%, OLED about 5%/4%: never above light's, and no
+      // brighter in the dark modes, where the same alpha reads stronger.
+      expect(Math.max(near, far)).toBeLessThanOrEqual({ light: 0.07, dark: 0.06, oled: 0.05 }[scheme]);
     });
 
     for (const accent of Object.keys(ACCENTS) as (keyof typeof ACCENTS)[]) {

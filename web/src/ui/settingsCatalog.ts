@@ -170,7 +170,7 @@ export const SETTINGS = {
     category: "appearance",
     label: "Accent",
     explanation:
-      "The one colour Winnow uses for unread mail, the selection and the main action. Each accent is checked for contrast in light and dark. It changes nothing but colour.",
+      "The colour of Winnow's buttons, links, switches and unread marks. Everything else stays neutral grey and white. Each accent is checked for contrast in light and dark.",
   },
   leftHanded: {
     category: "appearance",
