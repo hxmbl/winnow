@@ -9,6 +9,7 @@
  */
 
 import type { Draft, Email } from "../model/email";
+import { isAccountId } from "../session/accounts";
 import { displayName } from "../model/email";
 import { replySubject } from "../mail/reply";
 
@@ -52,7 +53,15 @@ export type MessageNotice = {
   picture: string | null;
 };
 
+/**
+ * Whose mail it is (1.4.0): every press names the account, so it acts on that account
+ * and opens its inbox. `label` is the address, shown on the notification only when more
+ * than one account is signed in (`null` otherwise, and in the demo).
+ */
+export type NotificationAccount = { id: string; label: string | null };
+
 export type NotificationBatch = {
+  account?: NotificationAccount | null;
   total: number;
   summaryTitle: string;
   summaryBody: string;
@@ -95,11 +104,13 @@ export function buildNotificationBatch(
   settings: Pick<NotificationSettings, "notificationActions" | "notificationHidePreview">,
   replyHeads: Readonly<Record<string, string>> = {},
   pictures: Readonly<Record<string, string>> = {},
+  account: NotificationAccount | null = null,
 ): NotificationBatch {
   const shown = emails.slice(0, MAX_MESSAGE_NOTIFICATIONS);
   const total = emails.length;
   const names = [...new Set(emails.map((email) => displayName(email)))];
   return {
+    account: account && isAccountId(account.id) ? { id: account.id, label: account.label } : null,
     total,
     summaryTitle: total === 1 ? displayName(emails[0]) : `${total} new messages`,
     summaryBody:
@@ -147,7 +158,8 @@ export function notificationReplyDraft(email: Email, body = ""): Draft {
 
 // ── Presses ────────────────────────────────────────────────────────────────
 
-export type NotificationActionName = "open" | "reply" | "read" | "trash" | "untrash";
+/** `inbox`: the summary of several messages was pressed, which opens the account's inbox. */
+export type NotificationActionName = "open" | "reply" | "read" | "trash" | "untrash" | "inbox";
 
 /** A press, as the platform reports it. */
 export type NotificationActionEvent = {
@@ -160,9 +172,11 @@ export type NotificationActionEvent = {
    */
   origin: "desktop" | "web" | "android";
   outcome?: "done" | "failed";
+  /** The account the notification was for (1.4.0); absent from an older native build. */
+  account?: string;
 };
 
-const ACTIONS: readonly NotificationActionName[] = ["open", "reply", "read", "trash", "untrash"];
+const ACTIONS: readonly NotificationActionName[] = ["open", "reply", "read", "trash", "untrash", "inbox"];
 
 /** Validate what came over IPC; anything unexpected is dropped, never guessed at. */
 export function parseNotificationAction(raw: unknown): NotificationActionEvent | null {
@@ -172,68 +186,104 @@ export function parseNotificationAction(raw: unknown): NotificationActionEvent |
   if (typeof action !== "string" || !(ACTIONS as readonly string[]).includes(action)) return null;
   const messageId = source.messageId;
   if (typeof messageId !== "number" || !Number.isSafeInteger(messageId)) return null;
+  // A summary names no message (`messageId` 0).
   const origin = source.origin;
   if (origin !== "desktop" && origin !== "web" && origin !== "android") return null;
   const gmailId = typeof source.gmailId === "string" ? source.gmailId : "";
   const outcome = source.outcome === "done" || source.outcome === "failed" ? source.outcome : undefined;
-  return { action: action as NotificationActionName, messageId, gmailId, origin, ...(outcome ? { outcome } : {}) };
+  const account = isAccountId(source.account) ? source.account : undefined;
+  return {
+    action: action as NotificationActionName,
+    messageId,
+    gmailId,
+    origin,
+    ...(outcome ? { outcome } : {}),
+    ...(account ? { account } : {}),
+  };
 }
 
 /** What the handler needs from the app. All of it already exists for the app's own buttons. */
 export type NotificationActionDeps = {
   focusWindow(): Promise<void> | void;
-  /** Select and open a message; `false` when it is not cached. */
-  focusMessage(id: number): boolean;
+  /**
+   * Make `account` the open one (1.4.0), resolving once its mail is there; `false` when
+   * this device has no such account any more. Absent: one account, nothing to switch.
+   */
+  openAccount?(account: string): Promise<boolean>;
+  /** Whether `account` is the open one. */
+  isOpen?(account: string): boolean;
+  /**
+   * Open a message in the reader: the cached copy, or fetched first when it is not
+   * cached yet (`store.openMessage`). `false` when it cannot be found.
+   */
+  openMessage(gmailId: string, id: number): Promise<boolean> | boolean;
+  /** The inbox, as the summary of several messages opens it. */
+  openInbox(): void;
   /** Open the composer on a reply to the open message. */
   openReply(): void;
-  /** Whether a message is cached, unread, and where. */
-  find(id: number): Pick<Email, "id" | "unread" | "mailbox"> | undefined;
+  /** Whether a message is cached (fetched when it is not), unread, and where. */
+  find(id: number, gmailId: string): Promise<Pick<Email, "id" | "unread" | "mailbox"> | undefined> | Pick<Email, "id" | "unread" | "mailbox"> | undefined;
   setRead(id: number, read: boolean): void;
   /** Move to Trash with Undo (`moveWithUndo`), never a permanent delete. */
   trashWithUndo(id: number): void;
   refresh(): Promise<void> | void;
+  /** An account that is not open did something natively: its light sync catches up. */
+  refreshAccount?(account: string): Promise<void> | void;
   /** Desktop: the short confirmation on the notification. */
   confirm?(messageId: number, title: string, text: string, failed: boolean): void;
 };
 
 /**
- * Act on a press. Returns what was done, for the tests and the log.
+ * Act on a press. Resolves to what was done, for the tests and the log.
  *
  * Android presses arrive already done, so the app only refreshes to show it. Desktop
  * and browser presses are done here, through the same store calls as the app's own
- * buttons, so Undo, rollback on failure and the error strip all come with them.
+ * buttons, so Undo, rollback on failure and the error strip all come with them — after
+ * the notification's account is made the open one, so the press acts on the account the
+ * mail arrived in and leaves its inbox on screen.
  */
-export function handleNotificationAction(event: NotificationActionEvent, deps: NotificationActionDeps): string {
-  if (event.origin === "android") {
+export async function handleNotificationAction(event: NotificationActionEvent, deps: NotificationActionDeps): Promise<string> {
+  if (event.origin === "android" && event.action !== "open" && event.action !== "inbox") {
+    if (event.account && deps.isOpen && !deps.isOpen(event.account)) {
+      void deps.refreshAccount?.(event.account);
+      return `refreshed ${event.account} after ${event.action}`;
+    }
     void deps.refresh();
     return `refreshed after ${event.action}`;
   }
+  const visible = event.action === "open" || event.action === "reply" || event.action === "inbox";
+  if (visible) void deps.focusWindow();
+  if (event.account && deps.openAccount && !(await deps.openAccount(event.account))) {
+    deps.confirm?.(event.messageId, "Couldn't do that. Open Winnow", "That account isn't signed in on this device any more.", true);
+    return "unknown account";
+  }
   switch (event.action) {
+    case "inbox":
+      deps.openInbox();
+      return "inbox opened";
     case "open":
-      void deps.focusWindow();
-      return deps.focusMessage(event.messageId) ? "opened" : "focused";
+      return (await deps.openMessage(event.gmailId, event.messageId)) ? "opened" : "focused";
     case "reply":
-      void deps.focusWindow();
-      if (!deps.focusMessage(event.messageId)) return "focused";
+      if (!(await deps.openMessage(event.gmailId, event.messageId))) return "focused";
       deps.openReply();
       return "reply opened";
     case "read": {
-      const email = deps.find(event.messageId);
+      const email = await deps.find(event.messageId, event.gmailId);
       if (!email) {
         deps.confirm?.(event.messageId, "Couldn't do that. Open Winnow", "That message isn't loaded yet.", true);
         return "not cached";
       }
-      deps.setRead(event.messageId, true);
+      deps.setRead(email.id, true);
       deps.confirm?.(event.messageId, "Marked as read", "", false);
       return "marked read";
     }
     case "trash": {
-      const email = deps.find(event.messageId);
+      const email = await deps.find(event.messageId, event.gmailId);
       if (!email || email.mailbox === "trash") {
         deps.confirm?.(event.messageId, "Couldn't do that. Open Winnow", "That message isn't loaded yet.", true);
         return "not cached";
       }
-      deps.trashWithUndo(event.messageId);
+      deps.trashWithUndo(email.id);
       deps.confirm?.(event.messageId, "Moved to Trash", "Undo is in Winnow.", false);
       return "trashed";
     }
@@ -241,6 +291,47 @@ export function handleNotificationAction(event: NotificationActionEvent, deps: N
       // Only Android offers Undo on the notification itself.
       return "ignored";
   }
+}
+
+// ── Deep links ─────────────────────────────────────────────────────────────
+
+/**
+ * What a `winnow://` link asks for. A notification's tap is
+ * `winnow://message/<id>?account=<acct>&gmail=<gmailId>` (one message) or
+ * `winnow://open?account=<acct>&view=inbox` (a summary of several); 1.3.5's
+ * `winnow://message/<id>` and `winnow://open` still read.
+ */
+export type DeepLink =
+  | { kind: "message"; messageId: number; gmailId: string; account?: string }
+  | { kind: "inbox"; account?: string }
+  | { kind: "signed-in" }
+  | { kind: "open" };
+
+export function parseDeepLink(raw: string): DeepLink | null {
+  const url = raw.trim();
+  if (/^winnow:\/\/signed-in\/?$/.test(url)) return { kind: "signed-in" };
+  const match = /^winnow:\/\/(message\/(\d+)|open)\/?(?:\?(.*))?$/.exec(url);
+  if (!match) return null;
+  const params = new URLSearchParams(match[3] ?? "");
+  const account = params.get("account");
+  const tagged = isAccountId(account) ? { account } : {};
+  if (match[2] !== undefined) {
+    const messageId = Number(match[2]);
+    if (!Number.isSafeInteger(messageId)) return null;
+    const gmail = params.get("gmail") ?? "";
+    return { kind: "message", messageId, gmailId: /^[A-Za-z0-9]{1,64}$/.test(gmail) ? gmail : "", ...tagged };
+  }
+  if (params.get("view") === "inbox" || account) return { kind: "inbox", ...tagged };
+  return { kind: "open" };
+}
+
+/** The link a notification's tap carries, as the native side builds it (pinned by tests on both sides). */
+export function messageLink(messageId: number, gmailId: string, account?: string | null): string {
+  const query = new URLSearchParams();
+  if (account) query.set("account", account);
+  if (gmailId) query.set("gmail", gmailId);
+  const rest = query.toString();
+  return `winnow://message/${messageId}${rest ? `?${rest}` : ""}`;
 }
 
 // ── Replies the phone kept ────────────────────────────────────────────────
@@ -257,6 +348,8 @@ export type KeptReply = {
   replyHead: string | null;
   reply: string;
   at: number;
+  /** The account the notification was for (1.4.0); saved into that account's Drafts only. */
+  account?: string;
 };
 
 export function parseKeptReply(raw: unknown): KeptReply | null {
@@ -276,6 +369,7 @@ export function parseKeptReply(raw: unknown): KeptReply | null {
     replyHead: typeof s.replyHead === "string" ? s.replyHead : null,
     reply: s.reply,
     at: typeof s.at === "number" ? s.at : 0,
+    ...(isAccountId(s.account) ? { account: s.account } : {}),
   };
 }
 

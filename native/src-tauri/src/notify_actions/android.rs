@@ -106,8 +106,11 @@ pub fn release_kept(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
 }
 
 fn run(app: &AppHandle, handle: &PluginHandle<Wry>, request: ActionRequest) {
+    // The notification's own account (1.4.0): its tokens, never another account's.
+    let tokens = plan::tokens_secret_for(request.account.as_deref())
+        .and_then(|name| crate::secrets::get(&name).ok().flatten());
     let secrets = Secrets {
-        tokens: crate::secrets::get(plan::TOKENS_SECRET).ok().flatten(),
+        tokens,
         client: crate::secrets::get(plan::CLIENT_SECRET).ok().flatten(),
     };
     let mut transport = |exchange: &HttpRequest| -> HttpResponse {
@@ -135,6 +138,7 @@ fn run(app: &AppHandle, handle: &PluginHandle<Wry>, request: ActionRequest) {
                 gmail_id: request.gmail_id.clone(),
                 origin: "android",
                 outcome: Some(if failed { "failed" } else { "done" }),
+                account: request.account.clone(),
             },
         );
     }

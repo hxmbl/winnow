@@ -113,6 +113,7 @@ pub fn run() {
             notify_actions::notify_action_result,
             notify_actions::notify_kept_replies,
             notify_actions::notify_release_kept,
+            deep_link::deep_link_launch,
         ])
         .on_page_load(|window, payload| {
             // The window is configured `visible: false` so the user never sees a

@@ -13,6 +13,9 @@ import {
   handleNotificationAction,
   parseKeptReply,
   type KeptReply,
+  type NotificationAccount,
+  type NotificationActionDeps,
+  type NotificationActionEvent,
 } from "../core/notify/notifications";
 import type { WinnowStore } from "../core/store/store";
 import type { Platform } from "../platform/types";
@@ -152,38 +155,129 @@ function requestReply(): void {
   replyOpener?.();
 }
 
+// ── Accounts ──────────────────────────────────────────────────────────────
+
+/**
+ * How a press reaches the right account (1.4.0). `App` provides it once the session
+ * bridge exists; a press that arrives before that (a cold start from a notification)
+ * waits for it, then for the launch's own restore, so it never acts on the demo.
+ */
+export type AccountRouter = {
+  /** Resolves once the launch has adopted (or failed to adopt) the stored session. */
+  ready(): Promise<void>;
+  /** Make `id` the open account; `false` when this device has no such account. */
+  openAccount(id: string): Promise<boolean>;
+  isOpen(id: string): boolean;
+  /** Catch an inactive account up after a native action (its light sync). */
+  refreshAccount(id: string): Promise<void>;
+  /** The light sync of every account that is not open. */
+  refreshInactive(): Promise<void>;
+};
+
+let router: AccountRouter | null = null;
+let routerWaiters: ((value: AccountRouter) => void)[] = [];
+
+export function provideAccountRouter(next: AccountRouter): () => void {
+  router = next;
+  for (const resolve of routerWaiters) resolve(next);
+  routerWaiters = [];
+  return () => {
+    if (router === next) router = null;
+  };
+}
+
+/** The router, waited for up to `ms` (a press before the app is up). */
+export function accountRouter(ms = 20_000): Promise<AccountRouter | null> {
+  if (router) return Promise.resolve(router);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    routerWaiters.push((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+}
+
+/** For tests. */
+export function resetAccountRouter(): void {
+  router = null;
+  routerWaiters = [];
+}
+
 // ── The store's bridge ────────────────────────────────────────────────────
 
+/** Whose notification this is: the open account, labelled when there is more than one. */
+export function openAccountTag(store: WinnowStore): NotificationAccount | null {
+  const snap = store.getSnapshot();
+  if (!snap.accountId) return null;
+  const many = snap.accounts.filter((account) => !account.demo).length > 1;
+  return { id: snap.accountId, label: many ? (snap.account?.email ?? null) : null };
+}
+
 /** `PlatformBridge.notifyNewMail`: the store's arrivals, as the platform's batch. */
-export async function announce(store: WinnowStore, platform: Platform, emails: readonly Email[]): Promise<void> {
+export async function announce(
+  store: WinnowStore,
+  platform: Platform,
+  emails: readonly Email[],
+  account: NotificationAccount | null = openAccountTag(store),
+  /** The account's own reply heads (another account's backend); the open one's by default. */
+  replyHeads?: (emails: readonly Email[]) => Promise<Record<string, string>>,
+): Promise<void> {
   if (emails.length === 0) return;
   const preferences = store.getSnapshot().preferences;
   // Only Android replies from the notification itself; elsewhere Reply opens the
   // composer, so the header blocks (a profile read each) would be built for nothing.
   const info = await platform.info().catch(() => null);
-  const [heads, pictures] = await Promise.all([
-    info?.os === "android" ? store.notificationReplyHeads(emails.slice(0, 5)) : Promise.resolve({}),
-    notificationPictures(emails, preferences.notificationHidePreview),
-  ]);
+  const heads = info?.os === "android"
+    ? (replyHeads ?? ((shown) => store.notificationReplyHeads(shown)))(emails.slice(0, 5)).catch(() => ({}))
+    : Promise.resolve({});
+  const [resolvedHeads, pictures] = await Promise.all([heads, notificationPictures(emails, preferences.notificationHidePreview)]);
   // Native notifications (Android, desktop) draw a picture from its bytes, never a URL.
   const shown = info?.kind === "desktop" ? await nativePictures(pictures) : pictures;
-  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, heads, shown));
+  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, resolvedHeads, shown, account));
 }
 
 // ── Presses and kept replies ──────────────────────────────────────────────
 
+/** The handler's dependencies over the store and the account router. */
+export function notificationDeps(store: WinnowStore, platform: Platform, routes: AccountRouter | null): NotificationActionDeps {
+  return {
+    focusWindow: () => platform.focusWindow(),
+    ...(routes
+      ? {
+          openAccount: (id: string) => routes.openAccount(id),
+          isOpen: (id: string) => routes.isOpen(id),
+          refreshAccount: (id: string) => routes.refreshAccount(id),
+        }
+      : {}),
+    openMessage: (gmailId, id) => store.openMessage(gmailId, id),
+    openInbox: () => store.openInbox(),
+    openReply: requestReply,
+    find: async (id, gmailId) => {
+      const snap = store.getSnapshot();
+      const cached = snap.all.find((email) => email.id === id || (gmailId !== "" && email.gmailId === gmailId));
+      if (cached) return cached;
+      return (await store.ensureMessage(gmailId)) ?? undefined;
+    },
+    setRead: (id, read) => store.setRead(id, read),
+    trashWithUndo: (id) => store.moveWithUndo(id, "trash"),
+    refresh: () => store.refresh(),
+    confirm: (id, title, text, failed) => void platform.confirmNotificationAction?.(id, title, text, failed),
+  };
+}
+
+/** One press (or a notification's deep link), once the app can act on it. */
+export async function routeNotificationAction(store: WinnowStore, platform: Platform, event: NotificationActionEvent): Promise<string> {
+  // A native action already done needs no account to be open.
+  const native = event.origin === "android" && event.action !== "open" && event.action !== "inbox";
+  const routes = await accountRouter(native ? 0 : undefined);
+  if (routes && !native) await routes.ready();
+  return handleNotificationAction(event, notificationDeps(store, platform, routes ?? router));
+}
+
 export function wireNotifications(store: WinnowStore, platform: Platform): () => void {
   const unlisten = platform.onNotificationAction((event) => {
-    handleNotificationAction(event, {
-      focusWindow: () => platform.focusWindow(),
-      focusMessage: (id) => store.focusMessage(id),
-      openReply: requestReply,
-      find: (id) => store.getSnapshot().all.find((email) => email.id === id),
-      setRead: (id, read) => store.setRead(id, read),
-      trashWithUndo: (id) => store.moveWithUndo(id, "trash"),
-      refresh: () => store.refresh(),
-      confirm: (id, title, text, failed) => void platform.confirmNotificationAction?.(id, title, text, failed),
-    });
+    void routeNotificationAction(store, platform, event);
     // A failed native action was about a message the user may now want to see.
     if (event.origin === "android" && event.outcome === "failed") {
       store.setNotice("A notification action didn't go through. It's shown on the notification.");
@@ -214,7 +308,12 @@ async function saveKeptRepliesOnce(store: WinnowStore, platform: Platform): Prom
   if (!platform.keptReplies || !platform.releaseKeptReplies) return;
   if (store.getSnapshot().status !== "ready") return;
   const raw = await platform.keptReplies().catch(() => []);
-  const kept = raw.map(parseKeptReply).filter((reply): reply is KeptReply => reply !== null);
+  // Each kept reply goes to its own account's Drafts: those for an account that is not
+  // open wait on the phone until it is (this runs again whenever an account is ready).
+  const open = store.currentAccountId();
+  const kept = raw
+    .map(parseKeptReply)
+    .filter((reply): reply is KeptReply => reply !== null && (!reply.account || reply.account === open));
   if (kept.length === 0) return;
   const { saved, failed } = await store.saveKeptReplies(kept);
   const failedIds = new Set(failed.map((reply) => reply.requestId));
