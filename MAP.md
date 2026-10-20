@@ -803,11 +803,20 @@ when previews are hidden) but the native notifications do not draw it yet.
 
 | Host | Shown by | Reply | Delete / Mark read | Tap | Where the action runs |
 | --- | --- | --- | --- | --- | --- |
-| Android | `NotifyPlugin.kt`: MessagingStyle per message, InboxStyle group summary, `ic_stat_winnow` | Inline (RemoteInput) | Buttons; Delete then offers Undo for 6 s | Opens `winnow://message/<id>` | **Native**, app backgrounded or not: receiver → channel → `android.rs` → `plan::execute` with the keychain tokens; `Http.kt` does the HTTPS |
+| Android | `NotifyPlugin.kt` → `MailNotifier`: BigTextStyle per message, Gmail's layout (sender as title, subject as text, subject + preview expanded: `MessageText`, JVM-tested in `MessageTextTest`; picture as the large icon; account address as subtext), InboxStyle group summary, `ic_stat_winnow` | Inline (RemoteInput) | Buttons; Delete then offers Undo for 6 s | Opens `winnow://message/<id>` | **Native**, app backgrounded or not: receiver → channel → `android.rs` → `plan::execute` with the keychain tokens; `Http.kt` does the HTTPS |
 | Linux | `notify-rust` over D-Bus | Button opens the composer on the message (no inline reply: KDE's is a vendor extension `notify-rust` does not expose) | Buttons | Opens the message | Webview (hidden, not paused): `ACTION_EVENT` → store `setRead` / `moveWithUndo`; confirmation replaces the notification for 3 s |
 | Windows | `notify-rust` WinRT toast | Button opens the composer (`tauri-winrt-notification` has no toast inputs) | Buttons | Opens the message | Webview, as Linux; only failures get a follow-up toast |
 | macOS | `tauri-plugin-notification`, one grouped notification | — | — | Reveals the window (`RunEvent::Reopen`) | Fallback: actions need `UNUserNotificationCenter` categories; `notify-rust`'s path is the deprecated `NSUserNotificationCenter` blocking a thread per notification, untestable here |
 | Browser | `Notification`, one per message | — | — | Opens the message | — (buttons need a service worker) |
+
+Every host puts the sender first: Android's title, the desktop's summary
+(`notify_actions/desktop.rs`), with the subject (and preview) under it. Android dropped
+MessagingStyle in 1.4.0 because One UI and stock Android draw its conversation title (the
+subject) as the headline and the message as "Sender: text". The inline reply never relied
+on it: a press replaces the notification with a status ("Sending…", then the result, or
+the message again via `message()` for `restore`), so no "You: …" line is appended. A
+notification rebuilt from a press's extras has no picture (the broadcasts leave it out to
+spare the binder).
 
 How a press is done:
 

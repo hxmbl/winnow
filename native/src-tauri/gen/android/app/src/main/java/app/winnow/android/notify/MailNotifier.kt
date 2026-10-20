@@ -15,17 +15,16 @@ import android.os.Looper
 import android.util.Base64
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.app.Person
 import androidx.core.app.RemoteInput
-import androidx.core.graphics.drawable.IconCompat
 import app.winnow.android.R
 import org.json.JSONObject
 
 /**
  * Posting, updating and clearing Winnow's mail notifications.
  *
- * One MessagingStyle notification per message (at most five; the web layer caps it and
- * Rust caps it again), in one group with an InboxStyle summary. Each carries its
+ * One BigTextStyle notification per message, laid out as Gmail's (sender, subject,
+ * preview, the sender's picture as the large icon; [MessageText]), at most five (the
+ * web layer caps it and Rust caps it again), in one group with an InboxStyle summary. Each carries its
  * message in its intents' extras, so a press still knows what it is about after
  * Android has killed and restarted the process.
  *
@@ -175,22 +174,21 @@ object MailNotifier {
     val hide = extras.getBoolean(EXTRA_HIDE, false)
     val account = validAccount(extras.getString(EXTRA_ACCOUNT))
     val label = extras.getString(EXTRA_ACCOUNT_LABEL)
-    val text = if (preview.isEmpty()) subject else "$subject\n$preview"
+    val text = MessageText.of(title, subject, preview)
 
     // The sender's picture, when the web layer sent one and the preview is not hidden:
-    // the large icon and the MessagingStyle person's icon. Anything undecodable: none.
+    // the round large icon on the right, as Gmail draws it. Anything undecodable: none.
     val picture = if (hide) null else pictureBitmap(extras.getString(EXTRA_PICTURE))
-    val senderBuilder = Person.Builder().setName(title.ifEmpty { "Someone" })
-    if (picture != null) senderBuilder.setIcon(IconCompat.createWithBitmap(picture))
-    val sender = senderBuilder.build()
-    val style = NotificationCompat.MessagingStyle(Person.Builder().setName("You").build())
-      .setConversationTitle(subject.ifEmpty { null })
-      .addMessage(text, extras.getLong(EXTRA_RECEIVED_AT).takeIf { it > 0 } ?: System.currentTimeMillis(), sender)
+    // Gmail's single-message layout: the sender is the title, the subject the line under
+    // it, and expanded, the subject over the preview. Not MessagingStyle: One UI (and
+    // stock Android) draws its conversation title (the subject) as the headline and the
+    // message as "Sender: text", which put the subject first and the sender in the body.
+    val style = NotificationCompat.BigTextStyle().bigText(text.bigText)
 
     val builder = NotificationCompat.Builder(context, CHANNEL)
       .setSmallIcon(R.drawable.ic_stat_winnow)
-      .setContentTitle(title)
-      .setContentText(subject)
+      .setContentTitle(text.title)
+      .setContentText(text.text)
       .setStyle(style)
       .setGroup(groupFor(account))
       .setCategory(NotificationCompat.CATEGORY_EMAIL)
