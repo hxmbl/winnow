@@ -137,7 +137,7 @@ import {
 import { formatWhen } from "../mail/when";
 
 /** The mailboxes, in the order the sidebar shows them; Snoozed and Scheduled are views (1.4.0). */
-export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "snoozed", "archive", "sent", "drafts", "scheduled", "trash", "spam"];
+export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "snoozed", "archive", "sent", "scheduled", "drafts", "trash", "spam"];
 
 /**
  * Which half of a sync is running, for the status line.
