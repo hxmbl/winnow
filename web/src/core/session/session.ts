@@ -69,6 +69,7 @@ import { base64UrlDecode } from "../gmail/dto";
 import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
 import { loadedBodyOf, mailboxFor, toDraftEmail } from "../gmail/mapper";
 import { mapPool } from "../gmail/pool";
+import { SNOOZED_LABEL } from "../mail/snooze";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
 
@@ -1234,6 +1235,9 @@ export class GmailSession {
     };
 
     /** A drafts request, with a scope refusal turned into the error the composer reads. */
+    /** The `Winnow/Snoozed` label's id, looked up once (`setSnoozed`). */
+    let snoozeLabel: Promise<string> | null = null;
+
     const draftCall = async <T>(call: () => Promise<T>): Promise<T> => {
       try {
         return await call();
@@ -1291,6 +1295,11 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.spam]);
             await client.removeLabels(gmailId, [LABEL.inbox]);
             break;
+          case "snoozed":
+          case "scheduled":
+            // Views, not places: snoozing goes through `setSnoozed`, and a scheduled send
+            // is a draft.
+            throw new GmailError("Mail cannot be filed into a view.", 400, "unknown");
           case "drafts":
             // Unreachable too: a draft is listed through the drafts API, never filed.
             throw new GmailError("Mail cannot be filed into Drafts.", 400, "unknown");
@@ -1307,6 +1316,24 @@ export class GmailSession {
       },
       async setRead(id, read) {
         await client.markRead(await gmailIdFor(id), read);
+      },
+      async setSnoozed(gmailId, snoozed, options) {
+        // The label is looked up (or made) once per session; a failure is not kept, so the
+        // next snooze asks again.
+        snoozeLabel ??= client.ensureLabel(SNOOZED_LABEL).catch((error: unknown) => {
+          snoozeLabel = null;
+          throw error;
+        });
+        const label = await snoozeLabel;
+        if (snoozed) {
+          await client.modify(gmailId, [label], [LABEL.inbox]);
+          return;
+        }
+        const add = [
+          ...(options?.toInbox === false ? [] : [LABEL.inbox]),
+          ...(options?.unread ? [LABEL.unread] : []),
+        ];
+        await client.modify(gmailId, add, [label]);
       },
       async deletePermanently(id) {
         await client.deletePermanently(await gmailIdFor(id));

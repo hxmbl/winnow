@@ -58,7 +58,7 @@ export function badgeText(unread: number): string | null {
  * `folders` is the desktop's top-down order; anything not named here keeps its place
  * from the reversed desktop order, above the named ones.
  */
-export const PANEL_ORDER = ["spam", "trash", "drafts", "archive", "sent"] as const satisfies readonly Mailbox[];
+export const PANEL_ORDER = ["spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent"] as const satisfies readonly Mailbox[];
 
 export function panelOrder<T extends { id: Mailbox }>(folders: readonly T[]): T[] {
   const rank = (id: Mailbox) => (PANEL_ORDER as readonly Mailbox[]).indexOf(id);

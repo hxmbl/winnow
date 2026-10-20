@@ -1083,7 +1083,8 @@ div[data-row-count] {
 .wn-reader-pill {
   /* Over a message, where a photo can be solid: the bars' higher tint keeps its icons at 3:1. */
   --wn-glass-text: var(--wn-glass-bar, 80%);
-  width: calc(5 * 48px + 4 * 2px + 12px + 2px);
+  /* One 48px button per action (`--wn-pill-count`: 6 with Snooze, 5 where there is none). */
+  width: calc(var(--wn-pill-count, 5) * 48px + (var(--wn-pill-count, 5) - 1) * 2px + 12px + 2px);
   overflow: hidden;
   transition:
     width 260ms var(--wn-glass-ease),

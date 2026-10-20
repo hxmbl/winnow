@@ -13,7 +13,8 @@
  *   4. Deleting from the Trash for good asks first on a phone (action sheet, red).
  *   5. The reader pill: bottom-right, mirrored bottom-left when left-handed; folds on
  *      reading down and opens on scrolling up, at the end, and on a tap; every action is
- *      on screen and hit-testable; it keeps clear of the status pill.
+ *      on screen and hit-testable (six with Snooze in the Inbox, five in the Trash); it
+ *      keeps clear of the status pill.
  *   6. Shapes: every visible button, field and menu item is a pill or a circle.
  *   7. Desktop Settings → Keyboard shortcuts reads as a table (description beside its
  *      key), and "Hidden & muted senders" fits on one line in the category column.
@@ -46,6 +47,24 @@ async function phonePage(browser, URL, errors, { width = 390, height = 844, pref
   await p.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
   await p.waitForTimeout(400);
   return { ctx, p };
+}
+
+/** The open reader pill's buttons: on screen, inside the pill's box (not clipped), hit-testable. */
+async function pillActions(p) {
+  return p.evaluate(() => {
+    const pill = document.querySelector("[data-reader-dock] .wn-reader-pill")?.getBoundingClientRect();
+    return [...document.querySelectorAll("[data-reader-pill-actions] button")].map((b) => {
+      const r = b.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return {
+        label: b.getAttribute("aria-label"),
+        onScreen: r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
+        inPill: Boolean(pill) && r.left >= pill.left - 0.5 && r.right <= pill.right + 0.5,
+        hit: hit === b || b.contains(hit),
+        w: r.width,
+      };
+    });
+  });
 }
 
 /** A left swipe on a row, by touch events (the list's swipe is touch-driven). */
@@ -225,6 +244,14 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
     await p.locator("[data-row-count] [data-row-id]").first().tap();
     await p.waitForTimeout(500);
     const del = p.locator('[data-reader-dock] button[aria-label="Delete permanently"]');
+    // No Snooze in the Trash: the pill is five buttons wide and none is clipped.
+    await p.waitForTimeout(400);
+    const trashActions = await pillActions(p);
+    check(
+      "in the Trash the pill has five actions (no Snooze), all inside the pill and tappable",
+      trashActions.length === 5 && !trashActions.some((a) => a.label === "Snooze") && trashActions.every((a) => a.onScreen && a.inPill && a.hit && a.w >= 44),
+      JSON.stringify(trashActions),
+    );
     check("the pill's Delete is red in the Trash", (await del.getAttribute("data-destructive")) === "");
     await del.tap();
     await p.waitForTimeout(400);
@@ -287,14 +314,12 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
         pill.y + pill.height >= 844 - 40,
       JSON.stringify(pill),
     );
-    const actions = await p.evaluate(() =>
-      [...document.querySelectorAll("[data-reader-pill-actions] button")].map((b) => {
-        const r = b.getBoundingClientRect();
-        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        return { label: b.getAttribute("aria-label"), onScreen: r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, hit: hit === b || b.contains(hit), w: r.width };
-      }),
+    const actions = await pillActions(p);
+    check(
+      `${tag}: all six actions (Snooze included in the Inbox) are on screen, inside the pill and tappable`,
+      actions.length === 6 && actions.some((a) => a.label === "Snooze") && actions.every((a) => a.onScreen && a.inPill && a.hit && a.w >= 44),
+      JSON.stringify(actions),
     );
-    check(`${tag}: all five actions are on screen and tappable`, actions.length === 5 && actions.every((a) => a.onScreen && a.hit && a.w >= 44), JSON.stringify(actions));
     const nearest = leftHanded ? actions[0]?.label : actions[actions.length - 1]?.label;
     check(`${tag}: Archive is nearest the thumb`, /Archive|Move to inbox|Restore|Not spam/.test(nearest ?? ""), nearest);
 

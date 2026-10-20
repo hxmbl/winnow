@@ -5,7 +5,8 @@
  * The pill floats at the bottom corner under the thumb (bottom-right, or bottom-left in
  * the left-handed layout) instead of a full-width bar. Its actions are ordered by
  * reach: the ones used most sit nearest the thumb (Archive, then Delete, then Reply),
- * Forward next, and More — the rare ones — furthest away. Back is not on it: the top of
+ * Snooze (1.4.0, only where a message can be snoozed) and Forward next, and More — the
+ * rare ones — furthest away. Back is not on it: the top of
  * the reader has a Back button, and Android has its back gesture.
  *
  * While you read down a message it folds to one small circle (a ••• handle that only
@@ -14,10 +15,10 @@
  * are unit-tested without a DOM.
  */
 
-export type ReaderPillAction = "archive" | "trash" | "reply" | "forward" | "more";
+export type ReaderPillAction = "archive" | "trash" | "reply" | "snooze" | "forward" | "more";
 
 /** Most-used first: the order away from the thumb. */
-export const REACH_ORDER: readonly ReaderPillAction[] = ["archive", "trash", "reply", "forward", "more"];
+export const REACH_ORDER: readonly ReaderPillAction[] = ["archive", "trash", "reply", "snooze", "forward", "more"];
 
 /**
  * The actions left to right on screen. Right-handed, the thumb is at the right edge, so

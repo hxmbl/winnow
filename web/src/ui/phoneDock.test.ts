@@ -32,10 +32,13 @@ describe("the phone dock", () => {
   it("lists the panel's folders rarest first, Archive then Sent nearest the thumb", () => {
     const folders = [{ id: "archive" }, { id: "sent" }, { id: "drafts" }, { id: "trash" }, { id: "spam" }] as const;
     expect(panelOrder(folders).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
-    expect([...PANEL_ORDER]).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
+    expect([...PANEL_ORDER]).toEqual(["spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent"]);
     // Whatever order the caller hands in, the named folders land in the panel's order.
     const shuffled = [{ id: "sent" }, { id: "spam" }, { id: "archive" }, { id: "trash" }, { id: "drafts" }] as const;
     expect(panelOrder(shuffled).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
+    // The two 1.4.0 views sit among them: Scheduled by Drafts, Snoozed above Archive.
+    const all = [{ id: "snoozed" }, { id: "archive" }, { id: "sent" }, { id: "drafts" }, { id: "scheduled" }, { id: "trash" }, { id: "spam" }] as const;
+    expect(panelOrder(all).map((f) => f.id)).toEqual(["spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent"]);
     // A copy: the caller's order is left alone.
     expect(folders[0].id).toBe("archive");
   });

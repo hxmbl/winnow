@@ -37,7 +37,8 @@ import {
   FILTER_LABELS,
   NAVIGATION_ITEMS,
 } from "./core/model/signals";
-import { displayName, MAILBOX_LABEL, type Email, type Mailbox } from "./core/model/email";
+import { displayName, isViewMailbox, MAILBOX_LABEL, type Email, type Mailbox } from "./core/model/email";
+import { hashId } from "./core/model/ids";
 import { buildForward, buildReply, stripQuote, withReplyAll } from "./core/mail/reply";
 import {
   DraftAutosaver,
@@ -106,7 +107,11 @@ import { maskClientId, type OAuthClientCredentials } from "./core/session/creden
 import { Menu } from "./ui/components/Menu";
 import { anchorFromElement, type MenuAnchor } from "./ui/menuPlacement";
 import { SelectionBar } from "./ui/components/SelectionBar";
-import { buildRowMenu, buildSenderMenu } from "./ui/menus";
+import { buildRowMenu, buildScheduledMenu, buildSenderMenu, canSnooze, snoozeEntries } from "./ui/menus";
+import { ScheduledSheet, WhenPicker } from "./ui/components/WhenPicker";
+import { formatWhen, tomorrowMorning, wentLate, whenPresets } from "./core/mail/when";
+import { newScheduleId, type ScheduledSend } from "./core/mail/scheduledSend";
+import { SEND_LATER_NOTE } from "./ui/components/Composer";
 import {
   EMPTY_SELECTION,
   orderedSelection,
@@ -246,6 +251,10 @@ type PendingSend = {
   drive?: SendDriveAnswers;
   /** The Drive permissions this message holds once dispatch has shared (set by `deliver`). */
   created?: DrivePermissionRef[];
+  /** The Gmail draft to send when there is no autosave to ask (a scheduled send). */
+  draftId?: string;
+  /** A scheduled send going out: what the pill says, and whether it is late. */
+  scheduled?: { sendAt: number; late: boolean };
 };
 
 /** Answers the user gave about a message's Drive links, carried into the send. */
@@ -297,6 +306,10 @@ function draftAccount(snap: Pick<Snapshot, "contactsAccess" | "account">): strin
 
 /** How long "Message sent." stays up before it clears itself, in ms. */
 const SENT_NOTICE_MS = 6000;
+/** How long the pill says a scheduled message went, or was scheduled. */
+const SCHEDULED_SENT_NOTICE_MS = 6000;
+/** How often the open app looks for snoozes to wake and scheduled sends to go. */
+const DUE_CHECK_MS = 15_000;
 
 /**
  * Whether discarding this draft would lose anything the user wrote.
@@ -1015,9 +1028,16 @@ export function App({ store }: Props) {
       MAILBOX_ORDER.map((id) => ({
         id,
         label: MAILBOX_LABEL[id],
-        unread: snapshot.all.filter((email) => email.mailbox === id && email.unread).length,
+        // The two views count what they hold (snoozed conversations, messages waiting to
+        // go), not unread mail, as Gmail's Snoozed and Scheduled do.
+        unread:
+          id === "snoozed"
+            ? snapshot.snoozes.snoozed.filter((record) => record.account === store.accountKey()).length
+            : id === "scheduled"
+              ? snapshot.scheduled.filter((send) => send.account === store.accountKey()).length
+              : snapshot.all.filter((email) => email.mailbox === id && email.unread).length,
       })),
-    [snapshot.all],
+    [snapshot.all, snapshot.snoozes, snapshot.scheduled, store],
   );
 
   /**
@@ -1715,7 +1735,7 @@ export function App({ store }: Props) {
   }, []);
 
   /** "Send without a subject?" is up, holding the recipients Send was pressed with. */
-  const [confirmNoSubject, setConfirmNoSubject] = useState<Pick<Draft, "to" | "cc" | "bcc"> | null>(null);
+  const [confirmNoSubject, setConfirmNoSubject] = useState<(Pick<Draft, "to" | "cc" | "bcc"> & { at?: number }) | null>(null);
 
   // ── Large files as Google Drive links ────────────────────────────────────
 
@@ -1747,7 +1767,12 @@ export function App({ store }: Props) {
   const [confirmGrant, setConfirmGrant] = useState<{
     recipients: Pick<Draft, "to" | "cc" | "bcc">;
     immediate: boolean;
+    /** Asked before a Send later to this time, not a Send. */
+    at?: number;
   } | null>(null);
+
+  /** `scheduleDraft`, for the Drive question asked before a Send later (declared later). */
+  const scheduleDraftRef = useRef<(recipients: Pick<Draft, "to" | "cc" | "bcc">, at: number) => void>(() => {});
 
   /** Whether Winnow may share Drive files now (the demo: allowed in its own dialog). */
   const driveAllowed = useCallback(
@@ -1906,11 +1931,14 @@ export function App({ store }: Props) {
     takeBackShares(dispatch.stale);
     pending.created = dispatch.share?.created ?? [];
     const outgoing: Draft = dispatch.share ? { ...sending.draft, driveShare: dispatch.share } : sending.draft;
-    const draftId = (saver ? await saver.settle().catch(() => null) : null) ?? undefined;
+    const draftId = (saver ? await saver.settle().catch(() => null) : (pending.draftId ?? null)) ?? undefined;
     const s = storeRef.current;
     let simulated = false;
-    if (sending.mode === "new") ({ simulated } = await s.sendNew(outgoing, draftId));
-    else if (inReplyTo) await s.sendReply(outgoing, inReplyTo, draftId);
+    // The demo cannot reply (it has no Gmail thread to reply on), but a scheduled send is
+    // simulated whatever it is: filed into Sent on this device, on its thread.
+    if (sending.mode === "new" || (pending.scheduled && s.getSnapshot().contactsAccess === "demo")) {
+      ({ simulated } = await s.sendNew(outgoing, draftId));
+    } else if (inReplyTo) await s.sendReply(outgoing, inReplyTo, draftId);
     else throw new Error("Couldn't find the message this replies to.");
     saver?.finish();
     if (saverRef.current === saver) saverRef.current = null;
@@ -1920,6 +1948,18 @@ export function App({ store }: Props) {
     // Offline: the send is in the offline queue, not in Gmail yet, and says so.
     if ((sessionRef.current?.offlineQueue.status().sends ?? 0) > 0) {
       s.setNotice("Offline: your message will be sent when you're back online.");
+      return;
+    }
+    if (pending.scheduled) {
+      // Through the status pill, saying when it was due if Winnow was closed then.
+      const subject = sending.draft.subject.trim() || "(no subject)";
+      const due = formatWhen(pending.scheduled.sendAt, Date.now());
+      s.flash(
+        pending.scheduled.late
+          ? `Sent “${subject}” late: it was due ${due}, while Winnow was closed.${simulated ? " (Demo: saved to Sent on this device only.)" : ""}`
+          : `Sent “${subject}” as scheduled.${simulated ? " (Demo: saved to Sent on this device only.)" : ""}`,
+        SCHEDULED_SENT_NOTICE_MS,
+      );
       return;
     }
     if (sending.mode !== "new") return;
@@ -2203,7 +2243,8 @@ export function App({ store }: Props) {
     if (!asked) return;
     if (storeRef.current.getSnapshot().contactsAccess === "demo") {
       demoDriveAllowedRef.current = true;
-      await sendDraft(asked.recipients, true, { immediate: asked.immediate });
+      if (asked.at !== undefined) scheduleDraftRef.current(asked.recipients, asked.at);
+      else await sendDraft(asked.recipients, true, { immediate: asked.immediate });
       return;
     }
     const bridge = sessionRef.current;
@@ -2213,12 +2254,347 @@ export function App({ store }: Props) {
       const access = await bridge.grantDrive();
       setDriveAccess(access);
       driveAccessRef.current = access;
-      if (access === "granted") await sendDraft(asked.recipients, true, { immediate: asked.immediate });
+      if (access === "granted" && asked.at !== undefined) scheduleDraftRef.current(asked.recipients, asked.at);
+      else if (access === "granted") await sendDraft(asked.recipients, true, { immediate: asked.immediate });
       else setDriveProblem({ message: "Google Drive was not allowed, so the links were not shared.", url: null, label: null });
     } catch (error) {
       setDriveProblem(driveFailureNotice(error));
     }
   }, [confirmGrant, sendDraft]);
+
+  // ── Snooze and send later (1.4.0) ────────────────────────────────────────
+
+  /*
+    Snooze (`core/mail/snooze.ts`, the store's `snooze`/`wakeDue`) and send later
+    (`core/mail/scheduledSend.ts`). The pickers are one menu of presets (`whenPresets`)
+    and "Pick date & time…" (`WhenPicker`), in the user's local time, from every entry
+    point: the row menu, the reader's bar, the selection bar, `b`, the phone reader pill;
+    and the composer's Send later.
+  */
+  /** The snooze choices, open for these messages beside `anchor`. */
+  const [snoozeMenu, setSnoozeMenu] = useState<{ ids: number[]; anchor: MenuAnchor; trigger: HTMLElement | null } | null>(null);
+  /** "Pick date & time…", for a snooze or a send later. */
+  const [whenPicker, setWhenPicker] = useState<
+    | { kind: "snooze"; ids: number[] }
+    | { kind: "send"; recipients: Pick<Draft, "to" | "cc" | "bcc"> }
+    | null
+  >(null);
+  /** A Scheduled row, opened. */
+  const [scheduledOpen, setScheduledOpen] = useState<string | null>(null);
+  /** The full drafts of sends scheduled in this session: the stored copy may have dropped big files. */
+  const scheduledDraftsRef = useRef(new Map<string, Draft>());
+  /** Anything of these up: the keyboard router stands down, as for a menu. */
+  const scheduleModalRef = useRef(false);
+  scheduleModalRef.current = snoozeMenu !== null || whenPicker !== null || scheduledOpen !== null;
+
+  const openSnoozeMenuRef = useRef<(ids: readonly number[], trigger: HTMLElement | null) => void>(() => {});
+
+  /** Snooze now: one Undo in the status pill, the rows leaving as an archive's do. */
+  const snoozeIds = useCallback((ids: readonly number[], at: number) => {
+    if (ids.length === 0) return;
+    const s = storeRef.current;
+    exitRows([...ids], () => s.snooze(ids, at));
+    setSelection(EMPTY_SELECTION);
+  }, []);
+
+  /** Open the snooze choices for `ids`, beside `trigger` (or mid-screen, for `b`). */
+  const openSnoozeMenu = useCallback((ids: readonly number[], trigger: HTMLElement | null) => {
+    if (ids.length === 0) return;
+    const anchor: MenuAnchor = trigger
+      ? anchorFromElement(trigger)
+      : { kind: "point", x: Math.round(window.innerWidth / 2) - 120, y: Math.round(window.innerHeight / 3) };
+    setSnoozeMenu({ ids: [...ids], anchor, trigger });
+  }, []);
+  openSnoozeMenuRef.current = openSnoozeMenu;
+
+  /**
+   * Schedule what the composer holds for `at` (Send later). The same checks as Send
+   * first (a subject, Drive's permission); then its Gmail draft is saved and kept, the
+   * time is recorded on this device, and the composer closes. Nothing is sent until the
+   * time (see the runner below).
+   */
+  const scheduleDraft = useCallback(
+    async (
+      recipients: Pick<Draft, "to" | "cc" | "bcc">,
+      at: number,
+      confirmedNoSubject = false,
+      answers: SendDriveAnswers = {},
+    ) => {
+      const current = composerRef.current;
+      if (!current || current.sending) return;
+      const draft = { ...current.draft, ...recipients };
+      if (current.mode === "new" && !confirmedNoSubject && needsSubjectConfirmation(draft)) {
+        setConfirmNoSubject({ to: draft.to, cc: draft.cc, bcc: draft.bcc, at });
+        return;
+      }
+      if (!answers.waived && needsDriveGrant(draft, driveAllowed())) {
+        setConfirmGrant({ recipients: { to: draft.to, cc: draft.cc, bcc: draft.bcc }, immediate: false, at });
+        return;
+      }
+      const replyTo = current.mode === "new" ? undefined : (current.replyTo ?? snapshotRef.current.view.selected?.gmailId);
+      if (current.mode !== "new" && !replyTo) return;
+      const s = storeRef.current;
+      const saver = saverRef.current;
+      setComposer({ ...current, draft, sending: true, error: null });
+      // The Gmail draft is what goes at the time: save it now and keep its id.
+      saver?.change(draft, { replyAll: current.replyAll, initial: current.initial });
+      const draftId = (await saver?.settle().catch(() => null)) ?? current.fromDrafts?.draftId ?? null;
+      const now = Date.now();
+      const send: ScheduledSend = {
+        id: newScheduleId(now),
+        account: s.accountKey(),
+        sendAt: at,
+        scheduledAt: now,
+        mode: current.mode,
+        context: current.context,
+        ...(replyTo ? { replyTo } : {}),
+        ...(current.replyAll !== undefined ? { replyAll: current.replyAll } : {}),
+        draftId,
+        draft,
+        ...(answers.waived || answers.accepted ? { drive: { waived: answers.waived, accepted: answers.accepted } } : {}),
+      };
+      scheduledDraftsRef.current.set(send.id, draft);
+      s.scheduleSend(send);
+      // Put away, kept: the schedule holds the draft now, so the device copy is not
+      // offered back as "unsent" on the next launch.
+      takeBackShares(current.driveShares);
+      saverRef.current = null;
+      void saver?.park().then(() => localDrafts()?.remove(current.context));
+      if (current.fromDrafts) s.removeDraftRow(current.fromDrafts.draftId);
+      composerRef.current = null;
+      setComposer(null);
+      s.flash(`Scheduled for ${formatWhen(at, now)}.`, SCHEDULED_SENT_NOTICE_MS);
+    },
+    [driveAllowed, localDrafts, takeBackShares],
+  );
+
+  scheduleDraftRef.current = (recipients, at) => void scheduleDraft(recipients, at, true);
+
+  /** The composer's Send later: a preset time, or the picker for a custom one. */
+  const sendLater = useCallback(
+    (recipients: Pick<Draft, "to" | "cc" | "bcc">, at: number | "custom") => {
+      if (at === "custom") setWhenPicker({ kind: "send", recipients });
+      else void scheduleDraft(recipients, at);
+    },
+    [scheduleDraft],
+  );
+
+  /** The composer state a scheduled send dispatches (or is edited) as. */
+  const composerFromSchedule = useCallback((send: ScheduledSend): ComposerState => {
+    const draft = scheduledDraftsRef.current.get(send.id) ?? send.draft;
+    return {
+      draft,
+      sending: false,
+      error: null,
+      mode: send.mode,
+      ...(send.mode === "new" ? { initial: { to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject } } : {}),
+      ...(send.replyTo ? { replyTo: send.replyTo } : {}),
+      ...(send.replyAll !== undefined ? { replyAll: send.replyAll } : {}),
+      context: send.context,
+      status: { kind: "idle" },
+    };
+  }, []);
+
+  /** Sends being dispatched by this window, so a tick does not start one twice. */
+  const dispatchingRef = useRef(new Set<string>());
+
+  /**
+   * Send one scheduled message now, through `deliver` (Drive links shared at dispatch,
+   * `drafts.send`, the offline queue). `manual` is Send now; otherwise it is due. A
+   * failure keeps the schedule with the reason (shown in Scheduled) and stops retrying it
+   * until Send now or Edit; a draft Gmail no longer has (sent or deleted elsewhere) ends it.
+   */
+  const dispatchScheduled = useCallback(
+    async (send: ScheduledSend, manual = false) => {
+      const s = storeRef.current;
+      if (dispatchingRef.current.has(send.id)) return;
+      if (!manual && !s.claimScheduled(send.id)) return;
+      dispatchingRef.current.add(send.id);
+      const now = Date.now();
+      const composerState = composerFromSchedule(send);
+      const lost = (composerState.draft.attachments ?? []).filter((file) => file.data === undefined && !file.source);
+      try {
+        if (lost.length > 0) {
+          throw new Error(
+            `${lost.map((file) => file.filename).join(", ")} ${lost.length === 1 ? "was" : "were"} too big to keep on this device. Open it with Edit to attach again, then send.`,
+          );
+        }
+        const pending: PendingSend = {
+          composer: composerState,
+          saver: null,
+          inReplyTo: send.replyTo,
+          drive: send.drive,
+          ...(send.draftId ? { draftId: send.draftId } : {}),
+          scheduled: { sendAt: send.sendAt, late: !manual && wentLate(send.sendAt, now) },
+        };
+        await deliver(pending);
+        s.cancelSchedule(send.id);
+        scheduledDraftsRef.current.delete(send.id);
+        localDrafts()?.remove(send.context);
+        if (send.draftId) s.removeDraftRow(send.draftId);
+      } catch (error) {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 404 && send.draftId) {
+          s.cancelSchedule(send.id);
+          s.setNotice(`“${send.draft.subject.trim() || "(no subject)"}” was not sent at its time: its draft is no longer in Gmail (sent or deleted elsewhere).`);
+          return;
+        }
+        const reason =
+          error instanceof DriveSendHold
+            ? "Its Google Drive links need an answer. Open it with Edit and press Send."
+            : error instanceof Error
+              ? error.message
+              : "Couldn't send it.";
+        s.updateScheduled(send.id, { problem: reason, claimedAt: undefined });
+        s.setNotice(`A scheduled message did not go: ${reason}`);
+      } finally {
+        dispatchingRef.current.delete(send.id);
+      }
+    },
+    [composerFromSchedule, deliver, localDrafts],
+  );
+
+  /**
+   * Edit a scheduled message: the schedule is cancelled and the draft opens in the
+   * composer (a sheet, as a draft from Drafts does), saving to the same Gmail draft.
+   * Closing it keeps it as a draft; Send or Send later from there as usual.
+   */
+  const editScheduled = useCallback(
+    (send: ScheduledSend) => {
+      const s = storeRef.current;
+      const state = composerFromSchedule(send);
+      s.cancelSchedule(send.id);
+      scheduledDraftsRef.current.delete(send.id);
+      setScheduledOpen(null);
+      const draftId = send.draftId ?? `local-${send.id}`;
+      const row: Email = {
+        id: hashId(`draft-${draftId}`),
+        gmailId: `draft-${draftId}`,
+        ...(send.draft.threadId ? { threadId: send.draft.threadId } : {}),
+        sender: snapshotRef.current.account?.email ?? DEMO_ACCOUNT.email,
+        to: send.draft.to.map((address) => ({ address })),
+        cc: send.draft.cc.map((address) => ({ address })),
+        bcc: send.draft.bcc.map((address) => ({ address })),
+        mailbox: "drafts",
+        receivedAt: Date.now(),
+        subject: send.draft.subject,
+        body: send.draft.body,
+        category: "primary",
+        starred: false,
+        unread: false,
+        urgent: false,
+        attachments: [],
+        code: null,
+        gmailDraft: { id: draftId },
+      };
+      startComposer(
+        {
+          draft: state.draft,
+          mode: state.mode,
+          replyTo: state.replyTo,
+          replyAll: state.replyAll,
+          context: send.context,
+          ...(state.initial ? { initial: state.initial } : {}),
+          fromDrafts: { draftId, row, baseline: state.draft },
+        },
+        {
+          context: send.context,
+          mode: send.mode,
+          draft: state.draft,
+          ...(send.replyTo ? { replyTo: send.replyTo } : {}),
+          ...(send.replyAll !== undefined ? { replyAll: send.replyAll } : {}),
+          ...(send.draftId ? { gmailDraftId: send.draftId } : {}),
+          savedAt: Date.now(),
+        },
+      );
+      s.flash("Schedule cancelled: it's a draft again.", DRAFT_NOTICE_MS);
+    },
+    [composerFromSchedule, startComposer],
+  );
+
+  /** Cancel schedules; each message stays a draft (in Gmail's Drafts; the demo's on this device). */
+  const cancelSchedules = useCallback((ids: readonly string[]) => {
+    const s = storeRef.current;
+    let cancelled = 0;
+    for (const id of ids) {
+      const send = s.cancelSchedule(id);
+      if (!send) continue;
+      cancelled += 1;
+      scheduledDraftsRef.current.delete(id);
+      // The demo has no Gmail draft to fall back to: it goes into Drafts here.
+      if (!send.draftId && s.getSnapshot().contactsAccess === "demo") {
+        const draftId = `demo-${send.id}`;
+        s.putDraftRow({
+          id: hashId(`draft-${draftId}`),
+          gmailId: `draft-${draftId}`,
+          sender: DEMO_ACCOUNT.email,
+          to: send.draft.to.map((address) => ({ address })),
+          cc: send.draft.cc.map((address) => ({ address })),
+          bcc: send.draft.bcc.map((address) => ({ address })),
+          mailbox: "drafts",
+          receivedAt: Date.now(),
+          subject: send.draft.subject,
+          body: send.draft.body,
+          category: "primary",
+          starred: false,
+          unread: false,
+          urgent: false,
+          attachments: [],
+          code: null,
+          gmailDraft: { id: draftId },
+        });
+      }
+    }
+    setScheduledOpen(null);
+    if (cancelled > 0) {
+      s.flash(cancelled === 1 ? "Schedule cancelled. It's in Drafts." : `${cancelled} schedules cancelled. They're in Drafts.`, DRAFT_NOTICE_MS);
+      if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
+    }
+  }, []);
+
+  /**
+   * What is due: snoozes to wake and scheduled sends to go. On start, after each sync,
+   * on focus and visibility, and every `DUE_CHECK_MS` while open (the demo has no sync).
+   * A scheduled send waits for a ready session, and only this account's ever go.
+   */
+  const runDue = useCallback(() => {
+    const s = storeRef.current;
+    const snap = s.getSnapshot();
+    if (snap.status !== "ready") return;
+    s.wakeDue();
+    const demo = snap.contactsAccess === "demo";
+    if (!demo && !sessionRef.current) return;
+    const account = s.accountKey();
+    if (!account) return;
+    const now = Date.now();
+    for (const send of s.scheduledSends()) {
+      if (send.sendAt > now || send.problem !== undefined) continue;
+      void dispatchScheduled(send);
+    }
+  }, [dispatchScheduled]);
+  const runDueRef = useRef(runDue);
+  runDueRef.current = runDue;
+  useEffect(() => {
+    const tick = () => runDueRef.current();
+    const timer = window.setInterval(tick, DUE_CHECK_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", tick);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+  // On start (the session ready, or the demo) and after each sync.
+  const dueStatus = snapshot.status;
+  const dueSynced = snapshot.lastSyncedAt;
+  const dueAccount = snapshot.account?.email ?? null;
+  useEffect(() => {
+    if (dueStatus === "ready") runDueRef.current();
+  }, [dueStatus, dueSynced, dueAccount]);
 
   /**
    * Close the composer, or ask before throwing the draft away.
@@ -2368,6 +2744,16 @@ export function App({ store }: Props) {
    * reader: a draft is something to finish. Every way of opening a row selects it, so
    * the selection is where this is caught, once, and then dropped again.
    */
+  /** In Scheduled, opening a row opens what can be done with it (not the reader). */
+  const openedScheduledId = snapshot.mailbox === "scheduled" ? snapshot.selectedId : null;
+  useEffect(() => {
+    if (openedScheduledId === null) return;
+    const s = storeRef.current;
+    const send = s.scheduledSend(openedScheduledId);
+    s.select(null);
+    if (send) setScheduledOpen(send.id);
+  }, [openedScheduledId]);
+
   const openedDraftId = snapshot.mailbox === "drafts" ? snapshot.selectedId : null;
   useEffect(() => {
     if (openedDraftId === null) return;
@@ -2600,8 +2986,9 @@ export function App({ store }: Props) {
       const rail = pillsRef.current;
       const batch = selectionRef.current;
 
-      // An open menu owns the keyboard; its own handler has already acted.
-      if (menuRef.current) return;
+      // An open menu owns the keyboard; its own handler has already acted. So do the
+      // snooze menu, the date and time picker and an opened scheduled send.
+      if (menuRef.current || scheduleModalRef.current) return;
 
       /*
         ⌘A / Ctrl+A outside a text field selects the region the user is in — the
@@ -2728,6 +3115,13 @@ export function App({ store }: Props) {
       const selectedId = snap.view.selected?.id;
 
       // With rows selected, the message verbs act on all of them.
+      if (batch.size > 0 && command.type === "snooze") {
+        if (canSnooze(snap.mailbox)) {
+          const bar = document.querySelector<HTMLElement>("[data-selection-snooze]");
+          openSnoozeMenuRef.current(orderedSelection(batch, snap.view.threads.map((row) => row.representative.id)), bar);
+        }
+        return;
+      }
       if (batch.size > 0 && (command.type === "archive" || command.type === "trash" || command.type === "toggleRead")) {
         const ids = orderedSelection(batch, snap.view.threads.map((row) => row.representative.id));
         if (command.type === "archive") s.archiveWithUndo(ids);
@@ -2781,6 +3175,15 @@ export function App({ store }: Props) {
           break;
         case "trash":
           if (selectedId !== undefined) exitRows([selectedId], () => s.trashWithUndo([selectedId]));
+          break;
+        case "snooze":
+          // Gmail's `b`: the open message's snooze choices, beside the reader's button.
+          if (selectedId !== undefined && canSnooze(snap.mailbox)) {
+            const button = document.querySelector<HTMLElement>(
+              '[data-reader-action="snooze"], [data-reader-pill-snooze]',
+            );
+            openSnoozeMenuRef.current([selectedId], button);
+          }
           break;
         case "toggleRead":
           if (selectedId !== undefined) toggleReadRef.current(selectedId);
@@ -2939,7 +3342,10 @@ export function App({ store }: Props) {
     confirmShares !== null ||
     confirmGrant !== null ||
     driveConsent !== null ||
-    restoreOffer !== null;
+    restoreOffer !== null ||
+    snoozeMenu !== null ||
+    whenPicker !== null ||
+    scheduledOpen !== null;
   const android = info?.os === "android";
   useEffect(() => {
     if (!android || !backHasWork) return;
@@ -3187,6 +3593,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onSend={(recipients) => {
             void sendDraft(recipients);
           }}
+          onSendLater={sendLater}
           // Discard is the button that already says the word, so it does not ask.
           onDiscard={() => closeComposer(true)}
           // Escape and the close button ask if there is anything to lose.
@@ -3527,10 +3934,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     mailbox={snapshot.mailbox}
                     anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
                     onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveWithUndo(ids)))}
-                    onTrash={() => guardForever(selection.size, () => runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids))))}
+                    onTrash={() =>
+                      snapshot.mailbox === "scheduled"
+                        ? runBatch((s, ids) => cancelSchedules(ids.map((id) => s.scheduledSend(id)?.id ?? "")))
+                        : guardForever(selection.size, () => runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids))))
+                    }
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveManyWithUndo(ids, target))}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
+                    onSnooze={canSnooze(snapshot.mailbox) ? (trigger) => runBatch((_s, ids) => openSnoozeMenu(ids, trigger), true) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
                 </div>
@@ -3590,10 +4002,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     mailbox={snapshot.mailbox}
                     anyUnread={snapshot.all.some((email) => selection.has(email.id) && email.unread)}
                     onArchive={() => runBatch((s, ids) => exitRows(ids, () => s.archiveWithUndo(ids)))}
-                    onTrash={() => runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids)))}
+                    onTrash={() =>
+                      snapshot.mailbox === "scheduled"
+                        ? runBatch((s, ids) => cancelSchedules(ids.map((id) => s.scheduledSend(id)?.id ?? "")))
+                        : runBatch((s, ids) => exitRows(ids, () => s.trashWithUndo(ids)))
+                    }
                     onSetRead={(read) => runBatch((s, ids) => s.setReadMany(ids, read), true)}
                     onMove={(target) => runBatch((s, ids) => s.moveManyWithUndo(ids, target))}
                     onChangeFilters={smartFiltersHere ? () => openFilterPicker([...selection]) : undefined}
+                    onSnooze={canSnooze(snapshot.mailbox) ? (trigger) => runBatch((_s, ids) => openSnoozeMenu(ids, trigger), true) : undefined}
                     onClear={() => setSelection(EMPTY_SELECTION)}
                   />
                 ) : undefined
@@ -3657,12 +4074,16 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             emptyMailbox={
               snapshot.mailbox === "drafts"
                 ? { body: snapshot.draftsLoading ? "Loading your drafts…" : "No drafts.", action: "Check for drafts" }
-                : undefined
+                : snapshot.mailbox === "snoozed"
+                  ? { body: "Nothing snoozed. Snooze a message (b) and it comes back to the top of your Inbox when you choose.", action: "" }
+                  : snapshot.mailbox === "scheduled"
+                    ? { body: "Nothing scheduled. Use Send later beside Send to pick when a message goes.", action: "" }
+                    : undefined
             }
             // Only a real account has something to sync with. Offering the button
             // over the demo would be a control that cannot do anything, which is the
             // exact failure the empty state's own copy was written to avoid.
-            canSync={snapshot.account !== null}
+            canSync={snapshot.account !== null && !isViewMailbox(snapshot.mailbox)}
             now={snapshot.now}
             photos={photos}
             selection={selection}
@@ -3801,6 +4222,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   ),
                 onReply: openReply,
                 onForward: openForward,
+                onSnooze: canSnooze(snapshot.mailbox)
+                  ? (trigger) => {
+                      const id = snapshotRef.current.view.selected?.id;
+                      if (id !== undefined) openSnoozeMenu([id], trigger);
+                    }
+                  : undefined,
                 onNotSpam: act((s, snap) => {
                   // "Not spam" is a move to the inbox, which is exactly what
                   // `store.move` does — so it inherits the optimistic update, the undo,
@@ -3940,6 +4367,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
+          scheduledCount={snapshot.scheduled.filter((send) => send.account === store.accountKey()).length}
+          snoozedCount={snapshot.snoozes.snoozed.filter((record) => record.account === store.accountKey()).length}
+          onOpenScheduled={() => {
+            store.setOverlay("none");
+            store.setMailbox("scheduled");
+          }}
           brandLogos={preferences.brandLogos}
           onBrandLogos={(value) => store.setPreferences({ brandLogos: value })}
           gravatars={preferences.gravatars}
@@ -4050,7 +4483,34 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           />
         );
       })()}
-      {menu && snapshot.mailbox !== "drafts" && (() => {
+      {menu && snapshot.mailbox === "scheduled" && (() => {
+        // A Scheduled row, from its avatar or its row alike: edit, send now, or cancel.
+        const send = store.scheduledSend(menu.id);
+        if (!send) return null;
+        const close = () => setMenu(null);
+        const single = menu.ids.length === 1;
+        return (
+          <Menu
+            testId="row"
+            label={single ? `Actions for scheduled message: ${send.draft.subject || "no subject"}` : `Actions for ${menu.ids.length} scheduled messages`}
+            anchor={menu.anchor}
+            returnFocus={menu.trigger}
+            onClose={close}
+            items={buildScheduledMenu(
+              {
+                edit: () => editScheduled(send),
+                sendNow: () => void dispatchScheduled(send, true),
+                cancel: () => {
+                  cancelSchedules(menu.ids.map((id) => store.scheduledSend(id)?.id ?? ""));
+                  if (!single) setSelection(EMPTY_SELECTION);
+                },
+              },
+              menu.ids.length,
+            )}
+          />
+        );
+      })()}
+      {menu && snapshot.mailbox !== "drafts" && snapshot.mailbox !== "scheduled" && (() => {
         const email = snapshot.all.find((candidate) => candidate.id === menu.id);
         if (!email) return null;
         const close = () => setMenu(null);
@@ -4188,6 +4648,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               count: menu.ids.length,
               mailbox: snapshot.mailbox,
               anyUnread: targets.some((candidate) => candidate.unread),
+              snoozePresets: canSnooze(snapshot.mailbox) ? whenPresets(Date.now()) : undefined,
               sender: single ? { name, address: email.sender, muted } : undefined,
               subject: single ? email.subject : undefined,
               actions: {
@@ -4201,6 +4662,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   else store.setReadMany(menu.ids, read);
                 },
                 move: (target) => runOn((s, ids) => s.moveManyWithUndo(ids, target)),
+                snooze: (at) => snoozeIds(menu.ids, at),
+                snoozeCustom: () => setWhenPicker({ kind: "snooze", ids: menu.ids }),
+                unsnooze: () => runOn((s, ids) => s.unsnooze(ids)),
                 changeFilters: smartFiltersHere ? () => openFilterPicker(menu.ids) : undefined,
                 toggleMuteSender: toggleMute,
                 findFrom: showAll,
@@ -4220,6 +4684,59 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       })()}
 
       {composer && !docked && composerElement}
+
+      {snoozeMenu && (
+        <Menu
+          testId="snooze"
+          label={snoozeMenu.ids.length === 1 ? "Snooze until" : `Snooze ${snoozeMenu.ids.length} until`}
+          anchor={snoozeMenu.anchor}
+          returnFocus={snoozeMenu.trigger}
+          onClose={() => setSnoozeMenu(null)}
+          header={<span className="block text-meta font-semibold text-ink-muted">Snooze until…</span>}
+          items={snoozeEntries(
+            whenPresets(Date.now()),
+            (at) => snoozeIds(snoozeMenu.ids, at),
+            () => setWhenPicker({ kind: "snooze", ids: snoozeMenu.ids }),
+          )}
+        />
+      )}
+
+      {whenPicker && (
+        <WhenPicker
+          title={whenPicker.kind === "snooze" ? "Snooze until…" : "Send later…"}
+          note={whenPicker.kind === "send" ? SEND_LATER_NOTE : undefined}
+          initial={tomorrowMorning(Date.now())}
+          confirmLabel={whenPicker.kind === "snooze" ? "Snooze" : "Schedule send"}
+          onCancel={() => setWhenPicker(null)}
+          onConfirm={(at) => {
+            const picked = whenPicker;
+            setWhenPicker(null);
+            if (picked.kind === "snooze") snoozeIds(picked.ids, at);
+            else void scheduleDraft(picked.recipients, at);
+          }}
+        />
+      )}
+
+      {scheduledOpen && (() => {
+        const send = store.scheduledSend(scheduledOpen);
+        if (!send) return null;
+        return (
+          <ScheduledSheet
+            subject={send.draft.subject}
+            to={[...send.draft.to, ...send.draft.cc, ...send.draft.bcc].join(", ")}
+            when={formatWhen(send.sendAt, Date.now())}
+            problem={send.problem}
+            body={send.draft.body}
+            onClose={() => setScheduledOpen(null)}
+            onEdit={() => editScheduled(send)}
+            onSendNow={() => {
+              setScheduledOpen(null);
+              void dispatchScheduled(send, true);
+            }}
+            onCancelSchedule={() => cancelSchedules([send.id])}
+          />
+        );
+      })()}
 
       {restoreOffer && !composer && (
         <ConfirmDialog
@@ -4241,9 +4758,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           confirmLabel="Send anyway"
           destructive={false}
           onConfirm={() => {
-            const recipients = confirmNoSubject;
+            const { at, ...recipients } = confirmNoSubject;
             setConfirmNoSubject(null);
-            void sendDraft(recipients, true);
+            if (at !== undefined) void scheduleDraft(recipients, at, true);
+            else void sendDraft(recipients, true);
           }}
           onCancel={() => setConfirmNoSubject(null)}
         />
@@ -4271,9 +4789,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           web={!isDemo && info?.kind !== "desktop" && !info?.nativeOAuth}
           onAllow={() => void allowDriveForSend()}
           onSendAnyway={() => {
-            const { recipients, immediate } = confirmGrant;
+            const { recipients, immediate, at } = confirmGrant;
             setConfirmGrant(null);
-            void sendDraft(recipients, true, { waived: true, immediate });
+            if (at !== undefined) void scheduleDraft(recipients, at, true, { waived: true });
+            else void sendDraft(recipients, true, { waived: true, immediate });
           }}
           onCancel={() => {
             setConfirmGrant(null);

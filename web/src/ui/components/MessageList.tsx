@@ -30,6 +30,7 @@ import {
   type Selection,
 } from "../selection";
 import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
+import { formatWhen } from "../../core/mail/when";
 import { displayName } from "../../core/model/email";
 import { draftRowName } from "../../core/mail/drafts";
 import {
@@ -271,13 +272,25 @@ const Row = memo(function Row({
 }: RowProps) {
   const email = row.representative;
   const indicators = rowIndicators(email, signals);
-  const time = formatRowTime(email.receivedAt, bucket);
+  // Snoozed and Scheduled rows say when (it comes back, it goes) rather than when it
+  // arrived: that time is the point of both lists.
+  const timed = email.snoozedUntil ?? email.scheduled?.sendAt;
+  const time = timed !== undefined ? formatWhen(timed, Date.now()) : formatRowTime(email.receivedAt, bucket);
   // A draft is named by who it is to, and says it is a draft where a row's signal word
-  // goes, in the danger colour Gmail gives it.
+  // goes, in the danger colour Gmail gives it. A scheduled send likewise.
   const draft = email.gmailDraft !== undefined;
-  const name = draft ? draftRowName(email) : displayName(email);
+  const scheduled = email.scheduled;
+  const name = draft || scheduled ? draftRowName(email) : displayName(email);
 
-  const signal: RowSignal | null = draft ? { label: "Draft", title: "Not sent yet", danger: true } : rowSignal(indicators, fresh);
+  const signal: RowSignal | null = scheduled
+    ? scheduled.problem
+      ? { label: "Not sent", title: scheduled.problem, danger: true }
+      : { label: "Scheduled", title: `Sends ${time}`, danger: false }
+    : email.snoozedUntil !== undefined
+      ? { label: "Snoozed", title: `Back in your Inbox ${time}`, danger: false }
+      : draft
+        ? { label: "Draft", title: "Not sent yet", danger: true }
+        : rowSignal(indicators, fresh);
 
   return (
     <div
@@ -837,11 +850,13 @@ function MessageList({
 
   // Day sections, on the *representative* message's date, since that is the date the row
   // displays. One flat section unless the sort is chronological.
+  // Snoozed and Scheduled are ordered by when, not by arrival: no day headers there.
+  const timedList = threads.some((row) => row.representative.snoozedUntil !== undefined || row.representative.scheduled !== undefined);
   const sections = daySections(
     threads,
     now,
     (row) => row.representative.receivedAt,
-    sortBy === "date",
+    sortBy === "date" && !timedList,
   );
 
   /**

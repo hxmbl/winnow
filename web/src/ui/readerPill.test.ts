@@ -6,10 +6,10 @@ const run = (positions: number[], max = 2000, from: PillScroll = PILL_START) =>
 
 describe("the reader pill's order", () => {
   it("puts the most-used actions nearest the thumb, More furthest", () => {
-    expect(pillOrder(false)).toEqual(["more", "forward", "reply", "trash", "archive"]);
+    expect(pillOrder(false)).toEqual(["more", "forward", "snooze", "reply", "trash", "archive"]);
   });
   it("mirrors for the left hand", () => {
-    expect(pillOrder(true)).toEqual(["archive", "trash", "reply", "forward", "more"]);
+    expect(pillOrder(true)).toEqual(["archive", "trash", "reply", "snooze", "forward", "more"]);
   });
 });
 

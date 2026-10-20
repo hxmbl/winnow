@@ -7,7 +7,7 @@
  * cursor arrives from (the list is to its left), and in one place for every message, so
  * the hand learns it:
  *
- *   Reply all · Forward │ Archive · Delete │ Mark unread · Star            ⋯ More
+ *   Reply all · Forward │ Archive · Snooze · Delete │ Mark unread · Star   ⋯ More
  *
  * Reply all leads and is the one filled button: answering is what a read ends in most
  * often after triage, and it is the verb Gmail hides behind a scroll to the bottom.
@@ -18,7 +18,7 @@
 import { shortcutFor, type Command } from "../core/mail/keybinds";
 import type { Mailbox } from "../core/model/email";
 
-export type ReaderActionId = "reply" | "forward" | "archive" | "notSpam" | "trash" | "read" | "star";
+export type ReaderActionId = "reply" | "forward" | "archive" | "snooze" | "notSpam" | "trash" | "read" | "star";
 
 export type ReaderAction = {
   id: ReaderActionId;
@@ -48,10 +48,22 @@ export function readerActions(mailbox: Mailbox, state: { starred: boolean; unrea
   // or its reverse where the message is already out of the Inbox.
   if (mailbox === "spam") {
     actions.push({ id: "notSpam", label: "Not spam — move to inbox", text: "Not spam", keys: null, group: "leave" });
+  } else if (mailbox === "snoozed") {
+    actions.push({ id: "archive", label: "Unsnooze — back to the inbox now", text: "Unsnooze", keys: keysFor("archive"), group: "leave" });
   } else {
     const label = mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : "Restore";
     const text = mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Inbox" : "Restore";
     actions.push({ id: "archive", label, text, keys: keysFor("archive"), group: "leave" });
+  }
+  // Snooze (1.4.0): mail in the Inbox or the Archive, and a new time for snoozed mail.
+  if (mailbox === "inbox" || mailbox === "archive" || mailbox === "snoozed") {
+    actions.push({
+      id: "snooze",
+      label: mailbox === "snoozed" ? "Change snooze time" : "Snooze",
+      text: mailbox === "snoozed" ? null : "Snooze",
+      keys: keysFor("snooze"),
+      group: "leave",
+    });
   }
   actions.push({
     id: "trash",

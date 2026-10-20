@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hashId, localId, threadKey } from "./ids";
-import { displayAddress, displayName, formatContact, isMailbox, MAILBOXES, MAILBOX_LABEL, mimeTypeForFilename, monogram, recipientLines } from "./email";
+import { displayAddress, displayName, formatContact, isMailbox, MAILBOXES, MAILBOX_LABEL, mimeTypeForFilename, monogram, recipientLines, VIEW_MAILBOXES } from "./email";
 import type { Email } from "./email";
 
 function email(over: Partial<Email> = {}): Email {
@@ -132,7 +132,9 @@ describe("isMailbox", () => {
   it("gives every mailbox exactly one label", () => {
     // "One name per folder" — the palette reads `MAILBOX_LABEL` too, so a mailbox
     // without one renders as `undefined` rather than as a row with no text.
-    expect(Object.keys(MAILBOX_LABEL).sort()).toEqual([...MAILBOXES].sort());
+    expect(Object.keys(MAILBOX_LABEL).sort()).toEqual([...MAILBOXES, ...VIEW_MAILBOXES].sort());
+    // The two views (1.4.0) are listable but are never where a message itself is.
+    expect(VIEW_MAILBOXES.some((view) => isMailbox(view))).toBe(false);
   });
 });
 

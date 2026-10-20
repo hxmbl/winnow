@@ -33,6 +33,7 @@ import { topEmail } from "./smoke-top-email.mjs";
 import { smokeMotion } from "./smoke-motion.mjs";
 import { smokeFixes } from "./smoke-fixes.mjs";
 import { smokeThumb } from "./smoke-thumb.mjs";
+import { smokeSchedule } from "./smoke-schedule.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -179,10 +180,13 @@ browser.newPage = async (options) => watchCsp(await watchedNewPage(options));
 // `WINNOW_SMOKE_SHOTS=<dir>` also saves its screenshots there.
 // `WINNOW_SMOKE_ONLY=thumb` runs only `smoke-thumb.mjs` (the 1.3.2 sweep fixes, phone
 // compose top bar, Trash confirmations, the reader pill and left-handed mode, shapes).
-if (process.env.WINNOW_SMOKE_ONLY === "fixes" || process.env.WINNOW_SMOKE_ONLY === "thumb") {
+// `WINNOW_SMOKE_ONLY=schedule` runs only `smoke-schedule.mjs` (1.4.0: snooze, waking, the
+// Snoozed mailbox, send later and the Scheduled mailbox, against the demo).
+if (["fixes", "thumb", "schedule"].includes(process.env.WINNOW_SMOKE_ONLY ?? "")) {
   const errors = [];
   try {
-    if (process.env.WINNOW_SMOKE_ONLY === "thumb") await smokeThumb({ browser, URL, check, section, errors });
+    if (process.env.WINNOW_SMOKE_ONLY === "schedule") await smokeSchedule({ browser, URL, check, section, errors });
+    else if (process.env.WINNOW_SMOKE_ONLY === "thumb") await smokeThumb({ browser, URL, check, section, errors });
     else await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
     section("console");
     check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
@@ -4012,8 +4016,9 @@ try {
     JSON.stringify(menuShape),
   );
   check(
-    "reversed: account and gear on top, then Spam, Trash, Drafts, Archive, Sent, and Inbox last",
-    JSON.stringify(menuShape.order) === JSON.stringify(["account", "spam", "trash", "drafts", "archive", "sent", "inbox"]),
+    "reversed: account and gear on top, then Spam, Trash, Scheduled, Drafts, Snoozed, Archive, Sent, and Inbox last",
+    JSON.stringify(menuShape.order) ===
+      JSON.stringify(["account", "spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent", "inbox"]),
     JSON.stringify(menuShape.order),
   );
   check(
@@ -4208,8 +4213,8 @@ try {
     })),
   );
   check(
-    "more, forward, reply, trash and archive (most-used nearest the thumb), each a full touch target",
-    readerButtons.map(({ label }) => label).join("|") === "More|Forward|Reply to all|Move to trash|Archive" &&
+    "more, forward, snooze, reply, trash and archive (most-used nearest the thumb), each a full touch target",
+    readerButtons.map(({ label }) => label).join("|") === "More|Forward|Snooze|Reply to all|Move to trash|Archive" &&
       readerButtons.every(({ box: b }) => b && b.width >= MIN_TARGET && b.height >= MIN_TARGET),
     JSON.stringify(readerButtons.map(({ label, box: b }) => [label, b && Math.round(b.width), b && Math.round(b.height)])),
   );
@@ -8174,6 +8179,7 @@ try {
   await smokeMotion({ browser, url: URL, check, section, errors });
   await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
   await smokeThumb({ browser, URL, check, section, errors });
+  await smokeSchedule({ browser, URL, check, section, errors });
 
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");

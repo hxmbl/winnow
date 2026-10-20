@@ -32,6 +32,7 @@ export type Command =
   | { type: "toggleStar" }
   | { type: "copyCode" }
   | { type: "archive" }
+  | { type: "snooze" }
   | { type: "trash" }
   | { type: "toggleRead" }
   | { type: "focusReply" }
@@ -299,6 +300,14 @@ export const BINDINGS: readonly Binding[] = [
     matches: { keys: ["e"] },
     when: ({ context }) => context.hasActionTarget,
     command: { type: "archive" },
+  },
+  {
+    // Gmail's `b`: opens the snooze choices for the open message, or the selection.
+    keys: "b",
+    help: "Snooze until a time you pick",
+    matches: { keys: ["b"] },
+    when: ({ event, context }) => event.shiftKey !== true && context.hasActionTarget,
+    command: { type: "snooze" },
   },
   {
     keys: "# / ⌫",

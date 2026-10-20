@@ -6,12 +6,22 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, CalendarClock, ChevronDown, Clock } from "lucide-react";
 import { Sheet, SheetHeader } from "./Overlay";
+import { Menu } from "./Menu";
+import { anchorFromElement, type MenuAnchor, type MenuEntry } from "../menuPlacement";
+import { whenPresets } from "../../core/mail/when";
 import { RecipientField } from "./RecipientField";
 import { normaliseRecipients, recipientProblem } from "../../core/mail/compose";
 import { draftStatusLabel, type DraftSaveStatus } from "../../core/mail/drafts";
 import type { ContactIndex } from "../../core/contacts/index";
+
+/** How long a press on the phone's Send circle is held before it opens Send later. */
+const SEND_LATER_PRESS_MS = 500;
+
+/** Said in the Send later menu, because nothing on Google's side knows about the schedule. */
+export const SEND_LATER_NOTE =
+  "Winnow sends it from this device, so it needs to be open at that time. If it's closed, the message goes the next time you open Winnow.";
 
 /** What the composer can change in its draft. */
 export type ComposerPatch = {
@@ -58,6 +68,11 @@ export type ComposerProps = {
    * parent's state may not hold yet when the keyboard sends.
    */
   onSend: (recipients: { to: string[]; cc: string[]; bcc: string[] }) => void;
+  /**
+   * Send later (1.4.0): schedule with the recipients as they stand, at a preset time, or
+   * `"custom"` for "Pick date & time…". Without it the composer offers no Send later.
+   */
+  onSendLater?: (recipients: { to: string[]; cc: string[]; bcc: string[] }, at: number | "custom") => void;
   /** Close, having said the word. No confirmation. */
   onDiscard: () => void;
   /** Close from Escape, the X, or the backdrop. May confirm. */
@@ -170,6 +185,7 @@ export function Composer({
   improveSuggestions,
   onChange,
   onSend,
+  onSendLater,
   onDiscard,
   onClose,
   phone = false,
@@ -258,6 +274,85 @@ export function Composer({
     }
     onSend(recipients);
   };
+
+  /** The Send later menu, open beside its button (or the phone's Send circle). */
+  const [laterMenu, setLaterMenu] = useState<{ anchor: MenuAnchor; trigger: HTMLElement } | null>(null);
+  const openLater = (trigger: HTMLElement) => {
+    if (sending || !onSendLater) return;
+    if (problem !== null) {
+      setAttempted(true);
+      return;
+    }
+    setLaterMenu({ anchor: anchorFromElement(trigger), trigger });
+  };
+  /** Schedule, with the same recipient rules as Send. */
+  const trySendLater = (at: number | "custom") => {
+    if (sending || !onSendLater || problem !== null) return;
+    const typed = pending.to.trim() !== "" || pending.cc.trim() !== "" || pending.bcc.trim() !== "";
+    if (typed) {
+      onChange(recipients);
+      setPending({ to: "", cc: "", bcc: "" });
+    }
+    onSendLater(recipients, at);
+  };
+  const laterItems = (): MenuEntry[] => [
+    ...whenPresets(Date.now()).map((preset) => ({
+      kind: "item" as const,
+      id: `later-${preset.id}`,
+      label: preset.label,
+      hint: preset.detail,
+      onSelect: () => trySendLater(preset.at),
+    })),
+    { kind: "divider", id: "later-d" },
+    { kind: "item", id: "later-custom", label: "Pick date & time…", icon: CalendarClock, onSelect: () => trySendLater("custom") },
+  ];
+  /** A long press on the phone's Send circle opens Send later instead of sending. */
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressFired = useRef(false);
+  const longPress = onSendLater
+    ? {
+        onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+          pressFired.current = false;
+          const target = event.currentTarget;
+          if (pressTimer.current) clearTimeout(pressTimer.current);
+          pressTimer.current = setTimeout(() => {
+            pressFired.current = true;
+            openLater(target);
+          }, SEND_LATER_PRESS_MS);
+        },
+        onPointerUp: () => {
+          if (pressTimer.current) clearTimeout(pressTimer.current);
+        },
+        onPointerLeave: () => {
+          if (pressTimer.current) clearTimeout(pressTimer.current);
+        },
+        onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => {
+          event.preventDefault();
+          openLater(event.currentTarget);
+        },
+        /** The click that ends a long press is not a Send. */
+        swallowClick: () => {
+          const fired = pressFired.current;
+          pressFired.current = false;
+          return fired;
+        },
+      }
+    : null;
+  const laterMenuElement = laterMenu && onSendLater && (
+    <Menu
+      testId="send-later"
+      label="Send later"
+      anchor={laterMenu.anchor}
+      returnFocus={laterMenu.trigger}
+      onClose={() => setLaterMenu(null)}
+      header={
+        <span data-send-later-note="" className="block max-w-[17rem] text-meta leading-snug text-ink-muted">
+          {SEND_LATER_NOTE}
+        </span>
+      }
+      items={laterItems()}
+    />
+  );
 
   /*
     Focus and caret placement, once per *mount*.
@@ -474,6 +569,7 @@ export function Composer({
 
         {!phone && (
         <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-stretch gap-px">
           <button
             type="button"
             onClick={trySend}
@@ -496,6 +592,22 @@ export function Composer({
               </kbd>
             )}
           </button>
+          {onSendLater && (
+            <button
+              type="button"
+              data-send-later=""
+              aria-haspopup="menu"
+              aria-expanded={laterMenu !== null}
+              aria-label="Send later"
+              title="Send later…"
+              disabled={!canSend}
+              onClick={(event) => openLater(event.currentTarget)}
+              className="inline-flex items-center rounded-ctl bg-accent px-2 text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+          )}
+          </span>
           <button
             type="button"
             onClick={onDiscard}
@@ -512,6 +624,7 @@ export function Composer({
           <p className="text-meta leading-snug text-ink-subtle">{hint}</p>
         )}
       </div>
+      {laterMenuElement}
       {dropping && (
         <div
           aria-hidden="true"
@@ -592,10 +705,15 @@ export function Composer({
           <PhoneComposerBar
             title={phoneTitle}
             onCancel={onClose}
-            onSend={trySend}
+            onSend={() => {
+              if (longPress?.swallowClick()) return;
+              trySend();
+            }}
             canSend={canSend}
             sending={sending}
             sendTitle={sendTitle}
+            onSendLater={onSendLater ? openLater : undefined}
+            sendPress={longPress ?? undefined}
           />
           {(mode === "reply" && onReplyAllChange) || draftStatusLabel(saveStatus) !== null ? (
             <div data-composer-status="" className="flex shrink-0 items-center gap-2 px-4 pt-2">
@@ -627,6 +745,8 @@ function PhoneComposerBar({
   canSend,
   sending,
   sendTitle,
+  onSendLater,
+  sendPress,
 }: {
   title: string;
   onCancel: () => void;
@@ -634,6 +754,14 @@ function PhoneComposerBar({
   canSend: boolean;
   sending: boolean;
   sendTitle: string;
+  /** Send later: the clock beside Send (and a long press on Send) opens its menu. */
+  onSendLater?: (trigger: HTMLElement) => void;
+  sendPress?: {
+    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
+    onPointerUp: () => void;
+    onPointerLeave: () => void;
+    onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  };
 }) {
   return (
     <div
@@ -651,13 +779,32 @@ function PhoneComposerBar({
       <h2 data-composer-title="" className="min-w-0 truncate text-center text-read font-semibold text-ink">
         {title}
       </h2>
+      <span className="flex items-center justify-self-end">
+      {onSendLater && (
+        <button
+          type="button"
+          data-composer-send-later=""
+          aria-haspopup="menu"
+          aria-label="Send later"
+          title="Send later (or hold Send)"
+          disabled={!canSend}
+          onClick={(event) => onSendLater(event.currentTarget)}
+          className="flex h-11 w-11 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          <Clock size={20} strokeWidth={2} aria-hidden="true" />
+        </button>
+      )}
       <button
         type="button"
         data-composer-send=""
         onClick={onSend}
         disabled={!canSend}
         title={sendTitle}
-        className="group flex h-11 w-11 items-center justify-center justify-self-end rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        onPointerDown={sendPress?.onPointerDown}
+        onPointerUp={sendPress?.onPointerUp}
+        onPointerLeave={sendPress?.onPointerLeave}
+        onContextMenu={sendPress?.onContextMenu}
+        className="group flex h-11 w-11 items-center justify-center rounded-full [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <span
           aria-hidden="true"
@@ -669,6 +816,7 @@ function PhoneComposerBar({
         </span>
         <span className="sr-only">{sending ? "Sending…" : "Send"}</span>
       </button>
+      </span>
     </div>
   );
 }

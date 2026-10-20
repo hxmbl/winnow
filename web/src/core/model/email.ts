@@ -17,10 +17,23 @@ export type GmailId = string;
  * Where a message is. `drafts` is the odd one out: its rows are the user's Gmail drafts,
  * listed through the drafts API rather than synced, and opening one reopens it in the
  * composer instead of the reader. No message is ever *moved* into it.
+ *
+ * `snoozed` and `scheduled` are views, not places (1.4.0): Snoozed lists the archived
+ * messages this device is holding until a wake time (`core/mail/snooze.ts`), Scheduled
+ * the drafts waiting to be sent later (`core/mail/scheduledSend.ts`). A message's own
+ * `mailbox` is never either; nothing is moved into them by "Move to".
  */
-export type Mailbox = "inbox" | "archive" | "sent" | "drafts" | "trash" | "spam";
+export type Mailbox = "inbox" | "archive" | "sent" | "drafts" | "trash" | "spam" | "snoozed" | "scheduled";
 
+/** Where a message itself can be (every mailbox but the two views). */
 export const MAILBOXES: readonly Mailbox[] = ["inbox", "archive", "sent", "drafts", "trash", "spam"];
+
+/** The two views (see `Mailbox`). */
+export const VIEW_MAILBOXES: readonly Mailbox[] = ["snoozed", "scheduled"];
+
+export function isViewMailbox(mailbox: Mailbox): boolean {
+  return mailbox === "snoozed" || mailbox === "scheduled";
+}
 
 export const MAILBOX_LABEL: Record<Mailbox, string> = {
   inbox: "Inbox",
@@ -29,6 +42,8 @@ export const MAILBOX_LABEL: Record<Mailbox, string> = {
   drafts: "Drafts",
   trash: "Trash",
   spam: "Spam",
+  snoozed: "Snoozed",
+  scheduled: "Scheduled",
 };
 
 /** Gmail categories. */
@@ -280,6 +295,10 @@ export type Email = {
    * same thread.
    */
   gmailDraft?: { id: string; inReplyTo?: string; references?: string };
+  /** Set on a row of the Snoozed view: when it comes back to the Inbox. */
+  snoozedUntil?: Millis;
+  /** Set on a row of the Scheduled view: which scheduled send, when it goes, and why it has not. */
+  scheduled?: { id: string; sendAt: Millis; problem?: string };
 };
 
 /** The message with `code` settled: kept if already looked for, detected otherwise. */
