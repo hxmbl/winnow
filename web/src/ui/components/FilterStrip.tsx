@@ -259,8 +259,8 @@ export const FilterStrip = memo(function FilterStrip({
           The catcher: a transparent band behind the chips, as wide as all of them and as
           tall as the strip's own box, so a wheel, a swipe or a tap in a gap between two
           chips lands on the strip instead of falling through to the list under it (the
-          scroller itself lets events through, for the frost padding above and below the
-          chips). First in the rail so the chips paint over it and the CSS that finds the
+          scroller itself lets events through, for the shadow padding above and below the
+          chips: inset by exactly that padding, the `-my-[20px]` above). First in the rail so the chips paint over it and the CSS that finds the
           first and last chip is undisturbed; sized in `update` above.
         */}
         {glass && (
@@ -268,7 +268,7 @@ export const FilterStrip = memo(function FilterStrip({
             ref={catcherRef}
             aria-hidden="true"
             data-rail-catcher=""
-            className="absolute left-0 top-[44px] bottom-[44px]"
+            className="absolute left-0 top-[20px] bottom-[20px]"
           />
         )}
 

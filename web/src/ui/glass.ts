@@ -8,6 +8,9 @@
  * element, a hairline edge and a soft shadow that lifts it off the list. The frost is
  * light on purpose (the owner's ask): rows and colours stay perceptible as they pass
  * underneath, and the tint, not the blur, is what keeps the words on the glass readable.
+ * (A glass that opens a fixed menu from inside itself, `.wn-glass-behind`, carries the
+ * same tint and frost on an inset `::before`: on the element, a backdrop-filter would
+ * make it the menu's containing block.)
  *
  * Two opacities per mode. `rim` is the frost itself, at a chip's rounded ends and
  * around the dock's icons. `text` (and `textOn` for a chip that is on) is the tint

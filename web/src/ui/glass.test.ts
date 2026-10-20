@@ -177,6 +177,12 @@ describe("one lean glass: the frost on the element itself (1.4)", () => {
     expect(read("SelectionBar.tsx")).toMatch(/wn-glass-behind/);
   });
 
+  it("pads the chip rail only for the chips' shadow, and its gap catcher by exactly as much", () => {
+    // Touch and floating both take back what they pad with a negative margin.
+    expect(strip.match(/pointer-events-none -my-\[20px\]/g)?.length).toBe(2);
+    expect(strip).toContain('className="absolute left-0 top-[20px] bottom-[20px]"');
+  });
+
   it("no longer clips the floating chrome sideways: that only held the reach layer in", () => {
     expect(css).not.toMatch(/overflow-x:\s*clip/);
   });
