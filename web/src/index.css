@@ -982,7 +982,8 @@ div[data-row-count] {
  * width change (it simply is one size or the other), only the fade.
  */
 .wn-reader-pill {
-  width: calc(5 * 48px + 4 * 2px + 12px + 2px);
+  /* One 48px button per action (`--wn-pill-count`: 6 with Snooze, 5 where there is none). */
+  width: calc(var(--wn-pill-count, 5) * 48px + (var(--wn-pill-count, 5) - 1) * 2px + 12px + 2px);
   overflow: hidden;
   transition:
     width 260ms var(--wn-glass-ease),

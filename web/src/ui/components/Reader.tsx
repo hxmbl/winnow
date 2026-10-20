@@ -478,6 +478,8 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
   const collapsed = scroll.collapsed;
 
   const inSpam = mailbox === "spam";
+  /** Snooze is on the pill only where a message can be snoozed (the pill sizes to it). */
+  const snoozable = actions.onSnooze !== undefined && (mailbox === "inbox" || mailbox === "archive" || mailbox === "snoozed");
   const archiveLabel =
     mailbox === "inbox" ? "Archive" : mailbox === "archive" ? "Move to inbox" : mailbox === "snoozed" ? "Unsnooze" : "Restore";
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
@@ -520,7 +522,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
           </button>
         );
       case "snooze":
-        if (!actions.onSnooze || !(mailbox === "inbox" || mailbox === "archive" || mailbox === "snoozed")) return null;
+        if (!snoozable) return null;
         return (
           <button
             key={id}
@@ -572,6 +574,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
         role="toolbar"
         aria-label="Message actions"
         className="wn-glass wn-reader-pill pointer-events-auto relative h-[var(--wn-dock-h)] rounded-full"
+        style={{ "--wn-pill-count": snoozable ? 6 : 5 } as React.CSSProperties}
       >
         <div
           data-reader-pill-actions=""
