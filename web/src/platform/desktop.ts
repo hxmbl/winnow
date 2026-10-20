@@ -204,7 +204,9 @@ export const desktopPlatform: Platform = {
   },
 
   async keptReplies(): Promise<unknown[]> {
-    return invoke<unknown[]>("notify_kept_replies").catch(() => []);
+    // An array or nothing: a shell without the command answers `null`.
+    const kept = await invoke<unknown[] | null>("notify_kept_replies").catch(() => []);
+    return Array.isArray(kept) ? kept : [];
   },
 
   async releaseKeptReplies(requestIds: readonly string[]): Promise<void> {
