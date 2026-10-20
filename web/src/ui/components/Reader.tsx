@@ -547,7 +547,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
       <div
         role="toolbar"
         aria-label="Message actions"
-        className="wn-glass wn-liquid wn-reader-pill pointer-events-auto relative h-[var(--wn-dock-h)] rounded-full"
+        className="wn-glass wn-glass-behind wn-liquid wn-reader-pill pointer-events-auto relative h-[var(--wn-dock-h)] rounded-full"
       >
         <div
           data-reader-pill-actions=""

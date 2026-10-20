@@ -618,6 +618,35 @@ button.wn-glass:not([data-rail-item]):active,
 }
 
 /*
+ * A glass that opens a fixed-position menu from inside itself (the phone reader pill's
+ * More, the desktop selection bar's Move to) carries its tint and frost on an inset
+ * `::before` instead (`.wn-glass-behind`). A `backdrop-filter` on the element would make
+ * it the containing block of every fixed descendant, so the menu would be placed against
+ * the pill and clipped by it rather than the screen. Same tint, same frost, same box:
+ * the layer is the element's own padding box, under its sheen and its content.
+ */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+  (background: color-mix(in srgb, red 50%, transparent)) {
+  .wn-glass.wn-glass-behind {
+    isolation: isolate;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .wn-glass.wn-glass-behind::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
+    -webkit-backdrop-filter: var(--wn-glass-filter);
+    backdrop-filter: var(--wn-glass-filter);
+  }
+}
+
+/*
  * The phone chip rail's haze (1.3.3, a deliberate outlier): what is left in the gaps
  * between the chips. A light blur of whatever scrolls behind them and nothing else: no
  * tint, no fill, no hairline, and masked to fade out above and below the chips, so it
@@ -732,6 +761,12 @@ button.wn-glass:not([data-rail-item]):active,
   .wn-liquid-accent.wn-liquid {
     backdrop-filter: var(--wn-glass-filter) url(#wn-liquid);
   }
+  .wn-glass.wn-glass-behind.wn-liquid {
+    backdrop-filter: none;
+  }
+  .wn-glass.wn-glass-behind.wn-liquid::before {
+    backdrop-filter: var(--wn-glass-filter) url(#wn-liquid);
+  }
 }
 
 /* WebKit with Apple's native glass enabled: a guarded progressive enhancement. */
@@ -748,6 +783,9 @@ button.wn-glass:not([data-rail-item]):active,
 }
 /* Under the native material a chip still says which filter it is: its hue stays. */
 @supports (-apple-visual-effect: -apple-system-glass-material) {
+  .wn-glass.wn-glass-behind::before {
+    display: none;
+  }
   .wn-pill.wn-chip-glass.wn-liquid {
     background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest)));
   }
@@ -992,7 +1030,8 @@ div[data-row-count] {
 
 /* Reduced transparency: the floating glass is solid (compose, the solid accent), the chips keep only their tint. */
 @media (prefers-reduced-transparency: reduce) {
-  .wn-liquid::after {
+  .wn-liquid::after,
+  .wn-glass.wn-glass-behind::before {
     display: none;
   }
   .wn-liquid-accent {
@@ -1017,7 +1056,8 @@ div[data-row-count] {
   }
 }
 @media (forced-colors: active) {
-  .wn-liquid::after {
+  .wn-liquid::after,
+  .wn-glass.wn-glass-behind::before {
     display: none;
   }
   .wn-liquid-accent {

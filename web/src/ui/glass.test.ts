@@ -155,10 +155,26 @@ describe("one lean glass: the frost on the element itself (1.4)", () => {
     expect(css).toMatch(rule);
     // The 1.2.3–1.3.4 machinery is gone: no reach, no ::before frost, no clip back to the pill.
     expect(css).not.toMatch(/--wn-glass-reach/);
-    expect(css).not.toMatch(/\.wn-glass[^,{]*::before/);
+    // The one ::before left is `.wn-glass-behind`'s, the element's own box (below).
+    expect(css.replace(/\.wn-glass\.wn-glass-behind(\.wn-liquid)?::before/g, "")).not.toMatch(/\.wn-glass[^,{]*::before/);
     expect(css).not.toMatch(/\.wn-chip-glass[^,{]*::before/);
     expect(css).not.toMatch(/clip-path:\s*inset\(var\(--wn-glass/);
     expect(strip).not.toMatch(/glass-reach|-my-\[44px\]/);
+  });
+
+  it("moves the frost under a glass that opens a fixed menu onto its own box, never past it", () => {
+    const layer = /\.wn-glass\.wn-glass-behind::before \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(layer).toMatch(/inset:\s*0;/);
+    expect(layer).toMatch(/z-index:\s*-1;/);
+    expect(layer).toMatch(/backdrop-filter:\s*var\(--wn-glass-filter\);/);
+    expect(layer).not.toMatch(/clip-path/);
+    const host = /\.wn-glass\.wn-glass-behind \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(host).toMatch(/isolation:\s*isolate;/);
+    expect(host).toMatch(/[^-]backdrop-filter:\s*none;/);
+    // Who needs it: the reader pill (More) and the desktop selection bar (Move to).
+    const read = (name: string) => readFileSync(new URL(`./components/${name}`, import.meta.url), "utf8");
+    expect(read("Reader.tsx")).toMatch(/wn-glass-behind/);
+    expect(read("SelectionBar.tsx")).toMatch(/wn-glass-behind/);
   });
 
   it("no longer clips the floating chrome sideways: that only held the reach layer in", () => {
@@ -189,9 +205,9 @@ describe("one lean glass: the frost on the element itself (1.4)", () => {
   });
 
   it("drops the frost and the sheen under reduced transparency and forced colours", () => {
-    const reduced = /@media \(prefers-reduced-transparency: reduce\) \{\s*\.wn-liquid::after \{\s*display: none;[\s\S]*?backdrop-filter: none !important;/.exec(css);
+    const reduced = /@media \(prefers-reduced-transparency: reduce\) \{\s*\.wn-liquid::after,[^{]*\{\s*display: none;[\s\S]*?backdrop-filter: none !important;/.exec(css);
     expect(reduced).not.toBeNull();
-    const forced = /@media \(forced-colors: active\) \{\s*\.wn-liquid::after \{\s*display: none;[\s\S]*?background: Canvas;/.exec(css);
+    const forced = /@media \(forced-colors: active\) \{\s*\.wn-liquid::after,[^{]*\{\s*display: none;[\s\S]*?background: Canvas;/.exec(css);
     expect(forced).not.toBeNull();
   });
 });
@@ -206,7 +222,7 @@ describe("Liquid Glass on the floating chrome (1.4)", () => {
     expect(read("ComposeFab.tsx")).toMatch(/wn-liquid wn-liquid-accent/);
     expect(read("FilterStrip.tsx")).toContain('"wn-chip-glass wn-liquid"');
     expect(read("FilterStrip.tsx").match(/wn-glass wn-liquid h-/g)?.length).toBe(2);
-    expect(read("Reader.tsx")).toMatch(/wn-glass wn-liquid wn-reader-pill/);
+    expect(read("Reader.tsx")).toMatch(/wn-glass wn-glass-behind wn-liquid wn-reader-pill/);
     expect(read("Masthead.tsx")).toMatch(/wn-glass wn-glass-bar wn-liquid/);
     expect(read("StatusPill.tsx")).toMatch(/wn-glass wn-glass-bar wn-liquid/);
   });

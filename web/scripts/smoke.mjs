@@ -3813,7 +3813,17 @@ try {
     probe.remove();
     return colour;
   });
-  check("and keeps the accent", fabFill === accentFill, `${fabFill} / ${accentFill}`);
+  // Liquid Glass (1.4): the accent itself, a little translucent (`COMPOSE_TINT`).
+  const channels = (css) => {
+    const n = (css.match(/[\d.]+/g) ?? []).map(Number);
+    return css.startsWith("color(") ? [...n.slice(0, 3).map((v) => Math.round(v * 255)), n[3] ?? 1] : [...n.slice(0, 3), n[3] ?? 1];
+  };
+  const [fab4, accent4] = [channels(fabFill), channels(accentFill)];
+  check(
+    "and keeps the accent, a little translucent",
+    fab4.slice(0, 3).every((v, i) => Math.abs(v - accent4[i]) <= 1) && fab4[3] >= 0.8 && fab4[3] < 1,
+    `${fabFill} / ${accentFill}`,
+  );
 
   const dockChips = dock.locator("[data-rail-key] button[aria-pressed]");
   const chipBox = await box(dockChips);
@@ -7144,7 +7154,7 @@ try {
       await d.waitForTimeout(200);
       const bar = d.locator("header [data-selection-bar='desktop']");
       const selBox = await bar.boundingBox();
-      const selFilter = await bar.evaluate((el) => ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(el))).catch(() => "");
+      const selFilter = await bar.evaluate((el) => ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(el, el.classList.contains("wn-glass-behind") ? "::before" : null))).catch(() => "");
       check(
         "a selection's bar floats in the chips' place, in the same glass, and the header keeps its height",
         Boolean(selBox) && /blur\(6px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
@@ -7856,8 +7866,8 @@ try {
       return value;
     };
     // The frost on, then off (and the pills' tint off in both, so only the blur differs).
-    const NO_TINT = ".wn-glass,.wn-chip-glass{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
-    const NO_FROST = ".wn-glass,.wn-chip-glass{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}";
+    const NO_TINT = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-liquid::after{display:none!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
+    const NO_FROST = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}";
     const frostRatio = async (p, ctx, rect) => {
       const tint = await p.addStyleTag({ content: NO_TINT });
       await p.waitForTimeout(250);
@@ -7892,7 +7902,8 @@ try {
         }
       }
       const layer = pills.map((pill) => {
-        const own = getComputedStyle(pill);
+        // A glass that opens a fixed menu frosts its own box from an inset ::before.
+        const own = getComputedStyle(pill, pill.classList.contains("wn-glass-behind") ? "::before" : null);
         const liquid = pill.classList.contains("wn-liquid");
         return { filter: own.backdropFilter || own.webkitBackdropFilter, liquid, refracts: /url\(.*#wn-liquid/.test(own.backdropFilter), sheen: liquid ? getComputedStyle(pill, "::after").zIndex : null };
       });
