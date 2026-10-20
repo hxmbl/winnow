@@ -558,7 +558,7 @@ async function stage(page, cdp, job, screen) {
       if (screen === "drive-compose") return;
       if (phone) await tap(page.locator("[data-composer-send]").first());
       else await sheet.locator("button", { hasText: /^Send/ }).first().click();
-      await page.locator('[role="dialog"][aria-label*="open the Drive link"]').waitFor({ timeout: 5_000 });
+      await page.locator('[role="dialog"][aria-label*="open the Drive link"]').waitFor({ timeout: 15_000 });
       await settle(page, 400);
       return;
     }
