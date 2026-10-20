@@ -91,7 +91,8 @@ function failure(picked: string, mode: ThemeName): string | null {
   if (!/^#[0-9A-F]{6}$/.test(accent)) return `${tag}: not an opaque hex`;
   if (focusRing !== accent) return `${tag}: ring is not the accent`;
   for (const plane of surfaces) {
-    if (contrastRatio(accent, plane) < 4.5) return `${tag}: text on ${plane}`;
+    // 5:1, the curated accents' floor, rather than bare AA (see CUSTOM_ACCENT_FLOOR).
+    if (contrastRatio(accent, plane) < 5) return `${tag}: text on ${plane}`;
     if (contrastRatio(focusRing, plane) < 3) return `${tag}: ring on ${plane}`;
   }
   if (contrastRatio(onAccent, accent) < 4.5) return `${tag}: label ${onAccent}`;

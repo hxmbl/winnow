@@ -6,8 +6,9 @@
  * derives its per-mode tones by rule, against the same bars, and `customAccent.test.ts`
  * holds the rule to them over random colours, greys and the extremes:
  *
- *   - the accent reads as text (4.5:1) on every opaque plane of the mode, which also makes
- *     it a focus ring (3:1) and an unread dot;
+ *   - the accent reads as text on every opaque plane of the mode at 5:1, the curated
+ *     accents' floor (bare AA left no room for the planes as painted), which also makes it
+ *     a focus ring (3:1) and an unread dot;
  *   - its label colour (`onAccent`, white or the mode's near-black, whichever is stronger)
  *     reads on it at 4.5:1, and the compose circle's icon at 3:1 with the circle at
  *     `COMPOSE_TINT` over black or white, sheen included;
@@ -82,6 +83,13 @@ export type CustomAccent<Mode extends string> = {
 
 /** WCAG AA for text. A hair of margin so no rounding downstream can tip a pass into a fail. */
 export const CUSTOM_TEXT_FLOOR = 4.55;
+/**
+ * The accent as text on the planes: 5:1, the floor the curated accents keep (`theme.test.ts`,
+ * "1.3.2 contrast margins"), not bare AA. The planes the eye sees are often a shade off the
+ * tokens (the drawer's veil over the list, a row's hover under the selected count), and the
+ * sweep measured a custom honey's count at 4.25:1 there when it was held to 4.55.
+ */
+export const CUSTOM_ACCENT_FLOOR = 5;
 /** The compose circle's icon (a non-text mark). */
 export const CUSTOM_ICON_FLOOR = 3.05;
 /** Danger's distance from the accent, in HSL hue degrees (the curated rule is 40). */
@@ -95,7 +103,7 @@ export const ADJUSTED_DISTANCE = 0.02;
 export function customToneOk(hex: string, mode: CustomModeContext): string | null {
   const lum = relativeLuminance(hex);
   if (lum < mode.luminance.min || lum > mode.luminance.max) return null;
-  for (const plane of mode.surfaces) if (contrastRatio(hex, plane) < CUSTOM_TEXT_FLOOR) return null;
+  for (const plane of mode.surfaces) if (contrastRatio(hex, plane) < CUSTOM_ACCENT_FLOOR) return null;
   const onAccent = [...mode.onAccent].sort((a, b) => contrastRatio(b, hex) - contrastRatio(a, hex))[0];
   if (contrastRatio(onAccent, hex) < CUSTOM_TEXT_FLOOR) return null;
   for (const under of ["#000000", "#FFFFFF"]) {
