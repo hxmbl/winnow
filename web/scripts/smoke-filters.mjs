@@ -278,6 +278,80 @@ try {
   check("no console errors on phone", pErrors.length === 0, pErrors.slice(0, 3).join(" | "));
   await phone.close();
 
+  // ── Faceted counts (1.4.0) ──────────────────────────────────────────────
+  section("desktop: chip counts facet on the active filters");
+  {
+    const fctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const f = await fctx.newPage();
+    const fErrors = [];
+    f.on("pageerror", (error) => fErrors.push(String(error)));
+    await f.goto(URL, { waitUntil: "networkidle" });
+    await f.waitForSelector("[data-row-count] [data-row-id]");
+    const chips = () =>
+      f.evaluate(() =>
+        [...document.querySelectorAll("[data-list-chrome] [data-rail-scroller] > [data-rail-item].wn-pill")].map((item) => ({
+          key: item.getAttribute("data-rail-key"),
+          count: Number(item.querySelector(".wn-pill-count")?.textContent ?? "0"),
+          on: item.hasAttribute("data-on"),
+          empty: item.hasAttribute("data-empty"),
+        })),
+      );
+    const rows = () => f.locator("[data-row-count] button[data-message-id]").count();
+    const tap = async (key) => {
+      await f.locator(`[data-list-chrome] [data-rail-item][data-rail-key="${key}"] button`).first().click();
+      await f.waitForTimeout(350);
+    };
+    const plain = await chips();
+    const first = plain.find((c) => c.key === "unread" && c.count > 0) ?? plain.find((c) => c.count > 1 && c.key !== "unsafe");
+    require("a chip to start from", Boolean(first));
+    await tap(first.key);
+    const faceted = await chips();
+    const self = faceted.find((c) => c.key === first.key);
+    check(
+      `${first.key} on: the rail keeps the same chips (narrowed ones dim, none vanish)`,
+      JSON.stringify(faceted.map((c) => c.key)) === JSON.stringify(plain.map((c) => c.key)),
+      faceted.map((c) => `${c.key}:${c.count}`).join(" "),
+    );
+    check(
+      `${first.key} on: other chips count within the current result`,
+      faceted.filter((c) => !c.on && c.key !== "unsafe").every((c) => c.count <= self.count),
+    );
+    check(
+      `${first.key} on: some chip's number changed from its plain count`,
+      faceted.some((c) => !c.on && c.key !== "unsafe" && c.count !== plain.find((p) => p.key === c.key)?.count),
+    );
+    check(
+      "a chip faceted to 0 is drawn empty",
+      faceted.filter((c) => !c.on).every((c) => (c.count === 0) === c.empty),
+    );
+    let tried = 0;
+    for (const chip of faceted.filter((c) => !c.on && c.key !== "unsafe").slice(0, 5)) {
+      await tap(chip.key);
+      const both = await chips();
+      const onCounts = both.filter((c) => c.on).map((c) => c.count);
+      const shown = await rows();
+      check(
+        `${first.key} + ${chip.key}: the chip's ${chip.count} is the new result, on both active chips`,
+        onCounts.length === 2 && onCounts.every((n) => n === chip.count) && (shown > 0) === (chip.count > 0) && shown <= chip.count,
+        `active ${JSON.stringify(onCounts)}, ${shown} row(s)`,
+      );
+      await tap(chip.key);
+      tried += 1;
+    }
+    check("at least two combinations were tried", tried >= 2);
+    await tap(first.key);
+    check(
+      "with nothing on again, the plain counts are back",
+      JSON.stringify(await chips()) === JSON.stringify(plain),
+    );
+    if (SHOTS) {
+      await tap(first.key);
+      await f.screenshot({ path: path.join(SHOTS, "filters-faceted-desktop.png") });
+    }
+    check("no page errors with facets", fErrors.length === 0, fErrors.slice(0, 3).join(" | "));
+    await fctx.close();
+  }
+
   // ── Smart filters in another mailbox (1.3.3) ─────────────────────────────
   section("desktop: smart filters apply to the open mailbox (Trash)");
   {

@@ -138,7 +138,8 @@ order for "why is this message wrong".
      bias, rank tier or quiet status changed are reclassified (sendersReclassifiedBy)
 7. derived: search → filter → sort → group     core/classify/pipeline.ts
      signals come from a map the caller built; the classifier never runs here
-8. rail ranked, counts computed                 core/classify/filters.ts
+8. rail ranked, counts computed (faceted on    core/classify/filters.ts
+   the active filters once one is on)
 9. one snapshot                                 core/store/store.ts (derive)
 10. React                                       web/src/App.tsx → useStore → components
 ```
@@ -174,6 +175,8 @@ a full pass.
 **Why the counts are over the inbox, not the current result.** `inboxCounts` is a
 claim about the user's mail, not about the rows currently rendered. Ranking the
 rail against anything else reshuffles it the moment you open a bucket.
+The *ranking* stays that way; only the *numbers* on the pills facet on the active
+filters once one is on (1.4.0, `railFacets`, see `filters.ts` below).
 
 The public surface is ~80 methods, grouped:
 
@@ -225,7 +228,7 @@ Two behaviours worth knowing before touching it:
 | `classify.ts` | `classifyEmail(email, profile, weights) → EmailSignals`. Pure and synchronous, so a cached classification stays valid across restarts. Also exports `contentBag`, `inboxSearchBag`, `matchesSocialDomain`, `senderRankBonus`, `classifyAll`. |
 | `heuristics.ts` | The vocabulary: ten `KeywordTable`s, one `SOCIAL_DOMAINS` table, and the regexes (`promoRegex`, `phishingRegex`, `coercionRegex`, `clickHereRegex`, `financeRegex`, `needsActionRegexes`, `replyRequestRegex`). |
 | `text.ts` | `PhraseMatcher` and `KeywordTable`. Word-bounded, never `String.includes` — `otp` inside `hotel` is the reason. |
-| `filters.ts` | `matchesBuiltin` / `matchesFilter` / `countAllFilters` / `rankFilters`. One predicate, shared by the list, the rail ranking and the badge renderer, so a filter and its badge cannot disagree. |
+| `filters.ts` | `matchesBuiltin` / `matchesFilter` / `countAllFilters` / `rankFilters` / `countFacets`. One predicate, shared by the list, the rail ranking and the badge renderer, so a filter and its badge cannot disagree. **Faceted counts (1.4.0):** with nothing on, a pill counts its bucket in the open mailbox (`countAllFilters`, spam-guarded), as before. With one or more filters on, `countFacets` (store: `MailboxView.railFacets`) gives each *off* pill the number of messages the list would show if it were turned on too — active filters AND in `runInboxQuery`, so that is the current result it also matches — and each *on* pill the current result; both use the list's own test (`listedFiltersFor`, no spam guard), before search like every rail count. Unsafe is exclusive (`toggleFilter` replaces the set), so an off Unsafe counts Unsafe alone. Memoised per message object (`listedHits`) and per pass (`facetCache`: same active set, profile, message and signal objects reuse the result, so a clock tick or a selection rescans nothing). `buildPills` takes the facets for the number only; which pills stay on the rail is still decided by the plain counts, so a pill narrowed to 0 is dimmed (`data-empty`), never removed, and the digits do not move. `All` has no count and still clears. |
 | `scoring.ts` | The **Smart Score**, 0–100, used only for ordering. Fixed, not learned. `recencyWindow` + `relativeRecencyBonus` measure against the newest message in the set, never the wall clock. |
 | `weights.ts` | The ten learnable weights, their clamped ranges, and `nudgeWeight`, which returns the *same object* when a move would clip so callers can use identity to detect change. |
 | `pipeline.ts` | `runInboxQuery` (search → filter → sort) and `groupThreads`. The hottest function in the app; the classifier never runs inside it. |
@@ -677,7 +680,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | File | Why it is separate |
 | --- | --- |
 | `theme.ts` | Every colour and the machinery that mirrors it to `--wn-*`, plus the contrast functions `theme.test.ts` uses. A screenshot cannot tell you a grey is 3.14:1 on white, which is how `inkSubtle` shipped. |
-| `rail.ts` | `buildPills`, `digitFor`, scroll geometry. Separate from `FilterStrip.tsx` because exporting a plain function from a component module breaks fast refresh. An active sender pill is never hidden. |
+| `rail.ts` | `buildPills` (plain counts decide which pills stay; `railFacets`, when a filter is on, the number shown), `digitFor`, scroll geometry. Separate from `FilterStrip.tsx` because exporting a plain function from a component module breaks fast refresh. An active sender pill is never hidden. |
 | `selection.ts` | Selection arithmetic and the `LongPress` state machine (`LONG_PRESS_MS = 450`, `TOUCH_SLOP = 10`, `EDGE_SCROLL_ZONE = 40`). |
 | `swipe.ts` | Swipe actions as pure logic: `SwipeGesture` (edge zones `EDGE_PX = 24`, axis lock after `AXIS_LOCK_PX = 10`, commit past `COMMIT_FRACTION = 0.38` of the row or a fling ≥ `FLING_VELOCITY = 0.6` px/ms over ≥ 40 px) and `swipeActionsFor`, which says what each direction does per mailbox: left is Trash, right toggles read; in Trash left restores to the Inbox; in Drafts left discards (with Undo) and right does nothing. Touch only, phone layout only, off in select mode and under any menu, sheet or dialog; Settings → Reading → Swipe actions turns it off. |
 | `pullRefresh.ts` | Pull-to-refresh as pure logic: `pullAllowed` (connected, list at the top, no dock panel, selection, overlay or sync under way), `pullIntent` on `swipe.ts`'s axis lock so a pull and a row swipe never both fire, the rubber band `pullDistance` (threshold `PULL_THRESHOLD = 70`, max `PULL_MAX`), the threshold tick and the phases. |

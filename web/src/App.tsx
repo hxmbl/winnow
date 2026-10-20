@@ -1065,9 +1065,11 @@ export function App({ store }: Props) {
 
   /**
    * The rail's data, from the store's counts over the open mailbox (1.3.3): a pill's
-   * number is how many messages in this mailbox it would show, before search and other
-   * filters. Computed in the store, the only place that knows which set the rail was
-   * ranked against.
+   * number is how many messages in this mailbox it would show, before search. With a
+   * filter on (1.4.0) the numbers are faceted on the active set (`railFacets`): what the
+   * list would show with that pill also on. Computed in the store, the only place that
+   * knows which set the rail was ranked against; `railFacets` keeps its identity while
+   * nothing it reads changed, so this memo holds across renders.
    */
   const pills = useMemo(
     () =>
@@ -1077,8 +1079,9 @@ export function App({ store }: Props) {
         view.profile.topSenders,
         view.railSenderCounts,
         snapshot.activeFilters,
+        view.railFacets,
       ),
-    [view.rail, view.railCounts, view.profile.topSenders, view.railSenderCounts, snapshot.activeFilters],
+    [view.rail, view.railCounts, view.profile.topSenders, view.railSenderCounts, snapshot.activeFilters, view.railFacets],
   );
 
   // What the list's empty state needs to tell a clear Inbox from an empty folder.

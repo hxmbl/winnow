@@ -58,7 +58,7 @@ import {
   type UserProfile,
 } from "../model/profile";
 import { classifyAll, classifyEmail, type SignalMap } from "../classify/classify";
-import { countAllFilters, matchesBuiltin, rankFilters } from "../classify/filters";
+import { countAllFilters, countFacets, matchesBuiltin, rankFilters, type FacetCounts } from "../classify/filters";
 import {
   buildSearchBags,
   conversationFor,
@@ -570,6 +570,14 @@ export type MailboxView = {
   railCounts: ReadonlyMap<BuiltinSmartFilter, number>;
   /** Messages per sender in the open mailbox, for the sender pills. */
   railSenderCounts: ReadonlyMap<string, number>;
+  /**
+   * The pills' numbers once a filter is on (1.4.0), faceted on the active set: an off
+   * pill counts what the list would show with it turned on too (AND, see `countFacets`),
+   * an on pill the current result. `null` with nothing active, when the pills show
+   * `railCounts` as before. `railCounts` still decides which pills the rail keeps, so
+   * narrowing the list dims a pill to 0 rather than pulling it off the rail.
+   */
+  railFacets: FacetCounts | null;
   /**
    * How many inbox messages land in each bucket.
    *
@@ -1095,6 +1103,44 @@ export class WinnowStore {
     { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }
   >();
 
+  /** The filters each message object *lists* under (no spam guard), for `railFacets`. */
+  private readonly listedHits = new WeakMap<
+    Email,
+    { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }
+  >();
+
+  /**
+   * The last facet pass and what it was over, so a version bump that moved nothing the
+   * counts read (a clock tick, a selection, the reader loading a body) reuses it rather
+   * than rescanning the mailbox: same active set, profile and message objects, and the
+   * same signal object for each.
+   */
+  private facetCache: {
+    filters: readonly FilterId[];
+    profile: UserProfile;
+    emails: readonly Email[];
+    signals: readonly (EmailSignals | undefined)[];
+    facets: FacetCounts | null;
+  } | null = null;
+
+  private facetsFor(emails: readonly Email[], signals: ReadonlyMap<number, EmailSignals>, profile: UserProfile): FacetCounts | null {
+    const filters = this.state.activeFilters;
+    if (filters.length === 0) return null;
+    const hit = this.facetCache;
+    if (
+      hit &&
+      hit.filters === filters &&
+      hit.profile === profile &&
+      hit.emails.length === emails.length &&
+      emails.every((email, i) => hit.emails[i] === email && hit.signals[i] === signals.get(email.id))
+    ) {
+      return hit.facets;
+    }
+    const facets = countFacets(emails, signals, profile, filters, this.listedHits);
+    this.facetCache = { filters, profile, emails, signals: emails.map((email) => signals.get(email.id)), facets };
+    return facets;
+  }
+
   /**
    * The contact index, memoised on the only two inputs that can change it.
    *
@@ -1316,6 +1362,7 @@ export class WinnowStore {
     for (const email of railEmails) {
       railSenderCounts.set(email.sender, (railSenderCounts.get(email.sender) ?? 0) + 1);
     }
+    const railFacets = this.facetsFor(railEmails, signals, profile);
 
     // Over the inbox whatever is open: the drawer's and the triage line's claims.
     const inboxCounts =
@@ -1374,6 +1421,7 @@ export class WinnowStore {
       rail: railWithActive,
       railCounts,
       railSenderCounts,
+      railFacets,
       inboxCounts,
       inboxSenderCounts,
       inboxThreadCount,
