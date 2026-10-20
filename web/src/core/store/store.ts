@@ -112,6 +112,7 @@ import {
   abandonedSnoozes,
   addSnooze,
   dueSnoozes,
+  forgetAccountSnoozes,
   markWoke,
   parseSnoozes,
   pruneWoke,
@@ -124,8 +125,10 @@ import {
 } from "../mail/snooze";
 import {
   addSchedule,
+  forgetAccountSchedules,
   parseSchedules,
   removeSchedule,
+  scheduleVerdict,
   scheduledRow,
   serializeSchedules,
   updateSchedule,
@@ -134,7 +137,7 @@ import {
 import { formatWhen } from "../mail/when";
 
 /** The mailboxes, in the order the sidebar shows them; Snoozed and Scheduled are views (1.4.0). */
-export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "snoozed", "archive", "sent", "drafts", "scheduled", "trash", "spam"];
+export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "snoozed", "archive", "sent", "scheduled", "drafts", "trash", "spam"];
 
 /**
  * Which half of a sync is running, for the status line.
@@ -2063,18 +2066,24 @@ export class WinnowStore {
     return row?.scheduled ? (this.state.scheduled.find((send) => send.id === row.scheduled!.id) ?? null) : null;
   }
 
-  private saveSchedules(scheduled: ScheduledSend[]): void {
-    this.scheduleSlot.write(serializeSchedules(scheduled));
+  /** `false` when storage refused the write: the change then holds for this run only. */
+  private saveSchedules(scheduled: ScheduledSend[]): boolean {
+    const stored = this.scheduleSlot.write(serializeSchedules(scheduled));
     const selectedGone =
       this.state.mailbox === "scheduled" &&
       this.state.selectedId !== null &&
       !scheduled.some((send) => scheduledRow(send, { email: "" }).id === this.state.selectedId);
     this.set({ scheduled, ...(selectedGone ? { selectedId: null } : {}) });
+    return stored;
   }
 
-  /** Record a message to send later (replacing an earlier time for the same draft). */
-  scheduleSend(send: ScheduledSend): void {
-    this.saveSchedules(addSchedule(this.state.scheduled, send));
+  /**
+   * Record a message to send later (replacing an earlier time for the same draft).
+   * `false` when storage refused it: it is scheduled for this run only, so the caller
+   * keeps the draft's device copy rather than leave the message only in memory.
+   */
+  scheduleSend(send: ScheduledSend): boolean {
+    return this.saveSchedules(addSchedule(this.state.scheduled, send));
   }
 
   /** Cancel a schedule; the draft stays a draft. Returns what was cancelled. */
@@ -2088,6 +2097,63 @@ export class WinnowStore {
   updateScheduled(id: string, patch: Partial<Pick<ScheduledSend, "claimedAt" | "problem" | "sendAt" | "draftId">>): void {
     if (!this.state.scheduled.some((send) => send.id === id)) return;
     this.saveSchedules(updateSchedule(this.state.scheduled, id, patch));
+  }
+
+  /**
+   * The send `id`, if it may go out now, checked right before it is dispatched (the
+   * Send-later runner and Send now both ask): only a send listed under the open account,
+   * and only while every account it names is still signed in here. One whose account is
+   * gone is dropped here, never sent from another (`scheduleVerdict`).
+   */
+  permitScheduled(id: string): ScheduledSend | null {
+    const send = this.state.scheduled.find((candidate) => candidate.id === id);
+    if (!send) return null;
+    const verdict = scheduleVerdict(send, {
+      account: this.accountKey(),
+      openId: this.state.accountId,
+      accounts: this.state.accounts.filter((account) => !account.demo),
+    });
+    if (verdict === "drop") this.saveSchedules(removeSchedule(this.state.scheduled, id));
+    return verdict === "send" ? send : null;
+  }
+
+  /**
+   * Forget everything one account left in the shared snooze and send-later records (its
+   * address, and sends going out from it by `id`): as it is signed out or removed, so no
+   * copy of its messages, recipients or drafts outlives it, and none can wake or go if
+   * the address is added again.
+   */
+  forgetAccountRecords(address: string, id?: string): void {
+    const snoozes = forgetAccountSnoozes(this.state.snoozes, address);
+    const scheduled = forgetAccountSchedules(this.state.scheduled, address, id);
+    if (snoozes !== this.state.snoozes) this.saveSnoozes(snoozes);
+    if (scheduled.length !== this.state.scheduled.length) this.saveSchedules(scheduled);
+  }
+
+  /**
+   * Keep only the records of accounts the registry has (and the demo's): what an account
+   * removed in a run that could not write the purge left behind. Judged only when every
+   * account's address is known (a migrated account's is filled in on its first open),
+   * and only for records tagged with an address.
+   */
+  keepAccountRecords(accounts: readonly { id: string; email: string }[]): void {
+    // No registry to judge by (none yet, or one that did not load): leave them be. The
+    // last account's sign-out already took its own (`signOut`).
+    if (accounts.length === 0 || accounts.some((account) => !account.email.trim())) return;
+    const known = new Set(accounts.map((account) => account.email.trim().toLowerCase()));
+    const ids = new Set(accounts.map((account) => account.id));
+    const orphan = (tag: string) => tag.includes("@") && !known.has(tag.trim().toLowerCase());
+    const snoozes: SnoozeState = {
+      snoozed: this.state.snoozes.snoozed.filter((r) => !orphan(r.account)),
+      woke: this.state.snoozes.woke.filter((r) => !orphan(r.account)),
+    };
+    const scheduled = this.state.scheduled.filter(
+      (send) => !orphan(send.account) && (send.from === undefined || ids.has(send.from)),
+    );
+    if (snoozes.snoozed.length !== this.state.snoozes.snoozed.length || snoozes.woke.length !== this.state.snoozes.woke.length) {
+      this.saveSnoozes(snoozes);
+    }
+    if (scheduled.length !== this.state.scheduled.length) this.saveSchedules(scheduled);
   }
 
   /**
@@ -4015,12 +4081,9 @@ export class WinnowStore {
     // draft there). The demo's are the demo's and stay.
     const leaving = this.backend ? this.accountKey() : null;
     if (leaving) {
-      const snoozes: SnoozeState = {
-        snoozed: this.state.snoozes.snoozed.filter((r) => r.account !== leaving),
-        woke: this.state.snoozes.woke.filter((r) => r.account !== leaving),
-      };
+      const snoozes = forgetAccountSnoozes(this.state.snoozes, leaving);
       this.snoozeSlot.write(snoozes);
-      const scheduled = this.state.scheduled.filter((send) => send.account !== leaving);
+      const scheduled = forgetAccountSchedules(this.state.scheduled, leaving, this.state.accountId ?? undefined);
       this.scheduleSlot.write(serializeSchedules(scheduled));
       this.state = { ...this.state, snoozes, scheduled };
     }

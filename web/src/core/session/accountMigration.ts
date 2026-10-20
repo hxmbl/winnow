@@ -13,9 +13,12 @@
  * rather than deferring the migration for ever; it is a copy of Gmail, and the first
  * sync rebuilds it in full.
  *
- * Crash safety: the id is recorded first (`winnow.accounts.migration`), so a migration
- * cut short re-runs into the same namespace instead of leaving a copy of the mail under
- * an id nobody owns; and the old copies go last, so an interrupted run still has them.
+ * Crash safety: the id is recorded first (`winnow.accounts.migration`, read back; a
+ * refused write defers), so a migration cut short re-runs into the same namespace
+ * instead of leaving a copy of the mail under an id nobody owns; and the old copies go
+ * last, only once the account's tokens and the registry are both confirmed in storage
+ * (written and read back, `persistAccounts`). A write that fails defers: nothing old is
+ * deleted, the legacy session is intact, and the next launch tries again.
  *
  * With no session (signed out under 1.3.5), there is no account to move: an empty
  * registry is written, the old mail-shaped keys (empty after a sign-out anyway) are
@@ -31,7 +34,7 @@ import {
   isAccountId,
   newAccountId,
   nextColor,
-  saveAccounts,
+  persistAccounts,
   type AccountRecord,
   type KeyValueStorage,
 } from "./accounts";
@@ -96,7 +99,11 @@ export async function migrateToAccounts(options: MigrationOptions): Promise<Migr
   }
 
   if (!tokens) {
-    saveAccounts(storage, { version: 1, active: null, accounts: [] });
+    // The empty registry is what says the migration happened: unwritten, nothing goes,
+    // and the next launch runs this again.
+    if (!persistAccounts(storage, { version: 1, active: null, accounts: [] })) {
+      return { kind: "deferred", reason: "the account registry could not be saved" };
+    }
     for (const key of ACCOUNT_SCOPED_KEYS) {
       if (DEVICE_KEYS.has(key)) continue;
       guarded(() => storage.removeItem(key), undefined);
@@ -106,7 +113,12 @@ export async function migrateToAccounts(options: MigrationOptions): Promise<Migr
 
   const recorded = guarded(() => storage.getItem(MIGRATION_ID_KEY), null);
   const id = isAccountId(recorded) ? recorded : (options.newId ?? newAccountId)();
-  guarded(() => storage.setItem(MIGRATION_ID_KEY, id), undefined);
+  // Unrecorded, a retry would mint another id and leave these copies under one nobody owns.
+  const idRecorded = guarded(() => {
+    storage.setItem(MIGRATION_ID_KEY, id);
+    return storage.getItem(MIGRATION_ID_KEY) === id;
+  }, false);
+  if (!idRecorded) return { kind: "deferred", reason: "the migration could not record its account id" };
 
   let mailDropped = false;
   for (const key of ACCOUNT_SCOPED_KEYS) {
@@ -134,7 +146,13 @@ export async function migrateToAccounts(options: MigrationOptions): Promise<Migr
     }
   }
   try {
-    await tokensFor(id).write(tokens);
+    const store = tokensFor(id);
+    await store.write(tokens);
+    // Read back: the legacy tokens are deleted on the strength of this copy.
+    const copied = await store.read();
+    if (copied?.refreshToken !== tokens.refreshToken || copied?.accessToken !== tokens.accessToken) {
+      return { kind: "deferred", reason: "the account's tokens did not save" };
+    }
   } catch (error) {
     return { kind: "deferred", reason: error instanceof Error ? error.message : String(error) };
   }
@@ -146,7 +164,12 @@ export async function migrateToAccounts(options: MigrationOptions): Promise<Migr
     notify: true,
     addedAt: (options.now ?? Date.now)(),
   };
-  saveAccounts(storage, { version: 1, active: id, accounts: [account] });
+  // The registry is what names the owner of the `<key>@<id>` copies. Until it is in
+  // storage (written and read back), nothing old is deleted: the legacy session still
+  // signs in, and the next launch runs this again into the same id.
+  if (!persistAccounts(storage, { version: 1, active: id, accounts: [account] })) {
+    return { kind: "deferred", reason: "the account registry could not be saved" };
+  }
 
   for (const key of ACCOUNT_SCOPED_KEYS) guarded(() => storage.removeItem(key), undefined);
   await legacyTokens.clear().catch(() => undefined);
@@ -165,7 +188,11 @@ export function adoptDeviceLearning(storage: KeyValueStorage | null, id: string)
     const device = guarded(() => storage.getItem(key), null);
     if (device === null) continue;
     if (guarded(() => storage.getItem(accountKey(key, id)), null) !== null) continue;
-    guarded(() => storage.setItem(accountKey(key, id), device), undefined);
-    guarded(() => storage.removeItem(key), undefined);
+    // Moved only once the account's copy is really there: a refused write keeps the device's.
+    const moved = guarded(() => {
+      storage.setItem(accountKey(key, id), device);
+      return storage.getItem(accountKey(key, id)) === device;
+    }, false);
+    if (moved) guarded(() => storage.removeItem(key), undefined);
   }
 }

@@ -114,6 +114,17 @@ export function removeSnooze(state: SnoozeState, account: string, key: string): 
   return snoozed.length === state.snoozed.length ? state : { ...state, snoozed };
 }
 
+/** Forget one account's snoozes and woken places (by address, case-insensitively). */
+export function forgetAccountSnoozes(state: SnoozeState, address: string): SnoozeState {
+  const gone = address.trim().toLowerCase();
+  if (!gone) return state;
+  const other = (account: string) => account.trim().toLowerCase() !== gone;
+  const snoozed = state.snoozed.filter((r) => other(r.account));
+  const woke = state.woke.filter((r) => other(r.account));
+  if (snoozed.length === state.snoozed.length && woke.length === state.woke.length) return state;
+  return { snoozed, woke };
+}
+
 /** This account's snoozes, by message. */
 export function snoozedById(state: SnoozeState, account: string): Map<GmailId, SnoozeRecord> {
   const out = new Map<GmailId, SnoozeRecord>();

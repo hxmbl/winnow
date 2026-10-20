@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 import { WinnowStore, type MailBackend } from "./store";
 import { LearningModel } from "../learn/learning";
 import { defaultFromAccount, draftFromAnotherAccount } from "../mail/fromAccount";
-import { LightSync } from "../session/lightSync";
+import { LightSync, MAX_LOOKUP_ATTEMPTS } from "../session/lightSync";
+import { GmailError } from "../gmail/dto";
 import type { Draft, Email } from "../model/email";
 import { hashId } from "../model/ids";
 import type { GmailClient } from "../gmail/client";
@@ -170,6 +171,74 @@ describe("the light sync of an account that is not open", () => {
     expect(result.unread).toBe(3);
     expect(result.fresh.map((m) => m.gmailId)).toEqual(["c"]);
     expect(second.reads).toEqual(["c"]);
+  });
+
+  /** A client whose metadata reads fail for `failing` ids (with `status`) while they are listed there. */
+  function flaky(unread: string[], failing: Map<string, number>) {
+    const base = client(unread);
+    const message = base.c.message.bind(base.c);
+    const c = {
+      list: base.c.list,
+      message: async (id: string, format: "metadata") => {
+        const status = failing.get(id);
+        if (status !== undefined) {
+          base.reads.push(id);
+          throw new GmailError(`failed ${id}`, status);
+        }
+        return message(id, format);
+      },
+    } as unknown as Pick<GmailClient, "list" | "message">;
+    return { c, reads: base.reads };
+  }
+
+  it("a metadata read that fails leaves its message eligible: the next check notifies it, once", async () => {
+    const storage = memory();
+    await new LightSync(client(["a"]).c, storage).check();
+    const failing = new Map([["c", 503]]);
+    const first = await new LightSync(flaky(["c", "b", "a"], failing).c, storage).check();
+    expect(first.fresh.map((m) => m.gmailId)).toEqual(["b"]);
+    failing.clear();
+    const second = flaky(["c", "b", "a"], failing);
+    const retried = await new LightSync(second.c, storage).check();
+    expect(retried.fresh.map((m) => m.gmailId)).toEqual(["c"]);
+    expect(second.reads).toEqual(["c"]);
+    const third = client(["c", "b", "a"]);
+    expect((await new LightSync(third.c, storage).check()).fresh).toEqual([]);
+    expect(third.reads).toEqual([]);
+  });
+
+  it("two checks at once notify a new message once between them", async () => {
+    const storage = memory();
+    await new LightSync(client([]).c, storage).check();
+    const run = client(["n"]);
+    const light = new LightSync(run.c, storage);
+    const [one, two] = await Promise.all([light.check(), light.check()]);
+    expect([...one.fresh, ...two.fresh].map((m) => m.gmailId)).toEqual(["n"]);
+    expect(two.unread).toBe(1);
+    expect(run.reads).toEqual(["n"]);
+  });
+
+  it("a message Gmail no longer has (404) is resolved, not retried", async () => {
+    const storage = memory();
+    await new LightSync(client([]).c, storage).check();
+    const gone = flaky(["x"], new Map([["x", 404]]));
+    expect((await new LightSync(gone.c, storage).check()).fresh).toEqual([]);
+    const next = client(["x"]);
+    expect((await new LightSync(next.c, storage).check()).fresh).toEqual([]);
+    expect(next.reads).toEqual([]);
+  });
+
+  it(`a read that keeps failing is given up after ${MAX_LOOKUP_ATTEMPTS} checks`, async () => {
+    const storage = memory();
+    await new LightSync(client([]).c, storage).check();
+    const failing = new Map([["y", 500]]);
+    let reads = 0;
+    for (let i = 0; i < MAX_LOOKUP_ATTEMPTS + 2; i++) {
+      const run = flaky(["y"], failing);
+      expect((await new LightSync(run.c, storage).check()).fresh).toEqual([]);
+      reads += run.reads.length;
+    }
+    expect(reads).toBe(MAX_LOOKUP_ATTEMPTS);
   });
 
   it("mail that was unread when the account was left is not news", async () => {

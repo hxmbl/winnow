@@ -3,6 +3,8 @@ import {
   CLAIM_MS,
   addSchedule,
   dueSchedules,
+  forgetAccountSchedules,
+  scheduleVerdict,
   parseSchedules,
   removeSchedule,
   scheduledRow,
@@ -76,5 +78,39 @@ describe("scheduled sends", () => {
     expect(row.scheduled).toEqual({ id: "a", sendAt: 777 });
     expect(row.to).toEqual([{ address: "ana@example.com" }]);
     expect(scheduledRow(send("a", 1), { email: "x" }).id).toBe(row.id);
+  });
+
+  it("keeps the account a send goes out from, across storage", () => {
+    const stored = parseSchedules(JSON.parse(JSON.stringify(serializeSchedules([send("a", 1, { from: "bbbb2222" })]))));
+    expect(stored[0]!.from).toBe("bbbb2222");
+    expect(parseSchedules({ sends: [{ ...send("b", 1), from: 7 }] })).toEqual([]);
+  });
+
+  it("goes out only under the open account, and only while every account it names is here", () => {
+    const accounts = [{ id: "aaaa1111" }, { id: "bbbb2222" }];
+    const open = { account: "me@example.com", openId: "aaaa1111", accounts };
+    expect(scheduleVerdict(send("a", 1), open)).toBe("send");
+    // Another account's, or the demo's: never sent here, never dropped from here.
+    expect(scheduleVerdict(send("a", 1, { account: "other@example.com" }), open)).toBe("skip");
+    expect(scheduleVerdict(send("a", 1, { account: "demo" }), open)).toBe("skip");
+    expect(scheduleVerdict(send("a", 1, { account: "ME@example.com" }), open)).toBe("send");
+    // From another account that is still signed in: it goes, through that account.
+    expect(scheduleVerdict(send("a", 1, { from: "bbbb2222" }), open)).toBe("send");
+    // From an account that is gone, or under an open account the registry no longer has: dropped.
+    expect(scheduleVerdict(send("a", 1, { from: "cccc3333" }), open)).toBe("drop");
+    expect(scheduleVerdict(send("a", 1), { ...open, accounts: [{ id: "bbbb2222" }] })).toBe("drop");
+    // The demo sends its own.
+    expect(scheduleVerdict(send("a", 1, { account: "demo" }), { account: "demo", openId: null, accounts: [] })).toBe("send");
+  });
+
+  it("forgets one account's sends: its own and those going out from it", () => {
+    const list = [
+      send("mine", 1),
+      send("theirs", 2, { account: "Bob@Two.example" }),
+      send("via", 3, { from: "bbbb2222" }),
+      send("demo", 4, { account: "demo" }),
+    ];
+    expect(forgetAccountSchedules(list, "bob@two.example", "bbbb2222").map((s) => s.id)).toEqual(["mine", "demo"]);
+    expect(forgetAccountSchedules(list, "", "bbbb2222").map((s) => s.id)).toEqual(["mine", "theirs", "demo"]);
   });
 });

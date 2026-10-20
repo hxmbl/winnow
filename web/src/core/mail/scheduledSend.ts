@@ -32,6 +32,11 @@ export type ScheduledSend = {
   id: string;
   /** Whose message: the account address, or `demo`. Only that account sends it. */
   account: string;
+  /**
+   * The account id it goes out from, when the composer's From was another signed-in
+   * account than `account` (its Gmail draft is that account's). Absent: from `account`.
+   */
+  from?: string;
   sendAt: Millis;
   scheduledAt: Millis;
   mode: DraftMode;
@@ -83,6 +88,7 @@ export function parseSchedules(raw: unknown): ScheduledSend[] {
         (r.mode === "new" || r.mode === "reply" || r.mode === "forward") &&
         isString(r.context) &&
         (r.draftId === null || isString(r.draftId)) &&
+        (r.from === undefined || isString(r.from)) &&
         isDraft(r.draft)
       );
     })
@@ -143,6 +149,40 @@ export function dueSchedules(sends: readonly ScheduledSend[], account: string, n
       send.sendAt <= now &&
       send.problem === undefined &&
       (send.claimedAt === undefined || now - send.claimedAt > CLAIM_MS),
+  );
+}
+
+/** What may be done with a due send in the account that is open now. */
+export type ScheduleVerdict = "send" | "skip" | "drop";
+
+/**
+ * Whether a send may go out now, checked again right before it is dispatched:
+ * `skip` for anything not listed under the open account (another account's, the
+ * demo's: never sent from here, kept for its owner); `drop` when an account it names is
+ * no longer signed in here (the open one gone from the registry, or the `from` account
+ * removed): it can never go as written, so it is ended rather than sent from someone
+ * else. `openId` null with no registry is the demo, or a store without accounts (tests).
+ */
+export function scheduleVerdict(
+  send: Pick<ScheduledSend, "account" | "from">,
+  open: { account: string; openId: string | null; accounts: readonly { id: string }[] },
+): ScheduleVerdict {
+  if (!open.account || send.account.trim().toLowerCase() !== open.account.trim().toLowerCase()) return "skip";
+  if (open.account === "demo") return "send";
+  const here = (id: string) => open.accounts.some((account) => account.id === id);
+  if (open.openId !== null && !here(open.openId)) return "drop";
+  if (send.from !== undefined && send.from !== open.openId && !here(send.from)) return "drop";
+  return "send";
+}
+
+/**
+ * Forget one account's sends: those listed under its address and those going out from
+ * it (`from`, its id). What an account leaves behind, as it is signed out or removed.
+ */
+export function forgetAccountSchedules(sends: readonly ScheduledSend[], address: string, id?: string): ScheduledSend[] {
+  const gone = address.trim().toLowerCase();
+  return sends.filter(
+    (send) => !((gone !== "" && send.account.trim().toLowerCase() === gone) || (id !== undefined && send.from === id)),
   );
 }
 
