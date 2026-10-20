@@ -168,7 +168,7 @@ export const webPlatform: WebPlatform = {
     for (const message of mail.messages) {
       const notification = new NotificationCtor(message.title, {
         body: (mail.hidePreview ? "New message" : message.subject) + whose,
-        tag: `winnow-${account ?? "mail"}-${message.gmailId}`,
+        tag: account ? `winnow-${account}-${message.gmailId}` : `winnow-${message.gmailId}`,
         // The sender's avatar picture, under the same settings as the app's avatars;
         // none (the browser's own icon) when there is none or previews are hidden.
         ...(message.picture && !mail.hidePreview ? { icon: message.picture } : {}),
@@ -188,7 +188,7 @@ export const webPlatform: WebPlatform = {
     if (mail.total > mail.messages.length) {
       const summary = new NotificationCtor(mail.summaryTitle, {
         body: (mail.hidePreview ? "" : mail.summaryBody) + whose,
-        tag: `winnow-new-mail-${account ?? "mail"}`,
+        tag: account ? `winnow-new-mail-${account}` : "winnow-new-mail",
       });
       // Several messages: the summary opens that account's inbox.
       summary.onclick = () => {

@@ -163,6 +163,24 @@ describe("webPlatform notifications", () => {
     expect(pressed).toHaveLength(1);
   });
 
+  it("1.4.0: tags each press with its account, says whose mail it is, and a summary opens that inbox", async () => {
+    const pressed: unknown[] = [];
+    const stop = webPlatform.onNotificationAction((event) => pressed.push(event));
+    await webPlatform.notifyNewMail({ ...batch(false), account: { id: "acct2xx", label: "two@x.example" } });
+    expect(shown.map((entry) => [entry.options.body, entry.options.tag])).toEqual([
+      ["Plan\ntwo@x.example", "winnow-acct2xx-a1"],
+      ["Lunch\ntwo@x.example", "winnow-acct2xx-b2"],
+      ["Ada, Bob\ntwo@x.example", "winnow-new-mail-acct2xx"],
+    ]);
+    shown[0].onclick?.();
+    shown[2].onclick?.();
+    expect(pressed).toEqual([
+      { action: "open", messageId: 1, gmailId: "a1", origin: "web", account: "acct2xx" },
+      { action: "inbox", messageId: 0, gmailId: "", origin: "web", account: "acct2xx" },
+    ]);
+    stop();
+  });
+
   it("names no subject when previews are hidden", async () => {
     await webPlatform.notifyNewMail(batch(true));
     expect(shown.map((entry) => entry.options.body)).toEqual(["New message", "New message", ""]);
