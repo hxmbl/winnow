@@ -1,15 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { GLASS, GLASS_BLUR, GLASS_REACH, WORST_BACKDROPS, blurRadius, glassProperties, reachCoversBlur } from "./glass";
+import { COMPOSE_SHEEN, COMPOSE_TINT, GLASS, GLASS_BLUR, LIQUID, LIQUID_FILTER, SOLID_BACKDROPS, WASH, WORST_BACKDROPS, blurRadius, glassProperties, liquidMaxBend } from "./glass";
 import { FILTER_HUES, senderHue } from "./filterColors";
-import { MODES, PALETTES, composite, contrastRatio, pillFill, type ThemeName } from "./theme";
+import { ACCENTS, MODES, PALETTES, composite, contrastRatio, paletteFor, pillFill, type ThemeName } from "./theme";
 
-/** A worst backdrop as an opaque colour: `white@0.6` is white over 60%, the list between. */
+/** A worst backdrop as an opaque colour: `white`/`black` solid, `white@0.6` over the list. */
 function backdrop(spec: string, scheme: ThemeName): string {
-  const [colour, share] = spec.split("@");
-  if (!share) return colour;
+  const [colour, share = "1"] = spec.split("@");
+  if (colour.startsWith("#")) return colour;
   const hex = colour === "white" ? "255, 255, 255" : "0, 0, 0";
   return composite(`rgba(${hex}, ${share})`, PALETTES[scheme].color.surface);
+}
+
+/** Liquid Glass's sheen (and glow) at full strength, white over a plate. */
+function withSheen(plate: string, white: number): string {
+  return composite(`rgba(255, 255, 255, ${white})`, plate);
+}
+
+/** A plate without and with the liquid sheen: the text has to read on both. */
+function plates(plate: string, scheme: ThemeName): string[] {
+  return [plate, withSheen(plate, LIQUID[scheme].sheen + LIQUID[scheme].glow)];
 }
 
 /** The glass tint at `alpha` over a backdrop. */
@@ -52,11 +62,14 @@ describe("the floating glass", () => {
         const under = backdrop(spec, scheme);
         for (const hue of HUES) {
           for (const on of [false, true]) {
-            const fill = pillFill(hue, scheme, glassOver(scheme, on ? GLASS[scheme].textOn : GLASS[scheme].text, under), { on });
+            const base = pillFill(hue, scheme, glassOver(scheme, on ? GLASS[scheme].textOn : GLASS[scheme].text, under), { on });
             const ink = color[on ? pill.inkOn : pill.ink];
             const count = color[pill.count];
-            expect(contrastRatio(fill, ink), `${scheme} ${spec} h${hue.h} ${on ? "on" : "rest"}`).toBeGreaterThanOrEqual(4.5);
-            expect(contrastRatio(fill, count), `${scheme} ${spec} h${hue.h} count`).toBeGreaterThanOrEqual(4.5);
+            // The chips are Liquid Glass: the label reads with the sheen over it and without.
+            for (const fill of plates(base, scheme)) {
+              expect(contrastRatio(fill, ink), `${scheme} ${spec} h${hue.h} ${on ? "on" : "rest"}`).toBeGreaterThanOrEqual(4.5);
+              expect(contrastRatio(fill, count), `${scheme} ${spec} h${hue.h} count`).toBeGreaterThanOrEqual(4.5);
+            }
           }
         }
       }
@@ -64,16 +77,26 @@ describe("the floating glass", () => {
 
     it(`${scheme}: the panel's rows and the dock's icons read over the worst backdrop`, () => {
       for (const spec of WORST_BACKDROPS[scheme]) {
-        const plate = glassOver(scheme, GLASS[scheme].text, backdrop(spec, scheme));
-        expect(contrastRatio(plate, color.inkBody), `${scheme} ${spec} row`).toBeGreaterThanOrEqual(4.5);
-        // Icons are not text: 3:1 (WCAG 1.4.11).
-        expect(contrastRatio(plate, color.inkMuted), `${scheme} ${spec} icon`).toBeGreaterThanOrEqual(3);
+        for (const plate of plates(glassOver(scheme, GLASS[scheme].text, backdrop(spec, scheme)), scheme)) {
+          expect(contrastRatio(plate, color.inkBody), `${scheme} ${spec} row`).toBeGreaterThanOrEqual(4.5);
+          // Icons are not text: 3:1 (WCAG 1.4.11).
+          expect(contrastRatio(plate, color.inkMuted), `${scheme} ${spec} icon`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+
+    it(`${scheme}: the reader pill, over a message, keeps its icons at 3:1 over a solid photo`, () => {
+      for (const spec of SOLID_BACKDROPS) {
+        for (const plate of plates(glassOver(scheme, GLASS[scheme].bar, backdrop(spec, scheme)), scheme)) {
+          expect(contrastRatio(plate, color.inkIcon), `${scheme} ${spec} icon`).toBeGreaterThanOrEqual(3);
+          expect(contrastRatio(plate, color.inkMuted), `${scheme} ${spec} muted icon`).toBeGreaterThanOrEqual(3);
+        }
       }
     });
 
     it(`${scheme}: the desktop's floating top bar and selection bar read over the worst backdrop`, () => {
       for (const spec of WORST_BACKDROPS[scheme]) {
-        const plate = glassOver(scheme, GLASS[scheme].bar, backdrop(spec, scheme));
+        for (const plate of plates(glassOver(scheme, GLASS[scheme].bar, backdrop(spec, scheme)), scheme)) {
         // The count ("12"), the list's name and the selection count, and the selection
         // bar's labels: text, so AA.
         expect(contrastRatio(plate, color.ink), `${scheme} ${spec} ink`).toBeGreaterThanOrEqual(4.5);
@@ -82,8 +105,10 @@ describe("the floating glass", () => {
         expect(contrastRatio(plate, color.inkMuted), `${scheme} ${spec} muted`).toBeGreaterThanOrEqual(4.5);
         // The prev/next chevrons and the rail's step buttons are icons: 3:1.
         expect(contrastRatio(plate, color.inkIcon), `${scheme} ${spec} icon`).toBeGreaterThanOrEqual(3);
-        const stepPlate = glassOver(scheme, GLASS[scheme].text, backdrop(spec, scheme));
-        expect(contrastRatio(stepPlate, color.inkIcon), `${scheme} ${spec} step`).toBeGreaterThanOrEqual(3);
+        }
+        for (const stepPlate of plates(glassOver(scheme, GLASS[scheme].text, backdrop(spec, scheme)), scheme)) {
+          expect(contrastRatio(stepPlate, color.inkIcon), `${scheme} ${spec} step`).toBeGreaterThanOrEqual(3);
+        }
       }
     });
 
@@ -109,52 +134,57 @@ describe("the floating glass", () => {
   }
 });
 
-describe("the frost layer reaches past each pill", () => {
+describe("one lean glass: the frost on the element itself (1.4)", () => {
   const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
   const strip = readFileSync(new URL("./components/FilterStrip.tsx", import.meta.url), "utf8");
 
   it("reads the blur radius out of a filter", () => {
-    expect(blurRadius(GLASS_BLUR)).toBe(22);
+    expect(blurRadius(GLASS_BLUR)).toBe(6);
     expect(blurRadius("saturate(2)")).toBe(0);
     expect(blurRadius("blur( 8.5px ) saturate(1.2)")).toBe(8.5);
   });
 
-  it("reaches at least two blur radii, so text across a thin pill is smeared, not just tinted", () => {
-    expect(reachCoversBlur(GLASS_REACH, GLASS_BLUR)).toBe(true);
-    expect(reachCoversBlur(20, GLASS_BLUR)).toBe(false);
-  });
-
-  it("is the same number in the stylesheet, the TypeScript and the chip rail's padding", () => {
+  it("is a light frost, the same number in the stylesheet and the TypeScript", () => {
+    expect(blurRadius(GLASS_BLUR)).toBeGreaterThan(0);
+    expect(blurRadius(GLASS_BLUR)).toBeLessThanOrEqual(8);
     expect(css).toContain(`--wn-glass-filter: ${GLASS_BLUR};`);
-    expect(css).toContain(`--wn-glass-reach: ${GLASS_REACH}px;`);
-    // The rail takes back exactly the reach it pads itself by, touch and floating.
-    expect(strip.match(new RegExp(`-my-\\[${GLASS_REACH}px\\]`, "g"))?.length).toBe(2);
   });
 
-  it("puts the filter on the oversized ::before, clipped back to the pill, not on the pill", () => {
-    const before = /\.wn-glass:not\(\.wn-sidebar-panel\)::before,\s*\.wn-pill\.wn-chip-glass::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    // The full reach on every side, sideways too: a chip's rounded ends need it as much
-    // as its middle does.
-    expect(before).toMatch(/inset:\s*calc\(-1 \* var\(--wn-glass-reach\)\);/);
-    expect(before).toMatch(/backdrop-filter:\s*var\(--wn-glass-filter\)/);
-    // Clipped back to the pill's own rounded shape on every side, chips included.
-    expect(before).toMatch(/clip-path:\s*inset\(var\(--wn-glass-reach\) round var\(--wn-glass-radius, 9999px\)\);/);
-    expect(before).toMatch(/z-index:\s*-1/);
-    // The chip's own rule no longer carries a backdrop-filter: it would make the chip a
-    // backdrop root, and its frost layer would see nothing.
-    const chip = /\.wn-pill\.wn-chip-glass \{\s*--wn-chip-frost[^}]*\}/.exec(css)?.[0] ?? "";
-    expect(chip).not.toMatch(/backdrop-filter/);
+  it("puts the backdrop-filter straight on the glass and the chips, with no oversized frost layer", () => {
+    const rule = /\.wn-glass,\s*\.wn-pill\.wn-chip-glass\s*\{\s*-webkit-backdrop-filter:\s*var\(--wn-glass-filter\);\s*backdrop-filter:\s*var\(--wn-glass-filter\);\s*\}/;
+    expect(css).toMatch(rule);
+    // The 1.2.3–1.3.4 machinery is gone: no reach, no ::before frost, no clip back to the pill.
+    expect(css).not.toMatch(/--wn-glass-reach/);
+    // The one ::before left is `.wn-glass-behind`'s, the element's own box (below).
+    expect(css.replace(/\.wn-glass\.wn-glass-behind(\.wn-liquid)?::before/g, "")).not.toMatch(/\.wn-glass[^,{]*::before/);
+    expect(css).not.toMatch(/\.wn-chip-glass[^,{]*::before/);
+    expect(css).not.toMatch(/clip-path:\s*inset\(var\(--wn-glass/);
+    expect(strip).not.toMatch(/glass-reach|-my-\[44px\]/);
   });
 
-  it("never lengthens the chip rail's scroll, nor widens the page: the rail's end padding holds the reach, and the chrome clips it sideways", () => {
-    expect(css).not.toMatch(/--wn-glass-reach-x/);
-    // Touch and floating, the rail's end padding is at least the reach.
-    expect(strip).toContain("pr-[max(var(--wn-dock-right),var(--wn-glass-reach))]");
-    expect(strip).toContain("pr-[var(--wn-glass-reach)]");
-    const clipped = /((?:\[data-[a-z-]+\],?\s*)+)\{\s*overflow-x:\s*clip;/.exec(css)?.[1] ?? "";
-    for (const chrome of ["[data-phone-chrome]", "[data-phone-dock]", "[data-list-chrome]", "[data-sticky-day]", "[data-pull-indicator]"]) {
-      expect(clipped).toContain(chrome);
-    }
+  it("moves the frost under a glass that opens a fixed menu onto its own box, never past it", () => {
+    const layer = /\.wn-glass\.wn-glass-behind::before \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(layer).toMatch(/inset:\s*0;/);
+    expect(layer).toMatch(/z-index:\s*-1;/);
+    expect(layer).toMatch(/backdrop-filter:\s*var\(--wn-glass-filter\);/);
+    expect(layer).not.toMatch(/clip-path/);
+    const host = /\.wn-glass\.wn-glass-behind \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(host).toMatch(/isolation:\s*isolate;/);
+    expect(host).toMatch(/[^-]backdrop-filter:\s*none;/);
+    // Who needs it: the reader pill (More) and the desktop selection bar (Move to).
+    const read = (name: string) => readFileSync(new URL(`./components/${name}`, import.meta.url), "utf8");
+    expect(read("Reader.tsx")).toMatch(/wn-glass-behind/);
+    expect(read("SelectionBar.tsx")).toMatch(/wn-glass-behind/);
+  });
+
+  it("pads the chip rail only for the chips' shadow, and its gap catcher by exactly as much", () => {
+    // Touch and floating both take back what they pad with a negative margin.
+    expect(strip.match(/pointer-events-none -my-\[20px\]/g)?.length).toBe(2);
+    expect(strip).toContain('className="absolute left-0 top-[20px] bottom-[20px]"');
+  });
+
+  it("no longer clips the floating chrome sideways: that only held the reach layer in", () => {
+    expect(css).not.toMatch(/overflow-x:\s*clip/);
   });
 
   it("frosts each chip on its own: no band joining them, only an untinted, edgeless haze in the gaps", () => {
@@ -172,9 +202,173 @@ describe("the frost layer reaches past each pill", () => {
     expect(phone).toMatch(/data-phone-chips=""[\s\S]{0,200}wn-rail-haze/);
   });
 
+  it("keeps the desktop sidebar's progressive blur, the other deliberate outlier", () => {
+    expect(css).toMatch(/\.wn-sidebar-blur/);
+  });
+
   it("never puts a filter on a glass pill (hover is a sheen), which would cut its frost off", () => {
     expect(css).not.toMatch(/\.wn-chip-glass:hover\s*\{[^}]*\bfilter:/);
   });
+
+  it("drops the frost and the sheen under reduced transparency and forced colours", () => {
+    const reduced = /@media \(prefers-reduced-transparency: reduce\) \{\s*\.wn-liquid::after,[^{]*\{\s*display: none;[\s\S]*?backdrop-filter: none !important;/.exec(css);
+    expect(reduced).not.toBeNull();
+    const forced = /@media \(forced-colors: active\) \{\s*\.wn-liquid::after,[^{]*\{\s*display: none;[\s\S]*?background: Canvas;/.exec(css);
+    expect(forced).not.toBeNull();
+  });
+});
+
+describe("Liquid Glass on the floating chrome (1.4)", () => {
+  const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../../index.html", import.meta.url), "utf8");
+  const read = (name: string) => readFileSync(new URL(`./components/${name}`, import.meta.url), "utf8");
+
+  it("is on the dock pill, compose, the chips and All, the reader pill, the desktop top bar and the status pill", () => {
+    expect(read("PhoneChrome.tsx")).toMatch(/wn-glass wn-liquid grid h-\[var\(--wn-dock-h\)\]/);
+    expect(read("ComposeFab.tsx")).toMatch(/wn-liquid wn-liquid-accent/);
+    expect(read("FilterStrip.tsx")).toContain('"wn-chip-glass wn-liquid"');
+    expect(read("FilterStrip.tsx").match(/wn-glass wn-liquid h-/g)?.length).toBe(2);
+    expect(read("Reader.tsx")).toMatch(/wn-glass wn-glass-behind wn-liquid wn-reader-pill/);
+    expect(read("Masthead.tsx")).toMatch(/wn-glass wn-glass-bar wn-liquid/);
+    expect(read("StatusPill.tsx")).toMatch(/wn-glass wn-glass-bar wn-liquid/);
+  });
+
+  it("leaves the large panels lean: the phone's menu panel and the sheets", () => {
+    expect(read("MailNav.tsx")).not.toMatch(/wn-liquid/);
+    expect(read("Overlay.tsx")).not.toMatch(/wn-liquid/);
+    expect(read("MailNav.tsx")).toMatch(/touch \? "wn-glass"/);
+  });
+
+  it("keeps the glass's tint (and so its AA arithmetic): it never sets a background of its own", () => {
+    // Apple's native material, in its own guard, is the one place the tint gives way.
+    const plain = css.replace(/@supports \(-apple-visual-effect[\s\S]*?\n\}/g, "");
+    const own = [...plain.matchAll(/(^|\n)([^{}\n]*\.wn-liquid(?!-accent)[^{}]*)\{([^{}]*)\}/g)]
+      .filter(([, , selector]) => !/::after|\.wn-pill/.test(selector) && !/^\s*@/.test(selector));
+    expect(own.length).toBeGreaterThan(0);
+    for (const [, , selector, body] of own) expect(body, selector).not.toMatch(/(^|[^-])background(-color)?:/);
+  });
+
+  it("pins the reader pill, which floats over a message, to the bars' higher tint", () => {
+    expect(css).toMatch(/\.wn-reader-pill \{\s*(\/\*[^*]*\*\/\s*)?--wn-glass-text: var\(--wn-glass-bar, 80%\);/);
+  });
+
+  it("refracts only in Chromium, after the light frost, and names the filter that is in index.html", () => {
+    const block = /@supports \(backdrop-filter: url\(#wn-liquid\)\) and \(not \(-moz-appearance: none\)\) and \(not \(font: -apple-system-body\)\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(block).toMatch(/backdrop-filter:\s*var\(--wn-glass-filter\) url\(#wn-liquid\);/);
+    expect(html.match(/<filter id="wn-liquid"/g)?.length).toBe(1);
+  });
+
+  it("keeps Apple's native material as a guarded progressive enhancement", () => {
+    expect(css).toMatch(
+      /@supports \(-apple-visual-effect: -apple-system-glass-material\) \{\s*\.wn-glass,\s*\.wn-liquid \{\s*-apple-visual-effect: -apple-system-glass-material;\s*background: transparent;\s*-webkit-backdrop-filter: none;\s*backdrop-filter: none;\s*box-shadow: var\(--wn-glass-lift\);\s*\}\s*\.wn-liquid::after \{ display: none; \}\s*\}/,
+    );
+    // Nothing outside that guard names the property.
+    const outside = css.replace(/@supports \(-apple-visual-effect[\s\S]*?\n\}/g, "");
+    expect(outside).not.toMatch(/-apple-visual-effect:\s*-apple/);
+  });
+
+  describe("the refraction's edge map", () => {
+    const filter = /<filter id="wn-liquid"([^>]*)>([\s\S]*?)<\/filter>/.exec(html);
+    const attrs = filter?.[1] ?? "";
+    const body = filter?.[2] ?? "";
+
+    it("is built in px from the glass's own box, not an image stretched to it", () => {
+      // objectBoundingBox scaled the bend by the box's width on both axes in Chromium.
+      expect(attrs).not.toMatch(/primitiveUnits="objectBoundingBox"/);
+      expect(body).not.toMatch(/<feImage/);
+      expect(body).toMatch(/<feComposite in="white" in2="SourceAlpha" operator="in" result="box" \/>/);
+    });
+
+    it("softens and differentiates the edge by the numbers in glass.ts, inward on every side", () => {
+      const { softness, edge, gain } = LIQUID_FILTER;
+      expect(body).toContain(`stdDeviation="${softness} 0" edgeMode="none"`);
+      expect(body).toContain(`stdDeviation="0 ${softness}" edgeMode="none"`);
+      // dx = -edge samples A(x + edge): positive at the left edge (pull right, inward),
+      // negative at the right edge (pull left, inward).
+      expect(body).toMatch(new RegExp(`<feOffset in="softX" dx="-${edge}" result="toLeft" />`));
+      expect(body).toMatch(new RegExp(`<feOffset in="softX" dx="${edge}" result="toRight" />`));
+      expect(body).toMatch(new RegExp(`in="toLeft" in2="toRight" operator="arithmetic" k2="${gain}" k3="-${gain}" k4="0.5"`));
+      expect(body).toMatch(new RegExp(`in="toTop" in2="toBottom" operator="arithmetic" k2="${gain}" k3="-${gain}" k4="0.5"`));
+    });
+
+    it("bends once (no per-channel passes, which stalled frames), and at most a few px", () => {
+      const scales = [...body.matchAll(/<feDisplacementMap[^>]*scale="([\d.]+)"/g)].map(([, n]) => Number(n));
+      expect(scales).toEqual([LIQUID_FILTER.scale]);
+      expect(body).not.toMatch(/<feBlend/);
+      expect(liquidMaxBend()).toBeGreaterThanOrEqual(4);
+      expect(liquidMaxBend()).toBeLessThanOrEqual(10);
+    });
+  });
+
+  for (const scheme of MODES) {
+    it(`${scheme}: the rim, glow and sheen are published, and the sheen is faint where the ink is light`, () => {
+      const props = glassProperties(scheme, PALETTES[scheme].color);
+      expect(props["--wn-liquid-sheen"]).toBe(`${Math.round(LIQUID[scheme].sheen * 100)}%`);
+      expect(props["--wn-liquid-rim-light"]).toMatch(/^\d+%$/);
+      // Light ink has no contrast to spare: in the dark modes the liquid look is the rim
+      // and the bend, with no white over the words.
+      if (scheme !== "light") expect(LIQUID[scheme].sheen + LIQUID[scheme].glow).toBe(0);
+    });
+  }
+});
+
+describe("the compose circle's liquid accent", () => {
+  for (const scheme of MODES) {
+    for (const accent of Object.keys(ACCENTS) as (keyof typeof ACCENTS)[]) {
+      it(`${scheme} ${accent}: its icon keeps 3:1 over black and white`, () => {
+        const { color } = paletteFor(scheme, accent);
+        const n = Number.parseInt(color.accent.slice(1), 16);
+        const tint = `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${COMPOSE_TINT})`;
+        for (const under of ["#000000", "#FFFFFF"]) {
+          const fill = withSheen(composite(tint, under), COMPOSE_SHEEN);
+          expect(contrastRatio(fill, color.onAccent), `${under}`).toBeGreaterThanOrEqual(3);
+        }
+      });
+    }
+  }
+});
+
+describe("the accent's wash behind the list (1.4)", () => {
+  const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+
+  it("is two radial glows of the accent over the surface, off under reduced transparency and forced colours", () => {
+    const rule = /\.wn-backdrop \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/background-color:\s*var\(--wn-surface\)/);
+    expect(rule.match(/radial-gradient\([^;]*?var\(--wn-accent\) var\(--wn-wash-(near|far)/g)?.length).toBe(2);
+    expect(css).toMatch(/@media \(prefers-reduced-transparency: reduce\), \(forced-colors: active\) \{\s*\.wn-backdrop \{\s*background-image: none;/);
+  });
+
+  it("is on the list's pane and the pinned day, and the scroller and day headers are see-through", () => {
+    const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+    const list = readFileSync(new URL("./components/MessageList.tsx", import.meta.url), "utf8");
+    expect(app).toMatch(/wn-backdrop relative min-h-0 min-w-0 flex-1 flex-col/);
+    expect(list).toMatch(/data-sticky-day="" className="wn-backdrop/);
+    expect(list).not.toMatch(/overflow-y-auto overscroll-contain bg-surface/);
+    expect(list).not.toMatch(/gap-2 bg-surface pb-1 pl-\[68px\]/);
+  });
+
+  for (const scheme of MODES) {
+    it(`${scheme}: OLED stays near black, and the wash is faint everywhere`, () => {
+      const { near, far } = WASH[scheme];
+      expect(near).toBeGreaterThan(0);
+      expect(far).toBeGreaterThan(0);
+      expect(Math.max(near, far)).toBeLessThanOrEqual(scheme === "oled" ? 0.1 : 0.16);
+    });
+
+    for (const accent of Object.keys(ACCENTS) as (keyof typeof ACCENTS)[]) {
+      it(`${scheme} ${accent}: every row ink keeps AA on the washed surface at its strongest`, () => {
+        const { color } = paletteFor(scheme, accent);
+        const n = Number.parseInt(color.accent.slice(1), 16);
+        const peak = Math.max(WASH[scheme].near, WASH[scheme].far);
+        const washed = composite(`rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${peak})`, color.surface);
+        for (const ink of ["ink", "inkBody", "inkMuted", "inkSubtle"] as const) {
+          expect(contrastRatio(washed, color[ink]), ink).toBeGreaterThanOrEqual(4.5);
+        }
+        // And the wash is really there: a visible step off the plain surface, in the accent's direction.
+        expect(washed).not.toBe(composite("rgba(0, 0, 0, 0)", color.surface));
+      });
+    }
+  }
 });
 
 describe("a held chip stays a pill (1.3.3)", () => {

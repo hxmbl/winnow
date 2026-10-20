@@ -446,7 +446,7 @@ try {
       visible: visible.length,
       width: Math.round(box.width),
       headerWidth: Math.round(header.width),
-      // The chips themselves: the scroller reaches past them by the glass's frost reach.
+      // The chips themselves: the scroller pads past them for their shadow.
       belowSearch: (pills[0]?.getBoundingClientRect().top ?? box.top) >= field.bottom - 0.5,
       inSidebar: Boolean(document.querySelector("[data-sidebar] [data-rail-scroller]")),
     };
@@ -3508,8 +3508,8 @@ try {
         const scroller = document.querySelector("header [data-rail-scroller]");
         const search = document.querySelector("#winnow-search")?.closest("label");
         if (!scroller || !search) return null;
-        // The rail's own band: the scroller pads itself above and below by the glass's
-        // frost reach (paint only, no events), which is not the rail reaching the field.
+        // The rail's own band: the scroller pads itself above and below for the chips'
+        // shadow (paint only, no events), which is not the rail reaching the field.
         const outer = scroller.getBoundingClientRect();
         const pad = getComputedStyle(scroller);
         const rail = { left: outer.left, right: outer.right, top: outer.top + parseFloat(pad.paddingTop), bottom: outer.bottom - parseFloat(pad.paddingBottom) };
@@ -3735,7 +3735,7 @@ try {
   check("the list's name is in the top bar", (await listTitle())?.trim() === "Inbox", await listTitle());
   const overflow = await page.evaluate(() => {
     // What it holds against its own width: the mark and search, by their boxes (each
-    // glass's frost layer is paint only and clipped to it, so it is not counted).
+    // glass's shadow is paint only, so it is not counted).
     const row = document.querySelector("[data-phone-topbar] > div");
     if (!row) return null;
     const box = row.getBoundingClientRect();
@@ -3761,11 +3761,11 @@ try {
   );
   const pillGlass = await pill.evaluate((nav) => {
     const style = getComputedStyle(nav);
-    return { filter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(nav, "::before")), background: style.backgroundColor, shadow: style.boxShadow };
+    return { filter: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(nav)), background: style.backgroundColor, shadow: style.boxShadow };
   });
   check(
     "in light frost: a modest blur over a translucent tint, with a shadow",
-    /blur\(22px\)/.test(pillGlass.filter) && /saturate\(1\.8\)/.test(pillGlass.filter) &&
+    /blur\(6px\)/.test(pillGlass.filter) && /saturate\(1\.8\)/.test(pillGlass.filter) &&
       /\/ 0\.[5-8]\d*\)|, 0\.[5-8]\d*\)/.test(pillGlass.background) && pillGlass.shadow !== "none",
     JSON.stringify(pillGlass),
   );
@@ -3813,7 +3813,17 @@ try {
     probe.remove();
     return colour;
   });
-  check("and keeps the accent", fabFill === accentFill, `${fabFill} / ${accentFill}`);
+  // Liquid Glass (1.4): the accent itself, a little translucent (`COMPOSE_TINT`).
+  const channels = (css) => {
+    const n = (css.match(/[\d.]+/g) ?? []).map(Number);
+    return css.startsWith("color(") ? [...n.slice(0, 3).map((v) => Math.round(v * 255)), n[3] ?? 1] : [...n.slice(0, 3), n[3] ?? 1];
+  };
+  const [fab4, accent4] = [channels(fabFill), channels(accentFill)];
+  check(
+    "and keeps the accent, a little translucent",
+    fab4.slice(0, 3).every((v, i) => Math.abs(v - accent4[i]) <= 1) && fab4[3] >= 0.8 && fab4[3] < 1,
+    `${fabFill} / ${accentFill}`,
+  );
 
   const dockChips = dock.locator("[data-rail-key] button[aria-pressed]");
   const chipBox = await box(dockChips);
@@ -3835,7 +3845,7 @@ try {
       swipeable: getComputedStyle(element).overflowX === "auto" && element.scrollWidth > element.clientWidth,
       bands,
       dockBg,
-      chipFilter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(chip, "::before")),
+      chipFilter: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(chip)),
       chipShadow: chipStyle.boxShadow,
       chipBorder: chipStyle.borderTopWidth,
       firstLeft: Math.round(chip.getBoundingClientRect().left),
@@ -3845,7 +3855,7 @@ try {
   check(
     "each chip is its own frosted pill with a hairline and a shadow; no band behind the rail",
     chipRow.bands.length === 0 && (chipRow.dockBg === "rgba(0, 0, 0, 0)" || chipRow.dockBg === "transparent") &&
-      /blur\(22px\)/.test(chipRow.chipFilter) && chipRow.chipShadow !== "none" && chipRow.chipBorder === "1px" &&
+      /blur\(6px\)/.test(chipRow.chipFilter) && chipRow.chipShadow !== "none" && chipRow.chipBorder === "1px" &&
       chipRow.gap >= 8,
     JSON.stringify(chipRow),
   );
@@ -4058,7 +4068,7 @@ try {
   );
   check(
     "in the same light frost as the dock",
-    /blur\(22px\)/.test(phoneSide.filter) && /saturate\(1\.8\)/.test(phoneSide.filter) && !/, 1\)$/.test(phoneSide.background),
+    /blur\(6px\)/.test(phoneSide.filter) && /saturate\(1\.8\)/.test(phoneSide.filter) && !/, 1\)$/.test(phoneSide.background),
     JSON.stringify({ filter: phoneSide.filter, background: phoneSide.background }),
   );
   check(
@@ -6905,7 +6915,7 @@ try {
             width: innerWidth,
             aboveChips: rect.bottom <= chips.top + 1,
             overlapsChrome: Boolean(overlaps(rect, pillRect) || overlaps(rect, fab)),
-            filter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(button, "::before")),
+            filter: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(button)),
             scrollTop: Math.round(scroller.scrollTop),
             screen: scroller.clientHeight,
             lastClear: last ? last.bottom <= rect.top + 1 : null,
@@ -6930,7 +6940,7 @@ try {
           "past a screen it shows: a frosted pill named Back to top, labelled Top, centred above the chips, clear of the dock and compose",
           past.shown && past.visibility === "visible" && past.takesTap && past.name === "Back to top" && past.label === "Top" &&
             Math.abs(past.centre - past.width / 2) <= 2 && past.aboveChips && !past.overlapsChrome &&
-            /blur\(22px\)/.test(past.filter) && /saturate\(1\.8\)/.test(past.filter),
+            /blur\(6px\)/.test(past.filter) && /saturate\(1\.8\)/.test(past.filter),
           JSON.stringify(past),
         );
       } else {
@@ -7017,7 +7027,7 @@ try {
           const scroller = document.querySelector("[data-row-count]");
           const rail = document.querySelector("header [data-rail-scroller]");
           const chips = rail ? [...rail.querySelectorAll("[data-rail-key]")] : [];
-          const filterOf = (el) => ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(el, "::before"));
+          const filterOf = (el) => ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(el));
           const rows = [...scroller.querySelectorAll("[data-row-id]")].map((r) => r.getBoundingClientRect());
           const briefing = scroller.querySelector("[data-briefing]");
           const connect = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Connect Gmail");
@@ -7033,7 +7043,7 @@ try {
             barRadius: parseFloat(getComputedStyle(bar).borderTopLeftRadius),
             barHeight: barRect.height,
             inset: { left: Math.round(barRect.left - pane.left), right: Math.round(pane.right - barRect.right), top: Math.round(barRect.top - pane.top) },
-            chipsGlass: chips.length > 0 && chips.every((chip) => chip.classList.contains("wn-chip-glass") && /blur\(22px\)/.test(filterOf(chip))),
+            chipsGlass: chips.length > 0 && chips.every((chip) => chip.classList.contains("wn-chip-glass") && /blur\(6px\)/.test(filterOf(chip))),
             chromeBottom: Math.round(chrome.getBoundingClientRect().bottom),
             scrollTop: Math.round(scroller.scrollTop),
             padTop: parseFloat(getComputedStyle(scroller).paddingTop),
@@ -7051,7 +7061,7 @@ try {
       check(
         `${mode}: the desktop header floats: no band behind it, the bar a rounded glass pill inset from the pane, every chip its own glass pill`,
         rest.theme === mode && rest.bands.every((bg) => bg === "rgba(0, 0, 0, 0)") && rest.railMask === "none" &&
-          /blur\(22px\)/.test(rest.barFilter) && /saturate\(1\.8\)/.test(rest.barFilter) &&
+          /blur\(6px\)/.test(rest.barFilter) && /saturate\(1\.8\)/.test(rest.barFilter) &&
           rest.barRadius >= rest.barHeight / 2 - 1 && rest.inset.left >= 8 && rest.inset.right >= 8 && rest.inset.top >= 8 && rest.chipsGlass,
         JSON.stringify(rest),
       );
@@ -7144,10 +7154,10 @@ try {
       await d.waitForTimeout(200);
       const bar = d.locator("header [data-selection-bar='desktop']");
       const selBox = await bar.boundingBox();
-      const selFilter = await bar.evaluate((el) => ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(el, "::before"))).catch(() => "");
+      const selFilter = await bar.evaluate((el) => ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(el, el.classList.contains("wn-glass-behind") ? "::before" : null))).catch(() => "");
       check(
         "a selection's bar floats in the chips' place, in the same glass, and the header keeps its height",
-        Boolean(selBox) && /blur\(22px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
+        Boolean(selBox) && /blur\(6px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
         JSON.stringify({ selBox, selFilter, before }),
       );
       await d.keyboard.press("Escape");
@@ -7167,9 +7177,9 @@ try {
         const st = (el) => getComputedStyle(el);
         return {
           matches: matchMedia("(prefers-reduced-transparency: reduce)").matches,
-          bar: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(bar, "::before")),
+          bar: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(bar)),
           barBg: st(bar).backgroundColor,
-          chip: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(chip, "::before")),
+          chip: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(chip)),
         };
       });
       check(
@@ -7856,8 +7866,8 @@ try {
       return value;
     };
     // The frost on, then off (and the pills' tint off in both, so only the blur differs).
-    const NO_TINT = ".wn-glass,.wn-chip-glass{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
-    const NO_FROST = ".wn-glass::before,.wn-chip-glass::before{display:none!important}";
+    const NO_TINT = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-liquid::after{display:none!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
+    const NO_FROST = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}";
     const frostRatio = async (p, ctx, rect) => {
       const tint = await p.addStyleTag({ content: NO_TINT });
       await p.waitForTimeout(250);
@@ -7870,13 +7880,14 @@ try {
       await p.waitForTimeout(250);
       return { frosted: Math.round(frosted * 100) / 100, plain: Math.round(plain * 100) / 100, ratio: plain > 0 ? frosted / plain : 1 };
     };
-    // Nothing between a pill's frost layer and the page may cut it off from the list.
+    // Nothing between a pill and the page may cut its frost off from the list (1.4: the
+    // frost is on the pill itself, so only a filter there would).
     const GLASS_AUDIT = () => {
       const roots = [];
       const pills = [...document.querySelectorAll(".wn-glass:not(.wn-sidebar-panel), .wn-chip-glass")].filter((el) => el.getClientRects().length > 0);
       for (const pill of pills) {
         const own = getComputedStyle(pill);
-        if ((own.backdropFilter && own.backdropFilter !== "none") || own.filter !== "none") roots.push(`${pill.className.slice(0, 40)}: on itself`);
+        if (own.filter !== "none") roots.push(`${pill.className.slice(0, 40)}: a filter on itself`);
         for (let el = pill.parentElement; el && el !== document.documentElement; el = el.parentElement) {
           const s = getComputedStyle(el);
           const why = [
@@ -7891,8 +7902,10 @@ try {
         }
       }
       const layer = pills.map((pill) => {
-        const b = getComputedStyle(pill, "::before");
-        return { inset: parseFloat(b.top), clip: b.clipPath, filter: b.backdropFilter || b.webkitBackdropFilter, z: b.zIndex };
+        // A glass that opens a fixed menu frosts its own box from an inset ::before.
+        const own = getComputedStyle(pill, pill.classList.contains("wn-glass-behind") ? "::before" : null);
+        const liquid = pill.classList.contains("wn-liquid");
+        return { filter: own.backdropFilter || own.webkitBackdropFilter, liquid, refracts: /url\(.*#wn-liquid/.test(own.backdropFilter), sheen: liquid ? getComputedStyle(pill, "::after").zIndex : null };
       });
       const rails = [...document.querySelectorAll("[data-rail-scroller]")].filter((el) => el.querySelector(".wn-chip-glass")).map((el) => parseFloat(getComputedStyle(el).paddingTop));
       return { count: pills.length, roots, layer, rails };
@@ -7966,14 +7979,15 @@ try {
 
       const audit = await g.evaluate(GLASS_AUDIT);
       check(
-        `${kind}: every glass pill's frost is an oversized ::before clipped back to it, and nothing above cuts it off from the list`,
+        `${kind}: every glass pill carries its light frost on itself (the liquid ones refracting in Chromium, their sheen under the content), and nothing above cuts it off from the list`,
         audit.count >= 3 && audit.roots.length === 0 &&
-          audit.layer.every((l) => l.inset <= -40 && /^inset\(4\dpx/.test(l.clip) && /blur\(22px\)/.test(l.filter) && l.z === "-1") &&
-          audit.rails.every((pad) => pad >= 44),
+          audit.layer.every((l) => /blur\(6px\)/.test(l.filter) && l.refracts === l.liquid && (!l.liquid || l.sheen === "-1")) &&
+          audit.layer.some((l) => l.liquid) &&
+          audit.rails.every((pad) => pad >= 20),
         JSON.stringify({ count: audit.count, roots: audit.roots.slice(0, 4), layer: audit.layer.slice(0, 2), rails: audit.rails }),
       );
 
-      // The rail pads itself by the frost's reach and takes it back: the row it sits in
+      // The rail pads itself for the chips' shadow and takes it back: the row it sits in
       // (what the dock's clearance, the Top pill's slot and the header's height measure)
       // keeps the chips' own box.
       const railRow = await g.evaluate(() => {
@@ -7983,12 +7997,12 @@ try {
         return chip && row ? { chip: Math.round(chip.height), row: Math.round(row.height), chipTop: Math.round(chip.top), rowTop: Math.round(row.top) } : null;
       });
       check(
-        `${kind}: the chip rail's row keeps the chips' box despite the frost padding`,
+        `${kind}: the chip rail's row keeps the chips' box despite the shadow padding`,
         railRow !== null && railRow.row <= railRow.chip + 17 && railRow.chipTop - railRow.rowTop <= 9,
         JSON.stringify(railRow),
       );
 
-      // Paint only: the frost layers neither lengthen the rail's scroll nor widen the page.
+      // Nothing about the glass lengthens the rail's scroll or widens the page.
       const extent = await g.evaluate(() => {
         const scroller = document.querySelector(".wn-chip-glass")?.closest("[data-rail-scroller]");
         const items = [...scroller.children].filter((el) => el.getClientRects().length > 0);
@@ -8003,7 +8017,7 @@ try {
         };
       });
       check(
-        `${kind}: the frost layers lengthen no scroll: the rail ends at its last chip, and the page is no wider than the screen`,
+        `${kind}: the glass lengthens no scroll: the rail ends at its last chip, and the page is no wider than the screen`,
         extent.scroll <= extent.contentEnd + 1 && extent.pageExtra <= 0 && extent.docExtra <= 0,
         JSON.stringify(extent),
       );

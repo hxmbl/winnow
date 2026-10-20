@@ -61,7 +61,7 @@ export function SelectionBar({
           ? "relative z-30 flex shrink-0 items-center gap-1 px-2 pb-1.5 pt-[max(0.5rem,env(safe-area-inset-top))]"
           : // The desktop's, floating in the list's header in the chips' place: the
             // same glass as the bar above it.
-            "wn-glass wn-glass-bar pointer-events-auto flex h-10 min-w-0 flex-1 items-center gap-1 rounded-full px-1.5"
+            "wn-glass wn-glass-bar wn-glass-behind pointer-events-auto flex h-10 min-w-0 flex-1 items-center gap-1 rounded-full px-1.5"
       }
     >
       <button type="button" onClick={onClear} aria-label="Clear selection" title="Clear selection (Esc)" className={phone ? button : `${button} px-2`}>

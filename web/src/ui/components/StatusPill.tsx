@@ -2,7 +2,7 @@
  * The status pill (the rules are `statusPill.ts`).
  *
  * The same frosted pill as a pull to refresh's "Synced just now" (`.wn-glass`,
- * `.wn-glass-bar`, full round, meta weight), at the same place: centred over the list,
+ * `.wn-glass-bar`, full round, meta weight; Liquid Glass, `.wn-liquid`, since 1.4), at the same place: centred over the list,
  * just under its top chrome — the phone's top bar or the desktop's floating list
  * header. When the list is not on screen (a phone reading a message, or a narrow
  * window with the reader over the list) it centres on the window under the safe area
@@ -170,7 +170,7 @@ export function StatusPill(props: Props) {
           <div
             key={noticeKey(shown)}
             {...(shown.kind === "sending" ? { "data-send-pending": "" } : {})}
-            className={`wn-glass wn-glass-bar pointer-events-auto flex h-10 max-w-full animate-appear items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
+            className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full animate-appear items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
               shown.kind === "sync" ? "pr-4" : "pr-1"
             } ${shown.kind === "sync" && !shown.ok ? "text-danger" : "text-ink-body"}`}
           >

@@ -3479,7 +3479,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           ref={attachListPane}
           className={`${
             selected ? "hidden lg:flex" : "flex"
-          } relative min-h-0 min-w-0 flex-1 flex-col bg-surface`}
+          } wn-backdrop relative min-h-0 min-w-0 flex-1 flex-col`}
         >
           {/*
             The mailbox's own status line, and the demo note.

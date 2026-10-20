@@ -90,7 +90,7 @@ const railLeft = (page, scope) =>
 
 /**
  * Scroll the list `steps` frames by `by` px each, reading every frame the filters on the
- * strip's chips, their words and their frost (`::before`): what a motion blur would change.
+ * strip's chips, their words, their frost and their liquid sheen (`::after`): what a motion blur would change.
  * Reports each distinct reading, so a crisp strip answers with exactly one.
  */
 const flingList = (page, by, steps, scope = "[data-list-chrome]") =>
@@ -104,7 +104,7 @@ const flingList = (page, by, steps, scope = "[data-list-chrome]") =>
             const chip = item.matches("button") ? item : item.querySelector("button");
             const word = chip?.firstElementChild;
             const s = chip ? getComputedStyle(chip) : null;
-            const before = chip ? getComputedStyle(chip, "::before") : null;
+            const before = chip ? getComputedStyle(item, "::after") : null;
             return [s?.filter, s?.backdropFilter, before?.backdropFilter, before?.filter, word ? getComputedStyle(word).filter : null, rail.getAttribute("style")];
           }));
         const seen = new Set([read()]);
@@ -124,7 +124,7 @@ const flingList = (page, by, steps, scope = "[data-list-chrome]") =>
 
 /**
  * Sample a chip's shape every frame for `ms`: its corner radius against half its height,
- * any transform, the frost layer's clip and the tap highlight. Started before a press and
+ * any transform, the sheen layer's clip and the tap highlight. Started before a press and
  * awaited after the release, so it covers press, hold and release.
  */
 const sampleShape = (page, sel, ms) =>
@@ -141,7 +141,7 @@ const sampleShape = (page, sel, ms) =>
           const cs = getComputedStyle(el);
           const r = el.getBoundingClientRect();
           const radius = parseFloat(cs.borderTopLeftRadius) || 0;
-          const before = getComputedStyle(el, "::before").clipPath;
+          const before = getComputedStyle(el, "::after").clipPath;
           pressedSeen ||= el.matches(":active, :has(:active)");
           const pill = radius >= r.height / 2 - 0.5;
           const flat = cs.transform === "none";
@@ -558,10 +558,10 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     await p.locator("[data-sidebar][data-open]").waitFor({ timeout: 5_000 });
     await settle(p, 400);
     const pill = await p.evaluate(() => ({
-      before: getComputedStyle(document.querySelector("[data-phone-pill]"), "::before").content,
+      before: getComputedStyle(document.querySelector("[data-phone-pill]"), "::after").content,
       inbox: document.querySelector('[data-sidebar] button[data-nav="inbox"]')?.getBoundingClientRect().height ?? 0,
     }));
-    check("with the menu open, the pill's frost no longer covers the Inbox row", pill.before === "none" && pill.inbox >= 44, JSON.stringify(pill));
+    check("with the menu open, the pill's frost and sheen no longer cover the Inbox row", pill.before === "none" && pill.inbox >= 44, JSON.stringify(pill));
 
     // Settings fills the screen behind the dock: nothing of the inbox around the pill.
     await p.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').tap();
