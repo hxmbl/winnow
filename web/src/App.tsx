@@ -77,6 +77,7 @@ import { useStore } from "./ui/useStore";
 import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
+import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
 import { ACCENT_THEMES } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
@@ -535,6 +536,13 @@ export function App({ store }: Props) {
   }, []);
 
   const themeMode = resolveScheme(preferences.appearance, systemDark);
+  // Email dark mode: the palette a message body is drawn in, or null for its own light page.
+  const emailDarkPalette =
+    !preferences.emailDarkMode || themeMode === "light"
+      ? null
+      : themeMode === "oled"
+        ? OLED_EMAIL_PALETTE
+        : DARK_EMAIL_PALETTE;
 
   useEffect(() => {
     applyTheme(document.documentElement, themeMode, preferences.accent);
@@ -4462,6 +4470,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             <Reader
               onMailto={openMailto}
               leftHanded={preferences.leftHanded}
+              emailDark={emailDarkPalette}
               email={selected}
               conversation={view.conversation}
               signals={selected ? (view.signals.get(selected.id) ?? null) : null}
@@ -4666,6 +4675,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onSwipeActions={(value) => store.setPreferences({ swipeActions: value })}
           leftHanded={phone ? preferences.leftHanded : null}
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
+          emailDarkMode={preferences.emailDarkMode}
+          onEmailDarkMode={(value) => store.setPreferences({ emailDarkMode: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           scheduledCount={snapshot.scheduled.filter((send) => send.account === store.accountKey()).length}

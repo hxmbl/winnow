@@ -44,6 +44,7 @@ import {
 } from "../../core/model/signals";
 import { filterIcon } from "../filterIcons";
 import { MessageBody, type BodyView } from "./MessageBody";
+import type { DarkPalette } from "../../core/mail/emailDark";
 import { bodyViewOptions } from "../bodyViews";
 import { platform } from "../../platform";
 import { ariaKey, readerActions, type ReaderAction, type ReaderActionId } from "../readerActions";
@@ -610,6 +611,8 @@ type Props = {
   onMailto?: (url: string) => void;
   /** Left-handed phone layout: the action pill sits bottom-left. */
   leftHanded?: boolean;
+  /** Email dark mode's palette for the body, or null for the sender's light page. See `MessageBody`. */
+  emailDark?: DarkPalette | null;
   email: Email | null;
   conversation: readonly Email[];
   signals: EmailSignals | null;
@@ -692,6 +695,7 @@ export function Reader({
   onToggleSidebar,
   onMailto,
   leftHanded = false,
+  emailDark = null,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -935,6 +939,7 @@ export function Reader({
               else void platform.openExternal(url);
             }}
             view={view}
+            emailDark={emailDark}
           />
 
           {/*

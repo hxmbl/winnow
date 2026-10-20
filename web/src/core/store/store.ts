@@ -336,6 +336,13 @@ export type Preferences = {
   appearance: Appearance;
   /** The accent theme, applied across every mode. */
   accent: AccentTheme;
+  /**
+   * Email dark mode (1.4.0): in the dark and OLED modes, draw message bodies dark too
+   * (`core/mail/emailDark`) rather than as a white card. On by default; light mode is
+   * never affected, and the reader's sun/moon button shows one message's original
+   * colours without changing this.
+   */
+  emailDarkMode: boolean;
   /** Keep syncing while the window is closed. Desktop only. */
   backgroundSync: boolean;
   /** How often, in seconds. */
@@ -365,6 +372,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   notificationHidePreview: false,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
+  emailDarkMode: true,
   backgroundSync: true,
   backgroundSyncInterval: 300,
   blockedSenders: [],
