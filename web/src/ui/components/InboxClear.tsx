@@ -80,7 +80,7 @@ export function InboxClear({
           <circle className="inbox-clear__dot" cx="18" cy="128" r="2.5" />
         </svg>
         <span className="inbox-clear__mark">
-          <AppMark size={56} single />
+          <AppMark size={40} single />
         </span>
       </div>
       <div role="status" aria-live="polite" className="flex flex-col items-center gap-1.5">

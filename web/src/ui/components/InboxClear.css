@@ -47,8 +47,8 @@
 }
 
 .inbox-clear__glow--core {
-  left: 164px;
-  top: 58px;
+  left: 160px;
+  top: 61px;
   width: 120px;
   height: 120px;
   transform: translate(-50%, -50%);
@@ -82,8 +82,8 @@
    behind it, as it is on the chrome, so the artwork reads exactly as it does there. */
 .inbox-clear__mark {
   position: absolute;
-  left: 164px;
-  top: 58px;
+  left: 160px;
+  top: 61px;
   transform: translate(-50%, -50%);
   --wn-chrome: var(--wn-surface);
   display: block;
