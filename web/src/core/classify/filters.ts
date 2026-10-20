@@ -19,6 +19,7 @@ import {
   type EmailSignals,
   type FilterId,
   catalogIndex,
+  NEUTRAL_SIGNALS,
 } from "../model/signals";
 import type { UserProfile } from "../model/profile";
 
@@ -178,6 +179,86 @@ export function filtersFor(email: Email, signal: EmailSignals, profile: UserProf
 }
 
 const ALL_FILTER_IDS: readonly BuiltinSmartFilter[] = BUILTIN_FILTERS;
+
+/**
+ * Every built-in filter one message *lists* under: `matchesBuiltin` with no spam guard,
+ * the list's own test (`runInboxQuery`). Unlike `filtersFor`, an unsafe message can be
+ * in Starred or Security here, because that is what the list behind those pills shows.
+ */
+export function listedFiltersFor(email: Email, signal: EmailSignals, profile: UserProfile): BuiltinSmartFilter[] {
+  const ids: BuiltinSmartFilter[] = [];
+  for (const id of ALL_FILTER_IDS) if (matchesBuiltin(id, email, signal, profile)) ids.push(id);
+  return ids;
+}
+
+/**
+ * The rail's counts once a filter is on (1.4.0): faceted on the active set.
+ *
+ * Several active filters narrow the list (AND, `runInboxQuery`), so a pill that is *off*
+ * counts the messages the list would show if it were turned on as well — the current
+ * result that it also matches — and a pill that is *on* counts the current result
+ * itself. Both are the list's own semantics (`matchesFilter`, no spam guard), so the
+ * number on a pill is exactly what tapping it gives (under the search too, below).
+ *
+ * One exception, from `toggleFilter`: Unsafe is exclusive, so turning it on *replaces*
+ * the set. While it is off its count is what Unsafe alone lists, not the intersection.
+ *
+ * With a search running (1.4.0) the caller passes only the search's matches (the list's
+ * own test, `matchesSearch`) and `searching`, so every count above is also ANDed with
+ * the search, nothing on included: an off pill counts search ∧ filters ∧ pill, an on
+ * pill the current (searched) result, and an off Unsafe what Unsafe alone lists under
+ * the search, since `toggleFilter` replaces the filters and leaves the query alone.
+ *
+ * `null` with nothing active and no search: the rail then shows the plain per-bucket
+ * counts (`countAllFilters`), unchanged.
+ */
+export type FacetCounts = {
+  /** Messages the active set admits: the current result (searched, while searching). */
+  total: number;
+  builtin: ReadonlyMap<BuiltinSmartFilter, number>;
+  /** By lowercased sender, as sender filters match (`matchesFilter`). */
+  senders: ReadonlyMap<string, number>;
+};
+
+export function countFacets(
+  emails: readonly Email[],
+  signals: ReadonlyMap<number, EmailSignals>,
+  profile: UserProfile,
+  active: readonly FilterId[],
+  /** Per-message memo of `listedFiltersFor`, like `countAllFilters`'s. */
+  memo?: WeakMap<Email, { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }>,
+  /**
+   * True while a search is running (1.4.0): `emails` are then the search's matches,
+   * and the counts are faceted even with nothing on, since every pill must count what
+   * tapping it gives under that search rather than the plain bucket size.
+   */
+  searching = false,
+): FacetCounts | null {
+  if (active.length === 0 && !searching) return null;
+  const builtinActive = active.flatMap((filter) => (filter.kind === "builtin" ? [filter.id] : []));
+  const senderActive = active.flatMap((filter) => (filter.kind === "sender" ? [filter.sender.toLowerCase()] : []));
+  const unsafeOn = builtinActive.includes("unsafe");
+
+  const builtin = new Map<BuiltinSmartFilter, number>();
+  const senders = new Map<string, number>();
+  let total = 0;
+  let unsafeAlone = 0;
+  for (const email of emails) {
+    const signal = signals.get(email.id) ?? NEUTRAL_SIGNALS;
+    const hit = memo?.get(email);
+    const ids = hit && hit.signal === signal && hit.profile === profile ? hit.ids : listedFiltersFor(email, signal, profile);
+    if (memo && ids !== hit?.ids) memo.set(email, { signal, profile, ids });
+    if (ids.includes("unsafe")) unsafeAlone += 1;
+    const sender = email.sender.toLowerCase();
+    if (!senderActive.every((s) => s === sender)) continue;
+    if (!builtinActive.every((id) => ids.includes(id))) continue;
+    total += 1;
+    for (const id of ids) builtin.set(id, (builtin.get(id) ?? 0) + 1);
+    senders.set(sender, (senders.get(sender) ?? 0) + 1);
+  }
+  if (!unsafeOn) builtin.set("unsafe", unsafeAlone);
+  return { total, builtin, senders };
+}
 
 /**
  * Order the rail for display.

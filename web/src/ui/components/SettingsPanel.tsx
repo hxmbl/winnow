@@ -35,7 +35,8 @@ import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { UNDO_SEND_CHOICES, type UndoSendSeconds } from "../../core/mail/undoSend";
 import { FILTER_LABELS } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
-import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
+import { APPEARANCES, CUSTOM_ACCENT, type AccentPreference, type Appearance } from "../../core/model/appearance";
+import { CustomAccentField, CUSTOM_SWATCH_IDLE } from "./CustomAccentField";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
 import type { FilterLearning, LearnableFilter } from "../../core/learn/filterLearning";
@@ -43,6 +44,11 @@ import { SmartFilterSettings } from "./SmartFilterSettings";
 import { SelectMenu } from "./SelectMenu";
 import { useShortcutsAvailable } from "../physicalKeyboard";
 import { remotePicturesPaused } from "../senderPictures";
+import type { AccountSummary } from "../../core/store/store";
+import { ACCOUNT_COLORS, MAX_ACCOUNTS, type AccountColor } from "../../core/session/accounts";
+import { ACCOUNT_COLOR_LABEL, ACCOUNTS_FULL, ADD_ACCOUNT_HELP, accountColorHex } from "../accounts";
+import { AccountDot } from "./AccountSwitcher";
+import type { ThemeName } from "../theme";
 
 /** Under a remote-picture switch that is on but paused by Remote images = Never. */
 const REMOTE_PAUSED_HINT = "Paused: Remote images is set to Never";
@@ -107,11 +113,11 @@ const APPEARANCE_LABELS: Record<Appearance, string> = {
   system: "System",
   light: "Light",
   dark: "Dark",
-  oled: "OLED",
+  oled: "Very dark",
 };
 
-/** One accent theme as the picker shows it: its name and a swatch in the current mode. */
-export type AccentChoice = { id: AccentTheme; label: string; swatch: string };
+/** One accent as the picker shows it: its name and a swatch in the current mode. */
+export type AccentChoice = { id: AccentPreference; label: string; swatch: string };
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
@@ -121,9 +127,15 @@ export type SettingsProps = {
   appearance: Appearance;
   onAppearance: (value: Appearance) => void;
   /** The accent theme in force, and the choices with a swatch drawn in the current mode. */
-  accentTheme: AccentTheme;
+  accentTheme: AccentPreference;
   accentChoices: readonly AccentChoice[];
-  onAccentTheme: (value: AccentTheme) => void;
+  onAccentTheme: (value: AccentPreference) => void;
+  /**
+   * The custom colour as picked (1.4.0) and whether the mode on screen had to move it for
+   * contrast; and the setter, which also selects Custom.
+   */
+  accentCustom: { value: string; adjusted: boolean };
+  onAccentCustom: (hex: string) => void;
   /**
    * Whether the reader can render a message's own markup at all.
    *
@@ -147,9 +159,17 @@ export type SettingsProps = {
   /** Left-handed phone layout. Null hides the row (only the phone layout has thumb controls). */
   leftHanded: boolean | null;
   onLeftHanded: (value: boolean) => void;
+  /** Email dark mode: message bodies drawn dark in the dark modes. See `Preferences.emailDarkMode`. */
+  emailDarkMode: boolean;
+  onEmailDarkMode: (value: boolean) => void;
   /** How long Send waits for Undo. 5s by default; see `Preferences.undoSendSeconds`. */
   undoSendSeconds: UndoSendSeconds;
   onUndoSendSeconds: (value: UndoSendSeconds) => void;
+  /** What send later and snooze hold on this device, for the Compose row (1.4.0). */
+  scheduledCount?: number;
+  snoozedCount?: number;
+  /** Open the Scheduled list (closing Settings). */
+  onOpenScheduled?: () => void;
   /** Brand logos from BIMI in avatars. Off by default; see `Preferences.brandLogos`. */
   brandLogos: boolean;
   onBrandLogos: (value: boolean) => void;
@@ -192,6 +212,16 @@ export type SettingsProps = {
   signedIn: boolean;
   /** Open the Google account sheet (set up, change or remove the OAuth client). */
   onGoogleAccount: () => void;
+  /** 1.4.0: the signed-in accounts (or the demo's two), with what each row can do. */
+  accounts?: readonly AccountSummary[];
+  accountScheme?: ThemeName;
+  accountsBusy?: boolean;
+  onAddAccount?: () => void;
+  onSwitchAccount?: (id: string) => void;
+  onSignOutAccount?: (id: string) => void;
+  onSignOutAll?: () => void;
+  onAccountColor?: (id: string, color: AccountColor) => void;
+  onAccountNotify?: (id: string, notify: boolean) => void;
   /** Where Google contacts stand. The row only shows for a signed-in account. */
   contactsAccess: ContactsAccessState;
   contactsBusy: boolean;
@@ -515,6 +545,8 @@ export function Settings(props: SettingsProps) {
 
 /** One category's controls. Every setting row names its catalog id with `setting="…"`. */
 function CategoryContent({ category, props }: { category: CategoryId; props: SettingsProps }) {
+  /** Opens the custom colour's native picker; set by `CustomAccentField`. */
+  const openCustomPicker = useRef<(() => void) | null>(null);
   switch (category) {
     case "reading":
       return <ReadingSettings props={props} />;
@@ -542,6 +574,23 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               onChange={props.onUndoSendSeconds}
             />
           </Row>
+          <Row
+            setting="sendLater"
+            hint={`${props.scheduledCount ?? 0} scheduled · ${props.snoozedCount ?? 0} snoozed, on this device`}
+          >
+            {props.onOpenScheduled ? (
+              <button
+                type="button"
+                data-settings-open-scheduled=""
+                onClick={props.onOpenScheduled}
+                className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Open Scheduled
+              </button>
+            ) : (
+              <span />
+            )}
+          </Row>
         </Section>
       );
     case "appearance":
@@ -562,11 +611,27 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             options={props.accentChoices.map((choice) => ({
               value: choice.id,
               label: choice.label,
-              swatch: choice.swatch,
+              // Custom shows a soft colour wheel until it is the accent, then its colour.
+              swatch: choice.id === CUSTOM_ACCENT && props.accentTheme !== CUSTOM_ACCENT ? CUSTOM_SWATCH_IDLE : choice.swatch,
             }))}
             value={props.accentTheme}
             onChange={props.onAccentTheme}
+            onOptionClick={(value) => {
+              if (value === CUSTOM_ACCENT) openCustomPicker.current?.();
+            }}
+            after={
+              <CustomAccentField
+                active={props.accentTheme === CUSTOM_ACCENT}
+                value={props.accentCustom.value}
+                adjusted={props.accentCustom.adjusted}
+                onChange={props.onAccentCustom}
+                openRef={openCustomPicker}
+              />
+            }
           />
+          <Row setting="emailDarkMode">
+            <Toggle checked={props.emailDarkMode} onChange={props.onEmailDarkMode} label={SETTINGS.emailDarkMode.label} />
+          </Row>
           {props.leftHanded !== null && (
             <Row setting="leftHanded">
               <Toggle checked={props.leftHanded} onChange={props.onLeftHanded} label="Left-handed" />
@@ -906,8 +971,118 @@ function DriveLinksRow({ props }: { props: SettingsProps }) {
   );
 }
 
+function AccountsSettings({ props }: { props: SettingsProps }) {
+  const accounts = props.accounts ?? [];
+  const scheme = props.accountScheme ?? "light";
+  const real = accounts.filter((account) => !account.demo);
+  return (
+    <Section title="Accounts">
+      <SettingBlock setting="accounts">
+        <SettingLabel setting="accounts" />
+        {real.length === 0 ? (
+          <p data-settings-empty="" className="text-meta text-ink-subtle">
+            No Gmail account is signed in yet.
+          </p>
+        ) : (
+          <ul data-settings-accounts="" className="mt-2 flex flex-col gap-3">
+            {real.map((account) => (
+              <li key={account.id} data-settings-account={account.id} className="flex flex-col gap-2 rounded-pane border border-hairline p-3">
+                <div className="flex items-center gap-2.5">
+                  <AccountDot color={account.color} scheme={scheme} />
+                  <span className="selectable min-w-0 flex-1 truncate text-ui font-medium text-ink">{account.email || "Your account"}</span>
+                  {account.active ? (
+                    <span className="text-meta font-semibold text-ink-muted">Open</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => props.onSwitchAccount?.(account.id)}
+                      disabled={props.accountsBusy}
+                      className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    >
+                      Open
+                    </button>
+                  )}
+                </div>
+                <SettingBlock setting="accountColor" className="!py-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <SettingLabel setting="accountColor" />
+                    <div role="radiogroup" aria-label={`Colour for ${account.email}`} className="flex items-center gap-1.5">
+                      {ACCOUNT_COLORS.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          role="radio"
+                          aria-checked={account.color === color}
+                          aria-label={ACCOUNT_COLOR_LABEL[color]}
+                          title={ACCOUNT_COLOR_LABEL[color]}
+                          onClick={() => props.onAccountColor?.(account.id, color)}
+                          className={`flex h-7 w-7 items-center justify-center rounded-full border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                            account.color === color ? "border-ink" : "border-transparent"
+                          }`}
+                        >
+                          <span className="h-4 w-4 rounded-full" style={{ background: accountColorHex(color, scheme) }} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </SettingBlock>
+                <SettingBlock setting="accountNotify" className="!py-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <SettingLabel setting="accountNotify" />
+                    <Toggle
+                      checked={account.notify}
+                      onChange={(value) => props.onAccountNotify?.(account.id, value)}
+                      label={`Notify about ${account.email} when it is not open`}
+                    />
+                  </div>
+                </SettingBlock>
+                <div>
+                  <button
+                    type="button"
+                    data-sign-out-account={account.id}
+                    onClick={() => props.onSignOutAccount?.(account.id)}
+                    disabled={props.accountsBusy}
+                    className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-danger-wash disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >
+                    Sign out of this account
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-settings-add-account=""
+            onClick={props.onAddAccount}
+            disabled={props.accountsBusy || real.length >= MAX_ACCOUNTS}
+            className="rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            {real.length === 0 ? "Connect Gmail" : "Add account"}
+          </button>
+          {real.length > 1 && (
+            <button
+              type="button"
+              data-sign-out-all=""
+              onClick={props.onSignOutAll}
+              disabled={props.accountsBusy}
+              className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-danger-wash disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              Sign out of all
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-meta text-ink-subtle">{real.length >= MAX_ACCOUNTS ? ACCOUNTS_FULL : ADD_ACCOUNT_HELP}</p>
+      </SettingBlock>
+    </Section>
+  );
+}
+
 function GoogleSettings({ props }: { props: SettingsProps }) {
   return (
+    <>
+    <AccountsSettings props={props} />
     <Section>
       {/*
         The client first: Winnow ships no Google client, so until one is set up this is
@@ -990,6 +1165,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
         </SettingBlock>
       )}
     </Section>
+    </>
   );
 }
 

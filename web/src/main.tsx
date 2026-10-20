@@ -31,7 +31,9 @@ import { applyTheme, resolveScheme } from "./ui/theme";
 import { DEFAULT_ACCENT_THEME, DEFAULT_APPEARANCE } from "./core/model/appearance";
 import type { LearningSnapshot } from "./core/learn/learning";
 import type { Email, Mailbox } from "./core/model/email";
-import { announce, saveKeptReplies, wireNotifications } from "./ui/notificationActions";
+import { accountRouter, announce, routeNotificationAction, saveKeptReplies, wireNotifications } from "./ui/notificationActions";
+import { persistAccountState } from "./core/store/accountState";
+import { parseDeepLink } from "./core/notify/notifications";
 import { watchPhysicalKeyboard } from "./ui/physicalKeyboard";
 import "./index.css";
 
@@ -154,6 +156,7 @@ applyTheme(
     globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
   ),
   persisted.preferences?.accent ?? DEFAULT_ACCENT_THEME,
+  persisted.preferences?.accentCustom,
 );
 
 const demo = demoMailbox();
@@ -190,10 +193,16 @@ function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): 
     const current = read(STORAGE_KEYS.preferences, revivePreferences) ?? {};
     write(STORAGE_KEYS.preferences, { ...current, ...patch.preferences });
   }
-  if (patch.learning) write(STORAGE_KEYS.learning, patch.learning);
-  if (patch.filterLearning) write(STORAGE_KEYS.filterLearning, patch.filterLearning);
-  if (patch.activeFilters) write(STORAGE_KEYS.filters, patch.activeFilters);
-  if (patch.mailbox) write(STORAGE_KEYS.mailbox, patch.mailbox);
+  // 1.4.0: the learning, the active filters and the mailbox are the open account's,
+  // written under its namespace (`core/store/accountState.ts`); the demo's are the
+  // device's own, under the unscoped keys.
+  let storage: Storage | null = null;
+  try {
+    storage = globalThis.localStorage ?? null;
+  } catch {
+    storage = null;
+  }
+  persistAccountState(storage, store.currentAccountId(), patch);
 }
 
 /**
@@ -204,6 +213,9 @@ function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): 
  * `saveAttachment` are *not* here — both are one-shot reads a component performs
  * directly, and routing them through the store would mean reaching past it.
  */
+/** How often the accounts that are not open are checked while the window is in front. */
+const INACTIVE_CHECK_MS = 60_000;
+
 const platformBridge = {
   // One notification per message with its buttons, plus a summary; what qualifies and
   // what it says are in `core/notify/notifications.ts`.
@@ -246,10 +258,18 @@ void platform
     const foreground = startForegroundSync(() => {
       if (automatic()) void store.refresh();
     });
+    // The accounts that are not open: a light sync (unread counts, new-mail
+    // notifications) on every background tick, and once a minute while the window is in
+    // front. Never more often: each is a listing per account.
+    const checkInactive = () => void accountRouter(0).then((routes) => routes?.refreshInactive());
     const unlistenTick = platform.onBackgroundTick(() => {
+      checkInactive();
       if (foreground.active()) return;
       void store.refresh();
     });
+    const inactiveTimer = setInterval(() => {
+      if (automatic() && foreground.active()) checkInactive();
+    }, INACTIVE_CHECK_MS);
 
     // The list's reference clock, so relative timestamps and day headings stay true
     // in a window that has been open since yesterday. Owned by the store because the
@@ -281,6 +301,7 @@ void platform
       globalThis.document?.removeEventListener("visibilitychange", onVisible);
       globalThis.removeEventListener?.("online", onOnline);
       unlistenTick();
+      clearInterval(inactiveTimer);
       foreground.stop();
       stopClock();
     });
@@ -301,18 +322,10 @@ function wireDesktopEvents(): void {
   // A `winnow://` link is either a message to open or just "wake up". Either way the
   // window has to come forward: a link that opened the app behind the frontmost
   // window reads as nothing happening at all.
-  const unlistenLink = desktopPlatformExtras.onDeepLink((url) => {
-    void platform.focusWindow();
-    // Android's sign-in success page links here only to bring the app forward; the
-    // sign-in itself finishes in `session.ts`, so there is nothing else to do.
-    if (isSignedInLink(url)) return;
-    const messageId = messageIdFromDeepLink(url);
-    if (messageId !== null) {
-      void store.focusMessage(messageId);
-    } else {
-      void store.refresh();
-    }
-  });
+  const unlistenLink = desktopPlatformExtras.onDeepLink(openDeepLink);
+  // A cold start from a notification's tap: the link was emitted before this listened,
+  // so it is asked for (`deep_link_launch`; an older shell without it answers nothing).
+  void desktopPlatformExtras.launchLinks().then((urls) => urls.forEach(openDeepLink));
 
   // The ids here must match `tray.rs`'s menu items exactly. They are strings across
   // an IPC boundary with no shared type, so this switch is the only place the two
@@ -346,20 +359,30 @@ function wireDesktopEvents(): void {
 }
 
 /**
- * Pull a message id out of a `winnow://message/<id>` link.
- *
- * Returns `null` for a link that is not a message link — a bare `winnow://open`,
- * say — because "show me the app" is a legitimate deep link that carries no id.
+ * A `winnow://` link: a notification's tap opens that exact message in its account (the
+ * reader, full screen on a phone, fetched first when it is not cached), a summary's tap
+ * that account's inbox, and anything else just brings the window forward and syncs.
+ * Either way the window comes forward first: a link that opened the app behind the
+ * frontmost window reads as nothing happening at all.
  */
-function isSignedInLink(url: string): boolean {
-  return /^winnow:\/\/signed-in\/?$/.test(url.trim());
-}
-
-function messageIdFromDeepLink(url: string): number | null {
-  const match = /^winnow:\/\/message\/(\d+)$/.exec(url.trim());
-  if (!match) return null;
-  const id = Number(match[1]);
-  return Number.isSafeInteger(id) ? id : null;
+function openDeepLink(url: string): void {
+  void platform.focusWindow();
+  const link = parseDeepLink(url);
+  // Android's sign-in success page links here only to bring the app forward; the
+  // sign-in itself finishes in `session.ts`, so there is nothing else to do.
+  if (!link || link.kind === "signed-in") return;
+  if (link.kind === "open") {
+    void store.refresh();
+    return;
+  }
+  void routeNotificationAction(store, platform, {
+    action: link.kind === "message" ? "open" : "inbox",
+    messageId: link.kind === "message" ? link.messageId : 0,
+    gmailId: link.kind === "message" ? link.gmailId : "",
+    // Asked of the app, not reported as done: the tap only opens.
+    origin: "desktop",
+    ...(link.account ? { account: link.account } : {}),
+  });
 }
 
 createRoot(container).render(

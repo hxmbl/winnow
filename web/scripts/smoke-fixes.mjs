@@ -278,7 +278,7 @@ export async function smokeFixes({ browser, URL, check, section, errors, shots =
         }),
         noFrost:
           getComputedStyle(pill).backdropFilter === "none" &&
-          getComputedStyle(pill, "::before").content === "none" &&
+          getComputedStyle(pill, "::after").content === "none" &&
           /rgba\(0, 0, 0, 0\)|transparent/.test(getComputedStyle(pill).backgroundColor),
         lastLabel: label(last),
         sentLabel: label(sent),
@@ -500,7 +500,7 @@ export async function smokeFixes({ browser, URL, check, section, errors, shots =
         top: Math.round(face.getBoundingClientRect().top),
         barBottom: Math.round(bar.getBoundingClientRect().bottom),
         alpha,
-        frost: getComputedStyle(face, "::before").backdropFilter !== "none" || style.backdropFilter !== "none",
+        frost: style.backdropFilter !== "none",
         edge: style.borderTopWidth !== "0px",
       };
     });
@@ -592,7 +592,11 @@ async function demoChecks({ browser, URL, check, section, errors }) {
         googleSignIns === 0 &&
         state.tokenCalls === tokenCallsBefore &&
         (await p.locator("[data-demo-cta]").count()) === 0 &&
-        (await p.evaluate(() => Boolean(localStorage.getItem("winnow.gmail.tokens")))),
+        // 1.4.0: the tokens are the active account's, `<key>@<id>` in the registry.
+        (await p.evaluate(() => {
+          const id = JSON.parse(localStorage.getItem("winnow.accounts.v1") ?? "null")?.active;
+          return Boolean(id && localStorage.getItem(`winnow.gmail.tokens@${id}`));
+        })),
       JSON.stringify({ googleSignIns, tokenCalls: state.tokenCalls, profileCalls: state.profileCalls }),
     );
     await ctx.close();

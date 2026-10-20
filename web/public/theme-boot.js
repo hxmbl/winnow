@@ -13,7 +13,7 @@
  */
 (function () {
   var MODES = ["system", "light", "dark", "oled"];
-  var ACCENTS = ["space", "plum", "ember", "aurora"];
+  var ACCENTS = ["space", "plum", "rose", "ember", "green", "aurora", "blue", "graphite"];
   var appearance = "system";
   var accent = "space";
   try {
@@ -21,6 +21,8 @@
     var stored = raw ? JSON.parse(raw) : null;
     if (stored && MODES.indexOf(stored.appearance) !== -1) appearance = stored.appearance;
     if (stored && ACCENTS.indexOf(stored.accent) !== -1) accent = stored.accent;
+    // The custom colour (1.4.0) is only named here; its tones need the bundle's arithmetic.
+    if (stored && stored.accent === "custom") accent = "custom";
   } catch (error) {
     // Private mode, a full quota, a corrupt blob: the defaults stand.
   }

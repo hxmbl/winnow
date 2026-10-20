@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSessionBridge } from "./bridge";
+import { saveAccounts } from "./accounts";
 import { GmailSession, localCache } from "./session";
 import { GOOGLE_REVOKE_URL, type TokenSet } from "../gmail/dto";
 import type { TokenStore } from "../gmail/tokens";
@@ -54,6 +55,8 @@ let answer: () => Promise<Response>;
 
 beforeEach(() => {
   storage = installLocalStorage();
+  // 1.4.0: the session belongs to an account in the registry (one, here).
+  saveAccounts(globalThis.localStorage, { version: 1, active: "acct1xx", accounts: [{ id: "acct1xx", email: "a@x.example", color: "space", notify: true, addedAt: 1 }] });
   requests = [];
   answer = async () => new Response("{}", { status: 200 });
   vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
@@ -72,8 +75,9 @@ const signedIn = (): TokenSet => ({ accessToken: "a", refreshToken: REFRESH, exp
 describe("signing out through the bridge", () => {
   it("revokes exactly once, with the refresh token in the body", async () => {
     const tokens = memoryTokens(signedIn());
-    const store = { signOut: vi.fn(async () => {}) } as unknown as WinnowStore;
+    const store = { signOut: vi.fn(async () => {}), setAccounts: () => {} } as unknown as WinnowStore;
     const bridge = createSessionBridge(platform(tokens.store), store);
+    await bridge.prepare();
     expect(await bridge.hasSession()).toBe(true);
 
     await bridge.signOut();
@@ -91,7 +95,8 @@ describe("signing out through the bridge", () => {
 
   it("revokes nothing for the demo", async () => {
     const tokens = memoryTokens(signedIn());
-    const bridge = createSessionBridge(platform(tokens.store), { signOut: async () => {} } as unknown as WinnowStore);
+    const bridge = createSessionBridge(platform(tokens.store), { signOut: async () => {}, setAccounts: () => {} } as unknown as WinnowStore);
+    await bridge.prepare();
     await bridge.signOut({ revoke: false });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requests).toHaveLength(0);
@@ -99,7 +104,7 @@ describe("signing out through the bridge", () => {
   });
 
   it("revokes nothing when there is no session at all", async () => {
-    const bridge = createSessionBridge(platform(memoryTokens(null).store), { signOut: async () => {} } as unknown as WinnowStore);
+    const bridge = createSessionBridge(platform(memoryTokens(null).store), { signOut: async () => {}, setAccounts: () => {} } as unknown as WinnowStore);
     await bridge.signOut();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requests).toHaveLength(0);

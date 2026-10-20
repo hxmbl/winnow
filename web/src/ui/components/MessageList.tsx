@@ -30,6 +30,7 @@ import {
   type Selection,
 } from "../selection";
 import { daySections, formatRowTime, type DayBucket } from "../../core/mail/datetime";
+import { formatWhen } from "../../core/mail/when";
 import { displayName } from "../../core/model/email";
 import { draftRowName } from "../../core/mail/drafts";
 import {
@@ -271,13 +272,25 @@ const Row = memo(function Row({
 }: RowProps) {
   const email = row.representative;
   const indicators = rowIndicators(email, signals);
-  const time = formatRowTime(email.receivedAt, bucket);
+  // Snoozed and Scheduled rows say when (it comes back, it goes) rather than when it
+  // arrived: that time is the point of both lists.
+  const timed = email.snoozedUntil ?? email.scheduled?.sendAt;
+  const time = timed !== undefined ? formatWhen(timed, Date.now()) : formatRowTime(email.receivedAt, bucket);
   // A draft is named by who it is to, and says it is a draft where a row's signal word
-  // goes, in the danger colour Gmail gives it.
+  // goes, in the danger colour Gmail gives it. A scheduled send likewise.
   const draft = email.gmailDraft !== undefined;
-  const name = draft ? draftRowName(email) : displayName(email);
+  const scheduled = email.scheduled;
+  const name = draft || scheduled ? draftRowName(email) : displayName(email);
 
-  const signal: RowSignal | null = draft ? { label: "Draft", title: "Not sent yet", danger: true } : rowSignal(indicators, fresh);
+  const signal: RowSignal | null = scheduled
+    ? scheduled.problem
+      ? { label: "Not sent", title: scheduled.problem, danger: true }
+      : { label: "Scheduled", title: `Sends ${time}`, danger: false }
+    : email.snoozedUntil !== undefined
+      ? { label: "Snoozed", title: `Back in your Inbox ${time}`, danger: false }
+      : draft
+        ? { label: "Draft", title: "Not sent yet", danger: true }
+        : rowSignal(indicators, fresh);
 
   return (
     <div
@@ -285,10 +298,10 @@ const Row = memo(function Row({
       data-checked={checked ? "" : undefined}
       className={`group/row relative flex w-full items-start gap-2 rounded-pane px-3 py-1.5 text-left transition-colors duration-150 [-webkit-touch-callout:none] ${
         /*
-         * Selection is the accent, washed into the surface: the one place in the list the
-         * accent appears besides the unread dot, so the two are never confused with any
-         * other state. A row in the multi-selection gets the same wash; the check in the
-         * avatar slot is what tells it from the open message.
+         * Selection is a neutral step (`surface-selected`, the same for every accent since
+         * 1.4.0), so the unread dot stays the list's one spot of accent and the two are
+         * never confused. A row in the multi-selection gets the same fill; the check in
+         * the avatar slot is what tells it from the open message.
          */
         selected || checked ? "bg-surface-selected" : "hover:bg-surface-hover"
       }`}
@@ -601,7 +614,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   // the loudest thing in a list that is meant to be read quietly. Inset to the sender
   // column, so the label sits over the names rather than over the unread gutter.
   return (
-    <div className="flex items-baseline gap-2 bg-surface pb-1 pl-[68px] pr-3 pt-4 text-meta">
+    <div className="flex items-baseline gap-2 pb-1 pl-[68px] pr-3 pt-4 text-meta">
       <span className="font-semibold text-ink-muted">{label}</span>
       <span className="tabular-nums text-ink-subtle">{count}</span>
     </div>
@@ -692,7 +705,7 @@ function Empty({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       {remedy ? (
         <>
           <p className="max-w-[26rem] text-ui text-ink-body">{remedy.body}</p>
@@ -837,11 +850,13 @@ function MessageList({
 
   // Day sections, on the *representative* message's date, since that is the date the row
   // displays. One flat section unless the sort is chronological.
+  // Snoozed and Scheduled are ordered by when, not by arrival: no day headers there.
+  const timedList = threads.some((row) => row.representative.snoozedUntil !== undefined || row.representative.scheduled !== undefined);
   const sections = daySections(
     threads,
     now,
     (row) => row.representative.receivedAt,
-    sortBy === "date",
+    sortBy === "date" && !timedList,
   );
 
   /**
@@ -1859,7 +1874,7 @@ function MessageList({
     return (
       <div
         data-list-empty=""
-        className="flex min-h-0 flex-1 flex-col bg-surface"
+        className="flex min-h-0 flex-1 flex-col"
         style={{ "--wn-top-chrome": `${band}px`, paddingTop: "var(--wn-top-chrome)" } as React.CSSProperties}
       >
         {lead}
@@ -1891,7 +1906,7 @@ function MessageList({
         // No scroll anchoring: the list places its own window (spacer + measured rows), and
         // the browser's anchoring fought it, snapping a programmatic or flung scroll back by
         // a few hundred px and, with reduced motion, flip-flopping between two offsets.
-        className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-surface pb-4 [overflow-anchor:none]"
+        className="thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain pb-4 [overflow-anchor:none]"
         // Under floating chrome: the rows start below it, and anything the browser
         // scrolls into view itself (Tab onto a row) stops below it and the pinned day.
         // `--wn-top-chrome` is the measured chrome (a ResizeObserver on it in the app) plus
@@ -2045,7 +2060,7 @@ function MessageList({
             </span>
           </div>
         ) : (
-          <div data-sticky-day="" className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-surface px-1.5">
+          <div data-sticky-day="" className="wn-backdrop pointer-events-none absolute inset-x-0 top-0 z-10 px-1.5">
             <SectionHeader label={stickyHeader.label} count={stickyHeader.count} />
           </div>
         ))}

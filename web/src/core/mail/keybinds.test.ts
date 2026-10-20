@@ -20,7 +20,7 @@ import {
 function reachableCommandTypes(): Set<string> {
   const types = new Set<string>();
   const keys = [
-    ..."jkoseurfmuhcz#/,?!123456789[".split(""),
+    ..."jkoseurfmuhczb#/,?!123456789[".split(""),
     "Enter",
     "Escape",
     "ArrowUp",
@@ -445,6 +445,8 @@ describe("the cheat sheet", () => {
       Escape: context({ viewerOpen: true, hasActionTarget: true }),
       // Digits need a rail to address.
       "1": context({ railCount: 9, hasActionTarget: true }),
+      // Snooze needs something to act on.
+      b: context({ viewerOpen: true, hasActionTarget: true }),
       // Undo needs an offer in the status pill.
       z: context({ hasActionTarget: true, undoAvailable: true }),
     };
@@ -477,6 +479,7 @@ describe("the cheat sheet", () => {
       "toggleStar",
       "copyCode",
       "archive",
+      "snooze",
       "trash",
       "toggleRead",
       "focusReply",
@@ -534,7 +537,7 @@ describe("the cheat sheet", () => {
     const ambiguous: string[] = [];
 
     for (const ctx of REACHABLE_CONTEXTS) {
-      for (const key of "jkoseurfmuh#/,?!123456789U&[".split("")) {
+      for (const key of "jkoseurfmuhb#/,?!123456789U&[".split("")) {
         for (const event of [{}, { shiftKey: true }, { shiftKey: false }]) {
           const firing = BINDINGS.filter((binding) => {
             if (![...binding.matches.keys, ...(binding.matches.chars ?? [])].includes(key)) {
@@ -661,6 +664,12 @@ describe("the undo key", () => {
     expect(commandForKey("z", offer, { ctrlKey: true, altKey: true })).toBeNull();
     expect(commandForKey("z", DEFAULT_CONTEXT, { ctrlKey: true })).toBeNull();
   });
+  it("routes b to snooze, only with something to snooze", () => {
+    expect(commandForKey("b", { ...offer, hasActionTarget: true })).toEqual({ type: "snooze" });
+    expect(commandForKey("b", { ...offer, hasActionTarget: false })).toBeNull();
+    expect(commandForKey("B", { ...offer, hasActionTarget: true }, { shiftKey: true })).toBeNull();
+  });
+
   it("is on the cheat sheet, and other system chords still pass through", () => {
     expect(BINDINGS.some((binding) => binding.keys === "z" && /undo/i.test(binding.help))).toBe(true);
     expect(commandForKey("e", { ...offer, hasActionTarget: true }, { ctrlKey: true })).toBeNull();

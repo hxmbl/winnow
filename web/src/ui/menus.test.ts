@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { archiveLabel, buildRowMenu, buildSenderMenu, menuHint, moveTargets, tidy, type RowMenuInput } from "./menus";
+import { archiveLabel, buildRowMenu, buildScheduledMenu, buildSenderMenu, canSnooze, menuHint, moveTargets, snoozeEntries, tidy, type RowMenuInput } from "./menus";
+import { whenPresets } from "../core/mail/when";
 import { MENU_MARGIN, placeMenu, type MenuEntry } from "./menuPlacement";
 import { avatarInitial, avatarTone } from "./avatar";
 
@@ -33,7 +34,7 @@ describe("the row context menu", () => {
 
   it("never offers what Winnow cannot do", () => {
     const all = JSON.stringify(buildRowMenu(rowInput()));
-    for (const missing of ["Snooze", "Add to tasks", "Forward as attachment"]) {
+    for (const missing of ["Add to tasks", "Forward as attachment"]) {
       expect(all).not.toContain(missing);
     }
   });
@@ -50,6 +51,39 @@ describe("the row context menu", () => {
     expect(ids(entries)).toEqual(["archive", "trash", "mark-read", "—", "move"]);
     const archive = entries.find((e) => e.kind === "item" && e.id === "archive");
     expect(archive && archive.kind === "item" && archive.label).toBe("Archive 3");
+  });
+
+  it("offers Snooze ▸ after Archive, with the presets and Pick date & time…, where snoozing means something", () => {
+    const presets = whenPresets(new Date(2026, 9, 20, 17, 1).getTime());
+    const snooze = vi.fn();
+    const withSnooze = (mailbox: RowMenuInput["mailbox"]) =>
+      buildRowMenu(rowInput({ mailbox, snoozePresets: presets, actions: { ...rowInput().actions, snooze, snoozeCustom: noop, unsnooze: noop } }));
+    const entries = withSnooze("inbox");
+    expect(ids(entries).slice(4, 6)).toEqual(["archive", "snooze"]);
+    const item = entries.find((e) => e.kind === "item" && e.id === "snooze");
+    expect(item && item.kind === "item" && item.hint).toBe("b");
+    const sub = item && item.kind === "item" ? item.submenu ?? [] : [];
+    expect(ids(sub)).toEqual(["snooze-laterToday", "snooze-tomorrow", "snooze-weekend", "snooze-nextWeek", "—", "snooze-custom"]);
+    const tomorrow = sub.find((e) => e.kind === "item" && e.id === "snooze-tomorrow");
+    if (tomorrow?.kind === "item") tomorrow.onSelect?.();
+    expect(snooze).toHaveBeenCalledWith(presets[1]!.at);
+    // In Snoozed: Unsnooze in Archive's place, and a new time.
+    const snoozed = withSnooze("snoozed");
+    const first = snoozed.find((e) => e.kind === "item" && e.id === "archive");
+    expect(first?.kind === "item" && first.label).toBe("Unsnooze");
+    expect(snoozed.some((e) => e.kind === "item" && e.label === "Change snooze time")).toBe(true);
+    for (const mailbox of ["sent", "trash", "spam"] as const) expect(ids(withSnooze(mailbox))).not.toContain("snooze");
+    expect(canSnooze("drafts")).toBe(false);
+    expect(ids(snoozeEntries([], noop, noop))).toEqual(["snooze-custom"]);
+  });
+
+  it("gives a scheduled send Edit, Send now and Cancel schedule, and only Cancel for several", () => {
+    expect(ids(buildScheduledMenu({ edit: noop, sendNow: noop, cancel: noop }))).toEqual(["scheduled-edit", "scheduled-send", "scheduled-cancel"]);
+    const many = buildScheduledMenu({ edit: noop, sendNow: noop, cancel: noop }, 3);
+    expect(ids(many)).toEqual(["scheduled-cancel"]);
+    expect(many[0]?.kind === "item" && many[0].label).toBe("Cancel 3 schedules");
+    expect(archiveLabel("scheduled")).toBeNull();
+    expect(moveTargets("scheduled")).toEqual([]);
   });
 
   it("prints the shortcut each verb really has", () => {
@@ -210,7 +244,7 @@ describe("the avatar monogram", () => {
   it("gives a sender the same one of two tones every time", () => {
     expect(avatarTone("Ada@Example.com")).toBe(avatarTone("ada@example.com"));
     const tones = new Set(["a@x.y", "b@x.y", "c@x.y", "d@x.y", "e@x.y", "f@x.y"].map(avatarTone));
-    expect([...tones].every((tone) => tone === "neutral" || tone === "accent")).toBe(true);
+    expect([...tones].every((tone) => tone === "neutral" || tone === "soft")).toBe(true);
     expect(tones.size).toBe(2);
   });
 });

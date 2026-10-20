@@ -39,6 +39,7 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   ACCENTS,
+  ACCENT_TOKENS,
   MODES,
   contrastRatio,
   PALETTES,
@@ -128,8 +129,8 @@ function rgbDistance(a: string, b: string): number {
 describe("every mode × accent is covered", () => {
   it("walks three modes and the curated accents", () => {
     expect(MODES).toEqual(["light", "dark", "oled"]);
-    expect(ACCENT_THEMES.length).toBeGreaterThanOrEqual(3);
-    expect(ACCENT_THEMES.length).toBeLessThanOrEqual(4);
+    // 1.4.0: eight curated accents round the wheel, Space first, Graphite (the neutral) last.
+    expect([...ACCENT_THEMES]).toEqual(["space", "plum", "rose", "ember", "green", "aurora", "blue", "graphite"]);
     expect(ACCENT_THEMES[0]).toBe("space");
     expect(COMBOS).toHaveLength(MODES.length * ACCENT_THEMES.length);
     for (const accent of ACCENT_THEMES) expect(ACCENTS[accent].label.length).toBeGreaterThan(0);
@@ -248,9 +249,36 @@ describe("the accent", () => {
     });
   }
 
+  /**
+   * Graphite (1.4.0) is the near-neutral: its hue is incidental (a trace of slate blue),
+   * so it is held apart from the rest by saturation, not hue. Every other accent is a
+   * colour, and they stay at least 30° apart.
+   */
+  const NEUTRAL_ACCENTS = new Set<AccentTheme>(["graphite"]);
+
+  it("graphite is near-neutral and every other accent is clearly a colour", () => {
+    for (const mode of MODES) {
+      for (const accent of ACCENT_THEMES) {
+        const { saturation } = hsl(paletteFor(mode, accent).color.accent);
+        if (NEUTRAL_ACCENTS.has(accent)) expect(saturation, `${mode}/${accent}`).toBeLessThanOrEqual(0.25);
+        else expect(saturation, `${mode}/${accent}`).toBeGreaterThanOrEqual(0.33);
+      }
+    }
+  });
+
+  it("graphite still reads as something to press: a slate tint the neutral inks never carry", () => {
+    for (const mode of MODES) {
+      const { color } = paletteFor(mode, "graphite");
+      const [r, g, b] = channels(color.accent);
+      // The inks' channels sit within 4 of each other; graphite's blue leads by 16 or more.
+      expect(b - Math.min(r, g), `${mode}: graphite ${color.accent} is a plain grey`).toBeGreaterThanOrEqual(16);
+    }
+  });
+
   it("the accent themes are visibly different colours", () => {
-    for (const [index, first] of ACCENT_THEMES.entries()) {
-      for (const second of ACCENT_THEMES.slice(index + 1)) {
+    const chromatic = ACCENT_THEMES.filter((accent) => !NEUTRAL_ACCENTS.has(accent));
+    for (const [index, first] of chromatic.entries()) {
+      for (const second of chromatic.slice(index + 1)) {
         const gap = hueGap(hsl(ACCENTS[first].dark.accent).hue, hsl(ACCENTS[second].dark.accent).hue);
         expect(gap, `${first} vs ${second}`).toBeGreaterThanOrEqual(30);
       }
@@ -263,26 +291,53 @@ describe("the accent", () => {
 });
 
 describe("the neutrals", () => {
-  /** Backdrops and inks that carry the blue-violet cast. Status colours and the accent are excluded. */
-  const NEUTRALS = [
-    ...SURFACE_TOKENS.filter((token) => token !== "surfaceSelected"),
-    ...INK_TOKENS.filter((token) => token !== "inkPlaceholder"),
-  ];
+  /** Every backdrop and ink, the selected row included. Status colours and the accent are excluded. */
+  const NEUTRALS = [...SURFACE_TOKENS, ...INK_TOKENS];
+  /** The translucent neutrals: lines, washes, veil and scrim. */
+  const LINES = ["hairline", "hairlineSoft", "divider", "controlBorder", "scrollbar", "sheen", "veil", "scrim"] as const;
   /** The planes that step up from the backdrop, in order. Each step has to be visible. */
   const STEPS = ["canvas", "surface", "surfaceHover", "surfaceActive"] as const;
-  /** The hue every neutral leans towards: Space's, shared by every accent theme. */
-  const SHARED_HUE = hsl(ACCENTS.space.dark.accent).hue;
-
   /**
-   * Neutrals are shared across accents, by design: only the accent (with light's
-   * selected-row wash and, for Ember, danger) changes. Light's neutrals lean towards
-   * Space's hue; dark and OLED are plain neutral greys.
+   * 1.4.0, the owner's rule: an accent is "the colour used for buttons and the like", not
+   * "everything is that colour". So an accent theme changes the accent, the focus ring,
+   * the ink on the accent and (for Ember) danger, and nothing else: every other token,
+   * the selected row included, is identical across accents. Light's neutrals are
+   * near-white greys with at most a trace of cool; dark and OLED are plain greys.
    */
+  it("an accent theme may change only the accent tokens", () => {
+    expect([...ACCENT_TOKENS].sort()).toEqual(["accent", "danger", "dangerWash", "focusRing", "onAccent"]);
+  });
+
   for (const { mode, accent, name } of COMBOS) {
     it(`${name}: neutrals are the shared set`, () => {
       const own = paletteFor(mode, accent).color;
       const space = paletteFor(mode, "space").color;
       for (const token of NEUTRALS) expect(own[token], `${name}: ${token}`).toBe(space[token]);
+    });
+
+    it(`${name}: every token outside the accent's own is identical across accents`, () => {
+      const own = paletteFor(mode, accent);
+      const space = paletteFor(mode, "space");
+      const accentOwned = new Set<string>(ACCENT_TOKENS);
+      for (const [token, value] of Object.entries(space.color)) {
+        if (accentOwned.has(token)) continue;
+        expect(own.color[token], `${name}: ${token}`).toBe(value);
+      }
+      expect(own.badge).toEqual(space.badge);
+      expect(own.pill).toEqual(space.pill);
+      expect(own.elevation).toEqual(space.elevation);
+    });
+
+    it(`${name}: no neutral carries the accent's hue`, () => {
+      const { color } = paletteFor(mode, accent);
+      for (const token of NEUTRALS) {
+        const [r, g, b] = channels(color[token]);
+        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${color[token]} is tinted`).toBeLessThanOrEqual(4);
+      }
+      for (const token of LINES) {
+        const [r, g, b] = (color[token].match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${color[token]} is tinted`).toBeLessThanOrEqual(4);
+      }
     });
 
     if (mode !== "light") {
@@ -298,18 +353,12 @@ describe("the neutrals", () => {
       });
     }
 
-    if (mode === "light") it(`${name}: are cool blue-violet greys, tinted but not coloured`, () => {
+    if (mode === "light") it(`${name}: are near-white greys, at most a trace of cool, never a colour`, () => {
       const { color } = paletteFor(mode, accent);
       for (const token of NEUTRALS) {
-        const hex = color[token];
-        const [r, g, b] = channels(hex);
-        // Blue over red over green: a blue-violet lean, not blue-grey, not teal, not beige.
-        expect(b, `${name}: ${token} ${hex} is not violet-leaning`).toBeGreaterThan(g);
-        expect(r, `${name}: ${token} ${hex} leans teal`).toBeGreaterThanOrEqual(g);
-        expect(b, `${name}: ${token} ${hex} is warm`).toBeGreaterThan(r);
-        // A cast, not a colour.
-        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${hex} is too saturated`).toBeLessThanOrEqual(36);
-        expect(hueGap(hsl(hex).hue, SHARED_HUE), `${name}: ${token} ${hex} drifts from the indigo cast`).toBeLessThanOrEqual(20);
+        const [r, g, b] = channels(color[token]);
+        // Blue never below red or green: a cool trace, never warm, never green.
+        expect(b, `${name}: ${token} is warm or green`).toBeGreaterThanOrEqual(Math.max(r, g));
       }
     });
 
@@ -337,17 +386,17 @@ describe("the neutrals", () => {
       }
     });
 
-    if (mode === "light") {
-      it(`${name}: the selected row is the accent washed into the surface`, () => {
-        const { color } = paletteFor(mode, accent);
-        const gap = hueGap(hsl(color.surfaceSelected).hue, hsl(color.accent).hue);
-        expect(gap, `${name}: ${color.surfaceSelected} drifts from ${color.accent}`).toBeLessThanOrEqual(25);
-      });
-    } else {
-      it(`${name}: the selected row is the same neutral grey for every accent`, () => {
-        expect(paletteFor(mode, accent).color.surfaceSelected).toBe(paletteFor(mode, "space").color.surfaceSelected);
-      });
-    }
+    it(`${name}: the selected row is the same neutral grey for every accent`, () => {
+      expect(paletteFor(mode, accent).color.surfaceSelected).toBe(paletteFor(mode, "space").color.surfaceSelected);
+    });
+
+    it(`${name}: the selected row sits between hover and pressed`, () => {
+      const { color } = paletteFor(mode, accent);
+      const lum = (token: "surfaceHover" | "surfaceSelected" | "surfaceActive") => relativeLuminance(color[token]);
+      const [low, high] = [lum("surfaceHover"), lum("surfaceActive")].sort((x, y) => x - y);
+      expect(lum("surfaceSelected")).toBeGreaterThan(low);
+      expect(lum("surfaceSelected")).toBeLessThan(high);
+    });
   }
 
   it("dark is Notion-like grey: a #191919 canvas under lighter chrome and panes", () => {
@@ -360,7 +409,7 @@ describe("the neutrals", () => {
     expect(color.hairline).toBe("rgba(255, 255, 255, 0.09)");
     expect(color.inkBody).toBe("#D4D4D4");
     // Light is untouched by the dark rework.
-    expect(paletteFor("light").color.canvas).toBe("#EDECF4");
+    expect(paletteFor("light").color.canvas).toBe("#F1F1F3");
   });
 
   it("OLED is true black where it can be, with neutral grey states and lines", () => {
@@ -458,6 +507,13 @@ describe("before the bundle loads", () => {
       });
     }
   }
+
+  it("names the custom accent (1.4.0); its colours come with the bundle", () => {
+    expect(boot(JSON.stringify({ appearance: "dark", accent: "custom", accentCustom: "#FF8800" }), false)).toMatchObject({
+      theme: "dark",
+      accent: "custom",
+    });
+  });
 
   it("falls back to system and Space for anything unreadable", () => {
     expect(boot(null, true)).toMatchObject({ theme: "dark", accent: "space" });
@@ -740,7 +796,8 @@ describe("1.3.2 contrast margins", () => {
     expect(PALETTES.dark.color.inkMuted).toBe("#ADADAD");
   });
 
-  for (const accent of ["ember", "aurora"] as const) {
+  // 1.4.0's accents are held to the same floor from the start.
+  for (const accent of ["ember", "aurora", "rose", "green", "blue", "graphite"] as const) {
     it(`light/${accent}: the accent clears ${ACCENT_FLOOR}:1 on every opaque surface`, () => {
       const color = paletteFor("light", accent).color.accent;
       for (const backdrop of opaqueSurfaces("light", accent)) {

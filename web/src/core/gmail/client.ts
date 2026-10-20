@@ -36,6 +36,7 @@ import {
   type GmailSendResponse,
 } from "./dto";
 import { decodeBody, htmlPart } from "./mapper";
+import { SNOOZED_LABEL } from "../mail/snooze";
 
 /** Gmail's maximum page size. Asking for more is silently clamped. */
 export const MAX_PAGE_SIZE = 200;
@@ -463,6 +464,36 @@ export class GmailClient {
       method: "POST",
       body: { removeLabelIds: labelIds },
     });
+  }
+
+  /**
+   * Add and remove labels in one `messages.modify`, for a change that must land together
+   * (snoozing: the label on and `INBOX` off).
+   */
+  async modify(id: string, addLabelIds: string[], removeLabelIds: string[]): Promise<void> {
+    refuseFixedLabels([...addLabelIds, ...removeLabelIds]);
+    await this.request(`/users/me/messages/${encodeURIComponent(id)}/modify`, {
+      method: "POST",
+      body: { addLabelIds, removeLabelIds },
+    });
+  }
+
+  /**
+   * The id of Winnow's own label, made if the account has none yet (`labels.list`, then
+   * `labels.create`). Only `Winnow/Snoozed`: Winnow does not manage the account's labels
+   * (MAP §13a), and this one exists so snoozed mail is visible and recoverable in any
+   * client. Any other name is refused rather than created.
+   */
+  async ensureLabel(name: string): Promise<string> {
+    if (name !== SNOOZED_LABEL) throw new GmailError(`Winnow only makes its own ${SNOOZED_LABEL} label.`, 400, "unknown");
+    const listing = await this.request<{ labels?: { id: string; name: string }[] }>("/users/me/labels");
+    const found = listing.labels?.find((label) => label.name.toLowerCase() === name.toLowerCase());
+    if (found) return found.id;
+    const made = await this.request<{ id: string }>("/users/me/labels", {
+      method: "POST",
+      body: { name, labelListVisibility: "labelShow", messageListVisibility: "show" },
+    });
+    return made.id;
   }
 
   /** Archive: leave the inbox, keep everything else. */

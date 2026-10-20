@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeMailHtml } from "./sanitize";
-import { MAX_SCOPED_CSS, scopeSelector, scopeSenderCss, sheetScope } from "./scopedSheet";
+import { MAX_SCOPED_CSS, scopeSelector, scopeSenderCss, sheetScope, unwrapDarkQuery } from "./scopedSheet";
+import { DARK_EMAIL_PALETTE } from "./emailDark";
 
 const S = '[data-wn-email][data-wn-sheet="m1"]';
 
@@ -157,5 +158,78 @@ describe("scopeSenderCss", () => {
     expect(css).toContain(`${S} { background: #eeeeee }`);
     expect(css).not.toContain("evil.example");
     expect(css).not.toContain("tracker.example");
+  });
+});
+
+describe("scopeSenderCss in email dark mode (1.4.0)", () => {
+  const palette = DARK_EMAIL_PALETTE;
+  const OWN = { mode: "own" as const, palette };
+  const ADAPTIVE = { mode: "adaptive" as const, palette };
+
+  it("unwraps a dark-scheme block so it applies when the reader is dark, light blocks still dropped", () => {
+    const css = scopeSenderCss(
+      [
+        `.card { background: #ffffff; color: #111111 }
+         @media (prefers-color-scheme: dark) { .card { background: #1c1c1e !important; color: #f2f2f7 !important } }
+         @media screen and (prefers-color-scheme: dark) and (max-width: 600px) { .hero { padding: 8px } }
+         @media (prefers-color-scheme: light) { .card { color: red } }`,
+      ],
+      S,
+      OWN,
+    );
+    // The sender's own light rule is untouched (own path: no recolouring)…
+    expect(css).toContain(`${S} .card { background: #ffffff; color: #111111 }`);
+    // …and their dark rule follows it, unconditionally, so it wins.
+    expect(css).toContain(`${S} .card { background: #1c1c1e !important; color: #f2f2f7 !important }`);
+    expect(css.indexOf("#1c1c1e")).toBeGreaterThan(css.indexOf("#ffffff"));
+    expect(css).toContain("@media screen and (max-width: 600px) {");
+    expect(css).not.toMatch(/prefers-color-scheme/);
+    expect(css).not.toContain("color: red");
+  });
+
+  it("keeps dropping dark-scheme blocks when the reader is light", () => {
+    const css = scopeSenderCss(["@media (prefers-color-scheme: dark) { .x { color: white } }"], S);
+    expect(css).toBe("");
+  });
+
+  it("unwrapDarkQuery takes only the dark feature out", () => {
+    expect(unwrapDarkQuery("@media (prefers-color-scheme: dark)")).toBe("");
+    expect(unwrapDarkQuery("@media only screen and (prefers-color-scheme: dark)")).toBe("");
+    expect(unwrapDarkQuery("@media (prefers-color-scheme:dark) and (max-width:600px)")).toBe("(max-width:600px)");
+    expect(unwrapDarkQuery("@media (max-width: 600px)")).toBeNull();
+    expect(unwrapDarkQuery("@media (prefers-color-scheme: dark), print")).toBeNull();
+    expect(unwrapDarkQuery("@media (prefers-color-scheme: light)")).toBeNull();
+  });
+
+  it("recolours ordinary rules on the adaptive path, responsive media included", () => {
+    const css = scopeSenderCss(
+      [`body { background: #F4F6F8; color: #15181D } .foot a { color: #7A838C }
+        @media (max-width: 600px) { .card { background: #ffffff } }`],
+      S,
+      ADAPTIVE,
+    );
+    expect(css).not.toMatch(/#F4F6F8|#15181D|#7A838C|#ffffff/i);
+    expect(css).toContain(`background: ${palette.surface.toLowerCase()}`);
+    expect(css).toContain("@media (max-width: 600px)");
+  });
+
+  it("applies Outlook's [data-ogsc]/[data-ogsb] hooks in a dark reader, unrecoloured; drops them in light", () => {
+    const sheet = ["[data-ogsc] .title { color: #fafafa !important } [data-ogsb] .band { background: #123456 }"];
+    const dark = scopeSenderCss(sheet, S, ADAPTIVE);
+    expect(dark).toContain(`${S} .title { color: #fafafa !important }`);
+    expect(dark).toContain(`${S} .band { background: #123456 }`);
+    expect(scopeSenderCss(sheet, S)).toBe("");
+  });
+
+  it("still fences every selector, dark or not", () => {
+    const css = scopeSenderCss(
+      ["@media (prefers-color-scheme: dark) { body ~ .x, :host .y, .ok { color: #fff } } [data-ogsc] + .z { color: #fff }"],
+      S,
+      OWN,
+    );
+    for (const rule of css.split("\n").filter((line) => line.includes("{"))) {
+      for (const selector of rule.split("{")[0].split(",")) expect(selector.trim().startsWith(S)).toBe(true);
+    }
+    expect(css).toContain(`${S} .ok`);
   });
 });

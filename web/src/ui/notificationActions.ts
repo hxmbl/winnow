@@ -13,6 +13,9 @@ import {
   handleNotificationAction,
   parseKeptReply,
   type KeptReply,
+  type NotificationAccount,
+  type NotificationActionDeps,
+  type NotificationActionEvent,
 } from "../core/notify/notifications";
 import type { WinnowStore } from "../core/store/store";
 import type { Platform } from "../platform/types";
@@ -20,8 +23,15 @@ import { MAX_MESSAGE_NOTIFICATIONS } from "../core/notify/notifications";
 import { displayName } from "../core/model/email";
 import { currentSenderPictures, resolveSenderPicture, type SenderPictures } from "./senderPictures";
 
-/** A notification's picture size: Android's large icon and the desktop's, in px. */
+/** A notification's picture size: Android's large icon and the desktop's, in CSS px. */
 export const NOTIFICATION_PICTURE_SIZE = 96;
+
+/**
+ * The pixels a native notification's picture is drawn at: twice the picture size, as
+ * Gravatar is asked for, so Android's 64dp large icon is sharp on a 3× screen rather
+ * than a 96px picture scaled up.
+ */
+export const NATIVE_PICTURE_PIXELS = NOTIFICATION_PICTURE_SIZE * 2;
 
 /**
  * Each shown message's sender picture, by Gmail id, under the avatar's own rules and
@@ -48,8 +58,8 @@ export async function notificationPictures(
 
 /**
  * The longest picture (as a data URL) handed to a native notification. Rust and Kotlin
- * enforce the same cap (`MAX_PICTURE_CHARS` in `notify_actions/mod.rs`); a 96px PNG is
- * usually 5–20 KB.
+ * enforce the same cap (`MAX_PICTURE_CHARS` in `notify_actions/mod.rs`); a 192px PNG is
+ * usually 10–60 KB.
  */
 export const NATIVE_PICTURE_MAX_CHARS = 200_000;
 
@@ -71,12 +81,84 @@ export function isNativePicture(value: unknown): value is string {
 export type Rasterise = (url: string, size: number) => Promise<string | null>;
 
 /**
- * The webview's rasteriser: the same anonymous, referrer-less image load the avatar
- * makes (so nothing new reaches anyone), centre-cropped into a square canvas. A picture
- * that fails to load, takes over `timeoutMs`, or taints the canvas (a server without
- * CORS) answers `null`, and the notification shows the app icon instead.
+ * Where a picture of natural size `width`×`height` is drawn in a `size`-px square: scaled
+ * to cover it and centred, the avatar's `object-cover` (the overflow is clipped by the
+ * canvas). Always in destination space, never a source crop: an SVG with a `viewBox` and
+ * no `width`/`height` (most BIMI logos, SVG Tiny PS) reports a made-up natural size
+ * (Chromium says 150×150, some engines 0×0) and is drawn at another, so cropping its
+ * source by the reported size cut the logo to a corner or to nothing at all. Drawn by
+ * destination rectangle, the vector is rendered at the size it is drawn. No natural size
+ * at all is taken as square.
  */
-export function canvasRasterise(timeoutMs = 3000): Rasterise {
+export function pictureDrawRect(width: number, height: number, size: number): { x: number; y: number; width: number; height: number } {
+  const w = width > 0 ? width : size;
+  const h = height > 0 ? height : size;
+  const scale = size / Math.min(w, h);
+  const dw = w * scale;
+  const dh = h * scale;
+  return { x: (size - dw) / 2, y: (size - dh) / 2, width: dw, height: dh };
+}
+
+/** Whether RGBA pixels are all fully transparent: a picture that drew nothing. */
+export function isBlankPixels(data: ArrayLike<number>): boolean {
+  for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) return false;
+  return true;
+}
+
+/** The parts of a 2D context `drawPicture` uses, so a test can stand in for a canvas. */
+export type PictureContext = {
+  drawImage(image: CanvasImageSource, dx: number, dy: number, dw: number, dh: number): void;
+  getImageData(sx: number, sy: number, sw: number, sh: number): { data: ArrayLike<number> };
+  fillRect(x: number, y: number, w: number, h: number): void;
+  fillStyle: string | CanvasGradient | CanvasPattern;
+  globalCompositeOperation: GlobalCompositeOperation;
+};
+
+/**
+ * Draw a loaded picture into a `size`-px square the way the avatar shows it: covering the
+ * square, centred, over the avatar's own backdrop (`background`, the in-app
+ * `bg-surface-active`) so a logo with a transparent background is not dark-on-nothing
+ * in a dark notification shade, and the round large icon Android crops it to looks like
+ * the avatar. `false` when it drew nothing at all (a picture Android would show as an
+ * empty disc rather than the app icon).
+ */
+export function drawPicture(
+  context: PictureContext,
+  image: CanvasImageSource,
+  natural: { width: number; height: number },
+  size: number,
+  background: string | null,
+): boolean {
+  const rect = pictureDrawRect(natural.width, natural.height, size);
+  context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+  if (isBlankPixels(context.getImageData(0, 0, size, size).data)) return false;
+  if (background) {
+    context.globalCompositeOperation = "destination-over";
+    context.fillStyle = background;
+    context.fillRect(0, 0, size, size);
+    context.globalCompositeOperation = "source-over";
+  }
+  return true;
+}
+
+/** The avatar's backdrop behind a loaded picture (`bg-surface-active`), or `null`. */
+export function avatarBackdrop(): string | null {
+  if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return null;
+  const value = getComputedStyle(document.documentElement).getPropertyValue("--wn-surfaceActive").trim();
+  return value || null;
+}
+
+/**
+ * The webview's rasteriser: an anonymous, referrer-less image load (so nothing new
+ * reaches anyone), drawn into a square canvas by `drawPicture`. The load has to be
+ * `crossOrigin="anonymous"` (the avatar's `<img>` is not, for non-Gravatar hosts) or the
+ * canvas is tainted and cannot be read; a host that sends no
+ * `Access-Control-Allow-Origin` therefore fails to load here, and the CSP's
+ * `connect-src` (Google and the DoH resolver only) rules out fetching the bytes instead.
+ * A picture that fails to load, takes over `timeoutMs`, draws nothing or taints the
+ * canvas answers `null`, and the notification shows the app icon instead.
+ */
+export function canvasRasterise(timeoutMs = 3000, background: () => string | null = avatarBackdrop): Rasterise {
   return (url, size) =>
     new Promise<string | null>((resolve) => {
       if (typeof Image === "undefined" || typeof document === "undefined") return resolve(null);
@@ -96,15 +178,15 @@ export function canvasRasterise(timeoutMs = 3000): Rasterise {
           canvas.width = size;
           canvas.height = size;
           const context = canvas.getContext("2d");
-          const w = img.naturalWidth || size;
-          const h = img.naturalHeight || size;
           if (!context) return done(null);
-          const side = Math.min(w, h);
-          context.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
-          const data = canvas.toDataURL("image/png");
+          if (!drawPicture(context, img, { width: img.naturalWidth, height: img.naturalHeight }, size, background())) return done(null);
+          // A PNG keeps a logo's edges; a busy photo that would pass the cap as a PNG
+          // goes as a JPEG (opaque by then: it is over the backdrop).
+          const png = canvas.toDataURL("image/png");
+          const data = isNativePicture(png) ? png : canvas.toDataURL("image/jpeg", 0.9);
           done(isNativePicture(data) ? data : null);
         } catch {
-          // A tainted canvas throws on `toDataURL`.
+          // A tainted canvas throws on `getImageData` / `toDataURL`.
           done(null);
         }
       };
@@ -120,7 +202,7 @@ export function canvasRasterise(timeoutMs = 3000): Rasterise {
 export async function nativePictures(
   pictures: Readonly<Record<string, string>>,
   rasterise: Rasterise = canvasRasterise(),
-  size = NOTIFICATION_PICTURE_SIZE,
+  size = NATIVE_PICTURE_PIXELS,
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   await Promise.all(
@@ -152,38 +234,129 @@ function requestReply(): void {
   replyOpener?.();
 }
 
+// ── Accounts ──────────────────────────────────────────────────────────────
+
+/**
+ * How a press reaches the right account (1.4.0). `App` provides it once the session
+ * bridge exists; a press that arrives before that (a cold start from a notification)
+ * waits for it, then for the launch's own restore, so it never acts on the demo.
+ */
+export type AccountRouter = {
+  /** Resolves once the launch has adopted (or failed to adopt) the stored session. */
+  ready(): Promise<void>;
+  /** Make `id` the open account; `false` when this device has no such account. */
+  openAccount(id: string): Promise<boolean>;
+  isOpen(id: string): boolean;
+  /** Catch an inactive account up after a native action (its light sync). */
+  refreshAccount(id: string): Promise<void>;
+  /** The light sync of every account that is not open. */
+  refreshInactive(): Promise<void>;
+};
+
+let router: AccountRouter | null = null;
+let routerWaiters: ((value: AccountRouter) => void)[] = [];
+
+export function provideAccountRouter(next: AccountRouter): () => void {
+  router = next;
+  for (const resolve of routerWaiters) resolve(next);
+  routerWaiters = [];
+  return () => {
+    if (router === next) router = null;
+  };
+}
+
+/** The router, waited for up to `ms` (a press before the app is up). */
+export function accountRouter(ms = 20_000): Promise<AccountRouter | null> {
+  if (router) return Promise.resolve(router);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    routerWaiters.push((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+}
+
+/** For tests. */
+export function resetAccountRouter(): void {
+  router = null;
+  routerWaiters = [];
+}
+
 // ── The store's bridge ────────────────────────────────────────────────────
 
+/** Whose notification this is: the open account, labelled when there is more than one. */
+export function openAccountTag(store: WinnowStore): NotificationAccount | null {
+  const snap = store.getSnapshot();
+  if (!snap.accountId) return null;
+  const many = snap.accounts.filter((account) => !account.demo).length > 1;
+  return { id: snap.accountId, label: many ? (snap.account?.email ?? null) : null };
+}
+
 /** `PlatformBridge.notifyNewMail`: the store's arrivals, as the platform's batch. */
-export async function announce(store: WinnowStore, platform: Platform, emails: readonly Email[]): Promise<void> {
+export async function announce(
+  store: WinnowStore,
+  platform: Platform,
+  emails: readonly Email[],
+  account: NotificationAccount | null = openAccountTag(store),
+  /** The account's own reply heads (another account's backend); the open one's by default. */
+  replyHeads?: (emails: readonly Email[]) => Promise<Record<string, string>>,
+): Promise<void> {
   if (emails.length === 0) return;
   const preferences = store.getSnapshot().preferences;
   // Only Android replies from the notification itself; elsewhere Reply opens the
   // composer, so the header blocks (a profile read each) would be built for nothing.
   const info = await platform.info().catch(() => null);
-  const [heads, pictures] = await Promise.all([
-    info?.os === "android" ? store.notificationReplyHeads(emails.slice(0, 5)) : Promise.resolve({}),
-    notificationPictures(emails, preferences.notificationHidePreview),
-  ]);
+  const heads = info?.os === "android"
+    ? (replyHeads ?? ((shown) => store.notificationReplyHeads(shown)))(emails.slice(0, 5)).catch(() => ({}))
+    : Promise.resolve({});
+  const [resolvedHeads, pictures] = await Promise.all([heads, notificationPictures(emails, preferences.notificationHidePreview)]);
   // Native notifications (Android, desktop) draw a picture from its bytes, never a URL.
   const shown = info?.kind === "desktop" ? await nativePictures(pictures) : pictures;
-  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, heads, shown));
+  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, resolvedHeads, shown, account));
 }
 
 // ── Presses and kept replies ──────────────────────────────────────────────
 
+/** The handler's dependencies over the store and the account router. */
+export function notificationDeps(store: WinnowStore, platform: Platform, routes: AccountRouter | null): NotificationActionDeps {
+  return {
+    focusWindow: () => platform.focusWindow(),
+    ...(routes
+      ? {
+          openAccount: (id: string) => routes.openAccount(id),
+          isOpen: (id: string) => routes.isOpen(id),
+          refreshAccount: (id: string) => routes.refreshAccount(id),
+        }
+      : {}),
+    openMessage: (gmailId, id) => store.openMessage(gmailId, id),
+    openInbox: () => store.openInbox(),
+    openReply: requestReply,
+    find: async (id, gmailId) => {
+      const snap = store.getSnapshot();
+      const cached = snap.all.find((email) => email.id === id || (gmailId !== "" && email.gmailId === gmailId));
+      if (cached) return cached;
+      return (await store.ensureMessage(gmailId)) ?? undefined;
+    },
+    setRead: (id, read) => store.setRead(id, read),
+    trashWithUndo: (id) => store.moveWithUndo(id, "trash"),
+    refresh: () => store.refresh(),
+    confirm: (id, title, text, failed) => void platform.confirmNotificationAction?.(id, title, text, failed),
+  };
+}
+
+/** One press (or a notification's deep link), once the app can act on it. */
+export async function routeNotificationAction(store: WinnowStore, platform: Platform, event: NotificationActionEvent): Promise<string> {
+  // A native action already done needs no account to be open.
+  const native = event.origin === "android" && event.action !== "open" && event.action !== "inbox";
+  const routes = await accountRouter(native ? 0 : undefined);
+  if (routes && !native) await routes.ready();
+  return handleNotificationAction(event, notificationDeps(store, platform, routes ?? router));
+}
+
 export function wireNotifications(store: WinnowStore, platform: Platform): () => void {
   const unlisten = platform.onNotificationAction((event) => {
-    handleNotificationAction(event, {
-      focusWindow: () => platform.focusWindow(),
-      focusMessage: (id) => store.focusMessage(id),
-      openReply: requestReply,
-      find: (id) => store.getSnapshot().all.find((email) => email.id === id),
-      setRead: (id, read) => store.setRead(id, read),
-      trashWithUndo: (id) => store.moveWithUndo(id, "trash"),
-      refresh: () => store.refresh(),
-      confirm: (id, title, text, failed) => void platform.confirmNotificationAction?.(id, title, text, failed),
-    });
+    void routeNotificationAction(store, platform, event);
     // A failed native action was about a message the user may now want to see.
     if (event.origin === "android" && event.outcome === "failed") {
       store.setNotice("A notification action didn't go through. It's shown on the notification.");
@@ -214,7 +387,12 @@ async function saveKeptRepliesOnce(store: WinnowStore, platform: Platform): Prom
   if (!platform.keptReplies || !platform.releaseKeptReplies) return;
   if (store.getSnapshot().status !== "ready") return;
   const raw = await platform.keptReplies().catch(() => []);
-  const kept = raw.map(parseKeptReply).filter((reply): reply is KeptReply => reply !== null);
+  // Each kept reply goes to its own account's Drafts: those for an account that is not
+  // open wait on the phone until it is (this runs again whenever an account is ready).
+  const open = store.currentAccountId();
+  const kept = raw
+    .map(parseKeptReply)
+    .filter((reply): reply is KeptReply => reply !== null && (!reply.account || reply.account === open));
   if (kept.length === 0) return;
   const { saved, failed } = await store.saveKeptReplies(kept);
   const failedIds = new Set(failed.map((reply) => reply.requestId));

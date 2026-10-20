@@ -21,7 +21,7 @@ class EventHandlerArgs {
  *
  * - `setEventHandler`: the channel [NotifyActionReceiver] reports button presses on.
  *   Rust decides what each press does (`plan.rs`).
- * - `show`: post a batch (one MessagingStyle notification per message, a group summary).
+ * - `show`: post a batch (one BigTextStyle notification per message, laid out as Gmail's, a group summary).
  * - `http`: one HTTPS exchange for Rust, which has no TLS client. Google's two API
  *   hosts only ([Http.ALLOWED_HOSTS]).
  * - `finish`: what the notification says once an action is done.

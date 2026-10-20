@@ -85,6 +85,20 @@ pub fn register(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The links the OS launched (or last re-opened) the app for, if any. The webview asks
+/// once it is listening (`main.tsx`): the event [`register`] emits from `setup` usually
+/// arrives before anything listens, so a cold start from a notification's tap would
+/// otherwise open the app and not the message.
+#[tauri::command]
+pub fn deep_link_launch(app: AppHandle) -> Vec<String> {
+    app.deep_link()
+        .get_current()
+        .ok()
+        .flatten()
+        .map(|urls| urls.into_iter().map(|url| url.to_string()).collect())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

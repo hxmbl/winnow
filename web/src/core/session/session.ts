@@ -21,6 +21,7 @@
  * planted redirect cannot trade its own code for the user's tokens.
  */
 
+import { accountKey } from "./accounts";
 import { createIdleWriter, onPageLeave, type IdleScheduler } from "./idleWrite";
 import { GoogleAuthStateMissing } from "./errors";
 import { exchangeWithRetry, isFetchRejection, retryWhileUnreachable } from "./exchangeRetry";
@@ -52,7 +53,7 @@ import {
 } from "../gmail/dto";
 import { buildAuthorizeUrl, createPkcePair, describeAuthError, stateMatches } from "../gmail/pkce";
 import type { NativeSignInResult, PlatformInfo } from "../../platform/types";
-import { NO_CLIENT_MESSAGE, TokenManager } from "../gmail/tokens";
+import { NO_CLIENT_MESSAGE, TokenManager, type TokenStore } from "../gmail/tokens";
 import { GmailClient } from "../gmail/client";
 import { GmailSyncEngine, type MailboxCache, type CursorStore } from "../gmail/sync";
 import { CONTACT_SCOPES, PeopleClient, PeopleScopeMissing, hasContactScopes } from "../gmail/people";
@@ -67,8 +68,9 @@ import { buildMime, type OutgoingAttachment } from "../gmail/mime";
 import { notificationReplyDraft } from "../notify/notifications";
 import { base64UrlDecode } from "../gmail/dto";
 import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
-import { loadedBodyOf, mailboxFor, toDraftEmail } from "../gmail/mapper";
+import { loadedBodyOf, mailboxFor, toDraftEmail, toEmail } from "../gmail/mapper";
 import { mapPool } from "../gmail/pool";
+import { SNOOZED_LABEL } from "../mail/snooze";
 import type { Platform } from "../../platform/types";
 import type { MailBackend } from "../store/store";
 
@@ -152,8 +154,12 @@ export function localCache(
     scheduler?: IdleScheduler;
     /** Calls back when the page is leaving, to write at once; `onPageLeave` by default. */
     lifecycle?: (flushNow: () => void) => () => void;
+    /** The account namespace (1.4.0): `<key>.messages@<id>` and `<key>.cursor@<id>`. */
+    account?: string;
   } = {},
-): MailboxCache & CursorStore & { flush(): Promise<void>; cursorClear(): Promise<void> } {
+): MailboxCache & CursorStore & { flush(): Promise<void>; cursorClear(): Promise<void>; release(): void } {
+  const messagesKey = options.account ? accountKey(`${key}.messages`, options.account) : `${key}.messages`;
+  const cursorKey = options.account ? accountKey(`${key}.cursor`, options.account) : `${key}.cursor`;
   /**
    * The mirror, keyed by Gmail id.
    *
@@ -176,7 +182,7 @@ export function localCache(
   const readAll = (): Map<GmailId, Email> => {
     if (mirror) return mirror;
     try {
-      const raw = globalThis.localStorage?.getItem(`${key}.messages`);
+      const raw = globalThis.localStorage?.getItem(messagesKey);
       const rows = raw ? (JSON.parse(raw) as Email[]) : [];
       mirror = new Map(rows.map((email) => [email.gmailId, email]));
     } catch {
@@ -191,7 +197,7 @@ export function localCache(
    */
   const commit = (json: string): void => {
     try {
-      globalThis.localStorage?.setItem(`${key}.messages`, json);
+      globalThis.localStorage?.setItem(messagesKey, json);
       flushError = null;
     } catch (error) {
       flushError = error ?? new Error("cache write failed");
@@ -258,7 +264,7 @@ export function localCache(
       mirror = new Map();
       flushError = null;
       try {
-        globalThis.localStorage?.removeItem(`${key}.messages`);
+        globalThis.localStorage?.removeItem(messagesKey);
       } catch {
         // Nothing to do; the cache is already unreachable.
       }
@@ -280,7 +286,7 @@ export function localCache(
 
     async read() {
       try {
-        return globalThis.localStorage?.getItem(`${key}.cursor`) ?? null;
+        return globalThis.localStorage?.getItem(cursorKey) ?? null;
       } catch {
         // No cursor means a full sync, which is slower and correct. Returning null
         // rather than throwing is what keeps a blocked-storage user signed in.
@@ -289,19 +295,28 @@ export function localCache(
     },
     async write(historyId: string) {
       try {
-        globalThis.localStorage?.setItem(`${key}.cursor`, historyId);
+        globalThis.localStorage?.setItem(cursorKey, historyId);
       } catch {
         // The next launch does a full sync. Nothing else is affected.
       }
     },
     async cursorClear() {
       try {
-        globalThis.localStorage?.removeItem(`${key}.cursor`);
+        globalThis.localStorage?.removeItem(cursorKey);
       } catch {
         // Already unreachable.
       }
     },
-  } as MailboxCache & CursorStore & { cursorClear(): Promise<void>; flush(): Promise<void> };
+
+    /**
+     * Write what is pending and let the mirror go (1.4.0): an account that is no longer
+     * the open one keeps its mail on disk only. The next read parses it again.
+     */
+    release() {
+      if (!writer.flushNow() && mirror) commit(JSON.stringify([...mirror.values()]));
+      mirror = null;
+    },
+  } as MailboxCache & CursorStore & { cursorClear(): Promise<void>; flush(): Promise<void>; release(): void };
 }
 
 /**
@@ -320,6 +335,8 @@ export type DraftsAccess = "unavailable" | "not_granted" | "granted";
 /** A finished web redirect, with what it was for when it was not a plain sign-in. */
 export type CompletedWebRedirect = {
   email: string;
+  /** 1.4.0: the account signed in was already added; Winnow switched to it instead. */
+  duplicateAccount?: boolean;
   view?: Record<string, string>;
   /**
    * Set when the redirect was the contacts opt-in: the access it ended with, or
@@ -459,17 +476,26 @@ export class GmailSession {
   /** The cache as everything except `signOut` sees it: writes dropped while signed out. */
   private readonly cache: MailboxCache & CursorStore;
 
+  /**
+   * The account namespace this session belongs to (1.4.0), recorded on a web sign-in's
+   * pending entry so the redirect back is finished by this session. `undefined` for a
+   * session built without one (tests, and 1.3.5's single account).
+   */
+  readonly account: string | undefined;
+
   constructor(
     private readonly platform: Platform,
     /** Kept on the instance: the backend needs it to resolve a numeric id. */
     private readonly rawCache: MailboxCache & CursorStore,
     contactsStore: GoogleContactsStore = localContactsStore(),
+    options: { tokenStore?: TokenStore; account?: string } = {},
   ) {
+    this.account = options.account;
     this.cache = gatedCache(rawCache, () => this.writable);
     contactsStore = gatedContacts(contactsStore, () => this.writable);
     this.credentials = platform.credentialStore();
     this.tokens = new TokenManager({
-      store: platform.tokenStore(),
+      store: options.tokenStore ?? platform.tokenStore(options.account),
       // Read per request from the user's own store: Winnow ships no client, and the
       // user can change or remove theirs while the app runs.
       // `issuedTo`: a native Android session is refreshed under the client it came from.
@@ -492,6 +518,16 @@ export class GmailSession {
       onUnauthorized: () => this.tokens.forceRefresh(),
     });
     this.contacts = new GoogleContactsSync({ client: people, store: contactsStore });
+  }
+
+  /** The account's cached mail, without the network: what a switch shows at once. */
+  async cachedMail(): Promise<Email[]> {
+    return this.rawCache.all();
+  }
+
+  /** Let the in-memory mirror go (the account is no longer the open one). */
+  releaseMemory(): void {
+    (this.rawCache as { release?: () => void }).release?.();
   }
 
   /** Whether the stored grant includes the contact scopes. Read from the token, not asked. */
@@ -727,8 +763,11 @@ export class GmailSession {
    * `kind`, so the sign-in screen can say something specific rather than
    * "something went wrong".
    */
-  async signIn(): Promise<{ email: string }> {
-    await this.authorize(GMAIL_SCOPE);
+  async signIn(options: { chooseAccount?: boolean } = {}): Promise<{ email: string }> {
+    // Adding an account: Google's account chooser first, so another account can be
+    // picked instead of the browser's current one. `consent` stays, or there is no
+    // refresh token.
+    await this.authorize(GMAIL_SCOPE, options.chooseAccount ? { prompt: "select_account consent" } : {});
 
     const profile = await this.profileAfterAuthorize();
     return { email: profile.emailAddress };
@@ -789,7 +828,13 @@ export class GmailSession {
     // The web build is about to unload this page, taking every local with it.
     // Stashing the verifier is the only way the redirect back can exchange the
     // code; the desktop build does not need it and does not pay for it.
-    rememberPendingAuth({ state: pkce.state, verifier: pkce.verifier, redirectUri, ...intent });
+    rememberPendingAuth({
+      state: pkce.state,
+      verifier: pkce.verifier,
+      redirectUri,
+      ...intent,
+      ...(this.account ? { account: this.account } : {}),
+    });
 
     const outcome = await this.platform.beginSignIn({
       authorizeUrl,
@@ -1234,6 +1279,9 @@ export class GmailSession {
     };
 
     /** A drafts request, with a scope refusal turned into the error the composer reads. */
+    /** The `Winnow/Snoozed` label's id, looked up once (`setSnoozed`). */
+    let snoozeLabel: Promise<string> | null = null;
+
     const draftCall = async <T>(call: () => Promise<T>): Promise<T> => {
       try {
         return await call();
@@ -1291,6 +1339,11 @@ export class GmailSession {
             await client.addLabels(gmailId, [LABEL.spam]);
             await client.removeLabels(gmailId, [LABEL.inbox]);
             break;
+          case "snoozed":
+          case "scheduled":
+            // Views, not places: snoozing goes through `setSnoozed`, and a scheduled send
+            // is a draft.
+            throw new GmailError("Mail cannot be filed into a view.", 400, "unknown");
           case "drafts":
             // Unreachable too: a draft is listed through the drafts API, never filed.
             throw new GmailError("Mail cannot be filed into Drafts.", 400, "unknown");
@@ -1307,6 +1360,24 @@ export class GmailSession {
       },
       async setRead(id, read) {
         await client.markRead(await gmailIdFor(id), read);
+      },
+      async setSnoozed(gmailId, snoozed, options) {
+        // The label is looked up (or made) once per session; a failure is not kept, so the
+        // next snooze asks again.
+        snoozeLabel ??= client.ensureLabel(SNOOZED_LABEL).catch((error: unknown) => {
+          snoozeLabel = null;
+          throw error;
+        });
+        const label = await snoozeLabel;
+        if (snoozed) {
+          await client.modify(gmailId, [label], [LABEL.inbox]);
+          return;
+        }
+        const add = [
+          ...(options?.toInbox === false ? [] : [LABEL.inbox]),
+          ...(options?.unread ? [LABEL.unread] : []),
+        ];
+        await client.modify(gmailId, add, [label]);
       },
       async deletePermanently(id) {
         await client.deletePermanently(await gmailIdFor(id));
@@ -1415,6 +1486,22 @@ export class GmailSession {
         const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
         if (cached) await cache.upsert([withLoadedBody(cached, loaded)]);
         return loaded;
+      },
+
+      async fetchMessage(gmailId) {
+        // A notification's message that is not cached yet: read whole, kept in the cache
+        // like any synced message, so it opens offline afterwards too.
+        let message;
+        try {
+          message = await client.message(gmailId, "full");
+        } catch (error) {
+          if (error instanceof GmailHttpError && error.status === 404) return null;
+          throw error;
+        }
+        const email = toEmail(message);
+        if (!email) return null;
+        await cache.upsert([email]);
+        return email;
       },
 
       async persistCache() {

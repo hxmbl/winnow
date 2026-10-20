@@ -261,10 +261,10 @@ describe("the sign-in redirect URI", () => {
     const session = new GmailSession(platform, cache);
 
     const inflight = session.signIn();
-    await flush();
-    await flush();
 
-    const state = new URL(opened[0]).searchParams.get("state") ?? "";
+    // Not two `flush()`es: `crypto.subtle` is a task, so under load that raced (see
+    // `authorizeUrlFor`).
+    const state = new URL(await authorizeUrlFor(opened)).searchParams.get("state") ?? "";
     expect(state).not.toBe("");
     expect(takePendingAuth(state)?.verifier).toBeTruthy();
 

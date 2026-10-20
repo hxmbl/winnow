@@ -70,6 +70,8 @@ export type PhoneTopBarProps = {
   onToggleLogo: () => void;
   /** Search was focused some other way: it shows search again. */
   onSearchFocus: () => void;
+  /** 1.4.0: the open account's avatar, which opens the account switcher. */
+  accountButton?: React.ReactNode;
 };
 
 export function PhoneTopBar({
@@ -84,6 +86,7 @@ export function PhoneTopBar({
   logoView,
   onToggleLogo,
   onSearchFocus,
+  accountButton,
 }: PhoneTopBarProps) {
   const showVersion = logoView === "version";
   return (
@@ -165,6 +168,7 @@ export function PhoneTopBar({
             {showVersion ? versionText(version) : ""}
           </p>
         </div>
+        {accountButton}
       </div>
     </header>
   );
@@ -385,7 +389,7 @@ export function PhoneDock({
           // Open, the pill is see-through and sits above the panel (z 55 over 50), on the
           // panel's Inbox row: it must not take that row's taps. Only Expand, which keeps
           // its own `pointer-events-auto`, stays live on it.
-          className={`wn-glass grid h-[var(--wn-dock-h)] min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
+          className={`wn-glass wn-liquid grid h-[var(--wn-dock-h)] min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
             menuOpen ? "pointer-events-none" : "pointer-events-auto"
           }`}
         >

@@ -278,6 +278,170 @@ try {
   check("no console errors on phone", pErrors.length === 0, pErrors.slice(0, 3).join(" | "));
   await phone.close();
 
+  // ── Faceted counts (1.4.0) ──────────────────────────────────────────────
+  section("desktop: chip counts facet on the active filters");
+  {
+    const fctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const f = await fctx.newPage();
+    const fErrors = [];
+    f.on("pageerror", (error) => fErrors.push(String(error)));
+    await f.goto(URL, { waitUntil: "networkidle" });
+    await f.waitForSelector("[data-row-count] [data-row-id]");
+    const chips = () =>
+      f.evaluate(() =>
+        [...document.querySelectorAll("[data-list-chrome] [data-rail-scroller] > [data-rail-item].wn-pill")].map((item) => ({
+          key: item.getAttribute("data-rail-key"),
+          count: Number(item.querySelector(".wn-pill-count")?.textContent ?? "0"),
+          on: item.hasAttribute("data-on"),
+          empty: item.hasAttribute("data-empty"),
+        })),
+      );
+    const rows = () => f.locator("[data-row-count] button[data-message-id]").count();
+    const tap = async (key) => {
+      await f.locator(`[data-list-chrome] [data-rail-item][data-rail-key="${key}"] button`).first().click();
+      await f.waitForTimeout(350);
+    };
+    const plain = await chips();
+    const first = plain.find((c) => c.key === "unread" && c.count > 0) ?? plain.find((c) => c.count > 1 && c.key !== "unsafe");
+    require("a chip to start from", Boolean(first));
+    await tap(first.key);
+    const faceted = await chips();
+    const self = faceted.find((c) => c.key === first.key);
+    check(
+      `${first.key} on: the rail keeps the same chips (narrowed ones dim, none vanish)`,
+      JSON.stringify(faceted.map((c) => c.key)) === JSON.stringify(plain.map((c) => c.key)),
+      faceted.map((c) => `${c.key}:${c.count}`).join(" "),
+    );
+    check(
+      `${first.key} on: other chips count within the current result`,
+      faceted.filter((c) => !c.on && c.key !== "unsafe").every((c) => c.count <= self.count),
+    );
+    check(
+      `${first.key} on: some chip's number changed from its plain count`,
+      faceted.some((c) => !c.on && c.key !== "unsafe" && c.count !== plain.find((p) => p.key === c.key)?.count),
+    );
+    check(
+      "a chip faceted to 0 is drawn empty",
+      faceted.filter((c) => !c.on).every((c) => (c.count === 0) === c.empty),
+    );
+    let tried = 0;
+    for (const chip of faceted.filter((c) => !c.on && c.key !== "unsafe").slice(0, 5)) {
+      await tap(chip.key);
+      const both = await chips();
+      const onCounts = both.filter((c) => c.on).map((c) => c.count);
+      const shown = await rows();
+      check(
+        `${first.key} + ${chip.key}: the chip's ${chip.count} is the new result, on both active chips`,
+        onCounts.length === 2 && onCounts.every((n) => n === chip.count) && (shown > 0) === (chip.count > 0) && shown <= chip.count,
+        `active ${JSON.stringify(onCounts)}, ${shown} row(s)`,
+      );
+      await tap(chip.key);
+      tried += 1;
+    }
+    check("at least two combinations were tried", tried >= 2);
+    await tap(first.key);
+    check(
+      "with nothing on again, the plain counts are back",
+      JSON.stringify(await chips()) === JSON.stringify(plain),
+    );
+    if (SHOTS) {
+      await tap(first.key);
+      await f.screenshot({ path: path.join(SHOTS, "filters-faceted-desktop.png") });
+    }
+    check("no page errors with facets", fErrors.length === 0, fErrors.slice(0, 3).join(" | "));
+    await fctx.close();
+  }
+
+  // ── Chip counts under a search (1.4.0) ──────────────────────────────────
+  section("chip counts respect an active search (desktop, then phone)");
+  for (const kind of ["desktop", "phone"]) {
+    const phoneKind = kind === "phone";
+    const sctx = await browser.newContext(
+      phoneKind ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width: 1440, height: 900 } },
+    );
+    const s = await sctx.newPage();
+    const sErrors = [];
+    s.on("pageerror", (error) => sErrors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    await s.waitForSelector("[data-row-count] [data-row-id]");
+    const railSel = "[data-rail-item][data-rail-key].wn-pill";
+    const chips = () =>
+      s.evaluate((sel) => {
+        const seen = new Set();
+        const out = [];
+        for (const item of document.querySelectorAll(sel)) {
+          if (item.getClientRects().length === 0) continue;
+          const key = item.getAttribute("data-rail-key");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            key,
+            count: Number(item.querySelector(".wn-pill-count")?.textContent ?? "0"),
+            on: item.hasAttribute("data-on"),
+            empty: item.hasAttribute("data-empty"),
+          });
+        }
+        return out;
+      }, railSel);
+    // Messages the list shows: each row is a conversation, its aria-label names "N messages"
+    // when it holds more than one. The search keeps the list short enough to be all mounted.
+    const listed = () =>
+      s.evaluate(() =>
+        [...document.querySelectorAll("[data-row-count] button[data-message-id]")].reduce((sum, row) => {
+          const m = /, (\d+) messages,/.exec(row.getAttribute("aria-label") ?? "");
+          return sum + (m ? Number(m[1]) : 1);
+        }, 0),
+      );
+    const tap = async (key) => {
+      await s.locator(`${railSel}[data-rail-key="${key}"]:visible button`).first().click();
+      await s.waitForTimeout(350);
+    };
+    const box = s.locator(phoneKind ? "[data-phone-search] input" : 'input[type="search"]:visible').first();
+    const plain = await chips();
+    require(`${kind}: a rail to start from`, plain.length > 2);
+    await box.click();
+    await box.pressSequentially("order", { delay: 30 });
+    await s.waitForTimeout(400);
+    if (phoneKind) {
+      await s.keyboard.press("Enter").catch(() => undefined);
+      await s.locator("[data-row-count] button[data-message-id]").first().waitFor({ timeout: 5_000 });
+    }
+    const searched = await chips();
+    check(
+      `${kind}: typing a search keeps the same chips in the same order`,
+      JSON.stringify(searched.map((c) => c.key)) === JSON.stringify(plain.map((c) => c.key)),
+      searched.map((c) => `${c.key}:${c.count}`).join(" "),
+    );
+    check(
+      `${kind}: and changes their numbers`,
+      searched.some((c) => c.count !== plain.find((p) => p.key === c.key)?.count),
+      searched.map((c) => `${c.key}:${c.count}`).join(" "),
+    );
+    check(`${kind}: a chip the search empties is drawn empty`, searched.every((c) => (c.count === 0) === c.empty));
+    if (phoneKind && SHOTS) await s.screenshot({ path: path.join(SHOTS, "phone-search-counts.png") });
+    let tried = 0;
+    for (const chip of searched.filter((c) => c.count > 0).slice(0, phoneKind ? 3 : 6)) {
+      await tap(chip.key);
+      const shown = await listed();
+      const self = (await chips()).find((c) => c.key === chip.key);
+      check(
+        `${kind}: "order" + ${chip.key}: the chip's ${chip.count} is what tapping it lists`,
+        shown === chip.count && self?.on && self.count === chip.count,
+        `${shown} message(s) listed, chip now ${self?.count}`,
+      );
+      await tap(chip.key);
+      tried += 1;
+    }
+    check(`${kind}: at least two chips were tapped`, tried >= 2);
+    if (!phoneKind) {
+      await box.fill("");
+      await s.waitForTimeout(350);
+      check(`${kind}: clearing the search brings the plain counts back`, JSON.stringify(await chips()) === JSON.stringify(plain));
+    }
+    check(`${kind}: no page errors`, sErrors.length === 0, sErrors.slice(0, 3).join(" | "));
+    await sctx.close();
+  }
+
   // ── Smart filters in another mailbox (1.3.3) ─────────────────────────────
   section("desktop: smart filters apply to the open mailbox (Trash)");
   {

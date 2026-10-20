@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronsUpDown, LogIn, LogOut, RefreshCw, Settings } from "lucide-react";
+import { ChevronsUpDown, LogIn, LogOut, RefreshCw, Settings, Users } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { Avatar } from "./Avatar";
 import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
@@ -86,6 +86,10 @@ export type NavProps = {
   onRefresh: () => void;
   settingsOpen: boolean;
   onOpenSettings: () => void;
+  /** 1.4.0: open the account switcher (the account menu's Switch account…). */
+  onOpenAccounts?: () => void;
+  /** 1.4.0: the open account's avatar in the desktop header, which opens the switcher. */
+  accountButton?: React.ReactNode;
 };
 
 /** The account, as the footer names it. */
@@ -238,6 +242,9 @@ function accountMenu(props: NavProps, onNavigate?: () => void): MenuEntry[] {
   }
   return [
     { kind: "item", id: "sync", label: props.syncLabel, icon: RefreshCw, disabled: props.syncing, onSelect: then(props.onRefresh) },
+    ...(props.onOpenAccounts
+      ? [{ kind: "item" as const, id: "accounts", label: "Switch account…", icon: Users, onSelect: then(props.onOpenAccounts) }]
+      : []),
     { kind: "divider", id: "d1" },
     { kind: "item", id: "sign-out", label: "Sign out", icon: LogOut, danger: true, onSelect: then(props.onSignOut) },
   ];
@@ -251,9 +258,18 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
     <div
       data-nav-account=""
       // On the phone's panel the account row is at the top (the list is reversed, Inbox
-      // nearest the dock), so its hairline is underneath it rather than above.
-      className={`flex shrink-0 items-center gap-2 border-hairline ${props.touch ? "mx-3 border-b pb-3 pt-3" : "border-t px-1.5 pb-1.5 pt-2"}`}
+      // nearest the dock), so its hairline is underneath it rather than above. There it
+      // is the dock pill's own grid (`PhoneDock`: three equal cells inside `px-1.5`, and
+      // the panel has the pill's left edge, width and border), the account spanning two
+      // cells and the gear centred in the third, so the gear sits in the same column as
+      // the Expand chevron below it, whichever hand the dock is set for.
+      className={
+        props.touch
+          ? "relative grid shrink-0 grid-cols-3 items-center px-1.5 pb-3 pt-3"
+          : "flex shrink-0 items-center gap-2 border-t border-hairline px-1.5 pb-1.5 pt-2"
+      }
     >
+      {props.touch && <span aria-hidden="true" className="pointer-events-none absolute inset-x-3 bottom-0 border-b border-hairline" />}
       <button
         ref={trigger}
         type="button"
@@ -262,7 +278,7 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
         aria-label={`Account: ${name}, ${detail}`}
         onClick={(event) => setAnchor(anchorFromElement(event.currentTarget))}
         className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-ctl px-1.5 text-left transition-colors hover:bg-surface-hover ${SIDEBAR_FOCUS} ${
-          props.touch ? "min-h-12 py-1" : "py-1"
+          props.touch ? "col-span-2 ml-1.5 min-h-12 py-1" : "py-1"
         }`}
       >
         <Avatar lookup={false} name={props.accountEmail ? name : "You"} address={props.accountEmail ?? "you@winnow.demo"} />
@@ -282,9 +298,10 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
         aria-label="Settings"
         aria-current={props.settingsOpen ? "page" : undefined}
         title="Settings (,)"
+        data-nav-settings=""
         className={`flex shrink-0 items-center justify-center text-ink-icon transition-colors hover:text-ink ${SIDEBAR_FOCUS} ${
           props.touch
-            ? "h-12 w-12 rounded-full bg-[color-mix(in_srgb,var(--wn-ink)_8%,transparent)] active:bg-[color-mix(in_srgb,var(--wn-ink)_14%,transparent)]"
+            ? "h-12 w-12 justify-self-center rounded-full bg-[color-mix(in_srgb,var(--wn-ink)_8%,transparent)] active:bg-[color-mix(in_srgb,var(--wn-ink)_14%,transparent)]"
             : "h-8 w-8 rounded-ctl hover:bg-surface-hover"
         }`}
       >
@@ -340,7 +357,8 @@ const FOCUSABLE =
  * On a phone it is the dock's pill, grown: the same left edge, width and bottom as the
  * pill, revealed upward by a `clip-path` that starts as the pill's own shape, in the
  * same light frost (`.wn-glass`). It has no app-name header, its list is reversed (the
- * account and Settings gear on top, Inbox at the bottom on the pill's line, beside the
+ * account and Settings gear on top (the gear in the Expand chevron's column), Inbox at
+ * the bottom on the pill's line, beside the
  * Expand chevron that the dock keeps on top of it), and the desktop's progressive blur
  * spreads over the rest of the app from the middle of its right edge, as on the desktop.
  */
@@ -683,7 +701,8 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline">
                 <AppMark size={22} />
               </span>
-              <span className="text-read font-semibold text-ink">Winnow</span>
+              <span className="flex-1 text-read font-semibold text-ink">Winnow</span>
+              {props.accountButton}
             </div>
           )}
           {touch && <AccountFooter {...props} touch={touch} onNavigate={onClose} />}

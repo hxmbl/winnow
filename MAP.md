@@ -138,7 +138,8 @@ order for "why is this message wrong".
      bias, rank tier or quiet status changed are reclassified (sendersReclassifiedBy)
 7. derived: search → filter → sort → group     core/classify/pipeline.ts
      signals come from a map the caller built; the classifier never runs here
-8. rail ranked, counts computed                 core/classify/filters.ts
+8. rail ranked, counts computed (faceted on    core/classify/filters.ts
+   the active filters once one is on)
 9. one snapshot                                 core/store/store.ts (derive)
 10. React                                       web/src/App.tsx → useStore → components
 ```
@@ -174,6 +175,8 @@ a full pass.
 **Why the counts are over the inbox, not the current result.** `inboxCounts` is a
 claim about the user's mail, not about the rows currently rendered. Ranking the
 rail against anything else reshuffles it the moment you open a bucket.
+The *ranking* stays that way; only the *numbers* on the pills facet on the active
+filters and the search once either is on (1.4.0, `railFacets`, see `filters.ts` below).
 
 The public surface is ~80 methods, grouped:
 
@@ -188,6 +191,7 @@ The public surface is ~80 methods, grouped:
 | Bodies | `loadBody`, `prefetchBodies`, `hasLoadedBody`, `scheduleReclassify` |
 | Offline storage | `saveMailboxOffline`, `declineMailboxStorage`, `dismissStoragePrompt` |
 | Learning | `resetLearning`, `setPreferences`, `setSortBy`, `setGoogleContacts` |
+| Snooze and send later (1.4.0, §13b) | `snooze`, `unsnooze`, `wakeDue`, `isSnoozed`, `snoozeFor`, `scheduleSend`, `cancelSchedule`, `updateScheduled`, `claimScheduled`, `scheduledSend`, `scheduledSends`, `accountKey` |
 
 Two behaviours worth knowing before touching it:
 
@@ -213,7 +217,10 @@ Two behaviours worth knowing before touching it:
   app tuned. The reason is in the code and it is the right reason: the learning is
   not the account's.
 
-`preferences.ts` holds the `Preferences` shape and its `localStorage` codec;
+`preferences.ts` holds the `Preferences` shape and its `localStorage` codec (1.4.0:
+`accent` may be `"custom"`, and `accentCustom` is the picked colour, normalised by
+`normalizeHexColor` and dropped if it is not a hex; blobs from before keep every value
+as it was, and `theme-boot.js` names `custom` on `<html>` but leaves its colours to the bundle);
 `retiredKeys.ts` deletes keys from older builds on launch (currently
 `winnow.mutedFilters.v1`) so a stale list cannot linger.
 
@@ -224,10 +231,10 @@ Two behaviours worth knowing before touching it:
 | `classify.ts` | `classifyEmail(email, profile, weights) → EmailSignals`. Pure and synchronous, so a cached classification stays valid across restarts. Also exports `contentBag`, `inboxSearchBag`, `matchesSocialDomain`, `senderRankBonus`, `classifyAll`. |
 | `heuristics.ts` | The vocabulary: ten `KeywordTable`s, one `SOCIAL_DOMAINS` table, and the regexes (`promoRegex`, `phishingRegex`, `coercionRegex`, `clickHereRegex`, `financeRegex`, `needsActionRegexes`, `replyRequestRegex`). |
 | `text.ts` | `PhraseMatcher` and `KeywordTable`. Word-bounded, never `String.includes` — `otp` inside `hotel` is the reason. |
-| `filters.ts` | `matchesBuiltin` / `matchesFilter` / `countAllFilters` / `rankFilters`. One predicate, shared by the list, the rail ranking and the badge renderer, so a filter and its badge cannot disagree. |
+| `filters.ts` | `matchesBuiltin` / `matchesFilter` / `countAllFilters` / `rankFilters` / `countFacets`. One predicate, shared by the list, the rail ranking and the badge renderer, so a filter and its badge cannot disagree. **Faceted counts (1.4.0):** with nothing on and no search, a pill counts its bucket in the open mailbox (`countAllFilters`, spam-guarded), as before. With one or more filters on, or a search running, `countFacets` (store: `MailboxView.railFacets`) gives each *off* pill the number of messages the list would show if it were turned on too — active filters AND with each other and with the search in `runInboxQuery`, so that is the current result it also matches — and each *on* pill the current result; both use the list's own test (`listedFiltersFor`, no spam guard, so under a search with nothing on an unsafe match still counts in Security, as tapping it lists it). **Under a search** the store (`facetsFor`) first narrows the open mailbox with the list's own search test (`searchTokens` / `matchesSearch` in `pipeline.ts`, over the pass's `searchBags`), then facets (`countFacets(..., searching = true)`), so a chip's number is exactly what tapping it gives under that query. Unsafe is exclusive (`toggleFilter` replaces the filters, the query stays), so an off Unsafe counts Unsafe alone under the search. `railCounts` and the drawer/triage `inboxCounts` never see the search. Memoised per message object (`listedHits`) and per pass (`facetCache`: same active set, search tokens, profile, message and signal objects reuse the result, so a clock tick, a selection or a whitespace/case-only edit rescans nothing, and a keystroke is one pass). `buildPills` takes the facets for the number only; which pills stay on the rail is still decided by the plain counts (the mailbox ranking, so typing a search never reshuffles the rail), so a pill narrowed to 0 by filters or search is dimmed (`data-empty`), never removed, and the digits do not move. `All` has no count and still clears. |
 | `scoring.ts` | The **Smart Score**, 0–100, used only for ordering. Fixed, not learned. `recencyWindow` + `relativeRecencyBonus` measure against the newest message in the set, never the wall clock. |
 | `weights.ts` | The ten learnable weights, their clamped ranges, and `nudgeWeight`, which returns the *same object* when a move would clip so callers can use identity to detect change. |
-| `pipeline.ts` | `runInboxQuery` (search → filter → sort) and `groupThreads`. The hottest function in the app; the classifier never runs inside it. |
+| `pipeline.ts` | `runInboxQuery` (search → filter → sort) and `groupThreads`. `searchTokens` / `matchesSearch` are its search test, exported so the rail's faceted counts search exactly as the list does. The hottest function in the app; the classifier never runs inside it. |
 | `attention.ts` | The one-sentence triage line. Derived from signals the classifier already produced, so it cannot disagree with the rail and costs no request. |
 
 **The signal set** (`model/signals.ts`): twelve booleans — `security`,
@@ -331,8 +338,10 @@ That is the only input; nothing is learned from opening or ignoring mail.
   built-in line names only what pushed it over the line. Words only.
 - Storage: `winnow.filterLearning.v1`, `{ version: 1, owner, corrections }`, capped at
   300 corrections, 20 clues each and 1,200 distinct clues (rarest words dropped first).
-  Local only, never synced. Cleared on sign-out and when a different account connects
-  (the demo's corrections are dropped on the first real connect).
+  Local only, never synced. Per account since 1.4.0 (`winnow.filterLearning.v1@<id>`,
+  §5.6 *Accounts*): erased with that account's sign-out; a correction set whose `owner`
+  is another address is still dropped (the demo's corrections are dropped on the first
+  real connect).
 - The demo has two Evri deliveries (`demo-missed-delivery-1/2`) the built-in rules miss
   on purpose; correcting the first moves the second by the sender rule.
 - Targeted smoke: `node web/scripts/smoke-filters.mjs` (port 4350 by default).
@@ -341,10 +350,10 @@ That is the only input; nothing is learned from opening or ignoring mail.
 
 | File | Holds |
 | --- | --- |
-| `email.ts` | `Email` (product view) vs `RawEmail` (wire view), `Mailbox = "inbox" \| "archive" \| "sent" \| "drafts" \| "trash" \| "spam"`, `MAILBOX_LABEL`, `EmailCategory`, `Contact`, `Attachment`, `Draft`, plus the loaded-body helpers (`isBodyLoaded`, `keepLoadedBody`, `withLoadedBody`) and `withCode`. |
+| `email.ts` | `Email` (product view) vs `RawEmail` (wire view), `Mailbox = "inbox" \| "archive" \| "sent" \| "drafts" \| "trash" \| "spam" \| "snoozed" \| "scheduled"` (the last two are views, `VIEW_MAILBOXES`, never a message's own `mailbox`; `MAILBOXES` is the six places), `MAILBOX_LABEL`, `EmailCategory`, `Contact`, `Attachment`, `Draft`, plus the loaded-body helpers (`isBodyLoaded`, `keepLoadedBody`, `withLoadedBody`) and `withCode`. |
 | `signals.ts` | `BUILTIN_FILTERS` (21, in rail-catalog order), `FILTER_LABELS`, `PERMANENT_FILTERS = ["important", "shipping"]`, `NAVIGATION_ITEMS`, `UNSAFE_THRESHOLD = 0.4`, `IMPORTANT_THRESHOLD = 56`, `isUnsafe`, `isImportant`, `badgeFilters` (the chips in a reader) and `rowIndicators` (the at-most-one word a list row carries). |
 | `profile.ts` | `buildUserProfile(inbox, trash)`, also built incrementally (`profileStats` → `updateProfileStats` → `profileFromStats`, integer counts per category so both paths agree exactly; `sendersReclassifiedBy` names the senders a profile change reclassifies): per-sender trash bias (unbounded in the profile, clamped to `MAX_TRASH_BIAS = 0.35` where used), top six correspondents, the quiet tail, and first-time senders. Deterministic, and ties break on the sender name — a ranking that hides mail cannot be a shuffle. |
-| `appearance.ts` | `APPEARANCES` (`system \| light \| dark \| oled`) and `ACCENT_THEMES` (`space \| plum \| ember \| aurora`). Names live in `core` because the store persists them and `core` does not import from `ui`. |
+| `appearance.ts` | `APPEARANCES` (`system \| light \| dark \| oled`; `oled` is the stored value whatever the picker calls it) and `ACCENT_THEMES` (1.4.0: `space \| plum \| rose \| ember \| green \| aurora \| blue \| graphite`, round the wheel, Space the default, Graphite the neutral last), plus `CUSTOM_ACCENT` (`"custom"`, the `accent` preference's ninth value, `AccentPreference`, `isAccentPreference`), `DEFAULT_ACCENT_CUSTOM` (Space's `#5028E2`) and `normalizeHexColor` (`#RGB`/`#RRGGBB`, with or without `#`, to upper-case `#RRGGBB`; anything else null). Names live in `core` because the store persists them and `core` does not import from `ui`. |
 | `ids.ts` | `hashId` (FNV-1a/64 truncated to 53 bits, deterministic so a cached classification survives a restart), `threadKey`, `localId`. |
 
 ### 5.5 `gmail/` — the wire
@@ -352,7 +361,7 @@ That is the only input; nothing is learned from opening or ignoring mail.
 | File | Job |
 | --- | --- |
 | `dto.ts` | The API's JSON and nothing else, plus `GMAIL_API`, `GOOGLE_TOKEN_URL`, `GOOGLE_AUTH_URL`, the base64url codec, `GMAIL_SCOPE`, and `LABEL`. API changes land here and in `mapper.ts`, nowhere else. |
-| `client.ts` | The typed `fetch` wrapper. Owns quota pacing and retries. Every verb Winnow uses: `profile`, `list`, `message`, `messageBodyHtml`, `history`, `addLabels`/`removeLabels`, `archive`, `markRead`, `setStarred`, `trash`, `restore`, `markNotSpam`, `deletePermanently`, `send`, `attachment`, `draft`, `listDrafts`, `createDraft`, `updateDraft`, `sendDraft`, `deleteDraft`. |
+| `client.ts` | The typed `fetch` wrapper. Owns quota pacing and retries. Every verb Winnow uses: `profile`, `list`, `message`, `messageBodyHtml`, `history`, `addLabels`/`removeLabels`, `archive`, `markRead`, `setStarred`, `trash`, `restore`, `markNotSpam`, `deletePermanently`, `send`, `attachment`, `draft`, `listDrafts`, `createDraft`, `updateDraft`, `sendDraft`, `deleteDraft`, and (1.4.0, §13b) `modify` (add and remove labels in one call) and `ensureLabel`, which only ever finds or makes `Winnow/Snoozed`. |
 | `sync.ts` | `GmailSyncEngine`: full vs incremental, the cursor, the five capped views, batching, partial publishing. Also defines the two interfaces everything else is written against: `MailboxCache` and `CursorStore`. |
 | `mapper.ts` | Gmail message → `Email`. Parses `From` rather than trusting it, prefers plain text over HTML, keeps attachments as metadata, and uses `internalDate` over the `Date:` header. |
 | `mime.ts` | RFC 822 out: `buildMime`, `messageIdFor`, `replyReferences`. Getting `Message-ID` / `In-Reply-To` / `References` wrong threads the reply in the sender's account and nowhere else. |
@@ -397,7 +406,7 @@ the store can be driven by a demo seed with no session at all.
 | File | Job |
 | --- | --- |
 | `session.ts` | `localCache()` and `GmailSession`. Sign-in, refresh, contacts grant, `signOut`, and `backend()` — the object the store talks to. |
-| `bridge.ts` | `SessionBridge`: a flat façade the UI uses, plus the two side effects the session cannot do (`store.signOut` when the client changes or the user signs out). `accountEmail` falls back to a placeholder so a launch still opens the cached mail; `verifiedAccountEmail` throws instead, for the demo's "Back to your inbox", which must know the session works before the store leaves the demo. |
+| `bridge.ts` | `SessionBridge`: a flat façade the UI uses, plus the two side effects the session cannot do (`store.signOut` when the client changes or the user signs out). Since 1.4.0 it holds one `GmailSession` per account (each over its own scoped cache, cursor, contacts and token store) and `bridge.accounts` (`switchTo`, `add`, `signOut(id)`, `signOutAll`, `setColor`, `setNotify`, `checkInactive`); every other method acts on the open account. `accountEmail` falls back to a placeholder so a launch still opens the cached mail; `verifiedAccountEmail` throws instead, for the demo's "Back to your inbox", which must know the session works before the store leaves the demo. |
 | `credentials.ts` | The user's own OAuth client: validation, the two stores (web `localStorage`, desktop keychain), and `testConnection`, which posts a deliberately invalid code and reads the verdict. |
 | `clientJson.ts` | Import of Google's downloaded `client_secret_….json`. 64 KB cap, and the exact list of refusals and warnings below. |
 | `redirect.ts` | Web-only redirect parsing as pure functions over a query string. A code with no `state` returns `null`. |
@@ -405,6 +414,9 @@ the store can be driven by a demo seed with no session at all.
 | `errors.ts` | `describeFailure` — the message and hint for each failure kind. |
 | `googleErrors.ts` | Google's setup errors (redirect_uri_mismatch, not a test user, API disabled, invalid_client, missing secret, org_internal, admin policy, …) mapped to a plain title, the fix, and the setup step that makes it. `explainGoogleText` reads a code out of pasted text. |
 | `nativeSignIn.ts` | Native Android sign-in's pure decisions. Two clients can own a session now: the main (Desktop app) client, or the Web application client native sign-in names as `serverClientId`, which `TokenSet.clientId` records. `refreshClientFor` picks the one to refresh under; `sessionStrandedBy` says when saving a client must sign out; `browserFallbackScope` re-asks for the session's scopes when the browser's client is not the one that granted them. `GmailSession.authorize` tries `platform.nativeGoogleSignIn` first when a Web client is stored, and falls back to the browser on anything but a code or a cancel, the exchange included. |
+| `accounts.ts` | Multi-account (1.4.0): the registry `winnow.accounts.v1` (`{ version: 1, active, accounts: [{ id, email, color, notify, addedAt }] }`, `AccountRegistry`, `MAX_ACCOUNTS = 5`), the namespace rule `accountKey(key, id)` = `<key>@<id>` with `id` a random `[a-z0-9]{4,24}` never derived from the address, `ACCOUNT_SCOPED_KEYS` (every key one account owns), `scopedStorage` (a `Storage` view that reads and writes the scoped copy and passes shared keys through), `tokenSecretName` / `webTokenKey`, and the colour palette (`ACCOUNT_COLORS`: `space`, `plum`, `ember`, `aurora` and the danger hue's `rose`, so five accounts can all differ; written out since 1.4.0, when the accents grew to eight and gained a Rose of their own, so a stored account colour keeps its meaning). |
+| `accountMigration.ts` | The one-time move from 1.3.5's single unscoped account, run by `bridge.prepare()` before anything reads an account's data. See *Accounts* below. |
+| `lightSync.ts` | The light sync of an account that is not open: its unread count and the new mail to notify about, nothing else. See *Accounts* below. |
 | `exchangeRetry.ts` | The end of a native sign-in on a WebView that may be paused (Android, behind the browser): before the code exchange and the profile read, wait for `platform.waitForForeground`, and resend only an attempt that got no HTTP response (`GoogleUnreachable`, or a bare fetch `TypeError` for the profile), backing off 0.5/1.5/3 s. `invalid_grant` and every other answer from Google are never resent. Out of attempts → `SignInUnreachable`: "Couldn't reach Google to finish signing in. Check your connection and try again." |
 
 **The offline cache** (`localCache`). A `Map<GmailId, Email>` mirror in memory,
@@ -416,6 +428,57 @@ rather than return; a failure is recorded and surfaced by `flush()` instead of
 being swallowed. Past roughly 2,000 messages the origin's ~5 MB quota is the
 ceiling, and `persistCache()` is the answer: it asks for persistent storage and
 reports honestly when the write still did not stick.
+
+**Accounts (1.4.0).** Up to five Google accounts on one device, one open at a time.
+
+- **Namespacing.** Everything an account owns is stored as `<key>@<id>`
+  (`ACCOUNT_SCOPED_KEYS`: the message cache and cursor, the offline queue, Google
+  contacts, brand logos, Gravatars, learning, smart-filter corrections, active filters,
+  last mailbox, light-sync state). Drafts were already one key per address
+  (`winnow.drafts.v1:<address>`). Tokens live in the platform's token store under
+  `gmail.tokens@<id>` (keychain, same service) or `winnow.gmail.tokens@<id>` (web). No
+  account's data can be read through another's keys. `null` as the id is the device
+  itself: the demo, and anything learned with nobody signed in, under the old unscoped
+  keys (`store/accountState.ts`, `keyFor`).
+- **Shared on purpose:** the OAuth client (one client, many grants), the preferences
+  (appearance, sort, notification settings, hidden and muted senders: they describe the
+  person, not an account), the setup guide's progress and the reader split.
+- **Migration from 1.3.5** (`migrateToAccounts`): with no registry and a stored session,
+  the account gets an id (recorded first in `winnow.accounts.migration`, so an
+  interrupted run resumes into the same namespace), each scoped key is copied to
+  `<key>@<id>`, the tokens are written to the account's own entry, the registry is
+  written naming it active, and only then are the old copies deleted. Nobody signs in
+  again; the address is filled in from the learning's owner or the queue's account, or
+  on the first profile read. A locked keychain or a failed token write defers it to the
+  next launch, moving and deleting nothing. A mail cache too big to copy within the
+  quota is dropped with its cursor instead of deferring (copy-then-delete needs it twice
+  over, so a big mailbox would defer on every launch); the first sync is then a full one.
+  Signed out under 1.3.5: an empty registry, and the learning stays the device's until
+  the first account added adopts it (`adoptDeviceLearning`).
+- **Light sync** (`LightSync`): an account that is not open keeps nothing in memory and
+  writes nothing to its cache. `bridge.accounts.checkInactive()` runs on every
+  background tick: one `messages.list` for `in:inbox is:unread` per account (5 quota
+  units), compared with the unread ids the last check saw (`winnow.lightSync.v1@<id>`);
+  new ids get one metadata read each, newest first, at most five, for the notification.
+  The first check after an account is added or left only records what is there (`seed`),
+  so mail already waiting is not news. The count feeds the switcher; failures stay quiet
+  until the account is opened.
+- **Switching** loads the account's own state (`WinnowStore.enterAccount`: learning,
+  filters, mailbox) and cache; a sync of an account that has since been left paints
+  nothing.
+- **Adding** asks Google's chooser (`prompt=select_account consent`) after the first
+  account; adding an account already here switches to it; a sixth is refused.
+- **Sign-out of one account** revokes its grant and erases exactly its namespace,
+  learning included, and its device drafts (`wipeAccountStorage`); the next account
+  opens, or the app is signed out when it was the last. Sign out of all does each.
+- **Owner decisions, 1.4.0:** at most five accounts (`MAX_ACCOUNTS`); notifications
+  for accounts that are not open are on by default; each account is told apart by a
+  colour dot (switcher, Settings), changeable; there is no "All inboxes" view, one
+  account is open at a time; signing out of an account erases its whole namespace,
+  learning and smart-filter corrections included; preferences are shared.
+- **Replies go out from the account that received the message** (`mail/fromAccount.ts`,
+  the composer's From picker); a reply sent from another account goes as a new message
+  carrying the original's `In-Reply-To`/`References` (thread ids belong to one mailbox).
 
 **`signOut()` order matters:** tokens → contacts → pending auth → message cache
 → cursor. The cursor is last for a specific reason — a cursor left over an empty
@@ -445,7 +508,8 @@ URI or origin. The secret never appears in an error, a warning or a log.
 
 | File | Job |
 | --- | --- |
-| `sanitize.ts` | The allowlist sanitiser. 1,400 lines: a hand-written scanner, a CSS walker, and the document builder. `MAX_DEPTH = 64`, `MAX_OUTPUT = 2 MiB`, `MAX_DIMENSION = 4096`. Drops `<script>`, `position: fixed\|sticky`, `z-index` and `@font-face`; `allowRemote` defaults to false. |
+| `sanitize.ts` | The allowlist sanitiser. 1,400 lines: a hand-written scanner, a CSS walker, and the document builder. `MAX_DEPTH = 64`, `MAX_OUTPUT = 2 MiB`, `MAX_DIMENSION = 4096`. Drops `<script>`, `position: fixed\|sticky`, `z-index` and `@font-face`; `allowRemote` defaults to false. `recolour` (1.4.0, absent = byte-identical output) re-maps colours in `style`, `bgcolor` and `color` through `emailDark.ts` during the walk; `inlineEmailDarkCss(palette)` is the dark baseline under `[data-wn-email][data-wn-dark]`. |
+| `emailDark.ts` | Email dark mode (1.4.0). `detectOwnDarkStyles` (an `@media (prefers-color-scheme: dark)` block, `[data-ogsc]`/`[data-ogsb]` hooks, a `color-scheme` meta or property) and `emailDarkMode` → `off` \| `own` (the sender's dark block is honoured, nothing recoloured) \| `adaptive`. Adaptive is partial inversion in OKLCH, hue kept: light paper → the theme surface (`DARK_EMAIL_PALETTE` #252525, `OLED_EMAIL_PALETTE` #000), light greys a step above it (capped at L 0.46); vivid light backgrounds keep hue/chroma at L ≤ 0.48; dark backgrounds kept; text lightness-flipped and lifted to ≥ 4.5:1 on the surface and on its own element's background (same block or `bgcolor`); light borders become dark hairlines. `url()` is masked, images are never filtered. Pure, node-tested. |
 | `html.ts` | HTML → text, `decodeEntities`, `sanitizeDisplayName` (strips C0/C1, zero-width, bidi; 128 chars), `parseAddressHeader`, and `remoteReferences` — the remote-image counter the reader offers to show. |
 | `reply.ts` | `buildReply`, `buildForward`, `quotedBody`, `stripQuote` (a quote is stripped only while it is still an untouched *suffix*). |
 | `datetime.ts` | `dayBucket` counted from calendar fields so a 23- or 25-hour DST day is still one day; `formatRowTime`, `daySections`, `formatRelative`, memoised formatters and a 4096-entry cache. |
@@ -453,6 +517,9 @@ URI or origin. The secret never appears in an error, a warning or a log.
 | `unsubscribe.ts` | RFC 2369 + RFC 8058. Keeps at most one https URL and one mailto; `oneClick` is only set when the POST header says so, and Winnow never sends the POST (CORS would refuse it from a web page). |
 | `imageConsent.ts` | `ImagePolicy = "ask" \| "always" \| "never"` and `resolveImageConsent`. Three states because there are three intentions, and a grant is for one message id only. |
 | `proxy.ts` | The optional render proxy client. The base URL is read once from the **build-time** `VITE_RENDER_PROXY` constant, http/https only — a runtime setting pointing the app at an arbitrary URL is a remote-administration hole. The returned document is mounted in `sandbox=""`. |
+| `when.ts` | The times snooze and send later offer, in local time (`whenPresets`: Later today = +3 h rounded up to the half hour, Tomorrow 9:00, This weekend = Saturday 9:00, Next week = Monday 9:00, each left out when it would lie), `formatWhen` ("Today, 18:00"), the date/time fields' codec and `wentLate` (`LATE_AFTER_MS` = 2 min). |
+| `snooze.ts` | Snooze records (`SNOOZED_LABEL = "Winnow/Snoozed"`), what is due, early wakes on a reply, abandoned snoozes, woken places (`WOKE_TTL_MS` = 7 days) and `SnoozeOverlay`. §13b. |
+| `scheduledSend.ts` | Scheduled-send records (device copy of the draft via `forDeviceCopy`), due/claim (`CLAIM_MS`), and the Scheduled view's rows (`scheduledRow`). §13b. |
 | `keybinds.ts` | `BINDINGS` as data, plus the router. Four imperative carve-outs: not ready, system modifiers, text editing, and modal grammars for the cheat sheet and the mailbox palette. `Masthead` prints its toolbar hints from the same array, so a button cannot advertise a shortcut the router will not take. |
 
 ### 5.9 `avatars/` and `data/`
@@ -518,7 +585,7 @@ of them properly:
 | Method | Browser | Desktop |
 | --- | --- | --- |
 | `info()` | constant `WEB_INFO` | `invoke("app_info")`, memoised |
-| `tokenStore()` | `localStorage["winnow.gmail.tokens"]` | keychain `gmail.tokens` |
+| `tokenStore(id?)` | `localStorage["winnow.gmail.tokens@<id>"]` (no id: 1.3.5's `winnow.gmail.tokens`, read only by the migration) | keychain `gmail.tokens@<id>` (no id: `gmail.tokens`, likewise) |
 | `credentialStore()` | `localStorage["winnow.google.oauthClient"]` | keychain `google.oauth-client` |
 | `beginSignIn()` | `sessionStorage` + `location.assign` | `oauth_begin` / `open_external` / `oauth_await` on an ephemeral loopback port |
 | `cancelSignIn()` | drop the session key | `oauth_cancel` |
@@ -554,6 +621,13 @@ Supporting files:
   `desktop.ts` adds `onDeepLink()`, `onTrayAction()`, and Android's `onBackButton()` /
   `exitApp()`.
 
+**Accounts at the boundary (1.4.0).** `notifyNewMail` carries the batch's account
+(`{ id, label }`, the label only with more than one account signed in), every
+`winnow://notification-action` event names its account, `desktop.ts`'s `keptReplies`
+reads anything that is not an array as none, and `deep_link_launch` returns the links the
+OS launched the app with so a cold start from a notification's tap is not lost (`main.tsx`
+asks once it is listening; an older shell answers nothing).
+
 **The IPC naming rule, which has cost real time.** Tauri rewrites *argument* keys
 from camelCase to snake_case but never rewrites *return values*. So `AppInfo` has
 explicit `#[serde(rename)]` on all four capability flags (serde would emit
@@ -578,17 +652,19 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | --- | --- |
 | `MessageList.tsx` | The windowed, day-sectioned list. Flat item union, memoised rows, heights in a `Map` plus a `ResizeObserver`, pinned day headers painted outside the scroller, drag/⌘/shift selection, long-press, sender and row menus, code chips, and the phone's swipe actions (the row is moved by hand with `translate3d`, a backdrop is mounted for the swiped row only, and `touch-action: pan-y pinch-zoom` on the list leaves sideways motion to it). At most one signal word per row; "Urgent" is drawn in the Urgent chip's hue (`.wn-signal-ink`: `FILTER_HUES.urgent` at the mode's `pill.textLightness`, AA-checked by `pillInk` in `theme.test.ts`), the rest grey. Under floating chrome (`topInset`) the rows start below the measured chrome plus a 6px gap (`TOP_GAP`), published on the scroller as `--wn-top-chrome` (padding) and `--wn-top-clear` (`scroll-padding-top`, with the first day's height). The first message is always revealed at scroll 0; a new view (`listView`: mailbox, filters, sort, search) starts at its top; a `j`/`k` while the list is hidden behind the reader is revealed on the way back (`revealIndex`, since the phone shows no cursor). Smoke: `scripts/smoke-top-email.mjs`, run by `smoke.mjs` and alone. |
 | `Reader.tsx` | The message pane: back bar, header (avatar → sender menu, sender `h2`, subject as the document `h1`), filter tags, the three-way image offer, body, attachments, then (since 1.3.3) "Why it's here" grouped with the "Not where it belongs? / Change smart filters…" footer at the bottom of the email (`data-reader-filters-footer`; the phone article's bottom padding keeps it clear of the reader pill), the conversation, and the phone dock. |
-| `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. |
+| `MessageBody.tsx` | Renders the body in the chosen `BodyView`: `rich` (sanitised, inline), `plain`, `sent` (`sandbox=""` iframe), `proxied`. The view is per message and is not persisted. **Email dark mode (1.4.0):** given `emailDark` (App passes the palette when the theme is dark/OLED and `Preferences.emailDarkMode`, default on; Settings → Appearance → Email dark mode), the rich card is the theme surface, the container carries `data-wn-dark="own\|adaptive"`, the sanitiser recolours (adaptive) and `scopeSenderCss` unwraps the sender's dark block (own) or recolours its rules (adaptive). A per-message sun/moon button (`data-wn-dark-toggle`, "Show original colours" / "Show in dark", reset per message) restores the white card. Light mode, "As sent" and the proxy frames are unchanged; no per-sender memory. |
 | `Masthead.tsx` | Sidebar toggle (a panel icon), the mark as the version toggle (`logoVersion.ts`), search, position readout, prev/next, Compose (no Mark all read anywhere: opening a message marks it read), and the `FilterStrip`. It floats over the list, like the phone's dock: the bar is a rounded glass pill (`.wn-glass.wn-glass-bar`) inset from the pane, each chip its own glass pill (`FilterStrip` `floating`), no band behind either, and the selection bar takes the chips' slot (`replaceRail`) so the header keeps its height. `App.tsx` measures it (`data-list-chrome`) and passes the height to `MessageList` as `topInset` (top padding, `scroll-padding-top`, the pinned day below it, the cursor's reveal clearing it); the briefing is the list's in-flow `lead`, scrolled away with the mail. Its `searchRef` must be the same ref the keybind handler holds, or `/` silently does nothing. |
-| `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. With `touch` (the phone) it is the floating rail instead: no band, no fades, each chip its own frosted glass pill (`.wn-chip-glass`, its frost clipped to the chip since 1.3.3) at the dock's side insets, over `.wn-rail-haze` (PhoneChrome: a 5px blur with no tint, masked to fade out above and below, so the gaps soften what is behind and show no band), and taps between chips fall through to the list. |
-| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other five mailboxes in `MAILBOX_ORDER` (Drafts among them), an account footer carrying Settings, and the progressive scrim blur. On a phone it is the dock's pill grown upward (`data-morph`: same left edge, width and bottom as the pill, revealed by a `clip-path` from the pill's shape, in the dock's frost) with no app-name header, icon rows, the current mailbox on a pill and the list upside down (account + round Settings gear on top, a divider, then Spam, Trash, Drafts, Archive and Sent (`PANEL_ORDER`), Inbox last on the pill's line, stopping a cell short so the dock's Expand chevron sits beside it on top of the panel); the scrim uses the same four-layer recipe as the desktop, spreading from the middle of the panel's right edge. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
+| `FilterStrip.tsx` | The rail of pills: sticky leading mark, `All`, edge fades and step chevrons. Fades are `pointer-events-none` — a gradient that eats clicks at the edge is the worst possible bug in a filter rail. With `touch` (the phone) it is the floating rail instead: no band, no fades, each chip its own Liquid Glass pill (`.wn-chip-glass.wn-liquid`, its frost on the chip itself since 1.4) at the dock's side insets, over `.wn-rail-haze` (PhoneChrome: a 5px blur with no tint, masked to fade out above and below, so the gaps soften what is behind and show no band), and taps between chips fall through to the list. |
+| `MailNav.tsx` | The sidebar overlay: Inbox with its thread count, then the other mailboxes in `MAILBOX_ORDER` (Snoozed, Archive, Sent, Drafts, Scheduled, Trash, Spam; the two 1.4.0 views count what they hold), an account footer carrying Settings, and the progressive scrim blur. On a phone it is the dock's pill grown upward (`data-morph`: same left edge, width and bottom as the pill, revealed by a `clip-path` from the pill's shape, in the dock's frost) with no app-name header, icon rows, the current mailbox on a pill and the list upside down (account + round Settings gear on top, the gear in the Expand chevron's column: the touch account row is the dock pill's own three-cell grid inside `px-1.5`, the account spanning two cells and the 48px gear centred in the third, so its centre is the chevron's to the pixel in either hand (the panel shares the pill's edge, width and border; `smoke.mjs` and `smoke-thumb.mjs` measure it within 1px), a divider, then Spam, Trash, Scheduled, Drafts, Snoozed, Archive and Sent (`PANEL_ORDER`), Inbox last on the pill's line, stopping a cell short so the dock's Expand chevron sits beside it on top of the panel); the scrim uses the same four-layer recipe as the desktop, spreading from the middle of the panel's right edge. Always mounted so it can animate out; `role="dialog"` and `inert` only while open. |
 | `SettingsPanel.tsx` | Settings. Sections: Google account, Reading, Appearance, Background, Google contacts, How Winnow sorts, hidden senders. Keyboard shortcuts is left out on a touch-only device until a hardware key is pressed (`physicalKeyboard.ts`, kept for the session). |
-| `SelectMenu.tsx` + `selectMenu.ts` | The Settings dropdown for many-valued settings (sort, undo send, remote images, mode, sync interval): a pill trigger (`role="combobox"`) and a listbox on the menu surface, placed by `placeMenu`; ↓↑ Home End, type-ahead, Enter/Space, Escape (closes the list, not Settings). On/off stays a switch, Accent stays swatch cards. |
-| `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send and Discard, the Reply / Reply all toggle and the draft status. Three layouts: docked at the bottom of the reader pane (desktop reply and forward, not modal, its own Escape), a centred sheet (desktop new message), full screen (phone, everything). |
+| `SelectMenu.tsx` + `selectMenu.ts` | The Settings dropdown for many-valued settings (sort, undo send, remote images, mode, sync interval): a pill trigger (`role="combobox"`) and a listbox on the menu surface, placed by `placeMenu`; ↓↑ Home End, type-ahead, Enter/Space, Escape (closes the list, not Settings). On/off stays a switch, Accent stays swatch cards (`RadioCards`, which wrap since 1.4.0: cells of at least 6.25rem, so nine accents are three rows of three on a phone). |
+| `WhenPicker.tsx` | "Pick date & time…" for snooze and send later (`WhenPicker`: native date and time fields, refused in words when past) and `ScheduledSheet`, a Scheduled row opened (Edit, Send now, Cancel schedule). |
+| `Composer.tsx` | Reply, forward and new message: recipients, subject, body, ⌘⏎, Send (with Send later beside it since 1.4.0: a split chevron on the desktop, a clock and a long press on the phone's Send circle; the menu says Winnow must be open) and Discard, the Reply / Reply all toggle and the draft status. Three layouts: docked at the bottom of the reader pane (desktop reply and forward, not modal, its own Escape), a centred sheet (desktop new message), full screen (phone, everything). |
 | `GoogleSetup.tsx` | The five-step BYO-client guide: console deep links, exact scopes and redirect URI with copy buttons, ticks and a resumable half-finished setup (`setupProgress.ts`), "Continue in demo" on every step; paste, import by file, drop or paste-into-field; test; save; connect. |
 | `SetupTroubleshoot.tsx` | `SetupFix` (a Google error as a plain fix plus a link back to its step) and "Google showed an error?" on step 5, which explains text pasted off Google's own error pages. Both read `core/session/googleErrors.ts`. |
+| `CustomAccentField.tsx` | The custom accent's field under the accent cards (1.4.0): the native `<input type="color">` (drawn round, `.wn-color-well`) and a hex text field (committed on Enter or blur; not a colour puts the old value back), plus the "Adjusted slightly for contrast" note when the mode on screen moved the colour. The Custom card opens the native picker in the same click (`openRef` → `showPicker()`), so the field stays in the page visually hidden (`sr-only`, `aria-hidden`, out of the tab order) until Custom is the accent. Until then the card's swatch is a soft conic wheel of the curated hues (`CUSTOM_SWATCH_IDLE`). |
 | `InboxClear.tsx` + `InboxClear.css` | The good-news empty states. Clear (Inbox empty, or only held-back junk left, or one smart filter worked to the end): `AppMark single` (only the leading plane, recentred) at the end of a dashed trail in accent light, a time-of-day line, and a one-time motion plus a phone haptic when the last row goes (`useClearCelebration.ts`; nothing moves under reduced motion). Quiet (empty folder, or filters that match nothing): one line and the remedy. `inboxClear.ts` decides which and what they say; search keeps `MessageList`'s own remedy screen. |
-| `ComposeFab.tsx` | `ComposeButton`: the phone's round compose pencil in the accent, a circle as tall as the dock's pill, beside it in the dock's bottom row (it used to float over the list and cover rows). `App.tsx` decides when it is offered. |
+| `ComposeFab.tsx` | `ComposeButton`: the phone's round compose pencil in the accent (Liquid Glass since 1.4: `.wn-liquid-accent`), a circle as tall as the dock's pill, beside it in the dock's bottom row (it used to float over the list and cover rows). `App.tsx` decides when it is offered. |
 | `RecipientField.tsx` | The composer's To, Cc and Bcc fields: chips plus an ARIA 1.2 editable combobox. Nothing is highlighted until an arrow key, Tab only accepts after navigation (WCAG 2.1.1), Escape is consumed only while the list is open. |
 | `Overlay.tsx` | `Sheet`, `ConfirmDialog`, `SheetHeader`. Focus moved in and restored on unmount, Tab trapped by `getClientRects()` (because `offsetParent` is null for a fixed element). `ConfirmDialog` exists because `window.confirm` is unimplemented in a Tauri webview. `backdrop="opaque"` (`.wn-backdrop-opaque`) paints chrome instead of the scrim, for a panel that replaces the screen: phone Settings, where the app also hides and inerts `main` (`data-covered`) so no frame of the entrance shows the inbox. |
 | `Menu.tsx` | The WAI-ARIA menu pattern, including submenus. Every other key is swallowed so the app's global shortcuts cannot fire while a menu is open. |
@@ -608,8 +684,9 @@ plus OS, applied as CSS custom properties), and **the layout**.
 
 | File | Why it is separate |
 | --- | --- |
-| `theme.ts` | Every colour and the machinery that mirrors it to `--wn-*`, plus the contrast functions `theme.test.ts` uses. A screenshot cannot tell you a grey is 3.14:1 on white, which is how `inkSubtle` shipped. |
-| `rail.ts` | `buildPills`, `digitFor`, scroll geometry. Separate from `FilterStrip.tsx` because exporting a plain function from a component module breaks fast refresh. An active sender pill is never hidden. |
+| `theme.ts` | Every colour and the machinery that mirrors it to `--wn-*`, plus the contrast functions `theme.test.ts` uses. The accent rule (1.4.0, Notion-like): an accent theme changes only `ACCENT_TOKENS` (`accent`, `focusRing`, `onAccent`, and `danger`/`dangerWash` for Ember, whose danger is a crimson, and Rose, whose danger is an orange-red: each keeps danger a red 40° of hue from the accent), so it colours what you act on and emphasis (primary buttons, compose, Send, links, switches, the selected segment and swatch, focus, unread dots and badges) and never the neutrals: planes, inks, lines, scrims and the selected row (`surfaceSelected`, a neutral step between hover and pressed) are the mode's own, identical across accents and near-neutral in every mode; `theme.test.ts` holds both. Smart-filter chip hues are signal colours, not the accent. A screenshot cannot tell you a grey is 3.14:1 on white, which is how `inkSubtle` shipped. The eight curated accents (1.4.0 added Rose, Green, Blue, Graphite) are hand-tuned per mode in `ACCENTS`; the chromatic ones stay 30° of hue apart and Graphite, the near-neutral, is held apart by saturation and a slate tint instead. `paletteFor(mode, "custom", hex)` / `applyTheme(root, mode, "custom", hex)` paint a picked colour through `customAccentFor` (memoised `deriveCustomAccent` over `customAccentContext()`: the planes, inks, wash cap, compose tint, the curated accents' luminance band, the three dangers, and `glassReadsOver`, the glass arithmetic of `glass.test.ts` as a predicate). The colour maths itself (`relativeLuminance`, `contrastRatio`, `composite`, HSL, OKLCH with chroma-reducing gamut mapping, `oklabDistance`) lives in `color.ts`, re-exported here, so `customAccent.ts` can use it without an import cycle. |
+| `customAccent.ts` | The custom accent (1.4.0) as one pure function, `deriveCustomAccent(hex, context)`: per mode, the picked colour moved in OKLCH lightness only (hue and chroma kept, chroma lowered only where sRGB cannot hold it) to the nearest lightness where it is text on every plane at 5:1 (the curated floor; bare AA measured 4.25:1 on the drawer as painted), its label (white or the mode's near-black, whichever is stronger) reads on it, the compose circle's icon keeps 3:1, the wash keeps the row inks AA, its luminance sits inside the curated accents' band and the glass reads over it (`backdropOk`). Danger: the mode's own red, or the farther of Ember's crimson and Rose's orange-red, 40.5° of hue away; a red pick turns its hue the least it must. `adjusted[mode]` (OKLab distance > 0.02) drives the picker's "Adjusted slightly for contrast". `customAccent.test.ts` walks 663 colours (the cube's corners, #FFFF00/#000000/#FFFFFF, greys, every curated accent, a 6×6×6 grid, 400 seeded random) × three modes against the full AA set, glass included. |
+| `rail.ts` | `buildPills` (plain counts decide which pills stay; `railFacets`, when a filter is on or a search is running, the number shown), `digitFor`, scroll geometry. Separate from `FilterStrip.tsx` because exporting a plain function from a component module breaks fast refresh. An active sender pill is never hidden. |
 | `selection.ts` | Selection arithmetic and the `LongPress` state machine (`LONG_PRESS_MS = 450`, `TOUCH_SLOP = 10`, `EDGE_SCROLL_ZONE = 40`). |
 | `swipe.ts` | Swipe actions as pure logic: `SwipeGesture` (edge zones `EDGE_PX = 24`, axis lock after `AXIS_LOCK_PX = 10`, commit past `COMMIT_FRACTION = 0.38` of the row or a fling ≥ `FLING_VELOCITY = 0.6` px/ms over ≥ 40 px) and `swipeActionsFor`, which says what each direction does per mailbox: left is Trash, right toggles read; in Trash left restores to the Inbox; in Drafts left discards (with Undo) and right does nothing. Touch only, phone layout only, off in select mode and under any menu, sheet or dialog; Settings → Reading → Swipe actions turns it off. |
 | `pullRefresh.ts` | Pull-to-refresh as pure logic: `pullAllowed` (connected, list at the top, no dock panel, selection, overlay or sync under way), `pullIntent` on `swipe.ts`'s axis lock so a pull and a row swipe never both fire, the rubber band `pullDistance` (threshold `PULL_THRESHOLD = 70`, max `PULL_MAX`), the threshold tick and the phases. |
@@ -623,7 +700,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `senderPictures.ts` / `avatar.ts` / `demoPictures.ts` | Avatar sourcing as a context, plus the pure hash that gives a sender a stable tone. |
 | `sidebarOverlay.ts` | The idle-close policy (all seven conditions must be false) and the scrim recipe (one recipe for the desktop sidebar and the phone's menu panel; both spread from the middle of the panel's right edge). |
 | `phoneDock.ts` | The dock's rules: the two tabs, Expand's name, a tab tap selecting or scrolling to the top (never opening the menu), the badge cap, the panel's reversed order, and the two published custom properties. |
-| `glass.ts` | The floating frost per mode (the phone's dock, chips and panel; the desktop list's top bar, chips and selection bar): blur 22px + saturate 1.8 (`--wn-glass-filter`; every floating pill also eases its background, opacity and transform over ~200ms and presses to 0.97, off under reduced motion), a 62% rim, and the raised tint behind text (`text`, `textOn`) that `glass.test.ts` holds to AA for every chip over the worst backdrop that can scroll under it, plus `bar`, the desktop bars' tint, held so `inkMuted` ("of 39") is AA too, and the no-`backdrop-filter` fallback. Published as `--wn-glass-*` by `applyTheme`. Since 1.2.3 the blur is not on the pill itself but on its `::before`, reaching `GLASS_REACH` (44px, `--wn-glass-reach`) past it and clipped back to its shape: a backdrop-filter only samples what is behind its own box, so on a thin pill a line of row text stayed sharp. Nothing above a pill may be a backdrop root (opacity < 1, filter, mask, clip-path), and the chip rail pads itself by the reach so its scroller does not clip the layer. |
+| `glass.ts` | The glass, one universal recipe since 1.4. Lean glass (`.wn-glass`, `.wn-glass-bar`, `.wn-chip-glass`): a translucent tint of the mode's glass base with a light frost straight on the element, blur 6px + saturate 1.8 (`GLASS_BLUR`, `--wn-glass-filter`; every floating pill also eases its background, opacity and transform over ~200ms and presses to 0.97, off under reduced motion), a 62% rim, and the raised tint behind text (`text`, `textOn`) that `glass.test.ts` holds to AA for every chip over the worst backdrop that can scroll under it, plus `bar`, the desktop bars' tint, held so `inkMuted` ("of 39") is AA too (the reader pill, over a message, takes it too, so its icons hold 3:1 over a solid photo), and the no-`backdrop-filter` fallback. Liquid Glass (`.wn-liquid`, `LIQUID`) on the small floating chrome (dock pill, compose circle (`.wn-liquid-accent`, the accent at `COMPOSE_TINT`), filter chips and All, reader pill, the desktop's floating top bar, status pill): the same tint, plus a lit rim, a sheen (`::after`, light mode only: in the dark modes any white over the words would cost AA) and, in Chromium only, an edge refraction through the SVG filter `#wn-liquid` in `index.html` (`LIQUID_FILTER`: one displacement, no chromatic fringe, which cost three passes and stalled frames; the edge map is built in px from the glass's own box, so within ~10px of each side the backdrop bends inward on any size of glass; an `feImage` map in `objectBoundingBox` units stretched with the box and bent outward). Apple's `-apple-visual-effect` material replaces it where WebKit offers it (a guarded `@supports`). Large panels (the phone's menu panel, sheets) stay lean. The accent's wash (`WASH`, `.wn-backdrop` on the list pane and the pinned day; the scroller and day headers are see-through): two barely-there radial glows of the accent over the surface (light 7%/6%, dark 6%/5%, OLED 5%/4%; capped in `glass.test.ts`), held so every row ink stays AA: the one large area the accent reaches. `WORST_BACKDROPS` lists every curated accent per mode by hand (`theme.ts` imports this file); `glass.test.ts` checks it against `ACCENTS`, and a custom accent must pass `glassReadsOver` in `theme.ts`. Published as `--wn-glass-*`, `--wn-liquid-*`, `--wn-wash-*` by `applyTheme`. Nothing above a glass may be a backdrop root (opacity < 1, filter, mask, clip-path). A glass that opens a fixed-position menu from inside itself (the reader pill's More, the desktop selection bar's Move to) is `.wn-glass-behind`: its tint and frost sit on an inset-0 `::before`, since a `backdrop-filter` on the element would make it the containing block of the menu. The two deliberate outliers: the desktop sidebar's progressive blur and the phone rail's haze. (1.2.3–1.3.4 put the frost on an oversized `::before` reaching 44px past each pill; gone.) |
 | `menus.ts` | Both menus' contents as data, so the rules are unit-tested rather than trapped in JSX. |
 | `backLayers.ts` | Android's Back as data: which layer one press closes (popover → sheet → composer → sidebar → Settings → message → leave), so the order is a test, not whichever handler ran first. |
 | `readerSplit.ts` | The reader's share of the width as a fraction (default 0.38, saved under `winnow.readerSplit.v1`), its 280 px list / 360 px reader minimums resolved per width, and the handle's key steps. |
@@ -730,16 +807,40 @@ Each message carries `picture`: the sender's picture resolved by the avatar's ow
 with `useSenderPictures`, over the sources `App` publishes): contact photo, then Gravatar
 only if "Gravatar photos" is on, then the brand logo only if "Show brand logos" is on,
 nothing for a relayed sender, and always `null` (no lookup) while lock-screen previews are
-hidden. The browser uses it as the notification's `icon`; Rust carries it (and drops it
-when previews are hidden) but the native notifications do not draw it yet.
+hidden. The browser uses it as the notification's `icon`. Native notifications never get
+a URL: `nativePictures` (`ui/notificationActions.ts`) has the webview rasterise each one
+(`canvasRasterise`) to a `NATIVE_PICTURE_PIXELS` (192 px, twice
+`NOTIFICATION_PICTURE_SIZE`) square PNG data URL (a JPEG if the PNG would pass
+`NATIVE_PICTURE_MAX_CHARS`, 200,000, the same cap as Rust's and Kotlin's
+`MAX_PICTURE_CHARS`), drawn as the avatar shows it (`drawPicture`): covering the square,
+centred, over the avatar's backdrop (`--wn-surfaceActive`), so a transparent logo is
+opaque and round-friendly. It is drawn by destination rectangle (`pictureDrawRect`),
+never a source crop: a BIMI logo is an SVG with a `viewBox` and no size, whose natural
+size the engine makes up (Chromium 150×150, others 0×0) and draws at another, so the old
+source crop sent Reddit's logo as a corner or as nothing; a draw that leaves every pixel
+transparent is no picture. The load is `crossOrigin="anonymous"` (the canvas must stay
+readable), so a logo host that sends no `Access-Control-Allow-Origin` still gets no
+picture in a notification while the in-app avatar (a plain `<img>`) shows it; the CSP's
+`connect-src` rules out fetching the bytes, and neither Rust (no TLS client) nor
+`Http.kt` (Google hosts only) may. Rust carries the bytes (dropping them when previews
+are hidden): Android draws them as the large icon, the desktop from a cache file.
 
 | Host | Shown by | Reply | Delete / Mark read | Tap | Where the action runs |
 | --- | --- | --- | --- | --- | --- |
-| Android | `NotifyPlugin.kt`: MessagingStyle per message, InboxStyle group summary, `ic_stat_winnow` | Inline (RemoteInput) | Buttons; Delete then offers Undo for 6 s | Opens `winnow://message/<id>` | **Native**, app backgrounded or not: receiver → channel → `android.rs` → `plan::execute` with the keychain tokens; `Http.kt` does the HTTPS |
+| Android | `NotifyPlugin.kt` → `MailNotifier`: BigTextStyle per message, Gmail's layout (sender as title, subject as text, subject + preview expanded: `MessageText`, JVM-tested in `MessageTextTest`; picture as the large icon; account address as subtext), InboxStyle group summary, `ic_stat_winnow` | Inline (RemoteInput) | Buttons; Delete then offers Undo for 6 s | Opens `winnow://message/<id>` | **Native**, app backgrounded or not: receiver → channel → `android.rs` → `plan::execute` with the keychain tokens; `Http.kt` does the HTTPS |
 | Linux | `notify-rust` over D-Bus | Button opens the composer on the message (no inline reply: KDE's is a vendor extension `notify-rust` does not expose) | Buttons | Opens the message | Webview (hidden, not paused): `ACTION_EVENT` → store `setRead` / `moveWithUndo`; confirmation replaces the notification for 3 s |
 | Windows | `notify-rust` WinRT toast | Button opens the composer (`tauri-winrt-notification` has no toast inputs) | Buttons | Opens the message | Webview, as Linux; only failures get a follow-up toast |
 | macOS | `tauri-plugin-notification`, one grouped notification | — | — | Reveals the window (`RunEvent::Reopen`) | Fallback: actions need `UNUserNotificationCenter` categories; `notify-rust`'s path is the deprecated `NSUserNotificationCenter` blocking a thread per notification, untestable here |
 | Browser | `Notification`, one per message | — | — | Opens the message | — (buttons need a service worker) |
+
+Every host puts the sender first: Android's title, the desktop's summary
+(`notify_actions/desktop.rs`), with the subject (and preview) under it. Android dropped
+MessagingStyle in 1.4.0 because One UI and stock Android draw its conversation title (the
+subject) as the headline and the message as "Sender: text". The inline reply never relied
+on it: a press replaces the notification with a status ("Sending…", then the result, or
+the message again via `message()` for `restore`), so no "You: …" line is appended. A
+notification rebuilt from a press's extras has no picture (the broadcasts leave it out to
+spare the binder).
 
 How a press is done:
 
@@ -762,6 +863,31 @@ How a press is done:
 - **The Kotlin commands are Rust-only**: no `winnow-notify:` permission is granted to the
   window, so page script cannot reach `http`, and `Http.kt` refuses any host but
   `gmail.googleapis.com` and `oauth2.googleapis.com`.
+
+**Accounts (1.4.0).** A batch names its account (`NotificationAccount`, an id that fails
+`plan::valid_account_id` is dropped), and the address is appended to the body when more
+than one account is signed in. Notifications for accounts that are not open are on by
+default (Settings → Google account, per account: `AccountRecord.notify`); they come from
+the light sync. Native presses act with that account's tokens only
+(`plan::tokens_secret_for`: `gmail.tokens@<id>`; no account means 1.3.5's entry, which the
+migration empties, so an old notification fails as signed out rather than acting on
+whichever account is there). On Android each account has its own group and summary
+(`MailNotifier.groupFor` / `summaryIdFor`) and a message's notification id includes the
+account. Deep links (`parseDeepLink` / `messageLink` in `core/notify/notifications.ts`,
+`messageUri` / `inboxUri` in Kotlin):
+
+- `winnow://message/<id>?account=<acct>&gmail=<gmailId>`: a tap switches to that
+  account, fetches the message if it is not cached and opens it (on a phone in the
+  full-screen reader; Back returns to that account's inbox).
+- `winnow://open?account=<acct>&view=inbox`: a summary opens that account's inbox.
+- 1.3.5's links (no account) still open in the open account. An action on an account
+  that is not open runs there (natively, or by switching) and its light sync catches up;
+  an account no longer on the device gets "That account isn't signed in on this device
+  any more."
+
+Linux and Windows summaries emit an `inbox` action with the account. macOS still shows one
+grouped notification whose tap only reveals the window: it carries no account or message,
+so it cannot deep-link (unverified on a Mac).
 
 What only a device can tell (untested here: no emulator, no macOS or Windows host):
 RemoteInput on Android 12–15, the receiver with the process killed, the deep link from a
@@ -804,25 +930,35 @@ judged as IPv4.
 
 ## 10. Where state lives
 
+Since 1.4.0, every key below marked *per account* is stored as `<key>@<id>` (§5.6,
+*Accounts*); the unscoped spelling is 1.3.5's, which the migration moves, and for the
+learning, filter and mailbox keys it is also the device's own copy (the demo, nobody
+signed in). "Sign-out" means signing out of that account, which erases its namespace.
+
 | Key | Holds | Cleared by |
 | --- | --- | --- |
-| `winnow.preferences.v1` | Appearance, sort, image policy, blocked/muted senders | never, by design |
-| `winnow.learning.v1` | Weights + the 400-event log | never, by design |
-| `winnow.filterLearning.v1` | Smart-filter corrections (sender rules and clues are derived from them) | sign-out, another account connecting, Settings → Smart filters reset |
-| `winnow.activeFilters.v1` | The active filter set | sign-out |
-| `winnow.mailbox.v1` | Which mailbox was last open | — |
-| `winnow.offlineQueue.v1` | Actions (and sends) waiting for the network, with the account they belong to | replay, sign-out |
+| `winnow.accounts.v1` | The registry: active id, and each account's id, address, colour, notify flag, added time (max 5) | an account's sign-out removes its entry |
+| `winnow.accounts.migration` | The id a 1.3.5 migration is moving into, while it runs | the migration's end |
+| `winnow.lightSync.v1` *(per account)* | The unread inbox ids the last light sync saw | sign-out |
+| `winnow.preferences.v1` | Appearance, sort, image policy, notification settings, blocked/muted senders: shared by every account | never, by design |
+| `winnow.learning.v1` *(per account)* | Weights + the 400-event log | that account's sign-out (owner decision, 1.4.0: learning goes with the account) |
+| `winnow.filterLearning.v1` *(per account)* | Smart-filter corrections (sender rules and clues are derived from them) | sign-out, a snapshot owned by another address, Settings → Smart filters reset |
+| `winnow.activeFilters.v1` *(per account)* | The active filter set | sign-out |
+| `winnow.mailbox.v1` *(per account)* | Which mailbox was last open | — |
+| `winnow.offlineQueue.v1` *(per account)* | Actions (and sends) waiting for the network, with the account they belong to | replay, sign-out |
+| `winnow.snooze.v1` *(shared; records carry their account)* | Snoozed conversations (account, message ids, wake time) and woken places, `core/mail/snooze.ts` via `core/store/keyedStorage.ts` | wake / unsnooze; this account's on sign-out |
+| `winnow.scheduledSend.v1` *(shared; records carry their account)* | Messages to send later (account, time, Gmail draft id, device copy of the draft), `core/mail/scheduledSend.ts` via `keyedStorage` | sent / cancelled / Edit; this account's on sign-out |
 | `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
-| `winnow.gmail.cache.messages` | The mailbox, as plain JSON | sign-out |
-| `winnow.gmail.cache.cursor` | Gmail `historyId` | sign-out |
-| `winnow.google.contacts.v1` | The People API snapshot | sign-out, revocation |
-| `winnow.brandLogos.v1` | Cached BIMI answers | sign-out, setting off |
-| `winnow.gravatars.v1` | Cached Gravatar answers, by sender address | sign-out, setting off |
+| `winnow.gmail.cache.messages` *(per account)* | The mailbox, as plain JSON | sign-out |
+| `winnow.gmail.cache.cursor` *(per account)* | Gmail `historyId` | sign-out |
+| `winnow.google.contacts.v1` *(per account)* | The People API snapshot | sign-out, revocation |
+| `winnow.brandLogos.v1` *(per account)* | Cached BIMI answers | sign-out, setting off |
+| `winnow.gravatars.v1` *(per account)* | Cached Gravatar answers, by sender address | sign-out, setting off |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
 | `winnow.google.setupProgress` | A half-finished setup: step, ticks, client ID draft (never the secret) | saving or removing the client, Start over |
-| `winnow.gmail.tokens` | Tokens (web only) | sign-out, which also revokes the grant at Google |
+| `winnow.gmail.tokens@<id>` | An account's tokens (web only; 1.3.5's unscoped key is migrated) | that account's sign-out, which also revokes the grant at Google |
 | `winnow.pendingAuth`, `winnow.pendingState` | PKCE verifier, sign-in state (`sessionStorage`) | read, or 15 min |
-| keychain `gmail.tokens`, `google.oauth-client` | The same two, on desktop and Android | sign-out (revoked at Google first, from the web layer) / setup |
+| keychain `gmail.tokens@<id>`, `google.oauth-client` | The same two, on desktop and Android (one token entry per account) | sign-out (revoked at Google first, from the web layer) / setup |
 | `winnow.mutedFilters.v1` | Retired — deleted on launch | — |
 | Android `SharedPreferences` `winnow.notify` / `pendingReplies` | Replies typed into a notification that are not yet sent or in Drafts | released by the web layer once saved to Drafts |
 
@@ -834,9 +970,10 @@ judged as IPv4.
 | --- | --- | --- |
 | Unit | `npm test` | Vitest, **node** environment, `src/**/*.test.ts` plus `../proxy/**/*.test.ts`. There are no component tests, and the glob says `.ts` not `.tsx` so nobody infers there should be. |
 | Gate | `npm run check` | typecheck + lint + lint:proxy + unit |
-| Smart filters | `node scripts/smoke-filters.mjs` | Targeted smoke for "Change smart filters…", "Why it's here" and Settings → Smart filters. Own `vite preview` on 4350 (`WINNOW_PORT`); `WINNOW_SHOTS=dir` writes screenshots. |
-| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs` and `smoke-notifications.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`; `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names). |
-| Theme sweep | `npm run sweep` | Manual, never in `npm run smoke` or CI. `scripts/sweep.mjs` photographs every mode (light, dark, OLED; `system` once each way) × every accent in `ACCENT_THEMES` (read from `core/model/appearance.ts`, so a new accent is swept for free) on a phone (390×844, Android UA, safe-area insets) and a desktop (1440×900): inbox, reader, drawer, Settings top and scrolled to the end, the Appearance picker, compose, the status pill with Undo, and inbox clear (the shared fake Gmail with an empty inbox). Then the settings and OS preferences that change the look (sort, remote images, brand logos, Gravatar, reduced transparency, forced colours, left-handed on a phone, a small phone, a tablet) once each, a Settings dropdown open (phone and desktop, light and dark), and the phone reader scrolled partway down the long demo newsletter with its pill folded (both hands × light/dark/OLED). Checks as it goes — page/console errors, text clipped without an ellipsis or pushed off-screen, sideways scroll, and WCAG AA for primary and pill/chip text measured against the pixels behind it (a second shot with text hidden, so glass counts) — and writes contact sheets per mode × device, `sweep.pdf` and `sweep-report.md`. Reports, never fails on a finding. `WINNOW_SWEEP_OUT` (default `web/.sweep`, git-ignored), `WINNOW_SWEEP_PHASE=capture\|sheets`, `WINNOW_SWEEP_MODES` / `WINNOW_SWEEP_DEVICES` for a subset, `WINNOW_SWEEP_JOBS` (3); port 4573 by default. |
+| Smart filters | `node scripts/smoke-filters.mjs` | Targeted smoke for "Change smart filters…", "Why it's here", Settings → Smart filters, and the faceted chip counts (with filters on, and under a search on desktop and phone: the chips stay put, their numbers change, and each tapped chip lists exactly its number; `WINNOW_SHOTS` adds `phone-search-counts.png`). Own `vite preview` on 4350 (`WINNOW_PORT`); `WINNOW_SHOTS=dir` writes screenshots. |
+| Accounts | `node scripts/smoke-accounts.mjs` | Targeted smoke for multi-account against a fake Google that knows two accounts by bearer token: a 1.3.5 session migrating with no sign-in (data moved into its namespace), Add account through Google's chooser (and a duplicate switched to), one-tap switching, a reply going out from the account that received the message, and on the Android app (a stand-in for Tauri's IPC) a notification's deep link switching account, fetching an uncached message into the full-screen reader, Back to that inbox, a summary's inbox link and a cold start from a tap (`deep_link_launch`). Own `vite preview` on 4362 (`WINNOW_PORT`). |
+| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs`, `smoke-notifications.mjs` and `smoke-accounts.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`; `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names, and email dark mode: the demo newsletter's body dark in dark/OLED on phone and desktop with every text element ≥ 4.5:1 against what is behind it, its @media phone rule intact, no image filtered, the sun/moon toggle round trip, and the white card with the setting off or in light). |
+| Theme sweep | `npm run sweep` | Manual, never in `npm run smoke` or CI. `scripts/sweep.mjs` photographs every mode (light, dark, very dark (`oled`); `system` once each way) × every accent in `ACCENT_THEMES` (read from `core/model/appearance.ts`, so a new accent is swept for free), plus the custom accent once per mode with one fixed colour (`SWEEP_CUSTOM_HEX`, a honey light mode has to darken, so the adjusted note is in the shots), on a phone (390×844, Android UA, safe-area insets) and a desktop (1440×900): inbox, reader, drawer, Settings top and scrolled to the end, the Appearance picker, compose, the status pill with Undo, and inbox clear (the shared fake Gmail with an empty inbox). Then the settings and OS preferences that change the look (sort, remote images, brand logos, Gravatar, reduced transparency, forced colours, left-handed on a phone, a small phone, a tablet) once each, a Settings dropdown open (phone and desktop, light and dark), and the phone reader scrolled partway down the long demo newsletter with its pill folded (both hands × light/dark/OLED). Checks as it goes — page/console errors, text clipped without an ellipsis or pushed off-screen, sideways scroll, and WCAG AA for primary and pill/chip text measured against the pixels behind it (a second shot with text hidden, so glass counts) — and writes contact sheets per mode × device, `sweep.pdf` and `sweep-report.md`. Reports, never fails on a finding. `WINNOW_SWEEP_OUT` (default `web/.sweep`, git-ignored), `WINNOW_SWEEP_PHASE=capture\|sheets`, `WINNOW_SWEEP_MODES` / `WINNOW_SWEEP_DEVICES` for a subset, `WINNOW_SWEEP_JOBS` (3); port 4573 by default. |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |
 
 `web/scripts/`:
@@ -869,6 +1006,10 @@ judged as IPv4.
   `os: "android"`: the step's package name and SHA-1, field validation, the Web
   client saved beside the Desktop one, and DEVELOPER_ERROR going on to the loopback
   flow. `npm run smoke` runs it after `smoke.mjs`; it runs alone too (port 4174).
+- Smokes that seed a signed-in session write 1.3.5's unscoped `winnow.gmail.tokens`
+  (and the Android stand-in's keychain `gmail.tokens`) on purpose: every signed-in run
+  goes through the migration. Anything they *read back* about an account is under the
+  namespaced key: look up `winnow.accounts.v1`'s `active` and read `<key>@<id>`.
 
 The four tests worth reading first, because each exists because a real bug got
 out and nothing else would have caught it:
@@ -926,9 +1067,12 @@ is hard to see.
 **No labels.** Labels were removed from the UI after 1.3.0-beta: the owner's call is that
 they are for people who stay on Gmail. There are no chips, no Labels section in the
 sidebar or the dock menu, no label views and no Label as…. Winnow never changes the
-account's labels: the Gmail client has no `labels.list`, `labels.create`,
-`threads.modify` or `batchModify` (`core/session/draftFiles.test.ts` pins their absence),
-and a label change an older build left in the offline queue is dropped, not replayed.
+account's labels, with one exception since 1.4.0: snoozing puts Winnow's own
+`Winnow/Snoozed` on (made on first use) so snoozed mail is visible and recoverable in any
+client (§13b). The client's only label calls are `ensureLabel`, which refuses any other
+name, and `modify`; there is no general `labels.list`/`labels.create` wrapper,
+`threads.modify` or `batchModify` (`core/session/draftFiles.test.ts` pins both), and a
+label change an older build left in the offline queue is dropped, not replayed.
 System labels (INBOX, SENT, TRASH, SPAM, STARRED, UNREAD, DRAFT, CATEGORY_*) still drive
 the mailboxes, star, read state and categories through `addLabels`/`removeLabels`.
 
@@ -1022,6 +1166,69 @@ queued send of the same draft inherits an older one's. Changing the Google accou
 (credentials removed) wipes the tokens first, so nothing can be taken back then. The
 demo uses `DemoDriveClient` throughout (own files are `demo-drive-…`, anything else 404s)
 and never calls Google; CSP and leak rules are unchanged.
+
+---
+
+## 13b. Snooze and send later (1.4.0)
+
+Gmail's API exposes neither of Gmail's own features, so both are built from what it does
+have, and **both keep their times on this device**: nothing on Google's side knows, so
+**Winnow has to be running** at the time. If it is closed, a wake or a send happens on the
+next open, and the status pill says it went late. The Send later menu, the custom-time
+picker and Settings → Compose → **Send later and snooze** (`settingsCatalog.ts`) say so.
+
+*Storage.* `core/store/keyedStorage.ts`: one key per feature (`winnow.snooze.v1`,
+`winnow.scheduledSend.v1`), built in `storageKey`, the one place an account scope goes
+for multi-account. Every record also names its account (`WinnowStore.accountKey()`: the
+address, or `demo`), so the demo's never act on a real account (a demo message must never
+reach Gmail) and one account's never list in another's. Sign-out drops the leaving
+account's records (the mail stays archived under its label; a scheduled message stays a
+Gmail draft); the demo's stay.
+
+*Snooze* (`core/mail/snooze.ts`, `WinnowStore.snooze`/`unsnooze`/`wakeDue`). Snoozing a
+row takes its whole conversation's Inbox messages out (archived optimistically through
+`mutate`) and calls `MailBackend.setSnoozed` (session: `Winnow/Snoozed` on, `INBOX` off,
+one `messages.modify`; the label id looked up or made once per session). If that fails
+(offline, refused) it falls back to a plain archive, which the offline queue carries; if
+even that is refused the record goes and the rollback runs. One Undo in the status pill
+("Snoozed until Tomorrow, 09:00."). From the Inbox, the Archive, or Snoozed (a new time).
+`SnoozeOverlay` is laid over every `all` that enters the store (in `set`, the one door),
+so a sync that still lists a snoozed message in the Inbox cannot bring it back, and a
+woken message in the Inbox is dated by when it woke, so it sorts at the top and the row
+shows that time (for up to `WOKE_TTL_MS`, while it stays in the Inbox). Snoozed mail is
+listed in Snoozed only, not in Archive. Waking (`wakeDue`: on start, after every sync
+including the 10 s poll, on focus/visibility, and on `App`'s 15 s timer, which is the
+demo's only clock) re-adds `INBOX` and `UNREAD`, takes the label off, marks the rows
+new, and flashes "A snoozed conversation is back in your Inbox." (with "It was due …,
+while Winnow was closed." when late). A new message in a snoozed conversation wakes it
+early; a snooze whose messages all went to Trash/Spam elsewhere is dropped. Moving a
+snoozed message anywhere ends its snooze; in Snoozed, `e`/Archive is **Unsnooze** (to the
+Inbox now, read state kept, Undo snoozes again). Entry points: row menu **Snooze ▸**
+(`menus.ts` `snoozeEntries`), the reader bar's Snooze, the selection bar, `b`, and the
+phone reader pill (`readerPill.ts`: Archive, Delete, Reply, Snooze, Forward, More).
+
+*Send later* (`core/mail/scheduledSend.ts`, `App.scheduleDraft`/`dispatchScheduled`).
+The composer's Send later (presets or a custom time) runs Send's checks (subject, Drive
+grant), saves the Gmail draft (`DraftAutosaver.settle`), records `{ sendAt, draftId,
+draft, replyTo, … }`, parks the saver and drops the device copy (so no "Restore your
+unsent draft?"). A scheduled draft is kept out of Drafts and listed in Scheduled.
+At the time `App.runDue` (same moments as waking, once the session is ready) claims the
+send (`claimScheduled`, so a second window does not send it too) and hands it to
+`deliver` with `draftId`: Drive links shared at dispatch, `drafts.send` (keeping the
+reply's thread), the offline queue when offline. The undo window is not run again: the
+time was the user's choice and Cancel schedule is its undo. The pill says "Sent “…” as
+scheduled." or "… late: it was due …, while Winnow was closed." A failure keeps the
+schedule with its reason (the row says Not sent) and stops retrying until Send now or
+Edit; a 404 on the draft (sent or deleted elsewhere) ends it with a notice. Scheduled
+rows open `ScheduledSheet`: **Edit** cancels the schedule and reopens the draft as a
+sheet on the same Gmail draft; **Send now**; **Cancel schedule** (it stays a draft; in the
+demo it is put into Drafts). The demo simulates the send (filed into Sent, on its thread).
+Files beyond the drafts' device budget survive only in this session's memory; after a
+restart such a send stops with "… too big to keep on this device. Open it with Edit…".
+
+Tests: `core/mail/{when,snooze,scheduledSend}.test.ts`, `core/store/keyedStorage.test.ts`,
+`core/store/snoozeSchedule.test.ts`, the label calls in `core/session/draftFiles.test.ts`,
+menus/reader/pill/keybind tests; smoke: `scripts/smoke-schedule.mjs`.
 
 ---
 

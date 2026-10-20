@@ -33,6 +33,7 @@ import { topEmail } from "./smoke-top-email.mjs";
 import { smokeMotion } from "./smoke-motion.mjs";
 import { smokeFixes } from "./smoke-fixes.mjs";
 import { smokeThumb } from "./smoke-thumb.mjs";
+import { smokeSchedule } from "./smoke-schedule.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -179,10 +180,13 @@ browser.newPage = async (options) => watchCsp(await watchedNewPage(options));
 // `WINNOW_SMOKE_SHOTS=<dir>` also saves its screenshots there.
 // `WINNOW_SMOKE_ONLY=thumb` runs only `smoke-thumb.mjs` (the 1.3.2 sweep fixes, phone
 // compose top bar, Trash confirmations, the reader pill and left-handed mode, shapes).
-if (process.env.WINNOW_SMOKE_ONLY === "fixes" || process.env.WINNOW_SMOKE_ONLY === "thumb") {
+// `WINNOW_SMOKE_ONLY=schedule` runs only `smoke-schedule.mjs` (1.4.0: snooze, waking, the
+// Snoozed mailbox, send later and the Scheduled mailbox, against the demo).
+if (["fixes", "thumb", "schedule"].includes(process.env.WINNOW_SMOKE_ONLY ?? "")) {
   const errors = [];
   try {
-    if (process.env.WINNOW_SMOKE_ONLY === "thumb") await smokeThumb({ browser, URL, check, section, errors });
+    if (process.env.WINNOW_SMOKE_ONLY === "schedule") await smokeSchedule({ browser, URL, check, section, errors });
+    else if (process.env.WINNOW_SMOKE_ONLY === "thumb") await smokeThumb({ browser, URL, check, section, errors });
     else await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
     section("console");
     check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
@@ -446,7 +450,7 @@ try {
       visible: visible.length,
       width: Math.round(box.width),
       headerWidth: Math.round(header.width),
-      // The chips themselves: the scroller reaches past them by the glass's frost reach.
+      // The chips themselves: the scroller pads past them for their shadow.
       belowSearch: (pills[0]?.getBoundingClientRect().top ?? box.top) >= field.bottom - 0.5,
       inSidebar: Boolean(document.querySelector("[data-sidebar] [data-rail-scroller]")),
     };
@@ -3302,7 +3306,7 @@ try {
   await page.keyboard.press("Escape");
   check(
     "the mode dropdown offers System, Light, Dark and OLED",
-    JSON.stringify(modeLabels) === JSON.stringify(["System", "Light", "Dark", "OLED"]),
+    JSON.stringify(modeLabels) === JSON.stringify(["System", "Light", "Dark", "Very dark"]),
     JSON.stringify(modeLabels),
   );
   // The keyboard: ↓ opens on the current value, ↓ moves, Enter chooses (then back to System).
@@ -3315,6 +3319,17 @@ try {
     "the mode dropdown works from the keyboard: ↓ opens, ↓ moves, Enter chooses and refocuses the trigger",
     (await modeTrigger.getAttribute("data-value")) === "light" &&
       (await page.evaluate(() => document.activeElement?.getAttribute("data-select"))) === "theme-mode",
+    await modeTrigger.getAttribute("data-value"),
+  );
+  // Type-ahead: a typed letter jumps to the option that starts with it.
+  await modeTrigger.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("d");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  check(
+    "a typed letter in the mode dropdown jumps to its option (D → Dark)",
+    (await modeTrigger.getAttribute("data-value")) === "dark",
     await modeTrigger.getAttribute("data-value"),
   );
   await chooseMode("System");
@@ -3369,7 +3384,7 @@ try {
     JSON.stringify(darkTokens),
   );
 
-  await chooseMode("OLED");
+  await chooseMode("Very dark");
   await page.waitForTimeout(150);
   let state = await themeState();
   const oledStates = await page.evaluate(() =>
@@ -3418,6 +3433,68 @@ try {
     "the mode and accent are persisted, without disturbing other preferences",
     themePrefs.appearance === "oled" && themePrefs.accent === "ember" && themePrefs.imagePolicy === "always",
     JSON.stringify(themePrefs),
+  );
+
+  // 1.4.0: eight curated accents round the wheel, then Custom, which takes any colour and
+  // makes it AA-safe per mode (`customAccent.ts`). Driven here in OLED.
+  check(
+    "the picker offers the eight accents, then Custom",
+    JSON.stringify((await accentRadios.allTextContents()).map((t) => t.trim())) ===
+      JSON.stringify(["Space", "Plum", "Rose", "Ember", "Green", "Aurora", "Blue", "Graphite", "Custom"]),
+    JSON.stringify(await accentRadios.allTextContents()),
+  );
+  const customField = page.locator("[data-custom-accent]");
+  check(
+    "the custom colour's field stays out of sight until Custom is chosen",
+    ((await customField.boundingBox())?.width ?? 0) <= 1 && (await customField.getAttribute("aria-hidden")) === "true",
+    JSON.stringify(await customField.boundingBox()),
+  );
+  await accentRadios.filter({ hasText: "Custom" }).click();
+  await page.waitForTimeout(150);
+  const customHex = page.locator("[data-custom-accent-hex]");
+  check(
+    "choosing Custom makes it the accent and shows the colour field",
+    (await themeState()).accent === "custom" && (await customHex.isVisible()) && (await page.locator("[data-custom-accent-picker]").isVisible()),
+    JSON.stringify(await themeState()),
+  );
+  await customHex.fill("#FFFF00");
+  await customHex.press("Enter");
+  await page.waitForTimeout(150);
+  const readAccent = () =>
+    page.evaluate(() => document.documentElement.style.getPropertyValue("--wn-accent").trim().toUpperCase());
+  const yellow = await readAccent();
+  const yellowPrefs = JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}");
+  check(
+    "a typed hex is stored as picked, and painted made safe for the mode, with the note",
+    yellowPrefs.accent === "custom" && yellowPrefs.accentCustom === "#FFFF00" && /^#[0-9A-F]{6}$/.test(yellow) && yellow !== "#FFFF00" &&
+      (await page.locator("[data-custom-accent-note]").textContent()) === "Adjusted slightly for contrast",
+    `${yellow} ${JSON.stringify({ accent: yellowPrefs.accent, accentCustom: yellowPrefs.accentCustom })}`,
+  );
+  await customHex.fill("nonsense");
+  await customHex.press("Enter");
+  await page.waitForTimeout(100);
+  check(
+    "a hex field that is not a colour is put back, not stored",
+    (await customHex.inputValue()) === "#FFFF00" &&
+      JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}").accentCustom === "#FFFF00",
+    await customHex.inputValue(),
+  );
+  // The native picker reports lower case; a colour that is already safe in OLED paints as picked.
+  await page.locator("[data-custom-accent-picker]").fill("#86b7ea");
+  await page.waitForTimeout(150);
+  check(
+    "the colour picker sets the colour, and a safe colour paints exactly as picked, with no note",
+    (await readAccent()) === "#86B7EA" && (await page.locator("[data-custom-accent-note]").count()) === 0 &&
+      JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}").accentCustom === "#86B7EA",
+    await readAccent(),
+  );
+  await accentRadios.filter({ hasText: "Ember" }).click();
+  await page.waitForTimeout(150);
+  check(
+    "going back to a curated accent keeps the custom colour for next time",
+    (await themeState()).accent === "ember" &&
+      JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}").accentCustom === "#86B7EA",
+    JSON.stringify(await themeState()),
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
@@ -3508,8 +3585,8 @@ try {
         const scroller = document.querySelector("header [data-rail-scroller]");
         const search = document.querySelector("#winnow-search")?.closest("label");
         if (!scroller || !search) return null;
-        // The rail's own band: the scroller pads itself above and below by the glass's
-        // frost reach (paint only, no events), which is not the rail reaching the field.
+        // The rail's own band: the scroller pads itself above and below for the chips'
+        // shadow (paint only, no events), which is not the rail reaching the field.
         const outer = scroller.getBoundingClientRect();
         const pad = getComputedStyle(scroller);
         const rail = { left: outer.left, right: outer.right, top: outer.top + parseFloat(pad.paddingTop), bottom: outer.bottom - parseFloat(pad.paddingBottom) };
@@ -3689,13 +3766,14 @@ try {
     JSON.stringify(logoBox),
   );
   // The top bar is where you are and search, nothing else: no prev/next chevrons, no
-  // tick and no menu button (the menu is the dock's Expand button). Its one button is
-  // the mark itself, which toggles the version.
-  const topBarButtons = await topBar.locator("button:not([data-version-toggle])").evaluateAll((nodes) =>
+  // tick and no menu button (the menu is the dock's Expand button). Its buttons are the
+  // mark itself, which toggles the version, and (1.4.0) the account avatar at the end of
+  // the row, which opens the account switcher.
+  const topBarButtons = await topBar.locator("button:not([data-version-toggle]):not([data-account-switcher-trigger])").evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute("aria-label") ?? node.textContent),
   );
   check(
-    "no chevrons, tick or menu button in the phone top bar (the mark is its only button, the version toggle)",
+    "no chevrons, tick or menu button in the phone top bar (only the mark, the version toggle, and the account avatar)",
     topBarButtons.length === 0 && (await topBar.locator("button[data-version-toggle][data-phone-mark]").count()) === 1 &&
       (await topBar.locator(
         '[aria-label="Previous message"], [aria-label="Next message"], [aria-label="Mark all read"], [aria-label="Open menu"], [data-sidebar-toggle]',
@@ -3704,12 +3782,17 @@ try {
   );
 
   const searchBox = await page.locator("[data-phone-search]").boundingBox();
+  // The row ends at the account avatar when there is one (1.4.0), else at the edge.
+  const avatarBox = await topBar.locator("[data-account-switcher-trigger]").first().boundingBox().catch(() => null);
+  const rowEnd = avatarBox ? avatarBox.x : 390 - logoBox.x;
   check(
-    "search sits on the logo's row, filling the rest of it, at touch height",
+    "search sits on the logo's row, filling the rest of it (up to the account avatar), at touch height",
     Boolean(searchBox && logoBox) && searchBox.x >= logoBox.x + logoBox.width &&
       Math.abs(searchBox.y + searchBox.height / 2 - (logoBox.y + logoBox.height / 2)) <= 2 &&
-      searchBox.x + searchBox.width >= 390 - logoBox.x - 1 && searchBox.height >= MIN_TARGET,
-    JSON.stringify({ searchBox, logoBox }),
+      searchBox.x + searchBox.width >= rowEnd - 12 && searchBox.x + searchBox.width <= rowEnd + 1 && searchBox.height >= MIN_TARGET &&
+      (!avatarBox || (Math.min(avatarBox.width, avatarBox.height) >= MIN_TARGET && avatarBox.x + avatarBox.width <= 390 &&
+        Math.abs(avatarBox.y + avatarBox.height / 2 - (logoBox.y + logoBox.height / 2)) <= 2)),
+    JSON.stringify({ searchBox, logoBox, avatarBox }),
   );
   const phoneTitle = await topBar.evaluate((bar) => {
     const heading = bar.querySelector("h1");
@@ -3735,7 +3818,7 @@ try {
   check("the list's name is in the top bar", (await listTitle())?.trim() === "Inbox", await listTitle());
   const overflow = await page.evaluate(() => {
     // What it holds against its own width: the mark and search, by their boxes (each
-    // glass's frost layer is paint only and clipped to it, so it is not counted).
+    // glass's shadow is paint only, so it is not counted).
     const row = document.querySelector("[data-phone-topbar] > div");
     if (!row) return null;
     const box = row.getBoundingClientRect();
@@ -3761,11 +3844,11 @@ try {
   );
   const pillGlass = await pill.evaluate((nav) => {
     const style = getComputedStyle(nav);
-    return { filter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(nav, "::before")), background: style.backgroundColor, shadow: style.boxShadow };
+    return { filter: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(nav)), background: style.backgroundColor, shadow: style.boxShadow };
   });
   check(
     "in light frost: a modest blur over a translucent tint, with a shadow",
-    /blur\(22px\)/.test(pillGlass.filter) && /saturate\(1\.8\)/.test(pillGlass.filter) &&
+    /blur\(6px\)/.test(pillGlass.filter) && /saturate\(1\.8\)/.test(pillGlass.filter) &&
       /\/ 0\.[5-8]\d*\)|, 0\.[5-8]\d*\)/.test(pillGlass.background) && pillGlass.shadow !== "none",
     JSON.stringify(pillGlass),
   );
@@ -3813,7 +3896,17 @@ try {
     probe.remove();
     return colour;
   });
-  check("and keeps the accent", fabFill === accentFill, `${fabFill} / ${accentFill}`);
+  // Liquid Glass (1.4): the accent itself, a little translucent (`COMPOSE_TINT`).
+  const channels = (css) => {
+    const n = (css.match(/[\d.]+/g) ?? []).map(Number);
+    return css.startsWith("color(") ? [...n.slice(0, 3).map((v) => Math.round(v * 255)), n[3] ?? 1] : [...n.slice(0, 3), n[3] ?? 1];
+  };
+  const [fab4, accent4] = [channels(fabFill), channels(accentFill)];
+  check(
+    "and keeps the accent, a little translucent",
+    fab4.slice(0, 3).every((v, i) => Math.abs(v - accent4[i]) <= 1) && fab4[3] >= 0.8 && fab4[3] < 1,
+    `${fabFill} / ${accentFill}`,
+  );
 
   const dockChips = dock.locator("[data-rail-key] button[aria-pressed]");
   const chipBox = await box(dockChips);
@@ -3835,7 +3928,7 @@ try {
       swipeable: getComputedStyle(element).overflowX === "auto" && element.scrollWidth > element.clientWidth,
       bands,
       dockBg,
-      chipFilter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(chip, "::before")),
+      chipFilter: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(chip)),
       chipShadow: chipStyle.boxShadow,
       chipBorder: chipStyle.borderTopWidth,
       firstLeft: Math.round(chip.getBoundingClientRect().left),
@@ -3845,7 +3938,7 @@ try {
   check(
     "each chip is its own frosted pill with a hairline and a shadow; no band behind the rail",
     chipRow.bands.length === 0 && (chipRow.dockBg === "rgba(0, 0, 0, 0)" || chipRow.dockBg === "transparent") &&
-      /blur\(22px\)/.test(chipRow.chipFilter) && chipRow.chipShadow !== "none" && chipRow.chipBorder === "1px" &&
+      /blur\(6px\)/.test(chipRow.chipFilter) && chipRow.chipShadow !== "none" && chipRow.chipBorder === "1px" &&
       chipRow.gap >= 8,
     JSON.stringify(chipRow),
   );
@@ -4002,8 +4095,9 @@ try {
     JSON.stringify(menuShape),
   );
   check(
-    "reversed: account and gear on top, then Spam, Trash, Drafts, Archive, Sent, and Inbox last",
-    JSON.stringify(menuShape.order) === JSON.stringify(["account", "spam", "trash", "drafts", "archive", "sent", "inbox"]),
+    "reversed: account and gear on top, then Spam, Trash, Scheduled, Drafts, Snoozed, Archive, Sent, and Inbox last",
+    JSON.stringify(menuShape.order) ===
+      JSON.stringify(["account", "spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent", "inbox"]),
     JSON.stringify(menuShape.order),
   );
   check(
@@ -4033,6 +4127,13 @@ try {
       pill: { left: Math.round(pillRect.left), right: Math.round(pillRect.right), bottom: Math.round(pillRect.bottom) },
       inboxRow: { right: Math.round(inboxRow.right), mid: Math.round(inboxRow.top + inboxRow.height / 2) },
       expand: { left: Math.round(expandRect.left), mid: Math.round(expandRect.top + expandRect.height / 2) },
+      // Centres unrounded, for the gear-over-chevron column (to the pixel).
+      expandX: expandRect.left + expandRect.width / 2,
+      expandW: expandRect.width,
+      gear: (() => {
+        const rect = panel.querySelector('[data-nav-account] button[aria-label="Settings"]')?.getBoundingClientRect();
+        return rect ? { x: rect.left + rect.width / 2, w: rect.width, h: rect.height, top: rect.top } : null;
+      })(),
       expandOnTop: Boolean(under?.closest("[data-dock-expand]")),
       fabVisible: fabRect.width > 0 && getComputedStyle(document.querySelector("[data-compose-fab]")).visibility === "visible",
       height: innerHeight,
@@ -4058,7 +4159,7 @@ try {
   );
   check(
     "in the same light frost as the dock",
-    /blur\(22px\)/.test(phoneSide.filter) && /saturate\(1\.8\)/.test(phoneSide.filter) && !/, 1\)$/.test(phoneSide.background),
+    /blur\(6px\)/.test(phoneSide.filter) && /saturate\(1\.8\)/.test(phoneSide.filter) && !/, 1\)$/.test(phoneSide.background),
     JSON.stringify({ filter: phoneSide.filter, background: phoneSide.background }),
   );
   check(
@@ -4066,6 +4167,12 @@ try {
     Math.abs(phoneSide.inboxRow.mid - phoneSide.expand.mid) <= 3 && phoneSide.inboxRow.right <= phoneSide.expand.left &&
       phoneSide.expandOnTop && phoneSide.fabVisible,
     JSON.stringify({ inbox: phoneSide.inboxRow, expand: phoneSide.expand, onTop: phoneSide.expandOnTop, fab: phoneSide.fabVisible }),
+  );
+  check(
+    "the Settings gear stays on the account row at the top, centred over the Expand chevron (same column, within 1px), 44px+ round",
+    phoneSide.gear !== null && Math.abs(phoneSide.gear.x - phoneSide.expandX) <= 1 &&
+      phoneSide.gear.w >= 44 && phoneSide.gear.h >= 44 && phoneSide.gear.top < phoneSide.side.top + 80,
+    JSON.stringify({ gear: phoneSide.gear, expandX: phoneSide.expandX, expandW: phoneSide.expandW, top: phoneSide.side.top }),
   );
   check(
     "the app behind it is blurred (the desktop sidebar's four-layer blur) and inert, the dock stays live and the chips are set aside",
@@ -4198,8 +4305,8 @@ try {
     })),
   );
   check(
-    "more, forward, reply, trash and archive (most-used nearest the thumb), each a full touch target",
-    readerButtons.map(({ label }) => label).join("|") === "More|Forward|Reply to all|Move to trash|Archive" &&
+    "more, forward, snooze, reply, trash and archive (most-used nearest the thumb), each a full touch target",
+    readerButtons.map(({ label }) => label).join("|") === "More|Forward|Snooze|Reply to all|Move to trash|Archive" &&
       readerButtons.every(({ box: b }) => b && b.width >= MIN_TARGET && b.height >= MIN_TARGET),
     JSON.stringify(readerButtons.map(({ label, box: b }) => [label, b && Math.round(b.width), b && Math.round(b.height)])),
   );
@@ -6905,7 +7012,7 @@ try {
             width: innerWidth,
             aboveChips: rect.bottom <= chips.top + 1,
             overlapsChrome: Boolean(overlaps(rect, pillRect) || overlaps(rect, fab)),
-            filter: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(button, "::before")),
+            filter: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(button)),
             scrollTop: Math.round(scroller.scrollTop),
             screen: scroller.clientHeight,
             lastClear: last ? last.bottom <= rect.top + 1 : null,
@@ -6930,7 +7037,7 @@ try {
           "past a screen it shows: a frosted pill named Back to top, labelled Top, centred above the chips, clear of the dock and compose",
           past.shown && past.visibility === "visible" && past.takesTap && past.name === "Back to top" && past.label === "Top" &&
             Math.abs(past.centre - past.width / 2) <= 2 && past.aboveChips && !past.overlapsChrome &&
-            /blur\(22px\)/.test(past.filter) && /saturate\(1\.8\)/.test(past.filter),
+            /blur\(6px\)/.test(past.filter) && /saturate\(1\.8\)/.test(past.filter),
           JSON.stringify(past),
         );
       } else {
@@ -7017,7 +7124,7 @@ try {
           const scroller = document.querySelector("[data-row-count]");
           const rail = document.querySelector("header [data-rail-scroller]");
           const chips = rail ? [...rail.querySelectorAll("[data-rail-key]")] : [];
-          const filterOf = (el) => ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(el, "::before"));
+          const filterOf = (el) => ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(el));
           const rows = [...scroller.querySelectorAll("[data-row-id]")].map((r) => r.getBoundingClientRect());
           const briefing = scroller.querySelector("[data-briefing]");
           const connect = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Connect Gmail");
@@ -7033,7 +7140,7 @@ try {
             barRadius: parseFloat(getComputedStyle(bar).borderTopLeftRadius),
             barHeight: barRect.height,
             inset: { left: Math.round(barRect.left - pane.left), right: Math.round(pane.right - barRect.right), top: Math.round(barRect.top - pane.top) },
-            chipsGlass: chips.length > 0 && chips.every((chip) => chip.classList.contains("wn-chip-glass") && /blur\(22px\)/.test(filterOf(chip))),
+            chipsGlass: chips.length > 0 && chips.every((chip) => chip.classList.contains("wn-chip-glass") && /blur\(6px\)/.test(filterOf(chip))),
             chromeBottom: Math.round(chrome.getBoundingClientRect().bottom),
             scrollTop: Math.round(scroller.scrollTop),
             padTop: parseFloat(getComputedStyle(scroller).paddingTop),
@@ -7051,7 +7158,7 @@ try {
       check(
         `${mode}: the desktop header floats: no band behind it, the bar a rounded glass pill inset from the pane, every chip its own glass pill`,
         rest.theme === mode && rest.bands.every((bg) => bg === "rgba(0, 0, 0, 0)") && rest.railMask === "none" &&
-          /blur\(22px\)/.test(rest.barFilter) && /saturate\(1\.8\)/.test(rest.barFilter) &&
+          /blur\(6px\)/.test(rest.barFilter) && /saturate\(1\.8\)/.test(rest.barFilter) &&
           rest.barRadius >= rest.barHeight / 2 - 1 && rest.inset.left >= 8 && rest.inset.right >= 8 && rest.inset.top >= 8 && rest.chipsGlass,
         JSON.stringify(rest),
       );
@@ -7144,10 +7251,10 @@ try {
       await d.waitForTimeout(200);
       const bar = d.locator("header [data-selection-bar='desktop']");
       const selBox = await bar.boundingBox();
-      const selFilter = await bar.evaluate((el) => ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(el, "::before"))).catch(() => "");
+      const selFilter = await bar.evaluate((el) => ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(el, el.classList.contains("wn-glass-behind") ? "::before" : null))).catch(() => "");
       check(
         "a selection's bar floats in the chips' place, in the same glass, and the header keeps its height",
-        Boolean(selBox) && /blur\(22px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
+        Boolean(selBox) && /blur\(6px\)/.test(selFilter) && Math.abs((await geometry()).chromeBottom - before) <= 1,
         JSON.stringify({ selBox, selFilter, before }),
       );
       await d.keyboard.press("Escape");
@@ -7167,9 +7274,9 @@ try {
         const st = (el) => getComputedStyle(el);
         return {
           matches: matchMedia("(prefers-reduced-transparency: reduce)").matches,
-          bar: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(bar, "::before")),
+          bar: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(bar)),
           barBg: st(bar).backgroundColor,
-          chip: ((b) => (b.display === "none" || b.content === "none" ? "none" : b.backdropFilter || b.webkitBackdropFilter))(getComputedStyle(chip, "::before")),
+          chip: ((b) => b.backdropFilter || b.webkitBackdropFilter)(getComputedStyle(chip)),
         };
       });
       check(
@@ -7856,8 +7963,8 @@ try {
       return value;
     };
     // The frost on, then off (and the pills' tint off in both, so only the blur differs).
-    const NO_TINT = ".wn-glass,.wn-chip-glass{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
-    const NO_FROST = ".wn-glass::before,.wn-chip-glass::before{display:none!important}";
+    const NO_TINT = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-liquid::after{display:none!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
+    const NO_FROST = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}";
     const frostRatio = async (p, ctx, rect) => {
       const tint = await p.addStyleTag({ content: NO_TINT });
       await p.waitForTimeout(250);
@@ -7870,13 +7977,14 @@ try {
       await p.waitForTimeout(250);
       return { frosted: Math.round(frosted * 100) / 100, plain: Math.round(plain * 100) / 100, ratio: plain > 0 ? frosted / plain : 1 };
     };
-    // Nothing between a pill's frost layer and the page may cut it off from the list.
+    // Nothing between a pill and the page may cut its frost off from the list (1.4: the
+    // frost is on the pill itself, so only a filter there would).
     const GLASS_AUDIT = () => {
       const roots = [];
       const pills = [...document.querySelectorAll(".wn-glass:not(.wn-sidebar-panel), .wn-chip-glass")].filter((el) => el.getClientRects().length > 0);
       for (const pill of pills) {
         const own = getComputedStyle(pill);
-        if ((own.backdropFilter && own.backdropFilter !== "none") || own.filter !== "none") roots.push(`${pill.className.slice(0, 40)}: on itself`);
+        if (own.filter !== "none") roots.push(`${pill.className.slice(0, 40)}: a filter on itself`);
         for (let el = pill.parentElement; el && el !== document.documentElement; el = el.parentElement) {
           const s = getComputedStyle(el);
           const why = [
@@ -7891,8 +7999,10 @@ try {
         }
       }
       const layer = pills.map((pill) => {
-        const b = getComputedStyle(pill, "::before");
-        return { inset: parseFloat(b.top), clip: b.clipPath, filter: b.backdropFilter || b.webkitBackdropFilter, z: b.zIndex };
+        // A glass that opens a fixed menu frosts its own box from an inset ::before.
+        const own = getComputedStyle(pill, pill.classList.contains("wn-glass-behind") ? "::before" : null);
+        const liquid = pill.classList.contains("wn-liquid");
+        return { filter: own.backdropFilter || own.webkitBackdropFilter, liquid, refracts: /url\(.*#wn-liquid/.test(own.backdropFilter), sheen: liquid ? getComputedStyle(pill, "::after").zIndex : null };
       });
       const rails = [...document.querySelectorAll("[data-rail-scroller]")].filter((el) => el.querySelector(".wn-chip-glass")).map((el) => parseFloat(getComputedStyle(el).paddingTop));
       return { count: pills.length, roots, layer, rails };
@@ -7966,14 +8076,15 @@ try {
 
       const audit = await g.evaluate(GLASS_AUDIT);
       check(
-        `${kind}: every glass pill's frost is an oversized ::before clipped back to it, and nothing above cuts it off from the list`,
+        `${kind}: every glass pill carries its light frost on itself (the liquid ones refracting in Chromium, their sheen under the content), and nothing above cuts it off from the list`,
         audit.count >= 3 && audit.roots.length === 0 &&
-          audit.layer.every((l) => l.inset <= -40 && /^inset\(4\dpx/.test(l.clip) && /blur\(22px\)/.test(l.filter) && l.z === "-1") &&
-          audit.rails.every((pad) => pad >= 44),
+          audit.layer.every((l) => /blur\(6px\)/.test(l.filter) && l.refracts === l.liquid && (!l.liquid || l.sheen === "-1")) &&
+          audit.layer.some((l) => l.liquid) &&
+          audit.rails.every((pad) => pad >= 20),
         JSON.stringify({ count: audit.count, roots: audit.roots.slice(0, 4), layer: audit.layer.slice(0, 2), rails: audit.rails }),
       );
 
-      // The rail pads itself by the frost's reach and takes it back: the row it sits in
+      // The rail pads itself for the chips' shadow and takes it back: the row it sits in
       // (what the dock's clearance, the Top pill's slot and the header's height measure)
       // keeps the chips' own box.
       const railRow = await g.evaluate(() => {
@@ -7983,12 +8094,12 @@ try {
         return chip && row ? { chip: Math.round(chip.height), row: Math.round(row.height), chipTop: Math.round(chip.top), rowTop: Math.round(row.top) } : null;
       });
       check(
-        `${kind}: the chip rail's row keeps the chips' box despite the frost padding`,
+        `${kind}: the chip rail's row keeps the chips' box despite the shadow padding`,
         railRow !== null && railRow.row <= railRow.chip + 17 && railRow.chipTop - railRow.rowTop <= 9,
         JSON.stringify(railRow),
       );
 
-      // Paint only: the frost layers neither lengthen the rail's scroll nor widen the page.
+      // Nothing about the glass lengthens the rail's scroll or widens the page.
       const extent = await g.evaluate(() => {
         const scroller = document.querySelector(".wn-chip-glass")?.closest("[data-rail-scroller]");
         const items = [...scroller.children].filter((el) => el.getClientRects().length > 0);
@@ -8003,7 +8114,7 @@ try {
         };
       });
       check(
-        `${kind}: the frost layers lengthen no scroll: the rail ends at its last chip, and the page is no wider than the screen`,
+        `${kind}: the glass lengthens no scroll: the rail ends at its last chip, and the page is no wider than the screen`,
         extent.scroll <= extent.contentEnd + 1 && extent.pageExtra <= 0 && extent.docExtra <= 0,
         JSON.stringify(extent),
       );
@@ -8160,6 +8271,7 @@ try {
   await smokeMotion({ browser, url: URL, check, section, errors });
   await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
   await smokeThumb({ browser, URL, check, section, errors });
+  await smokeSchedule({ browser, URL, check, section, errors });
 
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");
@@ -8251,11 +8363,11 @@ try {
     // Reduced motion: the state still appears, nothing moves.
     await c.emulateMedia({ reducedMotion: "reduce" });
     const animations = await c.evaluate(() =>
-      [...document.querySelectorAll(".inbox-clear__mark, .inbox-clear__path, .inbox-clear__glow--core")].map(
+      [...document.querySelectorAll(".inbox-clear__mark, .inbox-clear__path, .inbox-clear__glow--core, .inbox-clear__float, .inbox-clear__spark")].map(
         (el) => getComputedStyle(el).animationName,
       ),
     );
-    check("under reduced motion nothing animates", animations.length === 3 && animations.every((name) => name === "none"), JSON.stringify(animations));
+    check("under reduced motion nothing animates", animations.length === 6 && animations.every((name) => name === "none"), JSON.stringify(animations));
     await c.emulateMedia({ reducedMotion: null });
     // Let the Inbox's own celebration finish before judging what a theme change does.
     await c.waitForTimeout(1_900);
@@ -8283,7 +8395,7 @@ try {
           surface: state ? getComputedStyle(state).backgroundColor : "",
         };
       });
-    for (const [label, mode] of [["Light", "light"], ["Dark", "dark"], ["OLED", "oled"]]) {
+    for (const [label, mode] of [["Light", "light"], ["Dark", "dark"], ["Very dark", "oled"]]) {
       await appearance("mode", label);
       const seen = await look();
       check(

@@ -29,9 +29,9 @@ describe("the settings dropdown's list", () => {
   });
 
   it("jumps to the next value starting with a typed letter, wrapping, case-insensitive", () => {
-    const labels = ["System", "Light", "Dark", "OLED"];
+    const labels = ["System", "Light", "Dark", "Very dark"];
     expect(typeAhead(labels, all, 0, "d")).toBe(2);
-    expect(typeAhead(labels, all, 2, "O")).toBe(3);
+    expect(typeAhead(labels, all, 2, "V")).toBe(3);
     expect(typeAhead(labels, all, 3, "s")).toBe(0);
     const repeat = ["Every minute", "Every 5 minutes", "Every hour"];
     expect(typeAhead(repeat, [true, true, true], 0, "e")).toBe(1);

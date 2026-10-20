@@ -38,18 +38,29 @@ pub(crate) fn action_name(id: &str) -> Option<&'static str> {
 
 pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
     let actions = batch.actions;
+    // Whose mail (1.4.0): every press names the account; with several signed in, the
+    // body says which.
+    let account = batch.account.as_ref().map(|a| a.id.clone());
+    let whose = batch
+        .account
+        .as_ref()
+        .and_then(|a| a.label.clone())
+        .map(|label| format!("\n{label}"))
+        .unwrap_or_default();
     for message in batch.messages.iter().cloned() {
         let app = app.clone();
         let hide = batch.hide_preview;
+        let account = account.clone();
+        let whose = whose.clone();
         std::thread::spawn(move || {
             let mut n = base();
             n.summary(&message.title);
             if hide {
-                n.body("New message");
+                n.body(&format!("New message{whose}"));
             } else if message.preview.is_empty() {
-                n.body(&message.subject);
+                n.body(&format!("{}{whose}", message.subject));
             } else {
-                n.body(&format!("{}\n{}", message.subject, message.preview));
+                n.body(&format!("{}\n{}{whose}", message.subject, message.preview));
             }
             // The sender's picture: Linux's `image-path` hint (drawn as the notification's
             // image by GNOME, KDE, dunst and mako), Windows's toast image. A picture that
@@ -88,6 +99,7 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
                             gmail_id: gmail.clone(),
                             origin: "desktop",
                             outcome: None,
+                            account: account.clone(),
                         },
                     );
                 }
@@ -103,17 +115,31 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
         });
     }
 
-    // More arrived than were shown: one summary for the rest, which opens the app.
+    // More arrived than were shown: one summary for the rest, which opens the account's
+    // inbox (`inbox` names no message).
     if batch.total as usize > batch.messages.len() {
         let (title, body) = summary_text(&batch);
         let app = app.clone();
         std::thread::spawn(move || {
             let mut n = base();
-            n.summary(&title).body(&body).action("default", "Open");
+            n.summary(&title)
+                .body(&format!("{body}{whose}"))
+                .action("default", "Open");
             if let Ok(handle) = n.show() {
                 handle.wait_for_action(|action| {
                     if action_name(action) == Some("open") {
                         crate::tray::reveal(&app);
+                        let _ = app.emit(
+                            ACTION_EVENT,
+                            ActionEvent {
+                                action: "inbox".into(),
+                                message_id: 0,
+                                gmail_id: String::new(),
+                                origin: "desktop",
+                                outcome: None,
+                                account: account.clone(),
+                            },
+                        );
                     }
                 });
             }

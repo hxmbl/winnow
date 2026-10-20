@@ -102,10 +102,24 @@ pub struct MessageNotice {
     pub picture: Option<String>,
 }
 
+/// Whose mail a batch is (1.4.0): every press and tap names the account, so it acts on
+/// that account and opens its inbox. `label` (the address) is shown only when the web
+/// layer sends it, which it does with more than one account signed in.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationAccount {
+    pub id: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
 /// Everything one sync wants to announce.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationBatch {
+    /// Absent from a 1.3.5 web layer; a malformed id is dropped by [`sanitised`].
+    #[serde(default)]
+    pub account: Option<NotificationAccount>,
     /// How many messages arrived, which may be more than `messages`.
     pub total: u32,
     pub summary_title: String,
@@ -122,6 +136,14 @@ pub struct NotificationBatch {
 impl NotificationBatch {
     /// Cap, drop what cannot be acted on safely, and cut long strings.
     pub fn sanitised(mut self) -> Self {
+        self.account = self
+            .account
+            .take()
+            .filter(|account| plan::valid_account_id(&account.id))
+            .map(|NotificationAccount { id, label }| NotificationAccount {
+                id,
+                label: label.map(|l| clip(&l)).filter(|l| !l.is_empty()),
+            });
         self.messages.retain(|m| plan::valid_gmail_id(&m.gmail_id));
         self.messages.truncate(MAX_CHILDREN);
         let hide_preview = self.hide_preview;
@@ -200,6 +222,9 @@ pub struct ActionEvent {
     /// Android only: `done` or `failed`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<&'static str>,
+    /// The notification's account (1.4.0), when the batch named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 /// The confirmation the webview asks for after acting on a desktop click.
@@ -366,7 +391,20 @@ mod tests {
         assert_eq!(batch.total, 7);
         assert!(!batch.actions.reply);
         assert!(batch.hide_preview);
+        assert_eq!(batch.account, None);
         assert_eq!(batch.messages[0].thread_id.as_deref(), Some("def"));
+        let tagged: NotificationBatch = serde_json::from_str::<NotificationBatch>(
+            r#"{"account":{"id":"acct2","label":"two@x.co"},"total":1,"summaryTitle":"x","messages":[]}"#,
+        )
+        .unwrap()
+        .sanitised();
+        assert_eq!(
+            tagged.account,
+            Some(NotificationAccount {
+                id: "acct2".into(),
+                label: Some("two@x.co".into())
+            })
+        );
         // Missing settings mean everything on, not everything off.
         let bare: NotificationBatch =
             serde_json::from_str(r#"{"total":1,"summaryTitle":"x","messages":[]}"#).unwrap();
@@ -383,6 +421,7 @@ mod tests {
             n
         };
         let batch = |picture: &str, hide_preview: bool| NotificationBatch {
+            account: None,
             total: 1,
             summary_title: "Ada".into(),
             summary_body: String::new(),
@@ -431,6 +470,10 @@ mod tests {
         broken.thread_id = Some("bad id".into());
         messages.insert(1, broken);
         let batch = NotificationBatch {
+            account: Some(NotificationAccount {
+                id: "../evil".into(),
+                label: Some("x".into()),
+            }),
             total: 9,
             summary_title: "9 new messages".into(),
             summary_body: String::new(),
@@ -440,6 +483,8 @@ mod tests {
         }
         .sanitised();
         assert_eq!(batch.messages.len(), MAX_CHILDREN);
+        // An account id that is not one never reaches a keychain name or a link.
+        assert_eq!(batch.account, None);
         assert_eq!(batch.messages[0].gmail_id, "ok1");
         assert_eq!(batch.messages[0].reply_head, None);
         assert_eq!(batch.messages[0].thread_id, None);
@@ -451,6 +496,7 @@ mod tests {
     #[test]
     fn hidden_previews_never_name_the_subject() {
         let batch = NotificationBatch {
+            account: None,
             total: 1,
             summary_title: "1 new message".into(),
             summary_body: "Ada".into(),
@@ -471,14 +517,17 @@ mod tests {
             gmail_id: "abc".into(),
             origin: "android",
             outcome: Some("done"),
+            account: Some("acct2".into()),
         };
         let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["account"], "acct2");
         assert_eq!(json["messageId"], 9);
         assert_eq!(json["gmailId"], "abc");
         assert_eq!(json["outcome"], "done");
         let desktop = ActionEvent {
             outcome: None,
             origin: "desktop",
+            account: None,
             ..event
         };
         assert!(serde_json::to_value(&desktop)

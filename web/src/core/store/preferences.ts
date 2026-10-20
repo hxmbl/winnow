@@ -6,7 +6,7 @@
  * being exercised only by the smoke run.
  */
 
-import { isAccentTheme, isAppearance } from "../model/appearance";
+import { isAccentPreference, isAppearance, normalizeHexColor } from "../model/appearance";
 import { reviveUndoSendSeconds } from "../mail/undoSend";
 import { DEFAULT_NOTIFICATION_ACTIONS } from "../notify/notifications";
 import type { Preferences } from "./store";
@@ -23,7 +23,12 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   // An unknown mode or accent — a value from a newer build, or a hand-edited blob — is
   // dropped rather than guessed at, so the default applies and the app still paints.
   if (isAppearance(source.appearance)) out.appearance = source.appearance;
-  if (isAccentTheme(source.accent)) out.accent = source.accent;
+  if (isAccentPreference(source.accent)) out.accent = source.accent;
+  // The custom colour (1.4.0): a hex, normalised; anything else is dropped and the default
+  // colour stands. An older blob simply has none. `accent: "custom"` without a colour is
+  // still honoured, and paints the default custom colour.
+  const accentCustom = normalizeHexColor(source.accentCustom);
+  if (accentCustom) out.accentCustom = accentCustom;
   /*
    * The image policy, with the old boolean read as a migration rather than dropped:
    * `true` maps to `always` and `false` to `never`, which is exactly what each setting
@@ -39,6 +44,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
   if (typeof source.swipeActions === "boolean") out.swipeActions = source.swipeActions;
   if (typeof source.leftHanded === "boolean") out.leftHanded = source.leftHanded;
+  if (typeof source.emailDarkMode === "boolean") out.emailDarkMode = source.emailDarkMode;
   if (typeof source.driveLinks === "boolean") out.driveLinks = source.driveLinks;
   // Only a delay Settings offers (or the retired 30 s, read as 20 s): anything else (a
   // newer build's choice, a hand edit) falls back to the default rather than being

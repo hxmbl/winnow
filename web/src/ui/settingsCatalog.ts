@@ -72,7 +72,7 @@ export const CATEGORIES: readonly SettingsCategory[] = [
     id: "google",
     label: "Google account",
     intro:
-      "Winnow talks to Gmail through a Google client you create in your own Google Cloud project; it ships none of its own. Your mail goes between this device and Google only.",
+      "Winnow talks to Gmail through a Google client you create in your own Google Cloud project; it ships none of its own. Every account you add signs in with that same client. Your mail goes between this device and Google only.",
   },
   {
     id: "senders",
@@ -142,6 +142,12 @@ export const SETTINGS = {
     explanation:
       "After you press Send, the message waits this long with an Undo button before it goes, and Undo brings it back to the composer as it was. Nothing is recalled: the message simply has not left yet. If Winnow closes during the wait, the message is not sent but kept as a draft, in Gmail and on this device, and offered back next time. Off sends at once.",
   },
+  sendLater: {
+    category: "compose",
+    label: "Send later and snooze",
+    explanation:
+      "Gmail does not let other apps schedule a send or snooze mail, so Winnow keeps the time on this device: a scheduled message waits in Gmail's Drafts, and snoozed mail is archived with the label Winnow/Snoozed. Winnow has to be open to send or bring them back at that time; if it is closed, they happen the next time you open it, and the status pill says the message went late. Opening Winnow on another device does not send them or bring them back, and signing out forgets the times (the drafts and the label stay in Gmail).",
+  },
   resetSorting: {
     category: "reading",
     label: "Reset sorting",
@@ -158,13 +164,19 @@ export const SETTINGS = {
     category: "appearance",
     label: "Mode",
     explanation:
-      "System follows your device between light and dark. OLED is dark on true black, which saves power on OLED screens but makes edges harder to see. This is saved on this device only.",
+      "System follows your device between light and dark. Very dark is dark on true black, which saves power on OLED screens but makes edges harder to see. This is saved on this device only.",
   },
   accent: {
     category: "appearance",
     label: "Accent",
     explanation:
-      "The one colour Winnow uses for unread mail, the selection and the main action. Each accent is checked for contrast in light and dark. It changes nothing but colour.",
+      "The colour of Winnow's buttons, links, switches and unread marks; everything else stays neutral grey and white. Pick one of eight, now including Rose, Green, Blue and Graphite, or Custom for any colour you like. Every accent is checked for contrast in each mode, and a custom colour is lightened or darkened a little where it needs to be, so text on it stays readable.",
+  },
+  emailDarkMode: {
+    category: "appearance",
+    label: "Email dark mode",
+    explanation:
+      "In Dark and Very dark, messages are drawn dark too instead of as a white page: a message with its own dark design gets it, and any other has its colours adjusted so text stays readable, with images left as they are. The sun button above a message shows its original colours. Off keeps every message on its own light page. Light mode is unaffected.",
   },
   leftHanded: {
     category: "appearance",
@@ -231,6 +243,24 @@ export const SETTINGS = {
     label: "Your Google OAuth client",
     explanation:
       "The client ID (and secret, if it has one) from your own Google Cloud project that Winnow signs in with. On desktop it is kept in your system keychain; in the browser it is kept in this browser's storage. Change replaces or removes it; your mail itself never passes through anyone but Google.",
+  },
+  accounts: {
+    category: "google",
+    label: "Accounts on this device",
+    explanation:
+      "Up to five Gmail accounts, each signed in on its own with your one Google client. Each account's mail, drafts, learning and sign-in are kept apart on this device, and switching never clears any of them. Signing out of one erases only that account from this device and asks Google to revoke its access; Sign out of all does that for every account.",
+  },
+  accountColor: {
+    category: "google",
+    label: "Colour",
+    explanation:
+      "A small coloured dot beside an account wherever Winnow shows it: the switcher, the avatar in the top bar and Settings. It only helps tell accounts apart at a glance and is stored on this device.",
+  },
+  accountNotify: {
+    category: "google",
+    label: "Notify when not open",
+    explanation:
+      "Whether new mail in this account notifies you while you are reading another one. Winnow checks the accounts you are not viewing lightly, for their unread count and new mail only, on the same schedule as background sync. The open account always follows Notify about new mail.",
   },
   googleContacts: {
     category: "google",

@@ -15,6 +15,7 @@ import {
   type BuiltinSmartFilter,
   type FilterId,
 } from "../core/model/signals";
+import type { FacetCounts } from "../core/classify/filters";
 import { FILTER_HUES, senderHue, type PillHue } from "./filterColors";
 
 export type PillItem = {
@@ -27,11 +28,13 @@ export type PillItem = {
    */
   hue: PillHue;
   /**
-   * How many messages this bucket holds in the *inbox*, not "in the current view".
+   * The number on the pill: what tapping it would list.
    *
-   * The rail is ranked against the inbox so it stays put when you change mailbox; a
-   * count that meant something else would put a number on a pill that contradicts the
-   * rank beside it.
+   * With nothing on and no search, how many messages in the open mailbox the bucket
+   * holds. With a filter on or a search running (1.4.0) it is faceted: an off pill
+   * counts the current (searched) result it also matches (what the list becomes with it
+   * added, since filters AND with each other and with the search), an on pill the
+   * current result. See `countFacets`.
    */
   count: number;
 };
@@ -43,12 +46,30 @@ export function buildPills(
   topSenders: readonly string[],
   senderCounts: ReadonlyMap<string, number>,
   activeFilters: readonly FilterId[],
+  /**
+   * The store's faceted counts (`MailboxView.railFacets`), `null` with nothing on and no
+   * search. They
+   * replace the number shown; which pills the rail keeps is still decided by `counts`,
+   * so turning a filter on dims a pill that no longer narrows anything to 0 rather than
+   * taking it off the rail and moving every digit after it.
+   */
+  facets: FacetCounts | null = null,
 ): PillItem[] {
+  const builtinCount = (id: BuiltinSmartFilter) => counts.get(id) ?? 0;
+  const senderCount = (sender: string) => senderCounts.get(sender) ?? 0;
+  const display = (pill: PillItem): PillItem => {
+    if (!facets) return pill;
+    const count =
+      pill.id.kind === "builtin"
+        ? (facets.builtin.get(pill.id.id) ?? 0)
+        : (facets.senders.get(pill.id.sender.toLowerCase()) ?? 0);
+    return { ...pill, count };
+  };
   const buckets: PillItem[] = rail.map((id) => ({
     id: { kind: "builtin", id },
     label: FILTER_LABELS[id],
     hue: FILTER_HUES[id],
-    count: counts.get(id) ?? 0,
+    count: builtinCount(id),
   }));
 
   /**
@@ -63,7 +84,7 @@ export function buildPills(
     id: { kind: "sender", sender },
     label: `From ${sender}`,
     hue: senderHue(sender),
-    count: senderCounts.get(sender) ?? 0,
+    count: senderCount(sender),
   }));
 
   // An active sender that has dropped out of the top-N is appended rather than dropped,
@@ -78,7 +99,7 @@ export function buildPills(
       id: filter,
       label: `From ${filter.sender}`,
       hue: senderHue(filter.sender),
-      count: senderCounts.get(filter.sender) ?? 0,
+      count: senderCount(filter.sender),
     });
   }
 
@@ -92,7 +113,7 @@ export function buildPills(
     pill.count > 0 ||
     active.has(pill.id.kind === "builtin" ? `b:${pill.id.id}` : `s:${pill.id.sender}`) ||
     (pill.id.kind === "builtin" && (PERMANENT_FILTERS as readonly string[]).includes(pill.id.id));
-  return [...buckets, ...senders].filter(keep);
+  return [...buckets, ...senders].filter(keep).map(display);
 }
 
 /**
