@@ -3689,13 +3689,14 @@ try {
     JSON.stringify(logoBox),
   );
   // The top bar is where you are and search, nothing else: no prev/next chevrons, no
-  // tick and no menu button (the menu is the dock's Expand button). Its one button is
-  // the mark itself, which toggles the version.
-  const topBarButtons = await topBar.locator("button:not([data-version-toggle])").evaluateAll((nodes) =>
+  // tick and no menu button (the menu is the dock's Expand button). Its buttons are the
+  // mark itself, which toggles the version, and (1.4.0) the account avatar at the end of
+  // the row, which opens the account switcher.
+  const topBarButtons = await topBar.locator("button:not([data-version-toggle]):not([data-account-switcher-trigger])").evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute("aria-label") ?? node.textContent),
   );
   check(
-    "no chevrons, tick or menu button in the phone top bar (the mark is its only button, the version toggle)",
+    "no chevrons, tick or menu button in the phone top bar (only the mark, the version toggle, and the account avatar)",
     topBarButtons.length === 0 && (await topBar.locator("button[data-version-toggle][data-phone-mark]").count()) === 1 &&
       (await topBar.locator(
         '[aria-label="Previous message"], [aria-label="Next message"], [aria-label="Mark all read"], [aria-label="Open menu"], [data-sidebar-toggle]',
@@ -3704,12 +3705,17 @@ try {
   );
 
   const searchBox = await page.locator("[data-phone-search]").boundingBox();
+  // The row ends at the account avatar when there is one (1.4.0), else at the edge.
+  const avatarBox = await topBar.locator("[data-account-switcher-trigger]").first().boundingBox().catch(() => null);
+  const rowEnd = avatarBox ? avatarBox.x : 390 - logoBox.x;
   check(
-    "search sits on the logo's row, filling the rest of it, at touch height",
+    "search sits on the logo's row, filling the rest of it (up to the account avatar), at touch height",
     Boolean(searchBox && logoBox) && searchBox.x >= logoBox.x + logoBox.width &&
       Math.abs(searchBox.y + searchBox.height / 2 - (logoBox.y + logoBox.height / 2)) <= 2 &&
-      searchBox.x + searchBox.width >= 390 - logoBox.x - 1 && searchBox.height >= MIN_TARGET,
-    JSON.stringify({ searchBox, logoBox }),
+      searchBox.x + searchBox.width >= rowEnd - 12 && searchBox.x + searchBox.width <= rowEnd + 1 && searchBox.height >= MIN_TARGET &&
+      (!avatarBox || (Math.min(avatarBox.width, avatarBox.height) >= MIN_TARGET && avatarBox.x + avatarBox.width <= 390 &&
+        Math.abs(avatarBox.y + avatarBox.height / 2 - (logoBox.y + logoBox.height / 2)) <= 2)),
+    JSON.stringify({ searchBox, logoBox, avatarBox }),
   );
   const phoneTitle = await topBar.evaluate((bar) => {
     const heading = bar.querySelector("h1");
