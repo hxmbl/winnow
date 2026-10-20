@@ -103,6 +103,56 @@ const NOT_ROUND = () => {
   return out;
 };
 
+/**
+ * Email dark mode (1.4.0): what the open message body looks like. The card's own
+ * background, whether the container is on a dark path, and the worst WCAG contrast of
+ * any element with its own visible text against the first opaque background behind it.
+ */
+async function emailDarkState(p) {
+  return p.evaluate(() => {
+    const el = document.querySelector("[data-reader] [data-wn-email]");
+    const card = document.querySelector("[data-reader] [data-wn-email-card]");
+    if (!el || !card) return null;
+    const rgb = (value) => {
+      const m = /rgba?\(([^)]+)\)/.exec(value);
+      if (!m) return null;
+      const [r, g, b, a = 1] = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+      return { r, g, b, a };
+    };
+    const lin = (v) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+    const lum = (c) => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+    const ratio = (a, b) => { const x = lum(a); const y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    const backgroundBehind = (node) => {
+      for (let n = node; n; n = n.parentElement) {
+        const c = rgb(getComputedStyle(n).backgroundColor);
+        if (c && c.a > 0.5) return c;
+        if (getComputedStyle(n).backgroundImage !== "none" && n !== card) return null; // over a picture: not judged
+      }
+      return { r: 255, g: 255, b: 255, a: 1 };
+    };
+    let worst = { ratio: Infinity, text: "" };
+    for (const node of el.querySelectorAll("*")) {
+      const own = [...node.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim() !== "");
+      if (!own || node.getClientRects().length === 0) continue;
+      const fg = rgb(getComputedStyle(node).color);
+      const bg = backgroundBehind(node);
+      if (!fg || !bg) continue;
+      const r = ratio(fg, bg);
+      if (r < worst.ratio) worst = { ratio: Math.round(r * 100) / 100, text: node.textContent.trim().slice(0, 40), fg: getComputedStyle(node).color };
+    }
+    const cardBg = rgb(getComputedStyle(card).backgroundColor);
+    return {
+      mode: el.getAttribute("data-wn-dark"),
+      cardLum: cardBg ? Math.round(lum(cardBg) * 1000) / 1000 : null,
+      cardBg: getComputedStyle(card).backgroundColor,
+      worst,
+      toggle: document.querySelector("[data-reader] [data-wn-dark-toggle]")?.textContent?.trim() ?? null,
+      copyPx: parseFloat(getComputedStyle(el.querySelector(".hero p") ?? el).fontSize),
+      images: [...el.querySelectorAll("img")].map((i) => getComputedStyle(i).filter).filter((f) => f !== "none").length,
+    };
+  });
+}
+
 export async function smokeThumb({ browser, URL, check, section, errors }) {
   // ── 1. The status pill keeps off the demo strip ──────────────────────────
   section("status pill vs the phone demo strip");
@@ -504,5 +554,80 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
       JSON.stringify(wide),
     );
     await desk.close();
+  }
+
+  // ── Email dark mode: the body follows the dark and OLED themes (1.4.0) ──
+  section("reader: email dark mode");
+  {
+    const openNewsletter = async (p, tap) => {
+      await p.locator("#winnow-search").fill("Hark Pro");
+      await p.waitForTimeout(400);
+      const row = p.locator("[data-row-count] button[data-message-id]", { hasText: "Introducing Hark Pro" }).first();
+      if (tap) await row.tap();
+      else await row.click();
+      await p.waitForSelector("[data-reader] [data-wn-email] .hero", { timeout: 5_000 });
+      await p.waitForTimeout(500);
+    };
+    // Phone, dark.
+    const { ctx, p } = await phonePage(browser, URL, errors, { prefs: { appearance: "dark" } });
+    await openNewsletter(p, true);
+    const dark = await emailDarkState(p);
+    check(
+      "dark phone: the newsletter body is dark (adaptive), not a white card",
+      dark?.mode === "adaptive" && dark.cardLum !== null && dark.cardLum < 0.05,
+      JSON.stringify(dark),
+    );
+    check("dark phone: every line of text clears 4.5:1 against what is behind it", dark?.worst.ratio >= 4.5, JSON.stringify(dark?.worst));
+    check("dark phone: the newsletter's own @media phone rule still applies (17px copy)", dark?.copyPx === 17, String(dark?.copyPx));
+    check("dark phone: no image is filtered or inverted", dark?.images === 0, String(dark?.images));
+    await p.locator("[data-reader] [data-wn-dark-toggle]").tap();
+    await p.waitForTimeout(300);
+    const original = await emailDarkState(p);
+    check(
+      "the sun button restores the original colours: a white card, no dark path",
+      original?.mode === null && original.cardBg === "rgb(255, 255, 255)" && original.toggle === "Show in dark",
+      JSON.stringify(original),
+    );
+    await p.locator("[data-reader] [data-wn-dark-toggle]").tap();
+    await p.waitForTimeout(300);
+    check("and the moon button takes it back to dark", (await emailDarkState(p))?.mode === "adaptive");
+    await ctx.close();
+
+    // Phone, OLED: true black.
+    const oled = await phonePage(browser, URL, errors, { prefs: { appearance: "oled" } });
+    await openNewsletter(oled.p, true);
+    const black = await emailDarkState(oled.p);
+    check("OLED phone: the body sits on true black, text still ≥4.5:1",
+      black?.cardBg === "rgb(0, 0, 0)" && black.worst.ratio >= 4.5, JSON.stringify(black));
+    await oled.ctx.close();
+
+    // Desktop, dark; then the setting off; then light, untouched.
+    for (const [prefs, label] of [
+      [{ appearance: "dark" }, "dark"],
+      [{ appearance: "dark", emailDarkMode: false }, "off"],
+      [{ appearance: "light" }, "light"],
+    ]) {
+      const desk = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      await desk.addInitScript((value) => {
+        if (!sessionStorage.getItem("dark-smoke-seeded")) {
+          localStorage.setItem("winnow.preferences.v1", JSON.stringify(value));
+          sessionStorage.setItem("dark-smoke-seeded", "1");
+        }
+      }, prefs);
+      const d = await desk.newPage();
+      d.on("pageerror", (error) => errors.push(String(error)));
+      await d.goto(URL, { waitUntil: "networkidle" });
+      await d.waitForSelector("[data-row-count] [data-row-id]");
+      await openNewsletter(d, false);
+      const state = await emailDarkState(d);
+      if (label === "dark") {
+        check("dark desktop: a dark body, text ≥4.5:1", state?.mode === "adaptive" && state.cardLum < 0.05 && state.worst.ratio >= 4.5, JSON.stringify(state));
+      } else if (label === "off") {
+        check("Email dark mode off: the white card, and no sun button", state?.mode === null && state.cardBg === "rgb(255, 255, 255)" && state.toggle === null, JSON.stringify(state));
+      } else {
+        check("light mode is unchanged: a white card, no dark path, no button", state?.mode === null && state.cardBg === "rgb(255, 255, 255)" && state.toggle === null, JSON.stringify(state));
+      }
+      await desk.close();
+    }
   }
 }
