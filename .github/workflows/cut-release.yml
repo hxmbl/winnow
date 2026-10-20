@@ -3,7 +3,8 @@ name: Cut release
 # One button for a release: bumps every manifest, commits and tags on master, then
 # runs CI on the tag, which hands off to Release. With "publish" on (the default),
 # Release takes the draft live once every bundle is attached and the APK is
-# release-signed; otherwise it stops at the draft, as a hand-pushed tag does.
+# release-signed; otherwise it stops at the draft. A hand-pushed tag publishes the
+# same way, behind the same guards.
 on:
   workflow_dispatch:
     inputs:

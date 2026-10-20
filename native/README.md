@@ -212,7 +212,11 @@ last job publishes the draft only if all six bundles are attached and the APK is
 release-signed. Anything missing (Windows and Android are allowed to fail) leaves
 the draft for you to finish or publish by hand.
 
-Pushing a `v*` tag by hand still works, and it stops at a draft as before.
+Pushing a `v*` tag by hand works the same way: bump the manifests yourself
+(`node web/scripts/bump-version.mjs X.Y.Z`, commit), push the tag, and once CI
+passes the release builds and publishes behind the same guards (all six bundles,
+a release-signed APK), or stays a draft if one is missing. A `-suffix` tag is a
+pre-release; anything else becomes Latest.
 
 ## The command surface
 
