@@ -108,27 +108,27 @@ export type PillRecipe = {
 /**
  * Light.
  *
- * Pale, cool lavender-greys: every neutral carries a little of the accent's blue-violet, so
- * the light page reads as the same night sky with the lights on rather than a different app.
+ * Near white: the planes are almost neutral (since 1.4.0 they carry only a trace of cool,
+ * where they used to be lavender-grey), so the accent and its wash are the only colour.
  * Surfaces are separated by value alone — no rules, no shadows.
  */
 const LIGHT: Palette = {
   color: {
     // ── Surfaces ────────────────────────────────────────────────
     /** Whole-app backdrop: the chrome and the reader's gutter. */
-    canvas: "#EDECF4",
+    canvas: "#F1F1F3",
     /** Pane and control fill — the default "thing you can touch". */
-    surface: "#FAFAFD",
+    surface: "#FDFDFE",
     /** Recessed fill: the reader pane, search, empty states. */
-    surfaceSunken: "#F4F3F9",
+    surfaceSunken: "#F7F7F8",
     /** Hover wash on rows and icon buttons. */
-    surfaceHover: "#EDECF4",
+    surfaceHover: "#F1F1F3",
     /** Pressed and focused fills. */
-    surfaceActive: "#E2E0EE",
+    surfaceActive: "#E6E6EA",
     /** The selected list row: the accent, washed into `surface`. Opaque so the contrast test can see it. */
     surfaceSelected: "#E7E2FA",
     /** Masthead and the mobile bar under it. */
-    chrome: "#FAFAFD",
+    chrome: "#FDFDFE",
 
     // ── Text ────────────────────────────────────────────────────
     /** Headlines — sender name, subject. */

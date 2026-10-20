@@ -360,7 +360,7 @@ describe("the neutrals", () => {
     expect(color.hairline).toBe("rgba(255, 255, 255, 0.09)");
     expect(color.inkBody).toBe("#D4D4D4");
     // Light is untouched by the dark rework.
-    expect(paletteFor("light").color.canvas).toBe("#EDECF4");
+    expect(paletteFor("light").color.canvas).toBe("#F1F1F3");
   });
 
   it("OLED is true black where it can be, with neutral grey states and lines", () => {

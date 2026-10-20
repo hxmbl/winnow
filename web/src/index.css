@@ -58,7 +58,7 @@ body,
  * preference decides. `theme.test.ts` holds these values to the palettes in `theme.ts`.
  */
 :root {
-  --wn-boot-canvas: #edecf4;
+  --wn-boot-canvas: #f1f1f3;
   --wn-boot-ink: #18162b;
   color-scheme: light;
 }

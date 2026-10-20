@@ -166,7 +166,7 @@ export const COMPOSE_SHEEN = 0.08;
  * stays near black.
  */
 export const WASH: Record<ThemeName, { near: number; far: number }> = {
-  light: { near: 0.14, far: 0.12 },
+  light: { near: 0.07, far: 0.06 },
   dark: { near: 0.12, far: 0.11 },
   oled: { near: 0.1, far: 0.08 },
 };
