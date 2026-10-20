@@ -372,6 +372,17 @@ export type StoreState = {
   account: { email: string } | null;
 
   /**
+   * The account namespace that is open (1.4.0), or `null` in the demo and signed out.
+   * What the store persists (learning, active filters, the mailbox) is written under it.
+   */
+  accountId: string | null;
+  /**
+   * Every signed-in account, for the switcher: set by the session bridge, which owns the
+   * registry and the inactive accounts' light sync. The open one is `active`.
+   */
+  accounts: readonly AccountSummary[];
+
+  /**
    * Google's address book, merged into the contact index. Empty until the user opts in.
    *
    * Replaced whole, never mutated, so the contact index can memoise on its identity.
@@ -656,6 +667,13 @@ export interface MailBackend {
    */
   loadMessage?(gmailId: string): Promise<LoadedBody>;
   /**
+   * One whole message by Gmail id, fetched and written into the offline cache: what a
+   * notification opens when its message is not cached yet (a light sync announced it,
+   * or the cache was trimmed). `null` when Gmail no longer has it. Optional like
+   * `loadMessage`.
+   */
+  fetchMessage?(gmailId: string): Promise<Email | null>;
+  /**
    * Try again to write the offline cache, after asking the platform to keep it.
    *
    * On the web this requests persistent storage first (`navigator.storage.persist()`);
@@ -731,6 +749,28 @@ export type StoreOptions = {
   onPersist?: (patch: PersistPatch) => void;
   /** Called when the learning weights change, so the inbox can reclassify. */
   onWeightsChanged?: (model: LearningModel) => void;
+};
+
+/** One account as the switcher shows it. */
+export type AccountSummary = {
+  id: string;
+  email: string;
+  color: string;
+  /** Notifications while this account is not the open one. */
+  notify: boolean;
+  /** Unread in its inbox; the open account's comes from its mail, the others' from their light sync. */
+  unread: number | null;
+  active: boolean;
+  /** A demo account: the switcher shows it, nothing is signed in. */
+  demo?: boolean;
+};
+
+/** What one account (or the demo, with no account) persisted: see `core/store/accountState.ts`. */
+export type AccountState = {
+  learning?: ReturnType<LearningModel["toSnapshot"]> | null;
+  filterLearning?: unknown;
+  activeFilters?: readonly string[];
+  mailbox?: Mailbox | null;
 };
 
 export type PersistPatch = {
@@ -857,6 +897,8 @@ export class WinnowStore {
       notice: null,
       flash: null,
       account: null,
+      accountId: null,
+      accounts: [],
       googleContacts: options.backend ? [] : this.seedContacts,
       contactsAccess: options.backend ? "unavailable" : "demo",
       all: seed,
@@ -3210,6 +3252,7 @@ export class WinnowStore {
     this.set({
       status: "ready",
       account: null,
+      accountId: null,
       drafts: drafts ? drafts.slice() : this.state.drafts,
       draftsLoading: false,
       googleContacts: this.seedContacts,
@@ -3239,6 +3282,127 @@ export class WinnowStore {
     });
   }
 
+  // ── Accounts (1.4.0) ──────────────────────────────────────────────────────
+
+  /** The registry as the switcher shows it; the session bridge keeps it current. */
+  setAccounts(accounts: readonly AccountSummary[]): void {
+    this.set({ accounts });
+  }
+
+  /** The open account's namespace, or `null` (demo, signed out). What persistence keys by. */
+  currentAccountId(): string | null {
+    return this.state.accountId;
+  }
+
+  /**
+   * Leave the open account for another (or for none, `id` null), without erasing
+   * anything: the mail on screen goes (the next account's cached copy, `cached`, shows at
+   * once), and what the store keeps per account — the sorting weights, the smart-filter
+   * corrections, the active filters, the mailbox — is replaced by the next account's.
+   * Preferences, blocked and muted senders stay: they are the person's.
+   *
+   * `connect` follows, with the next account's backend. The old account's work in flight
+   * is dropped (its backend is let go first), so a sync landing late cannot paint one
+   * account's mail into another's view.
+   */
+  enterAccount(id: string | null, saved: AccountState, cached: readonly Email[] = []): void {
+    this.backend = undefined;
+    this.pendingConnect = null;
+    this.dropUndo();
+    this.dropBodyWork();
+    this.bodies = new Map();
+    this.bodyChecked = new Set();
+    this.bodyFailed = new Set();
+    this.bodyInFlight = new Map();
+    this.draftsGeneration += 1;
+    const filters = (saved.activeFilters ?? [])
+      .map(parseFilterKey)
+      .filter((filter): filter is FilterId => filter !== null);
+    this.state = {
+      ...this.state,
+      accountId: id,
+      account: null,
+      status: id ? "loading" : this.state.status,
+      all: cached.slice(),
+      drafts: [],
+      draftsLoading: false,
+      googleContacts: [],
+      contactsAccess: "unavailable",
+      selectedId: null,
+      cursorIndex: NO_CURSOR,
+      activeFilters: filters,
+      searchQuery: "",
+      mailbox: MAILBOX_ORDER.includes(saved.mailbox as Mailbox) ? (saved.mailbox as Mailbox) : "inbox",
+      overlay: "none",
+      syncing: false,
+      undo: null,
+      flash: null,
+      syncPhase: null,
+      syncFraction: null,
+      syncStage: null,
+      syncTotal: null,
+      syncError: null,
+      syncFailed: 0,
+      truncated: false,
+      error: null,
+      notice: null,
+      storagePrompt: null,
+      recentIds: new Set(),
+      lastSyncedAt: null,
+      learning: saved.learning ? LearningModel.fromSnapshot(saved.learning) : LearningModel.initial(),
+      filterLearning: saved.filterLearning ? FilterLearning.fromSnapshot(saved.filterLearning) : FilterLearning.empty(),
+    };
+    this.notify();
+  }
+
+  /**
+   * Open a message a notification named: the cached copy if there is one, or else fetch
+   * it (`fetchMessage`) and add it to the mailbox first. Opens its conversation in the
+   * reader (on a phone, full screen; Back returns to its mailbox, the Inbox for new mail).
+   * `false` when it cannot be found.
+   */
+  async openMessage(gmailId: string, id?: number): Promise<boolean> {
+    const email = await this.ensureMessage(gmailId, id);
+    return email ? this.focusMessage(email.id) : false;
+  }
+
+  /**
+   * The message a notification named, cached or fetched (and added to the mailbox), or
+   * `null`. What `openMessage` opens, and what a desktop notification's Mark read and
+   * Delete act on when the light sync announced mail the cache has not seen.
+   */
+  async ensureMessage(gmailId: string, id?: number): Promise<Email | null> {
+    const cached =
+      (gmailId ? this.state.all.find((email) => email.gmailId === gmailId) : undefined) ??
+      (id !== undefined ? this.state.all.find((email) => email.id === id) : undefined);
+    if (cached) return cached;
+    const backend = this.backend;
+    if (!backend?.fetchMessage || !gmailId) return null;
+    let fetched: Email | null = null;
+    try {
+      fetched = await backend.fetchMessage(gmailId);
+    } catch (error) {
+      if (this.backend === backend) {
+        this.set({ notice: error instanceof Error ? `Couldn't open that message: ${error.message}` : "Couldn't open that message." });
+      }
+      return null;
+    }
+    // Another account opened meanwhile: this message is not its to show.
+    if (!fetched || this.backend !== backend) return null;
+    const email = fetched;
+    const already = this.state.all.find((candidate) => candidate.gmailId === email.gmailId);
+    if (already) return already;
+    this.set({ all: [email, ...this.state.all] });
+    return email;
+  }
+
+  /** The summary of several new messages: the Inbox, unfiltered, with no message open. */
+  openInbox(): void {
+    this.setMailbox("inbox");
+    this.set({ selectedId: null, cursorIndex: NO_CURSOR, overlay: "none", searchQuery: "" });
+    if (this.state.activeFilters.length > 0) this.clearFilters();
+  }
+
   /**
    * Sign out: clear the session but keep the things that describe the user.
    *
@@ -3247,12 +3411,17 @@ export class WinnowStore {
    * preferences, blocked senders, muted senders and what Winnow learned are the person's.
    * Keeping the second group is why a user can sign back in and find the app tuned.
    */
-  async signOut(): Promise<void> {
+  async signOut(device?: AccountState): Promise<void> {
     // Kept across the boundary rather than spread back afterwards, since `this.state` is
     // replaced wholesale below and anything not in `keep` is gone.
+    //
+    // 1.4.0: the learning is per account, so when the bridge hands over the device's own
+    // (`device`, what the demo learns into) that replaces the account's, which went with
+    // the account. Without it (tests, 1.3.5's callers) the old rule holds and it stays.
     const keep = {
       preferences: this.state.preferences,
-      learning: this.state.learning,
+      learning: device ? (device.learning ? LearningModel.fromSnapshot(device.learning) : LearningModel.initial()) : this.state.learning,
+      accountId: null,
     };
     this.backend = undefined;
     this.pendingConnect = null;

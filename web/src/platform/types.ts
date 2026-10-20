@@ -94,8 +94,13 @@ export interface Platform {
 
   // ── Secrets ──────────────────────────────────────────────────────────────
 
-  /** A `TokenStore` backed by the keychain, or by `localStorage`. */
-  tokenStore(): TokenStore;
+  /**
+   * A `TokenStore` backed by the keychain, or by `localStorage`. With `account` (1.4.0),
+   * that account's own entry: keychain `gmail.tokens@<id>` under the same service, or
+   * `winnow.gmail.tokens@<id>`. Without it, 1.3.5's single entry, which only the
+   * migration still reads.
+   */
+  tokenStore(account?: string): TokenStore;
 
   /**
    * Where the user's own Google OAuth client (id, and secret when there is one) lives:

@@ -4,6 +4,7 @@
 
 import type { NotificationActionEvent } from "../core/notify/notifications";
 import type { TokenStore } from "../core/gmail/tokens";
+import { webTokenKey } from "../core/session/accounts";
 import { localStorageCredentialStore, type CredentialStore } from "../core/session/credentials";
 import { parseRedirect } from "../core/session/redirect";
 import {
@@ -84,8 +85,8 @@ export const webPlatform: WebPlatform = {
     return WEB_INFO;
   },
 
-  tokenStore(): TokenStore {
-    return webTokenStore();
+  tokenStore(account?: string): TokenStore {
+    return account ? webTokenStore(webTokenKey(account)) : webTokenStore();
   },
 
   credentialStore(): CredentialStore {
@@ -160,27 +161,40 @@ export const webPlatform: WebPlatform = {
     // Winnow does not have, so each one is click-to-open: the closure holds the id,
     // and the tab is alive to act on it. A tag per message keeps a re-sync from
     // doubling one up; the summary has its own and collapses a burst.
+    // 1.4.0: each press names its account, and with more than one account signed in the
+    // notification says whose mail it is.
+    const account = mail.account?.id;
+    const whose = mail.account?.label ? `\n${mail.account.label}` : "";
     for (const message of mail.messages) {
       const notification = new NotificationCtor(message.title, {
-        body: mail.hidePreview ? "New message" : message.subject,
-        tag: `winnow-${message.gmailId}`,
+        body: (mail.hidePreview ? "New message" : message.subject) + whose,
+        tag: `winnow-${account ?? "mail"}-${message.gmailId}`,
         // The sender's avatar picture, under the same settings as the app's avatars;
         // none (the browser's own icon) when there is none or previews are hidden.
         ...(message.picture && !mail.hidePreview ? { icon: message.picture } : {}),
       });
       notification.onclick = () => {
         notification.close();
-        emitNotificationAction({ action: "open", messageId: message.messageId, gmailId: message.gmailId, origin: "web" });
+        globalThis.focus?.();
+        emitNotificationAction({
+          action: "open",
+          messageId: message.messageId,
+          gmailId: message.gmailId,
+          origin: "web",
+          ...(account ? { account } : {}),
+        });
       };
     }
     if (mail.total > mail.messages.length) {
       const summary = new NotificationCtor(mail.summaryTitle, {
-        body: mail.hidePreview ? "" : mail.summaryBody,
-        tag: "winnow-new-mail",
+        body: (mail.hidePreview ? "" : mail.summaryBody) + whose,
+        tag: `winnow-new-mail-${account ?? "mail"}`,
       });
+      // Several messages: the summary opens that account's inbox.
       summary.onclick = () => {
         summary.close();
         globalThis.focus?.();
+        emitNotificationAction({ action: "inbox", messageId: 0, gmailId: "", origin: "web", ...(account ? { account } : {}) });
       };
     }
   },
