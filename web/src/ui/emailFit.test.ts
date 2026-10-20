@@ -33,7 +33,7 @@ describe("fitScale", () => {
 describe("the reader wires it", () => {
   const body = readFileSync(new URL("./components/MessageBody.tsx", import.meta.url), "utf8");
   it("the rich body zooms its container with fitScale, rather than cutting it off", () => {
-    expect(body).toMatch(/useFitToWidth\(containerRef, html\)/);
+    expect(body).toMatch(/useFitToWidth\(containerRef, html( \+ senderCss)?\)/);
     expect(body).toMatch(/el\.style\.zoom = String\(scale\)/);
     expect(body).toMatch(/ResizeObserver/);
   });

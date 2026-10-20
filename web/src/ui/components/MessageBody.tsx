@@ -20,7 +20,7 @@
  * reference is still counted and stated.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useState, useRef, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useState, useRef, type RefObject } from "react";
 import { Server } from "lucide-react";
 import {
   emailDocument,
@@ -33,6 +33,7 @@ import {
 } from "../../core/mail/proxy";
 import type { Email } from "../../core/model/email";
 import { fitScale, overflowAfterFit } from "../emailFit";
+import { scopeSenderCss, sheetScope } from "../../core/mail/scopedSheet";
 
 /**
  * Which of the forms a message body is being shown in.
@@ -72,10 +73,11 @@ function useSanitised(
       sanitizeMailHtml(email.bodyHtml ?? "", {
         allowRemote: imagesAllowed,
         inlineParts,
-        // Collected rather than dropped, and then not used here: there is nowhere to put
-        // a stylesheet in the app's document without it reaching the reader. "As sent"
-        // below is where they go, and the render proxy is the other.
-        collectStyles: false,
+        // Kept, and fenced into this message's container by `scopeSenderCss` before
+        // they reach the document (1.3.5): a responsive newsletter's phone layout lives
+        // in its `@media` rules, and without them a phone draws the desktop table and
+        // the fit zoom shrinks it to half size.
+        collectStyles: true,
       }),
     [email.bodyHtml, imagesAllowed, inlineParts],
   );
@@ -168,13 +170,22 @@ function useFitToWidth(ref: RefObject<HTMLDivElement | null>, html: string) {
 
 function RichBody({
   html,
+  stylesheets,
   onOpenLink,
 }: {
   html: string;
+  stylesheets: readonly string[];
   onOpenLink: (url: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  useFitToWidth(containerRef, html);
+  const scope = sheetScope(useId());
+  // The sender's sheet, every selector fenced under this one message. See `scopedSheet.ts`.
+  const senderCss = useMemo(
+    () => scopeSenderCss(stylesheets, scope.selector),
+    [stylesheets, scope.selector],
+  );
+  // Re-fit when the sheet changes too: its media rules can change the natural width.
+  useFitToWidth(containerRef, html + senderCss);
 
   // Add copy buttons to code blocks after the HTML is rendered
   useEffect(() => {
@@ -268,9 +279,13 @@ function RichBody({
     // padding (it must, for the "as sent" document's body), which left the text flush
     // against the card's edge.
     <div className="selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline bg-white px-4 py-4 sm:px-6 sm:py-5">
+      {senderCss !== "" && (
+        <style data-wn-sender-styles="" dangerouslySetInnerHTML={{ __html: senderCss }} />
+      )}
       <div
         ref={containerRef}
         data-wn-email=""
+        {...{ [scope.attribute]: scope.value }}
         onClick={(event) => {
           const anchor = (event.target as HTMLElement).closest?.("a[href]");
           if (!anchor || !event.currentTarget.contains(anchor)) return;
@@ -438,7 +453,7 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
         </p>
       )}
 
-      {shown === "rich" && <RichBody html={sanitised.html} onOpenLink={onOpenLink} />}
+      {shown === "rich" && <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} />}
       {shown === "plain" && <PlainText email={email} />}
       {shown === "sent" && <AsSent email={email} imagesAllowed={imagesAllowed} />}
       {shown === "proxied" &&
@@ -452,7 +467,7 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
               The render proxy is not answering, so this message is being rendered here
               instead.
             </p>
-            <RichBody html={sanitised.html} onOpenLink={onOpenLink} />
+            <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} />
           </div>
         ) : (
           <Proxied

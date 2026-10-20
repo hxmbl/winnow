@@ -26,6 +26,14 @@ export const DEMO_NEWSLETTER_HTML = `<!doctype html>
   .card p { margin: 0; color: #56616B; font-size: 14px; }
   .foot { color: #7A838C; font-size: 12px; padding: 28px 32px 40px; }
   .foot a { color: #7A838C; }
+  /* The phone layout, as real newsletters ship it: bigger copy, tighter padding. */
+  @media only screen and (max-width: 600px) {
+    .wrapper { width: 100% !important; }
+    .hero { padding: 32px 20px !important; }
+    .hero h1 { font-size: 32px !important; }
+    .hero p { font-size: 17px !important; line-height: 1.5 !important; }
+    .card p { font-size: 16px !important; }
+  }
 </style>
 <!--[if mso]></td></tr></table><![endif]-->
 </head>
@@ -38,7 +46,7 @@ export const DEMO_NEWSLETTER_HTML = `<!doctype html>
          style="background:#F4F6F8;">
     <tr><td align="center" style="padding:0;">
 
-      <table role="presentation" width="640" cellpadding="0" cellspacing="0"
+      <table role="presentation" class="wrapper" width="640" cellpadding="0" cellspacing="0"
              style="width:640px;max-width:100%;background:#FFFFFF;border-radius:16px;
                     overflow:hidden;box-shadow:0 8px 32px rgba(16,24,40,0.08);">
 

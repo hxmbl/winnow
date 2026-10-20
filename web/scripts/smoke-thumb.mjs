@@ -262,8 +262,9 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
     await p.waitForSelector("[data-reader-pill]", { timeout: 5_000 });
     await p.waitForTimeout(700);
     if (!leftHanded) {
-      // 1.3.3: the newsletter is a 640px fixed-width table; on a phone it is zoomed to
-      // the card's width (as mail clients do), not cut off at its right edge.
+      // 1.3.3: the newsletter is a 640px table and must never be cut off at the card's
+      // right edge. Since 1.3.5 its own @media rules make it fit natively on a phone
+      // (fit 1); the zoom path is still covered by the desktop check further down.
       const fit = await p.evaluate(() => {
         const el = document.querySelector("[data-reader] [data-wn-email]");
         const card = el.parentElement.getBoundingClientRect();
@@ -272,8 +273,8 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
         return { fit: Number(el.dataset.wnFit ?? 1), zoom: el.style.zoom, cardRight: Math.round(card.right), contentRight: Math.round(right), overflowX: el.style.overflowX };
       });
       check(
-        "phone: the fixed-width newsletter is scaled to fit the reader (nothing past the card's right edge)",
-        fit.fit < 1 && fit.fit >= 0.4 && fit.contentRight <= fit.cardRight && fit.overflowX === "",
+        "phone: the 640px newsletter fits the reader (nothing past the card's right edge)",
+        fit.fit <= 1 && fit.fit >= 0.4 && fit.contentRight <= fit.cardRight && fit.overflowX === "",
         JSON.stringify(fit),
       );
     }
@@ -413,6 +414,46 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
       return { fit: el.dataset.wnFit ?? null, zoom: el.style.zoom, fits: el.scrollWidth <= el.clientWidth + 2 };
     });
     check("phone: a responsive message is not zoomed", plain.fit === null && plain.zoom === "" && plain.fits, JSON.stringify(plain));
+    await ctx.close();
+  }
+
+  // ── The sender's own phone layout applies, fenced into its message (1.3.5) ──
+  section("reader: a newsletter's @media phone rules apply, scoped");
+  {
+    const { ctx, p } = await phonePage(browser, URL, errors);
+    await p.locator("#winnow-search").fill("Hark Pro");
+    await p.waitForTimeout(400);
+    await p.locator("[data-row-count] button[data-message-id]", { hasText: "Introducing Hark Pro" }).first().tap();
+    await p.waitForSelector("[data-reader] [data-wn-email] .hero", { timeout: 5_000 });
+    await p.waitForTimeout(500);
+    const phone = await p.evaluate(() => {
+      const el = document.querySelector("[data-reader] [data-wn-email]");
+      const copy = el.querySelector(".hero p");
+      const sheet = document.querySelector("[data-wn-sender-styles]")?.textContent ?? "";
+      const scope = `[data-wn-email][data-wn-sheet="${el.getAttribute("data-wn-sheet")}"]`;
+      const selectors = [];
+      for (const s of document.styleSheets) {
+        if (s.ownerNode?.hasAttribute?.("data-wn-sender-styles") !== true) continue;
+        const walk = (rules) => { for (const r of rules) { if (r.selectorText) selectors.push(r.selectorText); if (r.cssRules) walk(r.cssRules); } };
+        walk(s.cssRules);
+      }
+      const outside = selectors.flatMap((t) => t.split(",")).map((t) => t.trim()).filter((t) => !t.startsWith(scope));
+      return {
+        fit: el.dataset.wnFit ?? null,
+        copyPx: parseFloat(getComputedStyle(copy).fontSize),
+        hasMedia: /@media/.test(sheet),
+        rules: selectors.length,
+        outside,
+        appFont: getComputedStyle(document.body).fontFamily,
+      };
+    });
+    check(
+      "phone: the newsletter's own mobile rule sets its copy to 17px, unzoomed",
+      phone.fit === null && phone.copyPx === 17 && phone.hasMedia,
+      JSON.stringify(phone),
+    );
+    check("every sender rule is fenced under its message's scope", phone.rules > 0 && phone.outside.length === 0, JSON.stringify(phone.outside));
+    check("the reader's own font is untouched by the sender's Georgia", !/Georgia/.test(phone.appFont), phone.appFont);
     await ctx.close();
     const desk = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const d = await desk.newPage();

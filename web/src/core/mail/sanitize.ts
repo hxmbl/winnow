@@ -543,8 +543,8 @@ const FORBIDDEN_DECLARATIONS: readonly RegExp[] = [
   /@font-face/gi,
 ];
 
-/** Neutralise the forbidden declarations in a cleaned style attribute. */
-function stripForbiddenDeclarations(style: string): string {
+/** Neutralise the forbidden declarations in a cleaned style attribute or rule body. */
+export function stripForbiddenDeclarations(style: string): string {
   return FORBIDDEN_DECLARATIONS.reduce(
     (out, pattern) => out.replace(pattern, "-winnow-blocked:"),
     style,
