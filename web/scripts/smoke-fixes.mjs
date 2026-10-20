@@ -278,7 +278,7 @@ export async function smokeFixes({ browser, URL, check, section, errors, shots =
         }),
         noFrost:
           getComputedStyle(pill).backdropFilter === "none" &&
-          getComputedStyle(pill, "::before").content === "none" &&
+          getComputedStyle(pill, "::after").content === "none" &&
           /rgba\(0, 0, 0, 0\)|transparent/.test(getComputedStyle(pill).backgroundColor),
         lastLabel: label(last),
         sentLabel: label(sent),
@@ -500,7 +500,7 @@ export async function smokeFixes({ browser, URL, check, section, errors, shots =
         top: Math.round(face.getBoundingClientRect().top),
         barBottom: Math.round(bar.getBoundingClientRect().bottom),
         alpha,
-        frost: getComputedStyle(face, "::before").backdropFilter !== "none" || style.backdropFilter !== "none",
+        frost: style.backdropFilter !== "none",
         edge: style.borderTopWidth !== "0px",
       };
     });
