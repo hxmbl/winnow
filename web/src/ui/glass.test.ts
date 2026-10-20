@@ -312,6 +312,16 @@ describe("Liquid Glass on the floating chrome (1.4)", () => {
   }
 });
 
+describe("the worst backdrops", () => {
+  it("include every curated accent at full strength, in every mode", () => {
+    for (const scheme of MODES) {
+      for (const accent of Object.keys(ACCENTS) as (keyof typeof ACCENTS)[]) {
+        expect(WORST_BACKDROPS[scheme], `${scheme} ${accent}`).toContain(ACCENTS[accent][scheme].accent);
+      }
+    }
+  });
+});
+
 describe("the compose circle's liquid accent", () => {
   for (const scheme of MODES) {
     for (const accent of Object.keys(ACCENTS) as (keyof typeof ACCENTS)[]) {

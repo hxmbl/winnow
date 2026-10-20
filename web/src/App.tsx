@@ -76,9 +76,9 @@ import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./
 import { useStore } from "./ui/useStore";
 import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
-import { ACCENTS, applyTheme, paletteFor, resolveScheme } from "./ui/theme";
+import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
 import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
-import { ACCENT_THEMES } from "./core/model/appearance";
+import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { logoViewAfter, type LogoView } from "./ui/logoVersion";
@@ -545,19 +545,26 @@ export function App({ store }: Props) {
         : DARK_EMAIL_PALETTE;
 
   useEffect(() => {
-    applyTheme(document.documentElement, themeMode, preferences.accent);
-  }, [themeMode, preferences.accent]);
+    applyTheme(document.documentElement, themeMode, preferences.accent, preferences.accentCustom);
+  }, [themeMode, preferences.accent, preferences.accentCustom]);
 
   /** The picker's swatches, drawn in the mode on screen so each one shows what it will look like. */
   const accentChoices = useMemo(
-    () =>
-      ACCENT_THEMES.map((id) => ({
+    () => [
+      ...ACCENT_THEMES.map((id) => ({
         id,
         label: ACCENTS[id].label,
         swatch: paletteFor(themeMode, id).color.accent,
       })),
-    [themeMode],
+      { id: CUSTOM_ACCENT, label: CUSTOM_ACCENT_LABEL, swatch: customAccentFor(preferences.accentCustom).tones[themeMode].accent },
+    ],
+    [themeMode, preferences.accentCustom],
   );
+  /** The custom colour as picked, and whether this mode had to move it for contrast. */
+  const accentCustom = useMemo(() => {
+    const derived = customAccentFor(preferences.accentCustom);
+    return { value: derived.input, adjusted: derived.adjusted[themeMode] };
+  }, [themeMode, preferences.accentCustom]);
 
   // ── What this build can do ───────────────────────────────────────────────
   // Read once from the OS. Null until it lands, and the UI treats null as "not
@@ -4665,6 +4672,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           accentTheme={preferences.accent}
           accentChoices={accentChoices}
           onAccentTheme={(accent) => store.setPreferences({ accent })}
+          accentCustom={accentCustom}
+          onAccentCustom={(accentCustom) => store.setPreferences({ accent: CUSTOM_ACCENT, accentCustom })}
           // Both hosts render a message's HTML in a `sandbox=""` iframe, which loads its
           // images and executes none of its code. A *prop* rather than a constant so a
           // build that genuinely could not would say so rather than offering a switch that

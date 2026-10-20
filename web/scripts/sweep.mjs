@@ -86,6 +86,9 @@ const DEVICES = {
 };
 const isPhone = (device) => device === "phone" || DEVICES[device].phone === true;
 
+/** The one colour the custom accent is swept with. */
+const SWEEP_CUSTOM_HEX = "#E8A33D";
+
 const SCREENS = ["inbox", "reader", "drawer", "settings-top", "settings-end", "appearance", "compose", "pill-undo", "inbox-clear"];
 
 /** One job per mode × accent × device, then the extras, each with its own screens. */
@@ -98,6 +101,11 @@ function plan() {
       for (const device of ["phone", "desktop"]) {
         jobs.push({ id: `${mode}-${accent}-${device}`, group: mode, mode, accent, device, scheme: mode === "light" ? "light" : "dark", screens: SCREENS, prefs: {} });
       }
+    }
+    // The custom accent (1.4.0), once per mode with one fixed colour: a honey that light
+    // mode has to darken (so the "Adjusted slightly for contrast" note is in the shots).
+    for (const device of ["phone", "desktop"]) {
+      jobs.push({ id: `${mode}-custom-${device}`, group: mode, mode, accent: "custom", device, scheme: mode === "light" ? "light" : "dark", screens: SCREENS, prefs: { accentCustom: SWEEP_CUSTOM_HEX } });
     }
   }
   const extra = (id, mode, scheme, device, screens, more = {}) =>
@@ -713,7 +721,8 @@ async function sheetsPhase() {
     for (const device of ["phone", "desktop"]) {
       const rs = records.filter((r) => r.group === group && (group === "extras" ? (device === "phone" ? isPhone(r.device) : !isPhone(r.device)) : r.device === device));
       if (!rs.length) continue;
-      if (group !== "extras") rs.sort((a, b) => accents.indexOf(a.accent) - accents.indexOf(b.accent));
+      const rank = (accent) => (accent === "custom" ? accents.length : accents.indexOf(accent));
+      if (group !== "extras") rs.sort((a, b) => rank(a.accent) - rank(b.accent));
       const tiles = rs.flatMap((r) =>
         r.results.map((x) => ({
           label: group === "extras" ? `${r.label} (${r.device})` : `${r.mode} · ${r.accent}`,

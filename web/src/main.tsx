@@ -156,6 +156,7 @@ applyTheme(
     globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
   ),
   persisted.preferences?.accent ?? DEFAULT_ACCENT_THEME,
+  persisted.preferences?.accentCustom,
 );
 
 const demo = demoMailbox();

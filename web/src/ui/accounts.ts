@@ -10,7 +10,7 @@ import { DEMO_ACCOUNT } from "../core/data/demo";
 import { DEMO_ACCOUNT_IDS, DEMO_SECOND_ACCOUNT } from "../core/data/demoSecond";
 import { ACCENTS, type ThemeName } from "./theme";
 
-/** The fifth colour, beside the four accents: the danger hue's rose, per mode. */
+/** The fifth colour, beside four of the accents: the danger hue's rose (not the Rose accent), per mode. */
 const ROSE: Record<ThemeName, string> = { light: "#B8184A", dark: "#FF80A4", oled: "#FF80A4" };
 
 /** An account's dot, in the mode on screen. */

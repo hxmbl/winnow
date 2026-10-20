@@ -3321,6 +3321,17 @@ try {
       (await page.evaluate(() => document.activeElement?.getAttribute("data-select"))) === "theme-mode",
     await modeTrigger.getAttribute("data-value"),
   );
+  // Type-ahead: a typed letter jumps to the option that starts with it.
+  await modeTrigger.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("d");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  check(
+    "a typed letter in the mode dropdown jumps to its option (D → Dark)",
+    (await modeTrigger.getAttribute("data-value")) === "dark",
+    await modeTrigger.getAttribute("data-value"),
+  );
   await chooseMode("System");
   check(
     "the accent picker offers the curated accents, Space first",
@@ -3422,6 +3433,68 @@ try {
     "the mode and accent are persisted, without disturbing other preferences",
     themePrefs.appearance === "oled" && themePrefs.accent === "ember" && themePrefs.imagePolicy === "always",
     JSON.stringify(themePrefs),
+  );
+
+  // 1.4.0: eight curated accents round the wheel, then Custom, which takes any colour and
+  // makes it AA-safe per mode (`customAccent.ts`). Driven here in OLED.
+  check(
+    "the picker offers the eight accents, then Custom",
+    JSON.stringify((await accentRadios.allTextContents()).map((t) => t.trim())) ===
+      JSON.stringify(["Space", "Plum", "Rose", "Ember", "Green", "Aurora", "Blue", "Graphite", "Custom"]),
+    JSON.stringify(await accentRadios.allTextContents()),
+  );
+  const customField = page.locator("[data-custom-accent]");
+  check(
+    "the custom colour's field stays out of sight until Custom is chosen",
+    ((await customField.boundingBox())?.width ?? 0) <= 1 && (await customField.getAttribute("aria-hidden")) === "true",
+    JSON.stringify(await customField.boundingBox()),
+  );
+  await accentRadios.filter({ hasText: "Custom" }).click();
+  await page.waitForTimeout(150);
+  const customHex = page.locator("[data-custom-accent-hex]");
+  check(
+    "choosing Custom makes it the accent and shows the colour field",
+    (await themeState()).accent === "custom" && (await customHex.isVisible()) && (await page.locator("[data-custom-accent-picker]").isVisible()),
+    JSON.stringify(await themeState()),
+  );
+  await customHex.fill("#FFFF00");
+  await customHex.press("Enter");
+  await page.waitForTimeout(150);
+  const readAccent = () =>
+    page.evaluate(() => document.documentElement.style.getPropertyValue("--wn-accent").trim().toUpperCase());
+  const yellow = await readAccent();
+  const yellowPrefs = JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}");
+  check(
+    "a typed hex is stored as picked, and painted made safe for the mode, with the note",
+    yellowPrefs.accent === "custom" && yellowPrefs.accentCustom === "#FFFF00" && /^#[0-9A-F]{6}$/.test(yellow) && yellow !== "#FFFF00" &&
+      (await page.locator("[data-custom-accent-note]").textContent()) === "Adjusted slightly for contrast",
+    `${yellow} ${JSON.stringify({ accent: yellowPrefs.accent, accentCustom: yellowPrefs.accentCustom })}`,
+  );
+  await customHex.fill("nonsense");
+  await customHex.press("Enter");
+  await page.waitForTimeout(100);
+  check(
+    "a hex field that is not a colour is put back, not stored",
+    (await customHex.inputValue()) === "#FFFF00" &&
+      JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}").accentCustom === "#FFFF00",
+    await customHex.inputValue(),
+  );
+  // The native picker reports lower case; a colour that is already safe in OLED paints as picked.
+  await page.locator("[data-custom-accent-picker]").fill("#86b7ea");
+  await page.waitForTimeout(150);
+  check(
+    "the colour picker sets the colour, and a safe colour paints exactly as picked, with no note",
+    (await readAccent()) === "#86B7EA" && (await page.locator("[data-custom-accent-note]").count()) === 0 &&
+      JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}").accentCustom === "#86B7EA",
+    await readAccent(),
+  );
+  await accentRadios.filter({ hasText: "Ember" }).click();
+  await page.waitForTimeout(150);
+  check(
+    "going back to a curated accent keeps the custom colour for next time",
+    (await themeState()).accent === "ember" &&
+      JSON.parse((await storage())["winnow.preferences.v1"] ?? "{}").accentCustom === "#86B7EA",
+    JSON.stringify(await themeState()),
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);

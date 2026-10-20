@@ -35,7 +35,8 @@ import { SORT_OPTIONS, type SortBy } from "../../core/classify/scoring";
 import { UNDO_SEND_CHOICES, type UndoSendSeconds } from "../../core/mail/undoSend";
 import { FILTER_LABELS } from "../../core/model/signals";
 import type { ContactsAccessState, ImagePolicy } from "../../core/store/store";
-import { APPEARANCES, type AccentTheme, type Appearance } from "../../core/model/appearance";
+import { APPEARANCES, CUSTOM_ACCENT, type AccentPreference, type Appearance } from "../../core/model/appearance";
+import { CustomAccentField, CUSTOM_SWATCH_IDLE } from "./CustomAccentField";
 import { formatRelative } from "../../core/mail/datetime";
 import type { FeedbackEvent } from "../../core/learn/learning";
 import type { FilterLearning, LearnableFilter } from "../../core/learn/filterLearning";
@@ -115,8 +116,8 @@ const APPEARANCE_LABELS: Record<Appearance, string> = {
   oled: "Very dark",
 };
 
-/** One accent theme as the picker shows it: its name and a swatch in the current mode. */
-export type AccentChoice = { id: AccentTheme; label: string; swatch: string };
+/** One accent as the picker shows it: its name and a swatch in the current mode. */
+export type AccentChoice = { id: AccentPreference; label: string; swatch: string };
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
@@ -126,9 +127,15 @@ export type SettingsProps = {
   appearance: Appearance;
   onAppearance: (value: Appearance) => void;
   /** The accent theme in force, and the choices with a swatch drawn in the current mode. */
-  accentTheme: AccentTheme;
+  accentTheme: AccentPreference;
   accentChoices: readonly AccentChoice[];
-  onAccentTheme: (value: AccentTheme) => void;
+  onAccentTheme: (value: AccentPreference) => void;
+  /**
+   * The custom colour as picked (1.4.0) and whether the mode on screen had to move it for
+   * contrast; and the setter, which also selects Custom.
+   */
+  accentCustom: { value: string; adjusted: boolean };
+  onAccentCustom: (hex: string) => void;
   /**
    * Whether the reader can render a message's own markup at all.
    *
@@ -538,6 +545,8 @@ export function Settings(props: SettingsProps) {
 
 /** One category's controls. Every setting row names its catalog id with `setting="…"`. */
 function CategoryContent({ category, props }: { category: CategoryId; props: SettingsProps }) {
+  /** Opens the custom colour's native picker; set by `CustomAccentField`. */
+  const openCustomPicker = useRef<(() => void) | null>(null);
   switch (category) {
     case "reading":
       return <ReadingSettings props={props} />;
@@ -602,10 +611,23 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             options={props.accentChoices.map((choice) => ({
               value: choice.id,
               label: choice.label,
-              swatch: choice.swatch,
+              // Custom shows a soft colour wheel until it is the accent, then its colour.
+              swatch: choice.id === CUSTOM_ACCENT && props.accentTheme !== CUSTOM_ACCENT ? CUSTOM_SWATCH_IDLE : choice.swatch,
             }))}
             value={props.accentTheme}
             onChange={props.onAccentTheme}
+            onOptionClick={(value) => {
+              if (value === CUSTOM_ACCENT) openCustomPicker.current?.();
+            }}
+            after={
+              <CustomAccentField
+                active={props.accentTheme === CUSTOM_ACCENT}
+                value={props.accentCustom.value}
+                adjusted={props.accentCustom.adjusted}
+                onChange={props.onAccentCustom}
+                openRef={openCustomPicker}
+              />
+            }
           />
           <Row setting="emailDarkMode">
             <Toggle checked={props.emailDarkMode} onChange={props.onEmailDarkMode} label={SETTINGS.emailDarkMode.label} />

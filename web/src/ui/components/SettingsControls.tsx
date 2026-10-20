@@ -3,7 +3,7 @@
  * switch, and the hover/focus wiring and (?) popover that explain each setting.
  */
 
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CircleHelp } from "lucide-react";
 import { SETTINGS, type SettingId } from "../settingsCatalog";
@@ -231,12 +231,19 @@ export function RadioCards<T extends string>({
   options,
   value,
   onChange,
+  onOptionClick,
+  after,
 }: {
   id: string;
   setting: SettingId;
+  /** `swatch` is any CSS background: a colour, or a gradient (the custom accent's wheel). */
   options: readonly { value: T; label: string; swatch?: string }[];
   value: T;
   onChange: (value: T) => void;
+  /** A pointer click (or Enter/Space) on an option, after `onChange`; arrow keys do not call it. */
+  onOptionClick?: (value: T) => void;
+  /** Anything that belongs to the group under its cards (the custom colour's field). */
+  after?: ReactNode;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const move = (index: number) => {
@@ -251,8 +258,10 @@ export function RadioCards<T extends string>({
         role="radiogroup"
         aria-labelledby={`${id}-label`}
         data-picker={id}
+        // Wraps (1.4.0: nine accents): as many cells of at least 6.25rem as fit, so a
+        // phone shows three rows of three and the desktop's wider column two rows.
         className="grid gap-1.5"
-        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(6.25rem, 1fr))" }}
       >
         {options.map((option, index) => {
           const checked = option.value === value;
@@ -267,7 +276,10 @@ export function RadioCards<T extends string>({
               aria-checked={checked}
               tabIndex={checked ? 0 : -1}
               data-value={option.value}
-              onClick={() => onChange(option.value)}
+              onClick={() => {
+                onChange(option.value);
+                onOptionClick?.(option.value);
+              }}
               onKeyDown={(event) => {
                 if (event.key === "ArrowRight" || event.key === "ArrowDown") move(index + 1);
                 else if (event.key === "ArrowLeft" || event.key === "ArrowUp") move(index - 1);
@@ -286,7 +298,7 @@ export function RadioCards<T extends string>({
                 <span
                   aria-hidden="true"
                   className="h-3 w-3 shrink-0 rounded-full"
-                  style={{ backgroundColor: option.swatch }}
+                  style={{ background: option.swatch }}
                 />
               )}
               <span className="truncate">{option.label}</span>
@@ -294,6 +306,7 @@ export function RadioCards<T extends string>({
           );
         })}
       </div>
+      {after}
     </SettingBlock>
   );
 }
