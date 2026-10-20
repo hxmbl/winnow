@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { revivePreferences } from "./preferences";
 import { DEFAULT_PREFERENCES, WinnowStore, type Preferences } from "./store";
 import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
-import { ACCENT_THEMES, APPEARANCES, isAccentTheme, isAppearance } from "../model/appearance";
+import { ACCENT_THEMES, APPEARANCES, DEFAULT_ACCENT_CUSTOM, isAccentPreference, isAccentTheme, isAppearance } from "../model/appearance";
 
 function demoStore(preferences?: Partial<Preferences>) {
   return new WinnowStore({ seed: [...DEMO_EMAILS], seedTrash: DEMO_TRASH, preferences });
@@ -85,6 +85,31 @@ describe("theme persistence", () => {
   it("drops an unknown mode or accent rather than painting it", () => {
     expect(revivePreferences({ appearance: "sepia", accent: "neon" })).toEqual({});
     expect(revivePreferences({ appearance: "DARK", accent: 2 })).toEqual({});
+  });
+
+  it("revives the custom accent and its colour, normalised (1.4.0)", () => {
+    expect(revivePreferences({ accent: "custom", accentCustom: "#ff8800" })).toEqual({ accent: "custom", accentCustom: "#FF8800" });
+    expect(revivePreferences({ accent: "custom", accentCustom: "abc" })).toEqual({ accent: "custom", accentCustom: "#AABBCC" });
+    // Custom without a colour still paints: the store fills in the default colour.
+    const revived = revivePreferences({ accent: "custom" });
+    expect(revived).toEqual({ accent: "custom" });
+    expect(demoStore(revived ?? undefined).getSnapshot().preferences.accentCustom).toBe(DEFAULT_ACCENT_CUSTOM);
+  });
+
+  it("drops a custom colour that is not a hex, and keeps the rest", () => {
+    for (const junk of ["red", "#12345", "rgb(1, 2, 3)", 0xff8800, null, {}, "#FF880080"]) {
+      expect(revivePreferences({ accent: "plum", accentCustom: junk })).toEqual({ accent: "plum" });
+    }
+  });
+
+  it("leaves a blob from before the custom accent exactly as it was", () => {
+    // Every value stored by 1.3.x and early 1.4.0 means what it meant: no key added, none changed.
+    for (const accent of ["space", "plum", "ember", "aurora"]) {
+      expect(revivePreferences({ appearance: "dark", accent })).toEqual({ appearance: "dark", accent });
+    }
+    expect(DEFAULT_PREFERENCES.accentCustom).toBe(DEFAULT_ACCENT_CUSTOM);
+    expect(isAccentPreference("custom")).toBe(true);
+    expect(isAccentTheme("custom")).toBe(false);
   });
 
   it("reads a blob written before accents existed", () => {

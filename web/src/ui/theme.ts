@@ -20,30 +20,21 @@
  */
 
 import {
+  ACCENT_THEMES,
+  CUSTOM_ACCENT,
+  DEFAULT_ACCENT_CUSTOM,
   DEFAULT_ACCENT_THEME,
+  normalizeHexColor,
+  type AccentPreference,
   type AccentTheme,
   type Appearance,
 } from "../core/model/appearance";
-import { glassProperties } from "./glass";
+import { COMPOSE_SHEEN, COMPOSE_TINT, GLASS, LIQUID, WASH, glassProperties } from "./glass";
+import { FILTER_HUES, type PillHue } from "./filterColors";
+import { composite, contrastRatio, hslToRgb, relativeLuminance, toHex, withAlpha } from "./color";
+import { deriveCustomAccent, type CustomAccent, type CustomAccentContext } from "./customAccent";
 
-/** WCAG relative luminance of an `#RRGGBB` colour, 0–1. */
-export function relativeLuminance(hex: string): number {
-  const value = Number.parseInt(hex.slice(1), 16);
-  const channel = (shift: number): number => {
-    const raw = (value >> shift) & 255;
-    const c = raw / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
-}
-
-/** The WCAG contrast ratio between two `#RRGGBB` colours, 1–21. */
-export function contrastRatio(a: string, b: string): number {
-  const first = relativeLuminance(a);
-  const second = relativeLuminance(b);
-  const [high, low] = first > second ? [first, second] : [second, first];
-  return (high + 0.05) / (low + 0.05);
-}
+export { contrastRatio, composite, hslToRgb, relativeLuminance } from "./color";
 
 /**
  * The semantic names, grouped by the job a colour does: surfaces, text, lines,
@@ -389,6 +380,9 @@ export const PALETTES = { light: LIGHT, dark: DARK, oled: OLED } as const;
 
 export type ThemeName = keyof typeof PALETTES;
 
+/** Every opaque plane text can land on (the accent included); `theme.test.ts` keeps its own copy. */
+const SURFACE_TOKENS = ["canvas", "surface", "surfaceSunken", "surfaceHover", "surfaceActive", "surfaceSelected", "chrome"] as const;
+
 /** The modes, in the order tests and the picker walk them. */
 export const MODES = Object.keys(PALETTES) as ThemeName[];
 
@@ -458,21 +452,156 @@ export const ACCENTS: Record<AccentTheme, AccentSpec> = {
     dark: { accent: "#5ED6C5", onAccent: "#191919" },
     oled: { accent: "#5ED6C5", onAccent: "#000000" },
   },
+  /**
+   * Rose (1.4.0): a soft raspberry in light, a pale pink in dark. Between Plum and the
+   * reds, so like Ember it moves danger: to an orange-red, at least 40° of hue away (the
+   * shared brick red is only 25° from it). Its hue is pinned between Plum (30° away) and
+   * that orange-red (40° away), which is why it is exactly here.
+   */
+  rose: {
+    label: "Rose",
+    light: { accent: "#A1325A", onAccent: "#FFFFFF", danger: "#A54112" },
+    dark: { accent: "#EB9CB8", onAccent: "#191919", danger: "#F39465" },
+    oled: { accent: "#EB9CB8", onAccent: "#000000", danger: "#F39465" },
+  },
+  /** Green (1.4.0): a quiet leaf green, kept on the yellow side of Aurora's teal. */
+  green: {
+    label: "Green",
+    light: { accent: "#2B673B", onAccent: "#FFFFFF" },
+    dark: { accent: "#79C289", onAccent: "#191919" },
+    oled: { accent: "#79C289", onAccent: "#000000" },
+  },
+  /** Blue (1.4.0): a calm, slightly dusty blue, between Aurora and Space. */
+  blue: {
+    label: "Blue",
+    light: { accent: "#1D5E99", onAccent: "#FFFFFF" },
+    dark: { accent: "#86B7EA", onAccent: "#191919" },
+    oled: { accent: "#86B7EA", onAccent: "#000000" },
+  },
+  /**
+   * Graphite (1.4.0): the near-neutral. A slate charcoal in light, a cool light grey in
+   * dark, with just enough blue that a link still reads as something to press next to
+   * the neutral inks. Its hue is incidental, so it is exempt from the "every accent is a
+   * different hue" rule in `theme.test.ts` (it is held apart by saturation instead).
+   */
+  graphite: {
+    label: "Graphite",
+    light: { accent: "#3E4651", onAccent: "#FFFFFF" },
+    dark: { accent: "#B9C2CD", onAccent: "#191919" },
+    oled: { accent: "#B9C2CD", onAccent: "#000000" },
+  },
 };
 
-/** `#RRGGBB` at an alpha, as `rgba()`. For the washes derived from a theme's colours. */
-function withAlpha(hex: string, alpha: number): string {
-  const n = Number.parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+/** What the picker calls the custom colour. */
+export const CUSTOM_ACCENT_LABEL = "Custom";
+
+/**
+ * The planes, inks and bars a custom accent is derived against (`customAccent.ts`), per
+ * mode, read from the palettes and the glass so the rule moves with them. The luminance
+ * band is the one the curated accents span, over which the glass's tints were tuned.
+ */
+let customContext: CustomAccentContext<ThemeName> | null = null;
+export function customAccentContext(): CustomAccentContext<ThemeName> {
+  if (customContext) return customContext;
+  const build = (scheme: ThemeName) => {
+    const { color } = PALETTES[scheme];
+    const accents = ACCENT_THEMES.map((id) => relativeLuminance(ACCENTS[id][scheme].accent));
+    return {
+      surfaces: SURFACE_TOKENS.map((token) => color[token]).filter((value) => value.startsWith("#")),
+      washBase: color.surface,
+      washPeak: Math.max(WASH[scheme].near, WASH[scheme].far),
+      rowInks: ["ink", "inkBody", "inkMuted", "inkSubtle"].map((token) => color[token]),
+      onAccent: scheme === "light" ? ["#FFFFFF", color.ink] : ["#FFFFFF", ACCENTS.space[scheme].onAccent],
+      composeTint: COMPOSE_TINT,
+      composeSheen: COMPOSE_SHEEN,
+      luminance:
+        scheme === "light"
+          ? { min: Math.min(...accents), max: 1 }
+          : { min: 0, max: Math.max(...accents) },
+      dangers: [
+        { danger: undefined, hex: color.danger },
+        { danger: ACCENTS.ember[scheme].danger, hex: ACCENTS.ember[scheme].danger as string },
+        { danger: ACCENTS.rose[scheme].danger, hex: ACCENTS.rose[scheme].danger as string },
+      ],
+      backdropOk: (hex: string) => glassReadsOver(scheme, hex),
+    };
+  };
+  customContext = { light: build("light"), dark: build("dark"), oled: build("oled") };
+  return customContext;
+}
+
+/**
+ * Every chip hue that can float over the list: the smart filters' own, and the twelve
+ * sender hues (`senderHue`: every 30° from 15°, at 20% saturation).
+ */
+const GLASS_CHIP_HUES: readonly PillHue[] = [
+  ...Object.values(FILTER_HUES),
+  ...Array.from({ length: 12 }, (_, step) => ({ h: step * 30 + 15, s: 20 })),
+];
+
+/**
+ * Whether the floating glass keeps its bars over `under` at full strength: every chip
+ * label and count (rest and on) at AA, the panel's rows at AA and the dock's icons at
+ * 3:1, the desktop bars' inks at AA, sheen or none. The same arithmetic as
+ * `glass.test.ts`, which holds it for the curated accents; a custom accent must pass it.
+ */
+export function glassReadsOver(scheme: ThemeName, under: string): boolean {
+  const { color, pill } = PALETTES[scheme];
+  const recipe = GLASS[scheme];
+  const white = LIQUID[scheme].sheen + LIQUID[scheme].glow;
+  const tint = (alpha: number) => composite(withAlpha(color[recipe.base], alpha), under);
+  const plates = (plate: string) => (white > 0 ? [plate, composite(`rgba(255, 255, 255, ${white})`, plate)] : [plate]);
+  for (const hue of GLASS_CHIP_HUES) {
+    for (const on of [false, true]) {
+      const base = pillFill(hue, scheme, tint(on ? recipe.textOn : recipe.text), { on });
+      for (const fill of plates(base)) {
+        if (contrastRatio(fill, color[on ? pill.inkOn : pill.ink]) < 4.5) return false;
+        if (contrastRatio(fill, color[pill.count]) < 4.5) return false;
+      }
+    }
+  }
+  for (const plate of plates(tint(recipe.text))) {
+    if (contrastRatio(plate, color.inkBody) < 4.5) return false;
+    if (contrastRatio(plate, color.inkMuted) < 3 || contrastRatio(plate, color.inkIcon) < 3) return false;
+  }
+  for (const plate of plates(tint(recipe.bar))) {
+    for (const ink of [color.ink, color.inkBody, color.inkMuted]) if (contrastRatio(plate, ink) < 4.5) return false;
+  }
+  return true;
+}
+
+const customCache = new Map<string, CustomAccent<ThemeName>>();
+
+/**
+ * A picked colour's tones in every mode, and whether each was adjusted. Anything that is
+ * not a hex colour falls back to the default custom colour. Memoised: the picker calls it
+ * on every drag of the colour wheel.
+ */
+export function customAccentFor(hex: string | null | undefined): CustomAccent<ThemeName> {
+  const input = normalizeHexColor(hex) ?? DEFAULT_ACCENT_CUSTOM;
+  const cached = customCache.get(input);
+  if (cached) return cached;
+  const derived = deriveCustomAccent(input, customAccentContext());
+  if (customCache.size > 1024) customCache.clear();
+  customCache.set(input, derived);
+  return derived;
 }
 
 /** The light palette, for callers that need a value without the active scheme. */
 export const theme = LIGHT.color;
 
-/** The palette for a mode and accent theme. Space when no accent is given. */
-export function paletteFor(scheme: ThemeName, accent: AccentTheme = DEFAULT_ACCENT_THEME): Palette {
+/**
+ * The palette for a mode and accent: a curated theme, or `custom` with the picked colour
+ * (`customHex`, derived per mode by `customAccentFor`). Space when no accent is given.
+ */
+export function paletteFor(
+  scheme: ThemeName,
+  accent: AccentPreference = DEFAULT_ACCENT_THEME,
+  customHex?: string | null,
+): Palette {
   const base = PALETTES[scheme];
-  const tones = ACCENTS[accent][scheme];
+  const tones: AccentTones =
+    accent === CUSTOM_ACCENT ? customAccentFor(customHex).tones[scheme] : (ACCENTS[accent] ?? ACCENTS[DEFAULT_ACCENT_THEME])[scheme];
   const danger = tones.danger ?? base.color.danger;
   return {
     ...base,
@@ -496,9 +625,10 @@ export function paletteFor(scheme: ThemeName, accent: AccentTheme = DEFAULT_ACCE
 export function applyTheme(
   root: HTMLElement,
   scheme: ThemeName = "light",
-  accent: AccentTheme = DEFAULT_ACCENT_THEME,
+  accent: AccentPreference = DEFAULT_ACCENT_THEME,
+  customHex?: string | null,
 ): void {
-  const palette = paletteFor(scheme, accent);
+  const palette = paletteFor(scheme, accent, customHex);
   for (const [key, value] of Object.entries(palette.color)) {
     root.style.setProperty(`--wn-${key}`, value);
   }
@@ -537,38 +667,6 @@ export function applyTheme(
 export function resolveScheme(preference: Appearance, systemPrefersDark: boolean): ThemeName {
   if (preference === "system") return systemPrefersDark ? "dark" : "light";
   return preference;
-}
-
-/** HSL (degrees, percent, percent) → `[r, g, b]`, 0–255 unrounded, as CSS computes it. */
-export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  const sat = s / 100;
-  const light = l / 100;
-  const a = sat * Math.min(light, 1 - light);
-  const channel = (n: number): number => {
-    const k = (n + h / 30) % 12;
-    return 255 * (light - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)));
-  };
-  return [channel(0), channel(8), channel(4)];
-}
-
-function parseColor(value: string): [number, number, number, number] {
-  if (value.startsWith("#")) {
-    const n = Number.parseInt(value.slice(1), 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1];
-  }
-  const parts = value.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0];
-  return [parts[0], parts[1], parts[2], parts[3] ?? 1];
-}
-
-function toHex([r, g, b]: readonly number[]): string {
-  return `#${[r, g, b].map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, "0")).join("")}`;
-}
-
-/** Paint `top` (any `#hex` or `rgba()` token) over an opaque `#hex`. */
-export function composite(top: string, base: string): string {
-  const [r, g, b, a] = parseColor(top);
-  const [br, bg, bb] = parseColor(base);
-  return toHex([r * a + br * (1 - a), g * a + bg * (1 - a), b * a + bb * (1 - a)]);
 }
 
 /**

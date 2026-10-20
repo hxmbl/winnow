@@ -18,7 +18,6 @@
  * describe the person, not an account), the setup guide's progress and the reader split.
  */
 
-import { ACCENT_THEMES } from "../model/appearance";
 
 /** Owner decision: at most five accounts on one device. */
 export const MAX_ACCOUNTS = 5;
@@ -26,10 +25,12 @@ export const MAX_ACCOUNTS = 5;
 export const ACCOUNTS_STORAGE_KEY = "winnow.accounts.v1";
 
 /**
- * The colours an account's dot can take: the four accents, then one more so five
- * accounts can all differ. Names only; `ui/accountColors.ts` has the hues per mode.
+ * The colours an account's dot can take: four of the accents, then the danger hue's rose,
+ * so five accounts can all differ. Names only; `ui/accounts.ts` has the hues per mode.
+ * Written out rather than spread from `ACCENT_THEMES` (1.4.0): the accents grew to eight
+ * and gained their own "rose", and a stored account colour must keep meaning what it did.
  */
-export const ACCOUNT_COLORS = [...ACCENT_THEMES, "rose"] as const;
+export const ACCOUNT_COLORS = ["space", "plum", "ember", "aurora", "rose"] as const;
 export type AccountColor = (typeof ACCOUNT_COLORS)[number];
 
 export function isAccountColor(value: unknown): value is AccountColor {

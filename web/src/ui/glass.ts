@@ -76,7 +76,9 @@ export const GLASS: Record<ThemeName, GlassRecipe> = {
 
 /**
  * What can slide under the glass, per mode: the accents of every accent theme at full
- * strength (an avatar, a selected row, a button), and for the extreme, black (light
+ * strength (written out, since `theme.ts` imports this file; `glass.test.ts` checks the
+ * list against `ACCENTS`, and a custom accent is held inside the curated accents'
+ * luminance band by `customAccent.ts`, so it is never a worse backdrop than these) (an avatar, a selected row, a button), and for the extreme, black (light
  * mode) or white (the dark modes) covering 60% of the glass with the list's surface
  * between: a line of row text is strokes a pixel or two wide, and even the light frost
  * spreads each over a dozen, so nothing in the list arrives closer to solid than that.
@@ -86,9 +88,9 @@ export const GLASS: Record<ThemeName, GlassRecipe> = {
  * white; it carries icons only, which `SOLID_BACKDROPS` holds to 3:1.
  */
 export const WORST_BACKDROPS: Record<ThemeName, readonly string[]> = {
-  light: ["#5028E2", "#74306A", "#9A430C", "#096863", "black@0.6"],
-  dark: ["#B9A5FF", "#D4A3CE", "#F0964F", "#5ED6C5", "white@0.6"],
-  oled: ["#B9A5FF", "#D4A3CE", "#F0964F", "#5ED6C5", "white@0.6"],
+  light: ["#5028E2", "#74306A", "#A1325A", "#9A430C", "#2B673B", "#096863", "#1D5E99", "#3E4651", "black@0.6"],
+  dark: ["#B9A5FF", "#D4A3CE", "#EB9CB8", "#F0964F", "#79C289", "#5ED6C5", "#86B7EA", "#B9C2CD", "white@0.6"],
+  oled: ["#B9A5FF", "#D4A3CE", "#EB9CB8", "#F0964F", "#79C289", "#5ED6C5", "#86B7EA", "#B9C2CD", "white@0.6"],
 };
 
 /** Solid extremes, for icon-only glass over a message (the reader pill, the dock). */

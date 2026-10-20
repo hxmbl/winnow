@@ -97,9 +97,10 @@ import { explainFilters, type FilterReason } from "../learn/filterExplain";
 import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
 import type { SyncProgress, SyncStage } from "../gmail/sync";
 import {
+  DEFAULT_ACCENT_CUSTOM,
   DEFAULT_ACCENT_THEME,
   DEFAULT_APPEARANCE,
-  type AccentTheme,
+  type AccentPreference,
   type Appearance,
 } from "../model/appearance";
 import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
@@ -334,8 +335,14 @@ export type Preferences = {
   notificationHidePreview: boolean;
   /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
   appearance: Appearance;
-  /** The accent theme, applied across every mode. */
-  accent: AccentTheme;
+  /** The accent theme, applied across every mode: a curated one, or `custom`. */
+  accent: AccentPreference;
+  /**
+   * The picked colour behind `custom`, as `#RRGGBB` (1.4.0). Kept when another accent is
+   * chosen, so going back to Custom brings the same colour back. Made safe per mode by
+   * `ui/customAccent.ts`; the stored value is always what the user picked.
+   */
+  accentCustom: string;
   /** Keep syncing while the window is closed. Desktop only. */
   backgroundSync: boolean;
   /** How often, in seconds. */
@@ -365,6 +372,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   notificationHidePreview: false,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
+  accentCustom: DEFAULT_ACCENT_CUSTOM,
   backgroundSync: true,
   backgroundSyncInterval: 300,
   blockedSenders: [],

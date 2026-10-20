@@ -170,7 +170,7 @@ export const SETTINGS = {
     category: "appearance",
     label: "Accent",
     explanation:
-      "The colour of Winnow's buttons, links, switches and unread marks. Everything else stays neutral grey and white. Each accent is checked for contrast in light and dark.",
+      "The colour of Winnow's buttons, links, switches and unread marks; everything else stays neutral grey and white. Pick one of eight, or Custom for any colour you like. Every accent is checked for contrast in each mode, and a custom colour is lightened or darkened a little where it needs to be, so text on it stays readable.",
   },
   leftHanded: {
     category: "appearance",

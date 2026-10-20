@@ -129,8 +129,8 @@ function rgbDistance(a: string, b: string): number {
 describe("every mode × accent is covered", () => {
   it("walks three modes and the curated accents", () => {
     expect(MODES).toEqual(["light", "dark", "oled"]);
-    expect(ACCENT_THEMES.length).toBeGreaterThanOrEqual(3);
-    expect(ACCENT_THEMES.length).toBeLessThanOrEqual(4);
+    // 1.4.0: eight curated accents round the wheel, Space first, Graphite (the neutral) last.
+    expect([...ACCENT_THEMES]).toEqual(["space", "plum", "rose", "ember", "green", "aurora", "blue", "graphite"]);
     expect(ACCENT_THEMES[0]).toBe("space");
     expect(COMBOS).toHaveLength(MODES.length * ACCENT_THEMES.length);
     for (const accent of ACCENT_THEMES) expect(ACCENTS[accent].label.length).toBeGreaterThan(0);
@@ -249,9 +249,36 @@ describe("the accent", () => {
     });
   }
 
+  /**
+   * Graphite (1.4.0) is the near-neutral: its hue is incidental (a trace of slate blue),
+   * so it is held apart from the rest by saturation, not hue. Every other accent is a
+   * colour, and they stay at least 30° apart.
+   */
+  const NEUTRAL_ACCENTS = new Set<AccentTheme>(["graphite"]);
+
+  it("graphite is near-neutral and every other accent is clearly a colour", () => {
+    for (const mode of MODES) {
+      for (const accent of ACCENT_THEMES) {
+        const { saturation } = hsl(paletteFor(mode, accent).color.accent);
+        if (NEUTRAL_ACCENTS.has(accent)) expect(saturation, `${mode}/${accent}`).toBeLessThanOrEqual(0.25);
+        else expect(saturation, `${mode}/${accent}`).toBeGreaterThanOrEqual(0.33);
+      }
+    }
+  });
+
+  it("graphite still reads as something to press: a slate tint the neutral inks never carry", () => {
+    for (const mode of MODES) {
+      const { color } = paletteFor(mode, "graphite");
+      const [r, g, b] = channels(color.accent);
+      // The inks' channels sit within 4 of each other; graphite's blue leads by 16 or more.
+      expect(b - Math.min(r, g), `${mode}: graphite ${color.accent} is a plain grey`).toBeGreaterThanOrEqual(16);
+    }
+  });
+
   it("the accent themes are visibly different colours", () => {
-    for (const [index, first] of ACCENT_THEMES.entries()) {
-      for (const second of ACCENT_THEMES.slice(index + 1)) {
+    const chromatic = ACCENT_THEMES.filter((accent) => !NEUTRAL_ACCENTS.has(accent));
+    for (const [index, first] of chromatic.entries()) {
+      for (const second of chromatic.slice(index + 1)) {
         const gap = hueGap(hsl(ACCENTS[first].dark.accent).hue, hsl(ACCENTS[second].dark.accent).hue);
         expect(gap, `${first} vs ${second}`).toBeGreaterThanOrEqual(30);
       }
@@ -480,6 +507,13 @@ describe("before the bundle loads", () => {
       });
     }
   }
+
+  it("names the custom accent (1.4.0); its colours come with the bundle", () => {
+    expect(boot(JSON.stringify({ appearance: "dark", accent: "custom", accentCustom: "#FF8800" }), false)).toMatchObject({
+      theme: "dark",
+      accent: "custom",
+    });
+  });
 
   it("falls back to system and Space for anything unreadable", () => {
     expect(boot(null, true)).toMatchObject({ theme: "dark", accent: "space" });
@@ -762,7 +796,8 @@ describe("1.3.2 contrast margins", () => {
     expect(PALETTES.dark.color.inkMuted).toBe("#ADADAD");
   });
 
-  for (const accent of ["ember", "aurora"] as const) {
+  // 1.4.0's accents are held to the same floor from the start.
+  for (const accent of ["ember", "aurora", "rose", "green", "blue", "graphite"] as const) {
     it(`light/${accent}: the accent clears ${ACCENT_FLOOR}:1 on every opaque surface`, () => {
       const color = paletteFor("light", accent).color.accent;
       for (const backdrop of opaqueSurfaces("light", accent)) {

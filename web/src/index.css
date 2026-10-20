@@ -1344,3 +1344,24 @@ div[data-row-count] {
   overflow: hidden;
   pointer-events: none;
 }
+
+/*
+ * The custom accent's colour well (`CustomAccentField.tsx`, 1.4.0): the native
+ * `<input type="color">` drawn as a plain round swatch, without the browser's inner
+ * padding and square border, so it matches the accent cards' dots.
+ */
+.wn-color-well {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.wn-color-well::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.wn-color-well::-webkit-color-swatch {
+  border: none;
+  border-radius: 9999px;
+}
+.wn-color-well::-moz-color-swatch {
+  border: none;
+  border-radius: 9999px;
+}
