@@ -8,9 +8,11 @@
  * account later (multi-account) is a change to that one function: today every feature
  * has one key, `winnow.<feature>.v1`.
  *
- * Kept in `core/` with no `window`: the backing is `globalThis.localStorage` when there
- * is one, or whatever a test hands in.
+ * Kept in `core/` with no `window`: the backing is `deviceStorage()` when there is
+ * one, or whatever a test hands in.
  */
+
+import { deviceStorage } from "./storage";
 
 /** The part of `Storage` this needs. */
 export type KeyValueBacking = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -31,17 +33,8 @@ export type KeyedStorage = {
   clear(): void;
 };
 
-function defaultBacking(): KeyValueBacking | null {
-  try {
-    return (globalThis as { localStorage?: KeyValueBacking }).localStorage ?? null;
-  } catch {
-    // Some hosts throw on the getter itself (a sandboxed iframe with storage blocked).
-    return null;
-  }
-}
-
 /** One feature's slot. `backing` is read on every access, so a test can swap it. */
-export function keyedStorage(feature: string, backing: () => KeyValueBacking | null = defaultBacking): KeyedStorage {
+export function keyedStorage(feature: string, backing: () => KeyValueBacking | null = deviceStorage): KeyedStorage {
   const key = storageKey(feature);
   return {
     key,

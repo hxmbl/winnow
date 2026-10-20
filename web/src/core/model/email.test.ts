@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hashId, localId, threadKey } from "./ids";
-import { displayAddress, displayName, formatContact, isMailbox, MAILBOXES, MAILBOX_LABEL, mimeTypeForFilename, monogram, recipientLines, VIEW_MAILBOXES } from "./email";
+import { displayAddress, displayName, formatContact, isMailbox, isMailboxOrView, MAILBOXES, MAILBOX_LABEL, mimeTypeForFilename, monogram, recipientLines, VIEW_MAILBOXES } from "./email";
 import type { Email } from "./email";
 
 function email(over: Partial<Email> = {}): Email {
@@ -135,6 +135,19 @@ describe("isMailbox", () => {
     expect(Object.keys(MAILBOX_LABEL).sort()).toEqual([...MAILBOXES, ...VIEW_MAILBOXES].sort());
     // The two views (1.4.0) are listable but are never where a message itself is.
     expect(VIEW_MAILBOXES.some((view) => isMailbox(view))).toBe(false);
+  });
+});
+
+describe("isMailboxOrView", () => {
+  it("accepts every list navigation can open, views included", () => {
+    for (const mailbox of [...MAILBOXES, ...VIEW_MAILBOXES]) expect(isMailboxOrView(mailbox)).toBe(true);
+    // Restored navigation state is the reason this is wider than `isMailbox`.
+    expect(isMailboxOrView("snoozed")).toBe(true);
+    expect(isMailboxOrView("scheduled")).toBe(true);
+  });
+
+  it("rejects anything that is not a mailbox name", () => {
+    for (const junk of ["outbox", "Inbox", "", null, 7, {}]) expect(isMailboxOrView(junk)).toBe(false);
   });
 });
 
