@@ -4054,6 +4054,13 @@ try {
       pill: { left: Math.round(pillRect.left), right: Math.round(pillRect.right), bottom: Math.round(pillRect.bottom) },
       inboxRow: { right: Math.round(inboxRow.right), mid: Math.round(inboxRow.top + inboxRow.height / 2) },
       expand: { left: Math.round(expandRect.left), mid: Math.round(expandRect.top + expandRect.height / 2) },
+      // Centres unrounded, for the gear-over-chevron column (to the pixel).
+      expandX: expandRect.left + expandRect.width / 2,
+      expandW: expandRect.width,
+      gear: (() => {
+        const rect = panel.querySelector('[data-nav-account] button[aria-label="Settings"]')?.getBoundingClientRect();
+        return rect ? { x: rect.left + rect.width / 2, w: rect.width, h: rect.height, top: rect.top } : null;
+      })(),
       expandOnTop: Boolean(under?.closest("[data-dock-expand]")),
       fabVisible: fabRect.width > 0 && getComputedStyle(document.querySelector("[data-compose-fab]")).visibility === "visible",
       height: innerHeight,
@@ -4087,6 +4094,12 @@ try {
     Math.abs(phoneSide.inboxRow.mid - phoneSide.expand.mid) <= 3 && phoneSide.inboxRow.right <= phoneSide.expand.left &&
       phoneSide.expandOnTop && phoneSide.fabVisible,
     JSON.stringify({ inbox: phoneSide.inboxRow, expand: phoneSide.expand, onTop: phoneSide.expandOnTop, fab: phoneSide.fabVisible }),
+  );
+  check(
+    "the Settings gear stays on the account row at the top, centred over the Expand chevron (same column, within 1px), 44px+ round",
+    phoneSide.gear !== null && Math.abs(phoneSide.gear.x - phoneSide.expandX) <= 1 &&
+      phoneSide.gear.w >= 44 && phoneSide.gear.h >= 44 && phoneSide.gear.top < phoneSide.side.top + 80,
+    JSON.stringify({ gear: phoneSide.gear, expandX: phoneSide.expandX, expandW: phoneSide.expandW, top: phoneSide.side.top }),
   );
   check(
     "the app behind it is blurred (the desktop sidebar's four-layer blur) and inert, the dock stays live and the chips are set aside",

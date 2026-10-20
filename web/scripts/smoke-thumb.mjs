@@ -378,6 +378,28 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
     check("left-handed: the compose button is bottom-left, the dock pill to its right", Boolean(fab && dockPill) && fab.x <= 24 && dockPill.x > fab.x + fab.width, JSON.stringify({ fab, dockPill }));
     await ctx.close();
   }
+  // The menu panel's Settings gear sits in the Expand chevron's column, both hands.
+  for (const leftHanded of [false, true]) {
+    const tag = leftHanded ? "left-handed" : "right-handed";
+    const { ctx, p } = await phonePage(browser, URL, errors, { prefs: leftHanded ? { leftHanded: true } : null });
+    await p.locator("[data-phone-dock] button[data-dock-expand]").tap();
+    await p.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    await p.waitForTimeout(450);
+    const geo = await p.evaluate(() => {
+      const panel = document.querySelector("[data-sidebar]").getBoundingClientRect();
+      const expand = document.querySelector("[data-dock-expand]").getBoundingClientRect();
+      const gear = document.querySelector('[data-sidebar] [data-nav-account] button[aria-label="Settings"]')?.getBoundingClientRect();
+      return gear
+        ? { gearX: gear.left + gear.width / 2, expandX: expand.left + expand.width / 2, gearW: gear.width, gearTop: gear.top, panelTop: panel.top, panelLeft: panel.left }
+        : null;
+    });
+    check(
+      `${tag}: the panel's Settings gear is on the top row, centred over the Expand chevron within 1px`,
+      geo !== null && Math.abs(geo.gearX - geo.expandX) <= 1 && geo.gearW >= 44 && geo.gearTop < geo.panelTop + 80,
+      JSON.stringify(geo),
+    );
+    await ctx.close();
+  }
 
   // ── 6. Shapes ─────────────────────────────────────────────────────────────
   section("shapes: controls are pills or circles");
