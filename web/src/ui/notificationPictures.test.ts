@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { LogoState } from "../core/avatars/logoCache";
 import type { Email } from "../core/model/email";
-import { NATIVE_PICTURE_MAX_CHARS, NOTIFICATION_PICTURE_SIZE, announce, isNativePicture, nativePictures, notificationPictures } from "./notificationActions";
+import {
+  NATIVE_PICTURE_MAX_CHARS,
+  NATIVE_PICTURE_PIXELS,
+  NOTIFICATION_PICTURE_SIZE,
+  announce,
+  canvasRasterise,
+  drawPicture,
+  isBlankPixels,
+  isNativePicture,
+  nativePictures,
+  notificationPictures,
+  pictureDrawRect,
+  type PictureContext,
+} from "./notificationActions";
 import type { WinnowStore } from "../core/store/store";
 import type { Platform } from "../platform/types";
 import { orderPictures, pictureWants, publishSenderPictures, remotePicturesPaused, resolveSenderPicture, senderPictureSources, type LogoSource, type SenderPictures } from "./senderPictures";
 import { readFileSync } from "node:fs";
+import { afterEach, vi } from "vitest";
 
 /** A source that answers `table` after a request, and records every address asked. */
 function source(table: Record<string, string | null>, { slow = false } = {}): LogoSource & { asked: string[] } {
@@ -184,7 +198,7 @@ describe("native notifications get the picture as bytes, never a URL (1.3.3)", (
     expect(isNativePicture(null)).toBe(false);
   });
 
-  it("rasterises each resolved URL at the notification size, and drops one that fails", async () => {
+  it("rasterises each resolved URL at twice the notification size (sharp on a 3x phone), and drops one that fails", async () => {
     const asked: [string, number][] = [];
     const rasterise = async (url: string, size: number) => {
       asked.push([url, size]);
@@ -194,9 +208,9 @@ describe("native notifications get the picture as bytes, never a URL (1.3.3)", (
     const out = await nativePictures({ g1: GRAVATAR, g2: LOGO, g3: PHOTO, g4: PNG }, rasterise);
     expect(out).toEqual({ g1: PNG, g4: PNG });
     expect(asked).toEqual([
-      [GRAVATAR, NOTIFICATION_PICTURE_SIZE],
-      [LOGO, NOTIFICATION_PICTURE_SIZE],
-      [PHOTO, NOTIFICATION_PICTURE_SIZE],
+      [GRAVATAR, NATIVE_PICTURE_PIXELS],
+      [LOGO, NATIVE_PICTURE_PIXELS],
+      [PHOTO, NATIVE_PICTURE_PIXELS],
     ]);
   });
 
@@ -229,5 +243,127 @@ describe("native notifications get the picture as bytes, never a URL (1.3.3)", (
     } finally {
       publishSenderPictures(sources());
     }
+  });
+});
+
+describe("drawing a sender picture for a native notification (1.4.0)", () => {
+  /** A 2D context that records what was drawn; `blank` says whether the draw left any pixel. */
+  function fakeContext({ blank = false } = {}) {
+    const calls: unknown[][] = [];
+    const context: PictureContext = {
+      drawImage: (...args: unknown[]) => void calls.push(["drawImage", ...args.slice(1)]),
+      getImageData: (_x, _y, w, h) => {
+        const data = new Uint8ClampedArray(w * h * 4);
+        if (!blank) data[3 + 4 * 5] = 255;
+        return { data };
+      },
+      fillRect: (...args: number[]) => void calls.push(["fillRect", ...args, context.fillStyle, context.globalCompositeOperation]),
+      fillStyle: "",
+      globalCompositeOperation: "source-over",
+    };
+    return { context, calls };
+  }
+
+  it("covers the square and centres it, in destination space, like the avatar's object-cover", () => {
+    expect(pictureDrawRect(100, 100, 192)).toEqual({ x: 0, y: 0, width: 192, height: 192 });
+    // Wide: full height, the sides overflow equally.
+    expect(pictureDrawRect(200, 100, 100)).toEqual({ x: -50, y: 0, width: 200, height: 100 });
+    // Tall: full width, top and bottom overflow equally.
+    expect(pictureDrawRect(50, 100, 100)).toEqual({ x: 0, y: -50, width: 100, height: 200 });
+  });
+
+  it("an SVG logo with only a viewBox (no natural size reported) fills the square rather than a corner", () => {
+    // Some engines report 0x0 for `<svg viewBox="0 0 256 256">` with no width/height.
+    expect(pictureDrawRect(0, 0, 192)).toEqual({ x: 0, y: 0, width: 192, height: 192 });
+    // Chromium reports 150x150 for the same SVG: still drawn at the full square.
+    expect(pictureDrawRect(150, 150, 192)).toEqual({ x: 0, y: 0, width: 192, height: 192 });
+  });
+
+  it("draws with the destination-only drawImage form (never a source crop by the reported size)", () => {
+    const { context, calls } = fakeContext();
+    expect(drawPicture(context, {} as CanvasImageSource, { width: 150, height: 150 }, 192, null)).toBe(true);
+    expect(calls).toEqual([["drawImage", 0, 0, 192, 192]]);
+  });
+
+  it("puts the avatar's backdrop behind the picture, so a transparent logo is opaque and round-friendly", () => {
+    const { context, calls } = fakeContext();
+    drawPicture(context, {} as CanvasImageSource, { width: 64, height: 64 }, 192, "#e8e8e8");
+    expect(calls).toEqual([
+      ["drawImage", 0, 0, 192, 192],
+      ["fillRect", 0, 0, 192, 192, "#e8e8e8", "destination-over"],
+    ]);
+    expect(context.globalCompositeOperation).toBe("source-over");
+  });
+
+  it("a picture that drew nothing at all is no picture (the app icon, not an empty disc)", () => {
+    const { context, calls } = fakeContext({ blank: true });
+    expect(drawPicture(context, {} as CanvasImageSource, { width: 0, height: 0 }, 192, "#e8e8e8")).toBe(false);
+    expect(calls.some((call) => call[0] === "fillRect")).toBe(false);
+    expect(isBlankPixels(new Uint8ClampedArray([1, 2, 3, 0, 9, 9, 9, 0]))).toBe(true);
+    expect(isBlankPixels(new Uint8ClampedArray([0, 0, 0, 0, 0, 0, 0, 1]))).toBe(false);
+  });
+
+  describe("the webview rasteriser", () => {
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const JPEG = "data:image/jpeg;base64,/9j/4AAQ";
+    let images: FakeImage[] = [];
+    class FakeImage {
+      crossOrigin: string | null = null;
+      referrerPolicy = "";
+      decoding = "";
+      naturalWidth = 0;
+      naturalHeight = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      src = "";
+      constructor() {
+        images.push(this);
+      }
+    }
+    function stub({ blank = false, png = PNG, background = "" } = {}) {
+      images = [];
+      const { context, calls } = fakeContext({ blank });
+      const canvas = { width: 0, height: 0, getContext: () => context, toDataURL: (type: string) => (type === "image/png" ? png : JPEG) };
+      vi.stubGlobal("Image", FakeImage);
+      vi.stubGlobal("document", { createElement: () => canvas, documentElement: {} });
+      vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => background }));
+      return { calls, canvas };
+    }
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("loads anonymously with no referrer, and draws an SVG logo over the avatar backdrop", async () => {
+      const { calls, canvas } = stub({ background: " #373737 " });
+      const pending = canvasRasterise(1000)("https://www.redditstatic.com/bimi/redditbimi.svg", 192);
+      const img = images[0];
+      expect(img.crossOrigin).toBe("anonymous");
+      expect(img.referrerPolicy).toBe("no-referrer");
+      img.naturalWidth = 150;
+      img.naturalHeight = 150;
+      img.onload?.();
+      expect(await pending).toBe(PNG);
+      expect(canvas.width).toBe(192);
+      expect(calls).toEqual([
+        ["drawImage", 0, 0, 192, 192],
+        ["fillRect", 0, 0, 192, 192, "#373737", "destination-over"],
+      ]);
+    });
+
+    it("a host without CORS (the load fails) or a picture that draws nothing: null", async () => {
+      stub();
+      const failing = canvasRasterise(1000)("https://example.com/logo.svg", 192);
+      images[0].onerror?.();
+      expect(await failing).toBeNull();
+      stub({ blank: true });
+      const empty = canvasRasterise(1000)("https://example.com/logo.svg", 192);
+      images[0].onload?.();
+      expect(await empty).toBeNull();
+    });
+
+    it("a PNG over the cap goes as a JPEG rather than not at all", async () => {
+      stub({ png: `data:image/png;base64,${"A".repeat(NATIVE_PICTURE_MAX_CHARS)}` });
+      const pending = canvasRasterise(1000)("https://gravatar.com/avatar/abc?s=192", 192);
+      images[0].onload?.();
+      expect(await pending).toBe(JPEG);
+    });
   });
 });
