@@ -9,6 +9,10 @@
  * copies deleted, the retired-keys way (`retiredKeys.ts`): each removal guarded on its
  * own, and a launch never fails over housekeeping. Nobody signs in again.
  *
+ * Storage: a mail cache too big to copy within the quota is dropped (with its cursor)
+ * rather than deferring the migration for ever; it is a copy of Gmail, and the first
+ * sync rebuilds it in full.
+ *
  * Crash safety: the id is recorded first (`winnow.accounts.migration`), so a migration
  * cut short re-runs into the same namespace instead of leaving a copy of the mail under
  * an id nobody owns; and the old copies go last, so an interrupted run still has them.
@@ -33,6 +37,9 @@ import {
 } from "./accounts";
 
 export const MIGRATION_ID_KEY = "winnow.accounts.migration";
+
+const MESSAGES_KEY = "winnow.gmail.cache.messages";
+const CURSOR_KEY = "winnow.gmail.cache.cursor";
 
 /** Keys that are about the device rather than an account once nothing is signed in. */
 const DEVICE_KEYS = new Set<string>([
@@ -101,12 +108,28 @@ export async function migrateToAccounts(options: MigrationOptions): Promise<Migr
   const id = isAccountId(recorded) ? recorded : (options.newId ?? newAccountId)();
   guarded(() => storage.setItem(MIGRATION_ID_KEY, id), undefined);
 
+  let mailDropped = false;
   for (const key of ACCOUNT_SCOPED_KEYS) {
+    // The cursor only means anything over the mail it was recorded with.
+    if (mailDropped && key === CURSOR_KEY) continue;
     const value = guarded(() => storage.getItem(key), null);
     if (value === null) continue;
     try {
       storage.setItem(accountKey(key, id), value);
     } catch (error) {
+      if (key === MESSAGES_KEY) {
+        // Copy-then-delete needs the mail cache twice over, and a big 1.3.5 mailbox is
+        // already near the origin's quota: deferring here would defer on every launch,
+        // leaving the user signed out for good. The cache is a copy of Gmail, so it goes
+        // instead (with its cursor), freeing the room the rest needs, and the first sync
+        // is a full one.
+        mailDropped = true;
+        guarded(() => storage.removeItem(accountKey(MESSAGES_KEY, id)), undefined);
+        guarded(() => storage.removeItem(accountKey(CURSOR_KEY, id)), undefined);
+        guarded(() => storage.removeItem(MESSAGES_KEY), undefined);
+        guarded(() => storage.removeItem(CURSOR_KEY), undefined);
+        continue;
+      }
       return { kind: "deferred", reason: error instanceof Error ? error.message : "storage is full" };
     }
   }

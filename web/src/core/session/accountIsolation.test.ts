@@ -414,6 +414,30 @@ describe("migration from 1.3.5", () => {
     expect([...storage.keys()].some((key) => key.endsWith("@second22"))).toBe(false);
   });
 
+  it("a mail cache too big to copy is dropped with its cursor, and the rest still moves", async () => {
+    seedLegacy();
+    const full = {
+      getItem: (k: string) => globalThis.localStorage.getItem(k),
+      removeItem: (k: string) => globalThis.localStorage.removeItem(k),
+      setItem: (k: string, v: string) => {
+        if (k === "winnow.gmail.cache.messages@migr4ted" && storage.has("winnow.gmail.cache.messages")) {
+          throw new DOMException("quota", "QuotaExceededError");
+        }
+        globalThis.localStorage.setItem(k, v);
+      },
+    };
+    const outcome = await migrateToAccounts({ storage: full, legacyTokens: legacyTokens(), tokensFor, newId: () => "migr4ted" });
+    expect(outcome).toMatchObject({ kind: "migrated", account: { id: "migr4ted" } });
+    const cache = localCache(undefined, { account: "migr4ted", lifecycle: () => () => undefined });
+    expect(await cache.all()).toEqual([]);
+    // No cursor over an empty cache: the first sync is a full one.
+    expect(await cache.read()).toBeNull();
+    expect(loadAccountState(globalThis.localStorage, "migr4ted").activeFilters).toEqual(["urgent"]);
+    expect(storage.get("winnow.offlineQueue.v1@migr4ted")).toContain("ada@one.example");
+    expect((await tokensFor("migr4ted").read())?.accessToken).toBe("access-legacy");
+    for (const key of ACCOUNT_SCOPED_KEYS) expect(storage.has(key)).toBe(false);
+  });
+
   it("signed out under 1.3.5: no account, and the learning stays the device's until the first account adopts it", async () => {
     seedLegacy();
     storage.delete("winnow.gmail.tokens");
