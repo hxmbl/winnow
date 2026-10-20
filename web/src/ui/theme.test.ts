@@ -39,6 +39,7 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   ACCENTS,
+  ACCENT_TOKENS,
   MODES,
   contrastRatio,
   PALETTES,
@@ -263,26 +264,53 @@ describe("the accent", () => {
 });
 
 describe("the neutrals", () => {
-  /** Backdrops and inks that carry the blue-violet cast. Status colours and the accent are excluded. */
-  const NEUTRALS = [
-    ...SURFACE_TOKENS.filter((token) => token !== "surfaceSelected"),
-    ...INK_TOKENS.filter((token) => token !== "inkPlaceholder"),
-  ];
+  /** Every backdrop and ink, the selected row included. Status colours and the accent are excluded. */
+  const NEUTRALS = [...SURFACE_TOKENS, ...INK_TOKENS];
+  /** The translucent neutrals: lines, washes, veil and scrim. */
+  const LINES = ["hairline", "hairlineSoft", "divider", "controlBorder", "scrollbar", "sheen", "veil", "scrim"] as const;
   /** The planes that step up from the backdrop, in order. Each step has to be visible. */
   const STEPS = ["canvas", "surface", "surfaceHover", "surfaceActive"] as const;
-  /** The hue every neutral leans towards: Space's, shared by every accent theme. */
-  const SHARED_HUE = hsl(ACCENTS.space.dark.accent).hue;
-
   /**
-   * Neutrals are shared across accents, by design: only the accent (with light's
-   * selected-row wash and, for Ember, danger) changes. Light's neutrals lean towards
-   * Space's hue; dark and OLED are plain neutral greys.
+   * 1.4.0, the owner's rule: an accent is "the colour used for buttons and the like", not
+   * "everything is that colour". So an accent theme changes the accent, the focus ring,
+   * the ink on the accent and (for Ember) danger, and nothing else: every other token,
+   * the selected row included, is identical across accents. Light's neutrals are
+   * near-white greys with at most a trace of cool; dark and OLED are plain greys.
    */
+  it("an accent theme may change only the accent tokens", () => {
+    expect([...ACCENT_TOKENS].sort()).toEqual(["accent", "danger", "dangerWash", "focusRing", "onAccent"]);
+  });
+
   for (const { mode, accent, name } of COMBOS) {
     it(`${name}: neutrals are the shared set`, () => {
       const own = paletteFor(mode, accent).color;
       const space = paletteFor(mode, "space").color;
       for (const token of NEUTRALS) expect(own[token], `${name}: ${token}`).toBe(space[token]);
+    });
+
+    it(`${name}: every token outside the accent's own is identical across accents`, () => {
+      const own = paletteFor(mode, accent);
+      const space = paletteFor(mode, "space");
+      const accentOwned = new Set<string>(ACCENT_TOKENS);
+      for (const [token, value] of Object.entries(space.color)) {
+        if (accentOwned.has(token)) continue;
+        expect(own.color[token], `${name}: ${token}`).toBe(value);
+      }
+      expect(own.badge).toEqual(space.badge);
+      expect(own.pill).toEqual(space.pill);
+      expect(own.elevation).toEqual(space.elevation);
+    });
+
+    it(`${name}: no neutral carries the accent's hue`, () => {
+      const { color } = paletteFor(mode, accent);
+      for (const token of NEUTRALS) {
+        const [r, g, b] = channels(color[token]);
+        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${color[token]} is tinted`).toBeLessThanOrEqual(4);
+      }
+      for (const token of LINES) {
+        const [r, g, b] = (color[token].match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${color[token]} is tinted`).toBeLessThanOrEqual(4);
+      }
     });
 
     if (mode !== "light") {
@@ -298,18 +326,12 @@ describe("the neutrals", () => {
       });
     }
 
-    if (mode === "light") it(`${name}: are cool blue-violet greys, tinted but not coloured`, () => {
+    if (mode === "light") it(`${name}: are near-white greys, at most a trace of cool, never a colour`, () => {
       const { color } = paletteFor(mode, accent);
       for (const token of NEUTRALS) {
-        const hex = color[token];
-        const [r, g, b] = channels(hex);
-        // Blue over red over green: a blue-violet lean, not blue-grey, not teal, not beige.
-        expect(b, `${name}: ${token} ${hex} is not violet-leaning`).toBeGreaterThan(g);
-        expect(r, `${name}: ${token} ${hex} leans teal`).toBeGreaterThanOrEqual(g);
-        expect(b, `${name}: ${token} ${hex} is warm`).toBeGreaterThan(r);
-        // A cast, not a colour.
-        expect(Math.max(r, g, b) - Math.min(r, g, b), `${name}: ${token} ${hex} is too saturated`).toBeLessThanOrEqual(36);
-        expect(hueGap(hsl(hex).hue, SHARED_HUE), `${name}: ${token} ${hex} drifts from the indigo cast`).toBeLessThanOrEqual(20);
+        const [r, g, b] = channels(color[token]);
+        // Blue never below red or green: a cool trace, never warm, never green.
+        expect(b, `${name}: ${token} is warm or green`).toBeGreaterThanOrEqual(Math.max(r, g));
       }
     });
 
@@ -337,17 +359,17 @@ describe("the neutrals", () => {
       }
     });
 
-    if (mode === "light") {
-      it(`${name}: the selected row is the accent washed into the surface`, () => {
-        const { color } = paletteFor(mode, accent);
-        const gap = hueGap(hsl(color.surfaceSelected).hue, hsl(color.accent).hue);
-        expect(gap, `${name}: ${color.surfaceSelected} drifts from ${color.accent}`).toBeLessThanOrEqual(25);
-      });
-    } else {
-      it(`${name}: the selected row is the same neutral grey for every accent`, () => {
-        expect(paletteFor(mode, accent).color.surfaceSelected).toBe(paletteFor(mode, "space").color.surfaceSelected);
-      });
-    }
+    it(`${name}: the selected row is the same neutral grey for every accent`, () => {
+      expect(paletteFor(mode, accent).color.surfaceSelected).toBe(paletteFor(mode, "space").color.surfaceSelected);
+    });
+
+    it(`${name}: the selected row sits between hover and pressed`, () => {
+      const { color } = paletteFor(mode, accent);
+      const lum = (token: "surfaceHover" | "surfaceSelected" | "surfaceActive") => relativeLuminance(color[token]);
+      const [low, high] = [lum("surfaceHover"), lum("surfaceActive")].sort((x, y) => x - y);
+      expect(lum("surfaceSelected")).toBeGreaterThan(low);
+      expect(lum("surfaceSelected")).toBeLessThan(high);
+    });
   }
 
   it("dark is Notion-like grey: a #191919 canvas under lighter chrome and panes", () => {

@@ -108,9 +108,11 @@ export type PillRecipe = {
 /**
  * Light.
  *
- * Near white: the planes are almost neutral (since 1.4.0 they carry only a trace of cool,
- * where they used to be lavender-grey), so the accent and its wash are the only colour.
- * Surfaces are separated by value alone — no rules, no shadows.
+ * Near white: the planes, inks and lines are near-neutral greys (since 1.4.0 they carry
+ * only a trace of cool, where they used to lean towards Space's violet), the same for
+ * every accent. The accent colours what you act on (buttons, links, switches, focus,
+ * unread) and nothing else, bar the faint wash behind the list. Surfaces are separated
+ * by value alone — no rules, no shadows.
  */
 const LIGHT: Palette = {
   color: {
@@ -125,32 +127,36 @@ const LIGHT: Palette = {
     surfaceHover: "#F1F1F3",
     /** Pressed and focused fills. */
     surfaceActive: "#E6E6EA",
-    /** The selected list row: the accent, washed into `surface`. Opaque so the contrast test can see it. */
-    surfaceSelected: "#E7E2FA",
+    /**
+     * The selected list row (and the current item in a picker): a neutral step between
+     * hover and pressed, the same for every accent. It used to be the accent washed into
+     * `surface`; since 1.4.0 the accent is for what you act on, not for large fills.
+     */
+    surfaceSelected: "#EBEBEF",
     /** Masthead and the mobile bar under it. */
     chrome: "#FDFDFE",
 
     // ── Text ────────────────────────────────────────────────────
     /** Headlines — sender name, subject. */
-    ink: "#18162B",
+    ink: "#18181C",
     /** The strongest ink. Light has none stronger than `ink`; the dark modes use white. */
-    inkStrong: "#18162B",
+    inkStrong: "#18181C",
     /** Long-form body copy. */
-    inkBody: "#37334F",
+    inkBody: "#36363A",
     /** Secondary metadata: addresses, timestamps. Clears AA on every plane it sits on. */
-    inkMuted: "#514C6A",
+    inkMuted: "#4F4F53",
     /** Tertiary: section labels, empty-state copy, the row timestamp. Kept a visible step from `inkMuted`. */
-    inkSubtle: "#615C7A",
+    inkSubtle: "#5F5F63",
     /** Toolbar icon buttons. */
-    inkIcon: "#45405E",
+    inkIcon: "#434347",
     /** Search placeholder. Same size requirement as `inkSubtle`. */
-    inkPlaceholder: "#615C7A",
+    inkPlaceholder: "#5F5F63",
 
     // ── Accent ──────────────────────────────────────────────────
     /**
      * Winnow's one colour: a deep space violet, an indigo-leaning blue-violet saturated enough
-     * to read as a colour of its own. Unread, selection, focus and the primary action, and
-     * nothing else. 5.8:1 or better on every surface, so it can carry text as well as a ring.
+     * to read as a colour of its own. What you act on (primary buttons, links, switches,
+     * the selected segment, focus) and unread marks, and nothing else. 5.8:1 or better on every surface, so it can carry text as well as a ring.
      */
     accent: "#5028E2",
     /** Text on a solid accent fill. */
@@ -168,32 +174,32 @@ const LIGHT: Palette = {
 
     // ── Lines & controls ────────────────────────────────────────
     /** Default separator. Everything structural uses this unless it needs to recede. */
-    hairline: "rgba(28, 22, 72, 0.09)",
+    hairline: "rgba(24, 24, 28, 0.09)",
     /** Separator inside a container that already has a border. */
-    hairlineSoft: "rgba(28, 22, 72, 0.055)",
+    hairlineSoft: "rgba(24, 24, 28, 0.055)",
     /** Vertical separators splitting an action cluster into groups. */
-    divider: "rgba(28, 22, 72, 0.14)",
+    divider: "rgba(24, 24, 28, 0.14)",
     /** Neutral control border (search, action cluster). */
-    controlBorder: "rgba(28, 22, 72, 0.12)",
+    controlBorder: "rgba(24, 24, 28, 0.12)",
     /** Focus ring: the accent, solid. 3:1 or better against every surface. */
     focusRing: "#5028E2",
     /**
      * An edge drawn only where value cannot separate two planes: the search field, the
      * reader pane, the phone dock. Transparent here and in dark, where the planes already
-     * differ in lightness; a violet hairline on OLED, where they are all black.
+     * differ in lightness; a white hairline on OLED, where they are all black.
      */
     edge: "transparent",
 
     // ── Chrome ──────────────────────────────────────────────────
-    scrollbar: "rgba(28, 22, 72, 0.22)",
+    scrollbar: "rgba(24, 24, 28, 0.22)",
 
     // ── Depth, without borders ─────────────────────────────────
     /** Fill for layers floating over content (drawer, sheets). Opaque now that nothing blurs behind it. */
     veil: "rgba(250, 250, 253, 0.96)",
     /** A low-alpha wash of the palette's own ink: pressed states and quiet buttons. */
-    sheen: "rgba(28, 22, 72, 0.06)",
-    /** What the drawer dims. Tinted, not black, so dimming reads as depth. */
-    scrim: "rgba(16, 12, 52, 0.2)",
+    sheen: "rgba(24, 24, 28, 0.06)",
+    /** What the drawer dims. A near-neutral, not the accent, so dimming reads as depth and nothing else. */
+    scrim: "rgba(16, 16, 20, 0.2)",
   },
 
   badge: {
@@ -387,19 +393,24 @@ export type ThemeName = keyof typeof PALETTES;
 export const MODES = Object.keys(PALETTES) as ThemeName[];
 
 /**
- * What an accent theme replaces, per mode.
+ * What an accent theme replaces, per mode — and the complete list of it.
  *
  * `accent` is the colour itself (and the focus ring); `onAccent` is text on a solid
- * accent fill; `surfaceSelected` is the accent washed into the surface, hand-matched in
- * lightness across accents so the selected row is the same step on every theme.
- * `danger` is only given where the shared red would sit too close to the accent.
+ * accent fill; `danger` is only given where the shared red would sit too close to the
+ * accent. Nothing else: since 1.4.0 the accent is "the colour of buttons and the like",
+ * not "everything is that colour", so every plane, ink, line, scrim and the selected row
+ * are the mode's own neutrals for every accent (`ACCENT_TOKENS`, held in `theme.test.ts`).
+ * The one large thing the accent still reaches is the faint wash behind the list
+ * (`WASH` in `glass.ts`).
  */
 type AccentTones = {
   accent: string;
   onAccent: string;
-  surfaceSelected: string;
   danger?: string;
 };
+
+/** The palette tokens an accent theme may change. Every other token is the mode's own. */
+export const ACCENT_TOKENS = ["accent", "focusRing", "onAccent", "danger", "dangerWash"] as const;
 
 type AccentSpec = {
   /** What the picker calls it. */
@@ -410,31 +421,24 @@ type AccentSpec = {
 };
 
 /**
- * The selected row in the dark modes: a neutral grey step, the same for every accent.
- * Only light washes the accent into its selection.
- */
-const DARK_SELECTED = DARK.color.surfaceSelected;
-const OLED_SELECTED = OLED.color.surfaceSelected;
-
-/**
- * The accent themes. Neutrals are shared: light sits on Space's lavender-tinted greys,
- * dark and OLED on neutral greys, so only the one colour that means something changes.
+ * The accent themes. Neutrals are shared and neutral: light's near-white greys, dark and
+ * OLED's plain greys, so only the one colour that means something changes.
  * Every combination is held to WCAG AA in `theme.test.ts`.
  */
 export const ACCENTS: Record<AccentTheme, AccentSpec> = {
   /** Space violet, the default: an indigo-leaning blue-violet. */
   space: {
     label: "Space",
-    light: { accent: "#5028E2", onAccent: "#FFFFFF", surfaceSelected: "#E7E2FA" },
-    dark: { accent: "#B9A5FF", onAccent: "#191919", surfaceSelected: DARK_SELECTED },
-    oled: { accent: "#B9A5FF", onAccent: "#000000", surfaceSelected: OLED_SELECTED },
+    light: { accent: "#5028E2", onAccent: "#FFFFFF" },
+    dark: { accent: "#B9A5FF", onAccent: "#191919" },
+    oled: { accent: "#B9A5FF", onAccent: "#000000" },
   },
   /** Plum: a dusky red-violet. */
   plum: {
     label: "Plum",
-    light: { accent: "#74306A", onAccent: "#FFFFFF", surfaceSelected: "#F9DDF5" },
-    dark: { accent: "#D4A3CE", onAccent: "#191919", surfaceSelected: DARK_SELECTED },
-    oled: { accent: "#D4A3CE", onAccent: "#000000", surfaceSelected: OLED_SELECTED },
+    light: { accent: "#74306A", onAccent: "#FFFFFF" },
+    dark: { accent: "#D4A3CE", onAccent: "#191919" },
+    oled: { accent: "#D4A3CE", onAccent: "#000000" },
   },
   /**
    * Ember: rust in light, a warm amber glow in dark. It lives next door to red, so its
@@ -443,16 +447,16 @@ export const ACCENTS: Record<AccentTheme, AccentSpec> = {
    */
   ember: {
     label: "Ember",
-    light: { accent: "#9A430C", onAccent: "#FFFFFF", surfaceSelected: "#F8E0D2", danger: "#B8184A" },
-    dark: { accent: "#F0964F", onAccent: "#191919", surfaceSelected: DARK_SELECTED, danger: "#FF80A4" },
-    oled: { accent: "#F0964F", onAccent: "#000000", surfaceSelected: OLED_SELECTED, danger: "#FF80A4" },
+    light: { accent: "#9A430C", onAccent: "#FFFFFF", danger: "#B8184A" },
+    dark: { accent: "#F0964F", onAccent: "#191919", danger: "#FF80A4" },
+    oled: { accent: "#F0964F", onAccent: "#000000", danger: "#FF80A4" },
   },
   /** Aurora: a cool teal. */
   aurora: {
     label: "Aurora",
-    light: { accent: "#096863", onAccent: "#FFFFFF", surfaceSelected: "#D9F2EF" },
-    dark: { accent: "#5ED6C5", onAccent: "#191919", surfaceSelected: DARK_SELECTED },
-    oled: { accent: "#5ED6C5", onAccent: "#000000", surfaceSelected: OLED_SELECTED },
+    light: { accent: "#096863", onAccent: "#FFFFFF" },
+    dark: { accent: "#5ED6C5", onAccent: "#191919" },
+    oled: { accent: "#5ED6C5", onAccent: "#000000" },
   },
 };
 
@@ -477,7 +481,6 @@ export function paletteFor(scheme: ThemeName, accent: AccentTheme = DEFAULT_ACCE
       accent: tones.accent,
       focusRing: tones.accent,
       onAccent: tones.onAccent,
-      surfaceSelected: tones.surfaceSelected,
       danger,
       dangerWash: tones.danger ? withAlpha(danger, scheme === "light" ? 0.07 : 0.1) : base.color.dangerWash,
     },

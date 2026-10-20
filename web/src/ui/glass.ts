@@ -27,8 +27,9 @@
  * floating top bar and the status pill. Large panels (the phone's menu panel, sheets)
  * stay lean.
  *
- * Behind it all, each accent washes the list's backdrop faintly in its own hue (`WASH`,
- * `.wn-backdrop`), so the glass has a colour to frost: Plum reads plum through it.
+ * Behind it all, each accent washes the list's backdrop barely perceptibly in its own hue
+ * (`WASH`, `.wn-backdrop`), so the glass has a trace of colour to frost. It is the one
+ * large area the accent reaches; everything else large stays the mode's neutrals.
  *
  * Published as `--wn-glass-*`, `--wn-liquid-*` and `--wn-wash-*` by `applyTheme`, combined
  * in `index.css`. Without `backdrop-filter` the tint is `fallback` instead.
@@ -161,14 +162,15 @@ export const COMPOSE_SHEEN = 0.08;
 /**
  * The accent's wash over the list's backdrop (`.wn-backdrop` in `index.css`): two soft
  * radial glows of the accent, `near` (behind the top bar, top right) and `far` (behind
- * the dock and chips, bottom left), as opacity over the surface. Faint enough that every
- * row ink keeps AA on the washed surface at its strongest point (`glass.test.ts`); OLED
- * stays near black.
+ * the dock and chips, bottom left), as opacity over the surface. Barely noticeable on
+ * purpose (1.4.0, the owner's "subtle, not OMG look"): dark and OLED were 12%/11% and
+ * 10%/8%, which read as a tinted app; light was already 7%/6%. `glass.test.ts` caps it
+ * and holds every row ink to AA on the washed surface at its strongest point.
  */
 export const WASH: Record<ThemeName, { near: number; far: number }> = {
   light: { near: 0.07, far: 0.06 },
-  dark: { near: 0.12, far: 0.11 },
-  oled: { near: 0.1, far: 0.08 },
+  dark: { near: 0.06, far: 0.05 },
+  oled: { near: 0.05, far: 0.04 },
 };
 
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
