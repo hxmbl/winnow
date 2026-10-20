@@ -33,6 +33,13 @@ export type ComposerProps = {
   bcc?: readonly string[];
   /** The account the message goes out from, shown on a new message. */
   from?: string | null;
+  /**
+   * 1.4.0: the signed-in accounts it can go out from, with more than one. A reply starts
+   * on the account that received the message; a new message on the open one.
+   */
+  fromOptions?: readonly { id: string; email: string }[];
+  fromId?: string | null;
+  onFromChange?: (id: string) => void;
   subject: string;
   body: string;
   quoteBlock?: string;
@@ -162,6 +169,9 @@ export function Composer({
   cc = [],
   bcc = [],
   from = null,
+  fromOptions = [],
+  fromId = null,
+  onFromChange,
   subject,
   body,
   sending,
@@ -367,7 +377,26 @@ export function Composer({
           delivered — which is the difference between a disabled Send button and a disabled
           Send button you can understand.
         */}
-        {mode === "new" && from && (
+        {fromOptions.length > 1 && onFromChange ? (
+          <div className="flex items-center gap-2 text-meta">
+            <label htmlFor="winnow-composer-from" className="w-12 shrink-0 text-ink-subtle">
+              From
+            </label>
+            <select
+              id="winnow-composer-from"
+              data-composer-from-picker=""
+              value={fromId ?? fromOptions[0].id}
+              onChange={(event) => onFromChange(event.target.value)}
+              className="min-w-0 flex-1 truncate rounded-ctl bg-transparent px-1 text-ui text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              {fromOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.email}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : mode === "new" && from && (
           <div className="flex items-center gap-2 text-meta">
             <span className="w-12 shrink-0 text-ink-subtle">From</span>
             <span data-composer-from="" className="selectable min-w-0 truncate px-1 text-ui text-ink-body">

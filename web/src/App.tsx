@@ -61,6 +61,10 @@ import { formatRelative } from "./core/mail/datetime";
 import { resolveImageConsent } from "./core/mail/imageConsent";
 import type { Draft, DrivePermissionRef, GmailId } from "./core/model/email";
 import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
+import { DEMO_ACCOUNT_IDS, demoSecondMailbox } from "./core/data/demoSecond";
+import { demoAccounts, switcherLabel } from "./ui/accounts";
+import { AccountButton, AccountSwitcher } from "./ui/components/AccountSwitcher";
+import { defaultFromAccount, draftFromAnotherAccount } from "./core/mail/fromAccount";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
@@ -119,9 +123,10 @@ import { copyText } from "./ui/clipboard";
 import { CodeBar } from "./ui/components/CodeCopy";
 import { Avatar } from "./ui/components/Avatar";
 import { imageProbe, publishSenderPictures, senderPictureSources, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
-import { GravatarCache } from "./core/avatars/gravatar";
+import { GRAVATAR_STORAGE_KEY, GravatarCache } from "./core/avatars/gravatar";
 import { contactPhotoMap } from "./core/avatars/photos";
-import { BrandLogoCache } from "./core/avatars/logoCache";
+import { BrandLogoCache, LOGO_STORAGE_KEY, localLogoStorage } from "./core/avatars/logoCache";
+import { keyFor } from "./core/store/accountState";
 import { dohResolver } from "./core/avatars/bimi";
 import { contactsFailureNotice } from "./core/gmail/people";
 import { cleanFilename } from "./core/mail/attachments";
@@ -151,7 +156,9 @@ import type { OfflineQueue } from "./core/offline/queue";
 import { OfflineIndicator } from "./ui/components/OfflineIndicator";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
-import { onReplyRequest } from "./ui/notificationActions";
+import { announce, onReplyRequest, provideAccountRouter } from "./ui/notificationActions";
+import { notifiable } from "./core/notify/notifications";
+import { alreadyAddedMessage } from "./ui/accounts";
 import { exitRows } from "./ui/rowExit";
 import { isEditingElement } from "./ui/sidebarOverlay";
 
@@ -180,6 +187,15 @@ type Props = {
  * the second pass, a StrictMode warning of its own.
  */
 let sessionRestoreStarted = false;
+
+/** A promise and its resolver, for "once the launch has finished restoring". */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 /**
  * How stale Google contacts may get before opening the composer refreshes them.
@@ -231,6 +247,11 @@ type ComposerState = {
    * if the message is abandoned instead. See `core/gmail/driveSend`.
    */
   driveShares?: DrivePermissionRef[];
+  /**
+   * 1.4.0: the account it goes out from when that is not the open one (the From picker).
+   * Absent: the open account, which is also the one a reply's original arrived in.
+   */
+  fromAccount?: string;
 };
 
 /**
@@ -320,21 +341,25 @@ export function App({ store }: Props) {
   const snapshot = useStore(store);
   const { view, preferences } = snapshot;
   /**
-   * Brand logos (BIMI), behind "Show brand logos". One cache for the app's lifetime,
-   * cleared on sign-out and when the setting is turned off.
+   * Brand logos (BIMI), behind "Show brand logos", and Gravatar photos, behind "Gravatar
+   * photos". One pair per account (1.4.0): each is a list of who mails that account, so
+   * it is stored under the account's namespace and never read from another's. Cleared on
+   * sign-out and when the setting is turned off.
    */
-  const [logoCache] = useState(
+  const cacheAccount = snapshot.accountId;
+  const logoCache = useMemo(
     () =>
       new BrandLogoCache({
         resolve: dohResolver((input, init) => fetch(input, init)),
         isOnline: () => globalThis.navigator?.onLine !== false,
+        storage: localLogoStorage(keyFor(LOGO_STORAGE_KEY, cacheAccount)),
       }),
+    [cacheAccount],
   );
-  /** Gravatar photos, behind "Gravatar photos": the same lifetime and clearing. */
-  const [gravatarCache] = useState(() => {
+  const gravatarCache = useMemo(() => {
     const isOnline = () => globalThis.navigator?.onLine !== false;
-    return new GravatarCache({ probe: imageProbe(isOnline), isOnline });
-  });
+    return new GravatarCache({ probe: imageProbe(isOnline), isOnline, storage: localLogoStorage(keyFor(GRAVATAR_STORAGE_KEY, cacheAccount)) });
+  }, [cacheAccount]);
 
   // ── Refs the keyboard handler reads ─────────────────────────────────────
   // The handler is registered once and reads through these, because
@@ -555,6 +580,22 @@ export function App({ store }: Props) {
   }, [store]);
 
   const sessionRef = useRef<SessionBridge | null>(null);
+  /** Resolves once the launch has adopted (or failed to adopt) the stored session: a notification pressed before that waits for it. */
+  const restoreDone = useRef(deferred());
+  /** Set beside the composer code below, which switching has to park first. */
+  const switchAccountRef = useRef<(id: string) => Promise<void>>(async () => undefined);
+  /** The account switcher sheet (1.4.0). */
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  /** Which of the demo's two accounts is on screen. */
+  const [demoAccount, setDemoAccount] = useState<"work" | "home">("work");
+  /** What the switcher lists: the signed-in accounts, or the demo's two in the demo. */
+  const inDemoMailbox = snapshot.contactsAccess === "demo";
+  const switcherAccounts = useMemo(
+    () => (inDemoMailbox && snapshot.accounts.length === 0 ? demoAccounts(demoAccount) : snapshot.accounts),
+    [inDemoMailbox, snapshot.accounts, demoAccount],
+  );
   /**
    * Whether the grant includes `drive.file` (large files as Drive links), read off the
    * token when the account changes and after the opt-in. `null` before anyone is signed in.
@@ -690,7 +731,9 @@ export function App({ store }: Props) {
     setSigningIn(true);
     try {
       const account = await bridge.signIn();
-      await store.connect(bridge.backend(), { email: account.email });
+      if (account.duplicate) store.setNotice(alreadyAddedMessage(account.email));
+      // `signIn` adds the account; the open account changes only here, in one place.
+      await bridge.accounts.openActive();
       void syncGoogleContacts();
     } finally {
       setSigningIn(false);
@@ -789,6 +832,7 @@ export function App({ store }: Props) {
     message array.
   */
   const enterDemo = useCallback(() => {
+    setDemoAccount("work");
     const demo = demoMailbox();
     store.replaceAll(demo.emails);
     store.markDemoMode(demo.now, demo.drafts);
@@ -821,9 +865,9 @@ export function App({ store }: Props) {
         // of the demo the moment it starts, so a grant that turns out to be gone would
         // land on "Couldn't reach Gmail" instead of staying here with the reason. The
         // profile read is the only call to Google a resume makes before the sync.
-        const email = await bridge.verifiedAccountEmail();
+        await bridge.verifiedAccountEmail();
         try {
-          await store.connect(bridge.backend(), { email });
+          await bridge.accounts.openActive();
         } catch (error) {
           // The grant went in the moment between the profile read and the sync: back to
           // the demo, so the reason and "Sign in again" have somewhere to be. Anything
@@ -906,10 +950,37 @@ export function App({ store }: Props) {
 
     void (async () => {
       try {
-        const bridge = createSessionBridge(platform, store);
+        const bridge = createSessionBridge(platform, store, {
+          // New mail in an account that is not open: its own notification, tagged with
+          // the account, under the same settings (on, not muted or hidden) as the open one's.
+          onInactiveMail: (account, emails) => {
+            const prefs = store.getSnapshot().preferences;
+            if (!prefs.notificationsEnabled) return;
+            const shown = notifiable(emails, prefs);
+            if (shown.length === 0) return;
+            const backend = bridge.accounts.backendFor(account.id);
+            void announce(store, platform, shown, { id: account.id, label: account.email || null }, (heads) =>
+              backend?.replyHeads ? backend.replyHeads(heads.map((email) => email.gmailId)) : Promise.resolve({}),
+            );
+          },
+        });
         sessionRef.current = bridge;
-        setOfflineQueue(bridge.offlineQueue);
         setRestoringSession(true);
+        // Before anything reads an account: 1.3.5's single account moves into its own
+        // namespace, so nobody signs in again (`accountMigration.ts`).
+        await bridge.prepare();
+        setOfflineQueue(bridge.offlineQueue);
+        provideAccountRouter({
+          ready: () => restoreDone.current.promise,
+          isOpen: (id) => store.currentAccountId() === id,
+          openAccount: async (id) => {
+            if (!bridge.accounts.registry.get(id)) return false;
+            if (store.currentAccountId() !== id) await switchAccountRef.current(id);
+            return store.currentAccountId() === id;
+          },
+          refreshAccount: () => bridge.accounts.checkInactive(),
+          refreshInactive: () => bridge.accounts.checkInactive(),
+        });
         // Read once up front so Settings can say whether a client is set up, and the
         // setup sheet can show the redirect URI a web user has to register.
         setOauthClient(await bridge.credentials());
@@ -922,8 +993,9 @@ export function App({ store }: Props) {
         // and bounce the user back to the sign-in screen moments after signing in.
         const completed = await bridge.completeWebRedirect();
         if (completed) {
-          await store.connect(bridge.backend(), { email: completed.email });
+          await bridge.accounts.openActive();
           applySharedLink(completed.view);
+          if (completed.duplicateAccount) store.setNotice(alreadyAddedMessage(completed.email));
           // Back from the contacts opt-in rather than a sign-in: say how it went.
           if (completed.contacts === "declined") {
             store.setNotice(completed.contactsMessage ?? "Google contacts were not connected.");
@@ -951,7 +1023,7 @@ export function App({ store }: Props) {
         }
 
         if (await bridge.hasSession()) {
-          await store.connect(bridge.backend(), { email: await bridge.accountEmail() });
+          await bridge.accounts.openActive();
           void syncGoogleContacts();
         }
 
@@ -971,6 +1043,7 @@ export function App({ store }: Props) {
         store.setError(error instanceof Error ? error.message : null);
       } finally {
         setRestoringSession(false);
+        restoreDone.current.resolve();
       }
     })();
   }, [store, applySharedLink, syncGoogleContacts]);
@@ -1042,6 +1115,20 @@ export function App({ store }: Props) {
    * count is the unfiltered inbox list's own number of conversations. The smart filters
    * are not here; they are the rail (`FilterStrip`).
    */
+  /** The open account's avatar, which opens the account switcher (phone top bar, desktop sidebar header). */
+  const accountButton = (
+    <AccountButton
+      accounts={switcherAccounts}
+      scheme={themeMode}
+      label={switcherLabel(switcherAccounts)}
+      glass={phone}
+      onOpen={() => {
+        setAccountError(null);
+        setAccountsOpen(true);
+      }}
+    />
+  );
+
   const navProps: NavProps = {
     inboxCount: view.inboxThreadCount,
     inboxUnread: mailboxes.find((mailbox) => mailbox.id === "inbox")?.unread ?? 0,
@@ -1087,6 +1174,8 @@ export function App({ store }: Props) {
     },
     settingsOpen: snapshot.overlay === "settings",
     onOpenSettings: () => store.setOverlay("settings"),
+    onOpenAccounts: () => setAccountsOpen(true),
+    accountButton,
   };
 
   const paletteUnread = useMemo(
@@ -1909,7 +1998,21 @@ export function App({ store }: Props) {
     const draftId = (saver ? await saver.settle().catch(() => null) : null) ?? undefined;
     const s = storeRef.current;
     let simulated = false;
-    if (sending.mode === "new") ({ simulated } = await s.sendNew(outgoing, draftId));
+    const elsewhere = sending.fromAccount && sending.fromAccount !== s.currentAccountId()
+      ? sessionRef.current?.accounts.backendFor(sending.fromAccount)
+      : null;
+    if (sending.fromAccount && sending.fromAccount !== s.currentAccountId() && !elsewhere?.sendNew) {
+      throw new Error("That account is no longer signed in here. Choose another From address.");
+    }
+    if (elsewhere?.sendNew) {
+      // From another account: through that account's own backend (and its offline queue),
+      // a reply carrying the original's threading headers rather than a thread id that
+      // belongs to this mailbox (`core/mail/fromAccount.ts`).
+      const original = inReplyTo ? s.getSnapshot().all.find((email) => email.gmailId === inReplyTo) : undefined;
+      const routed = sending.mode === "new" ? outgoing : draftFromAnotherAccount(outgoing, original);
+      if (draftId) await elsewhere.sendNew(routed, draftId);
+      else await elsewhere.sendNew(routed);
+    } else if (sending.mode === "new") ({ simulated } = await s.sendNew(outgoing, draftId));
     else if (inReplyTo) await s.sendReply(outgoing, inReplyTo, draftId);
     else throw new Error("Couldn't find the message this replies to.");
     saver?.finish();
@@ -2410,6 +2513,194 @@ export function App({ store }: Props) {
     localDrafts()?.clear();
   }, [localDrafts]);
   forgetDraftsRef.current = forgetDeviceDrafts;
+
+  // ── Accounts (1.4.0) ──────────────────────────────────────────────────────
+
+
+  /** Put the open composer away (kept as a draft) before another account replaces the screen. */
+  const parkComposer = useCallback(() => {
+    const current = composerRef.current;
+    if (current) retireComposer(current, "park");
+    composerRef.current = null;
+    setComposer(null);
+    setRestoreOffer(null);
+  }, [retireComposer]);
+
+  /** One tap: the account's cached mail at once, then its sync. Nothing of either account is cleared. */
+  const switchAccount = useCallback(async (id: string) => {
+    if (id === DEMO_ACCOUNT_IDS.work || id === DEMO_ACCOUNT_IDS.home) {
+      parkComposer();
+      if (id === DEMO_ACCOUNT_IDS.work) enterDemo();
+      else {
+        const second = demoSecondMailbox();
+        store.replaceAll(second.emails);
+        store.markDemoMode(second.now, []);
+        setDemoAccount("home");
+      }
+      setAccountsOpen(false);
+      return;
+    }
+    const bridge = sessionRef.current;
+    if (!bridge || store.currentAccountId() === id) {
+      setAccountsOpen(false);
+      return;
+    }
+    parkComposer();
+    setAccountBusy(true);
+    setAccountError(null);
+    setAccountsOpen(false);
+    try {
+      await bridge.accounts.switchTo(id);
+      void syncGoogleContacts();
+    } catch {
+      // A sync that fails says so in the app's own strip, with Try again.
+    } finally {
+      setAccountBusy(false);
+      setOfflineQueue(bridge.offlineQueue);
+    }
+  }, [store, parkComposer, enterDemo, syncGoogleContacts]);
+  switchAccountRef.current = switchAccount;
+
+  /** Add account: Google's account chooser, then the new account opens. One already here is switched to. */
+  const addAccount = useCallback(async () => {
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    if (store.getSnapshot().contactsAccess === "demo" && store.getSnapshot().accounts.length === 0) {
+      setAccountsOpen(false);
+      connectOrResume();
+      return;
+    }
+    if (!(await bridge.credentials())) {
+      setAccountsOpen(false);
+      setSetupOpen(true);
+      return;
+    }
+    setAccountBusy(true);
+    setAccountError(null);
+    try {
+      const added = await bridge.accounts.add();
+      parkComposer();
+      setAccountsOpen(false);
+      await bridge.accounts.openActive();
+      if (added.duplicate) store.setNotice(alreadyAddedMessage(added.email));
+      void syncGoogleContacts();
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "The account was not added.");
+    } finally {
+      setAccountBusy(false);
+      setOfflineQueue(bridge.offlineQueue);
+    }
+  }, [store, connectOrResume, parkComposer, syncGoogleContacts]);
+
+  /** Sign out of one account: the open one goes through the full sign-out; another only erases itself. */
+  const signOutAccount = useCallback(async (id: string) => {
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    if (id === store.currentAccountId()) {
+      await signOut();
+    } else {
+      setAccountBusy(true);
+      try {
+        await bridge.accounts.signOut(id);
+      } finally {
+        setAccountBusy(false);
+      }
+    }
+    setOfflineQueue(bridge.offlineQueue);
+  }, [store, signOut]);
+
+  const signOutAll = useCallback(async () => {
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    forgetDeviceDrafts();
+    logoCache.clear();
+    gravatarCache.clear();
+    setAccountBusy(true);
+    try {
+      await bridge.accounts.signOutAll({ revoke: true });
+    } finally {
+      setAccountBusy(false);
+      setOfflineQueue(bridge.offlineQueue);
+    }
+  }, [forgetDeviceDrafts, logoCache, gravatarCache]);
+
+  /** Asked first on a phone, like the single sign-out: the row sits under the thumb. */
+  const confirmSignOutAccount = useCallback((id: string) => {
+    const email = store.getSnapshot().accounts.find((account) => account.id === id)?.email ?? "this account";
+    const run = () => void signOutAccount(id);
+    if (phoneRef.current) {
+      setPhoneConfirm({
+        label: `Sign out of ${email}?`,
+        message: "Mail kept on this device for this account is cleared, and Winnow's access to it is revoked. Your other accounts stay signed in.",
+        action: "Sign Out",
+        run,
+      });
+      return;
+    }
+    run();
+  }, [store, signOutAccount]);
+
+  const confirmSignOutAll = useCallback(() => {
+    if (phoneRef.current) {
+      setPhoneConfirm({
+        label: "Sign out of all accounts?",
+        message: "Mail kept on this device is cleared for every account, and Winnow's access to each is revoked.",
+        action: "Sign Out",
+        run: () => void signOutAll(),
+      });
+      return;
+    }
+    void signOutAll();
+  }, [signOutAll]);
+
+  // The offline line follows the open account's queue.
+  useEffect(() => {
+    const bridge = sessionRef.current;
+    if (bridge) setOfflineQueue(bridge.offlineQueue);
+  }, [snapshot.accountId]);
+
+  /** The composer's From: the signed-in accounts, when there is more than one. */
+  const fromOptions = useMemo(
+    () => snapshot.accounts.filter((account) => !account.demo && account.email).map((account) => ({ id: account.id, email: account.email })),
+    [snapshot.accounts],
+  );
+
+  /**
+   * Another From address: the draft moves to that account's Drafts (the one in the old
+   * account is deleted, its device copy too), and Send goes out through that account.
+   */
+  const changeFrom = useCallback((id: string) => {
+    const bridge = sessionRef.current;
+    const current = composerRef.current;
+    if (!bridge || !current) return;
+    const open = store.currentAccountId();
+    const target = id === open ? undefined : id;
+    if ((current.fromAccount ?? undefined) === target) return;
+    const record = store.getSnapshot().accounts.find((account) => account.id === id);
+    if (!record) return;
+    void saverRef.current?.discard();
+    const backend = target ? bridge.accounts.backendFor(target) : null;
+    const api = target ? (backend?.drafts ?? null) : store.draftsApi();
+    const saver: DraftAutosaver = new DraftAutosaver({
+      context: current.context,
+      mode: current.mode,
+      // A reply from another account is saved unthreaded there: the original is not in its cache.
+      replyTo: target ? undefined : current.replyTo,
+      api,
+      local: new LocalDrafts(deviceStorage(), record.email),
+      draftId: null,
+      permissionMissing: false,
+      onStatus: (status) => {
+        if (saverRef.current !== saver) return;
+        setComposer((composerNow) => (composerNow ? { ...composerNow, status } : composerNow));
+      },
+    });
+    saverRef.current = saver;
+    const next: ComposerState = { ...current, fromAccount: target, status: saver.currentStatus, fromDrafts: undefined };
+    composerRef.current = next;
+    setComposer(next);
+    saver.change(current.draft, { replyAll: current.replyAll, initial: current.initial });
+  }, [store]);
 
   /** Restore: a reply or forward reopens on its message; one whose message is gone becomes a new message. */
   const restoreDraft = useCallback(
@@ -3100,6 +3391,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           cc={composer.draft.cc}
           bcc={composer.draft.bcc}
           from={composer.mode === "new" ? (snapshot.account?.email ?? DEMO_ACCOUNT.email) : null}
+          fromOptions={fromOptions}
+          fromId={composer.fromAccount ?? defaultFromAccount({ mode: composer.mode, receivedIn: snapshot.accountId, open: snapshot.accountId })}
+          onFromChange={changeFrom}
           subject={composer.draft.subject}
           body={composer.draft.body}
           sending={composer.sending}
@@ -3548,6 +3842,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     logoView={logoView}
                     onToggleLogo={toggleLogo}
                     onSearchFocus={showSearch}
+                    accountButton={accountButton}
                   />
                 </div>
               )}
@@ -3984,6 +4279,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           isDesktop={info?.kind === "desktop"}
           googleClient={oauthClient ? maskClientId(oauthClient.clientId) : null}
           signedIn={snapshot.account !== null}
+          accounts={switcherAccounts}
+          accountScheme={themeMode}
+          accountsBusy={accountBusy}
+          onAddAccount={() => void addAccount()}
+          onSwitchAccount={(id) => void switchAccount(id)}
+          onSignOutAccount={confirmSignOutAccount}
+          onSignOutAll={confirmSignOutAll}
+          onAccountColor={(id, color) => sessionRef.current?.accounts.setColor(id, color)}
+          onAccountNotify={(id, notify) => sessionRef.current?.accounts.setNotify(id, notify)}
           onGoogleAccount={() => {
             store.setOverlay("none");
             setSetupOpen(true);
@@ -4295,6 +4599,26 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         On a phone the question is an iOS action sheet, as Mail asks it: Delete Draft (red),
         Save Draft, and Cancel apart at the bottom. The desktop keeps its dialog.
       */}
+      {accountsOpen && (
+        <AccountSwitcher
+          accounts={switcherAccounts}
+          scheme={themeMode}
+          activeUnread={mailboxes.find((mailbox) => mailbox.id === "inbox")?.unread ?? 0}
+          busy={accountBusy}
+          error={accountError}
+          phone={phone}
+          onSwitch={(id) => void switchAccount(id)}
+          onAdd={() => void addAccount()}
+          onManage={() => {
+            setAccountsOpen(false);
+            store.setOverlay("settings");
+          }}
+          onClose={() => {
+            setAccountsOpen(false);
+            setAccountError(null);
+          }}
+        />
+      )}
       {phoneConfirm && (
         <ActionSheet
           label={phoneConfirm.label}

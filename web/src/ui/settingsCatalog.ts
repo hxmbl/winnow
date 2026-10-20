@@ -72,7 +72,7 @@ export const CATEGORIES: readonly SettingsCategory[] = [
     id: "google",
     label: "Google account",
     intro:
-      "Winnow talks to Gmail through a Google client you create in your own Google Cloud project; it ships none of its own. Your mail goes between this device and Google only.",
+      "Winnow talks to Gmail through a Google client you create in your own Google Cloud project; it ships none of its own. Every account you add signs in with that same client. Your mail goes between this device and Google only.",
   },
   {
     id: "senders",
@@ -231,6 +231,24 @@ export const SETTINGS = {
     label: "Your Google OAuth client",
     explanation:
       "The client ID (and secret, if it has one) from your own Google Cloud project that Winnow signs in with. On desktop it is kept in your system keychain; in the browser it is kept in this browser's storage. Change replaces or removes it; your mail itself never passes through anyone but Google.",
+  },
+  accounts: {
+    category: "google",
+    label: "Accounts on this device",
+    explanation:
+      "Up to five Gmail accounts, each signed in on its own with your one Google client. Each account's mail, drafts, learning and sign-in are kept apart on this device, and switching never clears any of them. Signing out of one erases only that account from this device and asks Google to revoke its access; Sign out of all does that for every account.",
+  },
+  accountColor: {
+    category: "google",
+    label: "Colour",
+    explanation:
+      "A small coloured dot beside an account wherever Winnow shows it: the switcher, the avatar in the top bar and Settings. It only helps tell accounts apart at a glance and is stored on this device.",
+  },
+  accountNotify: {
+    category: "google",
+    label: "Notify when not open",
+    explanation:
+      "Whether new mail in this account notifies you while you are reading another one. Winnow checks the accounts you are not viewing lightly, for their unread count and new mail only, on the same schedule as background sync. The open account always follows Notify about new mail.",
   },
   googleContacts: {
     category: "google",
