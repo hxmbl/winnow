@@ -28,7 +28,6 @@ import {
   STORAGE_PROMPT,
   STORAGE_SAVE_FAILED,
   WinnowStore,
-  MAILBOX_ORDER,
   type Snapshot,
 } from "./core/store/store";
 import { commandForKey, shouldSwallow, type KeyContext } from "./core/mail/keybinds";
@@ -38,6 +37,8 @@ import {
   NAVIGATION_ITEMS,
 } from "./core/model/signals";
 import { displayName, isViewMailbox, MAILBOX_LABEL, type Email, type Mailbox } from "./core/model/email";
+import { MAILBOX_ORDER } from "./ui/mailboxNav";
+import { deviceStorage } from "./core/store/storage";
 import { hashId } from "./core/model/ids";
 import { buildForward, buildReply, stripQuote, withReplyAll } from "./core/mail/reply";
 import {
@@ -299,20 +300,11 @@ const BLANK_INITIAL: NonNullable<ComposerState["initial"]> = { to: [], cc: [], b
 /** How long "Draft saved." stays up after a half-written reply is put away, in ms. */
 const DRAFT_NOTICE_MS = 4000;
 
-/** `localStorage`, or `null` where reading it throws (storage disabled). */
 /** Where this Winnow runs, for Settings → About: "Desktop app · linux x86_64", "Browser". */
 function platformLabel(info: PlatformInfo): string {
   if (info.kind === "web") return "Browser";
   if (info.os === "android") return "Android app";
   return `Desktop app · ${info.os}${info.arch && info.arch !== "unknown" ? ` ${info.arch}` : ""}`;
-}
-
-function deviceStorage(): Storage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
 }
 
 /** The user's own address, for leaving it off a reply-all: the demo's is its seeded account. */
