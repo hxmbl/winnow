@@ -6,6 +6,7 @@ import {
   abandonedSnoozes,
   addSnooze,
   dueSnoozes,
+  forgetAccountSnoozes,
   markWoke,
   parseSnoozes,
   pruneWoke,
@@ -73,6 +74,17 @@ describe("snooze records", () => {
     expect(state.snoozed.find((r) => r.key === "t-1")?.wakeAt).toBe(99);
     expect(removeSnooze(state, "me@example.com", "t-2").snoozed.map((r) => r.key)).toEqual(["t-1"]);
     expect(removeSnooze(state, "other@example.com", "t-2")).toBe(state);
+  });
+
+  it("forgets one account's snoozes and woken places, matched case-insensitively", () => {
+    const state = {
+      snoozed: [record("t-1", ["g-1"], 5), record("t-2", ["g-2"], 5, { account: "Bob@Two.example" }), record("t-3", ["g-3"], 5, { account: "demo" })],
+      woke: [{ gmailId: "g-9", account: "bob@two.example", wokeAt: 1 }, { gmailId: "g-8", account: "me@example.com", wokeAt: 1 }],
+    };
+    const left = forgetAccountSnoozes(state, "BOB@two.example");
+    expect(left.snoozed.map((r) => r.key)).toEqual(["t-1", "t-3"]);
+    expect(left.woke.map((r) => r.gmailId)).toEqual(["g-8"]);
+    expect(forgetAccountSnoozes(state, "")).toBe(state);
   });
 
   it("only ever answers for one account", () => {

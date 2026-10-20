@@ -307,4 +307,78 @@ describe("scheduled sends", () => {
     store.setMailbox("scheduled");
     expect(store.view.threads).toEqual([]);
   });
+
+  it("forgets one account's snoozes and sends, and leaves every other's", async () => {
+    const backing = memoryBacking();
+    const { store } = await live([mail(1, "inbox"), mail(2, "inbox")], undefined, backing);
+    store.scheduleSend(send("mine", T, { account: "me@example.com" }));
+    store.scheduleSend(send("bob", T, { account: "bob@two.example", context: "c-bob" }));
+    store.scheduleSend(send("via-bob", T, { account: "me@example.com", context: "c-via", from: "bbbb2222" }));
+    store.scheduleSend(send("demo", T, { context: "c-demo" }));
+    store.snooze([2], T + HOUR);
+    backing.setItem(
+      "winnow.snooze.v1",
+      JSON.stringify({
+        ...JSON.parse(backing.getItem("winnow.snooze.v1")!),
+        woke: [{ gmailId: "g-7", account: "bob@two.example", wokeAt: T }],
+      }),
+    );
+    const reread = new WinnowStore({ backend: liveBackend([]).backend, storage: () => backing });
+    reread.forgetAccountRecords("Bob@two.example", "bbbb2222");
+    const sends = JSON.parse(backing.getItem("winnow.scheduledSend.v1")!).sends.map((r: ScheduledSend) => r.id);
+    expect(sends.sort()).toEqual(["demo", "mine"]);
+    const snoozes = JSON.parse(backing.getItem("winnow.snooze.v1")!);
+    expect(snoozes.snoozed.map((r: { account: string }) => r.account)).toEqual(["me@example.com"]);
+    expect(snoozes.woke).toEqual([]);
+    expect(reread.getSnapshot().scheduled.map((r) => r.id).sort()).toEqual(["demo", "mine"]);
+  });
+
+  it("keeps only the records of accounts the registry still has", async () => {
+    const backing = memoryBacking();
+    const { store } = await live([mail(1, "inbox")], undefined, backing);
+    store.scheduleSend(send("mine", T, { account: "me@example.com" }));
+    store.scheduleSend(send("gone", T, { account: "gone@x.example", context: "c-gone" }));
+    store.scheduleSend(send("via-gone", T, { account: "me@example.com", context: "c-via", from: "gone1111" }));
+    store.scheduleSend(send("demo", T, { context: "c-demo" }));
+    // An account whose address is not known yet: nothing can be judged, nothing goes.
+    store.keepAccountRecords([{ id: "aaaa1111", email: "me@example.com" }, { id: "migr4ted", email: "" }]);
+    expect(store.getSnapshot().scheduled).toHaveLength(4);
+    store.keepAccountRecords([{ id: "aaaa1111", email: "ME@example.com" }]);
+    expect(store.getSnapshot().scheduled.map((r) => r.id).sort()).toEqual(["demo", "mine"]);
+    expect(JSON.parse(backing.getItem("winnow.scheduledSend.v1")!).sends).toHaveLength(2);
+  });
+
+  it("never dispatches another account's send, and drops one whose account is gone", async () => {
+    const backing = memoryBacking();
+    const fake = liveBackend([mail(1, "inbox")]);
+    const store = new WinnowStore({ backend: fake.backend, storage: () => backing });
+    store.enterAccount("aaaa1111", { learning: null, filterLearning: null, activeFilters: [], mailbox: null });
+    await store.connect(fake.backend, { email: "me@example.com" });
+    store.setAccounts([
+      { id: "aaaa1111", email: "me@example.com", color: "space", notify: true, unread: null, active: true },
+      { id: "bbbb2222", email: "bob@two.example", color: "plum", notify: true, unread: 0, active: false },
+    ]);
+    store.scheduleSend(send("mine", T, { account: "me@example.com" }));
+    store.scheduleSend(send("bob", T, { account: "bob@two.example", context: "c-bob" }));
+    store.scheduleSend(send("via-gone", T, { account: "me@example.com", context: "c-via", from: "cccc3333" }));
+    expect(store.permitScheduled("mine")?.id).toBe("mine");
+    // Bob's is Bob's: not sent from here, and kept for him.
+    expect(store.permitScheduled("bob")).toBeNull();
+    expect(store.getSnapshot().scheduled.some((r) => r.id === "bob")).toBe(true);
+    // From an account that is no longer here: dropped, not sent.
+    expect(store.permitScheduled("via-gone")).toBeNull();
+    expect(store.getSnapshot().scheduled.some((r) => r.id === "via-gone")).toBe(false);
+    expect(store.permitScheduled("nothing")).toBeNull();
+    expect(store.scheduledSends().map((r) => r.id).sort()).toEqual(["mine"]);
+  });
+
+  it("says when a schedule could not be stored, so the caller keeps the draft's device copy", () => {
+    const backing = memoryBacking();
+    const { store } = demo(backing);
+    expect(store.scheduleSend(send("a", T + HOUR))).toBe(true);
+    const refusing = { ...backing, setItem: () => { throw new DOMException("quota", "QuotaExceededError"); } };
+    const full = new WinnowStore({ seed: seed(), storage: () => refusing, now: T });
+    expect(full.scheduleSend(send("b", T + HOUR, { context: "c-b" }))).toBe(false);
+    expect(full.scheduledSends().map((r) => r.id)).toContain("b");
+  });
 });

@@ -227,6 +227,10 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
       active: account.id === activeId,
     }));
     store.setAccounts(summaries);
+    // Snoozes and scheduled sends of an account that is no longer here (one removed by a
+    // run that could not write the purge) are dropped, so none can wake or go if its
+    // address is added again.
+    store.keepAccountRecords(registry.list());
   };
   registry.subscribe(publish);
 
@@ -325,6 +329,9 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
     } finally {
       // Whatever the token store said, nothing of the account stays readable here.
       wipeAccountStorage(storage, id, record.email);
+      // Its snoozes and scheduled sends live in the shared records, tagged with its
+      // address (and, for a send going out from it, its id): they go with it too.
+      store.forgetAccountRecords(record.email, id);
       entries.delete(id);
       unread.delete(id);
       registry.remove(id);

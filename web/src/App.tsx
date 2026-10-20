@@ -2470,6 +2470,8 @@ export function App({ store }: Props) {
       const send: ScheduledSend = {
         id: newScheduleId(now),
         account: s.accountKey(),
+        // From another signed-in account: its Gmail draft is that account's, and so is the send.
+        ...(current.fromAccount ? { from: current.fromAccount } : {}),
         sendAt: at,
         scheduledAt: now,
         mode: current.mode,
@@ -2481,12 +2483,15 @@ export function App({ store }: Props) {
         ...(answers.waived || answers.accepted ? { drive: { waived: answers.waived, accepted: answers.accepted } } : {}),
       };
       scheduledDraftsRef.current.set(send.id, draft);
-      s.scheduleSend(send);
+      const stored = s.scheduleSend(send);
       // Put away, kept: the schedule holds the draft now, so the device copy is not
-      // offered back as "unsent" on the next launch.
+      // offered back as "unsent" on the next launch. Unless storage refused the
+      // schedule: it then lasts only this run, and the device copy is what is left.
       takeBackShares(current.driveShares);
       saverRef.current = null;
-      void saver?.park().then(() => localDrafts()?.remove(current.context));
+      void saver?.park().then(() => {
+        if (stored) localDrafts()?.remove(current.context);
+      });
       if (current.fromDrafts) s.removeDraftRow(current.fromDrafts.draftId);
       composerRef.current = null;
       setComposer(null);
@@ -2514,6 +2519,8 @@ export function App({ store }: Props) {
       sending: false,
       error: null,
       mode: send.mode,
+      // The From it was scheduled with: `deliver` sends it through that account, never the open one.
+      ...(send.from ? { fromAccount: send.from } : {}),
       ...(send.mode === "new" ? { initial: { to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject } } : {}),
       ...(send.replyTo ? { replyTo: send.replyTo } : {}),
       ...(send.replyAll !== undefined ? { replyAll: send.replyAll } : {}),
@@ -2532,9 +2539,13 @@ export function App({ store }: Props) {
    * until Send now or Edit; a draft Gmail no longer has (sent or deleted elsewhere) ends it.
    */
   const dispatchScheduled = useCallback(
-    async (send: ScheduledSend, manual = false) => {
+    async (listed: ScheduledSend, manual = false) => {
       const s = storeRef.current;
-      if (dispatchingRef.current.has(send.id)) return;
+      if (dispatchingRef.current.has(listed.id)) return;
+      // Checked again at the moment it goes: only the open account's, and only while every
+      // account it names is still here; one whose account is gone is dropped, not sent.
+      const send = s.permitScheduled(listed.id);
+      if (!send) return;
       if (!manual && !s.claimScheduled(send.id)) return;
       dispatchingRef.current.add(send.id);
       const now = Date.now();
