@@ -76,15 +76,37 @@ export async function topEmail({ browser, url, check, section, shots = null }) {
         await p.evaluate((y) => (document.querySelector("[data-row-count]").scrollTop = y), y);
         await p.waitForTimeout(250);
       };
-      /** Wait for a (smooth) scroll to finish: the offset unchanged across a few frames. */
+      /**
+       * Wait for the list to settle: a (smooth) scroll finished and the chrome offset
+       * unchanged across a few rendered frames.
+       *
+       * Counted in frames, not timer ticks. The offset follows the chrome through a
+       * ResizeObserver, whose callbacks are only delivered in a frame's rendering steps, and
+       * a smooth scroll only advances in frames too. Headless Chromium can go half a second
+       * without painting a frame over the glass chrome, so timer polls across such a gap
+       * read "unchanged" before the app has seen a change that moves no scroll offset (the
+       * rail hidden) or while a scroll is paused mid-way. Each frame and the whole wait
+       * are capped, so a page that never paints fails the check instead of hanging the run.
+       */
       const settle = () =>
         p.evaluate(async () => {
           const scroller = () => document.querySelector("[data-row-count]");
-          let last = -1;
+          const frame = () =>
+            new Promise((resolve) => {
+              requestAnimationFrame(() => resolve());
+              setTimeout(resolve, 2_000);
+            });
+          const read = () => {
+            const el = scroller();
+            return el ? `${el.scrollTop}|${getComputedStyle(el).getPropertyValue("--wn-top-chrome")}` : "";
+          };
+          const deadline = performance.now() + 6_000;
+          await frame();
+          let last = read();
           let still = 0;
-          for (let i = 0; i < 60 && still < 4; i += 1) {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            const now = scroller()?.scrollTop ?? 0;
+          while (still < 6 && performance.now() < deadline) {
+            await frame();
+            const now = read();
             still = now === last ? still + 1 : 0;
             last = now;
           }
