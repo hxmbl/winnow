@@ -798,8 +798,23 @@ Each message carries `picture`: the sender's picture resolved by the avatar's ow
 with `useSenderPictures`, over the sources `App` publishes): contact photo, then Gravatar
 only if "Gravatar photos" is on, then the brand logo only if "Show brand logos" is on,
 nothing for a relayed sender, and always `null` (no lookup) while lock-screen previews are
-hidden. The browser uses it as the notification's `icon`; Rust carries it (and drops it
-when previews are hidden) but the native notifications do not draw it yet.
+hidden. The browser uses it as the notification's `icon`. Native notifications never get
+a URL: `nativePictures` (`ui/notificationActions.ts`) has the webview rasterise each one
+(`canvasRasterise`) to a `NATIVE_PICTURE_PIXELS` (192 px, twice
+`NOTIFICATION_PICTURE_SIZE`) square PNG data URL (a JPEG if the PNG would pass
+`NATIVE_PICTURE_MAX_CHARS`, 200,000, the same cap as Rust's and Kotlin's
+`MAX_PICTURE_CHARS`), drawn as the avatar shows it (`drawPicture`): covering the square,
+centred, over the avatar's backdrop (`--wn-surfaceActive`), so a transparent logo is
+opaque and round-friendly. It is drawn by destination rectangle (`pictureDrawRect`),
+never a source crop: a BIMI logo is an SVG with a `viewBox` and no size, whose natural
+size the engine makes up (Chromium 150×150, others 0×0) and draws at another, so the old
+source crop sent Reddit's logo as a corner or as nothing; a draw that leaves every pixel
+transparent is no picture. The load is `crossOrigin="anonymous"` (the canvas must stay
+readable), so a logo host that sends no `Access-Control-Allow-Origin` still gets no
+picture in a notification while the in-app avatar (a plain `<img>`) shows it; the CSP's
+`connect-src` rules out fetching the bytes, and neither Rust (no TLS client) nor
+`Http.kt` (Google hosts only) may. Rust carries the bytes (dropping them when previews
+are hidden): Android draws them as the large icon, the desktop from a cache file.
 
 | Host | Shown by | Reply | Delete / Mark read | Tap | Where the action runs |
 | --- | --- | --- | --- | --- | --- |
