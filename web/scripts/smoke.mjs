@@ -3306,7 +3306,7 @@ try {
   await page.keyboard.press("Escape");
   check(
     "the mode dropdown offers System, Light, Dark and OLED",
-    JSON.stringify(modeLabels) === JSON.stringify(["System", "Light", "Dark", "OLED"]),
+    JSON.stringify(modeLabels) === JSON.stringify(["System", "Light", "Dark", "Very dark"]),
     JSON.stringify(modeLabels),
   );
   // The keyboard: ↓ opens on the current value, ↓ moves, Enter chooses (then back to System).
@@ -3373,7 +3373,7 @@ try {
     JSON.stringify(darkTokens),
   );
 
-  await chooseMode("OLED");
+  await chooseMode("Very dark");
   await page.waitForTimeout(150);
   let state = await themeState();
   const oledStates = await page.evaluate(() =>
@@ -8277,11 +8277,11 @@ try {
     // Reduced motion: the state still appears, nothing moves.
     await c.emulateMedia({ reducedMotion: "reduce" });
     const animations = await c.evaluate(() =>
-      [...document.querySelectorAll(".inbox-clear__mark, .inbox-clear__path, .inbox-clear__glow--core")].map(
+      [...document.querySelectorAll(".inbox-clear__mark, .inbox-clear__path, .inbox-clear__glow--core, .inbox-clear__float, .inbox-clear__spark")].map(
         (el) => getComputedStyle(el).animationName,
       ),
     );
-    check("under reduced motion nothing animates", animations.length === 3 && animations.every((name) => name === "none"), JSON.stringify(animations));
+    check("under reduced motion nothing animates", animations.length === 6 && animations.every((name) => name === "none"), JSON.stringify(animations));
     await c.emulateMedia({ reducedMotion: null });
     // Let the Inbox's own celebration finish before judging what a theme change does.
     await c.waitForTimeout(1_900);
@@ -8309,7 +8309,7 @@ try {
           surface: state ? getComputedStyle(state).backgroundColor : "",
         };
       });
-    for (const [label, mode] of [["Light", "light"], ["Dark", "dark"], ["OLED", "oled"]]) {
+    for (const [label, mode] of [["Light", "light"], ["Dark", "dark"], ["Very dark", "oled"]]) {
       await appearance("mode", label);
       const seen = await look();
       check(

@@ -1,6 +1,7 @@
 /*
- * The inbox-clear illustration. Light, not outlines: two soft accent glows behind the
- * app mark and a dashed trail leading to it. Every colour is the accent mixed into
+ * The inbox-clear illustration. Light and a little cute: two faint accent glows behind the
+ * paper plane, a dotted trail with one loop-the-loop leading to it, two sparks off its nose
+ * and, at rest, a slow bob (none of it moves under reduced motion). Every colour is the accent mixed into
  * transparency, so all four accents and all three modes work without new tokens.
  */
 
@@ -9,22 +10,22 @@
   width: 240px;
   height: 150px;
   margin-bottom: 18px;
-  --clear-glow: 16%;
-  --clear-core: 26%;
-  --clear-trail: 42%;
+  --clear-glow: 9%;
+  --clear-core: 15%;
+  --clear-trail: 40%;
 }
 
 :root[data-theme="dark"] .inbox-clear__art {
-  --clear-glow: 18%;
-  --clear-core: 26%;
-  --clear-trail: 48%;
+  --clear-glow: 10%;
+  --clear-core: 16%;
+  --clear-trail: 46%;
 }
 
 /* OLED: the black stays black; the light is a smaller, dimmer pool. */
 :root[data-theme="oled"] .inbox-clear__art {
-  --clear-glow: 12%;
-  --clear-core: 20%;
-  --clear-trail: 44%;
+  --clear-glow: 7%;
+  --clear-core: 12%;
+  --clear-trail: 42%;
 }
 
 .inbox-clear__glow {
@@ -69,9 +70,19 @@
 
 .inbox-clear__path {
   stroke: color-mix(in oklab, var(--wn-accent) var(--clear-trail), transparent);
-  stroke-width: 1.6;
+  /* Beads, not dashes: zero-length dashes with round caps draw as dots. */
+  stroke-width: 2;
   stroke-linecap: round;
-  stroke-dasharray: 2.2 3.4;
+  stroke-dasharray: 0.01 4.6;
+}
+
+/* Two tiny sparks off the plane's nose. */
+.inbox-clear__spark {
+  fill: color-mix(in oklab, var(--wn-accent) var(--clear-trail), transparent);
+}
+
+.inbox-clear__float {
+  display: block;
 }
 
 .inbox-clear__dot {
@@ -111,6 +122,45 @@
   }
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  /* At rest the plane bobs on the air, and the sparks twinkle: slow and small. */
+  .inbox-clear__float {
+    animation: inbox-clear-float 3.6s ease-in-out infinite;
+  }
+
+  .inbox-clear__spark {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: inbox-clear-twinkle 2.8s ease-in-out infinite;
+  }
+
+  .inbox-clear__spark--late {
+    animation-delay: 1.4s;
+  }
+}
+
+@keyframes inbox-clear-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(-3deg);
+  }
+}
+
+@keyframes inbox-clear-twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @keyframes inbox-clear-draw {
   from {
     stroke-dashoffset: 100;
@@ -121,7 +171,7 @@
   }
   to {
     stroke-dashoffset: 0;
-    stroke-dasharray: 2.2 3.4;
+    stroke-dasharray: 0.01 4.6;
   }
 }
 

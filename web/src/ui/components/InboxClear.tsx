@@ -74,13 +74,17 @@ export function InboxClear({
         <svg className="inbox-clear__trail" viewBox="0 0 240 150" fill="none">
           <path
             className="inbox-clear__path"
-            d="M 18 128 C 62 126 82 96 112 92 C 132 89 142 77 149 67"
+            d="M 18 128 C 44 128 60 118 74 104 C 86 92 104 86 106 98 C 108 110 88 112 88 100 C 88 86 118 84 149 67"
             pathLength={100}
           />
-          <circle className="inbox-clear__dot" cx="18" cy="128" r="2.5" />
+          <circle className="inbox-clear__dot" cx="18" cy="128" r="2.2" />
+          <circle className="inbox-clear__spark" cx="178" cy="44" r="1.6" />
+          <circle className="inbox-clear__spark inbox-clear__spark--late" cx="184" cy="72" r="1.2" />
         </svg>
         <span className="inbox-clear__mark">
-          <AppMark size={40} single />
+          <span className="inbox-clear__float">
+            <AppMark size={40} single />
+          </span>
         </span>
       </div>
       <div role="status" aria-live="polite" className="flex flex-col items-center gap-1.5">
