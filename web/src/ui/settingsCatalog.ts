@@ -176,7 +176,7 @@ export const SETTINGS = {
     category: "appearance",
     label: "Email dark mode",
     explanation:
-      "In Dark and OLED, messages are drawn dark too instead of as a white page: a message with its own dark design gets it, and any other has its colours adjusted so text stays readable, with images left as they are. The sun button above a message shows its original colours. Off keeps every message on its own light page. Light mode is unaffected.",
+      "In Dark and Very dark, messages are drawn dark too instead of as a white page: a message with its own dark design gets it, and any other has its colours adjusted so text stays readable, with images left as they are. The sun button above a message shows its original colours. Off keeps every message on its own light page. Light mode is unaffected.",
   },
   leftHanded: {
     category: "appearance",
