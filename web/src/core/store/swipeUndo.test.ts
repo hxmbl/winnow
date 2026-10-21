@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DRAFT_DISCARD_UNDO_MS, WinnowStore, type MailBackend } from "./store";
+import { DEFAULT_PREFERENCES, DRAFT_DISCARD_UNDO_MS, UNDO_OFFER_MS, WinnowStore, type MailBackend } from "./store";
 import { revivePreferences } from "./preferences";
 import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 import type { Email, Mailbox } from "../model/email";
@@ -80,6 +80,23 @@ afterEach(() => {
 });
 
 describe("swipe to Trash", () => {
+  it("the Undo offer leaves the pill by itself after six seconds, keeping the move", () => {
+    vi.useFakeTimers();
+    try {
+      expect(UNDO_OFFER_MS).toBe(6_000);
+      const store = demoStore();
+      const row = store.view.threads.find((candidate) => candidate.representative.unread)!.representative;
+      store.moveWithUndo(row.id, "trash");
+      vi.advanceTimersByTime(5_999);
+      expect(store.getSnapshot().undo).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(store.getSnapshot().undo).toBeNull();
+      expect(store.getSnapshot().all.find((email) => email.id === row.id)?.mailbox).toBe("trash");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("moves the message to the Trash and offers Undo", () => {
     const store = demoStore();
     const row = store.view.threads.find((candidate) => candidate.representative.unread)!.representative;
