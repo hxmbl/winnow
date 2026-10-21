@@ -85,7 +85,8 @@ export function plainTextFromHtml(html: string): string {
  * chose; in a plain-text reading they are lines of nothing. Zero-width joiners are
  * kept: they hold emoji sequences and some scripts together.
  */
-const FILLER = /[\u00ad\u034f\u180e\u200b\u2060\ufeff]/g;
+// Alternation, not a class: U+034F is a combining mark, which a class would misread.
+const FILLER = /\u00ad|\u034f|\u180e|\u200b|\u2060|\ufeff/g;
 /** The same, still entity-encoded, as senders' text parts often leave it. */
 const FILLER_ENTITIES = /&(?:shy|#173|#xad|#847|#x34f|#8203|#x200b|#8288|#x2060|#65279|#xfeff);/gi;
 
