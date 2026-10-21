@@ -106,8 +106,33 @@ const overlaps = (a, b) => Boolean(a && b) && a.left < b.right && b.left < a.rig
 const onScreen = (s) =>
   Boolean(s.card) && s.card.left >= 0 && s.card.top >= 0 && s.card.right <= s.viewport.width && s.card.bottom <= s.viewport.height;
 
-/** Wait for the spotlight to settle (the menu's slide, the glide between steps). */
-const settle = (p) => p.waitForTimeout(800);
+/**
+ * Wait for the spotlight to settle (the menu's slide, the glide between steps).
+ * A fixed pause flaked on a slow runner, measuring the spotlight mid-glide, so this
+ * waits until the spotlight, the card and the sidebar have stopped moving: the same
+ * boxes on reads 150 ms apart, after at least 300 ms, and gives up after 5 s (the
+ * checks then report whatever is on screen).
+ */
+async function settle(p) {
+  await p.waitForTimeout(300);
+  const read = () =>
+    p.evaluate(() =>
+      ["[data-tour-spotlight]", "[data-tour-card]", "[data-sidebar]"]
+        .map((sel) => {
+          const r = document.querySelector(sel)?.getBoundingClientRect();
+          return r ? [r.left, r.top, r.width, r.height].map((n) => Math.round(n)).join(",") : "-";
+        })
+        .join("|"),
+    );
+  let last = await read();
+  let still = 0;
+  for (const deadline = Date.now() + 5000; Date.now() < deadline && still < 2; ) {
+    await p.waitForTimeout(150);
+    const now = await read();
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
+}
 
 const STEP_TARGET = {
   desktop: { mailboxes: "nav", reading: "row", filters: "rail", menu: "account" },
