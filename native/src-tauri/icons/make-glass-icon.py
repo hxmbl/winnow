@@ -120,11 +120,14 @@ def write_icon_bundle(planes):
             "fill-specializations": [
                 {"value": {"solid": INK_LIGHT}},
                 {"appearance": "dark", "value": {"solid": INK_DARK}},
+                # Tinted renders the icon by luminance: a dark glyph all but
+                # vanishes, so it is white there, the way Apple's own glyphs are.
+                {"appearance": "tinted", "value": {"solid": c(1.0, 1.0, 1.0)}},
             ],
         })
     doc = {
-        # Light frosted glass; a deep graphite glass in Dark. Tinted and Clear are
-        # derived by the system from these.
+        # Light frosted glass; a deep graphite glass in Dark. The system derives
+        # the Tinted and Clear backgrounds itself (a tinted background is ignored).
         "fill-specializations": [
             {"value": {"linear-gradient": [c(1.0, 1.0, 1.0), c(0.86, 0.89, 0.93)]}},
             {"appearance": "dark", "value": {"linear-gradient": [c(0.24, 0.25, 0.28), c(0.08, 0.08, 0.09)]}},

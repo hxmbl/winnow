@@ -82,7 +82,7 @@ macOS gets its own icon, not the bare planes the other platforms use: macOS 26
 (Tahoe) puts any icon that isn't its rounded square into a grey tile.
 
 - `icons/Winnow.icon` is an Icon Composer bundle (the planes floating on light
-  Liquid Glass, with Dark set; Tinted and Clear are derived by the system). The
+  Liquid Glass, with Dark and Tinted sets; Clear is derived by the system). The
   bundler compiles it into `Contents/Resources/Assets.car` and sets
   `CFBundleIconName`, which needs tauri-cli 2.11+ (tauri-bundler 2.9) and Xcode 26's
   `actool`. Without Xcode 26 the build still works: the bundler logs an error,

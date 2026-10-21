@@ -37,6 +37,12 @@
               "value": {
                 "solid": "extended-srgb:0.96000,0.96000,0.97000,1.00000"
               }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+              }
             }
           ]
         },
@@ -54,6 +60,12 @@
               "appearance": "dark",
               "value": {
                 "solid": "extended-srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "extended-srgb:1.00000,1.00000,1.00000,1.00000"
               }
             }
           ]
