@@ -4728,6 +4728,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           }}
           notificationActions={preferences.notificationActions}
           notificationHidePreview={preferences.notificationHidePreview}
+          unreadBadge={preferences.unreadBadge}
+          onUnreadBadge={(value) => store.setPreferences({ unreadBadge: value })}
           onNotificationSettings={(patch) => store.setPreferences(patch)}
           backgroundSync={info?.backgroundSync ?? null}
           onBackgroundSync={(backgroundSync) => store.setPreferences({ backgroundSync })}

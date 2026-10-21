@@ -248,3 +248,14 @@ describe("the Swipe actions setting", () => {
     expect(revivePreferences({ swipeActions: "off" })).not.toHaveProperty("swipeActions");
   });
 });
+
+describe("unread badge setting", () => {
+  it("counts unread by default and shows nothing when turned off", () => {
+    const store = demoStore();
+    expect(DEFAULT_PREFERENCES.unreadBadge).toBe(true);
+    expect(store.badgeCount()).toBeGreaterThan(0);
+    store.setPreferences({ unreadBadge: false });
+    expect(store.badgeCount()).toBe(0);
+    expect(revivePreferences({ unreadBadge: false })?.unreadBadge).toBe(false);
+  });
+});

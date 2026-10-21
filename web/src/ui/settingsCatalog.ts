@@ -226,6 +226,12 @@ export const SETTINGS = {
     explanation:
       "On, a notification on a locked phone says only that Winnow has new mail, not who sent it or what it says; unlock to see the rest. A computer has no separate lock-screen version, so there it shows the sender and \"New message\" instead of the subject. Nothing about this leaves the device.",
   },
+  unreadBadge: {
+    category: "sync",
+    label: "Unread count on the app icon",
+    explanation:
+      "Shows how many unread messages are waiting: a badge on the Dock icon on a Mac, in the tray icon's tooltip on Linux, and in the tab's title in a browser. Mail from muted senders is never counted, and with nothing unread there is no badge at all. Off hides the count everywhere; your mail is unaffected.",
+  },
   backgroundSync: {
     category: "sync",
     label: "Keep syncing while closed",

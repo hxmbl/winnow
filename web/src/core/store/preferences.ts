@@ -93,6 +93,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
       read: typeof actions.read === "boolean" ? actions.read : DEFAULT_NOTIFICATION_ACTIONS.read,
     };
   }
+  if (typeof source.unreadBadge === "boolean") out.unreadBadge = source.unreadBadge;
   if (typeof source.notificationHidePreview === "boolean") {
     out.notificationHidePreview = source.notificationHidePreview;
   }
