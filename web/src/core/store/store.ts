@@ -114,6 +114,7 @@ import {
   addSnooze,
   dueSnoozes,
   forgetAccountSnoozes,
+  mergeSnoozes,
   markWoke,
   parseSnoozes,
   pruneWoke,
@@ -127,6 +128,7 @@ import {
 import {
   addSchedule,
   forgetAccountSchedules,
+  mergeSchedules,
   parseSchedules,
   removeSchedule,
   scheduleVerdict,
@@ -989,6 +991,12 @@ export class WinnowStore {
   private readonly scheduleSlot: KeyedStorage;
   /** Lays the snoozes over every reading of the mailbox; see `set`. */
   private readonly snoozeOverlay = new SnoozeOverlay();
+  /**
+   * The snoozes and sends as this window last read or wrote them: the `base` each save
+   * merges against, so another window's entries written meanwhile are kept (STRM-290).
+   */
+  private snoozeBase: SnoozeState;
+  private scheduleBase: readonly ScheduledSend[];
 
   constructor(options: StoreOptions = {}) {
     this.snoozeSlot = keyedStorage("snooze", options.storage);
@@ -999,6 +1007,8 @@ export class WinnowStore {
     this.trashSenders = (options.seedTrash ?? []).map((row) => row.sender);
 
     const seed = (options.seed ?? []).slice();
+    this.snoozeBase = parseSnoozes(this.snoozeSlot.read());
+    this.scheduleBase = parseSchedules(this.scheduleSlot.read());
     this.state = {
       status: options.backend ? "loading" : "ready",
       error: null,
@@ -1012,8 +1022,8 @@ export class WinnowStore {
       all: seed,
       drafts: options.backend ? [] : (options.seedDrafts ?? []).slice(),
       draftsLoading: false,
-      snoozes: parseSnoozes(this.snoozeSlot.read()),
-      scheduled: parseSchedules(this.scheduleSlot.read()),
+      snoozes: this.snoozeBase,
+      scheduled: this.scheduleBase,
       mailbox: "inbox",
       activeFilters: [],
       searchQuery: "",
@@ -1807,8 +1817,54 @@ export class WinnowStore {
   }
 
   private saveSnoozes(snoozes: SnoozeState, extra: Partial<StoreState> = {}): void {
-    this.snoozeSlot.write(snoozes);
-    this.set({ snoozes, ...extra });
+    this.set({ snoozes: this.writeSnoozes(snoozes), ...extra });
+  }
+
+  /**
+   * Write snoozes, merged first with what storage holds now: another window of the app
+   * may have saved its own since this one read (STRM-290). Returns what was kept. The base
+   * moves only when the write took, so a change storage refused is still this window's
+   * own (added, not removed) at the next save.
+   */
+  private writeSnoozes(snoozes: SnoozeState): SnoozeState {
+    const raw = this.snoozeSlot.read();
+    const merged = raw === null ? snoozes : mergeSnoozes(this.snoozeBase, snoozes, parseSnoozes(raw));
+    if (this.snoozeSlot.write(merged)) this.snoozeBase = merged;
+    return merged;
+  }
+
+  /** Sends, written the same way as `writeSnoozes`. */
+  private writeSchedules(scheduled: readonly ScheduledSend[]): { kept: ScheduledSend[]; stored: boolean } {
+    const raw = this.scheduleSlot.read();
+    const kept = raw === null ? [...scheduled] : mergeSchedules(this.scheduleBase, scheduled, parseSchedules(raw));
+    const stored = this.scheduleSlot.write(serializeSchedules(kept));
+    if (stored) this.scheduleBase = parseSchedules(serializeSchedules(kept));
+    return { kept, stored };
+  }
+
+  /**
+   * Take in what another window of the app wrote to the snooze and send-later records
+   * (the platform calls this on a `storage` event for either key, and on focus), so this
+   * window shows, wakes and sends what the other one added, and stops holding what it
+   * removed. Changes of this window's own that storage has not taken are kept.
+   */
+  syncDeviceRecords(): void {
+    const rawSnoozes = this.snoozeSlot.read();
+    if (rawSnoozes !== null) {
+      const theirs = parseSnoozes(rawSnoozes);
+      const snoozes = mergeSnoozes(this.snoozeBase, this.state.snoozes, theirs);
+      this.snoozeBase = theirs;
+      if (JSON.stringify(snoozes) !== JSON.stringify(this.state.snoozes)) this.set({ snoozes });
+    }
+    const rawSchedules = this.scheduleSlot.read();
+    if (rawSchedules !== null) {
+      const theirs = parseSchedules(rawSchedules);
+      const scheduled = mergeSchedules(this.scheduleBase, this.state.scheduled, theirs);
+      this.scheduleBase = theirs;
+      const same =
+        JSON.stringify(serializeSchedules(scheduled)) === JSON.stringify(serializeSchedules(this.state.scheduled));
+      if (!same) this.showSchedules(scheduled);
+    }
   }
 
   /** Whether a message is snoozed on this device for the current account. */
@@ -2080,13 +2136,18 @@ export class WinnowStore {
 
   /** `false` when storage refused the write: the change then holds for this run only. */
   private saveSchedules(scheduled: ScheduledSend[]): boolean {
-    const stored = this.scheduleSlot.write(serializeSchedules(scheduled));
+    const { kept, stored } = this.writeSchedules(scheduled);
+    this.showSchedules(kept);
+    return stored;
+  }
+
+  /** Put sends in state, letting go of an open Scheduled row whose send is gone. */
+  private showSchedules(scheduled: ScheduledSend[]): void {
     const selectedGone =
       this.state.mailbox === "scheduled" &&
       this.state.selectedId !== null &&
       !scheduled.some((send) => scheduledRow(send, { email: "" }).id === this.state.selectedId);
     this.set({ scheduled, ...(selectedGone ? { selectedId: null } : {}) });
-    return stored;
   }
 
   /**
@@ -2174,7 +2235,13 @@ export class WinnowStore {
    * and write the claim. `false` when someone else holds it.
    */
   claimScheduled(id: string, now: number = this.now()): boolean {
-    const stored = parseSchedules(this.scheduleSlot.read()).find((send) => send.id === id);
+    const raw = this.scheduleSlot.read();
+    const stored = raw === null ? undefined : parseSchedules(raw).find((send) => send.id === id);
+    // Stored once and gone now: another window sent or cancelled it since this one read.
+    if (raw !== null && !stored && this.scheduleBase.some((send) => send.id === id)) {
+      this.syncDeviceRecords();
+      return false;
+    }
     if (stored?.claimedAt !== undefined && now - stored.claimedAt <= CLAIM_HOLD_MS) return false;
     this.updateScheduled(id, { claimedAt: now });
     return true;
@@ -4095,10 +4162,10 @@ export class WinnowStore {
     // draft there). The demo's are the demo's and stay.
     const leaving = this.backend ? this.accountKey() : null;
     if (leaving) {
-      const snoozes = forgetAccountSnoozes(this.state.snoozes, leaving);
-      this.snoozeSlot.write(snoozes);
-      const scheduled = forgetAccountSchedules(this.state.scheduled, leaving, this.state.accountId ?? undefined);
-      this.scheduleSlot.write(serializeSchedules(scheduled));
+      const snoozes = this.writeSnoozes(forgetAccountSnoozes(this.state.snoozes, leaving));
+      const scheduled = this.writeSchedules(
+        forgetAccountSchedules(this.state.scheduled, leaving, this.state.accountId ?? undefined),
+      ).kept;
       this.state = { ...this.state, snoozes, scheduled };
     }
     // Kept across the boundary rather than spread back afterwards, since `this.state` is

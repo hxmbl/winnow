@@ -124,7 +124,8 @@ import { SelectionBar } from "./ui/components/SelectionBar";
 import { buildRowMenu, buildScheduledMenu, buildSenderMenu, canSnooze, snoozeEntries } from "./ui/menus";
 import { ScheduledSheet, WhenPicker } from "./ui/components/WhenPicker";
 import { formatWhen, tomorrowMorning, wentLate, whenPresets } from "./core/mail/when";
-import { newScheduleId, type ScheduledSend } from "./core/mail/scheduledSend";
+import { newScheduleId, scheduleDraftOwner, type ScheduledSend } from "./core/mail/scheduledSend";
+import { storageKey } from "./core/store/keyedStorage";
 import { SEND_LATER_NOTE } from "./ui/components/Composer";
 import {
   EMPTY_SELECTION,
@@ -1625,9 +1626,19 @@ export function App({ store, existingInstall = true }: Props) {
     const s = storeRef.current;
     const reopened = current.fromDrafts;
     if (reopened) {
+      // A draft another account's From owns (a cross-account schedule reopened with Edit,
+      // STRM-289) lives in that account's Drafts: the open account's list is not touched.
+      const otherAccount =
+        current.fromAccount && current.fromAccount !== s.currentAccountId()
+          ? s.getSnapshot().accounts.find((account) => account.id === current.fromAccount)
+          : undefined;
       // A draft from Drafts is the user's already: putting it away keeps it, edited or
       // not, and only Discard deletes it.
       if (how === "discard") {
+        if (otherAccount) {
+          void saver.discard();
+          return;
+        }
         s.removeDraftRow(reopened.draftId);
         void saver.discard().then(() => s.refreshDrafts());
         return;
@@ -1636,13 +1647,17 @@ export function App({ store, existingInstall = true }: Props) {
         void saver.park();
         return;
       }
-      s.putDraftRow(draftRowFrom(reopened.row, current.draft, Date.now()));
+      if (!otherAccount) s.putDraftRow(draftRowFrom(reopened.row, current.draft, Date.now()));
       void saver.park().then(() => {
         // Its row in Drafts is the way back to it, so the device copy is not offered for
         // restoring on the next launch — unless Gmail did not take the save, when the
         // device copy is the only up-to-date one.
         const status = saver.currentStatus;
         const savedElsewhere = status.kind === "saved" && status.where === "gmail";
+        if (otherAccount) {
+          if (savedElsewhere) new LocalDrafts(deviceStorage(), otherAccount.email).remove(current.context);
+          return;
+        }
         if (savedElsewhere || s.draftsApi() === null) localDrafts()?.remove(current.context);
         void s.refreshDrafts();
       });
@@ -1672,17 +1687,28 @@ export function App({ store, existingInstall = true }: Props) {
     (start: ComposerStart, restore?: LocalDraft | false) => {
       const previous = composerRef.current;
       if (previous) retireComposer(previous, "park");
-      const local = localDrafts();
+      // From another signed-in account (a scheduled send reopened with Edit): its draft is
+      // that account's, so it saves to that account's Drafts and device copies, as the From
+      // picker's `changeFrom` does, never to the open account's (STRM-289).
+      const s = storeRef.current;
+      const elsewhere =
+        start.fromAccount && start.fromAccount !== s.currentAccountId()
+          ? s.getSnapshot().accounts.find((account) => account.id === start.fromAccount)
+          : undefined;
+      const local = elsewhere ? new LocalDrafts(deviceStorage(), elsewhere.email) : localDrafts();
       const kept = restore === false ? null : (restore ?? local?.get(start.context) ?? null);
-      const api = storeRef.current.draftsApi();
+      const api = elsewhere
+        ? (sessionRef.current?.accounts.backendFor(elsewhere.id)?.drafts ?? null)
+        : s.draftsApi();
       const saver: DraftAutosaver = new DraftAutosaver({
         context: start.context,
         mode: start.mode,
-        replyTo: start.replyTo,
+        // A reply from another account is saved unthreaded there: the original is not in its cache.
+        replyTo: elsewhere ? undefined : start.replyTo,
         api,
         local,
         draftId: kept?.gmailDraftId ?? null,
-        permissionMissing: api !== null && draftsAccessRef.current === "not_granted",
+        permissionMissing: !elsewhere && api !== null && draftsAccessRef.current === "not_granted",
         onStatus: (status) => {
           // A parked saver finishing its last save must not speak for the next composer.
           if (saverRef.current !== saver) return;
@@ -2528,8 +2554,15 @@ export function App({ store, existingInstall = true }: Props) {
       // schedule: it then lasts only this run, and the device copy is what is left.
       takeBackShares(current.driveShares);
       saverRef.current = null;
+      // A draft from another account's From keeps its device copy under that account.
+      const fromRecord =
+        current.fromAccount && current.fromAccount !== s.currentAccountId()
+          ? s.getSnapshot().accounts.find((account) => account.id === current.fromAccount)
+          : undefined;
       void saver?.park().then(() => {
-        if (stored) localDrafts()?.remove(current.context);
+        if (!stored) return;
+        if (fromRecord) new LocalDrafts(deviceStorage(), fromRecord.email).remove(current.context);
+        else localDrafts()?.remove(current.context);
       });
       if (current.fromDrafts) s.removeDraftRow(current.fromDrafts.draftId);
       composerRef.current = null;
@@ -2640,15 +2673,21 @@ export function App({ store, existingInstall = true }: Props) {
     (send: ScheduledSend) => {
       const s = storeRef.current;
       const state = composerFromSchedule(send);
+      const owner = scheduleDraftOwner(send, { openId: s.currentAccountId(), accounts: s.getSnapshot().accounts });
       s.cancelSchedule(send.id);
       scheduledDraftsRef.current.delete(send.id);
       setScheduledOpen(null);
-      const draftId = send.draftId ?? `local-${send.id}`;
+      // Its draft can be another account's (STRM-289). Signed in here: it reopens with that
+      // From, saving to that account's Gmail draft, not as a new one in the open account
+      // (which left the From account's draft behind). Signed out since: its draft cannot be
+      // reached, so it opens as a new draft here rather than write to another mailbox's id.
+      const ownDraftId = owner.kind === "gone" ? null : send.draftId;
+      const draftId = ownDraftId ?? `local-${send.id}`;
       const row: Email = {
         id: hashId(`draft-${draftId}`),
         gmailId: `draft-${draftId}`,
         ...(send.draft.threadId ? { threadId: send.draft.threadId } : {}),
-        sender: snapshotRef.current.account?.email ?? DEMO_ACCOUNT.email,
+        sender: owner.kind === "other" ? owner.email : (snapshotRef.current.account?.email ?? DEMO_ACCOUNT.email),
         to: send.draft.to.map((address) => ({ address })),
         cc: send.draft.cc.map((address) => ({ address })),
         bcc: send.draft.bcc.map((address) => ({ address })),
@@ -2672,6 +2711,7 @@ export function App({ store, existingInstall = true }: Props) {
           replyAll: state.replyAll,
           context: send.context,
           ...(state.initial ? { initial: state.initial } : {}),
+          ...(owner.kind === "other" ? { fromAccount: owner.id } : {}),
           fromDrafts: { draftId, row, baseline: state.draft },
         },
         {
@@ -2680,7 +2720,7 @@ export function App({ store, existingInstall = true }: Props) {
           draft: state.draft,
           ...(send.replyTo ? { replyTo: send.replyTo } : {}),
           ...(send.replyAll !== undefined ? { replyAll: send.replyAll } : {}),
-          ...(send.draftId ? { gmailDraftId: send.draftId } : {}),
+          ...(ownDraftId ? { gmailDraftId: ownDraftId } : {}),
           savedAt: Date.now(),
         },
       );
@@ -2693,11 +2733,34 @@ export function App({ store, existingInstall = true }: Props) {
   const cancelSchedules = useCallback((ids: readonly string[]) => {
     const s = storeRef.current;
     let cancelled = 0;
+    let openCancelled = 0;
+    /** Where a cancelled send from another account's From went: that account's Drafts. */
+    let elsewhere: string | null = null;
     for (const id of ids) {
       const send = s.cancelSchedule(id);
       if (!send) continue;
       cancelled += 1;
+      const owner = scheduleDraftOwner(send, { openId: s.currentAccountId(), accounts: s.getSnapshot().accounts });
       scheduledDraftsRef.current.delete(id);
+      if (owner.kind !== "open") {
+        // Its draft is the From account's (STRM-289): it stays in that account's Drafts,
+        // never put into the open account's. With no Gmail draft (the demo, or a save Gmail
+        // did not take), that account's device copy is what keeps it.
+        if (owner.kind === "other") {
+          elsewhere = owner.email;
+          if (!send.draftId) {
+            new LocalDrafts(deviceStorage(), owner.email).put({
+              context: send.context,
+              mode: send.mode,
+              draft: send.draft,
+              ...(send.replyAll !== undefined ? { replyAll: send.replyAll } : {}),
+              savedAt: Date.now(),
+            });
+          }
+        }
+        continue;
+      }
+      openCancelled += 1;
       // The demo has no Gmail draft to fall back to: it goes into Drafts here.
       if (!send.draftId && s.getSnapshot().contactsAccess === "demo") {
         const draftId = `demo-${send.id}`;
@@ -2724,8 +2787,15 @@ export function App({ store, existingInstall = true }: Props) {
     }
     setScheduledOpen(null);
     if (cancelled > 0) {
-      s.flash(cancelled === 1 ? "Schedule cancelled. It's in Drafts." : `${cancelled} schedules cancelled. They're in Drafts.`, DRAFT_NOTICE_MS);
-      if (s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
+      s.flash(
+        cancelled === 1
+          ? elsewhere
+            ? `Schedule cancelled. It's in ${elsewhere}'s Drafts.`
+            : "Schedule cancelled. It's in Drafts."
+          : `${cancelled} schedules cancelled. They're in Drafts.`,
+        DRAFT_NOTICE_MS,
+      );
+      if (openCancelled > 0 && s.getSnapshot().mailbox === "drafts") void s.refreshDrafts();
     }
   }, []);
 
@@ -2738,6 +2808,8 @@ export function App({ store, existingInstall = true }: Props) {
     const s = storeRef.current;
     const snap = s.getSnapshot();
     if (snap.status !== "ready") return;
+    // Another window of the app may have snoozed, woken, scheduled or sent meanwhile.
+    s.syncDeviceRecords();
     s.wakeDue();
     const demo = snap.contactsAccess === "demo";
     if (!demo && !sessionRef.current) return;
@@ -2764,6 +2836,16 @@ export function App({ store, existingInstall = true }: Props) {
       window.removeEventListener("focus", tick);
       document.removeEventListener("visibilitychange", onVisible);
     };
+  }, []);
+  // Another window of the app saved its snoozes or scheduled sends: take them in at once,
+  // so neither window's next save is made from a stale list (STRM-290).
+  useEffect(() => {
+    const keys = new Set([storageKey("snooze"), storageKey("scheduledSend")]);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || keys.has(event.key)) storeRef.current.syncDeviceRecords();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
   // On start (the session ready, or the demo) and after each sync.
   const dueStatus = snapshot.status;

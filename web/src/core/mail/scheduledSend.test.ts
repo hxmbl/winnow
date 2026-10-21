@@ -4,6 +4,8 @@ import {
   addSchedule,
   dueSchedules,
   forgetAccountSchedules,
+  mergeSchedules,
+  scheduleDraftOwner,
   scheduleVerdict,
   parseSchedules,
   removeSchedule,
@@ -112,5 +114,62 @@ describe("scheduled sends", () => {
     ];
     expect(forgetAccountSchedules(list, "bob@two.example", "bbbb2222").map((s) => s.id)).toEqual(["mine", "demo"]);
     expect(forgetAccountSchedules(list, "", "bbbb2222").map((s) => s.id)).toEqual(["mine", "theirs", "demo"]);
+  });
+});
+
+describe("whose draft a scheduled send is (STRM-289)", () => {
+  const accounts = [
+    { id: "aaaa1111", email: "me@example.com" },
+    { id: "bbbb2222", email: "bob@two.example" },
+  ];
+
+  it("is the open account's when it has no From of its own, or its From is the open one", () => {
+    expect(scheduleDraftOwner(send("a", 1), { openId: "aaaa1111", accounts })).toEqual({ kind: "open" });
+    expect(scheduleDraftOwner(send("a", 1, { from: "aaaa1111" }), { openId: "aaaa1111", accounts })).toEqual({ kind: "open" });
+    expect(scheduleDraftOwner(send("a", 1), { openId: null, accounts: [] })).toEqual({ kind: "open" });
+  });
+
+  it("is the From account's when that is another signed-in account", () => {
+    expect(scheduleDraftOwner(send("a", 1, { from: "bbbb2222" }), { openId: "aaaa1111", accounts })).toEqual({
+      kind: "other",
+      id: "bbbb2222",
+      email: "bob@two.example",
+    });
+  });
+
+  it("is gone when the From account is no longer signed in (or its address is not known yet)", () => {
+    expect(scheduleDraftOwner(send("a", 1, { from: "cccc3333" }), { openId: "aaaa1111", accounts })).toEqual({
+      kind: "gone",
+      id: "cccc3333",
+    });
+    expect(
+      scheduleDraftOwner(send("a", 1, { from: "bbbb2222" }), { openId: "aaaa1111", accounts: [{ id: "bbbb2222", email: " " }] }),
+    ).toEqual({ kind: "gone", id: "bbbb2222" });
+  });
+});
+
+describe("merging two windows' sends (STRM-290)", () => {
+  it("keeps both windows' new sends, soonest first", () => {
+    const base = [send("a", 10)];
+    expect(mergeSchedules(base, [...base, send("mine", 30)], [...base, send("theirs", 20)]).map((s) => s.id)).toEqual([
+      "a",
+      "theirs",
+      "mine",
+    ]);
+  });
+
+  it("never brings back a send the other window sent or cancelled", () => {
+    const base = [send("a", 10), send("b", 20)];
+    const mine = updateSchedule(base, "a", { claimedAt: 5 });
+    expect(mergeSchedules(base, mine, [send("b", 20)]).map((s) => s.id)).toEqual(["b"]);
+  });
+
+  it("does not count a big file kept only in memory as a change", () => {
+    const big = { id: "1", filename: "big.bin", mimeType: "x", size: 9, data: "A".repeat(DEVICE_COPY_BUDGET + 10) };
+    const withFile = send("a", 10, { draft: { ...send("a", 10).draft, attachments: [big] } });
+    const stored = parseSchedules(serializeSchedules([withFile]));
+    // The other window moved its time; this one only holds the file in memory.
+    const theirs = [{ ...stored[0]!, sendAt: 99 }];
+    expect(mergeSchedules(stored, [withFile], theirs)[0]!.sendAt).toBe(99);
   });
 });

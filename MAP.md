@@ -1252,7 +1252,13 @@ for multi-account. Every record also names its account (`WinnowStore.accountKey(
 address, or `demo`), so the demo's never act on a real account (a demo message must never
 reach Gmail) and one account's never list in another's. Sign-out drops the leaving
 account's records (the mail stays archived under its label; a scheduled message stays a
-Gmail draft); the demo's stay.
+Gmail draft); the demo's stay. **Two windows** share the keys (STRM-290): every save is a
+three-way merge (`core/store/mergeRecords.ts`, `mergeSnoozes`, `mergeSchedules`) of what
+the window last read, what it wants to write, and what storage holds now, so neither
+window drops the other's new entries; a removal wins over a change, so a send another
+window sent or cancelled never comes back. `WinnowStore.syncDeviceRecords` takes the
+other window's changes in (`App`: on a `storage` event for either key, and in `runDue`),
+and `claimScheduled` refuses a send storage no longer has.
 
 *Snooze* (`core/mail/snooze.ts`, `WinnowStore.snooze`/`unsnooze`/`wakeDue`). Snoozing a
 row takes its whole conversation's Inbox messages out (archived optimistically through
@@ -1295,11 +1301,14 @@ schedule with its reason (the row says Not sent) and stops retrying until Send n
 Edit; a 404 on the draft (sent or deleted elsewhere) ends it with a notice. Scheduled
 rows open `ScheduledSheet`: **Edit** cancels the schedule and reopens the draft as a
 sheet on the same Gmail draft; **Send now**; **Cancel schedule** (it stays a draft; in the
-demo it is put into Drafts). The demo simulates the send (filed into Sent, on its thread).
+demo it is put into Drafts). A send with another account's From (`scheduleDraftOwner`,
+STRM-289) reopens with that From, saving to that account's Gmail draft and device copies,
+and Cancel leaves it in that account's Drafts ("It's in …'s Drafts."), never in the open
+account's; if that account was signed out since, Edit opens it as a new draft here. The demo simulates the send (filed into Sent, on its thread).
 Files beyond the drafts' device budget survive only in this session's memory; after a
 restart such a send stops with "… too big to keep on this device. Open it with Edit…".
 
-Tests: `core/mail/{when,snooze,scheduledSend}.test.ts`, `core/store/keyedStorage.test.ts`,
+Tests: `core/mail/{when,snooze,scheduledSend}.test.ts`, `core/store/{keyedStorage,mergeRecords}.test.ts`,
 `core/store/snoozeSchedule.test.ts`, the label calls in `core/session/draftFiles.test.ts`,
 menus/reader/pill/keybind tests; smoke: `scripts/smoke-schedule.mjs`.
 
