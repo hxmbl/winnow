@@ -34,6 +34,7 @@ import { smokeMotion } from "./smoke-motion.mjs";
 import { smokeFixes } from "./smoke-fixes.mjs";
 import { smokeThumb } from "./smoke-thumb.mjs";
 import { smokeSchedule } from "./smoke-schedule.mjs";
+import { PARTS } from "./smoke-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -74,6 +75,19 @@ function require(label, ok, detail = "") {
 function section(title) {
   console.log(`\n── ${title} ${"─".repeat(Math.max(0, 66 - title.length))}`);
 }
+
+// ── Parts ───────────────────────────────────────────────────────────────────
+//
+// `WINNOW_SMOKE_PARTS=core,privacy,…` runs only those parts of the run, in the run's own
+// order; unset runs all of them, which is what `npm run smoke` does. CI runs the parts as
+// parallel shards (`smoke-shards.mjs`, which also checks that every part is in one).
+
+const ONLY_PARTS = (process.env.WINNOW_SMOKE_PARTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+for (const name of ONLY_PARTS) {
+  if (!PARTS.includes(name)) throw new Error(`WINNOW_SMOKE_PARTS: unknown part "${name}" (one of ${PARTS.join(", ")})`);
+}
+if (ONLY_PARTS.length > 0) console.log(`· parts: ${ONLY_PARTS.join(", ")}`);
+const part = (name) => ONLY_PARTS.length === 0 || ONLY_PARTS.includes(name);
 
 // ── The server ──────────────────────────────────────────────────────────────
 
@@ -362,6 +376,13 @@ try {
   const listTitle = () => page.locator("header span[title]").first().textContent();
   const search = () => page.locator("#winnow-search");
 
+  // Read by `core` and `sidebar-edges`: the sidebar's close-after-idle delay.
+  const SIDEBAR_IDLE_MS = 1500;
+
+  // Each part below is gated so CI can run them as parallel shards (see
+  // `smoke-shards.mjs`); left unindented so the gates add no churn to blame.
+  // Only `core` drives the shared `page`; every other part opens its own contexts.
+  if (part("core")) {
   await page.goto(URL, { waitUntil: "networkidle" });
 
 
@@ -641,7 +662,6 @@ try {
   section("sidebar overlay");
   const sidebar = page.locator("[data-sidebar]");
   const toggle = page.locator("header [data-sidebar-toggle]");
-  const SIDEBAR_IDLE_MS = 1500;
   check("the sidebar is rendered exactly once", (await sidebar.count()) === 1);
   check("and it lists no smart filters: no category rows, no Edit mode",
     (await sidebar.locator("[data-nav-category], [data-nav-edit], [data-rail-scroller], button[aria-pressed]").count()) === 0);
@@ -4706,6 +4726,8 @@ try {
     `${await rowTotal()} rows`,
   );
 
+  } // part: core
+  if (part("avatars")) {
   // ── Avatars, sender menu, multi-select, context menu, mark-unread, scroll ─
 
   section("avatars and selection");
@@ -5209,6 +5231,8 @@ try {
     await ctx.close();
   }
 
+  } // part: avatars
+  if (part("swipe")) {
   // ── Swipe actions, on a phone ──────────────────────────────────────────────
 
   /*
@@ -5484,6 +5508,8 @@ try {
     await desk.close();
   }
 
+  } // part: swipe
+  if (part("codes")) {
   // ── One-time codes ─────────────────────────────────────────────────────────
 
   /*
@@ -5567,6 +5593,8 @@ try {
     await ctx.close();
   }
 
+  } // part: codes
+  if (part("sender-pictures")) {
   // ── Sender pictures ───────────────────────────────────────────────────────
   //
   // Contact photos (Dana and Ana carry bundled demo photos), brand logos behind their
@@ -5811,6 +5839,8 @@ try {
     await gCtx.close();
   }
 
+  } // part: sender-pictures
+  if (part("sidebar-edges")) {
   // ── Sidebar, rail and avatar edge cases ───────────────────────────────────
   //
   // Each in its own context, so a failure here cannot leave the main page in a state the
@@ -6015,6 +6045,8 @@ try {
     await ctx.close();
   }
 
+  } // part: sidebar-edges
+  if (part("rail-edges")) {
   section("rail and avatar edge cases");
   {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -6100,6 +6132,8 @@ try {
     await ctx.close();
   }
 
+  } // part: rail-edges
+  if (part("text-selection")) {
   // ── Text selection ─────────────────────────────────────────────────────────
   //
   // The chrome is `user-select: none`, and readable text opts back in. A report that
@@ -6272,6 +6306,8 @@ try {
     await ctx.close();
   }
 
+  } // part: text-selection
+  if (part("reader-split")) {
   // ── Reader split ───────────────────────────────────────────────────────────
   //
   // The divider between the list and the reader: a separator that drags, steps with
@@ -6448,6 +6484,8 @@ try {
     await ctx.close();
   }
 
+  } // part: reader-split
+  if (part("read-on-open")) {
   // ── Read on open ───────────────────────────────────────────────────────────
 
   section("read on open");
@@ -6587,6 +6625,8 @@ try {
     await ctx.close();
   }
 
+  } // part: read-on-open
+  if (part("settings")) {
   // ── Settings layout ────────────────────────────────────────────────────────
   //
   // Three columns on a desktop (categories, controls, an explanation of the last setting
@@ -7499,6 +7539,8 @@ try {
     await ctx.close();
   }
 
+  } // part: settings
+  if (part("privacy")) {
   // ── Privacy ─────────────────────────────────────────────────────────────────
   //
   // From the network's side: what leaves the browser. A signed-in session against a
@@ -7716,6 +7758,8 @@ try {
     await ctx.close();
   }
 
+  } // part: privacy
+  if (part("position")) {
   // ── The position readout follows the open message ─────────────────────────
 
   // "4 of 39" was the cursor's index, a separate number from the open message, and every
@@ -7921,6 +7965,8 @@ try {
     await ctx.close();
   }
 
+  } // part: position
+  if (part("glass")) {
   // ── Glass over the list, and the logo's version toggle (1.2.3) ─────────────
   // BEGIN glass-and-version
   {
@@ -8258,21 +8304,23 @@ try {
     }
   }
   // END glass-and-version
+  } // part: glass
 
-  await smokeOffline({ browser, URL, check, section, errors });
+  if (part("offline")) await smokeOffline({ browser, URL, check, section, errors });
   // Labels and attachments: chips, the label picker's other doors, label mailboxes, the
   // reader's file list and lightbox, and compose attachments. Its own module, so it can
   // also run alone (`node scripts/smoke-labels-attachments.mjs`).
-  await attachmentsSmoke({ browser, url: URL, check, section });
+  if (part("attachments")) await attachmentsSmoke({ browser, url: URL, check, section });
   // The first email under the floating chrome: at rest, after the Top pill, Home and j/k,
   // in every kind of view, and when the chrome's height changes. Its own module, so it
   // can also run alone (`node scripts/smoke-top-email.mjs`).
-  await topEmail({ browser, url: URL, check, section });
-  await smokeMotion({ browser, url: URL, check, section, errors });
-  await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
-  await smokeThumb({ browser, URL, check, section, errors });
-  await smokeSchedule({ browser, URL, check, section, errors });
+  if (part("top-email")) await topEmail({ browser, url: URL, check, section });
+  if (part("motion")) await smokeMotion({ browser, url: URL, check, section, errors });
+  if (part("fixes")) await smokeFixes({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
+  if (part("thumb")) await smokeThumb({ browser, URL, check, section, errors });
+  if (part("schedule")) await smokeSchedule({ browser, URL, check, section, errors });
 
+  if (part("inbox-clear")) {
   // ── Inbox clear ────────────────────────────────────────────────────────────
   section("inbox clear");
   {
@@ -8469,6 +8517,8 @@ try {
     );
     await phoneCtx.close();
   }
+
+  } // part: inbox-clear
 
   // ── Console ────────────────────────────────────────────────────────────────
 

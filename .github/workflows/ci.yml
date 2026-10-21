@@ -94,6 +94,9 @@ jobs:
       - name: Check versions
         run: node scripts/check-version.mjs
 
+      - name: Check the smoke shards cover npm run smoke
+        run: node scripts/smoke-shards.mjs --check
+
       - name: Typecheck, lint and test
         run: npm run check
 
@@ -126,10 +129,19 @@ jobs:
               - 'native/src-tauri/gen/android/**'
               - 'native/src-tauri/src/google_signin.rs'
 
-  smoke:
-    name: Smoke test
+  # The smoke run (`npm run smoke`, ~11 min in one job) split into parallel shards.
+  # `web/scripts/smoke-shards.mjs` says which parts of smoke.mjs and which standalone
+  # scripts each shard runs, and `npm-checks` fails if the shards stop covering the
+  # whole of `npm run smoke` or this matrix stops naming exactly those shards.
+  smoke-shard:
+    name: Smoke (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      # Every shard reports, so one red shard does not hide another's failures.
+      fail-fast: false
+      matrix:
+        shard: [core, contexts-a, contexts-b, modules-a, modules-b, modules-c]
     # Playwright's own image ships the browsers and their system libraries, so the job
     # skips the download and the apt step. Its tag must match the locked `playwright`
     # version (1.63.0) or the browser build will not be the one the library expects.
@@ -154,8 +166,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Smoke test the production build
-        run: npm run smoke
+      # The production bundle, built per shard: ~15s here in parallel, against a separate
+      # build-and-upload job every shard would have to wait for. `vite build` alone, as
+      # `npm run build`'s `tsc -b` (noEmit) is the typecheck `npm-checks` already runs.
+      - name: Build the production bundle
+        run: npx vite build --logLevel warn
+
+      - name: Smoke test (${{ matrix.shard }})
+        run: node scripts/smoke-shards.mjs "${{ matrix.shard }}"
+
+  # The one check that stands for the whole smoke run (the name branch protection and
+  # `trigger-release` rely on): green only when every shard passed.
+  smoke:
+    name: Smoke test
+    needs: smoke-shard
+    # Not on a cancelled run (a superseded PR push), where there is nothing to report.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every smoke shard passed
+        env:
+          RESULT: ${{ needs.smoke-shard.result }}
+        run: |
+          echo "smoke shards: $RESULT"
+          test "$RESULT" = success
 
   # The Rust side's own gate: formatting, clippy with warnings as errors, and the
   # unit tests in commands/deep_link/files/oauth/scheduler. Runs on every event, so
