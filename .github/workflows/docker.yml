@@ -145,7 +145,7 @@ jobs:
           # index.html: the app, the CSP header, never cached.
           curl -fsS -D h.txt http://localhost:8081/ -o index.html
           grep -q '<div id="root"></div>' index.html || fail "index.html is not the app"
-          grep -q '<script src="/config.js"></script>' index.html || fail "index.html does not load config.js"
+          grep -q '<script src="./config.js"></script>' index.html || fail "index.html does not load config.js"
           header h.txt content-security-policy | grep -q "script-src 'self';" || fail "no CSP header"
           header h.txt content-security-policy | grep -q "frame-ancestors 'none'" || fail "CSP header cannot forbid framing"
           header h.txt cache-control | grep -q no-cache || fail "index.html is cacheable"
