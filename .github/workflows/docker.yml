@@ -191,6 +191,26 @@ jobs:
           [ "$(docker exec proxy id -u)" = 1000 ] || fail "proxy runs as $(docker exec proxy id -u)"
           echo "non-root ok"
 
+          # The updater's checks under the images' own busybox tools (the unit tests run
+          # them with GNU's): archive safety, completeness, versions, hosts.
+          for IMAGE in winnow:smoke winnow-proxy:smoke; do
+            docker run --rm --entrypoint sh "$IMAGE" -c '
+              set -e
+              cd /tmp && mkdir -p a/proxy && echo 9.9.9 > a/VERSION && echo x > a/proxy/server.ts && echo x > a/index.html
+              tar -czf ok.tgz -C a .
+              ln -s /etc/passwd a/evil && tar -czf bad.tgz -C a .
+              WINNOW_FETCH_LIB=1 . /opt/winnow/fetch-release.sh
+              KIND=proxy
+              safe_archive ok.tgz
+              ! safe_archive bad.tgz
+              mkdir u && tar -xzf ok.tgz -C u && looks_complete u 9.9.9
+              newer_than 1.10.0 1.9.0 && ! newer_than 1.5.0-beta 1.5.0
+              allowed_url https://release-assets.githubusercontent.com/x && ! allowed_url http://github.com/x && ! allowed_url https://github.com.evil.example/x
+              valid_tag v1.5.0 && ! valid_tag "v1.5.0/../x"
+              echo "updater checks ok"
+            ' || fail "the updater's checks failed in $IMAGE"
+          done
+
           echo "── start-up logs"
           docker logs web 2>&1 | grep -E 'winnow' || true
           docker logs proxy 2>&1 | grep -E 'winnow' || true
