@@ -304,6 +304,12 @@ export const SETTINGS = {
     explanation:
       "Winnow asks GitHub for its latest release when it starts and then every few hours, and tells you once when a newer one is out. The Mac app and the AppImage update themselves and restart; the .deb and Android download the new package for your installer; a self-hosted web copy needs a git pull. The check sends nothing about you or your mail.",
   },
+  tour: {
+    category: "about",
+    label: "The tour",
+    explanation:
+      "A short walk round Winnow: where your mailboxes are, how to read a message, what smart filters do and where the menu is. It opens by itself once, the first time Winnow starts on a device, and this plays it again. Watching it changes nothing.",
+  },
   licence: {
     category: "about",
     label: "Licence",

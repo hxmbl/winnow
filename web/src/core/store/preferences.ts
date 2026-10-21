@@ -97,6 +97,9 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.notificationHidePreview === "boolean") {
     out.notificationHidePreview = source.notificationHidePreview;
   }
+  // The first-run tour (1.5): only a boolean counts; anything else reads as not done,
+  // which on its own never opens the tour for a device that has run Winnow before.
+  if (typeof source.tourDone === "boolean") out.tourDone = source.tourDone;
   if (typeof source.backgroundSync === "boolean") out.backgroundSync = source.backgroundSync;
   if (typeof source.backgroundSyncInterval === "number" && source.backgroundSyncInterval > 0) {
     out.backgroundSyncInterval = source.backgroundSyncInterval;

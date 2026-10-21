@@ -251,6 +251,8 @@ export type SettingsProps = {
   updates?: UpdatesController | null;
   /** The category Settings opens on. Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
+  /** About › "Show the tour again": closes Settings and plays the first-run tour. */
+  onShowTour?: () => void;
   onClose: () => void;
 };
 
@@ -787,6 +789,13 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             <span className="text-meta font-semibold tabular-nums text-ink-body">{props.version ?? "Unknown"}</span>
           </Row>
           {props.updates && <UpdateSettings updates={props.updates} />}
+          {props.onShowTour && (
+            <Row setting="tour">
+              <button type="button" data-show-tour="" onClick={props.onShowTour} className={SECONDARY_BUTTON}>
+                Show the tour again
+              </button>
+            </Row>
+          )}
           <Row setting="licence">
             <span className="text-meta font-semibold text-ink-body">MIT</span>
           </Row>

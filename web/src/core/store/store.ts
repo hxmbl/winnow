@@ -373,6 +373,12 @@ export type Preferences = {
    * need a settings scope Winnow does not ask for.
    */
   mutedSenders: string[];
+  /**
+   * The first-run tour (1.5) was finished or skipped on this device, so it does not open
+   * by itself again. Settings › About › "Show the tour again" replays it. See `ui/tour.ts`
+   * for when it opens at all: never for a device upgrading from an earlier version.
+   */
+  tourDone: boolean;
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -397,6 +403,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   backgroundSyncInterval: 300,
   blockedSenders: [],
   mutedSenders: [],
+  tourDone: false,
 };
 
 /** Where the app is in its lifecycle. Drives which screen is shown. */

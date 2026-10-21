@@ -33,6 +33,7 @@ import { loadAccountState, persistAccountState } from "./core/store/accountState
 import { deviceStorage } from "./core/store/storage";
 import { parseDeepLink } from "./core/notify/notifications";
 import { watchPhysicalKeyboard } from "./ui/physicalKeyboard";
+import { isExistingInstall } from "./ui/tour";
 import "./index.css";
 
 // From the first key press, not from when Settings opens: Keyboard shortcuts shows on a
@@ -68,6 +69,23 @@ type PersistedState = AccountState & { preferences?: Partial<Preferences> };
  * store needs the session's backend, so neither is built here — the bridge is created
  * inside `App` on mount.
  */
+/*
+ * Whether this device has run Winnow before, read before anything below writes a key:
+ * the first-run tour opens only on a true first launch, never for someone upgrading
+ * (`ui/tour.ts`).
+ */
+const existingInstall = (() => {
+  try {
+    const storage = globalThis.localStorage;
+    const keys: string[] = [];
+    for (let i = 0; i < storage.length; i++) keys.push(storage.key(i) ?? "");
+    return isExistingInstall(keys);
+  } catch {
+    // Storage that cannot be read cannot remember the tour either: no tour.
+    return true;
+  }
+})();
+
 // Before anything is read: buckets hidden by an earlier build come back, and the list
 // that hid them is deleted rather than left behind (see `retiredKeys.ts`).
 dropRetiredKeys(() => globalThis.localStorage);
@@ -310,6 +328,6 @@ function openDeepLink(url: string): void {
 
 createRoot(container).render(
   <StrictMode>
-    <App store={store} />
+    <App store={store} existingInstall={existingInstall} />
   </StrictMode>,
 );
