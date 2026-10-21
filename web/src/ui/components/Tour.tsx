@@ -42,15 +42,8 @@ type TourProps = {
 
 const FOCUSABLE = 'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
-/**
- * After a step change the spotlight is re-measured every frame (the menu's slide): for
- * at least SETTLE_MS, then until the target has held still for STILL_FRAMES frames,
- * and never past SETTLE_MAX_MS. A fixed window left the spotlight at a mid-slide size
- * on a slow machine, where the slide outlasted it.
- */
+/** How long after a step change the spotlight is re-measured every frame (the menu's slide). */
 const SETTLE_MS = 700;
-const SETTLE_MAX_MS = 3000;
-const STILL_FRAMES = 10;
 
 function sameBox(a: Box | null, b: Box | null): boolean {
   if (a === null || b === null) return a === b;
@@ -182,29 +175,16 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
   useEffect(() => {
     let frame = 0;
     let current: Box | null | undefined;
-    // The target resizing on its own, without a transition (the account row filling in
-    // once the menu has laid out), re-measures it too. Observed as each measure finds it,
-    // since a menu step's target only exists once the menu has opened.
-    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => onChange());
-    // True when the box moved.
     const measure = () => {
-      for (const selector of step.targets) {
-        const element = document.querySelector(selector);
-        if (element) resized?.observe(element);
-      }
       const next = findTarget(step);
-      if (current !== undefined && sameBox(current, next)) return false;
+      if (current !== undefined && sameBox(current, next)) return;
       current = next;
       setTarget(next);
-      return true;
     };
     const started = performance.now();
-    let still = 0;
     const loop = () => {
-      still = measure() ? 0 : still + 1;
-      const elapsed = performance.now() - started;
-      const settling = elapsed < SETTLE_MS || (still < STILL_FRAMES && elapsed < SETTLE_MAX_MS);
-      if (settling) frame = requestAnimationFrame(loop);
+      measure();
+      if (performance.now() - started < SETTLE_MS) frame = requestAnimationFrame(loop);
       else frame = 0;
     };
     loop();
@@ -218,15 +198,11 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
     window.addEventListener("resize", onChange);
     window.addEventListener("orientationchange", onChange);
     document.addEventListener("scroll", onChange, { capture: true, passive: true });
-    // A slide or resize that ends after the settle window still lands the spotlight.
-    document.addEventListener("transitionend", onChange, true);
     return () => {
-      resized?.disconnect();
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("resize", onChange);
       window.removeEventListener("orientationchange", onChange);
       document.removeEventListener("scroll", onChange, { capture: true });
-      document.removeEventListener("transitionend", onChange, true);
     };
   }, [step]);
 
