@@ -12,8 +12,7 @@ import type { Mailbox } from "../core/model/email";
 
 /**
  * The desktop sidebar's rows, top to bottom. Snoozed and Scheduled are views (1.4.0);
- * the phone panel reverses these before applying its own `PANEL_ORDER`
- * (`ui/phoneDock.ts`).
+ * the phone panel shows these upside down (`PANEL_ORDER` in `ui/phoneDock.ts`).
  */
 export const MAILBOX_ORDER = [
   "inbox",

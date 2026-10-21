@@ -4095,9 +4095,9 @@ try {
     JSON.stringify(menuShape),
   );
   check(
-    "reversed: account and gear on top, then Spam, Trash, Scheduled, Drafts, Snoozed, Archive, Sent, and Inbox last",
+    "reversed: account and gear on top, then Spam, Trash, Drafts, Scheduled, Sent, Archive, Snoozed, and Inbox last",
     JSON.stringify(menuShape.order) ===
-      JSON.stringify(["account", "spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent", "inbox"]),
+      JSON.stringify(["account", "spam", "trash", "drafts", "scheduled", "sent", "archive", "snoozed", "inbox"]),
     JSON.stringify(menuShape.order),
   );
   check(
