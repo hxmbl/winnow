@@ -19,6 +19,7 @@
  *    underneath to be above.
  */
 
+import { untilFirstMail } from "./ui/firstMail";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LogIn, RefreshCw } from "lucide-react";
@@ -753,7 +754,9 @@ export function App({ store }: Props) {
       const account = await bridge.signIn();
       if (account.duplicate) store.setNotice(alreadyAddedMessage(account.email));
       // `signIn` adds the account; the open account changes only here, in one place.
-      await bridge.accounts.openActive();
+      // Sign-in is done once the account's first mail is on screen; the rest of its
+      // first sync carries on without holding "Waiting for Google…" up (`firstMail.ts`).
+      await untilFirstMail(store, account.id, bridge.accounts.openActive());
       void syncGoogleContacts();
     } finally {
       setSigningIn(false);
@@ -2994,7 +2997,7 @@ export function App({ store }: Props) {
       const added = await bridge.accounts.add();
       parkComposer();
       setAccountsOpen(false);
-      await bridge.accounts.openActive();
+      await untilFirstMail(store, added.id, bridge.accounts.openActive());
       if (added.duplicate) store.setNotice(alreadyAddedMessage(added.email));
       void syncGoogleContacts();
     } catch (error) {
