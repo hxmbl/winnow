@@ -15,6 +15,10 @@
  *      switches account, fetches it and opens it in the phone's full-screen reader; Back
  *      returns to that account's inbox; a summary's link opens the inbox; and a cold
  *      start from a tap (`deep_link_launch`) opens the message too.
+ *   6. The Accounts page (1.5), on the desktop and a phone: the switcher's Manage
+ *      accounts opens it; an account's page sets its colour and notify switch; Escape
+ *      steps back; Settings' Accounts row opens it and it links back to Settings →
+ *      Google account; Switch opens the other inbox; signing out of one leaves the other.
  *
  *   WINNOW_PORT=4362 WINNOW_CHROMIUM=/usr/bin/chromium node scripts/smoke-accounts.mjs
  */
@@ -226,6 +230,149 @@ const tokensJson = (accessToken) =>
 
 const subjects = (page) => page.locator("[data-row-id]").allInnerTexts().then((texts) => texts.join(" | "));
 
+
+/** The registry as stored: who is here, with each account's colour and notify switch. */
+const registry = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("winnow.accounts.v1") ?? "{}"));
+
+/** A web build with Ada and Bob already signed in (Ada open), for the phone's Accounts page. */
+function seedTwoAccounts({ client, ada, bob }) {
+  if (sessionStorage.getItem("seeded-accounts")) return;
+  sessionStorage.setItem("seeded-accounts", "1");
+  localStorage.setItem("winnow.google.oauthClient", JSON.stringify(client));
+  localStorage.setItem("winnow.gmail.tokens@acctada01", ada);
+  localStorage.setItem("winnow.gmail.tokens@acctbob02", bob);
+  localStorage.setItem("winnow.preferences.v1", JSON.stringify({ undoSendSeconds: 0 }));
+  localStorage.setItem(
+    "winnow.accounts.v1",
+    JSON.stringify({
+      version: 1,
+      active: "acctada01",
+      accounts: [
+        { id: "acctada01", email: "ada@one.example", color: "space", notify: true, addedAt: 1 },
+        { id: "acctbob02", email: "bob@two.example", color: "aurora", notify: true, addedAt: 2 },
+      ],
+    }),
+  );
+}
+
+/**
+ * The Accounts page, the same on both layouts: the switcher's Manage accounts opens it
+ * (not Settings), it lists both accounts, an account's page sets its colour (click and
+ * arrow keys) and notify switch, Escape steps back to the list, Settings' Accounts row
+ * opens it, its Google account link opens Settings there, Switch opens the other inbox,
+ * and signing out of the account that is not open leaves the other signed in.
+ */
+async function accountsPageChecks(page, { label, openSwitcher, registry: read }) {
+  const t = (text) => `accounts page (${label}): ${text}`;
+  const pageState = () => page.locator("[data-accounts-page]").getAttribute("data-accounts-page").catch(() => null);
+  const openPage = async () => {
+    await openSwitcher();
+    await page.locator("[data-account-manage]").click();
+    await page.locator("[data-accounts-page]").waitFor({ timeout: 5_000 });
+  };
+  await openPage();
+  const before = await read(page);
+  const activeId = before.active;
+  const other = before.accounts.find((account) => account.id !== activeId);
+  check(t("Manage accounts opens the Accounts page, not Settings"), (await pageState()) === "list" && (await page.locator("[data-settings-layout]").count()) === 0);
+  check(
+    t("it lists every account, the open one marked"),
+    (await page.locator("[data-accounts-row]").count()) === before.accounts.length &&
+      (await page.locator(`[data-accounts-row="${activeId}"]`).getAttribute("aria-current")) === "true",
+  );
+  const layout = await page.locator("[data-accounts-layout]").getAttribute("data-accounts-layout");
+  const box = await page.locator('[role="dialog"][aria-label="Accounts"]').boundingBox();
+  const viewport = page.viewportSize();
+  check(
+    t(label === "phone" ? "a full-screen sheet with 44px+ rows" : "a centred panel"),
+    label === "phone"
+      ? layout === "phone" && box && box.width >= viewport.width - 1 && ((await page.locator("[data-accounts-row]").first().boundingBox())?.height ?? 0) >= 44
+      : layout === "desktop" && box && box.width <= 520 && Math.abs(box.x + box.width / 2 - viewport.width / 2) < 2,
+    JSON.stringify(box),
+  );
+  check(t("Add account and its Testing-mode note are on it"), (await page.locator("[data-accounts-add]").innerText()).includes("Add account") && (await page.locator("[data-accounts-add-help]").innerText()).includes("test users"));
+  check(t("so are the demo inbox and Sign out of all"), (await page.locator("[data-accounts-demo]").count()) === 1 && (await page.locator("[data-accounts-sign-out-all]").count()) === 1);
+
+  // One account's page: colour and notify.
+  await page.locator(`[data-accounts-row="${other.id}"]`).click();
+  await page.locator(`[data-accounts-detail="${other.id}"]`).waitFor({ timeout: 3_000 });
+  check(t("an account opens its own page, titled with its address"), (await page.locator("[data-accounts-title]").innerText()) === other.email);
+  await page.locator(`[data-accounts-detail="${other.id}"] [data-accounts-colour="ember"]`).click();
+  await page.waitForTimeout(150);
+  let stored = (await read(page)).accounts.find((account) => account.id === other.id);
+  check(t("a colour is chosen and stored"), stored?.color === "ember" && (await page.locator('[data-accounts-colour="ember"]').getAttribute("aria-checked")) === "true", stored?.color);
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(150);
+  stored = (await read(page)).accounts.find((account) => account.id === other.id);
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-accounts-colour"));
+  check(t("the arrow keys move the colour and the focus together"), stored?.color === "aurora" && focused === "aurora", `${stored?.color} / ${focused}`);
+  await page.locator(`[data-accounts-notify="${other.id}"] [role="switch"]`).click();
+  await page.waitForTimeout(150);
+  stored = (await read(page)).accounts.find((account) => account.id === other.id);
+  check(t("its notify switch is stored"), stored?.notify === false && (await page.locator(`[data-accounts-notify="${other.id}"] [role="switch"]`).getAttribute("aria-checked")) === "false");
+
+  // Escape steps back to the list, onto that account's row; a second closes the page.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+  const back = await page.evaluate(() => document.activeElement?.getAttribute("data-accounts-row"));
+  check(t("Escape steps back to the list, focus on that account's row"), (await pageState()) === "list" && back === other.id, String(back));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  check(t("and Escape on the list closes the page"), (await page.locator("[data-accounts-page]").count()) === 0);
+
+  // Settings keeps one Accounts row, which opens the page; the page links back to Settings → Google account.
+  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+  await page.keyboard.press(",");
+  await page.locator("[data-settings-layout]").waitFor({ timeout: 5_000 });
+  if (label === "phone") await page.locator('[data-category="google"]').click();
+  else await page.locator('[data-settings-nav] [data-category="google"]').click();
+  check(
+    t("Settings no longer holds the per-account controls"),
+    (await page.locator("[data-settings-layout] [data-accounts-colour], [data-settings-layout] [data-sign-out-account]").count()) === 0 &&
+      (await page.locator("[data-settings-manage-accounts]").count()) === 1,
+  );
+  await page.locator("[data-settings-manage-accounts]").click();
+  await page.locator("[data-accounts-page]").waitFor({ timeout: 5_000 });
+  check(t("Settings' Accounts row opens the page"), (await page.locator("[data-settings-layout]").count()) === 0);
+  await page.locator("[data-accounts-google-settings]").click();
+  await page.locator("[data-settings-title]").waitFor({ timeout: 5_000 });
+  check(t("Google account settings opens Settings on Google account"), (await page.locator("[data-settings-title]").innerText()) === "Google account");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  if ((await page.locator("[data-settings-layout]").count()) > 0) {
+    // The phone's category page steps back to its list first.
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+  }
+  if ((await page.locator("[data-settings-layout]").count()) > 0) {
+    await page.locator("[data-settings-back]").first().click();
+    await page.waitForTimeout(250);
+  }
+
+  // Switch from the account's page: the page makes way for that inbox.
+  await openPage();
+  await page.locator(`[data-accounts-row="${other.id}"]`).click();
+  await page.locator(`[data-accounts-switch="${other.id}"]`).click();
+  const otherMail = other.email === BOB ? "Bob mail 1" : "Ada mail 1";
+  await page.waitForFunction((text) => document.body.innerText.includes(text), otherMail, { timeout: 10_000 }).catch(() => undefined);
+  check(t("Switch to this account opens its inbox and closes the page"), (await page.locator("[data-accounts-page]").count()) === 0 && (await subjects(page)).includes(otherMail));
+
+  // Sign out of the account that is no longer open: only it goes.
+  await openPage();
+  await page.locator(`[data-accounts-row="${activeId}"]`).click();
+  await page.locator(`[data-accounts-sign-out="${activeId}"]`).click();
+  if (label === "phone") {
+    // Asked first on a phone, as everywhere else.
+    await page.locator('[data-action-sheet-item="confirm"]').click();
+  }
+  await page.waitForFunction((id) => !(JSON.parse(localStorage.getItem("winnow.accounts.v1") ?? "{}").accounts ?? []).some((a) => a.id === id), activeId, { timeout: 10_000 }).catch(() => undefined);
+  const after = await read(page);
+  check(t("sign out of this account removes only it"), after.accounts?.length === 1 && after.accounts[0].id === other.id, JSON.stringify(after.accounts?.map((a) => a.email)));
+  check(t("and the page goes back to the list, which no longer shows it"), (await pageState()) === "list" && (await page.locator(`[data-accounts-row="${activeId}"]`).count()) === 0);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+}
+
 await ensureBuilt();
 const server = await preview({ root: ROOT, logLevel: "warn", preview: { port: PORT, strictPort: true, open: false } });
 const browser = await chromium.launch(process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM } : {});
@@ -332,6 +479,39 @@ try {
       Boolean(sent) && sent.owner === ADA && /^From: .*ada@one\.example/m.test(sent.raw) && /^In-Reply-To: <a2@fake\.example>/m.test(sent.raw),
       sent ? sent.raw.split("\r\n").slice(0, 6).join(" / ") : "nothing sent",
     );
+
+    // ── 6. The Accounts page (desktop) ──────────────────────────────────────
+    console.log("\n── the Accounts page (desktop) ──");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    await accountsPageChecks(page, { label: "desktop", openSwitcher, registry });
+    await ctx.close();
+  }
+
+  // ── 6. The Accounts page (phone) ───────────────────────────────────────────
+  console.log("\n── the Accounts page (phone) ──");
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      hasTouch: true,
+      isMobile: true,
+    });
+    await fakeGoogle(ctx);
+    await ctx.addInitScript(seedTwoAccounts, { client: CLIENT, ada: tokensJson("tok-ada"), bob: tokensJson("tok-bob") });
+    const page = await ctx.newPage();
+    page.on("pageerror", (error) => errors.push(String(error)));
+    page.on("dialog", (dialog) => {
+      errors.push(`native dialog: ${dialog.message()}`);
+      void dialog.dismiss();
+    });
+    await page.goto(URL);
+    await page.waitForFunction(() => document.body.innerText.includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
+    const openSwitcher = async () => {
+      await page.locator("[data-account-switcher-trigger]").first().click();
+      await page.locator("[data-account-switcher]").waitFor({ timeout: 5_000 });
+    };
+    await accountsPageChecks(page, { label: "phone", openSwitcher, registry });
     await ctx.close();
   }
 

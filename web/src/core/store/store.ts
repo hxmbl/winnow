@@ -515,7 +515,7 @@ export type StoreState = {
   filterLearning: FilterLearning;
 
   /** Which modal is up, if any. */
-  overlay: "none" | "shortcuts" | "navigation" | "settings";
+  overlay: "none" | "shortcuts" | "navigation" | "settings" | "accounts";
   navigationIndex: number;
 
   syncing: boolean;
