@@ -119,7 +119,15 @@ async function walk(p, layout, { check, shots }) {
   const seen = [];
   for (let i = 0; i < 5; i++) {
     await settle(p);
-    const s = await readTour(p);
+    let s = await readTour(p);
+    // On a slow runner the glide can outlast the pause: give the spotlight up to 3 s
+    // more to land around its control before checking it.
+    for (const deadline = Date.now() + 3000; Date.now() < deadline; ) {
+      const t = STEP_TARGET[layout][s.step];
+      if (!t || (inside(s.spotlight, s.targets[t], 2) && !overlaps(s.card, s.spotlight))) break;
+      await p.waitForTimeout(100);
+      s = await readTour(p);
+    }
     seen.push(s.step);
     if (shots) await p.screenshot({ path: path.join(shots, `tour-${layout}-${i + 1}.png`) });
     check(`${layout} step ${i + 1} (${s.step}): the card is fully on screen`, onScreen(s), JSON.stringify(s.card));
