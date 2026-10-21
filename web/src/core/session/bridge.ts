@@ -104,7 +104,7 @@ export type SessionBridge = {
    * Sign in. With no account yet, the first one; afterwards it is `accounts.add`. Throws
    * a `GmailError` on any failure.
    */
-  signIn(): Promise<{ email: string; duplicate?: boolean }>;
+  signIn(): Promise<{ id: string; email: string; duplicate?: boolean }>;
   /** Finish a sign-in delivered via redirect. Returns null if no redirect. */
   completeWebRedirect(): Promise<CompletedWebRedirect | null>;
   /** The open account's store-facing backend, behind its offline queue. */
@@ -469,12 +469,12 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
     async signIn() {
       if (registry.list().length > 0) {
         const added = await accounts.add();
-        return { email: added.email, duplicate: added.duplicate };
+        return { id: added.id, email: added.email, duplicate: added.duplicate };
       }
       const { email } = await pendingSession().signIn();
       const added = await settlePending(email);
       registry.setActive(added.id);
-      return { email: added.email, duplicate: added.duplicate };
+      return { id: added.id, email: added.email, duplicate: added.duplicate };
     },
 
     async completeWebRedirect() {
