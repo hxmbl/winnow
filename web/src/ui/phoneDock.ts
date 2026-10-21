@@ -8,6 +8,7 @@
  */
 
 import type { Mailbox } from "../core/model/email";
+import { MAILBOX_ORDER } from "./mailboxNav";
 
 /**
  * How far the pill's top edge sits above the window's bottom edge, published on
@@ -53,12 +54,13 @@ export function badgeText(unread: number): string | null {
 }
 
 /**
- * The panel's mailboxes above Inbox, top to bottom: the rarer folders first, then
- * Archive and Sent, the two most used, right above Inbox and the thumb that opened it.
- * `folders` is the desktop's top-down order; anything not named here keeps its place
- * from the reversed desktop order, above the named ones.
+ * The panel's mailboxes above Inbox, top to bottom: the desktop sidebar's order turned
+ * upside down, so the phone reads the same list from the thumb up (Hxmbl, 2026-10-21):
+ * Spam at the top, Snoozed right above Inbox. Derived from `MAILBOX_ORDER`, so the two
+ * can't drift apart. Anything the caller passes that isn't named keeps its place from
+ * the reversed order, above the named ones.
  */
-export const PANEL_ORDER = ["spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent"] as const satisfies readonly Mailbox[];
+export const PANEL_ORDER: readonly Mailbox[] = [...MAILBOX_ORDER].reverse().filter((id) => id !== "inbox");
 
 export function panelOrder<T extends { id: Mailbox }>(folders: readonly T[]): T[] {
   const rank = (id: Mailbox) => (PANEL_ORDER as readonly Mailbox[]).indexOf(id);

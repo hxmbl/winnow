@@ -140,7 +140,7 @@ function NavSections({
 
   // On the phone's panel the whole list is upside down, so the thumb that opened it from
   // the dock finds Inbox at the bottom, on the pill's line, and the rarer folders further
-  // up: Spam, Trash, Drafts, then Archive and Sent, then Inbox. The desktop sidebar reads top-down as before.
+  // up: the desktop order mirrored, Spam at the top down to Snoozed, then Inbox. The desktop sidebar reads top-down as before.
   const reversed = touch;
 
   const inbox = (

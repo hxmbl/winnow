@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAILBOX_ORDER } from "./mailboxNav";
 import { BACK_TO_TOP_LABEL, BACK_TO_TOP_SCREENS, backToTopVisible, DOCK_TABS, EXPAND_LABEL, badgeText, PANEL_ORDER, panelOrder, tabAction, tabLabel } from "./phoneDock";
 
 describe("the phone dock", () => {
@@ -29,16 +30,18 @@ describe("the phone dock", () => {
     expect(badgeText(120)).toBe("99+");
   });
 
-  it("lists the panel's folders rarest first, Archive then Sent nearest the thumb", () => {
+  it("lists the panel's folders as the desktop sidebar upside down, Snoozed nearest the thumb", () => {
     const folders = [{ id: "archive" }, { id: "sent" }, { id: "drafts" }, { id: "trash" }, { id: "spam" }] as const;
-    expect(panelOrder(folders).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
-    expect([...PANEL_ORDER]).toEqual(["spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent"]);
+    expect(panelOrder(folders).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "sent", "archive"]);
+    expect([...PANEL_ORDER]).toEqual(["spam", "trash", "drafts", "scheduled", "sent", "archive", "snoozed"]);
+    // Exactly the desktop sidebar upside down, Inbox aside.
+    expect([...PANEL_ORDER]).toEqual([...MAILBOX_ORDER].reverse().filter((id) => id !== "inbox"));
     // Whatever order the caller hands in, the named folders land in the panel's order.
     const shuffled = [{ id: "sent" }, { id: "spam" }, { id: "archive" }, { id: "trash" }, { id: "drafts" }] as const;
-    expect(panelOrder(shuffled).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "archive", "sent"]);
-    // The two 1.4.0 views sit among them: Scheduled by Drafts, Snoozed above Archive.
+    expect(panelOrder(shuffled).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "sent", "archive"]);
+    // The two 1.4.0 views sit where the desktop has them, mirrored.
     const all = [{ id: "snoozed" }, { id: "archive" }, { id: "sent" }, { id: "drafts" }, { id: "scheduled" }, { id: "trash" }, { id: "spam" }] as const;
-    expect(panelOrder(all).map((f) => f.id)).toEqual(["spam", "trash", "scheduled", "drafts", "snoozed", "archive", "sent"]);
+    expect(panelOrder(all).map((f) => f.id)).toEqual(["spam", "trash", "drafts", "scheduled", "sent", "archive", "snoozed"]);
     // A copy: the caller's order is left alone.
     expect(folders[0].id).toBe("archive");
   });
