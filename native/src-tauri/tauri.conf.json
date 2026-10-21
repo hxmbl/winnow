@@ -11,7 +11,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDAyMTIzNjk4MTE4OUVERjgKUldUNDdZa1JtRFlTQW9vaHRmNkZDT3p4ZVA0NzB5cTVFWEpHQkpLMFdaZzVlai9obTBLeVZrbDcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE1ODk5MUVGMUE0QTYyMTkKUldRWllrb2E3NUdKRlFRelBwMXVIZ2hTcTVxNVdyWmxSQzhEeUxMYWZJdHR5MUR4eHlPU0NaVjMK",
       "endpoints": ["https://github.com/hxmbl/winnow/releases/latest/download/latest.json"]
     },
     "deep-link": {
