@@ -37,10 +37,11 @@ describe("account state storage", () => {
     const storage = memoryBacking();
     storage.setItem(
       keyFor(ACCOUNT_STATE_KEYS.filters, null),
-      JSON.stringify(["urgent", "from:ada@one.example", 7, null]),
+      JSON.stringify(["urgent", "sender:ADA@one.example", 7, null]),
     );
 
-    expect(loadAccountState(storage, null).activeFilters).toEqual(["urgent", "from:ada@one.example"]);
+    // Sender keys are lowercased on the way back out, and junk is dropped.
+    expect(loadAccountState(storage, null).activeFilters).toEqual(["urgent", "sender:ada@one.example"]);
   });
 
   it("reads an account's own namespace, not the device's", () => {
