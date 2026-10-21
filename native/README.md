@@ -13,6 +13,7 @@ browser cannot do. Nothing here decides anything about mail.
 | `files.rs` | A real save dialog, and a path sanitiser |
 | `deep_link.rs` | `winnow://` links, registered with the OS |
 | `tray.rs` | The tray icon, which is also the only way back once the window hides |
+| `updater.rs` | How this copy runs (macOS, AppImage, `.deb`, Android) and installing a newer release |
 | `commands.rs` | The command surface. Thin: validate, delegate, stringify errors |
 
 Everything else — the classifier, the sync engine, the store, every pixel — is in
@@ -208,7 +209,8 @@ It runs `web/scripts/bump-version.mjs` to set the version in all six manifests,
 commits `Release vX.Y.Z` to `master`, tags it, and dispatches CI on the tag. A push
 made with `GITHUB_TOKEN` triggers no workflows, so the dispatch replaces the usual
 tag push. When CI passes it hands off to `release.yml`, which builds the draft. Its
-last job publishes the draft only if all four bundles are attached and the APK is
+last job publishes the draft only if all four bundles are attached (plus the updater
+files and `latest.json` when the signing key is set, see "Updates") and the APK is
 release-signed. Anything missing (Android is allowed to fail) leaves
 the draft for you to finish or publish by hand.
 
@@ -217,6 +219,35 @@ Pushing a `v*` tag by hand works the same way: bump the manifests yourself
 passes the release builds and publishes behind the same guards (all four bundles,
 a release-signed APK), or stays a draft if one is missing. A `-suffix` tag is a
 pre-release; anything else becomes Latest.
+
+## Updates
+
+The web layer finds a newer release (`web/src/core/updates/`, GitHub's
+`releases/latest`) the same way on every host; `updater.rs` installs it the way this
+copy runs:
+
+- **macOS, AppImage** (`$APPIMAGE` set): `tauri-plugin-updater` reads
+  `https://github.com/hxmbl/winnow/releases/latest/download/latest.json`, checks the
+  download against `plugins.updater.pubkey` in `tauri.conf.json`, swaps the app and
+  restarts. The universal macOS tarball serves both `darwin-aarch64` and
+  `darwin-x86_64`.
+- **`.deb`** (binary under `/usr`): never replaced in place, since dpkg owns it.
+  The `.deb` is downloaded to Downloads and opened with the system installer.
+- **Android**: `UpdatePlugin.kt` downloads the APK and opens the package installer
+  (`REQUEST_INSTALL_PACKAGES`, the existing FileProvider). It installs over the
+  running app only when signed with the same release key, so a `-debug` APK is
+  never offered.
+
+**Signing.** `release.yml` signs the updater artifacts with two repository secrets:
+`TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. With them, a tag build also attaches
+`Winnow_<v>_universal.app.tar.gz`, its `.sig`, the AppImage's `.sig` and
+`latest.json` (whose `notes` are the release body), and the publish guard requires
+them. Without them the release builds and publishes as before, with no `latest.json`;
+installed apps then open the release page instead of updating themselves. The public
+key in `tauri.conf.json` must match the private key: replacing the key means every
+installed copy stops accepting updates until it is reinstalled by hand. Generate a
+pair with `npx @tauri-apps/cli signer generate -w winnow.key`.
 
 ## The command surface
 
@@ -236,6 +267,10 @@ save_attachment             a save dialog
 set_unread_badge            dock badge, tray tooltip, window title
 set_background_sync         start, retune or park the ticker
 request_notification_permission
+update_runtime              how this copy runs: macos, appimage, deb, android, manual
+update_install              Tauri's updater: install and restart (macOS, AppImage)
+update_download_deb         download a release .deb and open the system installer
+update_install_apk          download a release APK and open Android's installer
 ```
 
 ## The loopback port

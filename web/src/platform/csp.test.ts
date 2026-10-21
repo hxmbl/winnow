@@ -12,7 +12,7 @@ describe("the web CSP", () => {
     expect(policy).not.toMatch(/script-src[^;]*unsafe-inline/);
   });
 
-  it("connects only to Google's APIs (Drive included) and the DoH resolver", () => {
+  it("connects only to Google's APIs (Drive included), the DoH resolver and GitHub's release API", () => {
     expect(directive("connect-src")).toEqual([
       "'self'",
       "https://gmail.googleapis.com",
@@ -20,13 +20,14 @@ describe("the web CSP", () => {
       "https://people.googleapis.com",
       "https://www.googleapis.com",
       "https://cloudflare-dns.com",
+      "https://api.github.com",
     ]);
   });
 
   it("adds the render proxy's origin, and only a real http(s) one", () => {
     expect(directive("connect-src", { renderProxy: "https://render.example/api/" })).toContain("https://render.example");
-    expect(directive("connect-src", { renderProxy: "javascript:alert(1)" })).toHaveLength(6);
-    expect(directive("connect-src", { renderProxy: "" })).toHaveLength(6);
+    expect(directive("connect-src", { renderProxy: "javascript:alert(1)" })).toHaveLength(7);
+    expect(directive("connect-src", { renderProxy: "" })).toHaveLength(7);
   });
 
   it("keeps images to https, data: and blob: — never plain http", () => {
@@ -37,13 +38,13 @@ describe("the web CSP", () => {
     expect(contentSecurityPolicy()).toBe(
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data: blob: https:; font-src 'self' data:; " +
-        "connect-src 'self' https://gmail.googleapis.com https://oauth2.googleapis.com https://people.googleapis.com https://www.googleapis.com https://cloudflare-dns.com; " +
+        "connect-src 'self' https://gmail.googleapis.com https://oauth2.googleapis.com https://people.googleapis.com https://www.googleapis.com https://cloudflare-dns.com https://api.github.com; " +
         "frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
     );
     expect(contentSecurityPolicy({ renderProxy: "https://render.example:8443/x", header: true })).toBe(
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data: blob: https:; font-src 'self' data:; " +
-        "connect-src 'self' https://gmail.googleapis.com https://oauth2.googleapis.com https://people.googleapis.com https://www.googleapis.com https://cloudflare-dns.com https://render.example:8443; " +
+        "connect-src 'self' https://gmail.googleapis.com https://oauth2.googleapis.com https://people.googleapis.com https://www.googleapis.com https://cloudflare-dns.com https://api.github.com https://render.example:8443; " +
         "frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     );
   });
@@ -57,7 +58,7 @@ describe("the web CSP", () => {
   });
 
   it("covers every API origin the code talks to", () => {
-    const sources = ["../core/gmail/dto.ts", "../core/gmail/people.ts", "../core/gmail/drive.ts", "../core/avatars/bimi.ts"]
+    const sources = ["../core/gmail/dto.ts", "../core/gmail/people.ts", "../core/gmail/drive.ts", "../core/avatars/bimi.ts", "../core/updates/updates.ts"]
       .map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
       .join("\n");
     // Scopes and console links are names and pages, not endpoints the app fetches.

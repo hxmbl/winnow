@@ -39,6 +39,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
       publish: ${{ steps.meta.outputs.publish }}
+      updater: ${{ steps.updater.outputs.updater }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -67,6 +68,23 @@ jobs:
 
           printf 'version=%s\ntag=%s\nprerelease=%s\npublish=%s\n' \
             "$VERSION" "$TAG" "$PRERELEASE" "$PUBLISH" | tee -a "$GITHUB_OUTPUT"
+
+      # Self-update (native/README.md, "Updates"): the macOS app and the AppImage are
+      # signed with TAURI_SIGNING_PRIVATE_KEY so the installed app can verify a download
+      # against the public key in tauri.conf.json. Without the secret (a fork, or before
+      # it has been added) the bundles build as before, without updater artifacts or
+      # latest.json, and installed apps fall back to opening the release page.
+      - name: Check updater signing
+        id: updater
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" = "true" ]; then
+            echo "updater=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=No updater artifacts::TAURI_SIGNING_PRIVATE_KEY is not set, so this release has no latest.json and installed apps cannot update themselves from it."
+            echo "updater=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create draft release
         if: steps.meta.outputs.publish == 'true'
@@ -190,9 +208,25 @@ jobs:
 
       # No Google secret or client id: each user brings their own OAuth client and
       # pastes it into the app at runtime (docs/google-setup.md).
+      # With the signing key, also the updater artifacts: the macOS `.app.tar.gz` and a
+      # `.sig` beside each bundle. The key and its password reach only this step.
       - name: Build bundles
         working-directory: web
-        run: npm run tauri:build -- ${{ matrix.build-args }}
+        env:
+          UPDATER: ${{ needs.prepare.outputs.updater }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [ "$UPDATER" = "true" ]; then
+            echo '{"bundle":{"createUpdaterArtifacts":true}}' > "$RUNNER_TEMP/updater.json"
+            EXTRA=(--config "$RUNNER_TEMP/updater.json")
+          else
+            unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          fi
+          # `${EXTRA[@]+…}`: macOS runs bash 3.2, where an empty array is "unbound" under `set -u`.
+          npm run tauri:build -- ${{ matrix.build-args }} ${EXTRA[@]+"${EXTRA[@]}"}
 
       - name: Check no client secret shipped
         # Google client secrets start GOCSPX-. Nothing should ever put one in a
@@ -204,12 +238,24 @@ jobs:
           fi
 
       - name: Collect bundles
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          mkdir -p "$RUNNER_TEMP/bundles"
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/bundles"
+          mkdir -p "$OUT"
           find native/src-tauri/target -type f -path '*/release/bundle/*' \
-            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' \) \
-            -exec cp {} "$RUNNER_TEMP/bundles/" \;
-          ls -la "$RUNNER_TEMP/bundles"
+            \( -name '*.AppImage' -o -name '*.AppImage.sig' -o -name '*.deb' -o -name '*.dmg' \) \
+            -exec cp {} "$OUT/" \;
+          # The macOS updater tarball is named `Winnow.app.tar.gz` whatever the version;
+          # it is attached under a versioned, universal name (latest.json points at it).
+          # The signature covers the bytes, not the name, so renaming keeps it valid.
+          TARBALL="$(find native/src-tauri/target -type f -path '*/release/bundle/macos/*' -name '*.app.tar.gz' | head -n 1)"
+          if [ -n "$TARBALL" ]; then
+            cp "$TARBALL" "$OUT/Winnow_${VERSION}_universal.app.tar.gz"
+            if [ -f "$TARBALL.sig" ]; then cp "$TARBALL.sig" "$OUT/Winnow_${VERSION}_universal.app.tar.gz.sig"; fi
+          fi
+          ls -la "$OUT"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -467,29 +513,107 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$TAG" "$RUNNER_TEMP"/android/*.apk --clobber --repo "$GITHUB_REPOSITORY"
 
-  # Cut release (or a manual run with publish) takes the draft live, but only when
-  # every bundle is attached and the APK is release-signed. Anything missing leaves
-  # the draft for a look, rather than shipping a release without Android.
-  publish:
-    name: Publish release
-    needs: [prepare, build, android]
-    if: ${{ !cancelled() && needs.prepare.outputs.publish == 'true' && inputs.publish }}
+  # latest.json for the Tauri updater, from the signatures the builds attached and the
+  # release notes (so the updater's `notes` match the Releases page). Only with the
+  # signing key; publishing regenerates it so notes edited on the draft are carried.
+  updater-manifest:
+    name: Updater manifest
+    needs: [prepare, build]
+    if: ${{ !cancelled() && needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.updater == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
-      - name: Check every bundle is attached
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Write and attach latest.json
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
+          SIGS="$RUNNER_TEMP/sigs"
+          mkdir -p "$SIGS"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig' --dir "$SIGS" --clobber
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            node web/scripts/updater-manifest.mjs "$SIGS" "$VERSION" "$TAG" "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/latest.json"
+          gh release upload "$TAG" "$RUNNER_TEMP/latest.json" --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Cut release (or a manual run with publish) takes the draft live, but only when
+  # every bundle is attached and the APK is release-signed. Anything missing leaves
+  # the draft for a look, rather than shipping a release without Android.
+  publish:
+    name: Publish release
+    needs: [prepare, build, android, updater-manifest]
+    if: ${{ !cancelled() && needs.prepare.outputs.publish == 'true' && inputs.publish }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        if: needs.prepare.outputs.updater == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        if: needs.prepare.outputs.updater == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # Notes may have been edited on the draft since the builds: write latest.json again
+      # from the body as it is now, so the updater's notes match what goes live.
+      - name: Refresh latest.json
+        if: needs.prepare.outputs.updater == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          SIGS="$RUNNER_TEMP/sigs"
+          mkdir -p "$SIGS"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig' --dir "$SIGS" --clobber
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            node web/scripts/updater-manifest.mjs "$SIGS" "$VERSION" "$TAG" "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/latest.json"
+          gh release upload "$TAG" "$RUNNER_TEMP/latest.json" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Check every bundle is attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          UPDATER: ${{ needs.prepare.outputs.updater }}
+        run: |
+          set -euo pipefail
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           printf 'Attached:\n%s\n' "$ASSETS"
           MISSING=""
-          for SUFFIX in amd64.AppImage amd64.deb universal.dmg android-universal.apk; do
+          SUFFIXES="amd64.AppImage amd64.deb universal.dmg android-universal.apk"
+          # With the signing key, self-update is part of the release: the signed macOS
+          # tarball, both signatures and latest.json must be there too. Without it the
+          # release publishes as before and the notice in the job summary says why.
+          if [ "$UPDATER" = "true" ]; then
+            SUFFIXES="$SUFFIXES universal.app.tar.gz universal.app.tar.gz.sig amd64.AppImage.sig"
+            printf '%s\n' "$ASSETS" | grep -qxF "latest.json" || MISSING="$MISSING latest.json"
+          fi
+          for SUFFIX in $SUFFIXES; do
             NAME="Winnow_${VERSION}_${SUFFIX}"
             printf '%s\n' "$ASSETS" | grep -qxF "$NAME" || MISSING="$MISSING $NAME"
           done

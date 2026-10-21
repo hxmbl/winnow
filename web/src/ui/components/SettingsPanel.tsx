@@ -49,6 +49,8 @@ import { ACCOUNT_COLORS, MAX_ACCOUNTS, type AccountColor } from "../../core/sess
 import { ACCOUNT_COLOR_LABEL, ACCOUNTS_FULL, ADD_ACCOUNT_HELP, accountColorHex } from "../accounts";
 import { AccountDot } from "./AccountSwitcher";
 import type { ThemeName } from "../theme";
+import type { UpdatesController } from "../useUpdates";
+import { GIT_PULL_COMMAND } from "../../core/updates/updates";
 
 /** Under a remote-picture switch that is on but paused by Remote images = Never. */
 const REMOTE_PAUSED_HINT = "Paused: Remote images is set to Never";
@@ -243,6 +245,8 @@ export type SettingsProps = {
   /** Which Winnow this is, for About: "Winnow 1.0.1", and where it runs. */
   version?: string | null;
   platformLabel?: string | null;
+  /** Update checks (`useUpdates.ts`), for About. Absent in tests that do not need them. */
+  updates?: UpdatesController | null;
   /** The category Settings opens on. Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
   onClose: () => void;
@@ -777,12 +781,70 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
           <Row setting="version" hint={props.platformLabel ?? undefined}>
             <span className="text-meta font-semibold tabular-nums text-ink-body">{props.version ?? "Unknown"}</span>
           </Row>
+          {props.updates && <UpdateSettings updates={props.updates} />}
           <Row setting="licence">
             <span className="text-meta font-semibold text-ink-body">MIT</span>
           </Row>
         </Section>
       );
   }
+}
+
+/**
+ * About › Updates: the automatic-check switch, then what the last check found and the
+ * one thing to do about it (Check now, Update, or the git pull for a web copy).
+ */
+function UpdateSettings({ updates }: { updates: UpdatesController }) {
+  const { offer, status } = updates;
+  const busy = status === "checking" || status === "installing";
+  const line = offer
+    ? `Winnow ${offer.version} is available (you have ${offer.current}).`
+    : status === "checking"
+      ? "Checking…"
+      : status === "current"
+        ? "You're up to date."
+        : null;
+  const button =
+    offer && offer.action.kind !== "git-pull"
+      ? { label: offer.action.kind === "page" ? "Download" : "Update", onClick: updates.install }
+      : { label: "Check now", onClick: updates.checkNow };
+  return (
+    <>
+      <Row setting="updates" hint={line ?? undefined}>
+        <Toggle checked={updates.auto} onChange={updates.setAuto} label="Check for updates automatically" />
+      </Row>
+      <div data-settings-updates={offer ? offer.action.kind : status} className="flex flex-col gap-2 pb-1">
+        {offer?.action.kind === "git-pull" && (
+          <p className="text-meta text-ink-muted">
+            This copy runs from your own deployment. To update it, run{" "}
+            <code className="selectable rounded-ctl bg-surface-sunken px-1 py-0.5 font-mono text-ink-body">{GIT_PULL_COMMAND}</code>{" "}
+            in your clone, then redeploy.
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-update-action=""
+            disabled={busy}
+            onClick={button.onClick}
+            className={`${SECONDARY_BUTTON} disabled:opacity-60`}
+          >
+            {status === "installing" ? "Updating…" : button.label}
+          </button>
+          {offer && (
+            <button type="button" data-update-whats-new="" onClick={updates.openWhatsNew} className={SECONDARY_BUTTON}>
+              What's new
+            </button>
+          )}
+        </div>
+        {updates.message && (
+          <p role="status" data-update-message="" className="selectable text-meta text-ink-muted">
+            {updates.message}
+          </p>
+        )}
+      </div>
+    </>
+  );
 }
 
 function ReadingSettings({ props }: { props: SettingsProps }) {

@@ -46,6 +46,15 @@ describe("what the status pill shows", () => {
     expect(currentNotice([sync(1), flash(1)])?.kind).toBe("flash");
   });
 
+  it("puts an update notice under an undo and over a flash, and lets newer notices cover it", () => {
+    const update: PillNotice = { kind: "update", at: 1, text: "Winnow 1.5.0 is available.", button: "Update" };
+    expect(currentNotice([flash(1), update, sync(1)])?.kind).toBe("update");
+    expect(currentNotice([undo(1), update])?.kind).toBe("undo");
+    expect(currentNotice([update, flash(2)])?.kind).toBe("flash");
+    expect(currentNotice([update, null])?.kind).toBe("update");
+    expect(isAction(update)).toBe(true);
+  });
+
   it("gives each notice its own key, so a repeat of the same words still arrives anew", () => {
     expect(noticeKey(undo(1))).not.toBe(noticeKey(undo(2)));
     expect(noticeKey(undo(1))).not.toBe(noticeKey(flash(1)));
@@ -110,6 +119,15 @@ describe("the words", () => {
     expect(pillAnnouncement(sending(1))).not.toMatch(/\d/);
     expect(pillAnnouncement(flash(1))).toBe("Draft saved.");
     expect(pillAnnouncement(null)).toBe("");
+    expect(
+      pillAnnouncement({ kind: "update", at: 1, text: "Winnow 1.5.0 is available.", button: "Update" }),
+    ).toBe("Winnow 1.5.0 is available. Button: Update.");
+    expect(
+      pillAnnouncement({ kind: "update", at: 1, text: "Winnow 1.5.0 is out. Run git pull to update.", button: null }),
+    ).toBe("Winnow 1.5.0 is out. Run git pull to update.");
+    expect(pillText({ kind: "update", at: 1, text: "Winnow 1.5.0 is available.", button: "Update" }, 0)).toBe(
+      "Winnow 1.5.0 is available.",
+    );
   });
 });
 

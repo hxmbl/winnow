@@ -290,7 +290,13 @@ export const SETTINGS = {
     category: "about",
     label: "Version",
     explanation:
-      "The version of Winnow you are running and where it is running. Winnow does not check for updates by itself; new desktop and Android builds are published on the project's Releases page.",
+      "The version of Winnow you are running and where it is running. New desktop and Android builds are published on the project's Releases page on GitHub.",
+  },
+  updates: {
+    category: "about",
+    label: "Updates",
+    explanation:
+      "Winnow asks GitHub for its latest release when it starts and then every few hours, and tells you once when a newer one is out. The Mac app and the AppImage update themselves and restart; the .deb and Android download the new package for your installer; a self-hosted web copy needs a git pull. The check sends nothing about you or your mail.",
   },
   licence: {
     category: "about",

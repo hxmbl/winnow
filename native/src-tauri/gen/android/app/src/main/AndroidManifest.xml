@@ -3,6 +3,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- navigator.vibrate() for swipe and long-press haptics; a normal permission, granted at install. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!--
+      Self-update (update/UpdatePlugin.kt): hand a downloaded release APK to the package
+      installer. Android still shows its own confirmation, and on 8+ asks the user once
+      to allow "Install unknown apps" for Winnow.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

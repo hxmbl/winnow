@@ -57,6 +57,11 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
+# Self-update (`src/updater.rs`): the macOS app and the AppImage replace themselves
+# from the release's signed `latest.json`. Linux and macOS only; Windows has no build.
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+
 # Android: `keyring` has no Android backend, so secrets go through the keyring
 # project's own Android store instead: values in SharedPreferences, encrypted
 # with an AES-GCM key that lives in the Android Keystore. It finds the app
@@ -74,6 +79,13 @@ tauri-plugin-fs = "2"
 # offers no actions on the desktop. See `src/notify_actions/desktop.rs`.
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 notify-rust = "4.11"
+
+# Downloads a release `.deb` for a package install (`updater.rs`). Both already in the
+# tree through `tauri-plugin-updater`, with the same versions and features (rustls with
+# the ring provider), so this adds no second HTTP client or TLS stack.
+[target.'cfg(target_os = "linux")'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -15,6 +15,7 @@
 //! | Writing attachments to disk | [`files`] |
 //! | Deep links, autostart, window state | plugins, [`deep_link`] |
 //! | Native Google sign-in and the sign-in Custom Tab (Android) | [`google_signin`] |
+//! | Installing a newer release (updater, `.deb`, APK) | [`updater`] |
 //!
 //! On Android the tray, autostart, single-instance and window-state pieces are
 //! compiled out (`#[cfg(desktop)]`); there is no tray and the OS owns the window.
@@ -33,6 +34,7 @@ pub mod scheduler;
 pub mod secrets;
 #[cfg(desktop)]
 pub mod tray;
+pub mod updater;
 
 #[cfg(desktop)]
 use tauri::Emitter;
@@ -81,6 +83,15 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
+    // Self-update for the macOS app and the AppImage (`updater.rs`). Only Rust calls
+    // it, through `update_install`; no capability grants its JS API.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    // Android only: hands a downloaded release APK to the package installer.
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(updater::init());
+
     // Android only: `files.rs` needs it to write to the save picker's content URI.
     // No capability grants its JS API, so the webview cannot reach it directly.
     #[cfg(target_os = "android")]
@@ -109,6 +120,10 @@ pub fn run() {
             commands::set_unread_badge,
             commands::set_background_sync,
             commands::request_notification_permission,
+            commands::update_runtime,
+            commands::update_install,
+            commands::update_download_deb,
+            commands::update_install_apk,
             notify_actions::notify_messages,
             notify_actions::notify_action_result,
             notify_actions::notify_kept_replies,

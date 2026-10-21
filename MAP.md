@@ -44,6 +44,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       avatars/      Contact photos, Gravatar, BIMI logos, the local picture caches.
       data/         The demo mailbox seed.
       offline/      The offline action queue (§5.10).
+      updates/      Update checks: versions, release assets per runtime, release notes, latest.json.
     platform/       The boundary. Two implementations (web.ts, desktop.ts), one interface.
     ui/             React components and the pure helpers beside them.
   scripts/          check-version.mjs, bump-version.mjs, smoke.mjs, sweep.mjs, bundle.mjs — see §11.
