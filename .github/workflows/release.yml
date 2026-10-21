@@ -89,13 +89,14 @@ jobs:
           | --- | --- |
           | Linux | `.AppImage` (any distro) or `.deb` (Debian, Ubuntu) |
           | macOS | `.dmg`, universal (Apple silicon and Intel) |
-          | Windows | `.msi` or `-setup.exe`, when the Windows build succeeded |
           | Android | `_android-universal.apk` (any phone, Android 7+), when the Android build succeeded |
+
+          There is no Windows build. On Windows, run the web app instead: build `web/`
+          and host it yourself (Railway works); see the README.
 
           These builds are **not code-signed**. On macOS, right-click the app and choose
           **Open** the first time, or run `xattr -dr com.apple.quarantine /Applications/Winnow.app`.
-          On Windows, SmartScreen may say it protected your PC: choose **More info**, then
-          **Run anyway**. On Android, Play Protect may warn about an unknown developer:
+          On Android, Play Protect may warn about an unknown developer:
           choose **Install anyway**. An APK named `-debug` is signed with a throwaway key,
           so installing a later one may require uninstalling it first. If you have an
           earlier `-debug` APK installed, uninstall it once before installing a signed
@@ -120,8 +121,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
-    # Windows is best-effort: its failure doesn't stop the other uploads.
-    continue-on-error: ${{ matrix.slug == 'windows' }}
     strategy:
       fail-fast: false
       matrix:
@@ -136,9 +135,6 @@ jobs:
             os: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             build-args: --target universal-apple-darwin
-          - name: Windows
-            slug: windows
-            os: windows-latest
     defaults:
       run:
         shell: bash
@@ -211,8 +207,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/bundles"
           find native/src-tauri/target -type f -path '*/release/bundle/*' \
-            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' \
-               -o -name '*.msi' -o -name '*-setup.exe' \) \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' \) \
             -exec cp {} "$RUNNER_TEMP/bundles/" \;
           ls -la "$RUNNER_TEMP/bundles"
 
@@ -239,7 +234,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
-    # Best-effort, like Windows: its failure doesn't stop the desktop uploads.
+    # Best-effort: its failure doesn't stop the desktop uploads.
     continue-on-error: true
     env:
       # Pinned so a new NDK on the runner image can't change the build under us.
@@ -474,7 +469,7 @@ jobs:
 
   # Cut release (or a manual run with publish) takes the draft live, but only when
   # every bundle is attached and the APK is release-signed. Anything missing leaves
-  # the draft for a look, rather than shipping a release without Windows or Android.
+  # the draft for a look, rather than shipping a release without Android.
   publish:
     name: Publish release
     needs: [prepare, build, android]
@@ -494,7 +489,7 @@ jobs:
           ASSETS="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           printf 'Attached:\n%s\n' "$ASSETS"
           MISSING=""
-          for SUFFIX in amd64.AppImage amd64.deb universal.dmg x64-setup.exe x64_en-US.msi android-universal.apk; do
+          for SUFFIX in amd64.AppImage amd64.deb universal.dmg android-universal.apk; do
             NAME="Winnow_${VERSION}_${SUFFIX}"
             printf '%s\n' "$ASSETS" | grep -qxF "$NAME" || MISSING="$MISSING $NAME"
           done

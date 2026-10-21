@@ -208,13 +208,13 @@ It runs `web/scripts/bump-version.mjs` to set the version in all six manifests,
 commits `Release vX.Y.Z` to `master`, tags it, and dispatches CI on the tag. A push
 made with `GITHUB_TOKEN` triggers no workflows, so the dispatch replaces the usual
 tag push. When CI passes it hands off to `release.yml`, which builds the draft. Its
-last job publishes the draft only if all six bundles are attached and the APK is
-release-signed. Anything missing (Windows and Android are allowed to fail) leaves
+last job publishes the draft only if all four bundles are attached and the APK is
+release-signed. Anything missing (Android is allowed to fail) leaves
 the draft for you to finish or publish by hand.
 
 Pushing a `v*` tag by hand works the same way: bump the manifests yourself
 (`node web/scripts/bump-version.mjs X.Y.Z`, commit), push the tag, and once CI
-passes the release builds and publishes behind the same guards (all six bundles,
+passes the release builds and publishes behind the same guards (all four bundles,
 a release-signed APK), or stays a draft if one is missing. A `-suffix` tag is a
 pre-release; anything else becomes Latest.
 

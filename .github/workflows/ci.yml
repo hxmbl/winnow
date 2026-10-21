@@ -462,7 +462,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Via the environment, not inline: a tag name may contain shell metacharacters.
           REF: ${{ github.ref_name }}
-          # A hand-pushed tag publishes too, behind release.yml's own guards (all six
+          # A hand-pushed tag publishes too, behind release.yml's own guards (all four
           # bundles attached, a signed APK); otherwise it stays a draft. A manual run
           # publishes only when asked (Cut release asks).
           PUBLISH: ${{ (github.event_name == 'push' || inputs.publish) && 'true' || 'false' }}

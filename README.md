@@ -38,7 +38,6 @@ tag's workflow run as artifacts.
 | --- | --- |
 | Linux | `Winnow_<version>_amd64.AppImage` (any distro: `chmod +x`, run it) or `Winnow_<version>_amd64.deb` (`sudo apt install ./Winnow_…deb`) |
 | macOS | `Winnow_<version>_universal.dmg`, Apple silicon and Intel, macOS 10.15+ |
-| Windows | `Winnow_<version>_x64_en-US.msi` or `Winnow_<version>_x64-setup.exe`, when that release has them — the Windows build is best-effort |
 | Android | `Winnow_<version>_android-universal.apk` (or `…-debug.apk`), any phone on Android 7+, when that release has one — the Android build is best-effort |
 
 - **macOS** says Winnow "can't be opened because Apple cannot check it for
@@ -50,8 +49,10 @@ tag's workflow run as artifacts.
   ```sh
   xattr -dr com.apple.quarantine /Applications/Winnow.app
   ```
-- **Windows** SmartScreen says "Windows protected your PC". Click **More info**,
-  then **Run anyway**.
+- **Windows** has no build. Winnow's desktop app is macOS and Linux only; on
+  Windows, run the web app: `cd web && npm install && npm run build`, then serve
+  `web/dist` from any static host (Railway works) and use a **Web application**
+  OAuth client (see Gmail setup).
 - **Linux** doesn't care. The AppImage needs FUSE 2 (`libfuse2`) on some
   distros; the `.deb` doesn't.
 
