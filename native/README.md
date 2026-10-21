@@ -76,6 +76,25 @@ The `.app` needs nothing beyond a Rust toolchain. The script checks for
 the `.dmg` then dies inside a vendored bash script with no mention of what to
 install.
 
+### The macOS icon
+
+macOS gets its own icon, not the bare planes the other platforms use: macOS 26
+(Tahoe) puts any icon that isn't its rounded square into a grey tile.
+
+- `icons/Winnow.icon` is an Icon Composer bundle (the planes floating on light
+  Liquid Glass, with Dark and Tinted sets; Clear is derived by the system). The
+  bundler compiles it into `Contents/Resources/Assets.car` and sets
+  `CFBundleIconName`, which needs tauri-cli 2.11+ (tauri-bundler 2.9) and Xcode 26's
+  `actool`. Without Xcode 26 the build still works: the bundler logs an error,
+  skips the `Assets.car`, and the app uses `icon.icns`.
+- `icons/icon.icns` is the fallback for older macOS: an opaque tile on Apple's
+  1024 grid (824 px rounded square), so it isn't boxed there either.
+
+Both come from `source-icon.svg` through `icons/make-glass-icon.py` (`pip install
+shapely cairosvg pillow`). `cargo tauri icon` regenerates everything else, but it
+would overwrite `icon.icns` with the bare planes: rerun the script after it. The
+release workflow fails the macOS build if the `.app` lacks the `Assets.car`.
+
 ### Apple Silicon
 
 The bundle built here is whatever the host toolchain targets — x86_64 on an Intel
