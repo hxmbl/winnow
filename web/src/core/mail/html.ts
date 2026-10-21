@@ -30,6 +30,9 @@ const NAMED_ENTITIES: Record<string, string> = {
   "#39": "'",
   apos: "'",
   nbsp: "\u00a0",
+  shy: "\u00ad",
+  zwnj: "\u200c",
+  zwj: "\u200d",
   mdash: "—",
   ndash: "–",
   hellip: "…",
@@ -63,7 +66,7 @@ export function decodeEntities(input: string): string {
 /** A readable plain-text rendering of an HTML mail body. */
 export function plainTextFromHtml(html: string): string {
   if (!html) return "";
-  return decodeEntities(
+  const text = decodeEntities(
     html
       .replace(DROPPED_BLOCKS, "")
       .replace(BLOCK_ENDS, "\n")
@@ -72,6 +75,37 @@ export function plainTextFromHtml(html: string): string {
     .replace(EXTRA_BLANK_LINES, "\n\n")
     .replace(/^[ \t]+|[ \t]+$/gm, "")
     .trim();
+  return tidyPlainText(text);
+}
+
+/**
+ * Invisible filler: soft hyphen, combining grapheme joiner, zero-width space, word
+ * joiner, Mongolian vowel separator and BOM. Marketing mail pads its preheader
+ * with rows of these (`͏ ͏ ͏ &shy;`) so the inbox preview shows only the line the sender
+ * chose; in a plain-text reading they are lines of nothing. Zero-width joiners are
+ * kept: they hold emoji sequences and some scripts together.
+ */
+// Alternation, not a class: U+034F is a combining mark, which a class would misread.
+const FILLER = /\u00ad|\u034f|\u180e|\u200b|\u2060|\ufeff/g;
+/** The same, still entity-encoded, as senders' text parts often leave it. */
+const FILLER_ENTITIES = /&(?:shy|#173|#xad|#847|#x34f|#8203|#x200b|#8288|#x2060|#65279|#xfeff);/gi;
+
+/**
+ * Plain text without preheader padding.
+ *
+ * Only filler is touched: the entities removed are the invisible ones, so a literal
+ * `&amp;` someone typed survives. A line left holding nothing but spaces becomes
+ * empty, and runs of empty lines collapse to one blank line.
+ */
+export function tidyPlainText(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(FILLER_ENTITIES, "")
+    .replace(FILLER, "")
+    .replace(/^[ \t\u00a0\u2000-\u200a\u202f\u3000]+$/gm, "")
+    .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n")
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "");
 }
 
 /**
