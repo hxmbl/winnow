@@ -181,6 +181,8 @@ export type SettingsProps = {
   /** Which buttons a notification offers, and the lock-screen privacy switch. */
   notificationActions: NotificationActions;
   notificationHidePreview: boolean;
+  unreadBadge: boolean;
+  onUnreadBadge: (value: boolean) => void;
   onNotificationSettings: (patch: { notificationActions?: NotificationActions; notificationHidePreview?: boolean }) => void;
   /** Null on the web, where there is no background thread to hand. */
   backgroundSync: boolean | null;
@@ -716,6 +718,9 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               </Row>
             </>
           )}
+          <Row setting="unreadBadge">
+            <Toggle checked={props.unreadBadge} onChange={props.onUnreadBadge} label="Unread count on the app icon" />
+          </Row>
           {props.isDesktop && props.backgroundSync !== null ? (
             <>
               <Row setting="backgroundSync">
