@@ -281,12 +281,15 @@ async function accountsPageChecks(page, { label, openSwitcher, registry: read })
       (await page.locator(`[data-accounts-row="${activeId}"]`).getAttribute("aria-current")) === "true",
   );
   const layout = await page.locator("[data-accounts-layout]").getAttribute("data-accounts-layout");
-  const box = await page.locator('[role="dialog"][aria-label="Accounts"]').boundingBox();
+  // Layout boxes rather than the painted one, which the entrance motion scales for 160ms.
+  const box = await page
+    .locator('[role="dialog"][aria-label="Accounts"]')
+    .evaluate((el) => ({ x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight }));
   const viewport = page.viewportSize();
   check(
     t(label === "phone" ? "a full-screen sheet with 44px+ rows" : "a centred panel"),
     label === "phone"
-      ? layout === "phone" && box && box.width >= viewport.width - 1 && ((await page.locator("[data-accounts-row]").first().boundingBox())?.height ?? 0) >= 44
+      ? layout === "phone" && box && box.width >= viewport.width - 1 && (await page.locator("[data-accounts-row]").first().evaluate((el) => el.offsetHeight)) >= 44
       : layout === "desktop" && box && box.width <= 520 && Math.abs(box.x + box.width / 2 - viewport.width / 2) < 2,
     JSON.stringify(box),
   );
