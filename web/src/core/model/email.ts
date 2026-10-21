@@ -35,6 +35,9 @@ export function isViewMailbox(mailbox: Mailbox): boolean {
   return mailbox === "snoozed" || mailbox === "scheduled";
 }
 
+/** Every list navigation can open: the mailboxes and the two views. */
+export const ALL_MAILBOXES: readonly Mailbox[] = [...MAILBOXES, ...VIEW_MAILBOXES];
+
 export const MAILBOX_LABEL: Record<Mailbox, string> = {
   inbox: "Inbox",
   archive: "Archive",
@@ -395,4 +398,14 @@ export function monogram(email: Email): string {
 
 export function isMailbox(value: unknown): value is Mailbox {
   return typeof value === "string" && (MAILBOXES as readonly string[]).includes(value);
+}
+
+/**
+ * True for anything `Mailbox` names, including the two views.
+ *
+ * `isMailbox` deliberately answers for the places a message can be; this is the wider
+ * question a restored navigation state asks, where "snoozed" is as valid as "inbox".
+ */
+export function isMailboxOrView(value: unknown): value is Mailbox {
+  return typeof value === "string" && (ALL_MAILBOXES as readonly string[]).includes(value);
 }

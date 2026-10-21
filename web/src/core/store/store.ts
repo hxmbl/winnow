@@ -22,6 +22,7 @@ import { summarizeAttention, type AttentionSummary } from "../classify/attention
 import {
   MAILBOX_LABEL,
   isBodyLoaded,
+  isMailboxOrView,
   withLoadedBody,
   withCode,
   type Draft,
@@ -135,9 +136,6 @@ import {
   type ScheduledSend,
 } from "../mail/scheduledSend";
 import { formatWhen } from "../mail/when";
-
-/** The mailboxes, in the order the sidebar shows them; Snoozed and Scheduled are views (1.4.0). */
-export const MAILBOX_ORDER: readonly Mailbox[] = ["inbox", "snoozed", "archive", "sent", "scheduled", "drafts", "trash", "spam"];
 
 /**
  * Which half of a sync is running, for the status line.
@@ -1640,9 +1638,7 @@ export class WinnowStore {
 
     this.state = {
       ...this.state,
-      mailbox: MAILBOX_ORDER.includes(saved.mailbox as Mailbox)
-        ? (saved.mailbox as Mailbox)
-        : this.state.mailbox,
+      mailbox: isMailboxOrView(saved.mailbox) ? saved.mailbox : this.state.mailbox,
       activeFilters: filters,
       preferences: { ...this.state.preferences, ...(saved.preferences ?? {}) },
       learning: saved.learning
@@ -3996,7 +3992,7 @@ export class WinnowStore {
       cursorIndex: NO_CURSOR,
       activeFilters: filters,
       searchQuery: "",
-      mailbox: MAILBOX_ORDER.includes(saved.mailbox as Mailbox) ? (saved.mailbox as Mailbox) : "inbox",
+      mailbox: isMailboxOrView(saved.mailbox) ? saved.mailbox : "inbox",
       overlay: "none",
       syncing: false,
       undo: null,

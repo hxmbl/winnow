@@ -1,15 +1,44 @@
 /**
- * Reading preferences back from storage.
+ * Reading preferences back from storage, and writing them safely.
  *
  * Lives in `core` rather than in `main.tsx`, so the rules about what survives a
- * restart — which keys, which values, which migrations — are unit-tested instead of
- * being exercised only by the smoke run.
+ * restart — which keys, which values, which migrations, and how a partial patch is
+ * merged — are unit-tested instead of being exercised only by the smoke run.
  */
 
 import { isAccentPreference, isAppearance, normalizeHexColor } from "../model/appearance";
 import { reviveUndoSendSeconds } from "../mail/undoSend";
 import { DEFAULT_NOTIFICATION_ACTIONS } from "../notify/notifications";
+import type { KeyValueStorage } from "../session/accounts";
 import type { Preferences } from "./store";
+import { readJson, writeJson } from "./storage";
+
+/** The one shared preferences slot (1.3.5's spelling, still current). */
+export const PREFERENCES_KEY = "winnow.preferences.v1";
+
+/**
+ * The preferences stored on this device, or `null` on a first run.
+ *
+ * A blob the current build understands nothing in reads as `{}` rather than as a
+ * failure: every default still applies, and the next write replaces it.
+ */
+export function loadPreferences(storage: KeyValueStorage | null): Partial<Preferences> | null {
+  const raw = readJson(storage, PREFERENCES_KEY);
+  return raw === null ? null : revivePreferences(raw);
+}
+
+/**
+ * Merge a persist patch into the stored preferences.
+ *
+ * The patch is a *partial* — `{ blockedSenders: [...] }` from a block action — so
+ * writing it verbatim would replace the whole blob with that one field, silently
+ * reverting appearance and sort order on the next launch. Reading first and spreading
+ * is what makes a partial patch mean "change this, keep the rest".
+ */
+export function persistPreferences(storage: KeyValueStorage | null, patch: Partial<Preferences>): void {
+  const current = loadPreferences(storage) ?? {};
+  writeJson(storage, PREFERENCES_KEY, { ...current, ...patch });
+}
 
 /** Preferences, keeping only the keys and values the current build knows about. */
 export function revivePreferences(raw: unknown): Partial<Preferences> | null {

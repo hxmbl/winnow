@@ -22,17 +22,15 @@ import { App } from "./App";
 import { WinnowStore } from "./core/store/store";
 import { DEMO_CONTACTS, DEMO_TRASH, demoMailbox } from "./core/data/demo";
 import { desktopPlatformExtras, isTauri, platform } from "./platform";
-import { filterKey, parseFilterKey } from "./core/model/signals";
-import { MAILBOX_ORDER } from "./core/store/store";
-import { revivePreferences } from "./core/store/preferences";
+import { loadPreferences, persistPreferences } from "./core/store/preferences";
 import { dropRetiredKeys } from "./core/store/retiredKeys";
-import type { Preferences, StoreOptions } from "./core/store/store";
+import type { AccountState, Preferences, StoreOptions } from "./core/store/store";
 import { applyTheme, resolveScheme } from "./ui/theme";
 import { DEFAULT_ACCENT_THEME, DEFAULT_APPEARANCE } from "./core/model/appearance";
-import type { LearningSnapshot } from "./core/learn/learning";
-import type { Email, Mailbox } from "./core/model/email";
+import type { Email } from "./core/model/email";
 import { accountRouter, announce, routeNotificationAction, saveKeptReplies, wireNotifications } from "./ui/notificationActions";
-import { persistAccountState } from "./core/store/accountState";
+import { loadAccountState, persistAccountState } from "./core/store/accountState";
+import { deviceStorage } from "./core/store/storage";
 import { parseDeepLink } from "./core/notify/notifications";
 import { watchPhysicalKeyboard } from "./ui/physicalKeyboard";
 import "./index.css";
@@ -45,90 +43,23 @@ const container = document.getElementById("root");
 if (!container) throw new Error("no #root element to mount into");
 
 /**
- * Persistence keys.
+ * What the last session persisted, in the shape `store.restoreState` takes.
  *
- * One object so the write path and the read path cannot drift. Versioned per key,
- * because these are independent blobs and only some of them gain fields.
- */
-const STORAGE_KEYS = {
-  preferences: "winnow.preferences.v1",
-  learning: "winnow.learning.v1",
-  // What "Change smart filters…" learned. This device only: never synced or backed up
-  // (Android backup is off for all app data), and replaced on sign-out.
-  filterLearning: "winnow.filterLearning.v1",
-  filters: "winnow.activeFilters.v1",
-  mailbox: "winnow.mailbox.v1",
-} as const;
-
-/**
- * Read one key, or `null` for anything unusable.
- *
- * Each read is individually guarded rather than wrapping the whole restore in one
- * `try`: a corrupt *learning* snapshot is no reason to also lose the user's appearance,
- * sort order, and blocked-sender list. Storage being unavailable — private mode, a full
- * quota — lands here too.
- */
-function read<T>(key: string, revive: (raw: unknown) => T | null): T | null {
-  try {
-    const raw = globalThis.localStorage?.getItem(key);
-    if (!raw) return null;
-    return revive(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
-function write(key: string, value: unknown): void {
-  try {
-    globalThis.localStorage?.setItem(key, JSON.stringify(value));
-  } catch {
-    // A full quota or a private-mode browser throws here. The app keeps working from
-    // memory; only the *next* launch loses the settings.
-  }
-}
-
-/** The mailbox the user last looked at, if it is one of the four. */
-function reviveMailbox(raw: unknown): Mailbox | null {
-  return typeof raw === "string" && (MAILBOX_ORDER as readonly string[]).includes(raw)
-    ? (raw as Mailbox)
-    : null;
-}
-
-/**
- * What the last session persisted, or `null` for a first run.
- *
- * Four independent reads, each guarded on its own — see `read`. Passed to
- * `store.restoreState` whole rather than applied key by key, so the store derives once
- * against a fully-restored world.
+ * The preferences are the person's and shared by every account; the rest is the
+ * device's own copy of what the demo, or a session with nobody signed in, learned
+ * (`core/store/accountState.ts`, id `null`). Reading through those two codecs rather
+ * than re-spelling their keys here is what keeps a restore and a write from drifting.
  */
 function loadPersisted(): PersistedState {
+  const storage = deviceStorage();
   return {
-    preferences: read(STORAGE_KEYS.preferences, revivePreferences) ?? undefined,
-    // Round-tripped through the store's own `filterKey` rather than a second spelling
-    // written here: the mapping between the persisted string and the in-memory `FilterId`
-    // lives in exactly one place in `core`.
-    activeFilters: read(STORAGE_KEYS.filters, (raw) =>
-      Array.isArray(raw)
-        ? raw
-            .map((key) => (typeof key === "string" ? parseFilterKey(key) : null))
-            .filter((filter): filter is NonNullable<typeof filter> => filter !== null)
-            .map(filterKey)
-        : null,
-    ) ?? [],
-    mailbox: read(STORAGE_KEYS.mailbox, reviveMailbox),
-    learning: read(STORAGE_KEYS.learning, (raw) => raw as LearningSnapshot),
-    filterLearning: read(STORAGE_KEYS.filterLearning, (raw) => raw),
+    preferences: loadPreferences(storage) ?? undefined,
+    ...loadAccountState(storage, null),
   };
 }
 
 /** What the last session persisted, as `store.restoreState` wants it. */
-type PersistedState = {
-  preferences?: Partial<Preferences>;
-  activeFilters: string[];
-  mailbox: Mailbox | null;
-  learning: LearningSnapshot | null;
-  filterLearning: unknown;
-};
+type PersistedState = AccountState & { preferences?: Partial<Preferences> };
 
 /**
  * The store, seeded with the demo mailbox and restored from the last session.
@@ -189,19 +120,11 @@ store.restoreState(persisted);
  * preferences patch is merged into what is stored.
  */
 function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): void {
-  if (patch.preferences) {
-    const current = read(STORAGE_KEYS.preferences, revivePreferences) ?? {};
-    write(STORAGE_KEYS.preferences, { ...current, ...patch.preferences });
-  }
+  const storage = deviceStorage();
+  if (patch.preferences) persistPreferences(storage, patch.preferences);
   // 1.4.0: the learning, the active filters and the mailbox are the open account's,
   // written under its namespace (`core/store/accountState.ts`); the demo's are the
   // device's own, under the unscoped keys.
-  let storage: Storage | null = null;
-  try {
-    storage = globalThis.localStorage ?? null;
-  } catch {
-    storage = null;
-  }
   persistAccountState(storage, store.currentAccountId(), patch);
 }
 

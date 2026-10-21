@@ -8,7 +8,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { revivePreferences } from "./preferences";
+import { loadPreferences, PREFERENCES_KEY, persistPreferences, revivePreferences } from "./preferences";
+import { memoryBacking } from "./keyedStorage";
 import { DEFAULT_PREFERENCES, WinnowStore, type Preferences } from "./store";
 import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 import { ACCENT_THEMES, APPEARANCES, DEFAULT_ACCENT_CUSTOM, isAccentPreference, isAccentTheme, isAppearance } from "../model/appearance";
@@ -177,5 +178,48 @@ describe("the Drive links preference", () => {
   it("survives a restart as a boolean and is dropped otherwise", () => {
     expect(revivePreferences({ driveLinks: false })?.driveLinks).toBe(false);
     expect(revivePreferences({ driveLinks: "no" })?.driveLinks).toBeUndefined();
+  });
+});
+
+describe("preferences storage", () => {
+  it("merges a partial patch into the whole stored blob", () => {
+    const storage = memoryBacking();
+    persistPreferences(storage, { appearance: "oled", accent: "ember", blockedSenders: ["ada@one.example"] });
+    persistPreferences(storage, { blockedSenders: ["ada@one.example", "bob@two.example"] });
+
+    // The second patch named one field; the first patch's appearance and accent are
+    // still there, which is the whole point of merging rather than writing verbatim.
+    expect(loadPreferences(storage)).toMatchObject({
+      appearance: "oled",
+      accent: "ember",
+      blockedSenders: ["ada@one.example", "bob@two.example"],
+    });
+  });
+
+  it("reads a first run and a corrupt blob as nothing", () => {
+    const storage = memoryBacking();
+    expect(loadPreferences(storage)).toBeNull();
+
+    storage.setItem(PREFERENCES_KEY, "{not json");
+    expect(loadPreferences(storage)).toBeNull();
+
+    // Valid JSON the build knows nothing in: every default applies, nothing is invented.
+    storage.setItem(PREFERENCES_KEY, JSON.stringify({ appearance: "sepia" }));
+    expect(loadPreferences(storage)).toEqual({});
+  });
+
+  it("does not throw when storage refuses to be read or written", () => {
+    const refused = {
+      getItem: () => {
+        throw new Error("storage disabled");
+      },
+      setItem: () => {
+        throw new Error("quota exceeded");
+      },
+      removeItem: () => {},
+    };
+
+    expect(loadPreferences(refused)).toBeNull();
+    expect(() => persistPreferences(refused, { appearance: "dark" })).not.toThrow();
   });
 });
