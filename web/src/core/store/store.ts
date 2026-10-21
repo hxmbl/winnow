@@ -154,6 +154,12 @@ export const NO_CURSOR = -1;
  * offer is neither taken nor let go sooner.
  */
 export const DRAFT_DISCARD_UNDO_MS = 10_000;
+/**
+ * How long an Undo offer (delete, archive, move, discard…) stays on the pill before it
+ * goes by itself, taking its commit with it. Six seconds, not five: Hxmbl's call (1.4.x).
+ * An offer with a shorter commit window of its own settles at that instead.
+ */
+export const UNDO_OFFER_MS = 6_000;
 
 /** How long the pill says a snooze woke. */
 export const WAKE_FLASH_MS = 6_000;
@@ -3143,13 +3149,14 @@ export class WinnowStore {
     this.settleUndo();
     this.undoAction = action;
     this.undoCommit = commit ?? null;
-    if (commit && commitAfterMs !== undefined) {
-      this.undoCommitTimer = setTimeout(() => {
-        if (this.undoAction !== action) return;
-        this.settleUndo();
-        this.set({ undo: null });
-      }, commitAfterMs);
-    }
+    // Every offer goes by itself after `UNDO_OFFER_MS` (sooner when its commit window
+    // is shorter); before, an offer with no commit stayed on the pill until dismissed.
+    const expiresAfterMs = commit && commitAfterMs !== undefined ? Math.min(commitAfterMs, UNDO_OFFER_MS) : UNDO_OFFER_MS;
+    this.undoCommitTimer = setTimeout(() => {
+      if (this.undoAction !== action) return;
+      this.settleUndo();
+      this.set({ undo: null });
+    }, expiresAfterMs);
     this.set({ undo: { label, at: Date.now() } });
   }
 
