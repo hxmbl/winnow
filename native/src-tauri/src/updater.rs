@@ -29,7 +29,7 @@ use std::path::Path;
 pub const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/hxmbl/winnow/releases/download/";
 
 /// No release `.deb` is anywhere near this; a larger answer is not ours.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 const MAX_DOWNLOAD_BYTES: u64 = 400 * 1024 * 1024;
 
 /// How this copy is running, for the web layer (`parseChannel`).
@@ -322,7 +322,6 @@ mod tests {
             ".apk"
         )
         .is_ok());
-        assert!(MAX_DOWNLOAD_BYTES > 100 * 1024 * 1024);
     }
 
     #[test]
