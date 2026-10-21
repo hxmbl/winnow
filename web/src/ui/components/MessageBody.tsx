@@ -20,6 +20,7 @@
  * reference is still counted and stated.
  */
 
+import { tidyPlainText } from "../../core/mail/html";
 import { useEffect, useId, useLayoutEffect, useMemo, useState, useRef, type RefObject } from "react";
 import { Moon, Server, Sun } from "lucide-react";
 import {
@@ -103,7 +104,7 @@ function useSanitised(
 function PlainText({ email }: { email: Email }) {
   return (
     <div className="selectable max-w-[68ch] whitespace-pre-wrap text-read text-ink-body">
-      {email.body}
+      {tidyPlainText(email.body)}
     </div>
   );
 }

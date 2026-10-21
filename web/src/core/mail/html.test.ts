@@ -11,7 +11,9 @@ import {
   parseAddressHeader,
   parseAddressList,
   remoteReferences,
+  plainTextFromHtml,
   sanitizeDisplayName,
+  tidyPlainText,
 } from "./html";
 
 describe("parseAddressHeader", () => {
@@ -274,5 +276,23 @@ describe("remote references inside a <style> block", () => {
     // Escaped HTML in the text is text, not a stylesheet.
     const html = "<pre>&lt;style&gt;a{background:url(https://x.example/a.png)}&lt;/style&gt;</pre>";
     expect(countRemoteReferences(html)).toBe(0);
+  });
+});
+
+describe("tidyPlainText", () => {
+  it("drops preheader padding, encoded or not", () => {
+    const pad = "\u034f \u034f \u034f &shy; \u034f \u034f &shy;";
+    const text = `Restaurants everyone is loving\nTake a look at these trending restaurants\n\n${pad}\n${pad}\n${pad}\n\nSee all`;
+    expect(tidyPlainText(text)).toBe(
+      "Restaurants everyone is loving\nTake a look at these trending restaurants\n\nSee all",
+    );
+  });
+  it("keeps real text, typed entities and emoji sequences", () => {
+    expect(tidyPlainText("AT&amp;T &lt;3")).toBe("AT&amp;T &lt;3");
+    expect(tidyPlainText("family 👨\u200d👩\u200d👧 here")).toBe("family 👨\u200d👩\u200d👧 here");
+    expect(tidyPlainText("co\u00adop")).toBe("coop");
+  });
+  it("is applied to text made from HTML", () => {
+    expect(plainTextFromHtml("<p>Hi</p><div>&#847; &nbsp;&shy; &#847;</div><p>Bye</p>")).toBe("Hi\n\nBye");
   });
 });
