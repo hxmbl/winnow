@@ -5165,6 +5165,11 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           phone={phone}
           onSwitch={(id) => void switchAccount(id)}
           onAdd={() => void addAccount()}
+          onOpenDemo={() => {
+            setAccountsOpen(false);
+            parkComposer();
+            enterDemo();
+          }}
           onManage={() => {
             setAccountsOpen(false);
             store.setOverlay("settings");
