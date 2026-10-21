@@ -25,11 +25,23 @@ import { fileURLToPath } from "node:url";
 const ROWS = "[data-row-count] [data-row-id]";
 const HOUR = 3_600_000;
 
+/**
+ * A leap that always clears the "Tomorrow" preset (9:00 tomorrow, `core/mail/when.ts`).
+ *
+ * From just after midnight, 9:00 tomorrow is up to 33 hours away, so the old 26-hour
+ * leap only cleared it when the suite started at 07:00 or later and the waking checks
+ * failed on every run in the small hours. 34 hours clears it from any start time.
+ */
+const PAST_TOMORROW_MORNING = 34 * HOUR;
+
 async function desktopPage(browser, URL, errors, { clock = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const p = await ctx.newPage();
   p.on("pageerror", (error) => errors.push(String(error)));
-  if (clock) await p.clock.install();
+  // `WINNOW_SMOKE_CLOCK_AT=2026-10-22T00:30:00` starts the fake clock at that local time
+  // instead of now, to check the waking blocks at any hour without waiting for it.
+  const at = process.env.WINNOW_SMOKE_CLOCK_AT;
+  if (clock) await p.clock.install(at ? { time: new Date(at) } : undefined);
   await p.goto(URL, { waitUntil: "networkidle" });
   await p.waitForSelector(ROWS, { timeout: 15_000 });
   await p.waitForTimeout(400);
@@ -169,7 +181,7 @@ export async function smokeSchedule({ browser, URL, check, section, errors }) {
     await p.locator('[data-menu-item="snooze-tomorrow"]').click();
     await p.waitForTimeout(400);
     check("snoozed until tomorrow", !(await has(p, target.id)));
-    await p.clock.fastForward(26 * HOUR);
+    await p.clock.fastForward(PAST_TOMORROW_MORNING);
     await p.evaluate(() => window.dispatchEvent(new Event("focus")));
     await p.waitForTimeout(800);
     const top = (await rows(p))[0];
@@ -281,7 +293,7 @@ export async function smokeSchedule({ browser, URL, check, section, errors }) {
     await goMailbox(p, "inbox");
     await compose("On the dot");
     await later("later-tomorrow");
-    await p.clock.fastForward(26 * HOUR);
+    await p.clock.fastForward(PAST_TOMORROW_MORNING);
     await p.evaluate(() => window.dispatchEvent(new Event("focus")));
     await p.waitForTimeout(1000);
     await goMailbox(p, "scheduled");
