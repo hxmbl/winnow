@@ -342,6 +342,8 @@ export type Preferences = {
   notificationActions: NotificationActions;
   /** Lock screen: "New message" instead of the sender and subject. */
   notificationHidePreview: boolean;
+  /** The unread count on the app icon (dock badge, tray tooltip, tab title). Off shows none. */
+  unreadBadge: boolean;
   /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
   appearance: Appearance;
   /** The accent theme, applied across every mode: a curated one, or `custom`. */
@@ -386,6 +388,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   notificationsEnabled: false,
   notificationActions: DEFAULT_NOTIFICATION_ACTIONS,
   notificationHidePreview: false,
+  unreadBadge: true,
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
   accentCustom: DEFAULT_ACCENT_CUSTOM,
@@ -2514,8 +2517,9 @@ export class WinnowStore {
     return { saved, failed };
   }
 
-  /** The OS badge: the mailbox's unread count, less mail from muted senders. */
+  /** The OS badge: the mailbox's unread count, less mail from muted senders; 0 when turned off. */
   badgeCount(): number {
+    if (!this.state.preferences.unreadBadge) return 0;
     const muted = this.state.preferences.mutedSenders;
     if (muted.length === 0) return this.view.unreadCount;
     const keys = new Set(muted.map((s) => s.toLowerCase()));

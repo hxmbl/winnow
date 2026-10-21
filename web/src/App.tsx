@@ -4591,6 +4591,11 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     s.closeReader({ dropCursor: phoneRef.current });
                   }
                 }),
+                onUnsubscribe: selected?.unsubscribe
+                  ? () => {
+                      if (selected) openUnsubscribe(selected, (text) => store.setNotice(text));
+                    }
+                  : undefined,
                 onChangeFilters:
                   selected?.mailbox === "inbox"
                     ? () => {
@@ -4742,6 +4747,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           }}
           notificationActions={preferences.notificationActions}
           notificationHidePreview={preferences.notificationHidePreview}
+          unreadBadge={preferences.unreadBadge}
+          onUnreadBadge={(value) => store.setPreferences({ unreadBadge: value })}
           onNotificationSettings={(patch) => store.setPreferences(patch)}
           backgroundSync={info?.backgroundSync ?? null}
           onBackgroundSync={(backgroundSync) => store.setPreferences({ backgroundSync })}
@@ -4975,21 +4982,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                     });
                     void platform.openExternal("https://contacts.google.com/new");
                   },
-                  unsubscribe: () => {
-                    const unsubscribe = email.unsubscribe;
-                    if (!unsubscribe) return;
-                    if (unsubscribe.url) {
-                      void platform.openExternal(unsubscribe.url);
-                      notice(`Opened ${name}'s unsubscribe page in your browser.`);
-                    } else if (unsubscribe.mailto) {
-                      const address = mailtoAddress(unsubscribe.mailto);
-                      void copyText(address).then((copied) => {
-                        notice(
-                          `${name} unsubscribes by email: send a message to ${address}${copied ? " (copied)" : ""}.`,
-                        );
-                      });
-                    }
-                  },
+                  unsubscribe: () => openUnsubscribe(email, notice),
                   copyAddress: () => {
                     void copyText(email.sender).then((copied) => {
                       notice(copied ? `Copied ${email.sender}.` : `Couldn't copy ${email.sender}.`);
@@ -5194,6 +5187,11 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           phone={phone}
           onSwitch={(id) => void switchAccount(id)}
           onAdd={() => void addAccount()}
+          onOpenDemo={() => {
+            setAccountsOpen(false);
+            parkComposer();
+            enterDemo();
+          }}
           onManage={() => {
             setAccountsOpen(false);
             store.setOverlay("settings");
@@ -5278,4 +5276,24 @@ function selectRegion(scope: Element | null): void {
   const range = document.createRange();
   range.selectNodeContents(scope);
   selection.addRange(range);
+}
+
+/**
+ * Unsubscribe the way the sender's List-Unsubscribe header asks: its web page in the
+ * system browser, or, for an email-only list, the address to write to (copied). Shared
+ * by the sender menu and the reader's ••• menu.
+ */
+function openUnsubscribe(email: Email, notice: (text: string) => void): void {
+  const unsubscribe = email.unsubscribe;
+  if (!unsubscribe) return;
+  const name = displayName(email);
+  if (unsubscribe.url) {
+    void platform.openExternal(unsubscribe.url);
+    notice(`Opened ${name}'s unsubscribe page in your browser.`);
+  } else if (unsubscribe.mailto) {
+    const address = mailtoAddress(unsubscribe.mailto);
+    void copyText(address).then((copied) => {
+      notice(`${name} unsubscribes by email: send a message to ${address}${copied ? " (copied)" : ""}.`);
+    });
+  }
 }

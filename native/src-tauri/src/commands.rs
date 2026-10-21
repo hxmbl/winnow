@@ -447,8 +447,10 @@ pub fn set_unread_badge(app: AppHandle, count: i64) -> Result<()> {
 
     #[cfg(target_os = "macos")]
     if let Some(window) = app.get_webview_window("main") {
+        // Zero clears the badge. `Some(0)` draws a red "0" on the dock, an alert with
+        // nothing behind it.
         window
-            .set_badge_count(Some(count))
+            .set_badge_count(if count > 0 { Some(count) } else { None })
             .map_err(|e| format!("could not set the dock badge: {e}"))?;
     }
 

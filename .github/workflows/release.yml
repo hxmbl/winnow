@@ -216,6 +216,10 @@ jobs:
           UPDATER: ${{ needs.prepare.outputs.updater }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Tauri skips the .dmg window layout (background, icon positions) whenever
+          # CI=true. GitHub's macOS runners have a real Finder session, so let it run.
+          TAURI_BUNDLER_DMG_IGNORE_CI: ${{ runner.os == 'macOS' && 'true' || 'false' }}
+        timeout-minutes: 45
         run: |
           set -euo pipefail
           EXTRA=()

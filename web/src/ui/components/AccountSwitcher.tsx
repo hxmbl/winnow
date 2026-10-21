@@ -8,7 +8,7 @@
  */
 
 import { useRef } from "react";
-import { Check, Plus, Settings } from "lucide-react";
+import { Check, FlaskConical, Plus, Settings } from "lucide-react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { Avatar } from "./Avatar";
 import type { AccountSummary } from "../../core/store/store";
@@ -27,6 +27,11 @@ export type AccountSwitcherProps = {
   phone: boolean;
   onSwitch: (id: string) => void;
   onAdd: () => void;
+  /**
+   * Look around the demo mailbox while signed in. The session stays on the device, so
+   * the demo's "Back to your inbox" returns without a new sign-in. Absent in the demo.
+   */
+  onOpenDemo?: () => void;
   onManage: () => void;
   onClose: () => void;
 };
@@ -117,6 +122,18 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
             <p role="alert" className="selectable px-2.5 pb-1 text-meta text-danger">
               {props.error}
             </p>
+          )}
+          {!demo && props.onOpenDemo && (
+            <button
+              type="button"
+              data-account-demo=""
+              disabled={props.busy}
+              onClick={props.onOpenDemo}
+              className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              <FlaskConical size={17} aria-hidden="true" className="ml-1.5 mr-1.5 shrink-0" />
+              Open demo inbox
+            </button>
           )}
           <button
             type="button"

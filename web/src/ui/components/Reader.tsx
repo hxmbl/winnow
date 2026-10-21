@@ -22,6 +22,7 @@ import {
   Forward,
   ImageOff,
   Mail,
+  MailMinus,
   MailOpen,
   MoreHorizontal,
   ReplyAll,
@@ -103,6 +104,8 @@ type Actions = {
   onSnooze?: (trigger: HTMLElement) => void;
   onShowOriginal: () => void;
   onBlockSender: () => void;
+  /** Unsubscribe as the List-Unsubscribe header says. Absent when the mail has none. */
+  onUnsubscribe?: () => void;
   /** Open "Change smart filters…" for this message. Absent outside the inbox. */
   onChangeFilters?: () => void;
   /** Turn image loading on for this message only. */
@@ -275,6 +278,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
           hasHtml={hasHtml}
           senderName={senderName}
           onBlockSender={actions.onBlockSender}
+          onUnsubscribe={actions.onUnsubscribe}
           onChangeFilters={actions.onChangeFilters}
           buttonClass="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         />
@@ -291,12 +295,13 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
  * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
  * hands focus back to its button so the keyboard is not stranded.
  */
-function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onChangeFilters, buttonClass, phone, buttonContent }: {
+function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUnsubscribe, onChangeFilters, buttonClass, phone, buttonContent }: {
   view: BodyView;
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
   senderName: string;
   onBlockSender: () => void;
+  onUnsubscribe?: () => void;
   onChangeFilters?: () => void;
   buttonClass: string;
   /**
@@ -421,6 +426,12 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onCh
             <button type="button" role="menuitem" data-reader-change-filters="" onClick={() => choose(onChangeFilters)} className={ITEM}>
               <ListFilter size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
               <span className="flex-1">Change smart filters…</span>
+            </button>
+          )}
+          {onUnsubscribe && (
+            <button type="button" role="menuitem" data-reader-unsubscribe="" onClick={() => choose(onUnsubscribe)} className={ITEM}>
+              <MailMinus size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <span className="min-w-0 flex-1 truncate">Unsubscribe from {senderName}</span>
             </button>
           )}
           <button
@@ -553,6 +564,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
             hasHtml={hasHtml}
             senderName={senderName}
             onBlockSender={actions.onBlockSender}
+            onUnsubscribe={actions.onUnsubscribe}
             onChangeFilters={actions.onChangeFilters}
             buttonClass={BUTTON}
             phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead, leftHanded }}
