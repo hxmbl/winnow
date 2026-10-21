@@ -182,8 +182,16 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
   useEffect(() => {
     let frame = 0;
     let current: Box | null | undefined;
+    // The target resizing on its own, without a transition (the account row filling in
+    // once the menu has laid out), re-measures it too. Observed as each measure finds it,
+    // since a menu step's target only exists once the menu has opened.
+    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => onChange());
     // True when the box moved.
     const measure = () => {
+      for (const selector of step.targets) {
+        const element = document.querySelector(selector);
+        if (element) resized?.observe(element);
+      }
       const next = findTarget(step);
       if (current !== undefined && sameBox(current, next)) return false;
       current = next;
@@ -213,6 +221,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
     // A slide or resize that ends after the settle window still lands the spotlight.
     document.addEventListener("transitionend", onChange, true);
     return () => {
+      resized?.disconnect();
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("resize", onChange);
       window.removeEventListener("orientationchange", onChange);
