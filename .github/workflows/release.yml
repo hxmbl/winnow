@@ -194,6 +194,25 @@ jobs:
         # bundle.mjs refuses to bundle a .dmg without it.
         run: brew install create-dmg
 
+      - name: Select Xcode 26
+        if: runner.os == 'macOS'
+        # The bundler compiles icons/Winnow.icon (the Liquid Glass icon) into
+        # Assets.car with actool, which must be Xcode 26 or later. With an older
+        # one it logs an error, skips the Assets.car and Tahoe greys the icon.
+        run: |
+          set -euo pipefail
+          ok() { actool --version --output-format=human-readable-text | grep -Eq 'short-bundle-version: (2[6-9]|[3-9][0-9])'; }
+          if ! ok; then
+            XCODE="$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | grep -vi beta | sort -V | tail -n 1 || true)"
+            if [ -z "$XCODE" ]; then
+              echo "::error::No Xcode 26+ on this runner; the Liquid Glass icon needs it."
+              exit 1
+            fi
+            sudo xcode-select -s "$XCODE"
+          fi
+          ok
+          xcode-select -p
+
       - name: Install cargo-binstall
         uses: taiki-e/install-action@v2
         with:
@@ -231,6 +250,24 @@ jobs:
           fi
           # `${EXTRA[@]+…}`: macOS runs bash 3.2, where an empty array is "unbound" under `set -u`.
           npm run tauri:build -- ${{ matrix.build-args }} ${EXTRA[@]+"${EXTRA[@]}"}
+
+      - name: Check the Liquid Glass icon
+        if: runner.os == 'macOS'
+        # Tahoe draws the icon from Assets.car (named by CFBundleIconName); older
+        # macOS falls back to icon.icns (CFBundleIconFile). Both must be there.
+        run: |
+          set -euo pipefail
+          APP="$(find native/src-tauri/target -type d -path '*/release/bundle/macos/*.app' | head -n 1)"
+          RES="$APP/Contents/Resources"
+          ls -la "$RES"
+          NAME="$(plutil -extract CFBundleIconName raw "$APP/Contents/Info.plist" || true)"
+          FILE="$(plutil -extract CFBundleIconFile raw "$APP/Contents/Info.plist" || true)"
+          echo "CFBundleIconName=$NAME CFBundleIconFile=$FILE"
+          if [ ! -s "$RES/Assets.car" ] || [ -z "$NAME" ] || [ ! -s "$RES/$FILE" ]; then
+            echo "::error::The app is missing Assets.car, CFBundleIconName or its .icns fallback."
+            exit 1
+          fi
+          assetutil --info "$RES/Assets.car" | grep -E '"(AssetType|Name|Appearance)"' | sort | uniq -c
 
       - name: Check no client secret shipped
         # Google client secrets start GOCSPX-. Nothing should ever put one in a
