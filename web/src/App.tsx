@@ -107,6 +107,8 @@ import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
 import { WhyHere } from "./ui/components/WhyHere";
 import { changeNotice } from "./ui/smartFilterPicker";
 import { Settings } from "./ui/components/SettingsPanel";
+import { Tour, type TourEnd } from "./ui/components/Tour";
+import { shouldStartTour, tourSteps } from "./ui/tour";
 import { ActionSheet, ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
 import { isSelectAll, selectAllScope } from "./ui/textSelection";
@@ -188,6 +190,11 @@ type OpenMenu = {
 type Props = {
   /** The one piece of global state. Everything else is derived from it. */
   store: WinnowStore;
+  /**
+   * This device had run Winnow before this launch (any `winnow.*` key at boot), so the
+   * first-run tour does not open by itself. Read in `main.tsx` before anything is written.
+   */
+  existingInstall?: boolean;
 };
 
 /**
@@ -347,7 +354,7 @@ function isUntouchedDraft(draft: Draft, initial?: ComposerState["initial"]): boo
   return written === (draft.prefilled ?? "").trim();
 }
 
-export function App({ store }: Props) {
+export function App({ store, existingInstall = true }: Props) {
   const snapshot = useStore(store);
   const { view, preferences } = snapshot;
   /**
@@ -1152,6 +1159,27 @@ export function App({ store }: Props) {
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), []);
+
+  /**
+   * The first-run tour (1.5, `ui/tour.ts`): open on a true first launch over the demo,
+   * never in a browser driven by automation unless the page opts in, and replayed from
+   * Settings › About. Its steps open and close the sidebar themselves.
+   */
+  const [tourOpen, setTourOpen] = useState(() =>
+    shouldStartTour({
+      tourDone: store.getSnapshot().preferences.tourDone,
+      existingInstall,
+      automated: globalThis.navigator?.webdriver === true,
+      optIn: (globalThis as { __WINNOW_TOUR__?: unknown }).__WINNOW_TOUR__ === true,
+    }),
+  );
+  const endTour = useCallback(
+    (_how: TourEnd) => {
+      setTourOpen(false);
+      store.setPreferences({ tourDone: true });
+    },
+    [store],
+  );
 
   /**
    * The sidebar's destinations. The Inbox
@@ -3733,6 +3761,21 @@ export function App({ store }: Props) {
     />
   ) : null;
 
+  // The tour's steps for this layout, kept stable so its effects follow the step only.
+  const tour = useMemo(() => tourSteps(phone), [phone]);
+  const tourMenu = useCallback((open: boolean) => setSidebarOpen(open), []);
+  /**
+   * Settings › About › "Show the tour again": Settings and anything else over the mail
+   * make way, and a phone's open message closes, so each step's control is on screen.
+   */
+  const replayTour = useCallback(() => {
+    store.setOverlay("none");
+    setAccountsOpen(false);
+    setSelection(EMPTY_SELECTION);
+    if (store.getSnapshot().view.selected) closeReader();
+    setTourOpen(true);
+  }, [store, closeReader]);
+
   if (snapshot.status === "signed_out") {
     return (
       <>
@@ -4794,6 +4837,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           version={info ? `${info.name} ${info.version}` : null}
           platformLabel={info ? platformLabel(info) : null}
           updates={updates}
+          onShowTour={replayTour}
           onClose={() => store.setOverlay("none")}
         />
       )}
@@ -5253,6 +5297,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       onClose={closeSidebar}
       touch={phone}
     />
+    {tourOpen && snapshot.status === "ready" && (
+      <Tour
+        steps={tour}
+        connectLabel={snapshot.account === null ? demoCta : null}
+        onMenu={tourMenu}
+        onConnect={connectOrResume}
+        onEnd={endTour}
+      />
+    )}
     </SenderPicturesContext.Provider>
   );
 }

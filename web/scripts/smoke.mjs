@@ -34,6 +34,7 @@ import { smokeMotion } from "./smoke-motion.mjs";
 import { smokeFixes } from "./smoke-fixes.mjs";
 import { smokeThumb } from "./smoke-thumb.mjs";
 import { smokeSchedule } from "./smoke-schedule.mjs";
+import { smokeTour } from "./smoke-tour.mjs";
 import { PARTS } from "./smoke-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -8519,6 +8520,9 @@ try {
   }
 
   } // part: inbox-clear
+
+  // The first-run tour (1.5): its own contexts, opted in (`smoke-tour.mjs`).
+  if (part("tour")) await smokeTour({ browser, URL, check, section, errors, shots: process.env.WINNOW_SMOKE_SHOTS ?? null });
 
   // ── Console ────────────────────────────────────────────────────────────────
 

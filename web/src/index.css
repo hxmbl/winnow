@@ -1365,3 +1365,44 @@ div[data-row-count] {
   border: none;
   border-radius: 9999px;
 }
+
+/*
+ * The first-run tour (`components/Tour.tsx`, 1.5). The spotlight is a hole made by its
+ * own shadow: one rounded box over the target, its outer shadow dimming everything else,
+ * with an accent ring so the hole reads on the light scheme's pale surfaces too. It
+ * glides between steps and simply jumps under reduced motion.
+ */
+:root {
+  --wn-tour-dim: rgba(16, 16, 20, 0.5);
+}
+:root[data-theme="dark"],
+:root[data-theme="oled"] {
+  --wn-tour-dim: rgba(0, 0, 0, 0.62);
+}
+.wn-tour-spotlight {
+  box-shadow:
+    0 0 0 2px var(--wn-accent),
+    0 0 0 200vmax var(--wn-tour-dim);
+  transition:
+    top 220ms ease,
+    left 220ms ease,
+    width 220ms ease,
+    height 220ms ease;
+}
+.wn-tour-card {
+  animation: wn-tour-in 180ms ease-out;
+}
+@keyframes wn-tour-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wn-tour-spotlight {
+    transition: none;
+  }
+  .wn-tour-card {
+    animation: none;
+  }
+}
