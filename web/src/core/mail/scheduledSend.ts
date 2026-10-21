@@ -23,6 +23,7 @@ import type { Draft, Email, GmailId, Millis } from "../model/email";
 import { hashId } from "../model/ids";
 import { forDeviceCopy } from "./attachments";
 import type { DraftMode } from "./drafts";
+import { mergeRecords } from "../store/mergeRecords";
 
 /** How long a claim on a due send holds off another window of the app from sending it too. */
 export const CLAIM_MS = 2 * 60 * 1000;
@@ -105,6 +106,46 @@ export function serializeSchedules(sends: readonly ScheduledSend[]): { sends: Sc
       return { ...send, draft: attachments ? { ...rest, attachments } : rest };
     }),
   };
+}
+
+/**
+ * This window's sends merged with what storage holds now, which another window of the app
+ * may have written since `base` was read (STRM-290; `mergeRecords` has the rules). A send
+ * is compared as stored (`serializeSchedules`), so a big attachment kept only in memory
+ * does not count as a change.
+ */
+export function mergeSchedules(
+  base: readonly ScheduledSend[],
+  mine: readonly ScheduledSend[],
+  theirs: readonly ScheduledSend[],
+): ScheduledSend[] {
+  return mergeRecords(base, mine, theirs, {
+    keyOf: (send) => send.id,
+    fingerprint: (send) => JSON.stringify(serializeSchedules([send]).sends[0]),
+  }).sort((a, b) => a.sendAt - b.sendAt);
+}
+
+/**
+ * Whose Gmail draft a scheduled send's is, as Edit and Cancel schedule must know
+ * (STRM-289): `open` when it goes from the account that is open; `other` (with that
+ * account's id and address) when its From was another signed-in account, whose Drafts
+ * hold it; `gone` when that account is no longer signed in here, so its draft cannot be
+ * reached (it is then reopened as a new draft in the open account, never by writing over
+ * an id that belongs to another mailbox).
+ */
+export type ScheduleDraftOwner =
+  | { kind: "open" }
+  | { kind: "other"; id: string; email: string }
+  | { kind: "gone"; id: string };
+
+export function scheduleDraftOwner(
+  send: Pick<ScheduledSend, "from">,
+  open: { openId: string | null; accounts: readonly { id: string; email: string }[] },
+): ScheduleDraftOwner {
+  if (send.from === undefined || send.from === open.openId) return { kind: "open" };
+  const record = open.accounts.find((account) => account.id === send.from);
+  if (!record || !record.email.trim()) return { kind: "gone", id: send.from };
+  return { kind: "other", id: record.id, email: record.email };
 }
 
 /**

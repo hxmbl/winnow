@@ -382,3 +382,110 @@ describe("scheduled sends", () => {
     expect(full.scheduledSends().map((r) => r.id)).toContain("b");
   });
 });
+
+describe("two windows of the app (STRM-290)", () => {
+  const send = (id: string, sendAt: number, extra: Partial<ScheduledSend> = {}): ScheduledSend => ({
+    id,
+    account: "demo",
+    sendAt,
+    scheduledAt: T,
+    mode: "new",
+    context: `c-${id}`,
+    draftId: `d-${id}`,
+    draft: { to: ["ana@example.com"], cc: [], bcc: [], subject: `Later ${id}`, body: "Hello" },
+    ...extra,
+  });
+  const stored = (backing: ReturnType<typeof memoryBacking>) =>
+    (JSON.parse(backing.getItem("winnow.scheduledSend.v1")!).sends as ScheduledSend[]).map((r) => r.id).sort();
+  const storedSnoozes = (backing: ReturnType<typeof memoryBacking>) =>
+    (JSON.parse(backing.getItem("winnow.snooze.v1")!).snoozed as { key: string }[]).map((r) => r.key).sort();
+
+  it("keeps both windows' scheduled sends when each saves from its own list", () => {
+    const backing = memoryBacking();
+    const a = demo(backing);
+    const b = demo(backing);
+    a.store.scheduleSend(send("from-a", T + HOUR));
+    // b's list is stale (it never saw from-a); its save must not drop it.
+    b.store.scheduleSend(send("from-b", T + 2 * HOUR));
+    expect(stored(backing)).toEqual(["from-a", "from-b"]);
+    expect(b.store.getSnapshot().scheduled.map((s) => s.id)).toEqual(["from-a", "from-b"]);
+    // And a's next save keeps b's.
+    a.store.updateScheduled("from-a", { sendAt: T + 3 * HOUR });
+    expect(stored(backing)).toEqual(["from-a", "from-b"]);
+  });
+
+  it("keeps both windows' snoozes", () => {
+    const backing = memoryBacking();
+    const a = demo(backing);
+    const b = demo(backing);
+    a.store.snooze([3], T + HOUR, { undo: false });
+    b.store.snooze([4], T + HOUR, { undo: false });
+    expect(storedSnoozes(backing)).toEqual(["g-3", "g-4"]);
+    a.store.syncDeviceRecords();
+    expect(a.store.isSnoozed("g-4")).toBe(true);
+  });
+
+  it("does not bring back what the other window cancelled or sent", () => {
+    const backing = memoryBacking();
+    const a = demo(backing);
+    a.store.scheduleSend(send("one", T + HOUR));
+    a.store.scheduleSend(send("two", T + HOUR));
+    const b = demo(backing);
+    a.store.cancelSchedule("one");
+    // b still lists "one"; saving something else must not write it back.
+    b.store.updateScheduled("two", { sendAt: T + 2 * HOUR });
+    expect(stored(backing)).toEqual(["two"]);
+    expect(b.store.getSnapshot().scheduled.map((s) => s.id)).toEqual(["two"]);
+  });
+
+  it("will not claim a send the other window already sent", () => {
+    const backing = memoryBacking();
+    const a = demo(backing);
+    a.store.scheduleSend(send("one", T));
+    const b = demo(backing);
+    // a sent it and ended the schedule.
+    expect(a.store.claimScheduled("one", T)).toBe(true);
+    a.store.cancelSchedule("one");
+    expect(b.store.claimScheduled("one", T + 10 * 60_000)).toBe(false);
+    expect(b.store.getSnapshot().scheduled).toEqual([]);
+  });
+
+  it("takes in the other window's changes on sync, keeping its own unsaved ones", () => {
+    const backing = memoryBacking();
+    const a = demo(backing);
+    const b = demo(backing);
+    a.store.scheduleSend(send("from-a", T + HOUR));
+    a.store.snooze([3], T + HOUR, { undo: false });
+    expect(b.store.getSnapshot().scheduled).toEqual([]);
+    b.store.syncDeviceRecords();
+    expect(b.store.getSnapshot().scheduled.map((s) => s.id)).toEqual(["from-a"]);
+    expect(b.store.isSnoozed("g-3")).toBe(true);
+    a.store.cancelSchedule("from-a");
+    b.store.syncDeviceRecords();
+    expect(b.store.getSnapshot().scheduled).toEqual([]);
+  });
+
+  it("still saves when storage holds nothing yet, and keeps a send storage refused", () => {
+    let refuse = false;
+    const inner = memoryBacking();
+    const backing = {
+      getItem: (key: string) => inner.getItem(key),
+      setItem: (key: string, value: string) => {
+        if (refuse) throw new Error("quota");
+        inner.setItem(key, value);
+      },
+      removeItem: (key: string) => inner.removeItem(key),
+    };
+    const store = new WinnowStore({ seed: seed(), storage: () => backing, now: T });
+    expect(store.scheduleSend(send("kept", T + HOUR))).toBe(true);
+    refuse = true;
+    expect(store.scheduleSend(send("memory-only", T + 2 * HOUR))).toBe(false);
+    refuse = false;
+    store.scheduleSend(send("later", T + 3 * HOUR));
+    expect(JSON.parse(inner.getItem("winnow.scheduledSend.v1")!).sends.map((r: ScheduledSend) => r.id)).toEqual([
+      "kept",
+      "memory-only",
+      "later",
+    ]);
+  });
+});

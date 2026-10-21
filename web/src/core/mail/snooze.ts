@@ -22,6 +22,7 @@
  */
 
 import type { Email, GmailId, Mailbox, Millis } from "../model/email";
+import { mergeRecords } from "../store/mergeRecords";
 
 /** The Gmail label snoozed mail carries while it is away. */
 export const SNOOZED_LABEL = "Winnow/Snoozed";
@@ -86,6 +87,20 @@ export function parseSnoozes(raw: unknown): SnoozeState {
   const woke = (Array.isArray(value.woke) ? value.woke : []).filter((entry): entry is WokeRecord => {
     const r = entry as Partial<WokeRecord>;
     return !!r && isString(r.gmailId) && isString(r.account) && isNumber(r.wokeAt);
+  });
+  return { snoozed, woke };
+}
+
+/**
+ * This window's snoozes merged with what storage holds now, which another window of the
+ * app may have written since `base` was read (STRM-290; `mergeRecords` has the rules).
+ */
+export function mergeSnoozes(base: SnoozeState, mine: SnoozeState, theirs: SnoozeState): SnoozeState {
+  const snoozed = mergeRecords(base.snoozed, mine.snoozed, theirs.snoozed, {
+    keyOf: (record) => `${record.account}\n${record.key}`,
+  }).sort((a, b) => a.wakeAt - b.wakeAt);
+  const woke = mergeRecords(base.woke, mine.woke, theirs.woke, {
+    keyOf: (record) => `${record.account}\n${record.gmailId}`,
   });
   return { snoozed, woke };
 }

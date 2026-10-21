@@ -13,6 +13,8 @@
  *      at its time (fake clock) and late on the next open (said in the pill).
  *   5. On a phone: the reader pill's Snooze, and the compose top bar's Send later.
  *   6. Settings → Compose says the same limitation.
+ *   7. Two windows of the app (one browser context, so one localStorage): each snoozes a
+ *      different conversation, and neither save drops the other's (STRM-290).
  *
  * Own module, so it runs alone too: `WINNOW_SMOKE_ONLY=schedule npm run smoke`, or
  * `node scripts/smoke-schedule.mjs` against a built `dist/` (port 4351 by default).
@@ -373,6 +375,40 @@ export async function smokeSchedule({ browser, URL, check, section, errors }) {
     await p.waitForTimeout(300);
     const text = (await dialog.textContent()) ?? "";
     check("whose help says Winnow has to be open, and that a late one is said", /has to be open/.test(text) && /went late/.test(text));
+    await ctx.close();
+  }
+
+  // ── 7. Two windows ───────────────────────────────────────────────────────
+  section("two windows: neither overwrites the other's snoozes (STRM-290)");
+  {
+    const { ctx, p: a } = await desktopPage(browser, URL, errors);
+    const b = await ctx.newPage();
+    b.on("pageerror", (error) => errors.push(String(error)));
+    await b.goto(URL, { waitUntil: "networkidle" });
+    await b.waitForSelector(ROWS, { timeout: 15_000 });
+    await b.waitForTimeout(400);
+    const snoozeRow = async (p, id) => {
+      await p.locator(`${ROWS}[data-row-id="${id}"] button[data-message-id]`).click({ button: "right" });
+      await p.locator('[data-menu="row"] [data-menu-item="snooze"]').click();
+      await p.locator('[data-menu-item="snooze-nextWeek"]').click();
+      await p.waitForTimeout(500);
+    };
+    const inA = await loneRow(a);
+    await snoozeRow(a, inA.id);
+    const inB = await loneRow(b, [inA.id]);
+    await snoozeRow(b, inB.id);
+    const keys = await a.evaluate(() => {
+      const raw = localStorage.getItem("winnow.snooze.v1");
+      return raw ? JSON.parse(raw).snoozed.flatMap((record) => record.gmailIds) : [];
+    });
+    check("storage keeps both windows' snoozes", keys.length === 2, JSON.stringify(keys));
+    await goMailbox(a, "snoozed");
+    const listed = (await rows(a)).map((row) => row.id);
+    check(
+      "the first window lists the other window's snooze too",
+      listed.includes(inA.id) && listed.includes(inB.id),
+      JSON.stringify({ listed, inA: inA.id, inB: inB.id }),
+    );
     await ctx.close();
   }
 }
