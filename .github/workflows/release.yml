@@ -192,6 +192,11 @@ jobs:
       # pastes it into the app at runtime (docs/google-setup.md).
       - name: Build bundles
         working-directory: web
+        env:
+          # Tauri skips the .dmg window layout (background, icon positions) whenever
+          # CI=true. GitHub's macOS runners have a real Finder session, so let it run.
+          TAURI_BUNDLER_DMG_IGNORE_CI: ${{ runner.os == 'macOS' && 'true' || 'false' }}
+        timeout-minutes: 45
         run: npm run tauri:build -- ${{ matrix.build-args }}
 
       - name: Check no client secret shipped
