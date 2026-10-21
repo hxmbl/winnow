@@ -107,7 +107,7 @@ import { SmartFilterPicker } from "./ui/components/SmartFilterPicker";
 import { WhyHere } from "./ui/components/WhyHere";
 import { changeNotice } from "./ui/smartFilterPicker";
 import { Settings } from "./ui/components/SettingsPanel";
-import { Tour, type TourEnd } from "./ui/components/Tour";
+import { Tour } from "./ui/components/Tour";
 import { shouldStartTour, tourSteps } from "./ui/tour";
 import { ActionSheet, ConfirmDialog } from "./ui/components/Overlay";
 import { ErrorText } from "./ui/components/ErrorText";
@@ -1173,13 +1173,11 @@ export function App({ store, existingInstall = true }: Props) {
       optIn: (globalThis as { __WINNOW_TOUR__?: unknown }).__WINNOW_TOUR__ === true,
     }),
   );
-  const endTour = useCallback(
-    (_how: TourEnd) => {
-      setTourOpen(false);
-      store.setPreferences({ tourDone: true });
-    },
-    [store],
-  );
+  // However it ends (skipped, finished, or Connect Gmail), it is not offered again.
+  const endTour = useCallback(() => {
+    setTourOpen(false);
+    store.setPreferences({ tourDone: true });
+  }, [store]);
 
   /**
    * The sidebar's destinations. The Inbox
