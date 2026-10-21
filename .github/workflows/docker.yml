@@ -1,0 +1,257 @@
+name: Docker
+
+# The images on ghcr.io: ghcr.io/hxmbl/winnow (the web app) and
+# ghcr.io/hxmbl/winnow-proxy (the render proxy), for linux/amd64 and linux/arm64.
+#
+# - A published release pushes `vX.Y.Z`, plus `X.Y` and `latest` when it is not a
+#   pre-release. release.yml starts this with the tag once it has published (a release
+#   published with GITHUB_TOKEN fires no `release` event); one published by hand in
+#   the UI starts it through `release`.
+# - A pull request that touches the Docker files builds both images and runs them,
+#   pushing nothing.
+#
+# Containers update themselves on start from the release's bundles
+# (docker/fetch-release.sh), so a new image matters for a fresh install or for
+# WINNOW_AUTO_UPDATE=false; the releases' bundles are what a restart picks up.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and push (v1.5.0)'
+        required: true
+        type: string
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'Dockerfile'
+      - 'proxy/Dockerfile'
+      - '.dockerignore'
+      - 'docker/**'
+      - 'docker-compose*.yml'
+      - '.github/workflows/docker.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.event.pull_request.number || inputs.tag || github.event.release.tag_name || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  meta:
+    name: Resolve the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      ref: ${{ steps.tag.outputs.ref }}
+      push: ${{ steps.tag.outputs.push }}
+      stable: ${{ steps.tag.outputs.stable }}
+    steps:
+      - name: Resolve
+        id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          # Via the environment: a tag name may contain shell metacharacters.
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG=""
+          case "$EVENT" in
+            release) TAG="$RELEASE_TAG" ;;
+            workflow_dispatch) TAG="$INPUT_TAG" ;;
+          esac
+          if [ -z "$TAG" ]; then
+            # A pull request: build its head, push nothing.
+            printf 'tag=\nref=\npush=false\nstable=false\n' | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! printf '%s\n' "$TAG" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'; then
+            echo "::error::$TAG is not a release tag like v1.5.0"
+            exit 1
+          fi
+          STABLE=true
+          case "$TAG" in *-*) STABLE=false ;; esac
+          printf 'tag=%s\nref=refs/tags/%s\npush=true\nstable=%s\n' "$TAG" "$TAG" "$STABLE" | tee -a "$GITHUB_OUTPUT"
+
+  # Both images built for the runner's architecture and run the way docker-compose
+  # runs them (read-only root, no capabilities, an unprivileged user): the page, the
+  # runtime config, a deep link, the cache headers, the proxy behind the app, and both
+  # health checks.
+  smoke:
+    name: Smoke test (amd64)
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: winnow:smoke
+          cache-from: type=gha,scope=winnow
+          cache-to: type=gha,scope=winnow,mode=max
+
+      - name: Build the proxy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: proxy/Dockerfile
+          load: true
+          tags: winnow-proxy:smoke
+          cache-from: type=gha,scope=winnow-proxy
+          cache-to: type=gha,scope=winnow-proxy,mode=max
+
+      - name: Run and check
+        run: |
+          set -euo pipefail
+          HARDEN="--read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --health-interval 3s"
+          docker network create winnow-smoke
+          # The baked copy only: deterministic, no GitHub.
+          docker run -d --name web-baked -p 8081:8080 $HARDEN -e WINNOW_AUTO_UPDATE=false winnow:smoke
+          # As docker-compose.proxy.yml runs them, auto-update on: asks GitHub on start
+          # and falls back to the baked copy when the release has no bundle yet.
+          docker run -d --name proxy --network winnow-smoke $HARDEN winnow-proxy:smoke
+          docker run -d --name web --network winnow-smoke -p 8080:8080 $HARDEN \
+            -e WINNOW_PROXY_UPSTREAM=http://proxy:8787 winnow:smoke
+
+          fail() { echo "::error::$*"; for c in web-baked web proxy; do echo "── $c"; docker logs "$c" 2>&1 | tail -n 40; done; exit 1; }
+          healthy() {
+            for _ in $(seq 1 60); do
+              [ "$(docker inspect -f '{{.State.Health.Status}}' "$1")" = healthy ] && return 0
+              sleep 2
+            done
+            fail "$1 never became healthy"
+          }
+          healthy web-baked; healthy proxy; healthy web
+          echo "healthy: web-baked, proxy, web"
+
+          header() { grep -i "^$2:" "$1" | tr -d '\r'; }
+
+          # index.html: the app, the CSP header, never cached.
+          curl -fsS -D h.txt http://localhost:8081/ -o index.html
+          grep -q '<div id="root"></div>' index.html || fail "index.html is not the app"
+          grep -q '<script src="/config.js"></script>' index.html || fail "index.html does not load config.js"
+          header h.txt content-security-policy | grep -q "script-src 'self';" || fail "no CSP header"
+          header h.txt content-security-policy | grep -q "frame-ancestors 'none'" || fail "CSP header cannot forbid framing"
+          header h.txt cache-control | grep -q no-cache || fail "index.html is cacheable"
+          echo "index.html ok"
+
+          # config.js: written on start, never cached.
+          curl -fsS -D c.txt http://localhost:8081/config.js -o config.js
+          cat config.js
+          grep -q '"distribution": "docker", "updates": "image"' config.js || fail "config.js is wrong for WINNOW_AUTO_UPDATE=false"
+          header c.txt cache-control | grep -q no-store || fail "config.js is cacheable"
+
+          # A deep link is the SPA.
+          curl -fsS http://localhost:8081/some/deep/link -o deep.html
+          cmp -s index.html deep.html || fail "a deep link did not get index.html"
+          # …and the files it asks for relative to itself are the real ones.
+          curl -fsS http://localhost:8081/some/deep/config.js | grep -q '__WINNOW_CONFIG__' || fail "a deep link's config.js is not config.js"
+          curl -fsS -D d.txt "http://localhost:8081/some/deep/$(grep -o 'assets/index-[^"]*\.js' index.html | head -n 1)" -o /dev/null
+          header d.txt content-type | grep -q javascript || fail "a deep link's script is not JavaScript"
+          echo "deep link ok"
+
+          # A hashed asset is immutable; a missing one is a 404, not index.html.
+          ASSET="$(grep -o 'assets/index-[^"]*\.js' index.html | head -n 1)"
+          curl -fsS -D a.txt "http://localhost:8081/$ASSET" -o /dev/null
+          header a.txt cache-control | grep -q immutable || fail "$ASSET is not immutable"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/assets/missing.js)" = 404 ] || fail "a missing asset was not a 404"
+          echo "cache headers ok"
+
+          # With the proxy: config says self, renders go through the app's own origin.
+          curl -fsS http://localhost:8080/config.js | tee config-proxy.js
+          grep -q '"renderProxy": "self"' config-proxy.js || fail "config.js does not name the proxy"
+          grep -q '"updates": "auto"' config-proxy.js || fail "config.js should say auto-update"
+          curl -fsS -X POST http://localhost:8080/render -H 'Origin: http://localhost:8080' \
+            -H 'Content-Type: application/json' -d '{"html":"<p>hello</p>"}' -o render.html
+          grep -q '<html' render.html || fail "/render did not return a document"
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/render \
+            -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -d '{"html":"<p>x</p>"}')"
+          [ "$CODE" = 403 ] || fail "a cross-origin render was answered $CODE, not 403"
+          echo "render proxy ok"
+
+          docker exec proxy curl -fsS http://127.0.0.1:8787/health
+          echo
+          [ "$(docker exec web id -u)" = 101 ] || fail "web runs as $(docker exec web id -u)"
+          [ "$(docker exec proxy id -u)" = 1000 ] || fail "proxy runs as $(docker exec proxy id -u)"
+          echo "non-root ok"
+
+          echo "── start-up logs"
+          docker logs web 2>&1 | grep -E 'winnow' || true
+          docker logs proxy 2>&1 | grep -E 'winnow' || true
+
+  publish:
+    name: Build ${{ matrix.image }} (amd64, arm64)
+    needs: [meta, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: winnow
+            file: Dockerfile
+          - image: winnow-proxy
+            file: proxy/Dockerfile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+          persist-credentials: false
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: needs.meta.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: tags
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern=v{{version}},value=${{ needs.meta.outputs.tag }},enable=${{ needs.meta.outputs.tag != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.meta.outputs.tag }},enable=${{ needs.meta.outputs.tag != '' }}
+            type=raw,value=latest,enable=${{ needs.meta.outputs.stable == 'true' }}
+            type=ref,event=pr
+
+      - name: Build${{ needs.meta.outputs.push == 'true' && ' and push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.meta.outputs.push == 'true' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.tags.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max

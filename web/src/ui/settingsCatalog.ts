@@ -302,7 +302,7 @@ export const SETTINGS = {
     category: "about",
     label: "Updates",
     explanation:
-      "Winnow asks GitHub for its latest release when it starts and then every few hours, and tells you once when a newer one is out. The Mac app and the AppImage update themselves and restart; the .deb and Android download the new package for your installer; a self-hosted web copy needs a git pull. The check sends nothing about you or your mail.",
+      "Winnow asks GitHub for its latest release when it starts and then every few hours, and tells you once when a newer one is out. The Mac app and the AppImage update themselves and restart; the .deb and Android download the new package for your installer; a self-hosted web copy needs a git pull, and the Docker image updates when its container restarts. The check sends nothing about you or your mail.",
   },
   licence: {
     category: "about",

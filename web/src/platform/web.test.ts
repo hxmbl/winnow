@@ -193,3 +193,21 @@ describe("webPlatform notifications", () => {
     expect(shown.map((entry) => entry.options.icon)).toEqual(["/demo-avatars/ada.svg", undefined, undefined]);
   });
 });
+
+describe("webPlatform.updateRuntime", () => {
+  const scope = globalThis as Record<string, unknown>;
+  afterEach(() => {
+    delete scope.__WINNOW_CONFIG__;
+  });
+
+  it("is the self-hosted web channel without a runtime config", async () => {
+    expect((await webPlatform.updateRuntime!()).channel).toBe("web");
+  });
+
+  it("is the docker channel, with its update mode, when the image's config.js says so", async () => {
+    scope.__WINNOW_CONFIG__ = Object.freeze({ distribution: "docker", updates: "pinned" });
+    const runtime = await webPlatform.updateRuntime!();
+    expect(runtime.channel).toBe("docker");
+    expect(runtime.docker).toBe("pinned");
+  });
+});

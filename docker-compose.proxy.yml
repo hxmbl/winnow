@@ -1,0 +1,39 @@
+# Adds the render proxy to docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d
+#
+# The proxy is not published on the host. The web container forwards /render and
+# /asset/ to it, so it is same-origin with the app: no CORS settings, no CSP change,
+# and the images a proxied message names load from the app's own address.
+# Restarting updates it too (it fetches the newest proxy release on start).
+
+services:
+  winnow:
+    environment:
+      WINNOW_PROXY_UPSTREAM: "http://proxy:8787"
+    depends_on:
+      - proxy
+
+  proxy:
+    image: ghcr.io/hxmbl/winnow-proxy:latest
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    expose:
+      - "8787"
+    environment:
+      WINNOW_AUTO_UPDATE: "true"
+      # WINNOW_VERSION: "v1.5.0"
+    volumes:
+      - winnow-proxy-data:/var/lib/winnow
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  winnow-proxy-data:

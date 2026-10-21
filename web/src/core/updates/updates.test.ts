@@ -11,8 +11,12 @@ import {
   isNewer,
   isReleaseDownload,
   msUntilDue,
+  DOCKER_PULL_COMMAND,
+  DOCKER_RESTART_COMMAND,
+  GIT_PULL_COMMAND,
   offerButton,
   offerText,
+  operatorUpdate,
   parseChannel,
   parseRelease,
   parseUpdateState,
@@ -184,6 +188,32 @@ describe("routing by runtime", () => {
     expect(offerButton(offer)).toBeNull();
   });
 
+  it("tells a Docker deployment to restart the container, with no button", () => {
+    const offer = planUpdate(runtime("docker"), release)!;
+    expect(offer.action).toEqual({ kind: "docker", mode: "auto" });
+    expect(offerText(offer)).toBe("Winnow 1.5.0 is out. Restart the container to update.");
+    expect(offerButton(offer)).toBeNull();
+    expect(operatorUpdate(offer)?.command).toBe(DOCKER_RESTART_COMMAND);
+    expect(DOCKER_RESTART_COMMAND).toBe("docker compose restart");
+  });
+
+  it("tells a pinned or non-updating Docker deployment what to change first", () => {
+    const pinned = planUpdate({ ...runtime("docker"), docker: "pinned" }, release)!;
+    expect(pinned.action).toEqual({ kind: "docker", mode: "pinned" });
+    expect(operatorUpdate(pinned)?.before).toMatch(/WINNOW_VERSION to v1\.5\.0/);
+    expect(offerText(pinned)).not.toMatch(/Restart/);
+    const image = planUpdate({ ...runtime("docker"), docker: "image" }, release)!;
+    expect(operatorUpdate(image)?.command).toBe(DOCKER_PULL_COMMAND);
+    expect(offerButton(image)).toBeNull();
+  });
+
+  it("gives the operator's command only where there is no button", () => {
+    expect(operatorUpdate(planUpdate(runtime("web"), release)!)?.command).toBe(GIT_PULL_COMMAND);
+    for (const channel of ["macos", "appimage", "deb", "android", "manual"] as const) {
+      expect(operatorUpdate(planUpdate(runtime(channel), release)!)).toBeNull();
+    }
+  });
+
   it("falls back to the release page when the file is missing or the build is unknown", () => {
     const noDeb: Release = { ...release, assets: release.assets.filter((asset) => !asset.name.endsWith(".deb")) };
     expect(planUpdate(runtime("deb"), noDeb)?.action).toEqual({ kind: "page" });
@@ -192,7 +222,7 @@ describe("routing by runtime", () => {
   });
 
   it("offers nothing when the release is not newer", () => {
-    for (const channel of ["macos", "appimage", "deb", "android", "web", "manual"] as const) {
+    for (const channel of ["macos", "appimage", "deb", "android", "web", "docker", "manual"] as const) {
       expect(planUpdate(runtime(channel, "1.5.0"), release)).toBeNull();
       expect(planUpdate(runtime(channel, "1.6.0"), release)).toBeNull();
     }

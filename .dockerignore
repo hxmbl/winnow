@@ -1,0 +1,15 @@
+# The images need web/ (the app), proxy/ and docker/ (the scripts); nothing else.
+*
+!web
+!proxy
+!docker
+
+# Never in an image: installed or built output, local env files, test artefacts.
+web/node_modules
+web/dist
+web/dist-gmailtest
+web/.sweep
+web/.env*
+web/smoke.png
+**/*.tsbuildinfo
+**/.DS_Store

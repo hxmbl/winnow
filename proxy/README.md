@@ -75,6 +75,19 @@ remote-administration hole dressed as a setting, and a setting is exactly the th
 a message could try to change. The proxy is an operator decision about where a
 deployment assembles mail.
 
+The Docker image keeps that rule while letting one published image serve everyone:
+the operator names the proxy in the container's environment
+(`WINNOW_PROXY_UPSTREAM=http://proxy:8787`, or `WINNOW_RENDER_PROXY` for one
+elsewhere), and the container writes it into a same-origin `/config.js` on start
+(`docker/web/configure.sh`, read by `web/src/platform/runtimeConfig.ts`). Nothing the
+app or a message can do writes that file, and a value that is not a plain http(s) URL
+is refused. With an upstream, nginx in the web container forwards `/render` and
+`/asset/` here, so the proxy is same-origin with the app; it drops an `Origin` that
+names the app's own host before forwarding and passes any other through, so this
+server's allowlist still refuses every other page. The proxy's own container
+(`proxy/Dockerfile`) runs as an unprivileged user and listens on all interfaces only
+inside its network: `docker-compose.proxy.yml` does not publish its port.
+
 ## The security argument, in order of how much it matters
 
 **The address policy.** This is a server that will fetch a URL chosen by whoever sent

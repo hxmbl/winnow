@@ -46,7 +46,8 @@ import { scopeSenderCss, sheetScope } from "../../core/mail/scopedSheet";
 /**
  * Which of the forms a message body is being shown in.
  *
- * `proxied` exists only when `VITE_RENDER_PROXY` named a proxy at build time — the one
+ * `proxied` exists only when the deployment names a proxy (`VITE_RENDER_PROXY`, or the
+ * Docker image's runtime config, `platform/runtimeConfig.ts`) — the one
  * form whose *images* load without the reader answering, because the fetch comes from
  * the server, so a tracking pixel reports the server's address and not the reader's.
  */

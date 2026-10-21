@@ -1,7 +1,7 @@
 /**
  * Automatic updates: the decisions, pure.
  *
- * Winnow runs in five ways, and each one updates differently:
+ * Winnow runs in six ways, and each one updates differently:
  *
  * | Runtime | How it updates |
  * | --- | --- |
@@ -10,6 +10,7 @@
  * | Linux `.deb` | Downloads the new `.deb` and opens it in the system installer (`apt` fallback) |
  * | Android APK | Downloads the new APK and hands it to Android's package installer |
  * | Web (self-hosted) | Nothing to download: says `git pull`, rebuild and redeploy |
+ * | Web (Docker image) | Nothing to download here: the container fetches the newest release each time it starts, so it says to restart it |
  *
  * Every runtime finds out the same way: GitHub's `releases/latest` for the repository,
  * which never returns a draft or a pre-release, compared with the running version. This
@@ -43,10 +44,19 @@ export const RETRY_AFTER_FAILURE_MS = 60 * 60 * 1000;
  * - `deb`: installed by the system package manager; we download, it installs.
  * - `android`: the package installer, with the user's confirmation.
  * - `web`: a self-hosted build; the person who deployed it updates it.
+ * - `docker`: the Docker image (`docker/`); restarting the container updates it, unless
+ *   the operator pinned a release or turned that off (`UpdateRuntime.docker`).
  * - `manual`: a desktop build that is none of the above (a `cargo` dev binary, or a
  *   platform without a release); it can only point at the Releases page.
  */
-export type UpdateChannel = "macos" | "appimage" | "deb" | "android" | "web" | "manual";
+export type UpdateChannel = "macos" | "appimage" | "deb" | "android" | "web" | "docker" | "manual";
+
+/**
+ * How a Docker deployment updates, from its runtime configuration
+ * (`platform/runtimeConfig.ts`): `auto` fetches the newest release on every start,
+ * `pinned` runs the release `WINNOW_VERSION` names, `image` runs the copy in the image.
+ */
+export type DockerUpdateMode = "auto" | "pinned" | "image";
 
 export type UpdateRuntime = {
   channel: UpdateChannel;
@@ -54,6 +64,8 @@ export type UpdateRuntime = {
   version: string;
   /** CPU, as Rust spells it (`x86_64`, `aarch64`); `unknown` in a browser. */
   arch: string;
+  /** For `docker`: how the container updates (absent means `auto`). */
+  docker?: DockerUpdateMode;
 };
 
 /** The channel a native shell's `update_runtime` reported, or `manual` when unrecognised. */
@@ -230,6 +242,8 @@ export function pickAsset(channel: UpdateChannel, arch: string, assets: readonly
  * - `deb`: download `asset` and open it in the system installer.
  * - `apk`: download `asset` and hand it to Android's package installer.
  * - `git-pull`: a self-hosted web build; tell whoever runs it to pull and redeploy.
+ * - `docker`: the Docker image; tell whoever runs it to restart the container (or, for
+ *   a pinned release or an image without auto-update, what to change first).
  * - `page`: nothing to install here; open the release page.
  */
 export type UpdateAction =
@@ -237,6 +251,7 @@ export type UpdateAction =
   | { kind: "deb"; asset: ReleaseAsset }
   | { kind: "apk"; asset: ReleaseAsset }
   | { kind: "git-pull" }
+  | { kind: "docker"; mode: DockerUpdateMode }
   | { kind: "page" };
 
 export type UpdateOffer = {
@@ -271,6 +286,8 @@ export function planUpdate(runtime: UpdateRuntime, release: Release): UpdateOffe
     }
     case "web":
       return offer({ kind: "git-pull" });
+    case "docker":
+      return offer({ kind: "docker", mode: runtime.docker ?? "auto" });
     case "manual":
       return offer({ kind: "page" });
   }
@@ -284,11 +301,54 @@ export function aptCommand(asset: ReleaseAsset): string {
 /** What a self-hosted build's operator runs: the README's update steps. */
 export const GIT_PULL_COMMAND = "git pull && npm --prefix web ci && npm --prefix web run build";
 
+/** What a Docker deployment's operator runs to restart it, which is the update. */
+export const DOCKER_RESTART_COMMAND = "docker compose restart";
+
+/** With `WINNOW_AUTO_UPDATE=false`, the image is the version: pull a newer one. */
+export const DOCKER_PULL_COMMAND = "docker compose pull && docker compose up -d";
+
+/**
+ * What the operator of a deployment Winnow cannot update itself is told: the words
+ * before the command, the command, and the words after. `null` for a runtime that has
+ * a button instead (`offerButton`).
+ */
+export function operatorUpdate(offer: UpdateOffer): { before: string; command: string; after: string } | null {
+  const action = offer.action;
+  if (action.kind === "git-pull") {
+    return { before: "This copy runs from your own deployment. To update it, run", command: GIT_PULL_COMMAND, after: "in your clone, then redeploy." };
+  }
+  if (action.kind !== "docker") return null;
+  switch (action.mode) {
+    case "auto":
+      return {
+        before: "This copy runs in Docker and fetches the newest release each time it starts. To update it, restart the container:",
+        command: DOCKER_RESTART_COMMAND,
+        after: "(or stop and start it).",
+      };
+    case "pinned":
+      return {
+        before: `This copy runs in Docker, pinned to one release. To update it, set WINNOW_VERSION to v${offer.version} (or remove it), then run`,
+        command: "docker compose up -d",
+        after: "to restart the container.",
+      };
+    case "image":
+      return {
+        before: "This copy runs in Docker with automatic updates off, so the image is the version. To update it, run",
+        command: DOCKER_PULL_COMMAND,
+        after: "",
+      };
+  }
+}
+
 /** The pill's words for an offer. */
 export function offerText(offer: UpdateOffer): string {
-  return offer.action.kind === "git-pull"
-    ? `Winnow ${offer.version} is out. Run git pull to update.`
-    : `Winnow ${offer.version} is available.`;
+  if (offer.action.kind === "git-pull") return `Winnow ${offer.version} is out. Run git pull to update.`;
+  if (offer.action.kind === "docker") {
+    return offer.action.mode === "auto"
+      ? `Winnow ${offer.version} is out. Restart the container to update.`
+      : `Winnow ${offer.version} is out. Update the container to get it.`;
+  }
+  return `Winnow ${offer.version} is available.`;
 }
 
 /** The pill's button for an offer, or `null` when there is nothing to press. */
@@ -301,6 +361,7 @@ export function offerButton(offer: UpdateOffer): string | null {
     case "page":
       return "Download";
     case "git-pull":
+    case "docker":
       return null;
   }
 }

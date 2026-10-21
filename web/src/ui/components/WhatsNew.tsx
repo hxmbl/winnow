@@ -11,7 +11,7 @@ import { useRef } from "react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { parseMarkdown, type Block, type Inline } from "../../core/updates/changelog";
 import type { ChangelogState } from "../useUpdates";
-import { GIT_PULL_COMMAND, type UpdateOffer } from "../../core/updates/updates";
+import { operatorUpdate, type UpdateOffer } from "../../core/updates/updates";
 
 type Props = {
   offer: UpdateOffer;
@@ -160,6 +160,7 @@ function Blocks({ blocks, onOpenLink }: { blocks: Block[]; onOpenLink: (url: str
 export function WhatsNew(props: Props) {
   const close = useRef<HTMLButtonElement>(null);
   const { offer, state } = props;
+  const operator = operatorUpdate(offer);
   return (
     <Sheet
       label={`What's new in Winnow ${offer.version}`}
@@ -176,11 +177,11 @@ export function WhatsNew(props: Props) {
           <p className="pb-3 text-meta text-ink-muted">
             Winnow {offer.version} is available. You have {offer.current}.
           </p>
-          {offer.action.kind === "git-pull" && (
+          {operator && (
             <p className="pb-3 text-meta text-ink-muted">
-              This copy runs from your own deployment. To update it, run{" "}
-              <code className="rounded-ctl bg-surface-sunken px-1 py-0.5 font-mono text-ink-body">{GIT_PULL_COMMAND}</code>{" "}
-              in your clone, then redeploy.
+              {operator.before}{" "}
+              <code className="rounded-ctl bg-surface-sunken px-1 py-0.5 font-mono text-ink-body">{operator.command}</code>
+              {operator.after && ` ${operator.after}`}
             </p>
           )}
           {state.status === "loading" && <p className="text-meta text-ink-subtle">Getting the release notes…</p>}

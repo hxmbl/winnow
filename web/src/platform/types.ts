@@ -200,7 +200,7 @@ export interface Platform {
   /**
    * Install `offer` the way this host can: Tauri's updater for `self`, the downloaded
    * package for `deb` / `apk`. Throws with a readable reason when it cannot. Optional:
-   * the web build has nothing to install (it says `git pull`).
+   * the web build has nothing to install (it says `git pull`, or to restart the Docker container).
    */
   installUpdate?(offer: UpdateOffer): Promise<InstallOutcome>;
 }

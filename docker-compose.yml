@@ -1,0 +1,44 @@
+# Winnow, self-hosted. The web app on http://localhost:8080.
+#
+#   docker compose up -d          # start (pulls the image the first time)
+#   docker compose restart        # update: every start fetches the newest release
+#
+# With the render proxy (images fetched by your server, not your browser):
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d
+# or put COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml in a .env file
+# beside this one, so plain `docker compose …` includes it.
+#
+# From source instead of the published image: docker compose up -d --build
+#
+# Gmail needs your own OAuth client, entered in the app on first run; add this
+# deployment's address to it (docs/google-setup.md). Serve it over https anywhere but
+# localhost: Google only redirects to https or localhost.
+
+services:
+  winnow:
+    image: ghcr.io/hxmbl/winnow:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # Every start fetches the newest release. Set to "false" to keep the copy in the
+      # image (then update with `docker compose pull && docker compose up -d`).
+      WINNOW_AUTO_UPDATE: "true"
+      # Pin a release instead of the newest:
+      # WINNOW_VERSION: "v1.5.0"
+    volumes:
+      # Downloaded releases, so a start without network still serves the newest.
+      - winnow-data:/var/lib/winnow
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  winnow-data:
