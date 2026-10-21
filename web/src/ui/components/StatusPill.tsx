@@ -38,6 +38,12 @@ type Props = {
   undo: { label: string; at: number } | null;
   /** The store's flash. */
   flash: { text: string; at: number } | null;
+  /** A newer Winnow, while its announcement shows (`useUpdates.ts`). */
+  update?: { text: string; button: string | null; at: number } | null;
+  onUpdate?: () => void;
+  onDismissUpdate?: () => void;
+  /** Open the release notes for the update ("What's new"). */
+  onWhatsNew?: () => void;
   /** A pull to refresh's result, while it shows. */
   pull: { text: string; ok: boolean; at: number } | null;
   /** The sync status line and whether it is bad news, for the beat after a notice. */
@@ -110,11 +116,12 @@ function useAnchor(element: HTMLElement | null, inset: number, avoid: string | u
 }
 
 export function StatusPill(props: Props) {
-  const { sending, undo, flash, pull } = props;
-  const candidates: (PillNotice | null)[] = [
+  const { sending, undo, flash, pull, update } = props;
+  const candidates: (PillNotice | null | undefined)[] = [
     sending && { kind: "sending", at: sending.at, deadline: sending.deadline },
     undo && { kind: "undo", at: undo.at, label: undo.label },
     flash && { kind: "flash", at: flash.at, text: flash.text },
+    update && { kind: "update", at: update.at, text: update.text, button: update.button },
     pull && { kind: "sync", at: pull.at, text: pull.text, ok: pull.ok },
   ];
   const live = currentNotice(candidates);
@@ -199,6 +206,23 @@ export function StatusPill(props: Props) {
                 </PillButton>
                 <PillButton onClick={props.onSendNow} data="data-send-now">
                   Send now
+                </PillButton>
+              </>
+            )}
+            {shown.kind === "update" && (
+              <>
+                {props.onWhatsNew && (
+                  <PillButton onClick={props.onWhatsNew} data="data-pill-whats-new">
+                    What's new
+                  </PillButton>
+                )}
+                {shown.button && props.onUpdate && (
+                  <PillButton onClick={props.onUpdate} primary data="data-pill-update">
+                    {shown.button}
+                  </PillButton>
+                )}
+                <PillButton onClick={props.onDismissUpdate ?? (() => undefined)} label="Dismiss" data="data-pill-dismiss">
+                  <X size={14} strokeWidth={2.2} aria-hidden="true" />
                 </PillButton>
               </>
             )}

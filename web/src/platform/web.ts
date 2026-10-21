@@ -85,6 +85,12 @@ export const webPlatform: WebPlatform = {
     return WEB_INFO;
   },
 
+  // A self-hosted build: whoever deployed it updates it (`git pull`), so there is no
+  // `installUpdate` here.
+  async updateRuntime() {
+    return { channel: "web", version: WEB_INFO.version, arch: "unknown" };
+  },
+
   tokenStore(account?: string): TokenStore {
     return account ? webTokenStore(webTokenKey(account)) : webTokenStore();
   },

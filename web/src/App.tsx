@@ -76,6 +76,9 @@ import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
 import type { AppSigningInfo } from "./platform/types";
 import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
+import { useUpdates } from "./ui/useUpdates";
+import { WhatsNew } from "./ui/components/WhatsNew";
+import { offerButton } from "./core/updates/updates";
 import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
@@ -572,6 +575,13 @@ export function App({ store }: Props) {
       cancelled = true;
     };
   }, []);
+
+  // ── Updates ──────────────────────────────────────────────────────────────
+  // Checks GitHub on launch and every few hours; installs the way this copy runs
+  // (`ui/useUpdates.ts`, `core/updates/updates.ts`). Announced once in the status pill,
+  // and always in Settings › About.
+  const flashUpdate = useCallback((text: string, ms: number) => store.flash(text, ms), [store]);
+  const updates = useUpdates(platform, flashUpdate);
 
   // ── Sign-in ──────────────────────────────────────────────────────────────
 
@@ -4168,6 +4178,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         onUndoSend={undoSend}
         onSendNow={sendWaitingNow}
         onDismissFlash={store.dismissFlash.bind(store)}
+        update={updates.announcement}
+        onUpdate={updates.install}
+        onDismissUpdate={updates.dismissAnnouncement}
+        onWhatsNew={updates.openWhatsNew}
         anchor={listPane}
         inset={phone ? phoneBarHeight : listChromeHeight}
         // The phone demo strip (Connect Gmail) heads the list right where the pill rests.
@@ -4779,7 +4793,24 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onImproveSuggestions={onImproveSuggestions}
           version={info ? `${info.name} ${info.version}` : null}
           platformLabel={info ? platformLabel(info) : null}
+          updates={updates}
           onClose={() => store.setOverlay("none")}
+        />
+      )}
+
+      {/* "What's new": release notes since the installed version, over Settings if it is open. */}
+      {updates.whatsNew && updates.offer && (
+        <WhatsNew
+          offer={updates.offer}
+          state={updates.whatsNew}
+          actionLabel={offerButton(updates.offer)}
+          onAction={() => {
+            updates.closeWhatsNew();
+            updates.install();
+          }}
+          onOpenLink={(url) => void platform.openExternal(url)}
+          onClose={updates.closeWhatsNew}
+          phone={phone}
         />
       )}
 

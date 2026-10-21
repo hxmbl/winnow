@@ -79,6 +79,73 @@ pub fn app_info(app: AppHandle) -> AppInfo {
     }
 }
 
+// ── Updates ─────────────────────────────────────────────────────────────────
+
+/// How this copy is running and so how it updates (`updater.rs`): `macos`,
+/// `appimage`, `deb`, `android` or `manual`, with the version and CPU.
+#[tauri::command]
+pub fn update_runtime(app: AppHandle) -> crate::updater::UpdateRuntime {
+    crate::updater::UpdateRuntime {
+        channel: crate::updater::channel(),
+        version: app.package_info().version.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+    }
+}
+
+/// Install the newest release with Tauri's updater and relaunch (macOS, AppImage).
+/// `{ kind: "none" }` when the release has no updater manifest for this platform.
+#[tauri::command]
+pub async fn update_install(app: AppHandle) -> Result<crate::updater::InstallOutcome> {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        crate::updater::install_self(&app).await
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = app;
+        Err("this platform does not update itself".into())
+    }
+}
+
+/// Download a release `.deb` to Downloads and open it with the system installer
+/// (Linux package installs). Returns where it was saved.
+#[tauri::command]
+pub async fn update_download_deb(
+    app: AppHandle,
+    url: String,
+    name: String,
+) -> Result<crate::updater::InstallOutcome> {
+    #[cfg(target_os = "linux")]
+    {
+        crate::updater::download_deb(&app, &url, &name).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, url, name);
+        Err("a .deb installs on Linux only".into())
+    }
+}
+
+/// Download a release APK and open Android's package installer.
+/// `{ kind: "opened" }`, or `{ kind: "needs-permission" }` when "Install unknown apps"
+/// is off (its settings page has been opened).
+#[tauri::command]
+pub async fn update_install_apk(
+    app: AppHandle,
+    url: String,
+    name: String,
+) -> Result<serde_json::Value> {
+    #[cfg(target_os = "android")]
+    {
+        crate::updater::install_apk(&app, &url, &name).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, url, name);
+        Err("an APK installs on Android only".into())
+    }
+}
+
 // ── Secrets ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]

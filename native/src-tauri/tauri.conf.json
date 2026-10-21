@@ -10,6 +10,10 @@
     "beforeBuildCommand": "npm --prefix ../web install && npm --prefix ../web run build"
   },
   "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDAyMTIzNjk4MTE4OUVERjgKUldUNDdZa1JtRFlTQW9vaHRmNkZDT3p4ZVA0NzB5cTVFWEpHQkpLMFdaZzVlai9obTBLeVZrbDcK",
+      "endpoints": ["https://github.com/hxmbl/winnow/releases/latest/download/latest.json"]
+    },
     "deep-link": {
       "desktop": {
         "schemes": [
@@ -42,7 +46,7 @@
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: blob: https:",
         "font-src": "'self' data:",
-        "connect-src": "'self' ipc: http://ipc.localhost https://www.googleapis.com https://gmail.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://*.googleapis.com https://cloudflare-dns.com",
+        "connect-src": "'self' ipc: http://ipc.localhost https://www.googleapis.com https://gmail.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://*.googleapis.com https://cloudflare-dns.com https://api.github.com",
         "frame-src": "'self'",
         "object-src": "'none'",
         "base-uri": "'self'",
@@ -54,6 +58,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": false,
     "category": "Productivity",
     "shortDescription": "Email that sorts itself",
     "longDescription": "Winnow is an email client that classifies, ranks and filters your mail so the important messages rise to the top and the noise falls away.",

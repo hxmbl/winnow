@@ -53,6 +53,12 @@ export const GOOGLE_CONNECT = [
   "https://www.googleapis.com",
 ] as const;
 
+/**
+ * Update checks: GitHub's `releases/latest` for the repository (`core/updates`). One
+ * unauthenticated GET every few hours, carrying nothing about the user or their mail.
+ */
+export const UPDATES_CONNECT = "https://api.github.com";
+
 /** Brand logos: the DNS-over-HTTPS resolver BIMI records are read through. */
 export const DOH_CONNECT = "https://cloudflare-dns.com";
 
@@ -86,7 +92,7 @@ export function cspDirectives(options: CspOptions = {}): Array<[string, string[]
     ["style-src", ["'self'", "'unsafe-inline'"]],
     ["img-src", ["'self'", "data:", "blob:", "https:"]],
     ["font-src", ["'self'", "data:"]],
-    ["connect-src", ["'self'", ...GOOGLE_CONNECT, DOH_CONNECT, ...(proxy ? [proxy] : [])]],
+    ["connect-src", ["'self'", ...GOOGLE_CONNECT, DOH_CONNECT, UPDATES_CONNECT, ...(proxy ? [proxy] : [])]],
     ["frame-src", ["'self'"]],
     ["object-src", ["'none'"]],
     ["base-uri", ["'none'"]],

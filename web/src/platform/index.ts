@@ -23,6 +23,7 @@ export const platform: Platform = createPlatform();
 
 export { desktopPlatform, desktopPlatformExtras, webPlatform };
 export type {
+  InstallOutcome,
   NewMailNotification,
   OAuthRedirect,
   Platform,

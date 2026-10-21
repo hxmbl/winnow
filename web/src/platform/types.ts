@@ -5,6 +5,7 @@
 import type { TokenStore } from "../core/gmail/tokens";
 import type { CredentialStore } from "../core/session/credentials";
 import type { NotificationActionEvent, NotificationBatch } from "../core/notify/notifications";
+import type { UpdateOffer, UpdateRuntime } from "../core/updates/updates";
 
 /** What this build can do. Reported to the UI so it can hide what is absent. */
 export type PlatformInfo = {
@@ -89,6 +90,23 @@ export type AppSigningInfo = {
   playServices: boolean;
 };
 
+/**
+ * What installing an update did (`installUpdate`).
+ *
+ * - `restarting`: the app is relaunching into the new version (macOS, AppImage).
+ * - `opened`: the installer has the file (Android's package installer, or the `.deb`
+ *   saved at `path` and opened with the system installer).
+ * - `needs-permission`: Android's "Install unknown apps" is off for Winnow; its
+ *   settings page is open, and pressing Update again after allowing it installs.
+ * - `none`: the updater's manifest has nothing newer (a release without updater
+ *   files); the caller opens the release page.
+ */
+export type InstallOutcome =
+  | { kind: "restarting" }
+  | { kind: "opened"; path?: string }
+  | { kind: "needs-permission" }
+  | { kind: "none" };
+
 export interface Platform {
   info(): Promise<PlatformInfo>;
 
@@ -170,6 +188,21 @@ export interface Platform {
    */
   openFile?(filename: string, bytes: Uint8Array, mimeType: string): Promise<boolean>;
   focusWindow(): Promise<void>;
+
+  // ── Updates ──────────────────────────────────────────────────────────────
+
+  /**
+   * How this copy is running, which decides how it updates (`core/updates/updates.ts`).
+   * Optional: absent means a plain web build.
+   */
+  updateRuntime?(): Promise<UpdateRuntime>;
+
+  /**
+   * Install `offer` the way this host can: Tauri's updater for `self`, the downloaded
+   * package for `deb` / `apk`. Throws with a readable reason when it cannot. Optional:
+   * the web build has nothing to install (it says `git pull`).
+   */
+  installUpdate?(offer: UpdateOffer): Promise<InstallOutcome>;
 }
 
 export const PLATFORM_KEYS = [

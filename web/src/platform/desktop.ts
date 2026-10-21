@@ -27,6 +27,8 @@ import type {
 import { parseNativeSignInResult, parseSigningInfo, unavailable } from "./nativeGoogle";
 import { waitUntilVisible } from "./visibility";
 import { parseNotificationAction, type NotificationActionEvent } from "../core/notify/notifications";
+import { parseChannel, type UpdateOffer, type UpdateRuntime } from "../core/updates/updates";
+import type { InstallOutcome } from "./types";
 
 /** Events from Rust. */
 const SYNC_TICK_EVENT = "winnow://sync-tick";
@@ -268,6 +270,25 @@ export const desktopPlatform: Platform = {
     return true;
   },
 
+  async updateRuntime(): Promise<UpdateRuntime> {
+    try {
+      const wire = await invoke<Record<string, unknown>>("update_runtime");
+      return {
+        channel: parseChannel(wire?.channel),
+        version: typeof wire?.version === "string" ? wire.version : "0.0.0",
+        arch: typeof wire?.arch === "string" ? wire.arch : "unknown",
+      };
+    } catch {
+      // A shell that predates `update_runtime`: it can only point at the release page.
+      const info = await desktopPlatform.info().catch(() => null);
+      return { channel: "manual", version: info?.version ?? "0.0.0", arch: info?.arch ?? "unknown" };
+    }
+  },
+
+  async installUpdate(offer: UpdateOffer): Promise<InstallOutcome> {
+    return installUpdateWith(offer, invoke);
+  },
+
   async focusWindow(): Promise<void> {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     const window = getCurrentWindow();
@@ -383,6 +404,37 @@ export async function openSignInPage(
     }
   }
   await call("open_external", { url });
+}
+
+/**
+ * Install an offer through the shell (`updater.rs`). Exported with its `invoke` as a
+ * parameter, for tests.
+ */
+export async function installUpdateWith(
+  offer: UpdateOffer,
+  call: <T>(command: string, args?: Record<string, unknown>) => Promise<T>,
+): Promise<InstallOutcome> {
+  const outcome = (wire: unknown): InstallOutcome => {
+    const kind = (wire as { kind?: unknown } | null)?.kind;
+    const path = (wire as { path?: unknown } | null)?.path;
+    if (kind === "opened") return typeof path === "string" ? { kind, path } : { kind };
+    if (kind === "needs-permission" || kind === "restarting" || kind === "none") return { kind };
+    throw new Error("the installer gave an unexpected answer");
+  };
+  try {
+    switch (offer.action.kind) {
+      case "self":
+        return outcome(await call("update_install"));
+      case "deb":
+        return outcome(await call("update_download_deb", { url: offer.action.asset.url, name: offer.action.asset.name }));
+      case "apk":
+        return outcome(await call("update_install_apk", { url: offer.action.asset.url, name: offer.action.asset.name }));
+      default:
+        return { kind: "none" };
+    }
+  } catch (error) {
+    throw new Error(describeIpcError(error, "the update could not be installed"));
+  }
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

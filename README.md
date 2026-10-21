@@ -56,6 +56,21 @@ tag's workflow run as artifacts.
 - **Linux** doesn't care. The AppImage needs FUSE 2 (`libfuse2`) on some
   distros; the `.deb` doesn't.
 
+### Updates
+
+Winnow asks GitHub for its latest release on launch and then every few hours, and
+says so once, in the status pill, when a newer one is out. **What's new** shows the
+release notes of every version since yours. How it updates depends on how it runs:
+
+| Running as | Update |
+| --- | --- |
+| macOS app, Linux AppImage | Downloads the signed update, replaces itself and restarts |
+| Linux `.deb` | Downloads the new `.deb` to Downloads and opens your package installer (or `sudo apt install ./Winnow_…deb`) |
+| Android | Downloads the new APK and opens Android's installer (allow "Install unknown apps" for Winnow once) |
+| Web app you host | Tells you to update it: `git pull && npm --prefix web ci && npm --prefix web run build`, then redeploy |
+
+Turn the automatic check off in **Settings → About**; **Check now** is there too.
+
 ### Android
 
 Download the `.apk` on your phone from the
@@ -319,7 +334,8 @@ VITE_RENDER_PROXY=http://127.0.0.1:8787 npm run build
 ## Privacy
 
 The developer runs no servers and
-collects nothing (no telemetry, analytics, crash reports or update checks); your
+collects nothing (no telemetry, analytics or crash reports; the update check is one
+anonymous request to GitHub's releases API every few hours, and can be turned off); your
 mail, tokens and OAuth client stay on your device and go only to Google (if you
 turn on **Show brand logos**, sender domains also go to Cloudflare's DNS resolver
 and logos load from the senders' own sites; with **Gravatar photos** on, a SHA-256
