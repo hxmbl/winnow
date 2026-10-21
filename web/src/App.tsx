@@ -67,6 +67,8 @@ import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { DEMO_ACCOUNT_IDS, demoSecondMailbox } from "./core/data/demoSecond";
 import { demoAccounts, switcherLabel } from "./ui/accounts";
 import { AccountButton, AccountSwitcher } from "./ui/components/AccountSwitcher";
+import { AccountsPage } from "./ui/components/AccountsPage";
+import type { CategoryId } from "./ui/settingsCatalog";
 import { defaultFromAccount, draftFromAnotherAccount } from "./core/mail/fromAccount";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
@@ -626,6 +628,8 @@ export function App({ store, existingInstall = true }: Props) {
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  /** The category Settings opens on when the Accounts page sends the user there (Google account). */
+  const [settingsCategory, setSettingsCategory] = useState<CategoryId | undefined>(undefined);
   /** Which of the demo's two accounts is on screen. */
   const [demoAccount, setDemoAccount] = useState<"work" | "home">("work");
   /** What the switcher lists: the signed-in accounts, or the demo's two in the demo. */
@@ -1263,8 +1267,12 @@ export function App({ store, existingInstall = true }: Props) {
   // ── Actions ──────────────────────────────────────────────────────────────
 
   const selected = view.selected;
-  /** Settings on a phone replaces the mail outright (see the `main` below). */
-  const settingsCoversMail = phone && snapshot.overlay === "settings";
+  /** Settings, and the Accounts page, on a phone replace the mail outright (see the `main` below). */
+  const settingsCoversMail = phone && (snapshot.overlay === "settings" || snapshot.overlay === "accounts");
+  // A category asked for by the Accounts page holds for that one visit to Settings.
+  useEffect(() => {
+    if (snapshot.overlay !== "settings") setSettingsCategory(undefined);
+  }, [snapshot.overlay]);
 
   /**
    * Announce the open message.
@@ -3439,7 +3447,7 @@ export function App({ store, existingInstall = true }: Props) {
         viewerOpen: snap.view.selected !== null,
         // `c` copies an open message's code and composes everywhere else.
         codeAvailable: Boolean(snap.view.selected?.code),
-        overlayVisible: snap.overlay === "shortcuts" || snap.overlay === "settings",
+        overlayVisible: snap.overlay === "shortcuts" || snap.overlay === "settings" || snap.overlay === "accounts",
         navigationVisible: snap.overlay === "navigation",
         filtersActive: snap.activeFilters.length > 0,
         hasActionTarget:
@@ -4694,7 +4702,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             store.setOverlay("none");
             store.setMailbox(mailbox);
           }}
-          settingsOpen={snapshot.overlay === "settings"}
+          // The Accounts page covers the mail like Settings, so the dock treats it the same.
+          settingsOpen={snapshot.overlay === "settings" || snapshot.overlay === "accounts"}
           menuOpen={sidebarOpen}
           onOpenMenu={openSidebar}
           onCloseMenu={closeSidebar}
@@ -4810,14 +4819,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           googleClient={oauthClient ? maskClientId(oauthClient.clientId) : null}
           signedIn={snapshot.account !== null}
           accounts={switcherAccounts}
-          accountScheme={themeMode}
-          accountsBusy={accountBusy}
-          onAddAccount={() => void addAccount()}
-          onSwitchAccount={(id) => void switchAccount(id)}
-          onSignOutAccount={confirmSignOutAccount}
-          onSignOutAll={confirmSignOutAll}
-          onAccountColor={(id, color) => sessionRef.current?.accounts.setColor(id, color)}
-          onAccountNotify={(id, notify) => sessionRef.current?.accounts.setNotify(id, notify)}
+          onManageAccounts={() => store.setOverlay("accounts")}
+          initialCategory={settingsCategory}
           onGoogleAccount={() => {
             store.setOverlay("none");
             setSetupOpen(true);
@@ -4837,6 +4840,50 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           updates={updates}
           onShowTour={replayTour}
           onClose={() => store.setOverlay("none")}
+        />
+      )}
+
+      {snapshot.overlay === "accounts" && (
+        <AccountsPage
+          accounts={switcherAccounts}
+          scheme={themeMode}
+          activeUnread={mailboxes.find((mailbox) => mailbox.id === "inbox")?.unread ?? 0}
+          busy={accountBusy}
+          error={accountError}
+          phone={phone}
+          googleClient={oauthClient ? maskClientId(oauthClient.clientId) : null}
+          signedIn={snapshot.account !== null}
+          onSwitch={(id) => {
+            // Switching opens that account's inbox, so the page makes way for it.
+            store.setOverlay("none");
+            void switchAccount(id);
+          }}
+          onAdd={() => {
+            // In the demo this is Connect Gmail, which leaves for Google's sign-in.
+            if (switcherAccounts.some((account) => account.demo)) store.setOverlay("none");
+            void addAccount();
+          }}
+          onOpenDemo={() => {
+            store.setOverlay("none");
+            parkComposer();
+            enterDemo();
+          }}
+          onSignOut={confirmSignOutAccount}
+          onSignOutAll={confirmSignOutAll}
+          onColor={(id, color) => sessionRef.current?.accounts.setColor(id, color)}
+          onNotify={(id, notify) => sessionRef.current?.accounts.setNotify(id, notify)}
+          onGoogleClient={() => {
+            store.setOverlay("none");
+            setSetupOpen(true);
+          }}
+          onGoogleSettings={() => {
+            setSettingsCategory("google");
+            store.setOverlay("settings");
+          }}
+          onClose={() => {
+            store.setOverlay("none");
+            setAccountError(null);
+          }}
         />
       )}
 
@@ -5236,7 +5283,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           }}
           onManage={() => {
             setAccountsOpen(false);
-            store.setOverlay("settings");
+            store.setOverlay("accounts");
           }}
           onClose={() => {
             setAccountsOpen(false);

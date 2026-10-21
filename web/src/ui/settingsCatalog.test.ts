@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATEGORIES, SETTINGS, SETTING_IDS, settingsIn } from "./settingsCatalog";
 
-/** The Settings components, read as text: every row names its setting by id. */
-const source = ["components/SettingsPanel.tsx", "components/SettingsControls.tsx", "components/SmartFilterSettings.tsx"]
+/** The Settings components (and the Accounts page, which took the per-account rows), read as text: every row names its setting by id. */
+const source = ["components/SettingsPanel.tsx", "components/SettingsControls.tsx", "components/SmartFilterSettings.tsx", "components/AccountsPage.tsx"]
   .map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
   .join("\n");
 

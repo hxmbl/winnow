@@ -252,15 +252,15 @@ export const SETTINGS = {
   },
   accounts: {
     category: "google",
-    label: "Accounts on this device",
+    label: "Accounts",
     explanation:
-      "Up to five Gmail accounts, each signed in on its own with your one Google client. Each account's mail, drafts, learning and sign-in are kept apart on this device, and switching never clears any of them. Signing out of one erases only that account from this device and asks Google to revoke its access; Sign out of all does that for every account.",
+      "Up to five Gmail accounts, each signed in on its own with your one Google client, managed on the Accounts page. Each account's mail, drafts, learning and sign-in are kept apart on this device, and switching never clears any of them. Signing out of one erases only that account from this device and asks Google to revoke its access; Sign out of all does that for every account.",
   },
   accountColor: {
     category: "google",
     label: "Colour",
     explanation:
-      "A small coloured dot beside an account wherever Winnow shows it: the switcher, the avatar in the top bar and Settings. It only helps tell accounts apart at a glance and is stored on this device.",
+      "A small coloured dot beside an account wherever Winnow shows it: the switcher, the avatar in the top bar and the Accounts page. It only helps tell accounts apart at a glance and is stored on this device.",
   },
   accountNotify: {
     category: "google",

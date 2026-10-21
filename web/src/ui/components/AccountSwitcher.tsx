@@ -2,7 +2,8 @@
  * The account switcher (1.4.0): the sheet the avatar in the phone top bar and the
  * desktop sidebar header opens. Each signed-in account with its avatar, address,
  * unread count and colour dot, the open one ticked; one tap switches. Then Add account,
- * with the Testing-mode note, and a way to Settings → Google account.
+ * with the Testing-mode note, the demo inbox, and Manage accounts, which opens the
+ * Accounts page (`AccountsPage.tsx`).
  *
  * The decisions are in `ui/accounts.ts`; this only lays them out.
  */
@@ -14,6 +15,7 @@ import { Avatar } from "./Avatar";
 import type { AccountSummary } from "../../core/store/store";
 import { ADD_ACCOUNT_HELP, ACCOUNTS_FULL, accountColorHex, unreadLabel } from "../accounts";
 import { MAX_ACCOUNTS } from "../../core/session/accounts";
+import { accountStatusLine } from "../accountsPage";
 import type { ThemeName } from "../theme";
 
 export type AccountSwitcherProps = {
@@ -66,6 +68,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
           {props.accounts.map((account, index) => {
             const count = account.active ? props.activeUnread : account.unread;
             const label = unreadLabel(count);
+            const status = accountStatusLine(account, props.activeUnread);
             return (
               <li key={account.id}>
                 <button
@@ -86,10 +89,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ui font-medium text-ink">{account.email || "Your account"}</span>
-                    <span className="block truncate text-meta text-ink-subtle">
-                      {account.active ? "Open now" : label ? `${label} unread` : "No unread mail"}
-                      {account.demo ? " · demo" : ""}
-                    </span>
+                    <span className="block truncate text-meta text-ink-subtle">{status}</span>
                   </span>
                   {label && !account.active && (
                     <span data-account-unread="" className="shrink-0 rounded-full bg-surface-active px-2 text-meta font-semibold text-ink">
@@ -137,6 +137,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
           )}
           <button
             type="button"
+            data-account-manage=""
             onClick={props.onManage}
             className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >

@@ -45,10 +45,7 @@ import { SelectMenu } from "./SelectMenu";
 import { useShortcutsAvailable } from "../physicalKeyboard";
 import { remotePicturesPaused } from "../senderPictures";
 import type { AccountSummary } from "../../core/store/store";
-import { ACCOUNT_COLORS, MAX_ACCOUNTS, type AccountColor } from "../../core/session/accounts";
-import { ACCOUNT_COLOR_LABEL, ACCOUNTS_FULL, ADD_ACCOUNT_HELP, accountColorHex } from "../accounts";
-import { AccountDot } from "./AccountSwitcher";
-import type { ThemeName } from "../theme";
+import { accountsSummary } from "../accountsPage";
 import type { UpdatesController } from "../useUpdates";
 import { operatorUpdate } from "../../core/updates/updates";
 
@@ -216,16 +213,10 @@ export type SettingsProps = {
   signedIn: boolean;
   /** Open the Google account sheet (set up, change or remove the OAuth client). */
   onGoogleAccount: () => void;
-  /** 1.4.0: the signed-in accounts (or the demo's two), with what each row can do. */
+  /** 1.4.0: the signed-in accounts (or the demo's two), counted on the Accounts row. */
   accounts?: readonly AccountSummary[];
-  accountScheme?: ThemeName;
-  accountsBusy?: boolean;
-  onAddAccount?: () => void;
-  onSwitchAccount?: (id: string) => void;
-  onSignOutAccount?: (id: string) => void;
-  onSignOutAll?: () => void;
-  onAccountColor?: (id: string, color: AccountColor) => void;
-  onAccountNotify?: (id: string, notify: boolean) => void;
+  /** Open the Accounts page (1.5), where each account's controls live. */
+  onManageAccounts?: () => void;
   /** Where Google contacts stand. The row only shows for a signed-in account. */
   contactsAccess: ContactsAccessState;
   contactsBusy: boolean;
@@ -249,7 +240,7 @@ export type SettingsProps = {
   platformLabel?: string | null;
   /** Update checks (`useUpdates.ts`), for About. Absent in tests that do not need them. */
   updates?: UpdatesController | null;
-  /** The category Settings opens on. Reading unless a caller has a reason. */
+  /** The category Settings opens on (on a phone, straight to its page). Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
   onShowTour?: () => void;
@@ -299,8 +290,11 @@ const BACK_BUTTON =
 export function Settings(props: SettingsProps) {
   const layout = useSettingsLayout();
   const [explain, setExplain] = useState(() => initialExplain(props.initialCategory ?? "reading"));
-  /** The phone's two screens: the category list, or one category's page. */
-  const [phonePage, setPhonePage] = useState<"list" | "category">("list");
+  /**
+   * The phone's two screens: the category list, or one category's page. A caller that
+   * names a category (the Accounts page's link to Google account) opens on its page.
+   */
+  const [phonePage, setPhonePage] = useState<"list" | "category">(props.initialCategory ? "category" : "list");
   const [info, dispatchInfo] = useReducer(infoReducer, INFO_CLOSED);
   const shortcutsAvailable = useShortcutsAvailable();
   const categories = visibleCategories({ shortcuts: shortcutsAvailable });
@@ -1049,110 +1043,25 @@ function DriveLinksRow({ props }: { props: SettingsProps }) {
   );
 }
 
+/**
+ * The accounts on this device, as one row that opens the Accounts page (1.5), where
+ * each account's colour, notifications and sign-out now live, so they are not in two
+ * places.
+ */
 function AccountsSettings({ props }: { props: SettingsProps }) {
-  const accounts = props.accounts ?? [];
-  const scheme = props.accountScheme ?? "light";
-  const real = accounts.filter((account) => !account.demo);
   return (
     <Section title="Accounts">
-      <SettingBlock setting="accounts">
-        <SettingLabel setting="accounts" />
-        {real.length === 0 ? (
-          <p data-settings-empty="" className="text-meta text-ink-subtle">
-            No Gmail account is signed in yet.
-          </p>
-        ) : (
-          <ul data-settings-accounts="" className="mt-2 flex flex-col gap-3">
-            {real.map((account) => (
-              <li key={account.id} data-settings-account={account.id} className="flex flex-col gap-2 rounded-pane border border-hairline p-3">
-                <div className="flex items-center gap-2.5">
-                  <AccountDot color={account.color} scheme={scheme} />
-                  <span className="selectable min-w-0 flex-1 truncate text-ui font-medium text-ink">{account.email || "Your account"}</span>
-                  {account.active ? (
-                    <span className="text-meta font-semibold text-ink-muted">Open</span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => props.onSwitchAccount?.(account.id)}
-                      disabled={props.accountsBusy}
-                      className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                    >
-                      Open
-                    </button>
-                  )}
-                </div>
-                <SettingBlock setting="accountColor" className="!py-1">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <SettingLabel setting="accountColor" />
-                    <div role="radiogroup" aria-label={`Colour for ${account.email}`} className="flex items-center gap-1.5">
-                      {ACCOUNT_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          role="radio"
-                          aria-checked={account.color === color}
-                          aria-label={ACCOUNT_COLOR_LABEL[color]}
-                          title={ACCOUNT_COLOR_LABEL[color]}
-                          onClick={() => props.onAccountColor?.(account.id, color)}
-                          className={`flex h-7 w-7 items-center justify-center rounded-full border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                            account.color === color ? "border-ink" : "border-transparent"
-                          }`}
-                        >
-                          <span className="h-4 w-4 rounded-full" style={{ background: accountColorHex(color, scheme) }} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </SettingBlock>
-                <SettingBlock setting="accountNotify" className="!py-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <SettingLabel setting="accountNotify" />
-                    <Toggle
-                      checked={account.notify}
-                      onChange={(value) => props.onAccountNotify?.(account.id, value)}
-                      label={`Notify about ${account.email} when it is not open`}
-                    />
-                  </div>
-                </SettingBlock>
-                <div>
-                  <button
-                    type="button"
-                    data-sign-out-account={account.id}
-                    onClick={() => props.onSignOutAccount?.(account.id)}
-                    disabled={props.accountsBusy}
-                    className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-danger-wash disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                  >
-                    Sign out of this account
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            data-settings-add-account=""
-            onClick={props.onAddAccount}
-            disabled={props.accountsBusy || real.length >= MAX_ACCOUNTS}
-            className="rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            {real.length === 0 ? "Connect Gmail" : "Add account"}
-          </button>
-          {real.length > 1 && (
-            <button
-              type="button"
-              data-sign-out-all=""
-              onClick={props.onSignOutAll}
-              disabled={props.accountsBusy}
-              className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-danger-wash disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-            >
-              Sign out of all
-            </button>
-          )}
-        </div>
-        <p className="mt-2 text-meta text-ink-subtle">{real.length >= MAX_ACCOUNTS ? ACCOUNTS_FULL : ADD_ACCOUNT_HELP}</p>
-      </SettingBlock>
+      <Row setting="accounts" hint={accountsSummary(props.accounts ?? [])}>
+        <button
+          type="button"
+          data-settings-manage-accounts=""
+          onClick={props.onManageAccounts}
+          className="inline-flex items-center gap-1 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          Manage
+          <ChevronRight size={14} aria-hidden="true" />
+        </button>
+      </Row>
     </Section>
   );
 }
