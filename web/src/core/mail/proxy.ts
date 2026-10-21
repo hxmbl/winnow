@@ -9,8 +9,9 @@
  * Where the proxy is, is a deployment choice, not a setting: pointing the app at an
  * arbitrary URL that fetches mail and returns markup would be a
  * remote-code-administration hole. It comes from the deployment's runtime
- * configuration (`platform/runtimeConfig.ts`: the Docker image's same-origin
- * `/config.js`, written from the container's environment) and otherwise from the
+ * configuration (`platform/runtimeConfig.ts`: the `<meta name="winnow-config">` the
+ * Docker image writes into its `index.html` from the container's environment) and
+ * otherwise from the
  * build-time `VITE_RENDER_PROXY`, so it is not a `platform/types.ts` capability flag.
  * (`runtimeConfig` is a pure module with no host behind it, which is why `core/` may
  * import it.)

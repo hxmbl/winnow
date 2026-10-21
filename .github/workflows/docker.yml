@@ -142,26 +142,21 @@ jobs:
 
           header() { grep -i "^$2:" "$1" | tr -d '\r'; }
 
-          # index.html: the app, the CSP header, never cached.
+          # index.html: the app, its runtime config, the CSP header, never cached.
           curl -fsS -D h.txt http://localhost:8081/ -o index.html
           grep -q '<div id="root"></div>' index.html || fail "index.html is not the app"
-          grep -q '<script src="./config.js"></script>' index.html || fail "index.html does not load config.js"
+          [ "$(grep -o '<meta name="winnow-config" content="[^"]*">' index.html)" = '<meta name="winnow-config" content="distribution=docker; updates=image">' ] \
+            || fail "index.html's runtime config is wrong for WINNOW_AUTO_UPDATE=false"
           header h.txt content-security-policy | grep -q "script-src 'self';" || fail "no CSP header"
           header h.txt content-security-policy | grep -q "frame-ancestors 'none'" || fail "CSP header cannot forbid framing"
           header h.txt cache-control | grep -q no-cache || fail "index.html is cacheable"
           echo "index.html ok"
 
-          # config.js: written on start, never cached.
-          curl -fsS -D c.txt http://localhost:8081/config.js -o config.js
-          cat config.js
-          grep -q '"distribution": "docker", "updates": "image"' config.js || fail "config.js is wrong for WINNOW_AUTO_UPDATE=false"
-          header c.txt cache-control | grep -q no-store || fail "config.js is cacheable"
-
           # A deep link is the SPA.
           curl -fsS http://localhost:8081/some/deep/link -o deep.html
           cmp -s index.html deep.html || fail "a deep link did not get index.html"
           # …and the files it asks for relative to itself are the real ones.
-          curl -fsS http://localhost:8081/some/deep/config.js | grep -q '__WINNOW_CONFIG__' || fail "a deep link's config.js is not config.js"
+          curl -fsS http://localhost:8081/some/deep/theme-boot.js | grep -q 'data-theme' || fail "a deep link's theme-boot.js is not theme-boot.js"
           curl -fsS -D d.txt "http://localhost:8081/some/deep/$(grep -o 'assets/index-[^"]*\.js' index.html | head -n 1)" -o /dev/null
           header d.txt content-type | grep -q javascript || fail "a deep link's script is not JavaScript"
           echo "deep link ok"
@@ -173,10 +168,10 @@ jobs:
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/assets/missing.js)" = 404 ] || fail "a missing asset was not a 404"
           echo "cache headers ok"
 
-          # With the proxy: config says self, renders go through the app's own origin.
-          curl -fsS http://localhost:8080/config.js | tee config-proxy.js
-          grep -q '"renderProxy": "self"' config-proxy.js || fail "config.js does not name the proxy"
-          grep -q '"updates": "auto"' config-proxy.js || fail "config.js should say auto-update"
+          # With the proxy: the config says self, renders go through the app's own origin.
+          curl -fsS http://localhost:8080/ | grep -o '<meta name="winnow-config" content="[^"]*">' | tee meta.txt
+          grep -qx '<meta name="winnow-config" content="distribution=docker; updates=auto; renderProxy=self">' meta.txt \
+            || fail "the runtime config does not name the proxy"
           curl -fsS -X POST http://localhost:8080/render -H 'Origin: http://localhost:8080' \
             -H 'Content-Type: application/json' -d '{"html":"<p>hello</p>"}' -o render.html
           grep -q '<html' render.html || fail "/render did not return a document"

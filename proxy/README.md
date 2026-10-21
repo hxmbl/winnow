@@ -78,9 +78,9 @@ deployment assembles mail.
 The Docker image keeps that rule while letting one published image serve everyone:
 the operator names the proxy in the container's environment
 (`WINNOW_PROXY_UPSTREAM=http://proxy:8787`, or `WINNOW_RENDER_PROXY` for one
-elsewhere), and the container writes it into a same-origin `/config.js` on start
-(`docker/web/configure.sh`, read by `web/src/platform/runtimeConfig.ts`). Nothing the
-app or a message can do writes that file, and a value that is not a plain http(s) URL
+elsewhere), and the container writes it into the `index.html` it serves, as a
+`<meta name="winnow-config">` tag, on start (`docker/web/configure.sh`, read by
+`web/src/platform/runtimeConfig.ts`). Nothing the app or a message can do writes it, and a value that is not a plain http(s) URL
 is refused. With an upstream, nginx in the web container forwards `/render` and
 `/asset/` here, so the proxy is same-origin with the app; it drops an `Origin` that
 names the app's own host before forwarding and passes any other through, so this

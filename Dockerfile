@@ -9,7 +9,8 @@
 # newest release's prebuilt bundle from GitHub (checksum-verified), and falls back to
 # the last one it downloaded, then to the copy built into this image
 # (docker/fetch-release.sh). The render proxy is configured at run time
-# (docker/web/configure.sh writes /config.js), so one image works for everyone.
+# (docker/web/configure.sh adds a <meta name="winnow-config"> to index.html), so one
+# image works for everyone.
 
 # ── Build: the same `vite build` as any web deployment, with no render proxy baked in.
 # On the build machine's own platform: the output is plain files, the same for every

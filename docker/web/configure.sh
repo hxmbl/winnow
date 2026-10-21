@@ -4,8 +4,9 @@
 #   configure.sh <bundle-dir> <serve-dir> <nginx-dir>
 #
 # Copies the bundle into <serve-dir> and, there:
-#   - writes /config.js, the app's runtime configuration (`src/platform/runtimeConfig.ts`
-#     reads it before the bundle runs);
+#   - adds the app's runtime configuration to index.html's <head>, as
+#     <meta name="winnow-config" content="distribution=docker; updates=…; renderProxy=…">
+#     (read by `src/platform/runtimeConfig.ts`);
 #   - when the render proxy is on another origin, adds that origin to `connect-src` in
 #     the `<meta>` Content-Security-Policy — the one change the policy can need;
 # and writes <nginx-dir>/headers.conf (the response headers, from the bundle's own
@@ -20,8 +21,8 @@
 #   WINNOW_AUTO_UPDATE, WINNOW_VERSION        only to tell the app how it is updated
 #
 # The render proxy stays an operator decision (proxy/README.md, "Pointing Winnow at
-# it"): it comes from the container's environment into a same-origin file, never from
-# anything the app or a message can write. A value that is not a plain http(s) URL is
+# it"): it comes from the container's environment into the page the server sends,
+# never from anything the app or a message can write. A value that is not a plain http(s) URL is
 # refused and the app runs without a proxy.
 set -eu
 
@@ -98,16 +99,22 @@ updates=auto
 case ${WINNOW_AUTO_UPDATE:-true} in false | 0 | no | off) updates=image ;; esac
 [ "$updates" = auto ] && [ -n "${WINNOW_VERSION:-}" ] && updates=pinned
 
-# ── /config.js ───────────────────────────────────────────────────────────────
+# ── The runtime configuration ────────────────────────────────────────────────
 
-# Every value is one of a fixed set or matched a strict pattern above, so none can
-# close the string it is written into.
-{
-  printf '/* Written by the container on start (docker/web/configure.sh). */\n'
-  printf 'window.__WINNOW_CONFIG__ = Object.freeze({ "distribution": "docker", "updates": "%s"' "$updates"
-  [ -n "$proxy" ] && printf ', "renderProxy": "%s"' "$proxy"
-  printf ' });\n'
-} > "$serve/config.js"
+# Every value is one of a fixed set or matched a strict pattern above (no quotes, `<`,
+# `&`, `;` or `#`), so none can leave the attribute or the pair it is written into.
+content="distribution=docker; updates=$updates"
+[ -n "$proxy" ] && content="$content; renderProxy=$proxy"
+if grep -q 'name="winnow-config"' "$serve/index.html"; then
+  log "the bundle's index.html already carries a winnow-config tag; refusing to serve it"
+  exit 1
+fi
+sed "s#<head>#<head><meta name=\"winnow-config\" content=\"$content\">#" "$serve/index.html" > "$serve/index.html.tmp"
+mv "$serve/index.html.tmp" "$serve/index.html"
+if [ "$(grep -c 'name="winnow-config"' "$serve/index.html")" != 1 ]; then
+  log "could not add the runtime configuration to index.html"
+  exit 1
+fi
 
 # ── Content-Security-Policy ──────────────────────────────────────────────────
 

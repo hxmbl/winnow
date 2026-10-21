@@ -1,42 +1,57 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_RUNTIME_CONFIG,
-  RUNTIME_CONFIG_GLOBAL,
+  RUNTIME_CONFIG_META,
   normaliseProxyUrl,
   parseRuntimeConfig,
   readRuntimeConfig,
   resolveRenderProxy,
 } from "./runtimeConfig";
 
+/** A document holding one `<meta name="winnow-config">`, or none. */
+const page = (content: string | null) => ({
+  querySelector: (selector: string) =>
+    content !== null && selector === `meta[name="${RUNTIME_CONFIG_META}"]` ? { getAttribute: () => content } : null,
+});
+
 describe("runtime configuration", () => {
-  it("is empty when the page defines none, as in dev, Tauri and a plain static host", () => {
-    expect(readRuntimeConfig({})).toEqual(EMPTY_RUNTIME_CONFIG);
+  it("is empty when the page carries none, as in dev, Tauri and a plain static host", () => {
+    expect(readRuntimeConfig(page(null))).toEqual(EMPTY_RUNTIME_CONFIG);
+    expect(readRuntimeConfig(undefined)).toEqual(EMPTY_RUNTIME_CONFIG);
+    // vitest runs in Node: no document at all.
+    expect(readRuntimeConfig()).toEqual(EMPTY_RUNTIME_CONFIG);
     expect(parseRuntimeConfig(undefined)).toEqual(EMPTY_RUNTIME_CONFIG);
-    expect(parseRuntimeConfig("docker")).toEqual(EMPTY_RUNTIME_CONFIG);
-    expect(parseRuntimeConfig(null)).toEqual(EMPTY_RUNTIME_CONFIG);
+    expect(parseRuntimeConfig({ distribution: "docker" })).toEqual(EMPTY_RUNTIME_CONFIG);
   });
 
   it("reads what the Docker image writes", () => {
-    const scope = {
-      [RUNTIME_CONFIG_GLOBAL]: Object.freeze({ distribution: "docker", updates: "pinned", renderProxy: "self" }),
-    };
-    expect(readRuntimeConfig(scope)).toEqual({ distribution: "docker", updates: "pinned", renderProxy: "self" });
+    expect(readRuntimeConfig(page("distribution=docker; updates=pinned; renderProxy=self"))).toEqual({
+      distribution: "docker",
+      updates: "pinned",
+      renderProxy: "self",
+    });
+    expect(parseRuntimeConfig("distribution=docker; updates=auto; renderProxy=https://render.example:8443/x").renderProxy).toBe(
+      "https://render.example:8443/x",
+    );
   });
 
   it("keeps only values that are what they claim", () => {
-    expect(parseRuntimeConfig({ distribution: "flatpak", updates: "auto", renderProxy: 42 })).toEqual(EMPTY_RUNTIME_CONFIG);
+    expect(parseRuntimeConfig("distribution=flatpak; updates=auto")).toEqual(EMPTY_RUNTIME_CONFIG);
     // Docker without a known update mode is the default one.
-    expect(parseRuntimeConfig({ distribution: "docker", updates: "nightly" }).updates).toBe("auto");
-    expect(parseRuntimeConfig({ distribution: "docker", renderProxy: "   " }).renderProxy).toBeNull();
+    expect(parseRuntimeConfig("distribution=docker; updates=nightly").updates).toBe("auto");
+    expect(parseRuntimeConfig("distribution=docker; renderProxy=").renderProxy).toBeNull();
+    expect(parseRuntimeConfig("garbage;;=x;distribution=docker").distribution).toBe("docker");
+    // The first of a repeated key wins.
+    expect(parseRuntimeConfig("distribution=docker; updates=image; updates=auto").updates).toBe("image");
   });
 
-  it("survives a global that throws when read", () => {
-    const scope = Object.defineProperty({}, RUNTIME_CONFIG_GLOBAL, {
-      get() {
+  it("survives a document that throws when read", () => {
+    const broken = {
+      querySelector: () => {
         throw new Error("no");
       },
-    });
-    expect(readRuntimeConfig(scope)).toEqual(EMPTY_RUNTIME_CONFIG);
+    };
+    expect(readRuntimeConfig(broken)).toEqual(EMPTY_RUNTIME_CONFIG);
   });
 });
 

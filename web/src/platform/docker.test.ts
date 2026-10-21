@@ -1,7 +1,7 @@
 /**
  * The Docker image's two start-up scripts, run for real against fixtures.
  *
- * `docker/web/configure.sh` writes the runtime config and patches the CSP; these tests
+ * `docker/web/configure.sh` writes the runtime config tag and patches the CSP; these tests
  * hold its output to `contentSecurityPolicy()` and `parseRuntimeConfig()`, so the shell
  * and the TypeScript cannot drift apart.
  *
@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { contentSecurityPolicy } from "./csp";
-import { RUNTIME_CONFIG_GLOBAL, parseRuntimeConfig } from "./runtimeConfig";
+import { RUNTIME_CONFIG_META, parseRuntimeConfig } from "./runtimeConfig";
 
 const DOCKER = new URL("../../../docker/", import.meta.url).pathname;
 const CONFIGURE = join(DOCKER, "web/configure.sh");
@@ -40,13 +40,12 @@ function fakeBundle(): string {
   const meta = contentSecurityPolicy().replaceAll("'", "&#39;");
   writeFileSync(
     join(bundle, "index.html"),
-    `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${meta}"><script src="/config.js"></script></head><body></body></html>`,
+    `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="${meta}"><script src="./theme-boot.js"></script></head><body></body></html>`,
   );
   writeFileSync(
     join(bundle, "_headers"),
     `/*\n  Content-Security-Policy: ${contentSecurityPolicy({ header: true })}\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n`,
   );
-  writeFileSync(join(bundle, "config.js"), "/* empty */\n");
   writeFileSync(join(bundle, "VERSION"), "1.4.0\n");
   return bundle;
 }
@@ -60,18 +59,17 @@ function configure(env: Record<string, string>) {
     encoding: "utf8",
   });
   const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
-  const configJs = read(join(serve, "config.js"));
-  const scope: Record<string, unknown> = {};
-  if (configJs) new Function("window", configJs)(scope);
   const html = read(join(serve, "index.html"));
-  const metaPolicy = /content="([^"]*)"/.exec(html)?.[1]?.replaceAll("&#39;", "'") ?? null;
+  const tags = [...html.matchAll(new RegExp(`<meta name="${RUNTIME_CONFIG_META}" content="([^"]*)">`, "g"))];
+  const metaPolicy = /http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)?.[1]?.replaceAll("&#39;", "'") ?? null;
   const headers = read(join(nginx, "headers.conf"));
   const headerPolicy = /^add_header Content-Security-Policy "([^"]*)" always;$/m.exec(headers)?.[1] ?? null;
   return {
     status: result.status,
     stderr: result.stderr,
-    config: parseRuntimeConfig(scope[RUNTIME_CONFIG_GLOBAL]),
-    raw: scope[RUNTIME_CONFIG_GLOBAL],
+    config: parseRuntimeConfig(tags[0]?.[1]),
+    tags: tags.length,
+    html,
     metaPolicy,
     headerPolicy,
     headers,
@@ -85,7 +83,9 @@ describe("docker/web/configure.sh", () => {
     const out = configure({});
     expect(out.status).toBe(0);
     expect(out.config).toEqual({ distribution: "docker", updates: "auto", renderProxy: null });
-    expect(Object.isFrozen(out.raw)).toBe(true);
+    expect(out.tags).toBe(1);
+    // First thing in <head>, before anything that could read it.
+    expect(out.html).toMatch(/^<!doctype html><html lang="en"><head><meta name="winnow-config" /);
     expect(out.metaPolicy).toBe(contentSecurityPolicy());
     expect(out.headerPolicy).toBe(contentSecurityPolicy({ header: true }));
     expect(out.headers).toMatch(/^add_header Referrer-Policy "no-referrer" always;$/m);
@@ -124,6 +124,14 @@ describe("docker/web/configure.sh", () => {
     const upstream = configure({ WINNOW_PROXY_UPSTREAM: "http://proxy:8787; evil" });
     expect(upstream.proxyConf).toBe("");
     expect(upstream.config.renderProxy).toBeNull();
+  });
+
+  it("refuses a bundle whose index.html already carries a runtime config tag", () => {
+    const bundle = fakeBundle();
+    const html = readFileSync(join(bundle, "index.html"), "utf8");
+    writeFileSync(join(bundle, "index.html"), html.replace("<head>", '<head><meta name="winnow-config" content="renderProxy=https://evil.example">'));
+    const result = spawnSync("sh", [CONFIGURE, bundle, join(dir, "www2"), join(dir, "nginx2")], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
   });
 
   it("tells the app how this container updates", () => {

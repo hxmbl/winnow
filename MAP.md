@@ -28,7 +28,6 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
   index.html        Vite entry. Loads /src/main.tsx and /theme-boot.js.
   public/
     theme-boot.js   Sets data-theme before React exists, so the first paint is the right colour.
-    config.js       Runtime configuration: empty here; the Docker image rewrites it on start.
     favicon.*       The tab icon: favicon.svg follows the OS scheme itself; .ico/.png for Safari.
     relayLight.svg  The original paper-plane artwork the icons are drawn from.
     demo-avatars/   Seven SVGs for the seeded demo mailbox. No network, no Gravatar.
@@ -107,7 +106,7 @@ Four honest exceptions, all deliberate:
 | --- | --- |
 | `core/session/*` takes a `Platform` as a constructor argument | The session is the seam: it is handed the host's implementation and cannot ask what host it is on. These imports are `import type` and erase at compile time. |
 | `core/session/errors.ts` imports `isTauri()` from `platform` | One runtime import, and it is a pure predicate over `window.__TAURI_INTERNALS__`. It exists so an OAuth failure message can say "wrong client type for this build" instead of something generic. |
-| `core/mail/proxy.ts` imports `platform/runtimeConfig.ts` | One runtime import of a pure module: it parses `window.__WINNOW_CONFIG__` (the Docker image's `/config.js`) and has no host behind it. Where the render proxy is belongs to the deployment, which is the platform layer's business. |
+| `core/mail/proxy.ts` imports `platform/runtimeConfig.ts` | One runtime import of a pure module: it parses the Docker image's `<meta name="winnow-config">` and has no host behind it. Where the render proxy is belongs to the deployment, which is the platform layer's business. |
 | `proxy/` imports `core/mail/sanitize.ts` | The proxy is a separate deployable that must produce byte-identical sanitising to the app. Sharing the sanitiser is the point; it is why the proxy's imports are the only ones that leave `web/`. |
 
 Two of the three rules are one grep each:
@@ -636,9 +635,10 @@ Supporting files:
   focused, and fires at once on focus regain, tab-visible and `online`. There is
   no server to push from, and an empty incremental sync costs 2 quota units. The
   same code runs in both hosts because a Tauri webview fires the same DOM events.
-- `runtimeConfig.ts` — what a deployment tells the app at run time: `public/config.js`
-  defines `window.__WINNOW_CONFIG__` before the bundle (empty in the repository, so dev,
-  static hosts and Tauri fall back to the build). The Docker image writes it on start:
+- `runtimeConfig.ts` — what a deployment tells the app at run time: a
+  `<meta name="winnow-config" content="key=value; …">` in `index.html` (absent in the
+  repository, so dev, static hosts and Tauri fall back to the build; a tag, not a script,
+  so no inline script and no extra request). The Docker image writes it on start:
   `distribution: "docker"`, `updates` (`auto` | `pinned` | `image`) and `renderProxy`
   (`self` or a URL). `resolveRenderProxy` takes the runtime value first, then
   `VITE_RENDER_PROXY`; `web.ts`'s `updateRuntime` reports the `docker` update channel
@@ -975,10 +975,11 @@ docker/bundle.sh          The one file list: web/dist, or proxy/*.ts + the sanit
                           and what it imports, plus VERSION. The Dockerfiles bake it;
                           release.yml's web-bundle job tars it as the release assets.
 docker/web/configure.sh   Copies the chosen bundle to /tmp/winnow/www, writes
-                          /config.js, adds a cross-origin proxy to connect-src (meta and
+                          the winnow-config tag into index.html, adds a cross-origin
+                          proxy to connect-src (meta and
                           header), and writes nginx's headers.conf and proxy.conf.
 docker/web/nginx.conf     SPA fallback; /assets/ immutable, index.html no-cache,
-                          config.js no-store; a deep link's relative files map to the
+                          a deep link's relative files map to the
                           top-level ones; /render and /asset/ forwarded to
                           WINNOW_PROXY_UPSTREAM with a same-host Origin dropped.
 ```
@@ -1089,7 +1090,7 @@ out and nothing else would have caught it:
 
 ## 12. Environment and named constants
 
-The environment surface is a handful of variables, one build-time constant, and its run-time counterpart for Docker (`/config.js`). Every
+The environment surface is a handful of variables, one build-time constant, and its run-time counterpart for Docker (the `winnow-config` meta tag). Every
 numeric constant worth knowing is quoted in the section that owns it: quota and
 retry in §5.5, sanitiser limits in §5.8, sync caps in §5.5, proxy limits in §9.
 
@@ -1099,7 +1100,7 @@ retry in §5.5, sanitiser limits in §5.8, sync caps in §5.5, proxy limits in �
 | `__WINNOW_LOOPBACK_PORT__` | both hosts | Placeholder the web layer writes and Rust substitutes with a real ephemeral port. `oauth.rs` refuses a URL without it. |
 | `PORT`, `HOST`, `ALLOWED_ORIGINS` | proxy runtime | Bind address and the exact-origin CORS allow list. |
 | `WINNOW_AUTO_UPDATE`, `WINNOW_VERSION`, `WINNOW_REPO`, `WINNOW_DATA` | Docker containers | Fetch the newest release on start (default) or not, pin one, a fork's releases, where downloads are kept. |
-| `WINNOW_PROXY_UPSTREAM`, `WINNOW_RENDER_PROXY` | web container | Forward `/render` and `/asset/` to a proxy container (the app then uses `self`), or name a proxy elsewhere; written to `/config.js`. |
+| `WINNOW_PROXY_UPSTREAM`, `WINNOW_RENDER_PROXY` | web container | Forward `/render` and `/asset/` to a proxy container (the app then uses `self`), or name a proxy elsewhere; written into `index.html`'s `winnow-config` tag. |
 | `WINNOW_PORT`, `WINNOW_URL`, `WINNOW_CHROMIUM`, `WINNOW_SMOKE_ONLY` | smoke | Point the suite at another port, an existing server, or a system browser; `offline` runs only the offline/undo-send checks. |
 | `WINNOW_SWEEP_OUT`, `WINNOW_SWEEP_PHASE`, `WINNOW_SWEEP_MODES`, `WINNOW_SWEEP_DEVICES`, `WINNOW_SWEEP_JOBS` | sweep | Output directory, capture or sheets only, a subset of modes (or `extras`) and devices, parallel contexts. `WINNOW_PORT` (4573) and `WINNOW_CHROMIUM` apply too. |
 

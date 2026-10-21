@@ -1,24 +1,26 @@
 /**
  * Configuration a deployment gives the app at run time, rather than at build time.
  *
- * `public/config.js` is loaded by `index.html` before the bundle. In this repository
- * it defines nothing, so `vite dev`, a plain static deployment and the Tauri builds
- * behave exactly as before: every value falls back to the build. The Docker image
- * replaces that file on every start (`docker/web/configure.sh`) with
+ * The repository's `index.html` carries none, so `vite dev`, a plain static deployment
+ * and the Tauri builds behave exactly as before: every value falls back to the build.
+ * The Docker image adds one tag to the `<head>` of the `index.html` it serves, on every
+ * start (`docker/web/configure.sh`):
  *
- *     window.__WINNOW_CONFIG__ = Object.freeze({ distribution: "docker", updates: "auto", renderProxy: "self" })
+ *     <meta name="winnow-config" content="distribution=docker; updates=auto; renderProxy=self">
  *
  * which is how one published image serves every operator, with or without a render
- * proxy.
+ * proxy. A tag rather than a script: the CSP forbids inline script, and a separate
+ * script file would add a blocking request to every page load.
  *
- * It is still an operator's decision and not a setting (`core/mail/proxy.ts`): the
- * file comes from the server's own origin, written from the container's environment;
- * nothing in the app, and nothing a message can do, writes it. Anything that is not
- * exactly the expected shape is ignored, value by value.
+ * It is still an operator's decision and not a setting (`core/mail/proxy.ts`): the tag
+ * is in the document the server sends, written from the container's environment;
+ * nothing in the app writes it, and a message is rendered in a sandboxed frame of its
+ * own and cannot reach it. Anything that is not exactly the expected shape is ignored,
+ * value by value.
  */
 
-/** The global `config.js` defines. */
-export const RUNTIME_CONFIG_GLOBAL = "__WINNOW_CONFIG__";
+/** The `<meta name>` the Docker image writes. */
+export const RUNTIME_CONFIG_META = "winnow-config";
 
 /**
  * How a Docker deployment updates (`docker/web/configure.sh`):
@@ -44,26 +46,33 @@ export type RuntimeConfig = {
 
 export const EMPTY_RUNTIME_CONFIG: RuntimeConfig = { distribution: null, updates: null, renderProxy: null };
 
-/** Tolerant: whatever is on the global, keep only the values that are what they claim. */
+/**
+ * Tolerant: `key=value` pairs separated by `;`. Unknown keys are ignored, the first of
+ * a repeated key wins, and a value that is not what it claims is dropped.
+ */
 export function parseRuntimeConfig(raw: unknown): RuntimeConfig {
-  if (raw === null || typeof raw !== "object") return { ...EMPTY_RUNTIME_CONFIG };
-  const value = raw as Record<string, unknown>;
-  const distribution = value.distribution === "docker" ? "docker" : null;
-  const updates =
-    distribution && (value.updates === "auto" || value.updates === "pinned" || value.updates === "image")
-      ? value.updates
-      : distribution
-        ? "auto"
-        : null;
-  const renderProxy =
-    typeof value.renderProxy === "string" && value.renderProxy.trim() !== "" ? value.renderProxy.trim() : null;
+  if (typeof raw !== "string" || raw.trim() === "") return { ...EMPTY_RUNTIME_CONFIG };
+  const values = new Map<string, string>();
+  for (const part of raw.split(";")) {
+    const at = part.indexOf("=");
+    if (at <= 0) continue;
+    const key = part.slice(0, at).trim();
+    if (!values.has(key)) values.set(key, part.slice(at + 1).trim());
+  }
+  const distribution = values.get("distribution") === "docker" ? "docker" : null;
+  const wanted = values.get("updates");
+  const updates = !distribution ? null : wanted === "auto" || wanted === "pinned" || wanted === "image" ? wanted : "auto";
+  const proxy = values.get("renderProxy");
+  const renderProxy = proxy !== undefined && proxy !== "" ? proxy : null;
   return { distribution, updates, renderProxy };
 }
 
-/** The runtime configuration this page was given; empty when there is none. */
-export function readRuntimeConfig(scope: object = globalThis): RuntimeConfig {
+type MetaSource = { querySelector(selector: string): { getAttribute(name: string): string | null } | null };
+
+/** The runtime configuration this page was given; empty when there is none (or no DOM). */
+export function readRuntimeConfig(doc: MetaSource | undefined = globalThis.document): RuntimeConfig {
   try {
-    return parseRuntimeConfig((scope as Record<string, unknown>)[RUNTIME_CONFIG_GLOBAL]);
+    return parseRuntimeConfig(doc?.querySelector(`meta[name="${RUNTIME_CONFIG_META}"]`)?.getAttribute("content"));
   } catch {
     return { ...EMPTY_RUNTIME_CONFIG };
   }
