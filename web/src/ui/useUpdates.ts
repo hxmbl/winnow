@@ -226,7 +226,7 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
     setState((current) => dismiss(current, offer.version));
     const openPage = () => void platform.openExternal(offer.pageUrl).catch(() => undefined);
     const action = offer.action;
-    if (action.kind === "git-pull") return;
+    if (action.kind === "git-pull" || action.kind === "docker") return;
     if (action.kind === "page" || !platform.installUpdate) {
       openPage();
       return;

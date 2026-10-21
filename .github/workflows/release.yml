@@ -109,8 +109,10 @@ jobs:
           | macOS | `.dmg`, universal (Apple silicon and Intel) |
           | Android | `_android-universal.apk` (any phone, Android 7+), when the Android build succeeded |
 
-          There is no Windows build. On Windows, run the web app instead: build `web/`
-          and host it yourself (Railway works); see the README.
+          There is no Windows build. On Windows, run the web app instead: with Docker
+          (`docker compose up -d`, image `ghcr.io/hxmbl/winnow`), or build `web/` and
+          host it yourself (Railway works); see the README. A Docker container fetches
+          the newest release each time it starts, so restarting it is the update.
 
           These builds are **not code-signed**. On macOS, right-click the app and choose
           **Open** the first time, or run `xattr -dr com.apple.quarantine /Applications/Winnow.app`.
@@ -311,6 +313,94 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$TAG" "$RUNNER_TEMP"/bundles/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  # The prebuilt web app and render proxy the Docker images fetch on every start
+  # (docker/fetch-release.sh): `winnow-web-<version>.tar.gz` and
+  # `winnow-proxy-<version>.tar.gz`, each with a `.sha256` the container checks before
+  # it unpacks anything. The layout is docker/bundle.sh's, the same one the images bake
+  # in. The web build has no VITE_RENDER_PROXY: a container names its proxy at run time.
+  web-bundle:
+    name: Build (web and proxy bundles)
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build the web bundle
+        working-directory: web
+        env:
+          VITE_RENDER_PROXY: ""
+        run: npx vite build --logLevel warn
+
+      - name: Package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/docker-bundles"
+          mkdir -p "$OUT"
+          for KIND in web proxy; do
+            sh docker/bundle.sh "$KIND" . "$RUNNER_TEMP/$KIND"
+            test "$(cat "$RUNNER_TEMP/$KIND/VERSION")" = "$VERSION"
+            NAME="winnow-${KIND}-${VERSION}.tar.gz"
+            # Plain files, root-owned, stable order: what fetch-release.sh accepts.
+            tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$OUT/$NAME" -C "$RUNNER_TEMP/$KIND" .
+            (cd "$OUT" && sha256sum "$NAME" > "$NAME.sha256")
+          done
+          ls -la "$OUT"
+          cat "$OUT"/*.sha256
+
+      # The proxy bundle must run as shipped: start it from the archive and ask /health.
+      # A new import in the sanitiser that bundle.sh does not copy fails here.
+      - name: Start the bundled proxy
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          DIR="$RUNNER_TEMP/proxy-check"
+          mkdir -p "$DIR"
+          tar -xzf "$RUNNER_TEMP/docker-bundles/winnow-proxy-${VERSION}.tar.gz" -C "$DIR"
+          cd "$DIR/proxy"
+          PORT=8799 node --experimental-strip-types server.ts > "$RUNNER_TEMP/proxy.log" 2>&1 &
+          PID=$!
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8799/health; then kill "$PID"; exit 0; fi
+            sleep 0.5
+          done
+          cat "$RUNNER_TEMP/proxy.log"
+          exit 1
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winnow-${{ needs.prepare.outputs.version }}-docker-bundles
+          path: ${{ runner.temp }}/docker-bundles
+          if-no-files-found: error
+
+      - name: Attach to draft release
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/docker-bundles/* --clobber --repo "$GITHUB_REPOSITORY"
 
   # Android is its own job rather than a matrix row: it needs Java, the SDK and NDK,
   # four Rust targets and a different CLI subcommand, and none of the desktop steps.
@@ -597,12 +687,14 @@ jobs:
   # the draft for a look, rather than shipping a release without Android.
   publish:
     name: Publish release
-    needs: [prepare, build, android, updater-manifest]
+    needs: [prepare, build, web-bundle, android, updater-manifest]
     if: ${{ !cancelled() && needs.prepare.outputs.publish == 'true' && inputs.publish }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
+      # Dispatching docker.yml once the release is live.
+      actions: write
     steps:
       - name: Checkout code
         if: needs.prepare.outputs.updater == 'true'
@@ -658,6 +750,12 @@ jobs:
             NAME="Winnow_${VERSION}_${SUFFIX}"
             printf '%s\n' "$ASSETS" | grep -qxF "$NAME" || MISSING="$MISSING $NAME"
           done
+          # What Docker containers fetch on start: without them a restart cannot update.
+          for NAME in "winnow-web-${VERSION}.tar.gz" "winnow-proxy-${VERSION}.tar.gz"; do
+            for FILE in "$NAME" "$NAME.sha256"; do
+              printf '%s\n' "$ASSETS" | grep -qxF "$FILE" || MISSING="$MISSING $FILE"
+            done
+          done
           if [ -n "$MISSING" ]; then
             echo "::error::Not publishing: missing$MISSING. The draft is left for you to finish or publish by hand."
             exit 1
@@ -682,3 +780,12 @@ jobs:
           URL="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
           echo "Published $URL"
           echo "Published [Winnow $TAG]($URL)." >> "$GITHUB_STEP_SUMMARY"
+
+      # The images on ghcr.io. A release published with GITHUB_TOKEN fires no
+      # `release` event, so docker.yml is started by hand (one published in the UI
+      # starts it itself).
+      - name: Build the Docker images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" -f tag="$TAG"

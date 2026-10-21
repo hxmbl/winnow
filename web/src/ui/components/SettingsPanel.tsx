@@ -50,7 +50,7 @@ import { ACCOUNT_COLOR_LABEL, ACCOUNTS_FULL, ADD_ACCOUNT_HELP, accountColorHex }
 import { AccountDot } from "./AccountSwitcher";
 import type { ThemeName } from "../theme";
 import type { UpdatesController } from "../useUpdates";
-import { GIT_PULL_COMMAND } from "../../core/updates/updates";
+import { operatorUpdate } from "../../core/updates/updates";
 
 /** Under a remote-picture switch that is on but paused by Remote images = Never. */
 const REMOTE_PAUSED_HINT = "Paused: Remote images is set to Never";
@@ -806,7 +806,8 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
 
 /**
  * About › Updates: the automatic-check switch, then what the last check found and the
- * one thing to do about it (Check now, Update, or the git pull for a web copy).
+ * one thing to do about it (Check now, Update, or what the operator runs: the git pull
+ * for a web copy, a restart for the Docker image).
  */
 function UpdateSettings({ updates }: { updates: UpdatesController }) {
   const { offer, status } = updates;
@@ -818,8 +819,9 @@ function UpdateSettings({ updates }: { updates: UpdatesController }) {
       : status === "current"
         ? "You're up to date."
         : null;
+  const operator = offer ? operatorUpdate(offer) : null;
   const button =
-    offer && offer.action.kind !== "git-pull"
+    offer && !operator
       ? { label: offer.action.kind === "page" ? "Download" : "Update", onClick: updates.install }
       : { label: "Check now", onClick: updates.checkNow };
   return (
@@ -828,11 +830,11 @@ function UpdateSettings({ updates }: { updates: UpdatesController }) {
         <Toggle checked={updates.auto} onChange={updates.setAuto} label="Check for updates automatically" />
       </Row>
       <div data-settings-updates={offer ? offer.action.kind : status} className="flex flex-col gap-2 pb-1">
-        {offer?.action.kind === "git-pull" && (
+        {operator && (
           <p className="text-meta text-ink-muted">
-            This copy runs from your own deployment. To update it, run{" "}
-            <code className="selectable rounded-ctl bg-surface-sunken px-1 py-0.5 font-mono text-ink-body">{GIT_PULL_COMMAND}</code>{" "}
-            in your clone, then redeploy.
+            {operator.before}{" "}
+            <code className="selectable rounded-ctl bg-surface-sunken px-1 py-0.5 font-mono text-ink-body">{operator.command}</code>
+            {operator.after && ` ${operator.after}`}
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">

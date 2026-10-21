@@ -52,6 +52,9 @@ native/src-tauri/   Tauri v2 shell. Rust. Native bits only. README.md there expl
                    the IPC naming rule, the loopback port and why the build is a
                    script.
 proxy/              Optional render proxy. Separate Node service, see §9 and its README.
+                   proxy/Dockerfile is its image.
+docker/             The Docker images' start-up scripts, see §9a. Dockerfile (web image),
+                   docker-compose.yml and docker-compose.proxy.yml are at the root.
 docs/               google-setup.md — the step-by-step for a BYO OAuth client.
 ```
 
@@ -97,12 +100,13 @@ Three consequences, and each is load-bearing:
   quietly passing because a jsdom shim answered it.
 - **`core/` never imports Tauri.** Tauri appears only in `platform/desktop.ts`.
 
-Three honest exceptions, all deliberate:
+Four honest exceptions, all deliberate:
 
 | Exception | Why |
 | --- | --- |
 | `core/session/*` takes a `Platform` as a constructor argument | The session is the seam: it is handed the host's implementation and cannot ask what host it is on. These imports are `import type` and erase at compile time. |
 | `core/session/errors.ts` imports `isTauri()` from `platform` | One runtime import, and it is a pure predicate over `window.__TAURI_INTERNALS__`. It exists so an OAuth failure message can say "wrong client type for this build" instead of something generic. |
+| `core/mail/proxy.ts` imports `platform/runtimeConfig.ts` | One runtime import of a pure module: it parses the Docker image's `<meta name="winnow-config">` and has no host behind it. Where the render proxy is belongs to the deployment, which is the platform layer's business. |
 | `proxy/` imports `core/mail/sanitize.ts` | The proxy is a separate deployable that must produce byte-identical sanitising to the app. Sharing the sanitiser is the point; it is why the proxy's imports are the only ones that leave `web/`. |
 
 Two of the three rules are one grep each:
@@ -631,6 +635,14 @@ Supporting files:
   focused, and fires at once on focus regain, tab-visible and `online`. There is
   no server to push from, and an empty incremental sync costs 2 quota units. The
   same code runs in both hosts because a Tauri webview fires the same DOM events.
+- `runtimeConfig.ts` — what a deployment tells the app at run time: a
+  `<meta name="winnow-config" content="key=value; …">` in `index.html` (absent in the
+  repository, so dev, static hosts and Tauri fall back to the build; a tag, not a script,
+  so no inline script and no extra request). The Docker image writes it on start:
+  `distribution: "docker"`, `updates` (`auto` | `pinned` | `image`) and `renderProxy`
+  (`self` or a URL). `resolveRenderProxy` takes the runtime value first, then
+  `VITE_RENDER_PROXY`; `web.ts`'s `updateRuntime` reports the `docker` update channel
+  from it. `docker.test.ts` runs the image's scripts against `csp.ts` and this parser.
 - `web.ts` adds `readRedirectFromLocation()` and `pendingSignInState()`;
   `desktop.ts` adds `onDeepLink()`, `onTrayAction()`, and Android's `onBackButton()` /
   `exitApp()`.
@@ -914,7 +926,7 @@ the activity is recreated, the Undo window, D-Bus servers that draw no buttons, 
 
 ## 9. `proxy/` — the optional render proxy
 
-Off unless built with `VITE_RENDER_PROXY`. It fetches a message's images and
+Off unless built with `VITE_RENDER_PROXY` or named by a Docker deployment (§9a). It fetches a message's images and
 returns a self-contained document, so reading a newsletter does not tell the
 sender where you are. `proxy/README.md` is the argument; this is the map.
 
@@ -940,6 +952,43 @@ own origin. Blocked ranges cover RFC 1918, CGNAT, loopback, link-local including
 `169.254.169.254`, and the documentation and benchmarking blocks, in both
 families — plus IPv4-mapped, NAT64 and 6to4 forms, where the *wrapped* address is
 judged as IPv4.
+
+---
+
+## 9a. Docker (`Dockerfile`, `proxy/Dockerfile`, `docker/`)
+
+Two images, `ghcr.io/hxmbl/winnow` (nginx-unprivileged, port 8080) and
+`ghcr.io/hxmbl/winnow-proxy` (node:24-alpine, port 8787), both non-root, both able to
+run with a read-only root and no capabilities (`docker-compose.yml`). Restarting a
+container is its update:
+
+```
+docker/fetch-release.sh   On start: releases/latest (or WINNOW_VERSION) → if not the
+                          baked or a cached version, download winnow-<kind>-<v>.tar.gz
+                          and .sha256, check both the sum and GitHub's asset digest,
+                          refuse links and `..` in the archive, unpack to
+                          /var/lib/winnow/<kind>/<tag>. https only, redirects followed
+                          by hand, hosts github.com / api.github.com / GitHub's asset
+                          hosts only. Any failure: last download, else the baked copy
+                          (whichever is newer). WINNOW_AUTO_UPDATE=false: baked only.
+docker/bundle.sh          The one file list: web/dist, or proxy/*.ts + the sanitiser
+                          and what it imports, plus VERSION. The Dockerfiles bake it;
+                          release.yml's web-bundle job tars it as the release assets.
+docker/web/configure.sh   Copies the chosen bundle to /tmp/winnow/www, writes
+                          the winnow-config tag into index.html, adds a cross-origin
+                          proxy to connect-src (meta and
+                          header), and writes nginx's headers.conf and proxy.conf.
+docker/web/nginx.conf     SPA fallback; /assets/ immutable, index.html no-cache,
+                          a deep link's relative files map to the
+                          top-level ones; /render and /asset/ forwarded to
+                          WINNOW_PROXY_UPSTREAM with a same-host Origin dropped.
+```
+
+`.github/workflows/docker.yml` builds both on PRs that touch these files (a smoke run
+of the containers, then amd64+arm64 without pushing) and pushes `vX.Y.Z`, `X.Y` and
+`latest` when release.yml dispatches it after publishing (or a release is published by
+hand). Release publishing requires the four `winnow-{web,proxy}-<v>.tar.gz{,.sha256}`
+assets.
 
 ---
 
@@ -1041,7 +1090,7 @@ out and nothing else would have caught it:
 
 ## 12. Environment and named constants
 
-The environment surface is a handful of variables and one build-time constant. Every
+The environment surface is a handful of variables, one build-time constant, and its run-time counterpart for Docker (the `winnow-config` meta tag). Every
 numeric constant worth knowing is quoted in the section that owns it: quota and
 retry in §5.5, sanitiser limits in §5.8, sync caps in §5.5, proxy limits in §9.
 
@@ -1050,6 +1099,8 @@ retry in §5.5, sanitiser limits in §5.8, sync caps in §5.5, proxy limits in �
 | `VITE_RENDER_PROXY` | build time | Turns on the Proxied view and its client. http/https only, read once. |
 | `__WINNOW_LOOPBACK_PORT__` | both hosts | Placeholder the web layer writes and Rust substitutes with a real ephemeral port. `oauth.rs` refuses a URL without it. |
 | `PORT`, `HOST`, `ALLOWED_ORIGINS` | proxy runtime | Bind address and the exact-origin CORS allow list. |
+| `WINNOW_AUTO_UPDATE`, `WINNOW_VERSION`, `WINNOW_REPO`, `WINNOW_DATA` | Docker containers | Fetch the newest release on start (default) or not, pin one, a fork's releases, where downloads are kept. |
+| `WINNOW_PROXY_UPSTREAM`, `WINNOW_RENDER_PROXY` | web container | Forward `/render` and `/asset/` to a proxy container (the app then uses `self`), or name a proxy elsewhere; written into `index.html`'s `winnow-config` tag. |
 | `WINNOW_PORT`, `WINNOW_URL`, `WINNOW_CHROMIUM`, `WINNOW_SMOKE_ONLY` | smoke | Point the suite at another port, an existing server, or a system browser; `offline` runs only the offline/undo-send checks. |
 | `WINNOW_SWEEP_OUT`, `WINNOW_SWEEP_PHASE`, `WINNOW_SWEEP_MODES`, `WINNOW_SWEEP_DEVICES`, `WINNOW_SWEEP_JOBS` | sweep | Output directory, capture or sheets only, a subset of modes (or `extras`) and devices, parallel contexts. `WINNOW_PORT` (4573) and `WINNOW_CHROMIUM` apply too. |
 

@@ -50,9 +50,12 @@ tag's workflow run as artifacts.
   xattr -dr com.apple.quarantine /Applications/Winnow.app
   ```
 - **Windows** has no build. Winnow's desktop app is macOS and Linux only; on
-  Windows, run the web app: `cd web && npm install && npm run build`, then serve
-  `web/dist` from any static host (Railway works) and use a **Web application**
-  OAuth client (see Gmail setup).
+  Windows, run the web app. The easy way is Docker Desktop: `docker compose up -d`
+  in a clone of this repository, then open http://localhost:8080 (see
+  [Self-hosting with Docker](#self-hosting-with-docker)). Or build it yourself:
+  `cd web && npm install && npm run build`, then serve `web/dist` from any static
+  host (Railway works). Either way, use a **Web application** OAuth client (see
+  Gmail setup).
 - **Linux** doesn't care. The AppImage needs FUSE 2 (`libfuse2`) on some
   distros; the `.deb` doesn't.
 
@@ -67,6 +70,7 @@ release notes of every version since yours. How it updates depends on how it run
 | macOS app, Linux AppImage | Downloads the signed update, replaces itself and restarts |
 | Linux `.deb` | Downloads the new `.deb` to Downloads and opens your package installer (or `sudo apt install ./Winnow_…deb`) |
 | Android | Downloads the new APK and opens Android's installer (allow "Install unknown apps" for Winnow once) |
+| Web app in Docker | Tells you to restart the container (`docker compose restart`): each start fetches the newest release |
 | Web app you host | Tells you to update it: `git pull && npm --prefix web ci && npm --prefix web run build`, then redeploy |
 
 Turn the automatic check off in **Settings → About**; **Check now** is there too.
@@ -213,6 +217,62 @@ file lists them, copy it from there. On macOS the `.dmg` needs
 the build is a script and not a bare `cargo tauri build`. [MAP.md](MAP.md) is an
 annotated map of the tree, if you're here to read the code rather than run it.
 
+## Self-hosting with Docker
+
+The web app as a container, for Windows or for a server of your own. Docker Desktop
+or any Docker with Compose:
+
+```sh
+git clone https://github.com/hxmbl/winnow && cd winnow
+docker compose up -d           # http://localhost:8080
+```
+
+The image is `ghcr.io/hxmbl/winnow` (amd64 and arm64): nginx as an unprivileged
+user, a read-only root, and the app's Content-Security-Policy sent as a header.
+`docker compose up -d --build` builds it from your checkout instead.
+
+**Updating is restarting.** Each time the container starts it asks GitHub for the
+newest release, downloads that release's prebuilt `winnow-web-<version>.tar.gz`,
+checks it against the release's `.sha256` (and GitHub's own digest), and serves it.
+So when Winnow says a new version is out:
+
+```sh
+docker compose restart         # or stop and start it, from Docker Desktop too
+```
+
+If GitHub can't be reached or a download fails its check, it serves the copy it
+downloaded last time, and failing that the one in the image; it never serves
+anything unverified. It only ever talks to github.com and GitHub's download hosts,
+over https. The downloads live in the `winnow-data` volume. In `docker-compose.yml`:
+
+| Setting | Effect |
+| --- | --- |
+| `WINNOW_VERSION: "v1.5.0"` | Run that release instead of the newest |
+| `WINNOW_AUTO_UPDATE: "false"` | Never contact GitHub; run the image's copy (update with `docker compose pull && docker compose up -d`) |
+
+There's no update script and nothing else to run: `git pull` only matters if you
+build from source.
+
+**Gmail** needs a **Web application** OAuth client with this deployment's address as
+the redirect URI and JavaScript origin (the setup sheet shows both). Google allows
+plain `http` only for `localhost`, so anywhere else put it behind https (a reverse
+proxy such as Caddy or Traefik, or your host's TLS).
+
+**The render proxy** (see [below](#the-render-proxy)) is a second container:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d
+```
+
+Put `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` in a `.env` beside
+them so plain `docker compose restart` includes it. The proxy is not published on
+the host; the web container forwards `/render` and `/asset/` to it, so it's
+same-origin with the app and needs no CORS setting. It updates the same way
+(`winnow-proxy-<version>.tar.gz`, image `ghcr.io/hxmbl/winnow-proxy`). To use a
+proxy you run elsewhere instead, set `WINNOW_RENDER_PROXY: "https://render.example"`
+on the web container; its origin is added to the policy's `connect-src`, and the
+proxy needs `ALLOWED_ORIGINS` set to the app's origin.
+
 ## Gmail setup
 
 Bring your own client. Winnow ships none, so there is nothing to put in
@@ -330,6 +390,9 @@ to gets judged, including the IPv6 ways of spelling a blocked IPv4 address.
 cd web && npm run proxy          # http://127.0.0.1:8787
 VITE_RENDER_PROXY=http://127.0.0.1:8787 npm run build
 ```
+
+In Docker the proxy is named at run time instead, so the published image works with
+or without one: see [Self-hosting with Docker](#self-hosting-with-docker).
 
 ## Privacy
 

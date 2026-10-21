@@ -6,28 +6,25 @@
  * Without one, remote images are withheld until the reader allows them
  * (`core/mail/imageConsent`).
  *
- * `VITE_RENDER_PROXY` is a build-time constant, not a setting: pointing the app at
- * an arbitrary URL that fetches mail and returns markup would be a
- * remote-code-administration hole. It is a deployment choice, so it is not a
- * `platform/types.ts` capability flag.
+ * Where the proxy is, is a deployment choice, not a setting: pointing the app at an
+ * arbitrary URL that fetches mail and returns markup would be a
+ * remote-code-administration hole. It comes from the deployment's runtime
+ * configuration (`platform/runtimeConfig.ts`: the `<meta name="winnow-config">` the
+ * Docker image writes into its `index.html` from the container's environment) and
+ * otherwise from the
+ * build-time `VITE_RENDER_PROXY`, so it is not a `platform/types.ts` capability flag.
+ * (`runtimeConfig` is a pure module with no host behind it, which is why `core/` may
+ * import it.)
  */
 
-/** Where the render proxy lives, or `null` when this build has none. */
-export const renderProxyUrl: string | null = readProxyUrl();
+import { pageOrigin, readRuntimeConfig, resolveRenderProxy } from "../../platform/runtimeConfig";
 
-function readProxyUrl(): string | null {
-  const configured = import.meta.env?.VITE_RENDER_PROXY;
-  if (typeof configured !== "string" || configured.trim() === "") return null;
-  try {
-    const url = new URL(configured);
-    // Only http(s); anything else is a `file:` or data URL.
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.origin + url.pathname.replace(/\/$/, "")
-      : null;
-  } catch {
-    return null;
-  }
-}
+/** Where the render proxy lives, or `null` when this deployment has none. */
+export const renderProxyUrl: string | null = resolveRenderProxy(
+  readRuntimeConfig().renderProxy,
+  import.meta.env?.VITE_RENDER_PROXY,
+  pageOrigin(),
+);
 
 export type ProxiedRender = {
   /** The document the proxy built. A complete, standalone page. */

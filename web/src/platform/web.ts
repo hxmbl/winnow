@@ -16,6 +16,7 @@ import {
   type SignInRequest,
   type SignInResult,
 } from "./types";
+import { readRuntimeConfig } from "./runtimeConfig";
 
 const PENDING_STATE_KEY = "winnow.pendingState";
 /**
@@ -85,9 +86,14 @@ export const webPlatform: WebPlatform = {
     return WEB_INFO;
   },
 
-  // A self-hosted build: whoever deployed it updates it (`git pull`), so there is no
+  // A self-hosted build: whoever deployed it updates it (`git pull`, or restarting the
+  // Docker container, which fetches the newest release on start), so there is no
   // `installUpdate` here.
   async updateRuntime() {
+    const runtime = readRuntimeConfig();
+    if (runtime.distribution === "docker") {
+      return { channel: "docker", version: WEB_INFO.version, arch: "unknown", docker: runtime.updates ?? "auto" };
+    }
     return { channel: "web", version: WEB_INFO.version, arch: "unknown" };
   },
 
