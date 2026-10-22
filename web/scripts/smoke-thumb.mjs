@@ -19,8 +19,24 @@
  *   7. Desktop Settings → Keyboard shortcuts reads as a table (description beside its
  *      key), and "Hidden & muted senders" fits on one line in the category column.
  *
+ *   8. STRM-317: on a phone, with a sync running and the menu panel open, the account
+ *      row and the account menu it opens ("Syncing…", Switch account…, Sign out) are on
+ *      screen, hit-testable across their width, clear of the dock and of the status pill,
+ *      and Switch account… opens the account switcher.
+ *
+ *   9. STRM-318: a fluid newsletter with wide fixed padding (`fixtures/arc-sunset.html`,
+ *      modelled on The Browser Company's "We've decided to sunset Arc" mail) is zoomed to
+ *      fit on a phone: the card spans the screen, the headline keeps whole words in a few
+ *      lines across most of the width, and the end of the mail clears the dock, in light,
+ *      dark and dark with "Show original colours".
+ *
  * Own module, so it runs alone too: `WINNOW_SMOKE_ONLY=thumb npm run smoke`.
  */
+
+import { readFileSync } from "node:fs";
+import { signedInContext } from "./fake-gmail.mjs";
+
+const ARC_SUNSET = readFileSync(new URL("./fixtures/arc-sunset.html", import.meta.url), "utf8");
 
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 15; Pixel 7; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.0.0 Mobile Safari/537.36";
@@ -651,5 +667,203 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
       }
       await desk.close();
     }
+  }
+
+  // ── STRM-317: the account menu in the phone's panel, while syncing ─────────
+  section("phone panel: the account switcher is reachable while syncing");
+  for (const [width, height] of [
+    [412, 915],
+    [384, 780],
+    [360, 640],
+  ]) {
+    const size = `${width}×${height}`;
+    const { ctx } = await signedInContext(
+      browser,
+      { viewport: { width, height }, hasTouch: true, isMobile: true, userAgent: ANDROID_UA },
+      { count: 30 },
+    );
+    const p = await ctx.newPage();
+    p.on("pageerror", (error) => errors.push(String(error)));
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await p.waitForTimeout(800);
+    // Hold every Gmail answer so the next sync stays running, then start one.
+    const held = [];
+    await ctx.route("https://gmail.googleapis.com/**", (route) => new Promise((resolve) => held.push(() => resolve(route.fallback().catch(() => undefined)))));
+    await p.evaluate(() => window.dispatchEvent(new Event("online")));
+    await p.locator("[data-phone-dock] [aria-label='More mailboxes']").tap();
+    await p.waitForSelector("[data-sidebar][data-open]", { timeout: 3_000 });
+    await p.waitForTimeout(500);
+    await p.locator("[data-nav-account] button[aria-haspopup]").tap();
+    await p.waitForSelector("[data-menu='account-menu'][data-menu-animate]", { timeout: 3_000 }).catch(() => undefined);
+    await p.waitForTimeout(400);
+    const state = await p.evaluate(() => {
+      const box = (el) => {
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.x, y: b.y, width: b.width, height: b.height };
+      };
+      // Hit-testable at its left, middle and right: nothing (the dock, the status pill,
+      // the panel's clip) is over any part of it.
+      const reachable = (el) => {
+        const b = el.getBoundingClientRect();
+        const y = b.top + b.height / 2;
+        return [b.left + 8, b.left + b.width / 2, b.right - 8].every((x) => {
+          const at = document.elementFromPoint(x, y);
+          return at !== null && (at === el || el.contains(at));
+        });
+      };
+      const onScreen = (b) => b.x >= 0 && b.y >= 0 && b.x + b.width <= innerWidth && b.y + b.height <= innerHeight;
+      const menu = document.querySelector("[data-menu='account-menu']");
+      const items = [...(menu?.querySelectorAll("[role='menuitem']") ?? [])].map((item) => ({
+        text: item.textContent.trim(),
+        box: box(item),
+        onScreen: onScreen(item.getBoundingClientRect()),
+        reachable: reachable(item),
+      }));
+      const row = document.querySelector("[data-nav-account] button[aria-haspopup]");
+      return {
+        items,
+        menu: box(menu),
+        row: box(row),
+        pill: box(document.querySelector("[data-status-pill] > *")),
+        dockPill: box(document.querySelector("[data-phone-dock] [data-phone-pill]")),
+        owned: Boolean(menu?.id) && (document.querySelector("[data-sidebar]")?.getAttribute("aria-owns") ?? "").split(" ").includes(menu.id),
+      };
+    });
+    const overlaps2 = (a, b) => Boolean(a && b) && overlaps(a, b);
+    const texts = state.items.map((item) => item.text);
+    check(
+      `${size}: the account menu says Syncing… and offers Switch account… and Sign out`,
+      texts[0] === "Syncing…" && texts.includes("Switch account…") && texts.includes("Sign out"),
+      JSON.stringify(texts),
+    );
+    check(
+      `${size}: every account menu item is on screen and tappable across its width`,
+      state.items.length >= 3 && state.items.every((item) => item.onScreen && item.reachable),
+      JSON.stringify(state.items),
+    );
+    check(
+      `${size}: the account menu is clear of the dock's pill and the status pill`,
+      Boolean(state.menu) && !overlaps2(state.menu, state.dockPill) && !overlaps2(state.menu, state.pill),
+      JSON.stringify({ menu: state.menu, dock: state.dockPill, pill: state.pill }),
+    );
+    check(`${size}: the panel lends the menu to its dialog (aria-owns)`, state.owned);
+    await p.locator("[data-menu='account-menu'] [data-menu-item='accounts']").tap({ timeout: 3_000 }).catch(() => undefined);
+    const switcher = await p.waitForSelector("[data-account-switcher]", { timeout: 3_000 }).then(() => true).catch(() => false);
+    check(`${size}: Switch account… opens the account switcher`, switcher);
+    // Back in the panel with the sync still running: its account row is not covered.
+    await p.keyboard.press("Escape");
+    await p.waitForTimeout(300);
+    if ((await p.locator("[data-sidebar][data-open]").count()) === 0) {
+      await p.locator("[data-phone-dock] [aria-label='More mailboxes']").tap();
+      await p.waitForSelector("[data-sidebar][data-open]", { timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(500);
+    }
+    const row = await p.evaluate(() => {
+      const el = document.querySelector("[data-nav-account] button[aria-haspopup]");
+      const b = el?.getBoundingClientRect();
+      if (!b) return null;
+      const y = b.top + b.height / 2;
+      const pill = document.querySelector("[data-status-pill] > *")?.getBoundingClientRect() ?? null;
+      const covered = pill !== null && pill.left < b.right && b.left < pill.right && pill.top < b.bottom && b.top < pill.bottom;
+      return {
+        reachable: [b.left + 8, b.left + b.width / 2, b.right - 8].every((x) => {
+          const at = document.elementFromPoint(x, y);
+          return at !== null && (at === el || el.contains(at));
+        }),
+        covered,
+      };
+    });
+    check(`${size}: the panel's account row is tappable and no status pill covers it`, Boolean(row?.reachable) && !row?.covered, JSON.stringify(row));
+    for (const release of held.splice(0)) release();
+    await ctx.close();
+  }
+
+  // ── STRM-318: a fluid newsletter with wide padding fits, whole-word ────────
+  section("reader: a fluid newsletter with wide padding fits whole-word");
+  for (const [label, appearance, original] of [
+    ["light", null, false],
+    ["dark", "dark", false],
+    ["dark, original colours", "dark", true],
+  ]) {
+    const { ctx } = await signedInContext(
+      browser,
+      { viewport: { width: 412, height: 915 }, hasTouch: true, isMobile: true, userAgent: ANDROID_UA, colorScheme: appearance ? "dark" : "light" },
+      { count: 4, html: { f0: { from: "The Browser Company <members@arc.net>", subject: "We’ve decided to sunset Arc on December 22, 2026", html: ARC_SUNSET } } },
+    );
+    if (appearance) {
+      await ctx.addInitScript((value) => {
+        if (sessionStorage.getItem("arc-smoke-seeded")) return;
+        sessionStorage.setItem("arc-smoke-seeded", "1");
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ appearance: value }));
+      }, appearance);
+    }
+    const p = await ctx.newPage();
+    p.on("pageerror", (error) => errors.push(String(error)));
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-row-count] button[data-message-id]", { timeout: 15_000 });
+    await p.waitForTimeout(600);
+    await p.locator("[data-row-count] button[data-message-id]", { hasText: "sunset Arc" }).first().tap();
+    await p.waitForSelector("[data-reader] [data-wn-email] h1", { timeout: 8_000 });
+    await p.waitForTimeout(800);
+    if (original) {
+      await p.locator("[data-reader] [data-wn-dark-toggle]").tap({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(800);
+    }
+    const state = await p.evaluate(() => {
+      const el = document.querySelector("[data-reader] [data-wn-email]");
+      const card = document.querySelector("[data-reader] [data-wn-email-card]");
+      const h1 = el.querySelector("h1");
+      const c = card.getBoundingClientRect();
+      const h = h1.getBoundingClientRect();
+      // Every word of the headline on one line: a word split across two lines has two
+      // client rects at different heights.
+      const text = h1.firstChild;
+      const broken = [];
+      const tops = new Set();
+      const re = /\S+/g;
+      let m;
+      while ((m = re.exec(text.textContent))) {
+        const range = document.createRange();
+        range.setStart(text, m.index);
+        range.setEnd(text, m.index + m[0].length);
+        const rows = new Set([...range.getClientRects()].map((r) => Math.round(r.top)));
+        if (rows.size > 1) broken.push(m[0]);
+        for (const row of rows) tops.add(row);
+      }
+      const cs = getComputedStyle(card);
+      return {
+        fit: Number(el.dataset.wnFit ?? 1),
+        card: { left: Math.round(c.left), width: Math.round(c.width), border: cs.borderLeftWidth, radius: cs.borderTopLeftRadius },
+        vw: innerWidth,
+        h1: { left: Math.round(h.left), right: Math.round(h.right), width: Math.round(h.width) },
+        lines: tops.size,
+        broken,
+        dark: el.getAttribute("data-wn-dark"),
+        fits: el.scrollWidth <= el.clientWidth + 2,
+      };
+    });
+    check(`${label}: the newsletter is zoomed to fit, not squeezed`, state.fit < 0.9 && state.fit >= 0.4 && state.fits, JSON.stringify(state));
+    check(`${label}: the card spans the screen, without a hairline or rounding`, state.card.left === 0 && state.card.width === state.vw && state.card.border === "0px" && state.card.radius === "0px", JSON.stringify(state.card));
+    check(`${label}: the headline keeps every word whole, in at most 5 lines`, state.broken.length === 0 && state.lines >= 2 && state.lines <= 5, JSON.stringify({ broken: state.broken, lines: state.lines }));
+    check(`${label}: and runs across the screen, not in a sliver at the right`, state.h1.width >= state.vw * 0.5 && state.h1.left < state.vw * 0.35, JSON.stringify(state.h1));
+    check(
+      `${label}: email dark mode is ${original ? "off for this message" : appearance ? "on" : "off"}`,
+      original || !appearance ? state.dark === null : state.dark !== null,
+      String(state.dark),
+    );
+    await p.evaluate(() => {
+      const scroller = document.querySelector("[data-reader] [data-wn-email-card]")?.closest(".overflow-y-auto");
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+    await p.waitForTimeout(500);
+    const end = await p.evaluate(() => {
+      const card = document.querySelector("[data-reader] [data-wn-email-card]").getBoundingClientRect();
+      const dock = document.querySelector("[data-reader-dock] .wn-reader-pill")?.getBoundingClientRect();
+      return { cardBottom: Math.round(card.bottom), dockTop: dock ? Math.round(dock.top) : null };
+    });
+    check(`${label}: scrolled to the end, the mail clears the reader dock`, end.dockTop !== null && end.cardBottom <= end.dockTop, JSON.stringify(end));
+    await ctx.close();
   }
 }

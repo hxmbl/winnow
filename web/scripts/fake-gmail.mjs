@@ -6,10 +6,12 @@
  * `count` inbox messages `f0…`; `moves` records every modify as `id +ADD -REMOVE`.
  * `gmailCalls` counts every Gmail request attempted (even while `down`).
  * `failProfile` makes /profile answer 500 that many times first (a connect that fails).
+ * `html` gives some messages an HTML body: `{ f0: { from, subject, html, text? } }`, sent
+ * as multipart/alternative the way a newsletter arrives.
  */
 export const FAKE_TOKEN = ["fake", "smoke", "access"].join("-");
 
-export async function signedInContext(browser, options = {}, { count = 12, failProfile = 0, seed = true } = {}) {
+export async function signedInContext(browser, options = {}, { count = 12, failProfile = 0, seed = true, html = {} } = {}) {
   const b64 = (text) => Buffer.from(text, "utf8").toString("base64url");
   const ids = Array.from({ length: count }, (_, i) => `f${i}`);
   const labels = new Map(ids.map((id) => [id, ["INBOX", "UNREAD"]]));
@@ -64,6 +66,28 @@ export async function signedInContext(browser, options = {}, { count = 12, failP
     const one = /^\/messages\/(f\d+)$/.exec(path);
     if (one) {
       const n = Number(one[1].slice(1));
+      const rich = html[one[1]];
+      if (rich) {
+        const text = rich.text ?? rich.subject;
+        return json(route, {
+          id: one[1], threadId: `t-${one[1]}`, labelIds: labels.get(one[1]), snippet: text.slice(0, 120),
+          internalDate: String(Date.now() - n * 3_600_000), sizeEstimate: rich.html.length,
+          payload: {
+            mimeType: "multipart/alternative",
+            headers: [
+              { name: "From", value: rich.from },
+              { name: "To", value: "me@winnow.example" },
+              { name: "Subject", value: rich.subject },
+              { name: "Date", value: new Date(Date.now() - n * 3_600_000).toUTCString() },
+            ],
+            body: { size: 0 },
+            parts: [
+              { partId: "0", mimeType: "text/plain", headers: [{ name: "Content-Type", value: "text/plain; charset=UTF-8" }], body: { size: text.length, data: b64(text) } },
+              { partId: "1", mimeType: "text/html", headers: [{ name: "Content-Type", value: "text/html; charset=UTF-8" }], body: { size: rich.html.length, data: b64(rich.html) } },
+            ],
+          },
+        });
+      }
       const headers = [
         { name: "From", value: `Sender ${n} <s${n}@fake.example>` },
         { name: "To", value: "me@winnow.example" },

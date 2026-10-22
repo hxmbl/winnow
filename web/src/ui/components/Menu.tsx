@@ -15,12 +15,24 @@
  *     moving focus, because the click already put it somewhere.
  *   - The menu is clamped into the viewport after it is measured, flipping above or to
  *     the left of its anchor when there is no room.
+ *   - The root menu renders into `document.body` (a portal), wherever its trigger is.
+ *     Its `position: fixed` coordinates are the viewport's only when no ancestor is a
+ *     containing block for fixed boxes, and the phone's menu panel is one (its glass
+ *     `backdrop-filter`, and its `transform` while it slides), with `overflow: hidden`
+ *     on top: the account menu opened from the panel's account row landed a panel's
+ *     offset down, clipped at the panel's bottom-left under the dock, with "Syncing…"
+ *     sitting over "Switch account…" and Sign out cut off (STRM-317). React events still
+ *     bubble through the portal to the trigger's tree. A submenu stays inside its root.
+ *     Opened from inside a modal dialog (that panel, a sheet), the dialog `aria-owns` the
+ *     menu while it is open, so assistive technology that hides everything outside an
+ *     `aria-modal` dialog still finds it there.
  *
  * Every key the menu handles stops there: the app's global shortcut handler must not see
  * `j` or `e` while a menu is open (App also checks `menuOpen` before routing).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { anchorFromElement, placeMenu, type MenuAnchor, type MenuEntry } from "../menuPlacement";
 
@@ -53,6 +65,23 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const isRoot = onBack === undefined;
   const hasHeader = header !== undefined;
+  const id = useId();
+
+  // The portal takes the root out of any modal dialog it was opened from: lend it back to
+  // that dialog in the accessibility tree for as long as it is open.
+  useLayoutEffect(() => {
+    if (!isRoot) return;
+    const owner = returnFocus?.closest?.('[aria-modal="true"]');
+    if (!owner) return;
+    const owned = (owner.getAttribute("aria-owns") ?? "").split(/\s+/).filter(Boolean);
+    if (owned.includes(id)) return;
+    owner.setAttribute("aria-owns", [...owned, id].join(" "));
+    return () => {
+      const rest = (owner.getAttribute("aria-owns") ?? "").split(/\s+/).filter((token) => token && token !== id);
+      if (rest.length) owner.setAttribute("aria-owns", rest.join(" "));
+      else owner.removeAttribute("aria-owns");
+    };
+  }, [isRoot, returnFocus, id]);
 
   const enabled = items.filter(
     (entry): entry is Extract<MenuEntry, { kind: "item" }> => entry.kind === "item" && !entry.disabled,
@@ -182,9 +211,10 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
     event.stopPropagation();
   };
 
-  return (
+  const menu = (
     <div
       ref={ref}
+      id={id}
       role="menu"
       aria-label={label}
       data-menu-root=""
@@ -270,4 +300,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
       })()}
     </div>
   );
+  // Only the root: a submenu is placed in viewport coordinates too, and its root (in the
+  // body, with nothing transformed above it) is no containing block for it.
+  return isRoot && typeof document !== "undefined" ? createPortal(menu, document.body) : menu;
 }

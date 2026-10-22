@@ -398,7 +398,8 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
       const selection = document.getSelection();
       const state = {
         pointerInside: pointerInside.current,
-        menuOpen: panel.querySelector('[role="menu"]') !== null,
+        // The account menu renders into the body (`Menu`), not inside the panel.
+        menuOpen: document.querySelector("[data-menu-root]") !== null,
         editing: inside && isEditingElement(active),
         keyboardFocus: inside && active.matches(":focus-visible"),
         pressing: pressing.current,
