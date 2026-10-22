@@ -19,8 +19,16 @@
  *   7. Desktop Settings → Keyboard shortcuts reads as a table (description beside its
  *      key), and "Hidden & muted senders" fits on one line in the category column.
  *
+ *   8. STRM-317: on a phone, with a sync running and the menu panel open, the account
+ *      row and the account menu it opens ("Syncing…", Switch account…, Sign out) are on
+ *      screen, hit-testable across their width, clear of the dock and of the status pill,
+ *      and Switch account… opens the account switcher.
+ *
+ *
  * Own module, so it runs alone too: `WINNOW_SMOKE_ONLY=thumb npm run smoke`.
  */
+
+import { signedInContext } from "./fake-gmail.mjs";
 
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 15; Pixel 7; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.0.0 Mobile Safari/537.36";
@@ -651,5 +659,116 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
       }
       await desk.close();
     }
+  }
+
+  // ── STRM-317: the account menu in the phone's panel, while syncing ─────────
+  section("phone panel: the account switcher is reachable while syncing");
+  for (const [width, height] of [
+    [412, 915],
+    [384, 780],
+    [360, 640],
+  ]) {
+    const size = `${width}×${height}`;
+    const { ctx } = await signedInContext(
+      browser,
+      { viewport: { width, height }, hasTouch: true, isMobile: true, userAgent: ANDROID_UA },
+      { count: 30 },
+    );
+    const p = await ctx.newPage();
+    p.on("pageerror", (error) => errors.push(String(error)));
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await p.waitForTimeout(800);
+    // Hold every Gmail answer so the next sync stays running, then start one.
+    const held = [];
+    await ctx.route("https://gmail.googleapis.com/**", (route) => new Promise((resolve) => held.push(() => resolve(route.fallback().catch(() => undefined)))));
+    await p.evaluate(() => window.dispatchEvent(new Event("online")));
+    await p.locator("[data-phone-dock] [aria-label='More mailboxes']").tap();
+    await p.waitForSelector("[data-sidebar][data-open]", { timeout: 3_000 });
+    await p.waitForTimeout(500);
+    await p.locator("[data-nav-account] button[aria-haspopup]").tap();
+    await p.waitForSelector("[data-menu='account-menu'][data-menu-animate]", { timeout: 3_000 }).catch(() => undefined);
+    await p.waitForTimeout(400);
+    const state = await p.evaluate(() => {
+      const box = (el) => {
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.x, y: b.y, width: b.width, height: b.height };
+      };
+      // Hit-testable at its left, middle and right: nothing (the dock, the status pill,
+      // the panel's clip) is over any part of it.
+      const reachable = (el) => {
+        const b = el.getBoundingClientRect();
+        const y = b.top + b.height / 2;
+        return [b.left + 8, b.left + b.width / 2, b.right - 8].every((x) => {
+          const at = document.elementFromPoint(x, y);
+          return at !== null && (at === el || el.contains(at));
+        });
+      };
+      const onScreen = (b) => b.x >= 0 && b.y >= 0 && b.x + b.width <= innerWidth && b.y + b.height <= innerHeight;
+      const menu = document.querySelector("[data-menu='account-menu']");
+      const items = [...(menu?.querySelectorAll("[role='menuitem']") ?? [])].map((item) => ({
+        text: item.textContent.trim(),
+        box: box(item),
+        onScreen: onScreen(item.getBoundingClientRect()),
+        reachable: reachable(item),
+      }));
+      const row = document.querySelector("[data-nav-account] button[aria-haspopup]");
+      return {
+        items,
+        menu: box(menu),
+        row: box(row),
+        pill: box(document.querySelector("[data-status-pill] > *")),
+        dockPill: box(document.querySelector("[data-phone-dock] [data-phone-pill]")),
+        owned: Boolean(menu?.id) && (document.querySelector("[data-sidebar]")?.getAttribute("aria-owns") ?? "").split(" ").includes(menu.id),
+      };
+    });
+    const overlaps2 = (a, b) => Boolean(a && b) && overlaps(a, b);
+    const texts = state.items.map((item) => item.text);
+    check(
+      `${size}: the account menu says Syncing… and offers Switch account… and Sign out`,
+      texts[0] === "Syncing…" && texts.includes("Switch account…") && texts.includes("Sign out"),
+      JSON.stringify(texts),
+    );
+    check(
+      `${size}: every account menu item is on screen and tappable across its width`,
+      state.items.length >= 3 && state.items.every((item) => item.onScreen && item.reachable),
+      JSON.stringify(state.items),
+    );
+    check(
+      `${size}: the account menu is clear of the dock's pill and the status pill`,
+      Boolean(state.menu) && !overlaps2(state.menu, state.dockPill) && !overlaps2(state.menu, state.pill),
+      JSON.stringify({ menu: state.menu, dock: state.dockPill, pill: state.pill }),
+    );
+    check(`${size}: the panel lends the menu to its dialog (aria-owns)`, state.owned);
+    await p.locator("[data-menu='account-menu'] [data-menu-item='accounts']").tap({ timeout: 3_000 }).catch(() => undefined);
+    const switcher = await p.waitForSelector("[data-account-switcher]", { timeout: 3_000 }).then(() => true).catch(() => false);
+    check(`${size}: Switch account… opens the account switcher`, switcher);
+    // Back in the panel with the sync still running: its account row is not covered.
+    await p.keyboard.press("Escape");
+    await p.waitForTimeout(300);
+    if ((await p.locator("[data-sidebar][data-open]").count()) === 0) {
+      await p.locator("[data-phone-dock] [aria-label='More mailboxes']").tap();
+      await p.waitForSelector("[data-sidebar][data-open]", { timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(500);
+    }
+    const row = await p.evaluate(() => {
+      const el = document.querySelector("[data-nav-account] button[aria-haspopup]");
+      const b = el?.getBoundingClientRect();
+      if (!b) return null;
+      const y = b.top + b.height / 2;
+      const pill = document.querySelector("[data-status-pill] > *")?.getBoundingClientRect() ?? null;
+      const covered = pill !== null && pill.left < b.right && b.left < pill.right && pill.top < b.bottom && b.top < pill.bottom;
+      return {
+        reachable: [b.left + 8, b.left + b.width / 2, b.right - 8].every((x) => {
+          const at = document.elementFromPoint(x, y);
+          return at !== null && (at === el || el.contains(at));
+        }),
+        covered,
+      };
+    });
+    check(`${size}: the panel's account row is tappable and no status pill covers it`, Boolean(row?.reachable) && !row?.covered, JSON.stringify(row));
+    for (const release of held.splice(0)) release();
+    await ctx.close();
   }
 }
