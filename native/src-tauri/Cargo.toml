@@ -4,7 +4,7 @@
 # `--package <name>`, which cargo rejects as ambiguous. The binary keeps its
 # name through `[[bin]]` below, so desktop bundles are unchanged.
 name = "winnow-app"
-version = "1.5.1"
+version = "1.5.2"
 description = "Winnow — an email client that sorts the noise out for you"
 authors = ["hxmbl"]
 license = "MIT"
