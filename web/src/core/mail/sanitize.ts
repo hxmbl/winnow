@@ -920,7 +920,41 @@ export type SanitizeOptions = {
    * way past the allowlist.
    */
   recolour?: DarkPalette;
+  /**
+   * Wrap every unbroken token of at least [`LONG_TOKEN`] characters in
+   * `<span data-wn-long>` so the baseline lets it break anywhere (the inline reader).
+   * Words keep whole-word wrapping, so a table column never shrinks below its longest
+   * word; only a URL or code that long can be split. Off by default: replies and the
+   * "as sent" document get the sender's text untouched.
+   */
+  markLongTokens?: boolean;
 };
+
+/** A token this long (no whitespace) may break anywhere under `markLongTokens`. */
+export const LONG_TOKEN = 30;
+
+const LONG_TOKEN_PATTERN = new RegExp(`\\S{${LONG_TOKEN},}`, "g");
+
+/**
+ * `escapeText`, with each token of `LONG_TOKEN`+ characters wrapped in a marker span.
+ * Measured on the decoded text, so `&amp;` counts as one character.
+ */
+function escapeTextMarkingLong(value: string): string {
+  const text = decodeEntities(value);
+  if (text.length < LONG_TOKEN) return escapeRaw(text);
+  let out = "";
+  let last = 0;
+  for (const match of text.matchAll(LONG_TOKEN_PATTERN)) {
+    const at = match.index ?? 0;
+    out += escapeRaw(text.slice(last, at)) + `<span data-wn-long="">${escapeRaw(match[0])}</span>`;
+    last = at + match[0].length;
+  }
+  return out + escapeRaw(text.slice(last));
+}
+
+function escapeRaw(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 export type SanitizedMail = {
   /** The markup, safe to inject. Balanced, and free of any fetch the caller forbade. */
@@ -965,6 +999,7 @@ const DEFAULTS: SanitizeOptions = { allowRemote: false };
 export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions> = {}): SanitizedMail {
   const settings = { ...DEFAULTS, ...options };
   const { allowRemote, inlineParts, rewriteUrls, recolour } = settings;
+  const text = settings.markLongTokens ? escapeTextMarkingLong : escapeText;
 
   // One lowercased copy of the body, for the element-boundary search: lowercasing
   // per dropped element made a newsletter full of buttons quadratic in its own size.
@@ -1003,11 +1038,11 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
     const lt = html.indexOf("<", i);
 
     if (lt === -1) {
-      if (!write(escapeText(html.slice(i)))) truncated = true;
+      if (!write(text(html.slice(i)))) truncated = true;
       break;
     }
 
-    if (lt > i && !write(escapeText(html.slice(i, lt)))) break;
+    if (lt > i && !write(text(html.slice(i, lt)))) break;
 
     const next = html[lt + 1];
 
@@ -1320,7 +1355,18 @@ const EMAIL_BASELINE_RULES: readonly Rule[] = [
     // to fit by `MessageBody` (`ui/emailFit.ts`), as mail clients do.
     `max-width: 100%;`,
   ],
-  ["td, th", `word-break: break-word; overflow-wrap: anywhere;`],
+  // Whole words, always. `overflow-wrap: anywhere` and the legacy `word-break: break-word`
+  // both count every character as a break when a table sizes its columns (min-content),
+  // so a fluid newsletter with wide fixed padding never overflowed: its cells shrank to a
+  // few characters, the fit zoom saw nothing to fit, and a 44px headline came out one
+  // word per line, split mid-word ("Decemb|er") in a sliver at the right (STRM-318).
+  // `break-word` breaks only a token that cannot fit on a line of its own, and does not
+  // shrink the column; a long token is marked by the sanitiser (`data-wn-long`, below).
+  ["td, th", `overflow-wrap: break-word;`],
+  ["h1, h2, h3, h4, h5, h6", `overflow-wrap: break-word; word-break: normal;`],
+  // A URL or a code long enough to force a column wider than a phone wraps anywhere, so
+  // one link in a footer cannot zoom a whole message down to its minimum (`markLongTokens`).
+  ["[data-wn-long]", `overflow-wrap: anywhere; word-break: normal;`],
   ["a", `color: #1A5FB4; text-decoration: underline;`],
   [
     "blockquote",

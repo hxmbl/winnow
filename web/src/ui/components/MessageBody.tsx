@@ -90,6 +90,10 @@ function useSanitised(
         collectStyles: true,
         // Email dark mode's adaptive path recolours inline colours while sanitising.
         recolour,
+        // Only a URL-length token may break anywhere; words stay whole, so a table
+        // column never shrinks below its longest word and a too-wide message is zoomed
+        // to fit instead of squeezed (STRM-318).
+        markLongTokens: true,
       }),
     [email.bodyHtml, imagesAllowed, inlineParts, recolour],
   );
@@ -306,9 +310,14 @@ function RichBody({
     //
     // In email dark mode the card is the theme's surface instead of white, and the
     // container carries `data-wn-dark` for `inlineEmailDarkCss`.
+    //
+    // On a phone (STRM-318) the card is the screen's width, as Gmail draws it: it bleeds
+    // through the reader's 24px gutters (`-mx-6`, the article's `px-6`), with no hairline
+    // or rounding and a thin inset, so a message gets every pixel across (a fixed-width
+    // one is zoomed less) and none of the frame above and around it.
     <div
       data-wn-email-card=""
-      className={`selectable overflow-x-auto overflow-y-hidden rounded-pane border border-hairline px-4 py-4 sm:px-6 sm:py-5 ${dark ? "" : "bg-white"}`}
+      className={`selectable overflow-x-auto overflow-y-hidden max-sm:-mx-6 max-sm:px-3 max-sm:py-2 sm:rounded-pane sm:border sm:border-hairline sm:px-6 sm:py-5 ${dark ? "" : "bg-white"}`}
       style={dark ? { background: dark.palette.surface } : undefined}
     >
       {darkCss !== "" && <style data-wn-dark-styles="" dangerouslySetInnerHTML={{ __html: darkCss }} />}
@@ -515,7 +524,7 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
     !hasHtml && (view === "rich" || view === "proxied") ? "plain" : view;
 
   return (
-    <div className="mt-5">
+    <div className="mt-3 sm:mt-5">
       <EmailStyles />
 
       {hasHtml && sanitised.html === "" && (

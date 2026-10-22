@@ -24,11 +24,19 @@
  *      screen, hit-testable across their width, clear of the dock and of the status pill,
  *      and Switch account… opens the account switcher.
  *
+ *   9. STRM-318: a fluid newsletter with wide fixed padding (`fixtures/arc-sunset.html`,
+ *      modelled on The Browser Company's "We've decided to sunset Arc" mail) is zoomed to
+ *      fit on a phone: the card spans the screen, the headline keeps whole words in a few
+ *      lines across most of the width, and the end of the mail clears the dock, in light,
+ *      dark and dark with "Show original colours".
  *
  * Own module, so it runs alone too: `WINNOW_SMOKE_ONLY=thumb npm run smoke`.
  */
 
+import { readFileSync } from "node:fs";
 import { signedInContext } from "./fake-gmail.mjs";
+
+const ARC_SUNSET = readFileSync(new URL("./fixtures/arc-sunset.html", import.meta.url), "utf8");
 
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 15; Pixel 7; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.0.0 Mobile Safari/537.36";
@@ -769,6 +777,93 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
     });
     check(`${size}: the panel's account row is tappable and no status pill covers it`, Boolean(row?.reachable) && !row?.covered, JSON.stringify(row));
     for (const release of held.splice(0)) release();
+    await ctx.close();
+  }
+
+  // ── STRM-318: a fluid newsletter with wide padding fits, whole-word ────────
+  section("reader: a fluid newsletter with wide padding fits whole-word");
+  for (const [label, appearance, original] of [
+    ["light", null, false],
+    ["dark", "dark", false],
+    ["dark, original colours", "dark", true],
+  ]) {
+    const { ctx } = await signedInContext(
+      browser,
+      { viewport: { width: 412, height: 915 }, hasTouch: true, isMobile: true, userAgent: ANDROID_UA, colorScheme: appearance ? "dark" : "light" },
+      { count: 4, html: { f0: { from: "The Browser Company <members@arc.net>", subject: "We’ve decided to sunset Arc on December 22, 2026", html: ARC_SUNSET } } },
+    );
+    if (appearance) {
+      await ctx.addInitScript((value) => {
+        if (sessionStorage.getItem("arc-smoke-seeded")) return;
+        sessionStorage.setItem("arc-smoke-seeded", "1");
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ appearance: value }));
+      }, appearance);
+    }
+    const p = await ctx.newPage();
+    p.on("pageerror", (error) => errors.push(String(error)));
+    await p.goto(URL, { waitUntil: "networkidle" });
+    await p.waitForSelector("[data-row-count] button[data-message-id]", { timeout: 15_000 });
+    await p.waitForTimeout(600);
+    await p.locator("[data-row-count] button[data-message-id]", { hasText: "sunset Arc" }).first().tap();
+    await p.waitForSelector("[data-reader] [data-wn-email] h1", { timeout: 8_000 });
+    await p.waitForTimeout(800);
+    if (original) {
+      await p.locator("[data-reader] [data-wn-dark-toggle]").tap({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(800);
+    }
+    const state = await p.evaluate(() => {
+      const el = document.querySelector("[data-reader] [data-wn-email]");
+      const card = document.querySelector("[data-reader] [data-wn-email-card]");
+      const h1 = el.querySelector("h1");
+      const c = card.getBoundingClientRect();
+      const h = h1.getBoundingClientRect();
+      // Every word of the headline on one line: a word split across two lines has two
+      // client rects at different heights.
+      const text = h1.firstChild;
+      const broken = [];
+      const tops = new Set();
+      const re = /\S+/g;
+      let m;
+      while ((m = re.exec(text.textContent))) {
+        const range = document.createRange();
+        range.setStart(text, m.index);
+        range.setEnd(text, m.index + m[0].length);
+        const rows = new Set([...range.getClientRects()].map((r) => Math.round(r.top)));
+        if (rows.size > 1) broken.push(m[0]);
+        for (const row of rows) tops.add(row);
+      }
+      const cs = getComputedStyle(card);
+      return {
+        fit: Number(el.dataset.wnFit ?? 1),
+        card: { left: Math.round(c.left), width: Math.round(c.width), border: cs.borderLeftWidth, radius: cs.borderTopLeftRadius },
+        vw: innerWidth,
+        h1: { left: Math.round(h.left), right: Math.round(h.right), width: Math.round(h.width) },
+        lines: tops.size,
+        broken,
+        dark: el.getAttribute("data-wn-dark"),
+        fits: el.scrollWidth <= el.clientWidth + 2,
+      };
+    });
+    check(`${label}: the newsletter is zoomed to fit, not squeezed`, state.fit < 0.9 && state.fit >= 0.4 && state.fits, JSON.stringify(state));
+    check(`${label}: the card spans the screen, without a hairline or rounding`, state.card.left === 0 && state.card.width === state.vw && state.card.border === "0px" && state.card.radius === "0px", JSON.stringify(state.card));
+    check(`${label}: the headline keeps every word whole, in at most 5 lines`, state.broken.length === 0 && state.lines >= 2 && state.lines <= 5, JSON.stringify({ broken: state.broken, lines: state.lines }));
+    check(`${label}: and runs across the screen, not in a sliver at the right`, state.h1.width >= state.vw * 0.5 && state.h1.left < state.vw * 0.35, JSON.stringify(state.h1));
+    check(
+      `${label}: email dark mode is ${original ? "off for this message" : appearance ? "on" : "off"}`,
+      original || !appearance ? state.dark === null : state.dark !== null,
+      String(state.dark),
+    );
+    await p.evaluate(() => {
+      const scroller = document.querySelector("[data-reader] [data-wn-email-card]")?.closest(".overflow-y-auto");
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+    await p.waitForTimeout(500);
+    const end = await p.evaluate(() => {
+      const card = document.querySelector("[data-reader] [data-wn-email-card]").getBoundingClientRect();
+      const dock = document.querySelector("[data-reader-dock] .wn-reader-pill")?.getBoundingClientRect();
+      return { cardBottom: Math.round(card.bottom), dockTop: dock ? Math.round(dock.top) : null };
+    });
+    check(`${label}: scrolled to the end, the mail clears the reader dock`, end.dockTop !== null && end.cardBottom <= end.dockTop, JSON.stringify(end));
     await ctx.close();
   }
 }
