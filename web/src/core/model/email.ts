@@ -245,6 +245,14 @@ export type Email = {
   subject: string;
   /** Plain text (always present). */
   body: string;
+  /**
+   * Where `body` came from: the message's own `text/plain` part, Winnow's extraction from
+   * its `text/html` part (`plainTextFromHtml`, which cleans as it goes), or Gmail's snippet.
+   * Read by Dev Options → Pure Plain Text (`core/mail/plainView.ts`), which shows a
+   * `text/plain` part verbatim but has to go back to the HTML for an extracted one.
+   * Absent on cache rows written before it existed; `plainView` then works it out.
+   */
+  bodySource?: BodySource;
   /** Original HTML. */
   bodyHtml?: string;
   category: EmailCategory;
@@ -319,8 +327,12 @@ export function isBodyLoaded(email: Pick<Email, "bodyLoaded">): boolean {
  * What loading a body adds to a metadata-only message. The reader's lazy load and the
  * background prefetch both produce one; the store and the cache both apply it.
  */
+/** See `Email.bodySource`. */
+export type BodySource = "plain" | "html" | "snippet";
+
 export type LoadedBody = {
   body: string;
+  bodySource?: BodySource;
   bodyHtml?: string;
   attachments: Attachment[];
 };
@@ -337,6 +349,7 @@ export function keepLoadedBody(fresh: Email, cached: Email | undefined): Email {
   return {
     ...fresh,
     body: cached.body,
+    bodySource: cached.bodySource,
     bodyHtml: cached.bodyHtml,
     attachments: cached.attachments,
     bodyLoaded: true,
@@ -350,6 +363,7 @@ export function withLoadedBody(email: Email, loaded: LoadedBody): Email {
   return {
     ...email,
     body: loaded.body,
+    bodySource: loaded.bodySource,
     bodyHtml: loaded.bodyHtml,
     attachments: loaded.attachments,
     bodyLoaded: true,

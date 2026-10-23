@@ -240,6 +240,9 @@ export type SettingsProps = {
   platformLabel?: string | null;
   /** Update checks (`useUpdates.ts`), for About. Absent in tests that do not need them. */
   updates?: UpdatesController | null;
+  /** Dev Options → Pure Plain Text (`ui/devOptions.ts`): plain text exactly as sent. */
+  purePlainText: boolean;
+  onPurePlainText: (value: boolean) => void;
   /** The category Settings opens on (on a phone, straight to its page). Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
@@ -545,6 +548,9 @@ export function Settings(props: SettingsProps) {
   );
 }
 
+/** Dev Options → Pure Plain Text's one-line description, under its name. */
+const PURE_PLAIN_TEXT_HINT = "Show plain text exactly as sent, with nothing removed";
+
 /** One category's controls. Every setting row names its catalog id with `setting="…"`. */
 function CategoryContent({ category, props }: { category: CategoryId; props: SettingsProps }) {
   /** Opens the custom colour's native picker; set by `CustomAccentField`. */
@@ -792,6 +798,19 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
           )}
           <Row setting="licence">
             <span className="text-meta font-semibold text-ink-body">MIT</span>
+          </Row>
+        </Section>
+      );
+    case "dev":
+      return (
+        <Section>
+          <Row setting="purePlainText" hint={PURE_PLAIN_TEXT_HINT} hintId="winnow-pure-plain-text-hint">
+            <Toggle
+              checked={props.purePlainText}
+              onChange={props.onPurePlainText}
+              label={SETTINGS.purePlainText.label}
+              describedBy="winnow-pure-plain-text-hint"
+            />
           </Row>
         </Section>
       );

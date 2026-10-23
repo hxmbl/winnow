@@ -85,6 +85,7 @@ import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
 import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
+import { DEV_OPTIONS_KEY, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
 import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
@@ -542,6 +543,24 @@ export function App({ store, existingInstall = true }: Props) {
   }, []);
 
   const themeMode = resolveScheme(preferences.appearance, systemDark);
+
+  // Settings → Dev Options (`ui/devOptions.ts`): this device only, apart from the shared
+  // preferences. Another window changing it is followed through the `storage` event.
+  const [devOptions, setDevOptions] = useState(() => loadDevOptions());
+  const changeDevOptions = useCallback((patch: Partial<DevOptions>) => {
+    setDevOptions((current) => {
+      const next = { ...current, ...patch };
+      saveDevOptions(next);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === DEV_OPTIONS_KEY) setDevOptions(loadDevOptions());
+    };
+    globalThis.addEventListener?.("storage", onStorage);
+    return () => globalThis.removeEventListener?.("storage", onStorage);
+  }, []);
   // Email dark mode: the palette a message body is drawn in, or null for its own light page.
   const emailDarkPalette =
     !preferences.emailDarkMode || themeMode === "light"
@@ -4648,6 +4667,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               onMailto={openMailto}
               leftHanded={preferences.leftHanded}
               emailDark={emailDarkPalette}
+              purePlainText={devOptions.purePlainText}
               email={selected}
               conversation={view.conversation}
               signals={selected ? (view.signals.get(selected.id) ?? null) : null}
@@ -4868,6 +4888,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
           emailDarkMode={preferences.emailDarkMode}
           onEmailDarkMode={(value) => store.setPreferences({ emailDarkMode: value })}
+          purePlainText={devOptions.purePlainText}
+          onPurePlainText={(value) => changeDevOptions({ purePlainText: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           scheduledCount={snapshot.scheduled.filter((send) => send.account === store.accountKey()).length}

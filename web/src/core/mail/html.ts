@@ -79,6 +79,27 @@ export function plainTextFromHtml(html: string): string {
 }
 
 /**
+ * The most literal text an HTML body holds: Dev Options → Pure Plain Text, for a message
+ * with no `text/plain` part.
+ *
+ * Only what has to happen for HTML to become text happens: tags go (they are markup, not
+ * words), the block ends a reader would see as line breaks become `\n`, and entities are
+ * decoded. Tags are found exactly as `plainTextFromHtml` finds them, so nothing that form
+ * shows is missing here (the words between an Outlook conditional comment's two halves
+ * included). None of `plainTextFromHtml`'s cleanup runs: the *contents* of
+ * `<head>`, `<style>` and `<script>` (the title, the CSS, any code) stay, the sender's own
+ * line breaks and indentation stay, blank lines are not collapsed, nothing is trimmed, and
+ * the preheader's invisible filler is kept.
+ *
+ * Still text: the result is rendered as a text node, never as markup, so a `<` decoded
+ * from `&lt;` cannot become an element.
+ */
+export function literalTextFromHtml(html: string): string {
+  if (!html) return "";
+  return decodeEntities(html.replace(BLOCK_ENDS, "\n").replace(ANY_TAG, ""));
+}
+
+/**
  * Invisible filler: soft hyphen, combining grapheme joiner, zero-width space, word
  * joiner, Mongolian vowel separator and BOM. Marketing mail pads its preheader
  * with rows of these (`͏ ͏ ͏ &shy;`) so the inbox preview shows only the line the sender

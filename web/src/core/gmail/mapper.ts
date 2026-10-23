@@ -16,6 +16,7 @@
 import { detectCode } from "../mail/otp";
 import {
   CATEGORY_MAP,
+  type BodySource,
   type LoadedBody,
   type Attachment,
   type Contact,
@@ -203,12 +204,17 @@ export function toEmail(
   const html = htmlPart(payload);
 
   let body = "";
+  let bodySource: BodySource = "snippet";
   // A metadata response has no leaves to read, so its body is the snippet — which
   // Gmail HTML-escapes (`&#39;`), unlike a decoded part.
   if (metadata) body = decodeEntities(snippetFor(message));
-  else if (plain) body = decodeBody(plain.body!.data!);
-  else if (html) body = plainTextFromHtml(decodeBody(html.body!.data!));
-  else body = snippetFor(message);
+  else if (plain) {
+    body = decodeBody(plain.body!.data!);
+    bodySource = "plain";
+  } else if (html) {
+    body = plainTextFromHtml(decodeBody(html.body!.data!));
+    bodySource = "html";
+  } else body = snippetFor(message);
 
   // A genuinely empty message: no body, no subject, and no payload at all.
   if (body.trim() === "" && !payload && !message.snippet) {
@@ -251,6 +257,7 @@ export function toEmail(
     receivedAt,
     subject: decodeMimeWord(headerValue(payload, "Subject") ?? ""),
     body,
+    bodySource,
     bodyHtml: bodyHtml && bodyHtml !== body ? bodyHtml : undefined,
     category: categoryFor(labelIds),
     starred: labelIds.includes(LABEL.starred),
@@ -314,7 +321,7 @@ export function toDraftEmail(draft: GmailFullDraft): Email | null {
 export function loadedBodyOf(message: GmailMessage): LoadedBody {
   const email = toEmail(message);
   if (!email) return { body: message.snippet ?? "", attachments: [] };
-  return { body: email.body, bodyHtml: email.bodyHtml, attachments: email.attachments };
+  return { body: email.body, bodySource: email.bodySource, bodyHtml: email.bodyHtml, attachments: email.attachments };
 }
 
 /**

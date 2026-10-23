@@ -20,7 +20,7 @@
  * reference is still counted and stated.
  */
 
-import { tidyPlainText } from "../../core/mail/html";
+import { plainTextForReading } from "../../core/mail/plainView";
 import { useEffect, useId, useLayoutEffect, useMemo, useState, useRef, type RefObject } from "react";
 import { Moon, Server, Sun } from "lucide-react";
 import {
@@ -100,16 +100,24 @@ function useSanitised(
 }
 
 /**
- * The plain text, unchanged.
+ * The plain text: tidied of invisible filler and runs of blank lines, or with Dev Options
+ * → Pure Plain Text (`pure`) exactly as sent (`core/mail/plainView.ts`).
  *
  * `whitespace-pre-wrap` so the sender's own paragraph breaks survive without re-wrapping
  * to the pane width. System sans rather than monospace, because this is prose a person
- * wrote.
+ * wrote. Always a text node, pure or not: nothing in it is ever parsed as markup.
  */
-function PlainText({ email }: { email: Email }) {
+function PlainText({ email, pure }: { email: Email; pure: boolean }) {
+  const text = useMemo(
+    () => plainTextForReading(email, { pure }),
+    [email, pure],
+  );
   return (
-    <div className="selectable max-w-[68ch] whitespace-pre-wrap text-read text-ink-body">
-      {tidyPlainText(email.body)}
+    <div
+      className="selectable max-w-[68ch] whitespace-pre-wrap text-read text-ink-body"
+      data-plain-text={pure ? "pure" : "tidy"}
+    >
+      {text}
     </div>
   );
 }
@@ -450,6 +458,8 @@ type Props = {
    * still ask for this one message's original colours with the sun/moon button.
    */
   emailDark?: DarkPalette | null;
+  /** Dev Options → Pure Plain Text: the Plain text form shows the text exactly as sent. */
+  purePlainText?: boolean;
 };
 
 /**
@@ -483,7 +493,15 @@ function DarkToggle({ original, onToggle }: { original: boolean; onToggle: () =>
  * preference would need a fourth `Preferences` key, a migration and a Settings control,
  * for a thing most readers change once.
  */
-export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, view, emailDark = null }: Props) {
+export function MessageBody({
+  email,
+  imagesAllowed,
+  inlineParts,
+  onOpenLink,
+  view,
+  emailDark = null,
+  purePlainText = false,
+}: Props) {
   const bodyHtml = email.bodyHtml;
 
   const hasHtml = Boolean(bodyHtml);
@@ -538,7 +556,7 @@ export function MessageBody({ email, imagesAllowed, inlineParts, onOpenLink, vie
         <DarkToggle original={original} onToggle={() => setOriginal((was) => !was)} />
       )}
       {shown === "rich" && <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} dark={darkFor} />}
-      {shown === "plain" && <PlainText email={email} />}
+      {shown === "plain" && <PlainText email={email} pure={purePlainText} />}
       {shown === "sent" && <AsSent email={email} imagesAllowed={imagesAllowed} />}
       {shown === "proxied" &&
         (proxied === undefined ? (

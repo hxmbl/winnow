@@ -508,7 +508,7 @@ describe("toEmail — format=metadata", () => {
       ...metadata,
       payload: { mimeType: "text/plain", headers: metadata.payload.headers, body: { data: btoa("the body"), size: 8 } },
     };
-    expect(loadedBodyOf(message)).toEqual({ body: "the body", bodyHtml: undefined, attachments: [] });
+    expect(loadedBodyOf(message)).toEqual({ body: "the body", bodySource: "plain", bodyHtml: undefined, attachments: [] });
   });
 });
 

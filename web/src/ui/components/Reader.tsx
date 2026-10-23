@@ -724,6 +724,8 @@ type Props = {
   leftHanded?: boolean;
   /** Email dark mode's palette for the body, or null for the sender's light page. See `MessageBody`. */
   emailDark?: DarkPalette | null;
+  /** Dev Options → Pure Plain Text: the Plain text form shows the text exactly as sent. See `MessageBody`. */
+  purePlainText?: boolean;
   email: Email | null;
   conversation: readonly Email[];
   signals: EmailSignals | null;
@@ -811,6 +813,7 @@ export function Reader({
   onMailto,
   leftHanded = false,
   emailDark = null,
+  purePlainText = false,
   stepReach,
   onStep,
 }: Props) {
@@ -1057,6 +1060,7 @@ export function Reader({
             }}
             view={view}
             emailDark={emailDark}
+            purePlainText={purePlainText}
           />
 
           {/*

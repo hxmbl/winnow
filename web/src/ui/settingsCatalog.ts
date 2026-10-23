@@ -21,7 +21,8 @@ export type CategoryId =
   | "google"
   | "senders"
   | "shortcuts"
-  | "about";
+  | "about"
+  | "dev";
 
 export type SettingsCategory = {
   id: CategoryId;
@@ -90,6 +91,12 @@ export const CATEGORIES: readonly SettingsCategory[] = [
     id: "about",
     label: "About",
     intro: "Which Winnow this is, and the terms it comes under.",
+  },
+  {
+    id: "dev",
+    label: "Dev Options",
+    intro:
+      "Switches for seeing exactly what a message carries, for testing and curiosity. They change only how Winnow shows mail on this device, never the mail itself, and are all off until you turn them on.",
   },
 ];
 
@@ -315,6 +322,12 @@ export const SETTINGS = {
     label: "Licence",
     explanation:
       "Winnow is open-source software under the MIT licence. You can use, change and share it freely; it comes with no warranty.",
+  },
+  purePlainText: {
+    category: "dev",
+    label: "Pure Plain Text",
+    explanation:
+      "When a message is shown as Plain text, shows its plain-text part exactly as the sender wrote it, with nothing removed: invisible preheader filler, blank lines and leading or trailing space all stay. A message with no plain-text part has its HTML turned into text as literally as possible, including the page title and style code Winnow normally leaves out. It is still shown as text, so nothing in it can run or load. Saved on this device only.",
   },
 } as const satisfies Record<string, SettingDefinition>;
 

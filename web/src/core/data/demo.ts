@@ -1441,6 +1441,9 @@ function toEmail(seed: Seed): Email {
     receivedAt: ago(seed.at),
     subject: seed.subject,
     body: seed.body,
+    // The seed's text is written as the message's own plain part, not extracted from
+    // its HTML, so Pure Plain Text shows it as it is.
+    bodySource: "plain",
     // Present only where the seed has it. The mapper's rule is the same one: a
     // real message arrives with both halves, and the HTML is kept only when it
     // says something the text does not.

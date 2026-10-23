@@ -186,12 +186,15 @@ export function Row({
   setting,
   label,
   hint,
+  hintId,
   children,
 }: {
   setting?: SettingId;
   label?: string;
   /** A short, live status line (the client in use, whether contacts are connected). */
   hint?: string;
+  /** An id for the hint, so the control can name it with `aria-describedby`. */
+  hintId?: string;
   children: React.ReactNode;
 }) {
   const row = (
@@ -208,7 +211,11 @@ export function Row({
         ) : (
           <p className="text-ui font-medium text-ink-body">{label}</p>
         )}
-        {hint && <p className="text-meta text-ink-subtle">{hint}</p>}
+        {hint && (
+          <p id={hintId} className="text-meta text-ink-subtle">
+            {hint}
+          </p>
+        )}
       </div>
       <div data-settings-control="" className="max-w-full shrink-0">{children}</div>
     </div>
@@ -316,10 +323,13 @@ export function Toggle({
   checked,
   onChange,
   label,
+  describedBy,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   label: string;
+  /** The id of a line that says more, read after the name (`aria-describedby`). */
+  describedBy?: string;
 }) {
   return (
     <button
@@ -327,6 +337,7 @@ export function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy}
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
         checked ? "bg-accent" : "bg-surface-active"

@@ -6700,7 +6700,7 @@ try {
     const tabLabels = await tabs.allTextContents();
     check(
       "the categories, Reading first and selected",
-      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Smart filters", "Compose", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About"]) &&
+      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Smart filters", "Compose", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About", "Dev Options"]) &&
         (await tabs.first().getAttribute("aria-selected")) === "true",
       JSON.stringify(tabLabels),
     );
@@ -6722,7 +6722,7 @@ try {
     );
     await s.keyboard.press("End");
     await s.waitForTimeout(80);
-    check("End jumps to the last", (await title()) === "About");
+    check("End jumps to the last", (await title()) === "Dev Options");
     await s.keyboard.press("ArrowDown");
     await s.waitForTimeout(80);
     check("and ArrowDown wraps round to the first", (await title()) === "Reading");
@@ -6766,7 +6766,7 @@ try {
     check("a new category starts on its intro", (await explain.getAttribute("data-settings-explain")) === "intro" && ((await explain.textContent()) ?? "").includes("Reading"));
     // Every setting row in every category explains itself.
     let unexplained = [];
-    for (const id of ["reading", "appearance", "privacy", "sync", "google", "senders", "shortcuts", "about"]) {
+    for (const id of ["reading", "appearance", "privacy", "sync", "google", "senders", "shortcuts", "about", "dev"]) {
       await openSettingsCategory(s, id);
       for (const block of await dialog.locator("[data-setting]").all()) {
         const setting = await block.getAttribute("data-setting");
@@ -6867,7 +6867,7 @@ try {
     // has no keys to press (1.3.3). A hardware key press brings it back for the session.
     check(
       "with every category but Keyboard shortcuts (touch only, no keyboard seen yet)",
-      (await dialog.locator("button[data-category]").count()) === 9 &&
+      (await dialog.locator("button[data-category]").count()) === 10 &&
         (await dialog.locator('button[data-category="shortcuts"]').count()) === 0,
     );
     await s.keyboard.press("Shift");
@@ -7612,6 +7612,103 @@ try {
       "in the demo the phone keeps a compact one-line strip whose Connect Gmail is a reachable touch target, and no pull",
       demo.kind === "compact" && demo.height <= 56 && demo.connect && demo.target >= 44 && demo.indicator === 0,
       JSON.stringify(demo),
+    );
+    await ctx.close();
+  }
+
+  // ── Dev Options → Pure Plain Text ─────────────────────────────────────────
+  //
+  // The last category, one switch, off by default and saved on this device. With it on,
+  // the reader's Plain text form is the message's text exactly as sent: the demo's
+  // security alert starts with a blank line that the tidy form drops.
+  section("dev options");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const s = await ctx.newPage();
+    s.on("pageerror", (error) => errors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    await s.waitForSelector("[data-row-count] [data-row-id]");
+    const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
+    const toggle = dialog.locator('[role="switch"][aria-label="Pure Plain Text"]');
+    const openDev = async () => {
+      await s.keyboard.press(",");
+      await openSettingsCategory(s, "dev");
+    };
+    const closeSettings = async () => {
+      await dialog.locator("[data-settings-back]").click();
+      await s.waitForTimeout(250);
+    };
+
+    await openDev();
+    const tabs = dialog.locator('[role="tablist"] [role="tab"]');
+    check(
+      "Dev Options is the last Settings category",
+      ((await tabs.last().textContent()) ?? "").trim() === "Dev Options" &&
+        ((await dialog.locator("[data-settings-title]").textContent()) ?? "").trim() === "Dev Options",
+    );
+    const describedBy = await toggle.getAttribute("aria-describedby");
+    const description = describedBy ? ((await s.locator(`#${describedBy}`).textContent()) ?? "").trim() : "";
+    check(
+      "with a Pure Plain Text switch, named for screen readers and described in one line, off by default",
+      (await toggle.count()) === 1 &&
+        (await toggle.getAttribute("aria-checked")) === "false" &&
+        description === "Show plain text exactly as sent, with nothing removed" &&
+        (await dialog.locator('[data-setting="purePlainText"]').count()) === 1,
+      JSON.stringify({ describedBy, description }),
+    );
+    check("and nothing saved while it is off", (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === null);
+    await closeSettings();
+
+    // The plain form of a message whose text starts with a blank line.
+    const plainOf = async () => {
+      await s.locator("#winnow-search").fill("unusual sign-in attempt");
+      await s.waitForTimeout(300);
+      await s.locator("[data-row-count] [data-row-id]").first().click();
+      await s.waitForTimeout(300);
+      await s.locator('[data-reader] button[aria-label="More"]:visible').first().click();
+      await s.locator('[role="menu"] [role="menuitemradio"]', { hasText: "Plain text" }).click();
+      await s.waitForTimeout(300);
+      return s.evaluate(() => {
+        const host = document.querySelector("[data-plain-text]");
+        return host
+          ? { mode: host.getAttribute("data-plain-text"), text: host.textContent ?? "", whiteSpace: getComputedStyle(host).whiteSpace }
+          : null;
+      });
+    };
+    const tidy = await plainOf();
+    check(
+      "off: Plain text is tidied (the leading blank line is gone)",
+      tidy?.mode === "tidy" && tidy.text.startsWith("We noticed a sign-in"),
+      JSON.stringify(tidy?.text.slice(0, 40)),
+    );
+
+    await openDev();
+    await toggle.click();
+    await s.waitForTimeout(100);
+    check(
+      "turning it on is saved on this device",
+      (await toggle.getAttribute("aria-checked")) === "true" &&
+        (await s.evaluate(() => JSON.parse(localStorage.getItem("winnow.devOptions.v1") ?? "null")?.purePlainText)) === true,
+    );
+    await closeSettings();
+    const pure = await plainOf();
+    check(
+      "on: Plain text is the text exactly as sent, blank line kept, whitespace preserved, still text",
+      pure?.mode === "pure" && pure.text.startsWith("\nWe noticed a sign-in") && pure.whiteSpace === "pre-wrap" &&
+        (await s.locator("[data-plain-text] *").count()) === 0,
+      JSON.stringify({ mode: pure?.mode, start: pure?.text.slice(0, 40), whiteSpace: pure?.whiteSpace }),
+    );
+
+    await s.reload({ waitUntil: "networkidle" });
+    await s.waitForSelector("[data-row-count] [data-row-id]");
+    await openDev();
+    check("and still on after a reload", (await toggle.getAttribute("aria-checked")) === "true");
+    await toggle.click();
+    await s.waitForTimeout(100);
+    check(
+      "turning it off removes the saved entry",
+      (await toggle.getAttribute("aria-checked")) === "false" &&
+        (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === null,
     );
     await ctx.close();
   }
