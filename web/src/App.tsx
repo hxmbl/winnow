@@ -4425,7 +4425,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             The triage line, then the status line under it.
 
             The first line is Winnow's one signature: what in the inbox needs you, as a
-            sentence ("3 waiting on you and 2 deliveries today"), derived from the
+            sentence ("3 waiting on you and 2 emails about deliveries today"), derived from the
             classifier's own signals. Only in the inbox — it is a claim about the inbox,
             and over Sent or the bin it would be answering a question nobody asked.
           */}

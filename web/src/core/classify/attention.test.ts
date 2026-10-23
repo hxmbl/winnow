@@ -38,12 +38,12 @@ describe("attentionSentence", () => {
   it("reads like a sentence, with singulars and an 'and'", () => {
     expect(attentionSentence({ waiting: 1, security: 0, deliveries: 0 })).toBe("1 waiting on you");
     expect(attentionSentence({ waiting: 3, security: 0, deliveries: 2 })).toBe(
-      "3 waiting on you and 2 deliveries today",
+      "3 waiting on you and 2 emails about deliveries today",
     );
     expect(attentionSentence({ waiting: 3, security: 1, deliveries: 1 })).toBe(
-      "3 waiting on you, 1 security alert and 1 delivery today",
+      "3 waiting on you, 1 security email and 1 email about deliveries today",
     );
-    expect(attentionSentence({ waiting: 0, security: 2, deliveries: 0 })).toBe("2 security alerts");
+    expect(attentionSentence({ waiting: 0, security: 2, deliveries: 0 })).toBe("2 security emails");
   });
 });
 

@@ -1,8 +1,8 @@
 /**
  * What needs you, as one sentence.
  *
- * The triage view's top line: "3 waiting on you, 1 security alert and 2 deliveries
- * today". Derived entirely from signals the classifier already produced, so it costs no
+ * The triage view's top line: "3 waiting on you, 1 security email and 2 emails about
+ * deliveries today". Derived entirely from signals the classifier already produced, so it costs no
  * request and cannot disagree with the rail — a message counted here is one the
  * matching filter would also show.
  *
@@ -12,10 +12,15 @@
  *   - **waiting on you** — unread, and the classifier's `needsAction` fired (the same
  *     predicate as the "Action needed" bucket). Read mail is not waiting; it has been
  *     seen.
- *   - **security alerts** — unread security mail. A sign-in alert you already read is
+ *   - **security emails** — unread security mail. A sign-in alert you already read is
  *     history.
- *   - **deliveries today** — shipping mail that arrived today, read or not, because
- *     "it's arriving today" stays true after you open the email.
+ *   - **emails about deliveries today** — shipping mail that arrived today, read or not,
+ *     because "it's arriving today" stays true after you open the email.
+ *
+ * The security and delivery clauses count *emails*, not alerts or parcels: the
+ * classifier knows a message is about security or shipping, not that it is a real alert
+ * or that a parcel lands today (an order confirmation is shipping mail too), so the
+ * wording claims no more than that.
  *
  * Unsafe mail is excluded from every clause: the line must never advertise a phishing
  * lure as something that needs you.
@@ -72,10 +77,10 @@ export function attentionSentence(summary: AttentionSummary): string {
   const clauses: string[] = [];
   if (summary.waiting > 0) clauses.push(`${summary.waiting} waiting on you`);
   if (summary.security > 0) {
-    clauses.push(`${summary.security} security ${summary.security === 1 ? "alert" : "alerts"}`);
+    clauses.push(`${summary.security} security ${summary.security === 1 ? "email" : "emails"}`);
   }
   if (summary.deliveries > 0) {
-    clauses.push(`${summary.deliveries} ${summary.deliveries === 1 ? "delivery" : "deliveries"} today`);
+    clauses.push(`${summary.deliveries} ${summary.deliveries === 1 ? "email" : "emails"} about deliveries today`);
   }
   if (clauses.length === 0) return "Nothing needs you right now";
   return joinClauses(clauses);
