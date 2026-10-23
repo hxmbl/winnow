@@ -3,6 +3,8 @@ import {
   AXIS_LOCK_PX,
   COMMIT_FRACTION,
   EDGE_PX,
+  isLongPressMenu,
+  swipesWith,
   FLING_MIN_PX,
   FLING_VELOCITY,
   SwipeGesture,
@@ -182,5 +184,27 @@ describe("directions per mailbox", () => {
     expect(directionOf(-10, true)).toBe("right");
     expect(directionOf(0)).toBeNull();
     expect(rowOffset(-80, { left: null, right: "markRead" }, true)).toBe(-80);
+  });
+});
+
+describe("S Pen and other styluses", () => {
+  it("swipes with a finger or a stylus tip, not a mouse", () => {
+    expect(swipesWith({ pointerType: "touch", buttons: 1 })).toBe(true);
+    expect(swipesWith({ pointerType: "pen", buttons: 1 })).toBe(true);
+    expect(swipesWith({ pointerType: "mouse", buttons: 1 })).toBe(false);
+  });
+
+  it("not with the side button or the eraser held", () => {
+    expect(swipesWith({ pointerType: "pen", buttons: 1 | 2 })).toBe(false);
+    expect(swipesWith({ pointerType: "pen", buttons: 32 })).toBe(false);
+  });
+
+  it("treats a stylus long-press as select, but a side-button press as a right-click", () => {
+    const menu = (pointerType: string, button: number) =>
+      isLongPressMenu({ button, nativeEvent: Object.assign(new Event("contextmenu"), { pointerType }) });
+    expect(menu("touch", 0)).toBe(true);
+    expect(menu("pen", 0)).toBe(true);
+    expect(menu("pen", 2)).toBe(false);
+    expect(menu("mouse", 2)).toBe(false);
   });
 });

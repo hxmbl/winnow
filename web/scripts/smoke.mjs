@@ -5389,6 +5389,38 @@ try {
       }
     }
 
+    // An S Pen: Chromium reports a stylus as `pen` pointer events, and a pen swipe
+    // does exactly what a finger's does. With its side button held it is a right-click
+    // and swipes nothing.
+    {
+      /** A stylus from (x, y) by dx, tip down (`buttons` 1), optionally side button held. */
+      const pen = async ({ x, y, dx, side = false }) => {
+        const buttons = side ? 3 : 1;
+        const send = (type, at) =>
+          cdp.send("Input.dispatchMouseEvent", { type, x: at, y, button: side ? "right" : "left", buttons, clickCount: 1, pointerType: "pen" });
+        await send("mousePressed", x);
+        for (let i = 1; i <= 12; i += 1) {
+          await send("mouseMoved", x + (dx * i) / 12);
+          await p.waitForTimeout(16);
+        }
+        await send("mouseReleased", x + dx);
+        await p.waitForTimeout(700);
+      };
+      const id = await rows.nth(2).getAttribute("data-row-id");
+      const before = await rowCount();
+      const at = await middleOf(id);
+      await pen({ x: at.x + 60, y: at.y, dx: -240, side: true });
+      check("an S Pen with its side button held swipes nothing", (await rowById(id).count()) === 1 && (await rowCount()) === before);
+      await p.keyboard.press("Escape");
+      await p.waitForTimeout(200);
+      await pen({ x: at.x + 60, y: at.y, dx: -240 });
+      check("an S Pen swipe left takes the message out of the list", (await rowById(id).count()) === 0 && (await rowCount()) === before - 1, `${before} → ${await rowCount()}`);
+      check("and nothing opened under the pen", (await p.locator("[data-reader]").count()) === 0);
+      const undo = p.locator("[data-pill-undo]");
+      if ((await undo.count()) === 1) await undo.click();
+      await p.waitForTimeout(500);
+    }
+
     // A short, slow swipe springs back and does nothing.
     {
       const id = await rows.nth(3).getAttribute("data-row-id");

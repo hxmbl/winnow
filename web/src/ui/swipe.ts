@@ -77,6 +77,28 @@ export const SWIPE_LABEL: Record<SwipeAction, string> = {
   markUnread: "Mark unread",
 };
 
+/**
+ * Whether a press can start a swipe: a finger, or a stylus tip (an S Pen reports
+ * `pen`). Not a mouse, and not a stylus with its side button or eraser held, which
+ * Android reports as a right-click and an eraser and which mean something else.
+ */
+export function swipesWith(event: { pointerType: string; buttons: number }): boolean {
+  if (event.pointerType === "touch") return true;
+  return event.pointerType === "pen" && event.buttons === 1;
+}
+
+/**
+ * Whether a `contextmenu` is the browser's long-press menu (a finger or a stylus held
+ * still) rather than a right-click. A long-press is select mode, so the row and its
+ * avatar leave it alone. A stylus with its side button pressed is a right-click
+ * (`button` 2) and keeps its menu.
+ */
+export function isLongPressMenu(event: { button: number; nativeEvent: Event }): boolean {
+  const type = (event.nativeEvent as PointerEvent).pointerType;
+  if (type === "touch") return true;
+  return type === "pen" && event.button !== 2;
+}
+
 /** True when a touch at `x` is in either system edge zone of a screen `width` wide. */
 export function inEdgeZone(x: number, width: number, edge = EDGE_PX): boolean {
   return x < edge || x > width - edge;

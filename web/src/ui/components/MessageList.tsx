@@ -48,9 +48,11 @@ import { emptyKindFor, viewKey, type EmptyContext, type EmptyKind } from "../inb
 import { useClearCelebration } from "../useClearCelebration";
 import {
   SWIPE_LABEL,
+  isLongPressMenu,
   SwipeGesture,
   removesRow,
   swipeActionsFor,
+  swipesWith,
   type SwipeAction,
   type SwipeActions,
   type SwipeDirection,
@@ -345,7 +347,7 @@ const Row = memo(function Row({
         // never the browser's. A touch long-press is left to the list, where it is
         // select mode.
         onContextMenu={(event) => {
-          if ((event.nativeEvent as PointerEvent).pointerType === "touch") return;
+          if (isLongPressMenu(event)) return;
           event.preventDefault();
           event.stopPropagation();
           if (selectMode) onToggleChecked(email.id);
@@ -1303,6 +1305,7 @@ function MessageList({
   const dragCleanup = useRef<(() => void) | null>(null);
 
   // ── Swipe actions ──────────────────────────────────────────────────────────
+  // A finger or a stylus (an S Pen is `pen`): see `swipesWith`.
 
   /**
    * The touch that may be a swipe. Every decision is `SwipeGesture`'s; this holds the
@@ -1358,7 +1361,7 @@ function MessageList({
   const startSwipe = (event: React.PointerEvent, target: Element) => {
     swipeRef.current = null;
     const config = live.current.swipe;
-    if (!config || event.pointerType !== "touch" || swipeBusy.current) return;
+    if (!config || !swipesWith(event) || swipeBusy.current) return;
     if (live.current.selection.size > 0) return;
     const row = target.closest<HTMLElement>("[data-row-id]");
     const item = row?.parentElement;
@@ -1643,7 +1646,7 @@ function MessageList({
     // Touch events keep the element the finger first landed on as their target, even
     // after the window unmounts its row during an edge scroll; a listener on that
     // element is the one place the scroll can still be vetoed from. See `noScroll`.
-    if (event.pointerType === "touch") holdTouchTarget(target);
+    if (event.pointerType === "touch" || event.pointerType === "pen") holdTouchTarget(target);
     const pointerId = event.pointerId;
     const pointerType = event.pointerType;
     longPress.current.down(id, event.clientX, event.clientY, performance.now());
