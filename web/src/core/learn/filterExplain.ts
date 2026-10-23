@@ -8,7 +8,9 @@
  * the path that actually decided — your correction for the message, a sender rule,
  * similar mail you corrected, or the built-in signals — and never a reason that had no
  * part in it. Generic clues (Gmail's category, a no-reply address) are never a reason.
- * No scores, ever: a reason is a thing about the message or a thing you did.
+ * No scores in the reasons, ever: a reason is a thing about the message or a thing you
+ * did. The numbers exist only behind Dev Options → Show filter scores (`scores: true`),
+ * which adds `FilterReason.scores` beside the words and changes nothing else.
  */
 
 import type { Email } from "../model/email";
@@ -71,6 +73,11 @@ export type FilterReason = {
   line: string;
   /** What decided: your correction, a sender rule, similar mail, or the built-in rules. */
   source: ReasonSource;
+  /**
+   * Dev Options → Show filter scores: the numbers behind the decision, one per line
+   * (`filterScoreLines`). Absent unless asked for.
+   */
+  scores?: string[];
 };
 
 /** At most this many reasons in one line; more reads as a list, not a sentence. */
@@ -243,6 +250,8 @@ export type ExplainContext = {
   background?: ClueBackground;
   /** The sorting weights the importance score was computed with. */
   weights?: SignalWeights;
+  /** Dev Options → Show filter scores: add each filter's numbers (`FilterReason.scores`). */
+  scores?: boolean;
 };
 
 /**
@@ -281,7 +290,59 @@ export function explainFilters(
     if (reasons.length === 0) reasons = ["its wording matches this filter"];
     const unique = [...new Set(reasons)].slice(0, MAX_REASONS);
     const label = FILTER_LABELS[filter];
-    out.push({ filter, label, reasons: unique, line: `In ${label} because: ${unique.join(", ")}`, source });
+    const reason: FilterReason = { filter, label, reasons: unique, line: `In ${label} because: ${unique.join(", ")}`, source };
+    if (context.scores) reason.scores = filterScoreLines(filter, email, base, learned, profile, model, background);
+    out.push(reason);
   }
   return out;
+}
+
+const num = (value: number) => (value >= 0 ? "+" : "") + value.toFixed(2);
+const way = (into: boolean) => (into ? "in" : "out");
+
+/**
+ * Dev Options → Show filter scores: the numbers behind one filter for one message.
+ * The built-in answer and its score where it has one (importance, spam likelihood),
+ * then for a filter you have corrected: the path that decided, your answer for this
+ * message, the sender rule and its count, and similar-mail naive Bayes (the prior,
+ * each shared clue's capped log-likelihood ratio, the words' sum and cap, the total
+ * log-odds as P(in), and the support a flip has against the support it needs).
+ */
+export function filterScoreLines(
+  filter: BuiltinSmartFilter,
+  email: Email,
+  base: EmailSignals,
+  learned: EmailSignals,
+  profile: UserProfile,
+  model: FilterLearning,
+  background: ClueBackground = EMPTY_BACKGROUND,
+): string[] {
+  const lines: string[] = [];
+  lines.push(`built-in: ${way(matchesBuiltin(filter, email, base, profile))} · after learning: ${way(matchesBuiltin(filter, email, learned, profile))}`);
+  if (filter === "important") {
+    lines.push(`importance score: ${base.importanceScore.toFixed(1)} (threshold ${IMPORTANT_THRESHOLD}) · needs action: ${base.needsAction ? "yes" : "no"}`);
+  }
+  if (filter === "unsafe") lines.push(`spam likelihood: ${base.spamLikelihood.toFixed(1)}`);
+  if (!isLearnable(filter)) return lines;
+  const detail = model.scoreDetail(email, filter, base, background);
+  lines.push(`decided by: ${detail.decision.by} → ${way(detail.decision.into)}`);
+  if (detail.messageAnswer !== undefined) lines.push(`your answer for this message: ${way(detail.messageAnswer)}`);
+  if (detail.senderRule) {
+    const rule = detail.senderRule;
+    lines.push(`sender rule hit: ${rule.kind} ${rule.key} → ${way(rule.into)} (${rule.count} ${rule.count === 1 ? "decision" : "decisions"})`);
+  } else {
+    lines.push("sender rule hit: none");
+  }
+  const bayes = detail.bayes;
+  if (!bayes) {
+    lines.push("naive Bayes: no corrections for this filter yet");
+    return lines;
+  }
+  lines.push(`naive Bayes prior (built-in answer): ${num(bayes.prior)} log-odds`);
+  for (const clue of bayes.clues) lines.push(`  clue ${clueLabel(clue.clue)} [${clue.kind}]: ${num(clue.weight)}`);
+  if (bayes.clues.length === 0) lines.push("  no shared clues");
+  lines.push(`  words: ${num(bayes.words)} (capped at ±${bayes.strongestWord.toFixed(2)})`);
+  lines.push(`  total: ${num(bayes.logOdds)} log-odds → P(in) = ${(bayes.probabilityIn * 100).toFixed(1)}%`);
+  lines.push(`  support: ${bayes.support} of ${bayes.minSupport} needed to overturn the built-in answer`);
+  return lines;
 }

@@ -26,12 +26,14 @@ export type DevOptions = {
   purePlainText: boolean;
   /** View Original: the reader's ⋯ menu offers the message's raw source (`core/mail/rawSource.ts`). */
   viewOriginal: boolean;
+  /** Show filter scores: "Why it's here" also shows the numbers (`filterScoreLines`). */
+  filterScores: boolean;
 };
 
-export const DEFAULT_DEV_OPTIONS: DevOptions = { unlocked: false, purePlainText: false, viewOriginal: false };
+export const DEFAULT_DEV_OPTIONS: DevOptions = { unlocked: false, purePlainText: false, viewOriginal: false, filterScores: false };
 
 /** The switches inside Dev Options (everything but `unlocked`), which hiding turns off. */
-export const DEV_SWITCHES = ["purePlainText", "viewOriginal"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
+export const DEV_SWITCHES = ["purePlainText", "viewOriginal", "filterScores"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
 
 /** The subset of `Storage` this needs, so a test can hand in a map. */
 export interface DevOptionsStorage {

@@ -151,6 +151,46 @@ export type FilterLearningSnapshot = {
 };
 
 /** A sender rule as Settings lists it. */
+/** `FilterLearning.bayes`'s working: the numbers behind similar-mail learning. */
+type BayesWorking = {
+  prior: number;
+  pushes: { clue: string; weight: number }[];
+  words: number;
+  strongestWord: number;
+  logOdds: number;
+  into: boolean;
+  support: number;
+  verdict: { into: boolean; clues: string[]; support: number } | null;
+};
+
+/** Every number behind one filter's decision for one message (`FilterLearning.scoreDetail`). */
+export type FilterScoreDetail = {
+  /** What the built-in rules alone say. */
+  builtIn: boolean;
+  /** The decision the list uses. */
+  decision: Decision;
+  /** Your own answer for this very message, if you gave one. */
+  messageAnswer: boolean | undefined;
+  /** The sender rule that applies, if any. */
+  senderRule: SenderRule | null;
+  /** Similar-mail naive Bayes, when the filter has corrections to learn from. */
+  bayes: {
+    /** The built-in answer as a prior, in log-odds (± ln BUILT_IN_ODDS). */
+    prior: number;
+    /** Each specific clue the message shares with your corrections, capped, in log-odds. */
+    clues: Array<{ clue: string; kind: string; weight: number }>;
+    /** The words' combined weight before the cap, and the cap (the strongest word). */
+    words: number;
+    strongestWord: number;
+    /** The total, and the same as a probability of "in". */
+    logOdds: number;
+    probabilityIn: number;
+    /** Your decisions backing a flip, and how many a flip needs. */
+    support: number;
+    minSupport: number;
+  } | null;
+};
+
 export type SenderRule = {
   filter: LearnableFilter;
   /** The address, or the domain for a domain rule. */
@@ -506,6 +546,20 @@ export class FilterLearning {
     builtIn: boolean,
     background: ClueBackground,
   ): { into: boolean; clues: string[]; support: number } | null {
+    return this.bayes(email, filter, builtIn, background)?.verdict ?? null;
+  }
+
+  /**
+   * `similarEvidence`'s whole working, numbers included: what Dev Options → Show filter
+   * scores prints. `verdict` is exactly what `similarEvidence` returns; `null` overall
+   * when the filter has no corrections to learn from.
+   */
+  private bayes(
+    email: Email,
+    filter: LearnableFilter,
+    builtIn: boolean,
+    background: ClueBackground,
+  ): BayesWorking | null {
     const stats = this.stats().get(filter);
     if (!stats) return null;
     const { moved } = stats;
@@ -536,10 +590,11 @@ export class FilterLearning {
     // them together are worth at most the strongest one.
     logOdds += Math.max(-strongestWord, Math.min(strongestWord, words));
     const into = logOdds > 0;
-    if (into === builtIn) return null;
+    const working = { prior: (builtIn ? 1 : -1) * prior, pushes, words, strongestWord, logOdds, into };
+    if (into === builtIn) return { ...working, support: 0, verdict: null };
     // Similarity alone never takes mail out of Security or Important: missing a security
     // notice or something important costs far more than an extra one shown.
-    if (!into && (filter === "security" || filter === "important")) return null;
+    if (!into && (filter === "security" || filter === "important")) return { ...working, support: 0, verdict: null };
     // The clues that pushed this message toward the flipped answer: each pattern, header
     // or category whose own weight points that way, and each word that does, but words
     // only when the words together point that way too, since a word moves the answer
@@ -553,8 +608,37 @@ export class FilterLearning {
     // A decision of yours backs the flip only when it shares one of those clues. Sharing
     // a clue with no weight, or one that pushes the other way, is not support.
     const support = stats.units.filter((unit) => unit.into === into && toward.some((clue) => (unit.clues.get(clue) ?? 0) > 0)).length;
-    if (support < MIN_SUPPORT) return null;
-    return { into, clues: toward, support };
+    if (support < MIN_SUPPORT) return { ...working, support, verdict: null };
+    return { ...working, support, verdict: { into, clues: toward, support } };
+  }
+
+  /**
+   * Dev Options → Show filter scores: every number behind one filter's decision for one
+   * message. Read-only and never used to decide; `decide` stays the one decision.
+   */
+  scoreDetail(email: Email, filter: LearnableFilter, signals: EmailSignals, background: ClueBackground = EMPTY_BACKGROUND): FilterScoreDetail {
+    const builtIn = builtInSays(filter, email, signals);
+    const decision = this.decide(email, filter, signals, background);
+    const learning = this.filtersWithCorrections().has(filter);
+    const working = learning ? this.bayes(email, filter, builtIn, background) : null;
+    return {
+      builtIn,
+      decision,
+      messageAnswer: learning ? this.messageAnswer(email.gmailId, filter) : undefined,
+      senderRule: learning ? this.senderRuleFor(email, filter) : null,
+      bayes: working
+        ? {
+            prior: working.prior,
+            clues: working.pushes.map((push) => ({ clue: push.clue, kind: clueKind(push.clue), weight: push.weight })),
+            words: working.words,
+            strongestWord: working.strongestWord,
+            logOdds: working.logOdds,
+            probabilityIn: 1 / (1 + Math.exp(-working.logOdds)),
+            support: working.support,
+            minSupport: MIN_SUPPORT,
+          }
+        : null,
+    };
   }
 
   /**

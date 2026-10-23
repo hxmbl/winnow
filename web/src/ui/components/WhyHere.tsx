@@ -1,6 +1,7 @@
 /**
  * "Why it's here": one plain line per smart filter the message is in, built in
- * `core/learn/filterExplain.ts`. Words only — no scores, no percentages.
+ * `core/learn/filterExplain.ts`. Words only — no scores, no percentages — unless Dev
+ * Options → Show filter scores put numbers in `reason.scores`, shown under each line.
  */
 
 import type { FilterReason } from "../../core/learn/filterExplain";
@@ -26,6 +27,14 @@ export function WhyHere({
               <Icon size={12} strokeWidth={2} className="mt-[3px] shrink-0 text-ink-subtle" />
               <span className="min-w-0">
                 In <span className="font-medium text-ink">{reason.label}</span> because: {reason.reasons.join(", ")}
+                {reason.scores && reason.scores.length > 0 && (
+                  <span
+                    data-filter-scores={reason.filter}
+                    className="selectable mt-0.5 block whitespace-pre-wrap font-mono text-meta leading-snug text-ink-muted"
+                  >
+                    {reason.scores.join("\n")}
+                  </span>
+                )}
               </span>
             </li>
           );

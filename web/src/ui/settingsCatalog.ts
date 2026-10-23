@@ -335,6 +335,12 @@ export const SETTINGS = {
     explanation:
       "Adds View Original to a message's ⋯ menu: the message exactly as Gmail stores it, every header and every MIME part, fetched from Gmail when you ask and shown as plain characters with a Copy button. Nothing in it is rendered, so no HTML, image or script in the message can run or load. It is not saved anywhere; in the demo the source is built on this device.",
   },
+  filterScores: {
+    category: "dev",
+    label: "Show filter scores",
+    explanation:
+      "Adds the numbers behind each line of “Why it's here”: the built-in answer, the importance score or spam likelihood, which path decided, any sender rule and how many decisions made it, and the similar-mail naive Bayes working (each shared clue's weight, the total log-odds and the probability). They are worked out on this device from what is already there. Off, Why it's here is words only, as normal.",
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingId = keyof typeof SETTINGS;

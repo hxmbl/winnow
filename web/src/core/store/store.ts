@@ -4348,10 +4348,13 @@ export class WinnowStore {
   /** Increases with every "Change smart filters…" action, so each action is one batch. */
   private smartFilterBatch = 0;
 
-  /** "Why it's here" for one inbox message: one line per filter it is in. */
-  explainSmartFilters(id: number): FilterReason[] {
+  /**
+   * "Why it's here" for one inbox message: one line per filter it is in. `scores` is
+   * Dev Options → Show filter scores: each line also carries its numbers.
+   */
+  explainSmartFilters(id: number, { scores = false }: { scores?: boolean } = {}): FilterReason[] {
     const email = this.inboxEmail(id);
-    if (!email) return this.explainInMailbox(id);
+    if (!email) return this.explainInMailbox(id, scores);
     this.inboxAnalysis();
     const cache = this.inboxCache;
     const base = cache?.baseSignals.get(id);
@@ -4360,6 +4363,7 @@ export class WinnowStore {
     return explainFilters(email, base, learned, cache.profile, this.state.filterLearning, {
       background: cache.background,
       weights: cache.weights,
+      scores,
     });
   }
 
@@ -4368,7 +4372,7 @@ export class WinnowStore {
    * the classification that mailbox's smart filters use (`mailboxSignals`). Drafts have
    * none.
    */
-  private explainInMailbox(id: number): FilterReason[] {
+  private explainInMailbox(id: number, scores: boolean): FilterReason[] {
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!email || email.mailbox === "inbox") return [];
     const { profile } = this.inboxAnalysis();
@@ -4379,6 +4383,7 @@ export class WinnowStore {
     return explainFilters(email, base, learned, profile, this.state.filterLearning, {
       background: cache?.background ?? EMPTY_BACKGROUND,
       weights: cache?.weights ?? weights,
+      scores,
     });
   }
 

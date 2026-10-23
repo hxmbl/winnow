@@ -252,6 +252,9 @@ export type SettingsProps = {
   /** Dev Options → View Original: the reader's ⋯ menu offers the raw source. */
   viewOriginal: boolean;
   onViewOriginal: (value: boolean) => void;
+  /** Dev Options → Show filter scores: "Why it's here" shows its numbers. */
+  filterScores: boolean;
+  onFilterScores: (value: boolean) => void;
   /** The category Settings opens on (on a phone, straight to its page). Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
@@ -873,6 +876,14 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               onChange={props.onViewOriginal}
               label={SETTINGS.viewOriginal.label}
               describedBy="winnow-view-original-hint"
+            />
+          </Row>
+          <Row setting="filterScores" hint="Adds the numbers behind “Why it's here”" hintId="winnow-filter-scores-hint">
+            <Toggle
+              checked={props.filterScores}
+              onChange={props.onFilterScores}
+              label={SETTINGS.filterScores.label}
+              describedBy="winnow-filter-scores-hint"
             />
           </Row>
           <div className="pt-4">

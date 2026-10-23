@@ -4326,7 +4326,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         <SmartFilterPicker
           count={filterPicker.length}
           membership={store.smartFilterMembership(filterPicker)}
-          reasons={filterPicker.length === 1 ? store.explainSmartFilters(filterPicker[0]) : []}
+          reasons={filterPicker.length === 1 ? store.explainSmartFilters(filterPicker[0], { scores: devOptions.filterScores }) : []}
           status={filterPickerStatus}
           onChange={(filter, into) => {
             const [outcome] = store.changeSmartFilters(filterPicker, [{ filter, into }]);
@@ -4727,7 +4727,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               whyHere={
                 // Every mailbox but Drafts has smart filters (1.3.3), so every one can say why.
                 selected && selected.mailbox !== "drafts" ? (
-                  <WhyHere reasons={store.explainSmartFilters(selected.id)} />
+                  <WhyHere reasons={store.explainSmartFilters(selected.id, { scores: devOptions.filterScores })} />
                 ) : null
               }
               onSenderMenu={(trigger) => {
@@ -4921,6 +4921,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onPurePlainText={(value) => changeDevOptions({ purePlainText: value })}
           viewOriginal={devOptions.viewOriginal}
           onViewOriginal={(value) => changeDevOptions({ viewOriginal: value })}
+          filterScores={devOptions.filterScores}
+          onFilterScores={(value) => changeDevOptions({ filterScores: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           scheduledCount={snapshot.scheduled.filter((send) => send.account === store.accountKey()).length}

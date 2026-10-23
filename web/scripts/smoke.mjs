@@ -7819,6 +7819,39 @@ try {
     await ctx.close();
   }
 
+  // ── Dev Options → Show filter scores ──────────────────────────────────────
+  section("dev options: filter scores");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const s = await ctx.newPage();
+    s.on("pageerror", (error) => errors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    const scoresFor = async (devOptions) => {
+      await s.evaluate((value) => localStorage.setItem("winnow.devOptions.v1", JSON.stringify(value)), devOptions);
+      await s.reload({ waitUntil: "networkidle" });
+      await s.waitForSelector("[data-row-count] [data-row-id]");
+      await s.locator("#winnow-search").fill("unusual sign-in attempt");
+      await s.waitForTimeout(300);
+      await s.locator("[data-row-count] [data-row-id]").first().click();
+      await s.locator("[data-why-here]").first().waitFor({ timeout: 5_000 });
+      return s.evaluate(() => ({
+        lines: document.querySelectorAll("[data-why-line]").length,
+        scores: [...document.querySelectorAll("[data-filter-scores]")].map((el) => el.textContent ?? ""),
+      }));
+    };
+    const off = await scoresFor({ version: 1, unlocked: true, filterScores: false });
+    check("off: Why it's here is words only", off.lines > 0 && off.scores.length === 0, JSON.stringify(off));
+    const on = await scoresFor({ version: 1, unlocked: true, filterScores: true });
+    check(
+      "on: every line also shows its numbers",
+      on.lines === off.lines && on.scores.length === on.lines && on.scores.every((text) => text.startsWith("built-in:")),
+      JSON.stringify(on.scores.map((text) => text.slice(0, 50))),
+    );
+    const locked = await scoresFor({ version: 1, unlocked: false, filterScores: true });
+    check("and none while Dev Options is hidden", locked.scores.length === 0);
+    await ctx.close();
+  }
+
   } // part: settings
   if (part("privacy")) {
   // ── Privacy ─────────────────────────────────────────────────────────────────
