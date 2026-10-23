@@ -36,6 +36,7 @@ import { smokeThumb } from "./smoke-thumb.mjs";
 import { smokeSchedule } from "./smoke-schedule.mjs";
 import { smokeTour } from "./smoke-tour.mjs";
 import { PARTS } from "./smoke-shards.mjs";
+import { signedInContext } from "./fake-gmail.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WINNOW_PORT ?? 4173);
@@ -7849,6 +7850,56 @@ try {
     );
     const locked = await scoresFor({ version: 1, unlocked: false, filterScores: true });
     check("and none while Dev Options is hidden", locked.scores.length === 0);
+    await ctx.close();
+  }
+
+  // ── Dev Options → Debug log ──────────────────────────────────────────────
+  //
+  // Signed in to a fake Gmail (the demo has no sync), with the log already on: the
+  // account's syncs are recorded as lines, none carrying the address, and Clear and
+  // Hide Dev Options work.
+  section("dev options: debug log");
+  {
+    const { ctx } = await signedInContext(browser, { viewport: { width: 1440, height: 900 } });
+    await ctx.addInitScript(() => {
+      if (window.top !== window || sessionStorage.getItem("seeded-debug-log")) return;
+      sessionStorage.setItem("seeded-debug-log", "1");
+      localStorage.setItem("winnow.devOptions.v1", JSON.stringify({ version: 1, unlocked: true, debugLog: true }));
+    });
+    const s = await ctx.newPage();
+    s.on("pageerror", (error) => errors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    await s.locator("[data-message-id]", { hasText: "Fake mail 1" }).first().waitFor({ state: "visible", timeout: 15_000 });
+    const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
+    const toggle = dialog.locator('[role="switch"][aria-label="Debug log"]');
+    const logText = async () => ((await dialog.locator("[data-debug-log-text]").textContent()) ?? "").trim();
+    await s.keyboard.press(",");
+    await openSettingsCategory(s, "dev");
+    check("Dev Options has a Debug log switch, on as saved", (await toggle.getAttribute("aria-checked")) === "true");
+    let recorded = await logText();
+    for (let i = 0; i < 30 && !/ sync done /.test(recorded); i++) {
+      await s.waitForTimeout(500);
+      recorded = await logText();
+    }
+    check(
+      "a sync is recorded as lines, with no address or token in them",
+      / sync start /.test(recorded) && / sync done .*ms=\d+/.test(recorded) && !recorded.includes("@") && !recorded.includes("fake-smoke-access"),
+      JSON.stringify(recorded.slice(0, 200)),
+    );
+    check("with Copy and Clear", (await dialog.locator("[data-debug-log-copy]").count()) === 1 && (await dialog.locator("[data-debug-log-clear]").count()) === 1);
+    await toggle.click();
+    await s.waitForTimeout(100);
+    check(
+      "turning it off is saved and the viewer says it is not recording",
+      (await s.evaluate(() => JSON.parse(localStorage.getItem("winnow.devOptions.v1") ?? "null")?.debugLog)) === false &&
+        ((await dialog.locator("[data-debug-log]").textContent()) ?? "").includes("not recording"),
+    );
+    await dialog.locator("[data-debug-log-clear]").click();
+    await s.waitForTimeout(100);
+    check("Clear empties it", (await logText()) === "Nothing recorded yet.");
+    await dialog.locator("[data-hide-dev-options]").click();
+    await s.waitForTimeout(250);
+    check("Hide Dev Options leaves nothing saved", (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === null);
     await ctx.close();
   }
 

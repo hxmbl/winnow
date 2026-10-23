@@ -28,12 +28,14 @@ export type DevOptions = {
   viewOriginal: boolean;
   /** Show filter scores: "Why it's here" also shows the numbers (`filterScoreLines`). */
   filterScores: boolean;
+  /** Debug log: sync, update and notification events kept in memory (`core/debug/debugLog.ts`). */
+  debugLog: boolean;
 };
 
-export const DEFAULT_DEV_OPTIONS: DevOptions = { unlocked: false, purePlainText: false, viewOriginal: false, filterScores: false };
+export const DEFAULT_DEV_OPTIONS: DevOptions = { unlocked: false, purePlainText: false, viewOriginal: false, filterScores: false, debugLog: false };
 
 /** The switches inside Dev Options (everything but `unlocked`), which hiding turns off. */
-export const DEV_SWITCHES = ["purePlainText", "viewOriginal", "filterScores"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
+export const DEV_SWITCHES = ["purePlainText", "viewOriginal", "filterScores", "debugLog"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
 
 /** The subset of `Storage` this needs, so a test can hand in a map. */
 export interface DevOptionsStorage {

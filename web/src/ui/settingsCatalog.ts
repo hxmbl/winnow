@@ -341,6 +341,12 @@ export const SETTINGS = {
     explanation:
       "Adds the numbers behind each line of “Why it's here”: the built-in answer, the importance score or spam likelihood, which path decided, any sender rule and how many decisions made it, and the similar-mail naive Bayes working (each shared clue's weight, the total log-odds and the probability). They are worked out on this device from what is already there. Off, Why it's here is words only, as normal.",
   },
+  debugLog: {
+    category: "dev",
+    label: "Debug log",
+    explanation:
+      "While on, Winnow keeps a log of sync, update-check and notification events here: what happened, ids, counts and how long it took. It is kept in memory only, at most 1,000 lines, and is gone when Winnow closes; nothing is recorded while it is off. Email addresses, tokens and anything from a message's content are removed before a line is kept, and Copy and Clear are the only ways it leaves this screen.",
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingId = keyof typeof SETTINGS;

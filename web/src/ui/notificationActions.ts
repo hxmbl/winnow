@@ -7,6 +7,7 @@
  * `core/notify/notifications.ts`.
  */
 
+import { debugLog } from "../core/debug/debugLog";
 import type { Email } from "../core/model/email";
 import {
   buildNotificationBatch,
@@ -432,7 +433,9 @@ export async function announce(
   // Android draws the sender's monogram when there is no picture, as the list does.
   const monograms = info?.os === "android" ? notificationMonograms(emails, preferences.notificationHidePreview) : {};
   const shown = info?.kind === "desktop" ? await nativePictures(pictures, undefined, undefined, { monograms }) : pictures;
-  await platform.notifyNewMail(buildNotificationBatch(emails, preferences, resolvedHeads, shown, account));
+  const batch = buildNotificationBatch(emails, preferences, resolvedHeads, shown, account);
+  debugLog("notify", "posted", { arrived: emails.length, os: info?.os ?? "unknown", account: account?.id ?? null });
+  await platform.notifyNewMail(batch);
 }
 
 // ── Presses and kept replies ──────────────────────────────────────────────
@@ -470,7 +473,9 @@ export async function routeNotificationAction(store: WinnowStore, platform: Plat
   const native = event.origin === "android" && event.action !== "open" && event.action !== "inbox";
   const routes = await accountRouter(native ? 0 : undefined);
   if (routes && !native) await routes.ready();
-  return handleNotificationAction(event, notificationDeps(store, platform, routes ?? router));
+  const outcome = await handleNotificationAction(event, notificationDeps(store, platform, routes ?? router));
+  debugLog("notify", "action", { action: event.action, origin: event.origin, messageId: event.messageId, gmailId: event.gmailId, result: outcome });
+  return outcome;
 }
 
 export function wireNotifications(store: WinnowStore, platform: Platform): () => void {

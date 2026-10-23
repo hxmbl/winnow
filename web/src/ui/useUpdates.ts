@@ -16,6 +16,7 @@
  *   the installed version and the newest, newest first (`core/updates/changelog.ts`).
  */
 
+import { debugLog } from "../core/debug/debugLog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkDue,
@@ -204,8 +205,16 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
       checking.current = true;
       setStatus("checking");
       if (manual) setMessage(null);
+      const started = Date.now();
+      debugLog("updates", "check", { manual, channel: runtime.channel });
       const result = await checkForUpdate(runtime, (url, init) => globalThis.fetch(url, init));
       checking.current = false;
+      debugLog("updates", "result", {
+        kind: result.kind,
+        ms: Date.now() - started,
+        version: result.kind === "offer" ? result.offer.version : result.kind === "current" ? result.latest : undefined,
+        reason: result.kind === "failed" ? result.reason : undefined,
+      });
       // Any check that ran restarts the count to the next load check.
       resetLoadCount();
       setState((current) => recordCheck(current, Date.now(), result.kind !== "failed"));
@@ -298,6 +307,7 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
     platform
       .installUpdate(offer)
       .then((outcome) => {
+        debugLog("updates", "install", { version: offer.version, outcome: outcome.kind });
         setStatus("idle");
         switch (outcome.kind) {
           case "restarting":
@@ -322,6 +332,7 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
       .catch((error: unknown) => {
         setStatus("failed");
         const reason = error instanceof Error ? error.message : String(error);
+        debugLog("updates", "install-failed", { version: offer.version, reason });
         say(`Couldn't update: ${reason}`);
       });
   }, [offer, status, platform, flash, say, setState]);

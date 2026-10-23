@@ -18,6 +18,7 @@
  * Ported from `legacy/swift-native/Sources/winnow/Store/WinnowStore.swift`.
  */
 
+import { debugLog } from "../debug/debugLog";
 import { demoRawSource } from "../mail/rawSource";
 import { summarizeAttention, type AttentionSummary } from "../classify/attention";
 import {
@@ -2370,6 +2371,8 @@ export class WinnowStore {
       syncError: null,
     });
     let lastProgressNotify = 0;
+    const started = Date.now();
+    debugLog("sync", "start", { initial, cached: this.state.all.length });
 
     const known = new Set(this.state.all.map((email) => email.gmailId));
 
@@ -2451,11 +2454,25 @@ export class WinnowStore {
         error: result.failed > 0 ? syncFailureSummary(result.failed) : null,
       });
 
+      debugLog("sync", "done", {
+        initial,
+        ms: Date.now() - started,
+        messages: result.emails.length,
+        new: recent.size,
+        failed: result.failed,
+        truncated: Boolean(result.truncated),
+        cacheUnpersisted: Boolean(result.cacheUnpersisted),
+      });
       if (!initial) await this.notifyIfNew(recent);
       await this.applyPlatform();
       this.prefetchInbox();
     } catch (error) {
       if (this.backend !== backend) return;
+      debugLog("sync", "failed", {
+        initial,
+        ms: Date.now() - started,
+        reason: error instanceof Error ? error.message : "unknown",
+      });
       this.set({
         status: "error",
         syncing: false,

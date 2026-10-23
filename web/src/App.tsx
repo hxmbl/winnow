@@ -86,6 +86,7 @@ import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
 import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
 import { RawSourceSheet, type RawSourceState } from "./ui/components/RawSourceSheet";
+import { setDebugLogEnabled } from "./core/debug/debugLog";
 import { DEV_OPTIONS_KEY, hiddenDevOptions, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
 import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
@@ -555,6 +556,9 @@ export function App({ store, existingInstall = true }: Props) {
       return next;
     });
   }, []);
+  // Dev Options → Debug log: recording follows the switch, and stops when Dev Options is hidden.
+  useEffect(() => setDebugLogEnabled(devOptions.debugLog), [devOptions.debugLog]);
+
   // Dev Options → View Original: the open sheet, and the request behind it.
   const [rawSource, setRawSource] = useState<RawSourceState | null>(null);
   const rawRequest = useRef(0);
@@ -4923,6 +4927,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onViewOriginal={(value) => changeDevOptions({ viewOriginal: value })}
           filterScores={devOptions.filterScores}
           onFilterScores={(value) => changeDevOptions({ filterScores: value })}
+          debugLog={devOptions.debugLog}
+          onDebugLog={(value) => changeDevOptions({ debugLog: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           scheduledCount={snapshot.scheduled.filter((send) => send.account === store.accountKey()).length}

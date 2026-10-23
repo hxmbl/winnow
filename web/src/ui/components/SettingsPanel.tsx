@@ -17,6 +17,7 @@ import type { NotificationActions } from "../../core/notify/notifications";
 import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
 import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
 import { devUnlockTap } from "../devOptions";
+import { DebugLogPanel } from "./DebugLogPanel";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
   INFO_CLOSED,
@@ -255,6 +256,9 @@ export type SettingsProps = {
   /** Dev Options → Show filter scores: "Why it's here" shows its numbers. */
   filterScores: boolean;
   onFilterScores: (value: boolean) => void;
+  /** Dev Options → Debug log: record sync, update and notification events in memory. */
+  debugLog: boolean;
+  onDebugLog: (value: boolean) => void;
   /** The category Settings opens on (on a phone, straight to its page). Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
@@ -886,6 +890,15 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               describedBy="winnow-filter-scores-hint"
             />
           </Row>
+          <Row setting="debugLog" hint="Sync, update and notification events, in memory, redacted" hintId="winnow-debug-log-hint">
+            <Toggle
+              checked={props.debugLog}
+              onChange={props.onDebugLog}
+              label={SETTINGS.debugLog.label}
+              describedBy="winnow-debug-log-hint"
+            />
+          </Row>
+          <DebugLogPanel recording={props.debugLog} />
           <div className="pt-4">
             <button type="button" data-hide-dev-options="" onClick={props.onHideDev} className={SECONDARY_BUTTON}>
               Hide Dev Options
