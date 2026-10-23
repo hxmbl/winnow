@@ -130,7 +130,7 @@ fn sums_url(url: &url::Url) -> url::Url {
 fn expected_sha256(sums: &str, name: &str) -> Option<String> {
     let mut found = sums.lines().filter_map(|line| {
         let line = line.trim_end_matches('\r');
-        let (hash, rest) = line.split_at_checked(64)?;
+        let (hash, rest) = (line.get(..64)?, line.get(64..)?);
         let file = rest
             .strip_prefix("  ")
             .or_else(|| rest.strip_prefix(" *"))?;
