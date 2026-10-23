@@ -30,6 +30,8 @@ import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 import { ComposeButton } from "./ComposeFab";
 import { listScroller, scrollListToTop } from "../listScroll";
+import { UpdateButton } from "./UpdateButton";
+import type { UpdatesController } from "../useUpdates";
 import { VERSION_TOGGLE_LABEL, logoHaptic, logoPressed, versionText, type LogoView } from "../logoVersion";
 import {
   BACK_TO_TOP_LABEL,
@@ -65,6 +67,8 @@ export type PhoneTopBarProps = {
   /** The build's version, from the platform; null until it has said. */
   version: string | null;
   /** Whether the field shows search or the version (`logoVersion.ts`). */
+  /** The updater, for the button beside the version (`UpdateButton`; native builds only). */
+  updates?: UpdatesController;
   logoView: LogoView;
   /** The mark was tapped. */
   onToggleLogo: () => void;
@@ -87,6 +91,7 @@ export function PhoneTopBar({
   onToggleLogo,
   onSearchFocus,
   accountButton,
+  updates,
 }: PhoneTopBarProps) {
   const showVersion = logoView === "version";
   return (
@@ -159,14 +164,17 @@ export function PhoneTopBar({
               className="min-w-0 flex-1 bg-transparent text-read text-ink outline-none placeholder:text-ink-placeholder"
             />
           </label>
-          <p
-            data-version-text=""
-            data-shown={showVersion ? "" : undefined}
-            aria-live="polite"
-            className="truncate px-4 text-read font-semibold text-ink"
-          >
-            {showVersion ? versionText(version) : ""}
-          </p>
+          {/* The version, and beside it the update button (native builds only). */}
+          <div data-version-row="" data-shown={showVersion ? "" : undefined} className="flex h-11 min-w-0 items-center gap-2">
+            <p
+              data-version-text=""
+              aria-live="polite"
+              className="min-w-0 flex-1 truncate pl-4 text-read font-semibold text-ink"
+            >
+              {showVersion ? versionText(version) : ""}
+            </p>
+            {showVersion && <UpdateButton updates={updates} phone />}
+          </div>
         </div>
         {accountButton}
       </div>

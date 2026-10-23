@@ -1233,7 +1233,9 @@ div[data-row-count] {
 }
 @media (prefers-reduced-motion: reduce) {
   .wn-logo-swap > *,
-  .wn-logo-swap > :not([data-shown]) {
+  .wn-logo-swap > :not([data-shown]),
+  /* The version text sits inside its row (beside the update button) and inherits the row's visibility. */
+  .wn-logo-swap [data-version-text] {
     transition: none;
   }
 }

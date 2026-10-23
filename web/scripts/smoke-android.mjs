@@ -11,6 +11,9 @@
  *      both values and the "already in use" way out; its fields are validated; and
  *      Save and connect stores the Web client, asks for native sign-in with it, and —
  *      when the stand-in answers DEVELOPER_ERROR — goes on to the loopback flow.
+ *   1b. The update button beside the version shortcut (1.5.5): absent on the web build;
+ *      in the Android app Check for updates → Checking… → No updates available → back,
+ *      and with a newer release Update, which runs the app's APK updater.
  *
  * Separate from `smoke.mjs` so it can run alone (`node scripts/smoke-android.mjs`);
  * `npm run smoke` runs both. Same environment: WINNOW_PORT, WINNOW_CHROMIUM.
@@ -95,6 +98,10 @@ function fakeAndroid({ packageName, sha1 }) {
           return { packageName, sha1, playServices: true };
         case "google_signin_authorize":
           return { kind: "unavailable", reason: "developer_error", detail: "status 10" };
+        case "update_runtime":
+          return { channel: "android", version: "1.5.4", arch: "aarch64" };
+        case "update_install_apk":
+          return { kind: "opened" };
         case "oauth_begin":
           // Stop the loopback flow where it starts: reaching it is the point.
           throw new Error("smoke: no loopback listener");
@@ -140,6 +147,86 @@ try {
     const ids = await stepIds(setup);
     check("the web walkthrough keeps its five steps", ids.join(",") === "project,apis,consent,client,paste", ids.join(","));
     check("and has no Android step", (await page.locator("[data-android-step]").count()) === 0);
+    // The version shortcut has no update button here: the web build has no updater.
+    await page.locator("button:has-text('Close'), [aria-label='Close']").first().click().catch(() => undefined);
+    await page.keyboard.press("Escape");
+    await page.locator("[data-masthead-bar] button[data-version-toggle]").click();
+    await page.waitForTimeout(300);
+    check(
+      "web build: the version shows, with no update button beside it",
+      (await page.locator("[data-version-text]").textContent())?.startsWith("Winnow") && (await page.locator("[data-update-shortcut]").count()) === 0,
+    );
+    await context.close();
+  }
+
+  // ── 1b. The update button beside the version, in the Android app ────────────
+  console.log("\n── android app: the update button ──");
+  {
+    const context = await browser.newContext({
+      viewport: { width: 412, height: 915 },
+      userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36",
+      hasTouch: true,
+      isMobile: true,
+    });
+    await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    const cors = { "access-control-allow-origin": "*" };
+    let latest = "v1.5.4";
+    await context.route("https://api.github.com/repos/hxmbl/winnow/releases/latest", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const version = latest.slice(1);
+      await route.fulfill({
+        headers: cors,
+        json: {
+          tag_name: latest,
+          name: latest,
+          draft: false,
+          prerelease: false,
+          html_url: `https://github.com/hxmbl/winnow/releases/tag/${latest}`,
+          assets: [
+            {
+              name: `Winnow_${version}_android-universal.apk`,
+              browser_download_url: `https://github.com/hxmbl/winnow/releases/download/${latest}/Winnow_${version}_android-universal.apk`,
+              size: 1,
+            },
+          ],
+        },
+      });
+    });
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error)));
+    await page.goto(URL, { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    const button = page.locator("[data-phone-topbar] [data-update-shortcut]");
+    check("hidden until the version shortcut is open", (await button.count()) === 0);
+    await page.locator("[data-phone-topbar] button[data-version-toggle]").tap();
+    await button.waitFor({ timeout: 5_000 });
+    const label = async () => ((await button.textContent()) ?? "").trim();
+    check("beside the version: Check for updates", (await label()) === "Check for updates", await label());
+    const bar = await page.locator("[data-phone-topbar]").boundingBox();
+    const box = await button.boundingBox();
+    check("inside the top bar, on screen", Boolean(bar && box) && box.x + box.width <= 412 && box.y >= bar.y && box.y + box.height <= bar.y + bar.height, JSON.stringify({ bar, box }));
+    await button.tap();
+    await page.waitForTimeout(150);
+    check("while it checks: Checking…", (await label()) === "Checking…", await label());
+    await page.waitForFunction(() => document.querySelector("[data-update-shortcut]")?.textContent?.trim() === "No updates available", null, { timeout: 5_000 }).catch(() => undefined);
+    check("nothing newer: No updates available", (await label()) === "No updates available", await label());
+    await page.waitForFunction(() => document.querySelector("[data-update-shortcut]")?.textContent?.trim() === "Check for updates", null, { timeout: 6_000 }).catch(() => undefined);
+    check("then back to Check for updates after a few seconds", (await label()) === "Check for updates", await label());
+
+    latest = "v99.0.0";
+    await button.tap();
+    await page.waitForFunction(() => document.querySelector("[data-update-shortcut]")?.textContent?.trim() === "Update", null, { timeout: 5_000 }).catch(() => undefined);
+    check("a newer release: Update", (await label()) === "Update", await label());
+    await button.tap();
+    await page.waitForFunction(() => window.__smokeCalls.some((call) => call.cmd === "update_install_apk"), null, { timeout: 5_000 }).catch(() => undefined);
+    const install = (await page.evaluate(() => window.__smokeCalls)).find((call) => call.cmd === "update_install_apk");
+    check(
+      "Update runs the app's APK updater with the release's universal APK",
+      install?.args?.name === "Winnow_99.0.0_android-universal.apk" && /releases\/download\/v99\.0\.0\//.test(install?.args?.url ?? ""),
+      JSON.stringify(install),
+    );
+    check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
     await context.close();
   }
 

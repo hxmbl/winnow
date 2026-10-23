@@ -18,6 +18,8 @@
 
 import { ChevronLeft, ChevronRight, PanelLeft, Search, SquarePen } from "lucide-react";
 import { AppMark } from "../AppMark";
+import { UpdateButton } from "./UpdateButton";
+import type { UpdatesController } from "../useUpdates";
 import { VERSION_TOGGLE_LABEL, logoPressed, versionText, type LogoView } from "../logoVersion";
 import { shortcutHint } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
@@ -36,6 +38,8 @@ export type MastheadProps = {
   /** The build's version, from the platform; null until it has said. */
   version: string | null;
   /** Whether the bar shows search or the version (`logoVersion.ts`). */
+  /** The updater, for the button beside the version (`UpdateButton`; native builds only). */
+  updates?: UpdatesController;
   logoView: LogoView;
   /** The mark was clicked. */
   onToggleLogo: () => void;
@@ -105,6 +109,7 @@ export function Masthead({
   searchRef,
   version,
   logoView,
+  updates,
   onToggleLogo,
   onSearchFocus,
   sidebarOpen,
@@ -195,14 +200,13 @@ export function Masthead({
               className="min-w-0 flex-1 bg-transparent text-ui font-medium text-ink outline-none placeholder:text-ink-placeholder"
             />
           </label>
-          <p
-            data-version-text=""
-            data-shown={logoView === "version" ? "" : undefined}
-            aria-live="polite"
-            className="truncate px-1 text-ui font-semibold text-ink"
-          >
-            {logoView === "version" ? versionText(version) : ""}
-          </p>
+          {/* The version, and beside it the update button (native builds only). */}
+          <div data-version-row="" data-shown={logoView === "version" ? "" : undefined} className="flex h-9 min-w-0 items-center gap-2">
+            <p data-version-text="" aria-live="polite" className="min-w-0 truncate px-1 text-ui font-semibold text-ink">
+              {logoView === "version" ? versionText(version) : ""}
+            </p>
+            {logoView === "version" && <UpdateButton updates={updates} phone={false} />}
+          </div>
           </div>
 
           {/*
