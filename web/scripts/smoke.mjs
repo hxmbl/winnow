@@ -6362,6 +6362,26 @@ try {
     await t.locator("[data-message-id]").nth(1).click();
     await t.waitForTimeout(300);
 
+    // The reader's toolbar and the list's masthead pill share one centre line: the owner
+    // saw the toolbar ~12px higher than the pill beside it. Measured on the buttons
+    // themselves, so a change to either bar's height or inset shows up here.
+    {
+      const mids = await t.evaluate(() => {
+        const mid = (b) => (b ? b.top + b.height / 2 : NaN);
+        const visible = (sel) =>
+          [...document.querySelectorAll(sel)].map((e) => e.getBoundingClientRect()).find((b) => b.width > 0 && b.height > 0);
+        return {
+          bar: mid(document.querySelector("[data-masthead] .wn-glass-bar")?.getBoundingClientRect()),
+          action: mid(visible("[data-reader-actions] button")),
+        };
+      });
+      check(
+        "desktop: the reader toolbar sits on the masthead pill's centre line",
+        Math.abs(mids.bar - mids.action) <= 1,
+        JSON.stringify(mids),
+      );
+    }
+
     const handle = t.locator('[data-reader-split][role="separator"]');
     const widths = () =>
       t.evaluate(() => {

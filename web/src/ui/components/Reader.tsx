@@ -233,7 +233,11 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
       data-reader-actions=""
       role="toolbar"
       aria-label="Message actions"
-      className="wn-reader-actions flex h-12 shrink-0 items-center gap-1 px-3"
+      // From lg the list's floating masthead sits beside this bar: a 52px glass pill 10px
+      // from the top (`Masthead`), so its centre line is 36px down. Matching its box
+      // (10px top inset + 52px) puts these buttons on the same line instead of 12px
+      // higher. Below lg the reader has the window to itself, so the plain 48px bar stays.
+      className="wn-reader-actions flex h-12 shrink-0 items-center gap-1 px-3 lg:box-content lg:h-[52px] lg:pt-2.5"
     >
       {onToggleSidebar && (
         <button
