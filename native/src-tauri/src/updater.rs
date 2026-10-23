@@ -17,6 +17,11 @@
 //! (`plugins.updater.pubkey`) before it touches the app; the matching private key signs
 //! the release in CI (`.github/workflows/release.yml`, `TAURI_SIGNING_PRIVATE_KEY`).
 //!
+//! The two downloads the updater's signature doesn't cover, the `.deb` and the APK, are
+//! checked against the release's `SHA256SUMS` before anything opens them; a release
+//! without one, or a file that doesn't match, is refused and deleted. The APK's check is
+//! in the Kotlin plugin (`UpdateLogic.expectedSha256`), the `.deb`'s here.
+//!
 //! A `.deb` install is never replaced in place: the package manager owns `/usr/bin`,
 //! and swapping files under it would leave dpkg's records wrong. It gets the package.
 
@@ -103,6 +108,37 @@ pub fn release_download(url: &str, name: &str, extension: &str) -> Result<url::U
         return Err("the file name does not match the URL".into());
     }
     Ok(parsed)
+}
+
+/// The checksum list every release carries (`.github/workflows/release.yml`).
+#[cfg(any(target_os = "linux", test))]
+const SUMS_NAME: &str = "SHA256SUMS";
+
+/// The release's `SHA256SUMS`, beside the file at `url` (already `release_download`ed).
+#[cfg(any(target_os = "linux", test))]
+fn sums_url(url: &url::Url) -> url::Url {
+    let mut sums = url.clone();
+    if let Ok(mut segments) = sums.path_segments_mut() {
+        segments.pop().push(SUMS_NAME);
+    }
+    sums
+}
+
+/// The SHA-256 `sums` (in `sha256sum`'s format) gives for `name`, lower-case; None when
+/// it lists no such file, or lists it twice, which no honest list does.
+#[cfg(any(target_os = "linux", test))]
+fn expected_sha256(sums: &str, name: &str) -> Option<String> {
+    let mut found = sums.lines().filter_map(|line| {
+        let line = line.trim_end_matches('\r');
+        let (hash, rest) = line.split_at_checked(64)?;
+        let file = rest
+            .strip_prefix("  ")
+            .or_else(|| rest.strip_prefix(" *"))?;
+        (file == name && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| hash.to_ascii_lowercase())
+    });
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
 }
 
 /// What `update_install` did: `restarting` never reaches the webview (the app has
@@ -219,12 +255,13 @@ pub async fn download_deb(
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
-    let response = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(5))
         .https_only(true)
         .build()
-        .map_err(|e| e.to_string())?
-        .get(parsed)
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .get(parsed.clone())
         .send()
         .await
         .and_then(|r| r.error_for_status())
@@ -238,6 +275,31 @@ pub async fn download_deb(
         .map_err(|e| format!("the download failed: {e}"))?;
     if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
         return Err("the file is too large".into());
+    }
+    // Checked before it is saved under its real name or opened: the release's own list.
+    let sums = client
+        .get(sums_url(&parsed))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("couldn't check the download: this release has no checksums ({e})"))?
+        .text()
+        .await
+        .map_err(|e| format!("couldn't check the download: {e}"))?;
+    let expected = expected_sha256(&sums, name).ok_or_else(|| {
+        format!("couldn't check the download: the release lists no checksum for {name}")
+    })?;
+    let actual: String = {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    };
+    if actual != expected {
+        return Err(
+            "the download doesn't match the release's checksum, so it wasn't installed".into(),
+        );
     }
     std::fs::write(&partial, &bytes).map_err(|e| format!("could not save the download: {e}"))?;
     std::fs::rename(&partial, &target).map_err(|e| format!("could not save the download: {e}"))?;
@@ -322,6 +384,42 @@ mod tests {
             ".apk"
         )
         .is_ok());
+    }
+
+    #[test]
+    fn the_checksum_comes_from_the_release_beside_the_file() {
+        let base = "https://github.com/hxmbl/winnow/releases/download/v1.5.0/";
+        let deb = "Winnow_1.5.0_amd64.deb";
+        let url = release_download(&format!("{base}{deb}"), deb, ".deb").unwrap();
+        assert_eq!(sums_url(&url).as_str(), format!("{base}SHA256SUMS"));
+
+        let a = "a".repeat(64);
+        let b = "b".repeat(64);
+        let sums = format!(
+            "{b}  Winnow_1.5.0_android-universal.apk\n{}  {deb}\r\n",
+            a.to_uppercase()
+        );
+        assert_eq!(expected_sha256(&sums, deb), Some(a.clone()));
+        assert_eq!(
+            expected_sha256(&format!("{a} *{deb}"), deb),
+            Some(a.clone())
+        );
+        // No checksum, no install.
+        assert_eq!(expected_sha256("", deb), None);
+        assert_eq!(expected_sha256(&format!("{b}  other.deb"), deb), None);
+        assert_eq!(
+            expected_sha256(&format!("{a}  {deb}\n{b}  {deb}"), deb),
+            None
+        );
+        assert_eq!(
+            expected_sha256(&format!("{}  {deb}", "a".repeat(63)), deb),
+            None
+        );
+        assert_eq!(
+            expected_sha256(&format!("{}  {deb}", "g".repeat(64)), deb),
+            None
+        );
+        assert_eq!(expected_sha256(&format!("{a}  x{deb}"), deb), None);
     }
 
     #[test]

@@ -16,6 +16,7 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 @InvokeArg
 class InstallApkArgs {
@@ -32,12 +33,18 @@ class InstallApkArgs {
  * The APK must be signed with the same key as the running app, or Android refuses it:
  * the web layer never offers a `-debug` APK for that reason.
  *
+ * Before the installer opens, the APK is checked against the release's `SHA256SUMS`:
+ * a release without one, or a download that doesn't match it, is refused and deleted.
+ *
  * Android 8+ asks the user once to allow "Install unknown apps" for Winnow. When that
  * is off, the command opens that settings page and resolves `needs-permission`; the
  * web layer says to press Update again after allowing it.
  *
  * Resolves `{ kind: "opened" }`, `{ kind: "needs-permission" }` or rejects with a reason.
  */
+/** A download that was fetched but must not be installed; its message is the reason. */
+private class Refused(message: String) : Exception(message)
+
 @TauriPlugin
 class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
 
@@ -80,7 +87,22 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
         // One update at a time: old downloads are only clutter.
         dir.listFiles()?.forEach { it.delete() }
         val file = File(dir, args.name)
-        download(args.url, file)
+        download(args.url, file, UpdateLogic.MAX_APK_BYTES)
+        // Checked before anything opens it: the release's own list of checksums.
+        val sumsFile = File(dir, UpdateLogic.SUMS_NAME)
+        try {
+          download(UpdateLogic.sumsUrl(args.url), sumsFile, UpdateLogic.MAX_SUMS_BYTES)
+        } catch (e: Exception) {
+          throw Refused("couldn't check the download: this release has no checksums (${e.message})")
+        }
+        val expected = UpdateLogic.expectedSha256(sumsFile.readText(), args.name)
+        sumsFile.delete()
+        if (expected == null) {
+          throw Refused("couldn't check the download: the release lists no checksum for ${args.name}")
+        }
+        if (sha256(file) != expected) {
+          throw Refused("the download doesn't match the release's checksum, so it wasn't installed")
+        }
         val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_VIEW)
           .setDataAndType(uri, "application/vnd.android.package-archive")
@@ -95,13 +117,30 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("the package installer could not be opened: ${e.message}")
           }
         }
+      } catch (e: Refused) {
+        // Nothing unchecked is left lying in the cache.
+        File(activity.cacheDir, "updates").listFiles()?.forEach { it.delete() }
+        invoke.reject(e.message ?: "the download couldn't be checked")
       } catch (e: Exception) {
         invoke.reject("the download failed: ${e.message}")
       }
     }.start()
   }
 
-  private fun download(from: String, to: File) {
+  private fun sha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+      val buffer = ByteArray(64 * 1024)
+      while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        digest.update(buffer, 0, read)
+      }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+  }
+
+  private fun download(from: String, to: File, maxBytes: Long) {
     var url = URL(from)
     // GitHub answers a release download with a redirect to its file host; follow a few,
     // https only (HttpURLConnection already refuses to cross from https to http).
@@ -120,7 +159,7 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
         }
         if (code != 200) throw IllegalStateException("HTTP $code")
         val length = connection.contentLengthLong
-        if (length > UpdateLogic.MAX_APK_BYTES) throw IllegalStateException("the file is too large")
+        if (length > maxBytes) throw IllegalStateException("the file is too large")
         val partial = File(to.parentFile, "${to.name}.part")
         var total = 0L
         connection.inputStream.use { input ->
@@ -130,7 +169,7 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
               val read = input.read(buffer)
               if (read < 0) break
               total += read
-              if (total > UpdateLogic.MAX_APK_BYTES) throw IllegalStateException("the file is too large")
+              if (total > maxBytes) throw IllegalStateException("the file is too large")
               output.write(buffer, 0, read)
             }
           }

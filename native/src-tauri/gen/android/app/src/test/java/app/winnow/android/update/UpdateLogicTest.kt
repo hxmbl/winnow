@@ -1,6 +1,8 @@
 package app.winnow.android.update
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,5 +25,24 @@ class UpdateLogicTest {
     assertFalse(UpdateLogic.isReleaseApk(base + name, "other.apk"))
     assertFalse(UpdateLogic.isReleaseApk(base + "Winnow_1.5.0_amd64.deb", "Winnow_1.5.0_amd64.deb"))
     assertFalse(UpdateLogic.isReleaseApk(base + name, "../$name"))
+  }
+
+  private val hash = "a".repeat(64)
+
+  @Test
+  fun findsTheChecksumBesideTheApk() {
+    assertEquals(base + "SHA256SUMS", UpdateLogic.sumsUrl(base + name))
+    val sums = "${"b".repeat(64)}  Winnow_1.5.0_amd64.deb\n${hash.uppercase()}  $name\r\n"
+    assertEquals(hash, UpdateLogic.expectedSha256(sums, name))
+    assertEquals(hash, UpdateLogic.expectedSha256("$hash *$name", name))
+  }
+
+  @Test
+  fun noChecksumMeansNoInstall() {
+    assertNull(UpdateLogic.expectedSha256("", name))
+    assertNull(UpdateLogic.expectedSha256("${"b".repeat(64)}  other.apk", name))
+    assertNull(UpdateLogic.expectedSha256("$hash  $name\n${"b".repeat(64)}  $name", name))
+    assertNull(UpdateLogic.expectedSha256("${"a".repeat(63)}  $name", name))
+    assertNull(UpdateLogic.expectedSha256("$hash  x$name", name))
   }
 }

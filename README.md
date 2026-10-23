@@ -58,6 +58,8 @@ How it updates depends on how you run it:
 | Web app in Docker | Tells you to restart the container (`docker compose restart`): each start fetches the newest release |
 | Web app you host | Tells you to update it: `git pull && npm --prefix web ci && npm --prefix web run build`, then redeploy |
 
+The `.deb` and the APK are checked against the release's `SHA256SUMS` before the installer opens; a download that doesn't match, or a release without the file, is refused. To check a download yourself: `sha256sum -c SHA256SUMS --ignore-missing`.
+
 Turn off the automatic check in **Settings → About**; **Check now** is there too.
 
 ## Running from source

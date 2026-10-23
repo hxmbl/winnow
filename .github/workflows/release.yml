@@ -120,8 +120,10 @@ jobs:
           choose **Install anyway**. An APK named `-debug` is signed with a throwaway key,
           so installing a later one may require uninstalling it first. If you have an
           earlier `-debug` APK installed, uninstall it once before installing a signed
-          one (no `-debug`): Android refuses an update signed with a different key. The
-          APK's SHA-256 and signing certificate are in the release run's summary.
+          one (no `-debug`): Android refuses an update signed with a different key.
+          `SHA256SUMS` lists every file's SHA-256 (`sha256sum -c SHA256SUMS
+          --ignore-missing`), and the app checks an APK or `.deb` against it before
+          installing. The APK's signing certificate is in the release run's summary.
           See the README.
 
           Winnow ships no Google sign-in client. To connect Gmail, create your own OAuth
@@ -685,9 +687,42 @@ jobs:
   # Cut release (or a manual run with publish) takes the draft live, but only when
   # every bundle is attached and the APK is release-signed. Anything missing leaves
   # the draft for a look, rather than shipping a release without Android.
+  # SHA256SUMS for every file on the release, which the app checks a downloaded APK or
+  # .deb against before it opens the installer (the updater's own signature covers the
+  # macOS tarball and the AppImage). Runs for a draft too, so a release published by
+  # hand still carries it. latest.json is left out: publish rewrites it from the notes.
+  checksums:
+    name: Checksums
+    needs: [prepare, build, web-bundle, android, updater-manifest]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Write SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          DIR="$RUNNER_TEMP/assets"
+          mkdir -p "$DIR"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$DIR" --clobber
+          rm -f "$DIR/SHA256SUMS" "$DIR/latest.json"
+          (cd "$DIR" && find . -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | xargs -d '\n' sha256sum) > "$RUNNER_TEMP/SHA256SUMS"
+          cat "$RUNNER_TEMP/SHA256SUMS"
+          gh release upload "$TAG" "$RUNNER_TEMP/SHA256SUMS" --clobber --repo "$GITHUB_REPOSITORY"
+          {
+            echo "### SHA256SUMS"
+            echo '```'
+            cat "$RUNNER_TEMP/SHA256SUMS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish:
     name: Publish release
-    needs: [prepare, build, web-bundle, android, updater-manifest]
+    needs: [prepare, build, web-bundle, android, updater-manifest, checksums]
     if: ${{ !cancelled() && needs.prepare.outputs.publish == 'true' && inputs.publish }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -750,6 +785,8 @@ jobs:
             NAME="Winnow_${VERSION}_${SUFFIX}"
             printf '%s\n' "$ASSETS" | grep -qxF "$NAME" || MISSING="$MISSING $NAME"
           done
+          # What the app checks an APK or .deb against before installing it.
+          printf '%s\n' "$ASSETS" | grep -qxF "SHA256SUMS" || MISSING="$MISSING SHA256SUMS"
           # What Docker containers fetch on start: without them a restart cannot update.
           for NAME in "winnow-web-${VERSION}.tar.gz" "winnow-proxy-${VERSION}.tar.gz"; do
             for FILE in "$NAME" "$NAME.sha256"; do

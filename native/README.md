@@ -257,6 +257,12 @@ copy runs:
   running app only when signed with the same release key, so a `-debug` APK is
   never offered.
 
+Before the installer opens, the `.deb` (`updater.rs`) and the APK
+(`UpdatePlugin.kt`) are checked against the release's `SHA256SUMS`, which
+`release.yml`'s Checksums job writes for every asset (draft or not) and Publish
+requires. A release without it, a file it doesn't list, or a mismatch is refused and
+the download deleted.
+
 **Signing.** `release.yml` signs the updater artifacts with two repository secrets:
 `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. With them, a tag build also attaches
