@@ -158,7 +158,7 @@ export function InfoButton({ setting }: { setting: SettingId }) {
             id={tipId}
             role="tooltip"
             data-setting-popover={setting}
-            className="fixed z-[60] rounded-pane border border-hairline bg-chrome p-3 shadow-lift"
+            className="fixed z-[70] rounded-pane border border-hairline bg-chrome p-3 shadow-lift"
             style={{
               top: place?.top ?? 0,
               left: place?.left ?? 0,

@@ -198,7 +198,13 @@ export function Sheet({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex ${
+      className={`fixed inset-0 ${
+        // Layers (low to high): a page that replaces the screen (Settings on a phone)
+        // at z-50, the phone dock raised over it at 55, every other sheet at 60, and
+        // menus and popovers at 70. A sheet or menu opened from Settings must never
+        // land under the dock.
+        backdrop === "opaque" ? "z-50" : "z-[60]"
+      } flex ${
         placement === "left"
           ? // Flush to the edge and full height: the drawer *is* the left side of the
             // window, and a rounded panel inset by 16px would read as a dialog

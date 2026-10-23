@@ -6937,6 +6937,50 @@ try {
       (await s.locator('[data-settings-page="list"]').count()) === 1 &&
         (await s.evaluate(() => document.activeElement?.getAttribute("data-category"))) === "privacy",
     );
+    // A sheet opened from Settings sits over the dock, never under it. The dock is
+    // raised over Settings (z 55), and in 1.5.3 it rose over Settings' sheets too: the
+    // What's new sheet's Update button sat under the pill. Its own page, with GitHub's
+    // releases answered here so an update is on offer.
+    {
+      const uctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+      const rel = {
+        tag_name: "v99.0.0",
+        name: "v99.0.0",
+        draft: false,
+        prerelease: false,
+        html_url: "https://github.com/hxmbl/winnow/releases/tag/v99.0.0",
+        body: "## Fixes\n\n" + "- A line of release notes.\n".repeat(40),
+        published_at: "2026-10-23T00:00:00Z",
+        assets: [],
+      };
+      const cors = { "access-control-allow-origin": "*" };
+      await uctx.route("https://api.github.com/repos/hxmbl/winnow/releases/latest", (r) => r.fulfill({ json: rel, headers: cors }));
+      await uctx.route("https://api.github.com/repos/hxmbl/winnow/releases?per_page=50", (r) => r.fulfill({ json: [rel], headers: cors }));
+      const u = await uctx.newPage();
+      u.on("pageerror", (error) => errors.push(String(error)));
+      await u.goto(URL, { waitUntil: "networkidle" });
+      await u.waitForSelector("[data-row-count] [data-row-id]");
+      await u.locator("[data-phone-dock] button[data-dock-expand]").tap();
+      await u.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+      await u.waitForTimeout(300);
+      await u.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').tap();
+      await u.locator('[role="dialog"][aria-label="Settings"]').waitFor({ timeout: 5_000 });
+      await u.locator('button[data-category="about"]').tap();
+      await u.locator("[data-update-action]").tap();
+      await u.locator("[data-update-whats-new]").waitFor({ timeout: 5_000 });
+      await u.locator("[data-update-whats-new]").tap();
+      await u.locator("[data-whats-new]").waitFor({ timeout: 5_000 });
+      await u.waitForTimeout(500);
+      const pill = await u.locator("[data-phone-dock] [data-phone-pill]").boundingBox();
+      const over = pill
+        ? await u.evaluate(({ x, y }) => {
+            const hit = document.elementFromPoint(x, y);
+            return { dock: Boolean(hit?.closest("[data-phone-dock]")), sheet: Boolean(hit?.closest("[data-backdrop='scrim']")) };
+          }, { x: pill.x + pill.width / 2, y: pill.y + pill.height / 2 })
+        : null;
+      check("What's new, opened from Settings on a phone, covers the dock", Boolean(over && !over.dock && over.sheet), JSON.stringify(over));
+      await uctx.close();
+    }
     await s.locator('[data-phone-dock] button[data-dock-tab="inbox"]').tap();
     await s.waitForTimeout(250);
     check("the Inbox tab returns to the mail", (await s.locator('[role="dialog"]').count()) === 0);

@@ -212,7 +212,7 @@ export function SelectMenu<T extends string | number>({
             data-select-list={id}
             onKeyDown={onListKey}
             style={{ position: "fixed", top: place?.top ?? 0, left: place?.left ?? 0, visibility: place ? "visible" : "hidden" }}
-            className={`${place ? "animate-menu" : ""} z-[60] flex max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body shadow-lift outline-none`}
+            className={`${place ? "animate-menu" : ""} z-[70] flex max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body shadow-lift outline-none`}
           >
             {options.map((option, index) => {
               const selected = index === selectedIndex;
