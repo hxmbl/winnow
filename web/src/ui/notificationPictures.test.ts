@@ -6,7 +6,10 @@ import {
   NATIVE_PICTURE_PIXELS,
   NOTIFICATION_PICTURE_SIZE,
   announce,
+  cachedRasterise,
   canvasRasterise,
+  largeIconSource,
+  notificationMonograms,
   drawPicture,
   isBlankPixels,
   isNativePicture,
@@ -19,6 +22,7 @@ import type { WinnowStore } from "../core/store/store";
 import type { Platform } from "../platform/types";
 import { orderPictures, pictureWants, publishSenderPictures, remotePicturesPaused, resolveSenderPicture, senderPictureSources, type LogoSource, type SenderPictures } from "./senderPictures";
 import { readFileSync } from "node:fs";
+import { avatarTone } from "./avatar";
 import { afterEach, vi } from "vitest";
 
 /** A source that answers `table` after a request, and records every address asked. */
@@ -365,5 +369,96 @@ describe("drawing a sender picture for a native notification (1.4.0)", () => {
       images[0].onload?.();
       expect(await pending).toBe(JPEG);
     });
+  });
+});
+
+describe("Android: the sender's monogram when there is no picture (1.5.5)", () => {
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const MONO = "data:image/png;base64,TU9OTw==";
+
+  it("is the list's monogram: the name's first letter and the address's tone, nothing while previews are hidden", () => {
+    const out = notificationMonograms([mail({ name: "ada lovelace" }), mail({ gmailId: "g2", name: "", sender: "9lives@example.com" })], false);
+    expect(out.g1).toEqual({ initial: "A", tone: avatarTone(ADA) });
+    expect(out.g2?.initial).toBe("9");
+    expect(notificationMonograms([mail()], true)).toEqual({});
+  });
+
+  it("chooses the picture when it draws, the monogram when it is missing or fails, and none without one", () => {
+    expect(largeIconSource(GRAVATAR, PNG, { initial: "A", tone: "neutral" })).toBe("picture");
+    expect(largeIconSource(GRAVATAR, null, { initial: "A", tone: "neutral" })).toBe("monogram");
+    expect(largeIconSource(undefined, null, { initial: "A", tone: "neutral" })).toBe("monogram");
+    expect(largeIconSource(GRAVATAR, null, undefined)).toBe("none");
+  });
+
+  it("nativePictures: a drawn picture wins; a failed or absent one gets the monogram; a monogram that cannot draw is none", async () => {
+    const drawn: string[] = [];
+    const out = await nativePictures(
+      { g1: GRAVATAR, g2: LOGO },
+      async (url) => (url === GRAVATAR ? PNG : null),
+      NATIVE_PICTURE_PIXELS,
+      {
+        monograms: { g1: { initial: "A", tone: "neutral" }, g2: { initial: "B", tone: "soft" }, g3: { initial: "C", tone: "soft" }, g4: { initial: "D", tone: "soft" } },
+        drawMonogram: (m) => {
+          drawn.push(m.initial);
+          return m.initial === "D" ? null : MONO;
+        },
+      },
+    );
+    expect(out).toEqual({ g1: PNG, g2: MONO, g3: MONO });
+    expect(drawn.sort()).toEqual(["B", "C", "D"]);
+  });
+
+  it("without monograms (desktop, or hidden previews) nothing changes: no picture, no large icon", async () => {
+    expect(await nativePictures({ g1: LOGO }, async () => null)).toEqual({});
+  });
+
+  it("the monogram is drawn from what the app already knows: no lookup at all with both switches off", async () => {
+    const gravatars = source({});
+    const logos = source({});
+    publishSenderPictures(sources());
+    const pictures = await notificationPictures([mail()], false);
+    expect(pictures).toEqual({});
+    expect(gravatars.asked).toEqual([]);
+    expect(logos.asked).toEqual([]);
+  });
+
+  it("a brand logo is only a source when Show brand logos is on (its source is null when off)", async () => {
+    const logos = source({ [ADA]: LOGO });
+    publishSenderPictures(sources({ logos }));
+    try {
+      expect(await notificationPictures([mail()], false)).toEqual({ g1: LOGO });
+    } finally {
+      publishSenderPictures(sources());
+    }
+    expect(await notificationPictures([mail()], false)).toEqual({});
+  });
+
+  it("announce on Android hands the monogram when nothing else draws (no canvas here: so none, never a URL)", async () => {
+    const sent: (string | null)[] = [];
+    const store = {
+      getSnapshot: () => ({ preferences: { notificationHidePreview: false, notificationActions: { reply: true, read: true, trash: true } } }),
+      notificationReplyHeads: async () => ({}),
+    } as unknown as WinnowStore;
+    const platform = {
+      info: async () => ({ kind: "desktop", os: "android" }),
+      notifyNewMail: async (batch: { messages: { picture: string | null }[] }) => {
+        sent.push(...batch.messages.map((m) => m.picture));
+      },
+    } as unknown as Platform;
+    await announce(store, platform, [mail()]);
+    expect(sent).toEqual([null]);
+  });
+
+  it("remembers each picture it drew (or failed to) for the session", async () => {
+    let loads = 0;
+    const cached = cachedRasterise(async (url) => {
+      loads += 1;
+      return url === GRAVATAR ? PNG : null;
+    });
+    expect(await cached(GRAVATAR, 192)).toBe(PNG);
+    expect(await cached(GRAVATAR, 192)).toBe(PNG);
+    expect(await cached(LOGO, 192)).toBeNull();
+    expect(await cached(LOGO, 192)).toBeNull();
+    expect(loads).toBe(2);
   });
 });

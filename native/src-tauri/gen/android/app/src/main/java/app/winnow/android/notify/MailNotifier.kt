@@ -205,32 +205,30 @@ object MailNotifier {
       builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicVersion(context, "New message"))
     }
 
-    if (flags and 1 != 0 && extras.getString(EXTRA_REPLY_HEAD) != null) {
-      val input = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
-      builder.addAction(
-        NotificationCompat.Action.Builder(0, "Reply", broadcast(context, extras, "reply", mutable = true))
-          .addRemoteInput(input)
-          .setAllowGeneratedReplies(false)
-          .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
-          .setShowsUserInterface(false)
-          .build(),
-      )
-    }
-    if (flags and 4 != 0) {
-      builder.addAction(
-        NotificationCompat.Action.Builder(0, "Mark read", broadcast(context, extras, "read"))
-          .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
-          .setShowsUserInterface(false)
-          .build(),
-      )
-    }
-    if (flags and 2 != 0) {
-      builder.addAction(
-        NotificationCompat.Action.Builder(0, "Delete", broadcast(context, extras, "trash"))
-          .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_DELETE)
-          .setShowsUserInterface(false)
-          .build(),
-      )
+    // Gmail's order, left to right: Delete, Mark read, Reply ([NotifyActions]).
+    for (action in NotifyActions.shown(flags, canReply = extras.getString(EXTRA_REPLY_HEAD) != null)) {
+      when (action) {
+        MailAction.DELETE -> builder.addAction(
+          NotificationCompat.Action.Builder(0, "Delete", broadcast(context, extras, "trash"))
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_DELETE)
+            .setShowsUserInterface(false)
+            .build(),
+        )
+        MailAction.READ -> builder.addAction(
+          NotificationCompat.Action.Builder(0, "Mark read", broadcast(context, extras, "read"))
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+            .setShowsUserInterface(false)
+            .build(),
+        )
+        MailAction.REPLY -> builder.addAction(
+          NotificationCompat.Action.Builder(0, "Reply", broadcast(context, extras, "reply", mutable = true))
+            .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build())
+            .setAllowGeneratedReplies(false)
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+            .setShowsUserInterface(false)
+            .build(),
+        )
+      }
     }
     return builder.build()
   }

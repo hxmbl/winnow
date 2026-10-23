@@ -22,6 +22,7 @@ import type { Platform } from "../platform/types";
 import { MAX_MESSAGE_NOTIFICATIONS } from "../core/notify/notifications";
 import { displayName } from "../core/model/email";
 import { currentSenderPictures, resolveSenderPicture, type SenderPictures } from "./senderPictures";
+import { avatarInitial, avatarTone, type AvatarTone } from "./avatar";
 
 /** A notification's picture size: Android's large icon and the desktop's, in CSS px. */
 export const NOTIFICATION_PICTURE_SIZE = 96;
@@ -194,21 +195,137 @@ export function canvasRasterise(timeoutMs = 3000, background: () => string | nul
     });
 }
 
+/** How long a notification waits for one picture to load and draw, ms. */
+export const NOTIFICATION_RASTERISE_MS = 1500;
+
+/** Pictures drawn this session, by size and URL (a hit is instant; a miss is remembered too). */
+const RASTER_CACHE_MAX = 64;
+
+/**
+ * `inner`, remembering each answer (a picture or `null`) for the session, so a sender who
+ * writes again is not loaded and drawn again, and one whose picture failed does not hold
+ * the next notification up for another timeout.
+ */
+export function cachedRasterise(inner: Rasterise, cache = new Map<string, string | null>()): Rasterise {
+  return async (url, size) => {
+    const key = `${size}|${url}`;
+    if (cache.has(key)) return cache.get(key) ?? null;
+    const drawn = await inner(url, size).catch(() => null);
+    if (cache.size >= RASTER_CACHE_MAX) cache.delete(cache.keys().next().value as string);
+    cache.set(key, drawn);
+    return drawn;
+  };
+}
+
+let defaultRasteriser: Rasterise | null = null;
+function notificationRasterise(): Rasterise {
+  defaultRasteriser ??= cachedRasterise(canvasRasterise(NOTIFICATION_RASTERISE_MS));
+  return defaultRasteriser;
+}
+
+// ── The monogram, for an Android notification with no picture ─────────────
+
+/** A sender's monogram as the list's avatar draws it: one letter on one of two tones. */
+export type Monogram = { initial: string; tone: AvatarTone };
+
+/**
+ * The monogram for each shown message, by Gmail id (the avatar's `avatarInitial` and
+ * `avatarTone`). Nothing while previews are hidden, as for pictures. Local: no lookup.
+ */
+export function notificationMonograms(emails: readonly Email[], hidePreview: boolean): Record<string, Monogram> {
+  if (hidePreview) return {};
+  const out: Record<string, Monogram> = {};
+  for (const email of emails.slice(0, MAX_MESSAGE_NOTIFICATIONS)) {
+    out[email.gmailId] = { initial: avatarInitial(displayName(email), email.sender), tone: avatarTone(email.sender) };
+  }
+  return out;
+}
+
+/** The CSS variables a tone paints with: the avatar's `TONE_CLASS`, background then ink. */
+export const MONOGRAM_COLOURS: Record<AvatarTone, { background: string; ink: string }> = {
+  neutral: { background: "--wn-surfaceActive", ink: "--wn-inkMuted" },
+  soft: { background: "--wn-surfaceSelected", ink: "--wn-inkBody" },
+};
+
+/** Draw a monogram to a PNG data URL, or `null` when it cannot be. */
+export type DrawMonogram = (monogram: Monogram, size: number) => string | null;
+
+/**
+ * The webview's monogram: a filled circle in the tone's colour (transparent outside, so
+ * it is round whether or not the shade crops the large icon) with the letter centred in
+ * the app's semibold face, read from the theme in force. Anything missing: `null`.
+ */
+export function canvasMonogram(monogram: Monogram, size: number): string | null {
+  try {
+    if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return null;
+    const root = getComputedStyle(document.documentElement);
+    const colours = MONOGRAM_COLOURS[monogram.tone];
+    const background = root.getPropertyValue(colours.background).trim();
+    const ink = root.getPropertyValue(colours.ink).trim();
+    if (!background || !ink) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.fillStyle = background;
+    context.beginPath();
+    context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    context.fill();
+    context.fillStyle = ink;
+    context.font = `600 ${Math.round(size * 0.44)}px "IBM Plex Sans", system-ui, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(monogram.initial, size / 2, size / 2 + size * 0.02);
+    const data = canvas.toDataURL("image/png");
+    return isNativePicture(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a native notification's large icon is drawn from, for one message: its resolved
+ * picture when it draws, else its monogram when the platform asks for one (Android),
+ * else nothing (the app icon). The picture itself was chosen by the avatar's own rules
+ * (`resolveSenderPicture`), so nothing here reaches a server the app would not.
+ */
+export function largeIconSource(picture: string | null | undefined, drawn: string | null, monogram: Monogram | undefined): "picture" | "monogram" | "none" {
+  if (picture && isNativePicture(drawn)) return "picture";
+  return monogram ? "monogram" : "none";
+}
+
 /**
  * The resolved pictures, made drawable by a native notification: each URL rasterised to
  * a small PNG data URL in the webview, under the same rules that resolved it. A picture
- * that cannot be drawn is left out (the app icon shows), never passed on as a URL.
+ * that cannot be drawn is left out (the app icon shows), never passed on as a URL. With
+ * `monograms` (Android), a message whose picture is missing or failed gets its sender's
+ * monogram instead, as the list's avatar does; a monogram that cannot be drawn is none.
  */
 export async function nativePictures(
   pictures: Readonly<Record<string, string>>,
-  rasterise: Rasterise = canvasRasterise(),
+  rasterise: Rasterise = notificationRasterise(),
   size = NATIVE_PICTURE_PIXELS,
+  { monograms = {}, drawMonogram = canvasMonogram }: { monograms?: Readonly<Record<string, Monogram>>; drawMonogram?: DrawMonogram } = {},
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
+  const ids = new Set([...Object.keys(pictures), ...Object.keys(monograms)]);
   await Promise.all(
-    Object.entries(pictures).map(async ([id, url]) => {
-      const drawn = isNativePicture(url) ? url : await rasterise(url, size).catch(() => null);
-      if (isNativePicture(drawn)) out[id] = drawn;
+    [...ids].map(async (id) => {
+      const url = pictures[id];
+      const drawn = url ? (isNativePicture(url) ? url : await rasterise(url, size).catch(() => null)) : null;
+      switch (largeIconSource(url, drawn, monograms[id])) {
+        case "picture":
+          out[id] = drawn as string;
+          break;
+        case "monogram": {
+          const mono = drawMonogram(monograms[id]!, size);
+          if (isNativePicture(mono)) out[id] = mono;
+          break;
+        }
+        case "none":
+          break;
+      }
     }),
   );
   return out;
@@ -312,7 +429,9 @@ export async function announce(
     : Promise.resolve({});
   const [resolvedHeads, pictures] = await Promise.all([heads, notificationPictures(emails, preferences.notificationHidePreview)]);
   // Native notifications (Android, desktop) draw a picture from its bytes, never a URL.
-  const shown = info?.kind === "desktop" ? await nativePictures(pictures) : pictures;
+  // Android draws the sender's monogram when there is no picture, as the list does.
+  const monograms = info?.os === "android" ? notificationMonograms(emails, preferences.notificationHidePreview) : {};
+  const shown = info?.kind === "desktop" ? await nativePictures(pictures, undefined, undefined, { monograms }) : pictures;
   await platform.notifyNewMail(buildNotificationBatch(emails, preferences, resolvedHeads, shown, account));
 }
 

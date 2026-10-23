@@ -8,7 +8,7 @@
 //!
 //! | Host | Shown by | Actions | Where an action runs |
 //! | --- | --- | --- | --- |
-//! | Android | `NotifyPlugin.kt` (MessagingStyle, group summary) | Reply inline (RemoteInput), Delete, Mark read; Undo after Delete | **Natively**: [`android`] runs [`plan::execute`] with the keychain tokens, the Kotlin plugin does the HTTPS. The webview may be paused or gone. |
+//! | Android | `NotifyPlugin.kt` (MessagingStyle, group summary) | Delete, Mark read, Reply inline (RemoteInput), in Gmail's order; Undo after Delete | **Natively**: [`android`] runs [`plan::execute`] with the keychain tokens, the Kotlin plugin does the HTTPS. The webview may be paused or gone. |
 //! | Linux, Windows | `notify-rust` (D-Bus / WinRT toast) | Open, Reply (opens the composer), Mark read, Delete | In the webview: [`ACTION_EVENT`] → the store, the same calls as the app's own buttons. The window is hidden, not paused. |
 //! | macOS | `tauri-plugin-notification`, one grouped notification | None: a click activates the app (`RunEvent::Reopen`) | — |
 //!
