@@ -58,6 +58,8 @@ How it updates depends on how you run it:
 | Web app in Docker | Tells you to restart the container (`docker compose restart`): each start fetches the newest release |
 | Web app you host | Tells you to update it: `git pull && npm --prefix web ci && npm --prefix web run build`, then redeploy |
 
+Pre-releases (versions like `1.6.0-beta.1`) are never offered: only stable releases. Maintainers can opt an installed app (macOS, AppImage, `.deb`, Android) into **Beta updates**, which also offers pre-releases, installed from that release's own signed files with the same checks; it's off by default, and turning it off never moves you back to an older version (you stay on the beta until the next stable release newer than it). The Docker image only runs a pre-release you pin with `WINNOW_VERSION`.
+
 The `.deb` and the APK are checked against the release's `SHA256SUMS` before the installer opens; a download that doesn't match, or a release without the file, is refused. To check a download yourself: `sha256sum -c SHA256SUMS --ignore-missing`.
 
 Turn off the automatic check in **Settings → About**; **Check now** is there too.

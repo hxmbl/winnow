@@ -17,7 +17,7 @@
  */
 
 import { debugLog } from "../core/debug/debugLog";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   checkDue,
   checkForUpdate,
@@ -131,8 +131,14 @@ function loadCheckOptIn(): boolean {
   return (globalThis as { __WINNOW_LOAD_CHECK__?: unknown }).__WINNOW_LOAD_CHECK__ === true;
 }
 
-export function useUpdates(platform: Platform, flash: (text: string, ms: number) => void): UpdatesController {
-  const [runtime, setRuntime] = useState<UpdateRuntime | null>(null);
+export function useUpdates(
+  platform: Platform,
+  flash: (text: string, ms: number) => void,
+  /** Dev Options → Beta updates (`ui/devOptions.ts`); only a native build honours it (`betaChannel`). */
+  beta = false,
+): UpdatesController {
+  const [hostRuntime, setRuntime] = useState<UpdateRuntime | null>(null);
+  const runtime = useMemo(() => (hostRuntime ? { ...hostRuntime, beta } : null), [hostRuntime, beta]);
   const [state, setStateRaw] = useState<UpdateState>(readState);
   const [offer, setOffer] = useState<UpdateOffer | null>(null);
   const [latest, setLatest] = useState<string | null>(null);
@@ -143,6 +149,14 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
   const [whatsNew, setWhatsNew] = useState<ChangelogState | null>(null);
   /** The notes once fetched, by `current→latest`, so reopening is instant. */
   const changelogCache = useRef<{ key: string; entries: ChangelogEntry[] } | null>(null);
+
+  // Beta updates turned off: a pre-release offer already on screen is withdrawn (it is
+  // not installed, and nothing is downgraded); the next check is the stable channel's.
+  useEffect(() => {
+    if (beta || !offer?.beta) return;
+    setOffer(null);
+    setAnnouncement(null);
+  }, [beta, offer]);
 
   const stateRef = useRef(state);
   const setState = useCallback((update: (current: UpdateState) => UpdateState) => {
@@ -359,7 +373,9 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
       return;
     }
     setWhatsNew({ status: "loading" });
-    void fetchChangelog(offer.current, offer.version, (url, init) => globalThis.fetch(url, init)).then((result) => {
+    void fetchChangelog(offer.current, offer.version, (url, init) => globalThis.fetch(url, init), undefined, {
+      includePrereleases: offer.beta === true,
+    }).then((result) => {
       if (result.kind === "ok") {
         changelogCache.current = { key, entries: result.entries };
         setWhatsNew((open) => (open ? { status: "ok", entries: result.entries } : open));

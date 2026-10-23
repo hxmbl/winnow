@@ -42,11 +42,35 @@ describe("installing through the shell", () => {
       kind: "opened",
       path: "/home/a/Downloads/Winnow_1.5.0_amd64.deb",
     });
-    expect(d.calls).toEqual([["update_download_deb", { url: `${DL}Winnow_1.5.0_amd64.deb`, name: "Winnow_1.5.0_amd64.deb" }]]);
+    expect(d.calls).toEqual([["update_download_deb", { url: `${DL}Winnow_1.5.0_amd64.deb`, name: "Winnow_1.5.0_amd64.deb", beta: false }]]);
 
     const a = recorder({ kind: "needs-permission" });
     expect(await installUpdateWith(apk, a.call)).toEqual({ kind: "needs-permission" });
     expect(a.calls[0][0]).toBe("update_install_apk");
+  });
+
+  it("passes the Beta channel to the shell, and its own manifest for a self-update", async () => {
+    const BETA = "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/";
+    const betaBase = { version: "1.6.0-beta.1", current: "1.5.0", pageUrl: "https://github.com/hxmbl/winnow/releases/tag/v1.6.0-beta.1", beta: true };
+
+    const self = recorder({ kind: "none" });
+    await installUpdateWith({ ...betaBase, action: { kind: "self", manifest: `${BETA}latest.json` } }, self.call);
+    expect(self.calls).toEqual([["update_install", { manifest: `${BETA}latest.json` }]]);
+
+    const debName = "Winnow_1.6.0-beta.1_amd64.deb";
+    const d = recorder({ kind: "opened", path: `/home/a/Downloads/${debName}` });
+    await installUpdateWith({ ...betaBase, action: { kind: "deb", asset: { name: debName, url: BETA + debName, size: 1 } } }, d.call);
+    expect(d.calls).toEqual([["update_download_deb", { url: BETA + debName, name: debName, beta: true }]]);
+
+    const apkName = "Winnow_1.6.0-beta.1_android-universal.apk";
+    const a = recorder({ kind: "none" });
+    await installUpdateWith({ ...betaBase, action: { kind: "apk", asset: { name: apkName, url: BETA + apkName, size: 1 } } }, a.call);
+    expect(a.calls).toEqual([["update_install_apk", { url: BETA + apkName, name: apkName, beta: true }]]);
+
+    // A stable offer says beta: false, so the shell refuses a pre-release's files.
+    const s = recorder({ kind: "needs-permission" });
+    await installUpdateWith(apk, s.call);
+    expect(s.calls).toEqual([["update_install_apk", { url: `${DL}Winnow_1.5.0_android-universal.apk`, name: "Winnow_1.5.0_android-universal.apk", beta: false }]]);
   });
 
   it("installs nothing for the page or a git pull", async () => {

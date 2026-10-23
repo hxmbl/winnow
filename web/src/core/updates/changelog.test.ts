@@ -57,6 +57,40 @@ describe("the releases between two versions", () => {
     expect(odd.pageUrl).toBe("https://github.com/hxmbl/winnow/releases/latest");
   });
 
+  it("stable: leaves out pre-releases, by GitHub's flag or by a dash in the tag", () => {
+    const sneaky = [release("v1.7.0"), release("v1.7.0-rc.1"), release("v1.6.5", { prerelease: true }), release("v1.6.0")];
+    expect(changelogBetween(sneaky, "1.6.0", "1.7.0").map((entry) => entry.version)).toEqual(["1.7.0"]);
+  });
+
+  it("beta: lists pre-releases too, still never a draft, and only up to the offered version", () => {
+    const betaList = [
+      release("v1.7.0-beta.2", { prerelease: true }),
+      release("v1.7.0-beta.1", { prerelease: true }),
+      release("v1.6.1-beta.1", { prerelease: true }),
+      release("v1.6.0"),
+      release("v1.7.0-beta.3", { prerelease: true, draft: true }),
+    ];
+    expect(changelogBetween(betaList, "1.6.0", "1.7.0-beta.2", { includePrereleases: true }).map((entry) => entry.version)).toEqual([
+      "1.7.0-beta.2",
+      "1.7.0-beta.1",
+      "1.6.1-beta.1",
+    ]);
+    // A beta user's notes up to the next stable include the betas between.
+    expect(changelogBetween(list, "1.6.0", "1.7.0", { includePrereleases: true }).map((entry) => entry.version)).toEqual([
+      "1.7.0",
+      "1.6.1-beta.1",
+    ]);
+    expect(changelogBetween(list, "1.6.0", "1.7.0").map((entry) => entry.version)).toEqual(["1.7.0"]);
+  });
+
+  it("fetches with pre-releases for the Beta channel", async () => {
+    const result = await fetchChangelog("1.6.0", "1.7.0", async () => ({ ok: true, status: 200, json: async () => list }), undefined, {
+      includePrereleases: true,
+    });
+    expect(result).toEqual({ kind: "ok", entries: changelogBetween(list, "1.6.0", "1.7.0", { includePrereleases: true }) });
+    expect(result.kind === "ok" && result.entries.map((entry) => entry.version)).toEqual(["1.7.0", "1.6.1-beta.1"]);
+  });
+
   it("is empty for anything that is not a list", () => {
     expect(changelogBetween({ message: "rate limited" }, "1.4.0", "1.5.0")).toEqual([]);
   });

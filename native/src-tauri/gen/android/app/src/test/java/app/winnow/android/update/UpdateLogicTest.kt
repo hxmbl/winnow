@@ -27,6 +27,29 @@ class UpdateLogicTest {
     assertFalse(UpdateLogic.isReleaseApk(base + name, "../$name"))
   }
 
+  @Test
+  fun aPrereleaseApkNeedsBetaUpdates() {
+    val beta = "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/"
+    val apk = "Winnow_1.6.0-beta.1_android-universal.apk"
+    assertTrue(UpdateLogic.isPrereleaseDownload(beta + apk))
+    assertFalse(UpdateLogic.isPrereleaseDownload(base + name))
+    // Stable: refused by the tag, even under a stable-looking file name.
+    assertFalse(UpdateLogic.isReleaseApk(beta + apk, apk))
+    assertFalse(UpdateLogic.isReleaseApk(beta + name, name))
+    // Beta: allowed, with every other check still applied.
+    assertTrue(UpdateLogic.isReleaseApk(beta + apk, apk, allowPrerelease = true))
+    assertFalse(UpdateLogic.isReleaseApk(beta + "../x/$apk", apk, allowPrerelease = true))
+    assertFalse(
+      UpdateLogic.isReleaseApk(beta + "Winnow_1.6.0-beta.1_android-universal-debug.apk", "Winnow_1.6.0-beta.1_android-universal-debug.apk", allowPrerelease = true),
+    )
+    // A stable APK is fine on either channel.
+    assertTrue(UpdateLogic.isReleaseApk(base + name, name, allowPrerelease = true))
+    assertEquals("v1.6.0-beta.1", UpdateLogic.releaseTag(beta + apk))
+    assertNull(UpdateLogic.releaseTag("https://evil.example/v1.6.0-beta.1/$apk"))
+    // The checksum still comes from the same release.
+    assertEquals(beta + "SHA256SUMS", UpdateLogic.sumsUrl(beta + apk))
+  }
+
   private val hash = "a".repeat(64)
 
   @Test

@@ -58,6 +58,14 @@ valid_tag() {
   printf '%s\n' "$1" | grep -Eqx 'v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(-[0-9A-Za-z.]{1,32})?'
 }
 
+# A stable release tag: no "-" anywhere (so no pre-release suffix).
+stable_tag() {
+  case $1 in
+    *-*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 valid_repo() {
   printf '%s\n' "$1" | grep -Eqx '[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}'
 }
@@ -240,6 +248,15 @@ run() {
   tag=$(jq -r '.tag_name // empty' "$work/release.json" 2>/dev/null)
   if ! valid_tag "$tag"; then
     log "the release has no usable tag"
+    fallback
+    return 0
+  fi
+  # A pre-release tag (anything with a "-", like v1.6.0-beta.1) is never taken from
+  # releases/latest, which should not return one anyway: this is the backstop if a
+  # pre-release is ever marked latest by mistake. Only an explicit WINNOW_VERSION pin
+  # may choose one.
+  if [ -z "$pinned" ] && ! stable_tag "$tag"; then
+    log "$tag is a pre-release; not taking it from releases/latest (pin it with WINNOW_VERSION to run it)"
     fallback
     return 0
   fi

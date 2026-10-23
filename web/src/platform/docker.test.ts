@@ -369,6 +369,22 @@ describe.skipIf(!hasTools)("docker/fetch-release.sh", () => {
     expect(repo.requests).toEqual([]);
   });
 
+  it("never takes a pre-release (a tag with a dash) from releases/latest, but runs a pinned one", () => {
+    const h = harness();
+    // GitHub should never answer releases/latest with a pre-release; if it ever does
+    // (one marked latest by mistake), the container keeps what it has.
+    h.release("1.6.0-beta.1");
+    const latest = h.run();
+    expect(latest.chosen).toBe(h.baked);
+    expect(latest.requests).toEqual([API_LATEST]);
+    expect(latest.stderr).toContain("pre-release");
+    expect(existsSync(join(h.cache, "web", "v1.6.0-beta.1"))).toBe(false);
+
+    const pinned = h.run({ WINNOW_VERSION: "v1.6.0-beta.1" });
+    expect(pinned.chosen).toBe(join(h.cache, "web", "v1.6.0-beta.1"));
+    expect(readFileSync(join(pinned.chosen, "index.html"), "utf8")).toBe("release 1.6.0-beta.1");
+  });
+
   it("keeps the current and previous downloads only", () => {
     const h = harness();
     for (const version of ["1.5.0", "1.6.0", "1.7.0"]) {

@@ -94,9 +94,13 @@ jobs:
           PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
           set -euo pipefail
-          # A re-run reuses the draft it made the first time.
+          # Any tag with a "-" is a pre-release and never Latest
+          # (web/src/core/updates/releaseFlags.ts): the stable channel reads "latest".
+          mapfile -t FLAGS < <(node web/scripts/release-flags.mjs create "$TAG")
+          # A re-run reuses the draft it made the first time, re-marked by the same rule.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "Release $TAG already exists; reusing it."
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" "${FLAGS[@]}"
             exit 0
           fi
 
@@ -132,8 +136,11 @@ jobs:
 
           EOF
 
+          # PRERELEASE (from the tag in "Check versions") and FLAGS agree; FLAGS also
+          # keeps a pre-release from ever being made Latest.
+          echo "Pre-release: $PRERELEASE"
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --prerelease="$PRERELEASE" --title "Winnow $TAG" \
+            "${FLAGS[@]}" --title "Winnow $TAG" \
             --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
 
   build:
@@ -808,11 +815,23 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          # A pre-release stays a pre-release and never becomes "Latest".
-          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = "true" ]; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
-          else
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          # A pre-release (a "-" tag, or ticked as one on the draft) stays a pre-release
+          # and never becomes "Latest" (web/src/core/updates/releaseFlags.ts).
+          IS_PRE="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)"
+          mapfile -t FLAGS < <(node web/scripts/release-flags.mjs publish "$TAG" "$IS_PRE")
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" "${FLAGS[@]}"
+          # Belt and braces: the stable channel reads releases/latest (and its
+          # latest.json). If GitHub ever calls a pre-release Latest anyway, give Latest
+          # back to the newest stable release and fail the run so someone looks.
+          if [ "$(node web/scripts/release-flags.mjs prerelease "$TAG")" = "true" ]; then
+            LATEST="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            if [ "$LATEST" = "$TAG" ]; then
+              STABLE="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" \
+                --jq '[.[] | select(.draft == false and .prerelease == false and (.tag_name | contains("-") | not))][0].tag_name // empty')"
+              if [ -n "$STABLE" ]; then gh release edit "$STABLE" --repo "$GITHUB_REPOSITORY" --latest; fi
+              echo "::error::$TAG was marked Latest; Latest is back on ${STABLE:-nothing}. Check the release."
+              exit 1
+            fi
           fi
           URL="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
           echo "Published $URL"

@@ -71,6 +71,25 @@ describe("Dev Options storage", () => {
     expect(DEV_SWITCHES.every((key) => hiddenDevOptions()[key] === false)).toBe(true);
   });
 
+  it("Beta updates: off by default, persisted, and Hide turns it off", () => {
+    const storage = memory();
+    expect(DEFAULT_DEV_OPTIONS.betaUpdates).toBe(false);
+    expect(loadDevOptions(storage).betaUpdates).toBe(false);
+    saveDevOptions(o({ unlocked: true, betaUpdates: true }), storage);
+    expect(JSON.parse(storage.map.get(DEV_OPTIONS_KEY)!).betaUpdates).toBe(true);
+    expect(loadDevOptions(storage)).toEqual(o({ unlocked: true, betaUpdates: true }));
+    saveDevOptions(hiddenDevOptions(), storage);
+    expect(loadDevOptions(storage).betaUpdates).toBe(false);
+    // Unlocking again does not bring it back.
+    saveDevOptions(o({ unlocked: true }), storage);
+    expect(loadDevOptions(storage).betaUpdates).toBe(false);
+    // Only a literal true, and never while locked.
+    storage.map.set(DEV_OPTIONS_KEY, JSON.stringify({ version: 1, unlocked: true, betaUpdates: "true" }));
+    expect(loadDevOptions(storage).betaUpdates).toBe(false);
+    storage.map.set(DEV_OPTIONS_KEY, JSON.stringify({ version: 1, betaUpdates: true }));
+    expect(loadDevOptions(storage).betaUpdates).toBe(false);
+  });
+
   it("is local only: one shared key, not an account-scoped or synced one", () => {
     expect(DEV_OPTIONS_KEY).toBe("winnow.devOptions.v1");
   });

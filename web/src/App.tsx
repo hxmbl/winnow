@@ -650,7 +650,7 @@ export function App({ store, existingInstall = true }: Props) {
   // (`ui/useUpdates.ts`, `core/updates/updates.ts`). Announced once in the status pill,
   // and always in Settings › About.
   const flashUpdate = useCallback((text: string, ms: number) => store.flash(text, ms), [store]);
-  const updates = useUpdates(platform, flashUpdate);
+  const updates = useUpdates(platform, flashUpdate, devOptions.betaUpdates);
 
   // ── Sign-in ──────────────────────────────────────────────────────────────
 
@@ -4948,6 +4948,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onFilterScores={(value) => changeDevOptions({ filterScores: value })}
           debugLog={devOptions.debugLog}
           onDebugLog={(value) => changeDevOptions({ debugLog: value })}
+          betaUpdates={devOptions.betaUpdates}
+          onBetaUpdates={(value) => changeDevOptions({ betaUpdates: value })}
           onTestNotification={updateButtonShown(updates.runtime) ? () => sendTestNotification(store, platform) : undefined}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}

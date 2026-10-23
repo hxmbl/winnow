@@ -30,12 +30,25 @@ export type DevOptions = {
   filterScores: boolean;
   /** Debug log: sync, update and notification events kept in memory (`core/debug/debugLog.ts`). */
   debugLog: boolean;
+  /**
+   * Beta updates (native builds only): update checks consider pre-releases too
+   * (`betaChannel` in `core/updates/updates.ts`). Off, nothing with a `-` in its tag is
+   * ever offered. Turning it off never downgrades.
+   */
+  betaUpdates: boolean;
 };
 
-export const DEFAULT_DEV_OPTIONS: DevOptions = { unlocked: false, purePlainText: false, viewOriginal: false, filterScores: false, debugLog: false };
+export const DEFAULT_DEV_OPTIONS: DevOptions = {
+  unlocked: false,
+  purePlainText: false,
+  viewOriginal: false,
+  filterScores: false,
+  debugLog: false,
+  betaUpdates: false,
+};
 
 /** The switches inside Dev Options (everything but `unlocked`), which hiding turns off. */
-export const DEV_SWITCHES = ["purePlainText", "viewOriginal", "filterScores", "debugLog"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
+export const DEV_SWITCHES = ["purePlainText", "viewOriginal", "filterScores", "debugLog", "betaUpdates"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
 
 /** The subset of `Storage` this needs, so a test can hand in a map. */
 export interface DevOptionsStorage {

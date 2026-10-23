@@ -371,6 +371,12 @@ export const SETTINGS = {
     explanation:
       "Checks for a newer release now, the same check as Check now in About: it ignores the schedule and the automatic-check switch, and starts the every-tenth-load count again. The answer shows here: Update available, No updates available, or Couldn't check. It never installs anything; updating stays in About and the version's button. Only on the installed app.",
   },
+  betaUpdates: {
+    category: "dev",
+    label: "Beta updates",
+    explanation:
+      "Also offers pre-releases (versions like 1.6.0-beta.1) when Winnow checks for updates, and installs them from that release's own files with the same signature and checksum checks. Betas can be rough, so this is off unless you turn it on. Turning it off never moves you back to an older version: you stay on the beta until the next stable release newer than it. Only on the installed app.",
+  },
   debugLog: {
     category: "dev",
     label: "Debug log",

@@ -95,14 +95,18 @@ pub fn update_runtime(app: AppHandle) -> crate::updater::UpdateRuntime {
 /// Install the newest release with Tauri's updater and relaunch (macOS, AppImage).
 /// `{ kind: "none" }` when the release has no updater manifest for this platform.
 #[tauri::command]
-pub async fn update_install(app: AppHandle) -> Result<crate::updater::InstallOutcome> {
+/// `manifest`: the Beta channel's own `latest.json` (Dev Options → Beta updates).
+pub async fn update_install(
+    app: AppHandle,
+    manifest: Option<String>,
+) -> Result<crate::updater::InstallOutcome> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        crate::updater::install_self(&app).await
+        crate::updater::install_self(&app, manifest).await
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        let _ = app;
+        let _ = (app, manifest);
         Err("this platform does not update itself".into())
     }
 }
@@ -114,14 +118,15 @@ pub async fn update_download_deb(
     app: AppHandle,
     url: String,
     name: String,
+    beta: Option<bool>,
 ) -> Result<crate::updater::InstallOutcome> {
     #[cfg(target_os = "linux")]
     {
-        crate::updater::download_deb(&app, &url, &name).await
+        crate::updater::download_deb(&app, &url, &name, beta.unwrap_or(false)).await
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (app, url, name);
+        let _ = (app, url, name, beta);
         Err("a .deb installs on Linux only".into())
     }
 }
@@ -134,14 +139,15 @@ pub async fn update_install_apk(
     app: AppHandle,
     url: String,
     name: String,
+    beta: Option<bool>,
 ) -> Result<serde_json::Value> {
     #[cfg(target_os = "android")]
     {
-        crate::updater::install_apk(&app, &url, &name).await
+        crate::updater::install_apk(&app, &url, &name, beta.unwrap_or(false)).await
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, url, name);
+        let _ = (app, url, name, beta);
         Err("an APK installs on Android only".into())
     }
 }

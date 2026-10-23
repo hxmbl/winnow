@@ -11,10 +11,10 @@
  * in the system browser; raw HTML is shown as text with its tags removed.
  */
 
-import { RELEASES_PAGE_URL, UPDATE_REPO, isNewer, parseVersion, versionOfTag } from "./updates";
+import { RELEASES_LIST_URL, RELEASES_PAGE_URL, UPDATE_REPO, isNewer, parseVersion, versionOfTag } from "./updates";
 
 /** Enough releases to cover a long gap; GitHub returns newest first. */
-export const RELEASES_LIST_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=50`;
+export { RELEASES_LIST_URL };
 
 /** A release body longer than this is cut, with a link to the rest. */
 export const MAX_NOTES_CHARS = 20_000;
@@ -29,18 +29,27 @@ export type ChangelogEntry = {
 
 /**
  * The published, non-pre-release releases newer than `current` and no newer than
- * `latest`, newest first. Drafts and pre-releases are left out (the app never offers
- * them). Unreadable entries are skipped.
+ * `latest`, newest first. Drafts and pre-releases are left out (the stable channel never
+ * offers them): a pre-release by GitHub's flag or by a `-` in its tag. With
+ * `includePrereleases` (the Beta channel, which does offer them) pre-releases are listed
+ * too. Unreadable entries are skipped.
  */
-export function changelogBetween(json: unknown, current: string, latest: string): ChangelogEntry[] {
+export function changelogBetween(
+  json: unknown,
+  current: string,
+  latest: string,
+  { includePrereleases = false }: { includePrereleases?: boolean } = {},
+): ChangelogEntry[] {
   if (!Array.isArray(json)) return [];
   const entries: ChangelogEntry[] = [];
   const seen = new Set<string>();
   for (const item of json) {
     if (!item || typeof item !== "object") continue;
     const raw = item as Record<string, unknown>;
-    if (raw.draft === true || raw.prerelease === true) continue;
-    const version = versionOfTag(typeof raw.tag_name === "string" ? raw.tag_name : "");
+    if (raw.draft === true) continue;
+    const tag = typeof raw.tag_name === "string" ? raw.tag_name : "";
+    if (!includePrereleases && (raw.prerelease === true || tag.includes("-"))) continue;
+    const version = versionOfTag(tag);
     if (!parseVersion(version) || seen.has(version)) continue;
     if (!isNewer(version, current) || isNewer(version, latest)) continue;
     seen.add(version);
@@ -72,11 +81,12 @@ export async function fetchChangelog(
   latest: string,
   fetcher: FetchLike,
   signal?: AbortSignal,
+  { includePrereleases = false }: { includePrereleases?: boolean } = {},
 ): Promise<ChangelogResult> {
   try {
     const response = await fetcher(RELEASES_LIST_URL, { headers: { Accept: "application/vnd.github+json" }, signal });
     if (!response.ok) return { kind: "failed", reason: `GitHub answered ${response.status}` };
-    return { kind: "ok", entries: changelogBetween(await response.json(), current, latest) };
+    return { kind: "ok", entries: changelogBetween(await response.json(), current, latest, { includePrereleases }) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { kind: "failed", reason: message || "the network request failed" };

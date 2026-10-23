@@ -22,6 +22,14 @@
 //! without one, or a file that doesn't match, is refused and deleted. The APK's check is
 //! in the Kotlin plugin (`UpdateLogic.expectedSha256`), the `.deb`'s here.
 //!
+//! **Pre-releases.** Any release whose tag has a `-` (`v1.6.0-beta.1`) is a pre-release.
+//! Every install here refuses one unless the web layer says the offer came from the Beta
+//! channel (Dev Options → Beta updates): `release_download` checks the tag segment of the
+//! URL, and the stable self-update refuses a manifest whose version or download carries a
+//! pre-release. GitHub's own flags already keep a pre-release out of `releases/latest`;
+//! this is the backstop if one is ever marked latest by mistake. A Beta self-update reads
+//! the offered release's own `latest.json` (`manifest_url`), never `releases/latest`.
+//!
 //! A `.deb` install is never replaced in place: the package manager owns `/usr/bin`,
 //! and swapping files under it would leave dpkg's records wrong. It gets the package.
 
@@ -82,16 +90,58 @@ pub fn channel() -> &'static str {
     }
 }
 
+/// The Beta channel's updater manifest: the offered release's own `latest.json`.
+pub fn manifest_url(url: &str) -> Result<url::Url, String> {
+    release_download(url, "latest.json", ".json", true)
+}
+
+/// Whether the stable channel may install what an updater manifest offers: a version and
+/// a download tag with no pre-release in either. The Beta channel takes either.
+pub fn self_update_allowed(version: &str, download_url: &str, beta: bool) -> bool {
+    beta || (!is_prerelease(version)
+        && release_tag(download_url).is_some_and(|tag| !is_prerelease(tag)))
+}
+
 /// Whether Tauri's updater may replace this copy.
 pub fn self_updates(channel: &str) -> bool {
     matches!(channel, "macos" | "appimage")
 }
 
+/// The tag a release download belongs to: the path segment after `/releases/download/`.
+pub fn release_tag(url: &str) -> Option<&str> {
+    let tag = url
+        .strip_prefix(RELEASE_DOWNLOAD_PREFIX)?
+        .split('/')
+        .next()?;
+    (!tag.is_empty()).then_some(tag)
+}
+
+/// A pre-release tag or version: anything with a `-` in it.
+pub fn is_prerelease(tag_or_version: &str) -> bool {
+    tag_or_version.contains('-')
+}
+
+/// What `release_download` says to a pre-release's file without Beta updates.
+const PRERELEASE_REFUSED: &str =
+    "that release is a pre-release; it is offered only with Beta updates on (Dev Options)";
+
 /// Check a release download: https, this repository's releases, a plain file name with
-/// the expected extension that is the URL's last segment, no `..` anywhere.
-pub fn release_download(url: &str, name: &str, extension: &str) -> Result<url::Url, String> {
+/// the expected extension that is the URL's last segment, no `..` anywhere, and, unless
+/// `allow_prerelease` (an offer from the Beta channel), a tag with no `-`.
+pub fn release_download(
+    url: &str,
+    name: &str,
+    extension: &str,
+    allow_prerelease: bool,
+) -> Result<url::Url, String> {
     if !url.starts_with(RELEASE_DOWNLOAD_PREFIX) || url.contains("..") {
         return Err("not a Winnow release download".into());
+    }
+    let Some(tag) = release_tag(url) else {
+        return Err("not a Winnow release download".into());
+    };
+    if is_prerelease(tag) && !allow_prerelease {
+        return Err(PRERELEASE_REFUSED.into());
     }
     let plain = !name.is_empty()
         && name
@@ -186,9 +236,10 @@ pub async fn install_apk(
     app: &tauri::AppHandle,
     url: &str,
     name: &str,
+    beta: bool,
 ) -> Result<serde_json::Value, String> {
     use tauri::Manager;
-    release_download(url, name, ".apk")?;
+    release_download(url, name, ".apk", beta)?;
     let native = app
         .try_state::<android::Native>()
         .ok_or_else(|| "the update plugin is not registered".to_string())?;
@@ -196,7 +247,7 @@ pub async fn install_apk(
         .0
         .run_mobile_plugin_async::<serde_json::Value>(
             "installApk",
-            serde_json::json!({ "url": url, "name": name }),
+            serde_json::json!({ "url": url, "name": name, "beta": beta }),
         )
         .await
         .map_err(|e| e.to_string())
@@ -206,16 +257,37 @@ pub async fn install_apk(
 
 /// Install the newest release through `latest.json`, then relaunch. Only for the
 /// channels Tauri's updater can replace (`self_updates`).
+///
+/// `manifest`: the Beta channel's `latest.json`, from the release it offered. Without
+/// one, the configured `releases/latest/download/latest.json`, and nothing whose version
+/// or download is a pre-release is installed from it.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-pub async fn install_self(app: &tauri::AppHandle) -> Result<InstallOutcome, String> {
+pub async fn install_self(
+    app: &tauri::AppHandle,
+    manifest: Option<String>,
+) -> Result<InstallOutcome, String> {
     use tauri_plugin_updater::UpdaterExt;
     if !self_updates(channel()) {
         return Err("this copy of Winnow is not one the updater can replace".into());
     }
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let beta = manifest.is_some();
+    let builder = match manifest {
+        Some(url) => app
+            .updater_builder()
+            .endpoints(vec![manifest_url(&url)?])
+            .map_err(|e| e.to_string())?,
+        // Stable: a newer version with no pre-release part, never anything else.
+        None => app.updater_builder().version_comparator(|current, remote| {
+            remote.version > current && remote.version.pre.is_empty()
+        }),
+    };
+    let updater = builder.build().map_err(|e| e.to_string())?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
         return Ok(InstallOutcome::None);
     };
+    if !self_update_allowed(&update.version, update.download_url.as_str(), beta) {
+        return Err(PRERELEASE_REFUSED.into());
+    }
     update
         .download_and_install(|_, _| {}, || {})
         .await
@@ -244,9 +316,10 @@ pub async fn download_deb(
     app: &tauri::AppHandle,
     url: &str,
     name: &str,
+    beta: bool,
 ) -> Result<InstallOutcome, String> {
     use tauri_plugin_opener::OpenerExt;
-    let parsed = release_download(url, name, ".deb")?;
+    let parsed = release_download(url, name, ".deb", beta)?;
     let dir = download_dir(app);
     let target = dir.join(name);
     let partial = dir.join(format!("{name}.part"));
@@ -356,7 +429,7 @@ mod tests {
     fn release_downloads_are_checked() {
         let base = "https://github.com/hxmbl/winnow/releases/download/v1.5.0/";
         let deb = "Winnow_1.5.0_amd64.deb";
-        assert!(release_download(&format!("{base}{deb}"), deb, ".deb").is_ok());
+        assert!(release_download(&format!("{base}{deb}"), deb, ".deb", false).is_ok());
         for (url, name) in [
             (
                 format!("http://github.com/hxmbl/winnow/releases/download/v1.5.0/{deb}"),
@@ -374,23 +447,88 @@ mod tests {
             (format!("{base}.deb"), ".deb"),
         ] {
             assert!(
-                release_download(&url, name, ".deb").is_err(),
+                release_download(&url, name, ".deb", false).is_err(),
                 "{url} {name}"
             );
         }
         assert!(release_download(
             &format!("{base}Winnow_1.5.0_android-universal.apk"),
             "Winnow_1.5.0_android-universal.apk",
-            ".apk"
+            ".apk",
+            false
         )
         .is_ok());
+    }
+
+    #[test]
+    fn a_prerelease_download_needs_beta_updates() {
+        let beta = "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/";
+        let deb = "Winnow_1.6.0-beta.1_amd64.deb";
+        let apk = "Winnow_1.6.0-beta.1_android-universal.apk";
+        // Stable: refused by the tag, whatever the file is called.
+        let err = release_download(&format!("{beta}{deb}"), deb, ".deb", false).unwrap_err();
+        assert!(err.contains("pre-release"), "{err}");
+        assert!(release_download(&format!("{beta}{apk}"), apk, ".apk", false).is_err());
+        let sneaky = "Winnow_1.6.0_amd64.deb";
+        assert!(release_download(&format!("{beta}{sneaky}"), sneaky, ".deb", false).is_err());
+        // Beta: the same files, with every other check still applied.
+        assert!(release_download(&format!("{beta}{deb}"), deb, ".deb", true).is_ok());
+        assert!(release_download(&format!("{beta}{apk}"), apk, ".apk", true).is_ok());
+        assert!(release_download(&format!("{beta}../x/{deb}"), deb, ".deb", true).is_err());
+        assert!(release_download(
+            &format!("https://evil.example/v1.6.0-beta.1/{deb}"),
+            deb,
+            ".deb",
+            true
+        )
+        .is_err());
+        // A stable tag is fine either way.
+        let stable =
+            "https://github.com/hxmbl/winnow/releases/download/v1.6.0/Winnow_1.6.0_amd64.deb";
+        assert!(release_download(stable, "Winnow_1.6.0_amd64.deb", ".deb", false).is_ok());
+        assert!(release_download(stable, "Winnow_1.6.0_amd64.deb", ".deb", true).is_ok());
+        assert_eq!(release_tag(stable), Some("v1.6.0"));
+        assert_eq!(
+            release_tag("https://github.com/hxmbl/winnow/releases/download//x"),
+            None
+        );
+    }
+
+    #[test]
+    fn self_update_takes_a_prerelease_only_on_beta() {
+        let pre = "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/Winnow_1.6.0-beta.1_universal.app.tar.gz";
+        let stable = "https://github.com/hxmbl/winnow/releases/download/v1.6.0/Winnow_1.6.0_universal.app.tar.gz";
+        assert!(self_update_allowed("1.6.0", stable, false));
+        assert!(!self_update_allowed("1.6.0-beta.1", pre, false));
+        assert!(!self_update_allowed("1.6.0", pre, false));
+        assert!(!self_update_allowed("1.6.0-beta.1", stable, false));
+        assert!(!self_update_allowed(
+            "1.6.0",
+            "https://evil.example/x.tar.gz",
+            false
+        ));
+        assert!(self_update_allowed("1.6.0-beta.1", pre, true));
+        // The Beta manifest is only ever a release's own latest.json.
+        let manifest =
+            "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/latest.json";
+        assert!(manifest_url(manifest).is_ok());
+        // Never `releases/latest`: that is the stable channel's.
+        assert!(manifest_url(
+            "https://github.com/hxmbl/winnow/releases/latest/download/latest.json"
+        )
+        .is_err());
+        assert!(manifest_url("https://evil.example/latest.json").is_err());
+        assert!(manifest_url(
+            "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/other.json"
+        )
+        .is_err());
     }
 
     #[test]
     fn the_checksum_comes_from_the_release_beside_the_file() {
         let base = "https://github.com/hxmbl/winnow/releases/download/v1.5.0/";
         let deb = "Winnow_1.5.0_amd64.deb";
-        let url = release_download(&format!("{base}{deb}"), deb, ".deb").unwrap();
+        let url = release_download(&format!("{base}{deb}"), deb, ".deb", false).unwrap();
         assert_eq!(sums_url(&url).as_str(), format!("{base}SHA256SUMS"));
 
         let a = "a".repeat(64);

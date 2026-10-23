@@ -22,6 +22,7 @@ import { DebugLogPanel } from "./DebugLogPanel";
 import type { TestNotificationResult } from "../notificationActions";
 import { devCheckView } from "../devCheckNow";
 import { updateButtonShown } from "../updateButton";
+import { betaAvailable } from "../../core/updates/updates";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
   INFO_CLOSED,
@@ -267,6 +268,9 @@ export type SettingsProps = {
   /** Dev Options → Show filter scores: "Why it's here" shows its numbers. */
   filterScores: boolean;
   onFilterScores: (value: boolean) => void;
+  /** Dev Options → Beta updates: update checks consider pre-releases (native builds only). */
+  betaUpdates?: boolean;
+  onBetaUpdates?: (value: boolean) => void;
   /** Dev Options → Debug log: record sync, update and notification events in memory. */
   debugLog: boolean;
   onDebugLog: (value: boolean) => void;
@@ -909,6 +913,16 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
           </Row>
           {props.onTestNotification && <TestNotificationRow send={props.onTestNotification} />}
           {props.updates && updateButtonShown(props.updates.runtime) && <DevCheckNowRow updates={props.updates} />}
+          {props.updates && betaAvailable(props.updates.runtime) && props.onBetaUpdates && (
+            <Row setting="betaUpdates" hint="Also offers pre-releases like 1.6.0-beta.1; off never downgrades" hintId="winnow-beta-updates-hint">
+              <Toggle
+                checked={props.betaUpdates === true}
+                onChange={props.onBetaUpdates}
+                label={SETTINGS.betaUpdates.label}
+                describedBy="winnow-beta-updates-hint"
+              />
+            </Row>
+          )}
           <Row setting="debugLog" hint="Sync, update and notification events, in memory, redacted" hintId="winnow-debug-log-hint">
             <Toggle
               checked={props.debugLog}

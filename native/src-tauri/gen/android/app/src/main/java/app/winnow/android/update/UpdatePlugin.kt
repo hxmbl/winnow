@@ -22,6 +22,8 @@ import java.security.MessageDigest
 class InstallApkArgs {
   var url: String = ""
   var name: String = ""
+  /** The offer came from Dev Options → Beta updates: a pre-release's APK is allowed. */
+  var beta: Boolean = false
 }
 
 /**
@@ -56,7 +58,11 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject("unreadable arguments")
       return
     }
-    if (!UpdateLogic.isReleaseApk(args.url, args.name)) {
+    if (UpdateLogic.isPrereleaseDownload(args.url) && !args.beta) {
+      invoke.reject(UpdateLogic.PRERELEASE_REFUSED)
+      return
+    }
+    if (!UpdateLogic.isReleaseApk(args.url, args.name, allowPrerelease = args.beta)) {
       invoke.reject("not a Winnow release APK")
       return
     }

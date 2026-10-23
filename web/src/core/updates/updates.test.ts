@@ -4,13 +4,17 @@ import {
   DEFAULT_UPDATE_STATE,
   RETRY_AFTER_FAILURE_MS,
   aptCommand,
+  betaAvailable,
+  betaChannel,
   checkDue,
   checkForUpdate,
   compareVersions,
   dismiss,
   isNewer,
   isReleaseDownload,
+  isStableVersion,
   msUntilDue,
+  newestRelease,
   DOCKER_PULL_COMMAND,
   DOCKER_RESTART_COMMAND,
   GIT_PULL_COMMAND,
@@ -23,6 +27,7 @@ import {
   parseVersion,
   pickAsset,
   planUpdate,
+  RELEASES_LIST_URL,
   recordCheck,
   serialiseUpdateState,
   shouldAnnounce,
@@ -324,5 +329,152 @@ describe("checkForUpdate", () => {
       return { ok: true, status: 200, json: async () => githubRelease() };
     });
     expect(asked).toBe("https://api.github.com/repos/hxmbl/winnow/releases/latest");
+  });
+});
+
+/** A GitHub release for another tag, with that tag's own files. */
+function taggedRelease(tag: string, overrides: Record<string, unknown> = {}) {
+  const version = tag.replace(/^v/, "");
+  const dl = `https://github.com/hxmbl/winnow/releases/download/${tag}/`;
+  return {
+    tag_name: tag,
+    html_url: `https://github.com/hxmbl/winnow/releases/tag/${tag}`,
+    draft: false,
+    prerelease: tag.includes("-"),
+    assets: [
+      `Winnow_${version}_amd64.AppImage`,
+      `Winnow_${version}_amd64.deb`,
+      `Winnow_${version}_universal.app.tar.gz`,
+      `Winnow_${version}_android-universal.apk`,
+      "latest.json",
+      "SHA256SUMS",
+    ].map((name, i) => ({ name, browser_download_url: dl + name, size: 1000 + i })),
+    ...overrides,
+  };
+}
+
+const beta = (channel: UpdateChannel, version = "1.5.0"): UpdateRuntime => ({ ...runtime(channel, version), beta: true });
+
+describe("update channels", () => {
+  const respond = (body: unknown) => {
+    const asked: string[] = [];
+    const fetcher = async (url: string) => {
+      asked.push(url);
+      return { ok: true, status: 200, json: async () => body };
+    };
+    return { asked, fetcher };
+  };
+
+  it("offers Beta only on native builds that install releases", () => {
+    for (const channel of ["macos", "appimage", "deb", "android"] as const) {
+      expect(betaAvailable(runtime(channel))).toBe(true);
+      expect(betaChannel(beta(channel))).toBe(true);
+      expect(betaChannel(runtime(channel))).toBe(false);
+    }
+    for (const channel of ["web", "docker", "manual"] as const) {
+      expect(betaAvailable(runtime(channel))).toBe(false);
+      expect(betaChannel(beta(channel))).toBe(false);
+    }
+    expect(betaAvailable(null)).toBe(false);
+  });
+
+  it("calls a version stable only with no dash anywhere", () => {
+    expect(isStableVersion("1.6.0")).toBe(true);
+    expect(isStableVersion("1.6.0-beta.1")).toBe(false);
+    expect(isStableVersion("nightly")).toBe(false);
+  });
+
+  it("stable: refuses a pre-release by GitHub's flag or by a dash in its tag", () => {
+    expect(parseRelease(taggedRelease("v1.6.0-beta.1"))).toBeNull();
+    expect(parseRelease(taggedRelease("v1.6.0-beta.1", { prerelease: false }))).toBeNull();
+    expect(parseRelease(taggedRelease("v1.6.0", { prerelease: true }))).toBeNull();
+    const pre = parseRelease(taggedRelease("v1.6.0-beta.1", { prerelease: false }), { allowPrerelease: true }) as Release;
+    expect(pre.prerelease).toBe(true);
+    // Even a pre-release Release handed to planUpdate is never offered on stable.
+    expect(planUpdate(runtime("deb", "1.5.0"), pre)).toBeNull();
+    expect(planUpdate(runtime("macos", "1.5.0"), pre)).toBeNull();
+  });
+
+  it("stable: a pre-release marked latest by mistake is current, not an offer", async () => {
+    for (const body of [taggedRelease("v1.6.0-beta.1"), taggedRelease("v1.6.0-beta.1", { prerelease: false }), taggedRelease("v1.6.0", { prerelease: true })]) {
+      const { asked, fetcher } = respond(body);
+      expect(await checkForUpdate(runtime("deb", "1.5.0"), fetcher)).toEqual({ kind: "current", latest: null });
+      expect(asked).toEqual(["https://api.github.com/repos/hxmbl/winnow/releases/latest"]);
+    }
+  });
+
+  it("stable: beta=true is ignored where Beta is not available", async () => {
+    const { asked, fetcher } = respond(taggedRelease("v1.6.0-beta.1"));
+    expect(await checkForUpdate({ ...runtime("web", "1.5.0"), beta: true }, fetcher)).toEqual({ kind: "current", latest: null });
+    expect(asked).toEqual(["https://api.github.com/repos/hxmbl/winnow/releases/latest"]);
+  });
+
+  it("beta: reads every release and offers the newest by semver, pre-releases included", async () => {
+    const list = [
+      taggedRelease("v1.5.1"), // a hotfix published after the beta
+      taggedRelease("v1.6.0-beta.2"),
+      taggedRelease("v1.7.0-beta.1", { draft: true }),
+      taggedRelease("v1.6.0-beta.1"),
+      taggedRelease("v1.5.0"),
+      { tag_name: "nightly" },
+    ];
+    const { asked, fetcher } = respond(list);
+    const result = await checkForUpdate(beta("deb", "1.5.0"), fetcher);
+    expect(asked).toEqual([RELEASES_LIST_URL]);
+    expect(result).toEqual({
+      kind: "offer",
+      offer: {
+        version: "1.6.0-beta.2",
+        current: "1.5.0",
+        pageUrl: "https://github.com/hxmbl/winnow/releases/tag/v1.6.0-beta.2",
+        action: {
+          kind: "deb",
+          asset: {
+            name: "Winnow_1.6.0-beta.2_amd64.deb",
+            url: "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.2/Winnow_1.6.0-beta.2_amd64.deb",
+            size: 1001,
+          },
+        },
+        beta: true,
+      },
+    });
+    expect(newestRelease(list)?.tag).toBe("v1.6.0-beta.2");
+    expect(newestRelease("junk")).toBeNull();
+    expect(newestRelease([])).toBeNull();
+  });
+
+  it("beta: a stable release newer than the beta wins", async () => {
+    const { fetcher } = respond([taggedRelease("v1.6.0-beta.2"), taggedRelease("v1.6.0")]);
+    const result = await checkForUpdate(beta("android", "1.6.0-beta.1"), fetcher);
+    expect(result.kind === "offer" && result.offer.version).toBe("1.6.0");
+  });
+
+  it("beta: never offers anything older than what runs", async () => {
+    const { fetcher } = respond([taggedRelease("v1.6.0-beta.1"), taggedRelease("v1.5.0")]);
+    expect(await checkForUpdate(beta("deb", "1.6.0-beta.2"), fetcher)).toEqual({ kind: "current", latest: "1.6.0-beta.1" });
+    expect(await checkForUpdate(beta("deb"), respond([]).fetcher)).toEqual({ kind: "current", latest: null });
+  });
+
+  it("beta: self-updates from the offered release's own latest.json, or the page without one", () => {
+    const pre = parseRelease(taggedRelease("v1.6.0-beta.1"), { allowPrerelease: true }) as Release;
+    expect(planUpdate(beta("macos"), pre)?.action).toEqual({
+      kind: "self",
+      manifest: "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/latest.json",
+    });
+    expect(planUpdate(beta("appimage"), { ...pre, assets: pre.assets.filter((a) => a.name !== "latest.json") })?.action).toEqual({
+      kind: "page",
+    });
+    // Stable self-update keeps Tauri's own releases/latest manifest.
+    expect(planUpdate(runtime("macos"), release)?.action).toEqual({ kind: "self" });
+    expect(planUpdate(runtime("macos"), release)?.beta).toBeUndefined();
+  });
+
+  it("turning Beta off never downgrades: a beta user is current until a newer stable", async () => {
+    const stable = respond(taggedRelease("v1.5.0"));
+    expect(await checkForUpdate(runtime("deb", "1.6.0-beta.1"), stable.fetcher)).toEqual({ kind: "current", latest: "1.5.0" });
+    const next = respond(taggedRelease("v1.6.0"));
+    const result = await checkForUpdate(runtime("deb", "1.6.0-beta.1"), next.fetcher);
+    expect(result.kind === "offer" && result.offer.version).toBe("1.6.0");
+    expect(result.kind === "offer" && result.offer.beta).toBeUndefined();
   });
 });

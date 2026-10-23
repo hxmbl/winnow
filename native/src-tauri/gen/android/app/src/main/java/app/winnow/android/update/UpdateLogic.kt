@@ -18,13 +18,33 @@ object UpdateLogic {
 
   private val NAME = Regex("^[A-Za-z0-9._-]+\\.apk$")
 
+  /** Why a pre-release's APK is refused without Beta updates. */
+  const val PRERELEASE_REFUSED =
+    "that release is a pre-release; it is offered only with Beta updates on (Dev Options)"
+
+  /** The tag a release download belongs to: the path segment after `/releases/download/`. */
+  fun releaseTag(url: String): String? {
+    if (!url.startsWith(RELEASE_DOWNLOAD_PREFIX)) return null
+    return url.removePrefix(RELEASE_DOWNLOAD_PREFIX).substringBefore('/').ifEmpty { null }
+  }
+
+  /**
+   * A download from a pre-release: its tag has a `-` (`v1.6.0-beta.1`). Refused unless
+   * the offer came from the Beta channel, whatever GitHub's flags say: the backstop if a
+   * pre-release is ever marked latest by mistake.
+   */
+  fun isPrereleaseDownload(url: String): Boolean = releaseTag(url)?.contains('-') == true
+
   /**
    * A signed universal APK attached to one of this repository's releases: https, the
-   * repository's release downloads, no `..`, and a plain file name that is the URL's
-   * last segment. Never a `-debug` APK: Android refuses it over a release-signed app.
+   * repository's release downloads, no `..`, a plain file name that is the URL's last
+   * segment, and a stable tag (no `-`) unless `allowPrerelease` (Beta updates). Never a
+   * `-debug` APK: Android refuses it over a release-signed app.
    */
-  fun isReleaseApk(url: String, name: String): Boolean {
+  fun isReleaseApk(url: String, name: String, allowPrerelease: Boolean = false): Boolean {
     if (!url.startsWith(RELEASE_DOWNLOAD_PREFIX) || url.contains("..")) return false
+    val tag = releaseTag(url) ?: return false
+    if (tag.contains('-') && !allowPrerelease) return false
     if (!NAME.matches(name) || name.endsWith("-debug.apk")) return false
     if (!name.contains("android-universal")) return false
     return url.substringAfterLast('/') == name

@@ -428,12 +428,18 @@ export async function installUpdateWith(
   };
   try {
     switch (offer.action.kind) {
+      // `beta`: the shell refuses a pre-release's files (a tag with a "-") unless the
+      // offer came from the Beta channel. `manifest`: that channel's own latest.json.
       case "self":
-        return outcome(await call("update_install"));
+        return outcome(await call("update_install", offer.action.manifest ? { manifest: offer.action.manifest } : undefined));
       case "deb":
-        return outcome(await call("update_download_deb", { url: offer.action.asset.url, name: offer.action.asset.name }));
+        return outcome(
+          await call("update_download_deb", { url: offer.action.asset.url, name: offer.action.asset.name, beta: offer.beta === true }),
+        );
       case "apk":
-        return outcome(await call("update_install_apk", { url: offer.action.asset.url, name: offer.action.asset.name }));
+        return outcome(
+          await call("update_install_apk", { url: offer.action.asset.url, name: offer.action.asset.name, beta: offer.beta === true }),
+        );
       default:
         return { kind: "none" };
     }

@@ -16,12 +16,25 @@
  * which never returns a draft or a pre-release, compared with the running version. This
  * module decides; `platform/` carries out the install, and `ui/useUpdates.ts` owns the
  * timer and the stored state. No DOM, no network, no clock: each is passed in.
+ *
+ * **Two channels.** Stable (everyone, always the default) never offers a pre-release,
+ * and does not trust GitHub's `prerelease` flag alone for that: any tag with a `-` in it
+ * (`v1.6.0-beta.1`) is refused here, in the changelog, in the native installers
+ * (`updater.rs`, `UpdateLogic.kt`) and in the Docker image's fetch, so a pre-release
+ * marked "latest" by mistake still reaches nobody. Beta (Dev Options → Beta updates,
+ * native builds only) lists `/releases` instead and takes the newest published release
+ * of any kind, pre-releases included, installing from that release's own files. Neither
+ * ever offers anything older than what runs, so turning Beta off never downgrades: a
+ * beta user waits for the next stable release newer than their beta.
  */
 
 export const UPDATE_REPO = "hxmbl/winnow";
 
 /** GitHub's newest published, non-pre-release release. */
 export const RELEASES_LATEST_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+
+/** Every release, newest first: what the Beta channel reads (and the changelog). */
+export const RELEASES_LIST_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=50`;
 
 /** Where a release's files live; every download must be one of these. */
 export const RELEASE_DOWNLOAD_PREFIX = `https://github.com/${UPDATE_REPO}/releases/download/`;
@@ -66,7 +79,25 @@ export type UpdateRuntime = {
   arch: string;
   /** For `docker`: how the container updates (absent means `auto`). */
   docker?: DockerUpdateMode;
+  /**
+   * Dev Options → Beta updates: consider pre-releases too. Honoured only on a native
+   * build that installs releases (`betaChannel`); everywhere else it is ignored.
+   */
+  beta?: boolean;
 };
+
+/** The runtimes that install a release themselves, and so may opt into Beta updates. */
+const NATIVE_CHANNELS: readonly UpdateChannel[] = ["macos", "appimage", "deb", "android"];
+
+/** Whether this runtime may offer Dev Options → Beta updates at all: a native build that installs releases. */
+export function betaAvailable(runtime: UpdateRuntime | null | undefined): boolean {
+  return runtime != null && NATIVE_CHANNELS.includes(runtime.channel);
+}
+
+/** Whether this runtime is on the Beta channel (opted in, and a native build). */
+export function betaChannel(runtime: UpdateRuntime): boolean {
+  return runtime.beta === true && NATIVE_CHANNELS.includes(runtime.channel);
+}
 
 /** The channel a native shell's `update_runtime` reported, or `manual` when unrecognised. */
 export function parseChannel(raw: unknown): UpdateChannel {
@@ -139,6 +170,16 @@ export function isNewer(candidate: string, current: string): boolean {
   return a !== null && b !== null && compareVersions(a, b) > 0;
 }
 
+/**
+ * A stable version or tag: one with no `-` at all, so no pre-release part. The check is
+ * on the raw string rather than only on the parsed `pre`, so nothing that parses
+ * oddly can slip a suffix through.
+ */
+export function isStableVersion(raw: string): boolean {
+  const parsed = parseVersion(raw);
+  return parsed !== null && parsed.pre.length === 0 && !raw.includes("-");
+}
+
 /** `v1.5.0` → `1.5.0`. */
 export function versionOfTag(tag: string): string {
   return tag.trim().replace(/^v/, "");
@@ -151,24 +192,29 @@ export type ReleaseAsset = { name: string; url: string; size: number };
 export type Release = {
   version: string;
   tag: string;
+  /** A pre-release: GitHub's flag, or a tag with a `-`. Only the Beta channel reads one. */
+  prerelease: boolean;
   /** The release's page on GitHub. */
   pageUrl: string;
   assets: ReleaseAsset[];
 };
 
 /**
- * A GitHub release, as `releases/latest` returns it, or `null` when it is not one we
- * can use: a draft or pre-release (never returned by that endpoint, but checked), a tag
- * that is not a version, or a body that is not an object. Asset URLs outside this
- * repository's release downloads are dropped.
+ * A GitHub release, as `releases/latest` (or one entry of `/releases`) returns it, or
+ * `null` when it is not one we can use: a draft, a tag that is not a version, or a body
+ * that is not an object — and, unless `allowPrerelease` (the Beta channel), a
+ * pre-release, by GitHub's flag *or* by a `-` in its tag, whichever says so. Asset URLs
+ * outside this repository's release downloads are dropped.
  */
-export function parseRelease(json: unknown): Release | null {
+export function parseRelease(json: unknown, { allowPrerelease = false }: { allowPrerelease?: boolean } = {}): Release | null {
   if (!json || typeof json !== "object") return null;
   const raw = json as Record<string, unknown>;
-  if (raw.draft === true || raw.prerelease === true) return null;
+  if (raw.draft === true) return null;
   const tag = typeof raw.tag_name === "string" ? raw.tag_name : "";
   const version = versionOfTag(tag);
   if (!parseVersion(version)) return null;
+  const prerelease = raw.prerelease === true || tag.includes("-") || !isStableVersion(version);
+  if (prerelease && !allowPrerelease) return null;
   const pageUrl =
     typeof raw.html_url === "string" && raw.html_url.startsWith(`https://github.com/${UPDATE_REPO}/`)
       ? raw.html_url
@@ -182,7 +228,22 @@ export function parseRelease(json: unknown): Release | null {
     if (!name || !isReleaseDownload(url)) continue;
     assets.push({ name, url, size: typeof asset.size === "number" ? asset.size : 0 });
   }
-  return { version, tag, pageUrl, assets };
+  return { version, tag, prerelease, pageUrl, assets };
+}
+
+/**
+ * The newest usable release in a `/releases` list (the Beta channel): drafts skipped,
+ * pre-releases included, ordered by semver rather than by GitHub's list order (a hotfix
+ * to an older line can be published after a newer beta). `null` when none is usable.
+ */
+export function newestRelease(json: unknown): Release | null {
+  if (!Array.isArray(json)) return null;
+  let best: Release | null = null;
+  for (const item of json) {
+    const release = parseRelease(item, { allowPrerelease: true });
+    if (release && (!best || isNewer(release.version, best.version))) best = release;
+  }
+  return best;
 }
 
 /** Whether a URL is a file attached to one of this repository's releases. */
@@ -247,7 +308,11 @@ export function pickAsset(channel: UpdateChannel, arch: string, assets: readonly
  * - `page`: nothing to install here; open the release page.
  */
 export type UpdateAction =
-  | { kind: "self" }
+  /**
+   * `manifest`: the Beta channel's own `latest.json`, from the offered release (Tauri's
+   * updater otherwise reads `releases/latest/download/latest.json`, which is stable only).
+   */
+  | { kind: "self"; manifest?: string }
   | { kind: "deb"; asset: ReleaseAsset }
   | { kind: "apk"; asset: ReleaseAsset }
   | { kind: "git-pull" }
@@ -259,6 +324,11 @@ export type UpdateOffer = {
   current: string;
   pageUrl: string;
   action: UpdateAction;
+  /**
+   * Offered on the Beta channel: the native installers accept a pre-release's files only
+   * when this says so (they refuse any tag with a `-` otherwise).
+   */
+  beta?: boolean;
 };
 
 /**
@@ -267,17 +337,27 @@ export type UpdateOffer = {
  * with only a debug APK) falls back to the release page rather than offering nothing.
  */
 export function planUpdate(runtime: UpdateRuntime, release: Release): UpdateOffer | null {
+  const beta = betaChannel(runtime);
+  // The stable channel's hard guard: a pre-release is never offered, whatever produced
+  // the `Release`.
+  if (!beta && (release.prerelease || !isStableVersion(release.version) || release.tag.includes("-"))) return null;
   if (!isNewer(release.version, runtime.version)) return null;
   const offer = (action: UpdateAction): UpdateOffer => ({
     version: release.version,
     current: runtime.version,
     pageUrl: release.pageUrl,
     action,
+    ...(beta ? { beta: true } : {}),
   });
   switch (runtime.channel) {
     case "macos":
-    case "appimage":
-      return offer({ kind: "self" });
+    case "appimage": {
+      if (!beta) return offer({ kind: "self" });
+      // Beta installs from the offered release's own manifest; without one there is
+      // nothing signed to install, so the page instead.
+      const manifest = release.assets.find((asset) => asset.name === "latest.json");
+      return offer(manifest ? { kind: "self", manifest: manifest.url } : { kind: "page" });
+    }
     case "deb":
     case "android": {
       const asset = pickAsset(runtime.channel, runtime.arch, release.assets);
@@ -465,6 +545,10 @@ type FetchLike = (
 /**
  * Ask GitHub for the latest release and plan it for `runtime`. Never throws. A 404
  * (a repository with no published release yet) is "current", not a failure.
+ *
+ * Stable reads `releases/latest`; a `-` tag there (a pre-release marked latest by
+ * mistake) is "current", not an offer. Beta (`betaChannel`) reads `/releases` and plans
+ * the newest release of any kind.
  */
 export async function checkForUpdate(
   runtime: UpdateRuntime,
@@ -472,13 +556,25 @@ export async function checkForUpdate(
   signal?: AbortSignal,
 ): Promise<CheckResult> {
   try {
-    const response = await fetcher(RELEASES_LATEST_URL, {
+    const beta = betaChannel(runtime);
+    const response = await fetcher(beta ? RELEASES_LIST_URL : RELEASES_LATEST_URL, {
       headers: { Accept: "application/vnd.github+json" },
       signal,
     });
     if (response.status === 404) return { kind: "current", latest: null };
     if (!response.ok) return { kind: "failed", reason: `GitHub answered ${response.status}` };
-    const release = parseRelease(await response.json());
+    const body = await response.json();
+    if (beta) {
+      const newest = newestRelease(body);
+      if (!newest) return { kind: "current", latest: null };
+      const offer = planUpdate(runtime, newest);
+      return offer ? { kind: "offer", offer } : { kind: "current", latest: newest.version };
+    }
+    if (body && typeof body === "object" && typeof (body as { tag_name?: unknown }).tag_name === "string" &&
+      ((body as { tag_name: string }).tag_name.includes("-") || (body as { prerelease?: unknown }).prerelease === true)) {
+      return { kind: "current", latest: null };
+    }
+    const release = parseRelease(body);
     if (!release) return { kind: "failed", reason: "the latest release could not be read" };
     const offer = planUpdate(runtime, release);
     return offer ? { kind: "offer", offer } : { kind: "current", latest: release.version };
