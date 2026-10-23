@@ -7,6 +7,7 @@
  * `core/notify/notifications.ts`.
  */
 
+import { sessionScrambler } from "./censorDom";
 import { debugLog } from "../core/debug/debugLog";
 import type { Email } from "../core/model/email";
 import {
@@ -18,6 +19,7 @@ import {
 } from "../core/notify/testNotification";
 import {
   buildNotificationBatch,
+  censorNotificationBatch,
   handleNotificationAction,
   parseKeptReply,
   type KeptReply,
@@ -443,7 +445,10 @@ export async function announce(
   // Android draws the sender's monogram when there is no picture, as the list does.
   const monograms = info?.os === "android" ? notificationMonograms(emails, preferences.notificationHidePreview) : {};
   const shown = info?.kind === "desktop" ? await nativePictures(pictures, undefined, undefined, { monograms }) : pictures;
-  const batch = buildNotificationBatch(emails, preferences, resolvedHeads, shown, account);
+  const built = buildNotificationBatch(emails, preferences, resolvedHeads, shown, account);
+  // Censor email addresses covers notifications too: a notification is on the screen
+  // being shared as much as the app is. Display fields only; the reply heads stay real.
+  const batch = preferences.censorEmails ? censorNotificationBatch(built, sessionScrambler()) : built;
   debugLog("notify", "posted", { arrived: emails.length, os: info?.os ?? "unknown", account: account?.id ?? null });
   await platform.notifyNewMail(batch);
 }

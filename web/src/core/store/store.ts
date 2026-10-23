@@ -332,6 +332,13 @@ export type Preferences = {
    */
   leftHanded: boolean;
   /**
+   * Censor email addresses (Settings → Appearance): every address on screen is replaced
+   * by random letters of the same length and blurred, for screenshots and screen
+   * sharing. Off by default. Display only: what is sent to Gmail never changes. See
+   * `core/mail/censor.ts` and `ui/censorDom.ts`.
+   */
+  censorEmails: boolean;
+  /**
    * Offer "Send as a Drive link" for a file over Gmail's 25 MB. On by default, but it does
    * nothing until the user allows `drive.file` (asked the first time, never at sign-in).
    * Settings → Privacy → Stop turns it off on this device; the grant itself goes with a
@@ -395,6 +402,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   markReadOnOpen: true,
   swipeActions: true,
   leftHanded: false,
+  censorEmails: false,
   driveLinks: true,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,

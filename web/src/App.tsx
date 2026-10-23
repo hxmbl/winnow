@@ -20,7 +20,8 @@
  */
 
 import { untilFirstMail } from "./ui/firstMail";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { setCensorActive, startCensor } from "./ui/censorDom";
 import { flushSync } from "react-dom";
 import { LogIn, RefreshCw } from "lucide-react";
 import {
@@ -482,6 +483,21 @@ export function App({ store, existingInstall = true }: Props) {
    * floating controls (the dock's compose button and pill, see `index.css`). Phone only.
    */
   const leftHanded = phone && preferences.leftHanded;
+  /**
+   * Censor email addresses (Settings → Appearance): the document watcher in
+   * `ui/censorDom.ts`. A layout effect, so with the switch already on at launch the
+   * first paint is censored too.
+   */
+  const censorEmails = preferences.censorEmails;
+  useLayoutEffect(() => {
+    setCensorActive(censorEmails);
+    if (!censorEmails) return;
+    const stop = startCensor(document);
+    return () => {
+      setCensorActive(false);
+      stop();
+    };
+  }, [censorEmails]);
   useEffect(() => {
     const root = document.documentElement;
     if (leftHanded) root.setAttribute("data-hand", "left");
@@ -4915,6 +4931,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
           emailDarkMode={preferences.emailDarkMode}
           onEmailDarkMode={(value) => store.setPreferences({ emailDarkMode: value })}
+          censorEmails={preferences.censorEmails}
+          onCensorEmails={(value) => store.setPreferences({ censorEmails: value })}
           devUnlocked={devOptions.unlocked}
           onUnlockDev={() => changeDevOptions({ unlocked: true })}
           onHideDev={() => {

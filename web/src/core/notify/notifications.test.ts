@@ -3,6 +3,7 @@ import {
   DEFAULT_NOTIFICATION_ACTIONS,
   MAX_MESSAGE_NOTIFICATIONS,
   buildNotificationBatch,
+  censorNotificationBatch,
   draftForKeptReply,
   handleNotificationAction,
   messageLink,
@@ -17,6 +18,7 @@ import {
   type NotificationActionEvent,
 } from "./notifications";
 import type { Email } from "../model/email";
+import { AddressScrambler } from "../mail/censor";
 import { buildMime, messageIdFor } from "../gmail/mime";
 
 function mail(overrides: Partial<Email> = {}): Email {
@@ -113,6 +115,29 @@ describe("the batch", () => {
     expect(previewOf(mail({ body: "\n> earlier\n\n  Yes, Thursday works.  \nmore" }))).toBe("Yes, Thursday works.");
     expect(previewOf(mail({ body: "" }))).toBe("");
     expect(previewOf(mail({ body: "x".repeat(300) })).length).toBe(140);
+  });
+});
+
+describe("censored notifications", () => {
+  it("scrambles every address a person reads and leaves the reply head and ids alone", () => {
+    let x = 7;
+    const scrambler = new AddressScrambler(() => ((x = (x * 48271) % 2147483647) / 2147483647));
+    const nameless = mail({ name: "ada@example.com", body: "Sent from ada@example.com\nmore" });
+    const batch = buildNotificationBatch([nameless], SETTINGS, { "18a": "To: ada@example.com" }, {}, {
+      id: "acct-1",
+      label: "me@example.org",
+    });
+    const out = censorNotificationBatch(batch, scrambler);
+    const shown = JSON.stringify({ ...out, messages: out.messages.map((m) => ({ ...m, replyHead: null })) });
+    expect(shown).not.toContain("ada@example.com");
+    expect(shown).not.toContain("me@example.org");
+    expect(out.messages[0].title).toBe(scrambler.scramble("ada@example.com"));
+    expect(out.summaryTitle).toBe(scrambler.scramble("ada@example.com"));
+    expect(out.messages[0].replyHead).toBe("To: ada@example.com");
+    expect(out.messages[0].gmailId).toBe("18a");
+    expect(out.messages[0].messageId).toBe(1);
+    // The input batch is not modified.
+    expect(batch.messages[0].title).toBe("ada@example.com");
   });
 });
 

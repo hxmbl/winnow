@@ -21,6 +21,8 @@
  */
 
 import { plainTextForReading } from "../../core/mail/plainView";
+import { censorHtmlDocument, originalAttribute, sessionScrambler } from "../censorDom";
+import { useCensorActive } from "../useCensor";
 import { useEffect, useId, useLayoutEffect, useMemo, useState, useRef, type RefObject } from "react";
 import { Moon, Server, Sun } from "lucide-react";
 import {
@@ -112,12 +114,26 @@ function PlainText({ email, pure }: { email: Email; pure: boolean }) {
     () => plainTextForReading(email, { pure }),
     [email, pure],
   );
+  // Censor email addresses: each address its own blurred span, scrambled here rather
+  // than by the document watcher, which can only blur a whole element.
+  const censor = useCensorActive();
+  const parts = useMemo(() => (censor ? sessionScrambler().censorParts(text) : null), [censor, text]);
   return (
     <div
       className="selectable max-w-[68ch] whitespace-pre-wrap text-read text-ink-body"
       data-plain-text={pure ? "pure" : "tidy"}
     >
-      {text}
+      {parts
+        ? parts.map((part, index) =>
+            part.censored ? (
+              <span key={index} data-wn-censored="">
+                {part.text}
+              </span>
+            ) : (
+              part.text
+            ),
+          )
+        : text}
     </div>
   );
 }
@@ -343,7 +359,9 @@ function RichBody({
           // A modified click is the user asking for the browser's own answer — a new
           // tab, a download — so it is left alone rather than swallowed.
           if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          const href = anchor.getAttribute("href");
+          // The real target: Censor email addresses scrambles a `mailto:` on screen,
+          // never where it goes.
+          const href = originalAttribute(anchor, "href");
           // A fragment stays in the document, and a message's own anchors were not given
           // ids (a sender's `id` would collide with the app's), so there is nowhere for
           // one to go.
@@ -387,12 +405,15 @@ function AsSent({ email, imagesAllowed }: { email: Email; imagesAllowed: boolean
     });
     return emailDocument(sanitised.html, sanitised.stylesheets);
   }, [email.bodyHtml, imagesAllowed]);
+  // The frame's opaque origin is out of the document watcher's reach: censor the srcdoc.
+  const censor = useCensorActive();
+  const shown = useMemo(() => (censor ? censorHtmlDocument(document) : document), [censor, document]);
 
   return (
     <iframe
-      key={`${email.id}:${imagesAllowed}`}
+      key={`${email.id}:${imagesAllowed}:${censor}`}
       title="Message as sent"
-      srcDoc={document}
+      srcDoc={shown}
       sandbox=""
       referrerPolicy="no-referrer"
       className="h-[38rem] w-full rounded-pane border border-hairline bg-white"
@@ -417,6 +438,8 @@ function Proxied({ email, document, fetched, blocked }: {
   fetched: number;
   blocked: number;
 }) {
+  const censor = useCensorActive();
+  const shown = useMemo(() => (censor ? censorHtmlDocument(document) : document), [censor, document]);
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -428,9 +451,9 @@ function Proxied({ email, document, fetched, blocked }: {
         </p>
       </div>
       <iframe
-        key={`${email.id}:proxied`}
+        key={`${email.id}:proxied:${censor}`}
         title="Message, rendered by Winnow's server"
-        srcDoc={document}
+        srcDoc={shown}
         sandbox=""
         referrerPolicy="no-referrer"
         className="h-[38rem] w-full rounded-pane border border-hairline bg-white"

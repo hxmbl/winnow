@@ -12,6 +12,7 @@ import type { Draft, Email } from "../model/email";
 import { isAccountId } from "../session/accounts";
 import { displayName } from "../model/email";
 import { replySubject } from "../mail/reply";
+import { censorNotice, type AddressScrambler } from "../mail/censor";
 
 /** Per-message notifications at most; the rest are counted in the summary. Rust caps it too. */
 export const MAX_MESSAGE_NOTIFICATIONS = 5;
@@ -131,6 +132,25 @@ export function buildNotificationBatch(
     })),
     actions: { ...settings.notificationActions },
     hidePreview: settings.notificationHidePreview,
+  };
+}
+
+/**
+ * The batch as Censor email addresses shows it (`core/mail/censor.ts`): every line a
+ * person reads on the notification — titles, subjects, previews, the summary and the
+ * account label — with its addresses scrambled. Ids and each `replyHead` (the header
+ * block an inline reply is sent with) are untouched: censoring is for the screen, never
+ * for what goes to Gmail.
+ */
+export function censorNotificationBatch(batch: NotificationBatch, scrambler: AddressScrambler): NotificationBatch {
+  return {
+    ...batch,
+    account: batch.account
+      ? { ...batch.account, label: batch.account.label === null ? null : scrambler.censorText(batch.account.label) }
+      : batch.account,
+    summaryTitle: scrambler.censorText(batch.summaryTitle),
+    summaryBody: scrambler.censorText(batch.summaryBody),
+    messages: batch.messages.map((notice) => censorNotice(notice, scrambler)),
   };
 }
 

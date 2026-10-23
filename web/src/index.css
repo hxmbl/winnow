@@ -1438,3 +1438,13 @@ div[data-row-count] {
     animation: none;
   }
 }
+
+/*
+ * Censor email addresses (Settings → Appearance; `ui/censorDom.ts`). The text under this
+ * mark is already random letters; the blur says "an address was here" without inviting
+ * anyone to read the noise. Kept on under forced colours and reduced motion: it is a
+ * privacy mark, not decoration.
+ */
+[data-wn-censored] {
+  filter: blur(4px);
+}

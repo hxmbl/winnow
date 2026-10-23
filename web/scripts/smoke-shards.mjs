@@ -49,6 +49,7 @@ export const PARTS = [
   "schedule",
   "inbox-clear",
   "tour",
+  "censor",
 ];
 
 /**
@@ -60,7 +61,7 @@ export const SHARDS = {
   "contexts-a": {
     parts: ["avatars", "swipe", "codes", "sender-pictures", "sidebar-edges", "rail-edges", "text-selection", "reader-split", "read-on-open"],
   },
-  "contexts-b": { parts: ["settings", "privacy", "position", "glass", "inbox-clear", "tour"] },
+  "contexts-b": { parts: ["settings", "privacy", "position", "glass", "inbox-clear", "tour", "censor"] },
   "modules-a": { parts: ["fixes", "offline", "attachments", "motion"] },
   "modules-b": { parts: ["thumb", "top-email"], scripts: ["smoke-android.mjs", "smoke-notifications.mjs"] },
   "modules-c": { parts: ["schedule", "offline-save"], scripts: ["smoke-filters.mjs", "smoke-accounts.mjs"] },

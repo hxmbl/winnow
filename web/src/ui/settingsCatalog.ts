@@ -191,6 +191,12 @@ export const SETTINGS = {
     explanation:
       "On a phone, puts the controls you reach with your thumb on the left: the message actions pill, the compose button and the order of the dock. Off keeps them on the right. Saved on this device.",
   },
+  censorEmails: {
+    category: "appearance",
+    label: "Censor email addresses",
+    explanation:
+      "For screenshots and sharing your screen: every email address Winnow shows, in the list, the reader, the composer, your accounts, Settings and notifications, is swapped for random letters of the same length and blurred, so copying it copies only the letters. Each address keeps its letters until you close Winnow. Mail you send is not affected: replies and recipients still use the real addresses.",
+  },
   remoteImages: {
     category: "privacy",
     label: "Remote images",

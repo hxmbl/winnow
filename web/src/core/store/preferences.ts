@@ -73,6 +73,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
   if (typeof source.swipeActions === "boolean") out.swipeActions = source.swipeActions;
   if (typeof source.leftHanded === "boolean") out.leftHanded = source.leftHanded;
+  if (typeof source.censorEmails === "boolean") out.censorEmails = source.censorEmails;
   if (typeof source.emailDarkMode === "boolean") out.emailDarkMode = source.emailDarkMode;
   if (typeof source.driveLinks === "boolean") out.driveLinks = source.driveLinks;
   // Only a delay Settings offers (or the retired 30 s, read as 20 s): anything else (a
