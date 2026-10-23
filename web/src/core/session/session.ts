@@ -23,6 +23,8 @@
 
 import { decodeRawMessage } from "../mail/rawSource";
 import { accountKey } from "./accounts";
+import { defaultOfflineStore, gatedOfflineStore, loadedFromStored, type OfflineStore } from "../offline/offlineStore";
+import { debugLog } from "../debug/debugLog";
 import { createIdleWriter, onPageLeave, type IdleScheduler } from "./idleWrite";
 import { GoogleAuthStateMissing } from "./errors";
 import { exchangeWithRetry, isFetchRejection, retryWhileUnreachable } from "./exchangeRetry";
@@ -68,7 +70,7 @@ import {
 import { buildMime, type OutgoingAttachment } from "../gmail/mime";
 import { notificationReplyDraft } from "../notify/notifications";
 import { base64UrlDecode } from "../gmail/dto";
-import { keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
+import { isBodyLoaded, keepLoadedBody, withLoadedBody, type Draft, type Email, type GmailId, type Mailbox } from "../model/email";
 import { loadedBodyOf, mailboxFor, toDraftEmail, toEmail } from "../gmail/mapper";
 import { mapPool } from "../gmail/pool";
 import { SNOOZED_LABEL } from "../mail/snooze";
@@ -157,10 +159,18 @@ export function localCache(
     lifecycle?: (flushNow: () => void) => () => void;
     /** The account namespace (1.4.0): `<key>.messages@<id>` and `<key>.cursor@<id>`. */
     account?: string;
+    /**
+     * Where the mailbox, the downloaded bodies and the attachments are kept: the
+     * account's IndexedDB database (`core/offline/offlineStore.ts`) wherever the host has
+     * IndexedDB, which is every supported browser and WebView. `null` keeps the old
+     * `localStorage` sink, for hosts without one (and the node test runner).
+     */
+    offline?: OfflineStore | null;
   } = {},
-): MailboxCache & CursorStore & { flush(): Promise<void>; cursorClear(): Promise<void>; release(): void } {
+): LocalCache {
   const messagesKey = options.account ? accountKey(`${key}.messages`, options.account) : `${key}.messages`;
   const cursorKey = options.account ? accountKey(`${key}.cursor`, options.account) : `${key}.cursor`;
+  const offline = options.offline === undefined ? defaultOfflineStore(options.account) : options.offline;
   /**
    * The mirror, keyed by Gmail id.
    *
@@ -177,32 +187,88 @@ export function localCache(
    * the initial parse.
    */
   let mirror: Map<GmailId, Email> | null = null;
+  /** The read that fills `mirror`, shared by every caller that arrives while it runs. */
+  let loading: Promise<Map<GmailId, Email>> | null = null;
   /** The last persistence failure, or `null`. Reported by `flush()`. */
   let flushError: unknown = null;
+  /** The newest write to the offline store, which `flush()` waits for. */
+  let lastWrite: Promise<void> = Promise.resolve();
+  /** A mailbox still sitting in `localStorage` from before the offline store, removed once the store has it. */
+  let legacyPending = false;
 
-  const readAll = (): Map<GmailId, Email> => {
-    if (mirror) return mirror;
+  const parse = (raw: string | null | undefined): Map<GmailId, Email> => {
+    const rows = raw ? (JSON.parse(raw) as Email[]) : [];
+    return new Map(rows.map((email) => [email.gmailId, email]));
+  };
+
+  const readLegacy = (): string | null => {
     try {
-      const raw = globalThis.localStorage?.getItem(messagesKey);
-      const rows = raw ? (JSON.parse(raw) as Email[]) : [];
-      mirror = new Map(rows.map((email) => [email.gmailId, email]));
+      return globalThis.localStorage?.getItem(messagesKey) ?? null;
     } catch {
-      mirror = new Map();
+      return null;
     }
-    return mirror;
+  };
+
+  const load = (): Promise<Map<GmailId, Email>> => {
+    if (mirror) return Promise.resolve(mirror);
+    loading ??= (async () => {
+      let loaded: Map<GmailId, Email>;
+      try {
+        let raw: string | null = null;
+        if (offline) raw = await offline.readMailbox().catch(() => null);
+        if (raw === null) {
+          // The mailbox as 1.5.5 and earlier kept it. Moved into the offline store by
+          // the first write, and only then removed from `localStorage`.
+          raw = readLegacy();
+          legacyPending = offline !== null && raw !== null;
+        }
+        loaded = parse(raw);
+      } catch {
+        loaded = new Map();
+      }
+      // A write that happened while this read was on the way wins over what was read.
+      mirror ??= loaded;
+      if (legacyPending) scheduleFlush();
+      loading = null;
+      return mirror;
+    })();
+    return loading;
   };
 
   /**
    * Hand a serialised mailbox to storage. Records the failure instead of discarding it;
    * `flush()` is where it surfaces.
    */
-  const commit = (json: string): void => {
+  const commitLocal = (json: string): void => {
     try {
       globalThis.localStorage?.setItem(messagesKey, json);
       flushError = null;
     } catch (error) {
       flushError = error ?? new Error("cache write failed");
     }
+  };
+  const commit = (json: string): void => {
+    if (!offline) {
+      commitLocal(json);
+      return;
+    }
+    const migrating = legacyPending;
+    lastWrite = offline.writeMailbox(json).then(
+      () => {
+        flushError = null;
+        if (migrating) {
+          legacyPending = false;
+          try {
+            globalThis.localStorage?.removeItem(messagesKey);
+          } catch {
+            // Left behind; the next write tries again.
+          }
+        }
+      },
+      (error: unknown) => {
+        flushError = error ?? new Error("offline store write failed");
+      },
+    );
   };
 
   /**
@@ -218,20 +284,29 @@ export function localCache(
   (options.lifecycle ?? onPageLeave)(() => {
     writer.flushNow();
   });
-  const scheduleFlush = (): void => writer.schedule();
+  function scheduleFlush(): void {
+    writer.schedule();
+  }
 
-  /** Replace the mirror and schedule one write. */
-  const setAll = (emails: readonly Email[]): void => {
-    mirror = new Map(emails.map((email) => [email.gmailId, email]));
-    scheduleFlush();
+  /** Write the mirror now (pending or not) and wait for it to land. */
+  const writeNow = async (): Promise<void> => {
+    if (!writer.flushNow() && mirror) commit(JSON.stringify([...mirror.values()]));
+    await lastWrite;
+  };
+
+  /** Bodies and files follow the mailbox: a message the cache forgets is forgotten offline too. */
+  const forgetOffline = async (run: (store: OfflineStore) => Promise<unknown>): Promise<void> => {
+    if (!offline) return;
+    await run(offline).catch(() => undefined);
   };
 
   return {
+    offline,
     async all() {
-      return [...readAll().values()].sort((a, b) => b.receivedAt - a.receivedAt);
+      return [...(await load()).values()].sort((a, b) => b.receivedAt - a.receivedAt);
     },
     async upsert(emails) {
-      const rows = readAll();
+      const rows = await load();
       // A metadata-only copy never overwrites a body already held: Gmail does not
       // change a message's content, and the reader may have loaded this one while the
       // sync that is now writing its metadata was still running.
@@ -239,36 +314,44 @@ export function localCache(
       scheduleFlush();
     },
     async remove(gmailIds) {
-      const rows = readAll();
+      const rows = await load();
       for (const gmailId of gmailIds) rows.delete(gmailId);
       scheduleFlush();
+      await forgetOffline((store) => store.remove(gmailIds));
     },
     async gmailIds() {
-      return [...readAll().keys()];
+      return [...(await load()).keys()];
     },
     async keepOnly(gmailIds) {
       // Deleted rather than rebuilt: `keepOnly` runs over the whole cache at the
       // end of a full sync, and this is the one operation where the survivors are
       // usually *most* of the mailbox.
       const keep = new Set(gmailIds);
-      const rows = readAll();
+      const rows = await load();
       for (const gmailId of [...rows.keys()]) {
         if (!keep.has(gmailId)) rows.delete(gmailId);
       }
       scheduleFlush();
+      await forgetOffline((store) => store.keepOnly([...rows.keys()]));
     },
     async replace(emails) {
-      setAll(emails);
+      mirror = new Map(emails.map((email) => [email.gmailId, email]));
+      scheduleFlush();
+      await forgetOffline((store) => store.keepOnly([...mirror!.keys()]));
     },
     async clear() {
       writer.cancel();
       mirror = new Map();
       flushError = null;
+      legacyPending = false;
       try {
         globalThis.localStorage?.removeItem(messagesKey);
       } catch {
         // Nothing to do; the cache is already unreachable.
       }
+      // The mailbox, every downloaded body and every saved attachment: the database goes.
+      await lastWrite.catch(() => undefined);
+      if (offline) await offline.clear().catch(() => undefined);
     },
 
     /**
@@ -281,7 +364,7 @@ export function localCache(
     async flush() {
       // Pending or not: a flush always writes the mirror, so it reports on the
       // storage's real state rather than on a write that landed earlier.
-      if (!writer.flushNow() && mirror) commit(JSON.stringify([...mirror.values()]));
+      await writeNow();
       if (flushError !== null) throw flushError;
     },
 
@@ -317,8 +400,18 @@ export function localCache(
       if (!writer.flushNow() && mirror) commit(JSON.stringify([...mirror.values()]));
       mirror = null;
     },
-  } as MailboxCache & CursorStore & { cursorClear(): Promise<void>; flush(): Promise<void>; release(): void };
+  } as LocalCache;
 }
+
+/** What `localCache` returns: the engine's two interfaces plus the cache's own extras. */
+export type LocalCache = MailboxCache &
+  CursorStore & {
+    flush(): Promise<void>;
+    cursorClear(): Promise<void>;
+    release(): void;
+    /** The account's offline store, or `null` on a host without IndexedDB. */
+    readonly offline: OfflineStore | null;
+  };
 
 /**
  * Where the user stands on Google contacts.
@@ -401,8 +494,10 @@ export function cursorOf(store: CursorStore & { cursorClear?: () => Promise<void
  *
  * `true` when granted. Best-effort and never throws: an engine without the API, or
  * one that refuses, is the same answer — and either way the write is retried after.
- * Note that persistence protects storage from eviction; it does not raise the
- * ~5MB `localStorage` ceiling, which metadata-first sync is what keeps us under.
+ * Persistence protects storage from eviction; it does not raise the ~5MB `localStorage`
+ * ceiling. That is why the mailbox now lives in IndexedDB (`core/offline/offlineStore.ts`),
+ * whose quota is a share of the disk: asking for persistence there keeps a saved mailbox
+ * from being evicted under storage pressure.
  */
 export async function requestPersistentStorage(
   nav: { storage?: { persist?: () => Promise<boolean> } } | undefined = globalThis.navigator,
@@ -455,6 +550,24 @@ export function gatedContacts(store: GoogleContactsStore, open: () => boolean): 
       if (open()) await store.write(snapshot);
     },
   };
+}
+
+/** At most how often the full id reconciliation runs (`GmailSyncEngine.reconcile`). */
+export const RECONCILE_EVERY_MS = 24 * 60 * 60_000;
+
+/** When the last full reconciliation (or full sync) finished, per account. */
+export const RECONCILE_KEY = "winnow.reconcile.v1";
+
+/**
+ * The answer to "save this mailbox offline", per account: `on` or `off`. Absent until the
+ * user answers (or a small mailbox is saved without asking). See `core/offline/offlineSave.ts`.
+ */
+export const OFFLINE_SAVE_KEY = "winnow.offlineSave.v1";
+
+/** Whether a reconciliation is due: never run, or the last one is a day old (a clock gone backwards counts as due). */
+export function reconcileDue(last: number | null, now: number): boolean {
+  if (last === null || !Number.isFinite(last)) return true;
+  return now - last >= RECONCILE_EVERY_MS || now < last;
 }
 
 /** The session: a token manager, a client, a sync engine, and a backend. */
@@ -1177,6 +1290,59 @@ export class GmailSession {
     // And the cursor with it: a cursor left over an empty cache makes the next
     // sign-in sync incrementally — changes only — into an empty mailbox.
     await cursorOf(this.rawCache).clear().catch(() => undefined);
+    // The offline decision and the reconciliation clock belong to the account too.
+    for (const key of [OFFLINE_SAVE_KEY, RECONCILE_KEY]) {
+      try {
+        globalThis.localStorage?.removeItem(this.scopedKey(key));
+      } catch {
+        // Unreachable storage holds nothing to remove.
+      }
+    }
+  }
+
+  /** This account's spelling of a storage key. */
+  private scopedKey(key: string): string {
+    return this.account ? accountKey(key, this.account) : key;
+  }
+
+  private readStored(key: string): string | null {
+    try {
+      return globalThis.localStorage?.getItem(this.scopedKey(key)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeStored(key: string, value: string): void {
+    try {
+      globalThis.localStorage?.setItem(this.scopedKey(key), value);
+    } catch {
+      // Not remembered: asked again next launch, reconciled again next sync.
+    }
+  }
+
+  /**
+   * After a sync: the full id reconciliation, when a day has passed since the last one
+   * (and so on the first sync after a launch, when the last is older than that). A full
+   * sync is a reconciliation in itself and only restarts the clock. Returns the ids it
+   * removed, `[]` when it removed nothing or did not run.
+   */
+  private async reconcileIfDue(mode: "full" | "incremental" | undefined): Promise<string[]> {
+    const now = Date.now();
+    if (mode === "full") {
+      this.writeStored(RECONCILE_KEY, String(now));
+      return [];
+    }
+    const last = Number(this.readStored(RECONCILE_KEY) ?? NaN);
+    if (!reconcileDue(Number.isNaN(last) ? null : last, now)) return [];
+    const result = await this.sync.reconcile();
+    if (result.kind === "skipped") {
+      debugLog("sync", "reconcile-skipped", { reason: result.reason });
+      return [];
+    }
+    this.writeStored(RECONCILE_KEY, String(now));
+    debugLog("sync", "reconcile", { listed: result.listed, removed: result.removed.length, ms: Date.now() - now });
+    return result.removed;
   }
 
   /** A `MailBackend` the store can drive. */
@@ -1194,6 +1360,10 @@ export class GmailSession {
      */
     const loadCache = (): Promise<Email[]> => cache.all();
     const platform = this.platform;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the backend's methods are an object literal's
+    const session = this;
+    /** The account's offline store (bodies and attachments saved for offline), if the host has one. */
+    const offline = (this.rawCache as { offline?: OfflineStore | null }).offline ?? null;
 
     /** The gmail id for a numeric id — the API speaks ids, the UI does not. */
     const gmailIdFor = async (id: number): Promise<string> => {
@@ -1304,8 +1474,10 @@ export class GmailSession {
           onProgress: options?.onProgress,
           onPartial: options?.onPartial,
         });
+        // Mail deleted on the server that history did not report goes here (a day apart).
+        const removed = await session.reconcileIfDue(result.mode).catch(() => [] as string[]);
         return {
-          emails: result.emails,
+          emails: removed.length > 0 ? await cache.all() : result.emails,
           failed: result.failed,
           truncated: result.truncated,
           // Forwarded rather than dropped: the store's notice is the only place the
@@ -1458,10 +1630,14 @@ export class GmailSession {
 
       async fetchAttachment(gmailId, attachmentId) {
         const all = await loadCache();
-        const response = await client.attachment(gmailId, attachmentId);
-        // Gmail returns base64url; the bytes are handed to the platform layer
-        // which encodes them again for its own transport.
-        const bytes = base64UrlDecode(response.data ?? "") ?? new Uint8Array(0);
+        // Saved offline with its message (up to `ATTACHMENT_DOWNLOAD_CAP`): no request.
+        let bytes = offline ? await offline.getFile(gmailId, attachmentId).catch(() => null) : null;
+        if (!bytes) {
+          const response = await client.attachment(gmailId, attachmentId);
+          // Gmail returns base64url; the bytes are handed to the platform layer
+          // which encodes them again for its own transport.
+          bytes = base64UrlDecode(response.data ?? "") ?? new Uint8Array(0);
+        }
 
         const email = all.find((candidate) => candidate.gmailId === gmailId);
         const attachment = email?.attachments.find((a) => a.id === attachmentId);
@@ -1475,7 +1651,9 @@ export class GmailSession {
       async fetchBody(gmailId) {
         // One request, for one message, when someone opens it. The store keeps the
         // HTML body for a recent window precisely so this is rare — see
-        // `BODY_RETENTION`.
+        // `BODY_RETENTION` — and a message saved offline costs none at all.
+        const stored = offline ? await offline.getBody(gmailId).catch(() => null) : null;
+        if (stored) return stored.bodyHtml;
         return client.messageBodyHtml(gmailId);
       },
 
@@ -1483,7 +1661,9 @@ export class GmailSession {
         // The lazy half of metadata-first sync: one `format=full` request, decoded the
         // same way a full sync would have, and written into the offline cache so the
         // message reads offline from now on.
-        const loaded = loadedBodyOf(await client.message(gmailId, "full"));
+        // Saved offline already (the background download): read it from disk, no request.
+        const stored = offline ? await offline.getBody(gmailId).catch(() => null) : null;
+        const loaded = stored ? loadedFromStored(stored) : loadedBodyOf(await client.message(gmailId, "full"));
         const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
         if (cached) await cache.upsert([withLoadedBody(cached, loaded)]);
         return loaded;
@@ -1510,9 +1690,46 @@ export class GmailSession {
         return email;
       },
 
+      offline: offline
+        ? {
+            store: gatedOfflineStore(offline, () => this.writable),
+            decision: () => {
+              const value = this.readStored(OFFLINE_SAVE_KEY);
+              return value === "on" || value === "off" ? value : null;
+            },
+            setDecision: (value) => this.writeStored(OFFLINE_SAVE_KEY, value),
+            async body(gmailId) {
+              // Opened before (the reader or a prefetch put its body in the cache): no
+              // second download. Otherwise one `format=full`, *not* written into the cache
+              // mirror — the offline store holds it, and the mirror stays metadata.
+              const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
+              if (cached && isBodyLoaded(cached)) {
+                return {
+                  body: cached.body,
+                  ...(cached.bodySource ? { bodySource: cached.bodySource } : {}),
+                  ...(cached.bodyHtml !== undefined ? { bodyHtml: cached.bodyHtml } : {}),
+                  attachments: cached.attachments,
+                };
+              }
+              return loadedBodyOf(await client.message(gmailId, "full"));
+            },
+            async attachment(gmailId, attachmentId) {
+              const response = await client.attachment(gmailId, attachmentId);
+              return base64UrlDecode(response.data ?? "") ?? new Uint8Array(0);
+            },
+            async gone(gmailIds) {
+              await cache.remove(gmailIds);
+              await cache.flush?.().catch(() => undefined);
+            },
+          }
+        : undefined,
+
       async persistCache() {
-        // Web: ask for persistent storage first. Desktop: the webview's storage is the
-        // app's own, so there is nothing to ask for — just retry the write.
+        // The large-mailbox question's Save. Web: ask for persistent storage first, so the
+        // browser does not evict the offline database. Desktop: the webview's storage is
+        // the app's own, so there is nothing to ask for. Then write the mailbox (to
+        // IndexedDB, which has the room `localStorage` never had); the store starts the
+        // download of every body once this lands.
         const kind = await platform.info().then((info) => info.kind, () => "web" as const);
         if (kind === "web") await requestPersistentStorage();
         try {

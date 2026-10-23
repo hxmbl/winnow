@@ -41,6 +41,9 @@ import { SNOOZED_LABEL } from "../mail/snooze";
 /** Gmail's maximum page size. Asking for more is silently clamped. */
 export const MAX_PAGE_SIZE = 200;
 
+/** Page size of the id-only listing the reconciliation walks (Gmail's maximum). */
+export const LIST_ALL_PAGE_SIZE = 500;
+
 /**
  * Gmail's per-user quota is 6,000 units/minute. The bucket refills at 4,800/min
  * and bursts to 1,000, so a burst plus a full minute of refill stays under the
@@ -85,7 +88,7 @@ export const METADATA_HEADERS: readonly string[] = [
 ];
 
 /** How much of a message to ask for. `metadata` is labels + headers + snippet. */
-export type MessageFormat = "full" | "metadata";
+export type MessageFormat = "full" | "metadata" | "minimal";
 
 /** A wait. Injectable so tests never sleep on the real clock. */
 export type Sleep = (ms: number) => Promise<void>;
@@ -396,6 +399,21 @@ export class GmailClient {
     pageToken?: string,
   ): Promise<GmailListResponse> {
     const params = new URLSearchParams({ q: query, maxResults: String(maxResults) });
+    if (pageToken) params.set("pageToken", pageToken);
+    return this.request<GmailListResponse>(`/users/me/messages?${params}`);
+  }
+
+  /**
+   * One page of every message id in the mailbox, trash and spam included, for the daily
+   * reconciliation (`GmailSyncEngine.reconcile`). Ids only (`fields`), 500 a page: one
+   * `messages.list` costs 5 quota units whatever the page size.
+   */
+  async listAllIds(pageToken?: string): Promise<GmailListResponse> {
+    const params = new URLSearchParams({
+      maxResults: String(LIST_ALL_PAGE_SIZE),
+      includeSpamTrash: "true",
+      fields: "messages/id,nextPageToken,resultSizeEstimate",
+    });
     if (pageToken) params.set("pageToken", pageToken);
     return this.request<GmailListResponse>(`/users/me/messages?${params}`);
   }

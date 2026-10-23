@@ -37,6 +37,7 @@
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
+    "fake-indexeddb": "^6.2.6",
     "globals": "^15.14.0",
     "playwright": "^1.63.0",
     "postcss": "^8.4.49",

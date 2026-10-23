@@ -128,6 +128,7 @@ pub fn run() {
             notify_actions::notify_action_result,
             notify_actions::notify_kept_replies,
             notify_actions::notify_release_kept,
+            notify_actions::notify_withdraw,
             deep_link::deep_link_launch,
         ])
         .on_page_load(|window, payload| {

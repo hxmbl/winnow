@@ -4964,6 +4964,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           }}
           notificationActions={preferences.notificationActions}
           notificationHidePreview={preferences.notificationHidePreview}
+          offline={snapshot.offline}
+          onOfflineSave={(on) => store.setOfflineSave(on)}
+          onRemoveDownloads={() => void store.removeOfflineDownloads()}
           unreadBadge={preferences.unreadBadge}
           onUnreadBadge={(value) => store.setPreferences({ unreadBadge: value })}
           onNotificationSettings={(patch) => store.setPreferences(patch)}

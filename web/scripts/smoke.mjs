@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build, preview } from "vite";
 import { smokeOffline } from "./smoke-offline.mjs";
+import { smokeOfflineSave } from "./smoke-offline-save.mjs";
 import { attachmentsSmoke } from "./smoke-attachments.mjs";
 import { topEmail } from "./smoke-top-email.mjs";
 import { smokeMotion } from "./smoke-motion.mjs";
@@ -8675,6 +8676,8 @@ try {
   } // part: glass
 
   if (part("offline")) await smokeOffline({ browser, URL, check, section, errors });
+  // Saving mail offline (IndexedDB) and mail deleted on the server: `smoke-offline-save.mjs`.
+  if (part("offline-save")) await smokeOfflineSave({ browser, URL, check, section, errors });
   // Labels and attachments: chips, the label picker's other doors, label mailboxes, the
   // reader's file list and lightbox, and compose attachments. Its own module, so it can
   // also run alone (`node scripts/smoke-labels-attachments.mjs`).

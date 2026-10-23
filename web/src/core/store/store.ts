@@ -19,6 +19,8 @@
  */
 
 import { debugLog } from "../debug/debugLog";
+import { OfflineDownloader, type DownloadBlock, type DownloadProgress } from "../offline/downloader";
+import { OFFLINE_UNAVAILABLE, offlineNextStep, type OfflineBackend, type OfflineView } from "../offline/offlineSave";
 import { demoRawSource } from "../mail/rawSource";
 import { summarizeAttention, type AttentionSummary } from "../classify/attention";
 import {
@@ -572,6 +574,11 @@ export type StoreState = {
    */
   storagePrompt: StoragePrompt | null;
   /**
+   * Offline saving for the open account (`core/offline/offlineSave.ts`): the answer to
+   * the storage question, and how far the background download has got.
+   */
+  offline: OfflineView;
+  /**
    * The reference instant the list's day sections are computed against.
    *
    * A property rather than a `Date.now()` at the point of use: the demo mailbox is
@@ -784,6 +791,12 @@ export interface MailBackend {
    * on the desktop it just retries. `true` when the cache landed.
    */
   persistCache?(): Promise<boolean>;
+  /**
+   * Saving the whole mailbox offline: the account's durable store, the user's answer,
+   * and the requests the background download makes. Absent on a host with no durable
+   * store and in test doubles; Save then only retries the write, as it used to.
+   */
+  offline?: OfflineBackend;
 }
 
 /** What one sync produced. */
@@ -810,6 +823,10 @@ export type SyncOutcome = {
  */
 export interface PlatformBridge {
   notifyNewMail(emails: readonly Email[]): Promise<void>;
+  /** Take down notifications of messages that no longer exist (deleted on the server). Optional. */
+  withdrawNotifications?(gmailIds: readonly string[]): Promise<void>;
+  /** What stops the offline download right now (offline, hidden on a phone, metered, battery), or `null`. Optional. */
+  downloadConditions?(): DownloadBlock | null;
   setUnreadBadge(count: number): Promise<void>;
   setBackgroundSync(intervalSeconds: number | null): Promise<void>;
 }
@@ -957,6 +974,9 @@ export class WinnowStore {
   /** "Not now" on the storage question, for the rest of this session. */
   private storageDeclined = false;
 
+  /** The background offline download of the open account, and the backend it is for. */
+  private downloader: { backend: MailBackend; offline: OfflineBackend; run: OfflineDownloader } | null = null;
+
   /**
    * The binned senders, kept separately from the message list.
    *
@@ -1055,6 +1075,7 @@ export class WinnowStore {
       truncated: false,
       recentIds: new Set(),
       storagePrompt: null,
+      offline: OFFLINE_UNAVAILABLE,
       now: options.now ?? Date.now(),
     };
     this.state = { ...this.state, all: this.overlaid(this.state.all) };
@@ -2464,8 +2485,17 @@ export class WinnowStore {
         cacheUnpersisted: Boolean(result.cacheUnpersisted),
       });
       if (!initial) await this.notifyIfNew(recent);
+      // Mail that was here and is gone (deleted on the server, found by history or the
+      // daily reconciliation) takes its notification with it.
+      const present = new Set(result.emails.map((email) => email.gmailId));
+      const vanished = [...known].filter((gmailId) => !present.has(gmailId));
+      if (vanished.length > 0) {
+        debugLog("sync", "removed", { messages: vanished.length });
+        void this.platform?.withdrawNotifications?.(vanished).catch(() => undefined);
+      }
       await this.applyPlatform();
       this.prefetchInbox();
+      this.afterSyncOffline(backend, Boolean(result.cacheUnpersisted));
     } catch (error) {
       if (this.backend !== backend) return;
       debugLog("sync", "failed", {
@@ -2525,6 +2555,121 @@ export class WinnowStore {
       saved = false;
     }
     this.set({ storagePrompt: saved ? null : "failed" });
+    // Save means the whole mailbox: the answer is remembered for this account and the
+    // background download starts (or carries on).
+    if (saved && backend && backend === this.backend && backend.offline) {
+      backend.offline.setDecision("on");
+      this.runOffline(backend);
+    }
+  }
+
+  // ── Offline saving (core/offline/) ────────────────────────────────────────
+
+  /** The downloader for `backend`, made on first use; another backend's is stopped. */
+  private offlineFor(backend: MailBackend): OfflineDownloader | null {
+    const offline = backend.offline;
+    if (!offline) return null;
+    if (this.downloader?.backend === backend) return this.downloader.run;
+    this.stopOffline();
+    const run = new OfflineDownloader({
+      store: offline.store,
+      source: {
+        targets: () =>
+          this.backend === backend ? this.state.all.map((email) => ({ gmailId: email.gmailId, receivedAt: email.receivedAt })) : [],
+        body: async (gmailId) => {
+          // The reader or a prefetch is already loading it: wait, then take the cache's copy.
+          const email = this.state.all.find((candidate) => candidate.gmailId === gmailId);
+          const inFlight = email ? this.bodyInFlight.get(email.id) : undefined;
+          if (inFlight) await inFlight.catch(() => undefined);
+          return offline.body(gmailId);
+        },
+        attachment: (gmailId, attachmentId) => offline.attachment(gmailId, attachmentId),
+        gone: async (gmailId) => {
+          await offline.gone([gmailId]);
+          if (this.backend === backend) this.forgetGone([gmailId]);
+        },
+      },
+      // The bodies queue at its lowest priority: an opened message always goes first.
+      schedule: (task) => this.bodyQueue.push(task, "low"),
+      conditions: () => this.platform?.downloadConditions?.() ?? null,
+      onProgress: (progress) => {
+        if (this.backend === backend) this.publishOffline(offline, progress);
+      },
+      log: (event, data) => debugLog("offline", event, data as Record<string, number | string>),
+    });
+    this.downloader = { backend, offline, run };
+    return run;
+  }
+
+  private publishOffline(offline: OfflineBackend, progress: DownloadProgress | null): void {
+    this.set({ offline: { available: true, decision: offline.decision(), progress } });
+  }
+
+  private stopOffline(): void {
+    this.downloader?.run.stop();
+    this.downloader = null;
+  }
+
+  /** Start (or resume) the download when the answer is yes; otherwise just the counts. */
+  private runOffline(backend: MailBackend): void {
+    const run = this.offlineFor(backend);
+    const offline = backend.offline;
+    if (!run || !offline) return;
+    this.publishOffline(offline, run.progress().total > 0 ? run.progress() : this.state.offline.progress);
+    if (offline.decision() === "on") void run.start();
+    else void run.refreshCounts().catch(() => undefined);
+  }
+
+  /** After each sync: ask, save without asking (a small mailbox), or carry on as answered. */
+  private afterSyncOffline(backend: MailBackend, unpersisted: boolean): void {
+    const offline = backend.offline;
+    if (!offline) {
+      if (this.state.offline.available) this.set({ offline: OFFLINE_UNAVAILABLE });
+      return;
+    }
+    const step = offlineNextStep(offline.decision(), this.state.all.length, { declined: this.storageDeclined, unpersisted });
+    if (step === "save") offline.setDecision("on");
+    if (step === "ask" && this.state.storagePrompt === null) this.set({ storagePrompt: "ask" });
+    this.runOffline(backend);
+  }
+
+  /**
+   * Settings → Offline mail: the same answer the storage question records. Off stops the
+   * download and keeps what is saved; on starts it again.
+   */
+  setOfflineSave(on: boolean): void {
+    const backend = this.backend;
+    if (!backend?.offline) return;
+    backend.offline.setDecision(on ? "on" : "off");
+    if (on && this.state.storagePrompt !== null) this.set({ storagePrompt: null });
+    if (!on) this.downloader?.run.stop();
+    if (!on) this.downloader = null;
+    this.runOffline(backend);
+  }
+
+  /** Settings → Remove downloads: every saved body and attachment goes, and saving turns off. */
+  async removeOfflineDownloads(): Promise<void> {
+    const backend = this.backend;
+    if (!backend?.offline) return;
+    backend.offline.setDecision("off");
+    this.stopOffline();
+    await backend.offline.store.clearDownloads().catch(() => undefined);
+    debugLog("offline", "removed", {});
+    if (this.backend === backend) this.runOffline(backend);
+  }
+
+  /** Messages Gmail says no longer exist: off the screen, out of the bodies, notifications down. */
+  private forgetGone(gmailIds: readonly string[]): void {
+    const gone = new Set(gmailIds);
+    const all = this.state.all.filter((email) => !gone.has(email.gmailId));
+    if (all.length === this.state.all.length) return;
+    for (const email of this.state.all) {
+      if (!gone.has(email.gmailId)) continue;
+      this.bodies.delete(email.id);
+      this.bodyChecked.delete(email.id);
+    }
+    this.set({ all });
+    void this.platform?.withdrawNotifications?.(gmailIds).catch(() => undefined);
   }
 
   /** "Not now": stop asking for this session, and keep re-downloading on launch. */
@@ -3893,6 +4038,7 @@ export class WinnowStore {
 
   /** Forget queued body work: the account it was for is gone. */
   private dropBodyWork(): void {
+    this.stopOffline();
     this.bodyQueue.clear();
     this.pendingBodies.clear();
     if (this.bodyApplyTimer !== null) clearTimeout(this.bodyApplyTimer);
@@ -4056,6 +4202,7 @@ export class WinnowStore {
       error: null,
       notice: null,
       storagePrompt: null,
+      offline: OFFLINE_UNAVAILABLE,
       lastSyncedAt: null,
       // The seed's reference instant (by default the fixed one; the app passes it moved
       // onto the real clock). The live wall clock would put the seed in "Earlier".
@@ -4128,6 +4275,7 @@ export class WinnowStore {
       error: null,
       notice: null,
       storagePrompt: null,
+      offline: OFFLINE_UNAVAILABLE,
       recentIds: new Set(),
       lastSyncedAt: null,
       learning: saved.learning ? LearningModel.fromSnapshot(saved.learning) : LearningModel.initial(),
@@ -4263,6 +4411,7 @@ export class WinnowStore {
       error: null,
       notice: null,
       storagePrompt: null,
+      offline: OFFLINE_UNAVAILABLE,
       recentIds: new Set(),
       lastSyncedAt: null,
       // Unlike the sorting weights, what the smart filters learned names this account's

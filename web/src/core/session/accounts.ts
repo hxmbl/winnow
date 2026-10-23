@@ -77,6 +77,8 @@ export const ACCOUNT_SCOPED_KEYS = [
   "winnow.activeFilters.v1",
   "winnow.mailbox.v1",
   "winnow.lightSync.v1",
+  "winnow.offlineSave.v1",
+  "winnow.reconcile.v1",
 ] as const;
 export type AccountScopedKey = (typeof ACCOUNT_SCOPED_KEYS)[number];
 

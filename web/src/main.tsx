@@ -16,6 +16,7 @@
  */
 
 import { startForegroundSync } from "./platform/foregroundSync";
+import { hostDownloadConditions } from "./platform/downloadConditions";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -157,10 +158,23 @@ function persist(patch: Parameters<NonNullable<StoreOptions["onPersist"]>>[0]): 
 /** How often the accounts that are not open are checked while the window is in front. */
 const INACTIVE_CHECK_MS = 60_000;
 
+/** Set once `platform.info()` answers: Android counts as a phone for the offline download. */
+let androidHost = false;
+
 const platformBridge = {
   // One notification per message with its buttons, plus a summary; what qualifies and
   // what it says are in `core/notify/notifications.ts`.
   notifyNewMail: (emails: readonly Email[]) => announce(store, platform, emails),
+  // A message deleted on the server takes its notification with it (the open account's).
+  withdrawNotifications: (gmailIds: readonly string[]) =>
+    platform.withdrawNotifications?.(gmailIds, store.currentAccountId()) ?? Promise.resolve(),
+  // When the offline download waits: offline, hidden on a phone, metered, low battery.
+  downloadConditions: hostDownloadConditions(
+    () =>
+      androidHost ||
+      ((globalThis.matchMedia?.("(pointer: coarse)").matches ?? false) &&
+        (globalThis.matchMedia?.("(max-width: 639px)").matches ?? false)),
+  ),
   setUnreadBadge: (count: number) => platform.setUnreadBadge(count),
   setBackgroundSync: (interval: number | null) => platform.setBackgroundSync(interval),
 };
@@ -179,7 +193,8 @@ void platform
     console.warn("winnow: could not read platform capabilities:", error);
     return null;
   })
-  .then(() => {
+  .then((info) => {
+    androidHost = info?.os === "android";
     store.attach({ platform: platformBridge, onPersist: persist });
 
     // The background ticker. Registered here rather than in `App` because it is not UI:

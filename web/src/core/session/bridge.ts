@@ -36,6 +36,7 @@ import {
 import { adoptDeviceLearning, migrateToAccounts, type MigrationOutcome } from "./accountMigration";
 import { LightSync } from "./lightSync";
 import { loadAccountState, wipeAccountStorage } from "../store/accountState";
+import { deleteOfflineData } from "../offline/offlineStore";
 import type { Email } from "../model/email";
 
 /** The namespace an account being added signs in under, until its address is known. */
@@ -329,6 +330,8 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
     } finally {
       // Whatever the token store said, nothing of the account stays readable here.
       wipeAccountStorage(storage, id, record.email);
+      // And its offline database (mailbox, downloaded bodies, attachments).
+      await deleteOfflineData(id);
       // Its snoozes and scheduled sends live in the shared records, tagged with its
       // address (and, for a send going out from it, its id): they go with it too.
       store.forgetAccountRecords(record.email, id);

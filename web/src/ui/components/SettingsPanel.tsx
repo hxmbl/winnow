@@ -12,6 +12,7 @@ import { useCallback, useContext, useEffect, useMemo, useReducer, useRef, useSta
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Sheet } from "./Overlay";
 import { InfoButton, RadioCards, Row, Section, SettingBlock, SettingLabel, Toggle } from "./SettingsControls";
+import { offlineSummary, type OfflineView } from "../../core/offline/offlineSave";
 import { BINDINGS } from "../../core/mail/keybinds";
 import type { NotificationActions } from "../../core/notify/notifications";
 import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
@@ -126,6 +127,10 @@ export type AccentChoice = { id: AccentPreference; label: string; swatch: string
 // ── Settings ────────────────────────────────────────────────────────────────
 
 export type SettingsProps = {
+  /** Offline saving for the open account (`core/offline/offlineSave.ts`); absent in tests and older callers. */
+  offline?: OfflineView;
+  onOfflineSave?: (on: boolean) => void;
+  onRemoveDownloads?: () => void;
   sortBy: SortBy;
   onSortBy: (sort: SortBy) => void;
   appearance: Appearance;
@@ -794,6 +799,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
           <Row setting="unreadBadge">
             <Toggle checked={props.unreadBadge} onChange={props.onUnreadBadge} label="Unread count on the app icon" />
           </Row>
+          <OfflineMailRows props={props} />
           {props.isDesktop && props.backgroundSync !== null ? (
             <>
               <Row setting="backgroundSync">
@@ -1194,6 +1200,39 @@ function LearningHistory({ events }: { events: readonly FeedbackEvent[] }) {
 }
 
 /** Big files as Drive links (status words in `core/gmail/drive`). */
+/**
+ * Settings → Notifications & sync → Save mail offline: the large-mailbox question's
+ * answer, the download's progress ("Saved 1,234 of 1,500 · 312 MB"), and Remove downloads.
+ * Only shown for a signed-in account on a host with a durable store.
+ */
+function OfflineMailRows({ props }: { props: SettingsProps }) {
+  const view = props.offline;
+  if (!view?.available) return null;
+  const on = view.decision === "on";
+  const saved = view.progress?.saved ?? 0;
+  return (
+    <>
+      <Row setting="offlineMail" hint={offlineSummary(view)} hintId="winnow-offline-mail-hint">
+        <span data-offline-mail={view.progress?.state ?? "idle"} data-offline-saved={saved} data-offline-total={view.progress?.total ?? 0} className="contents">
+          <Toggle checked={on} onChange={(value) => props.onOfflineSave?.(value)} label="Save mail offline" />
+        </span>
+      </Row>
+      {(saved > 0 || on) && (
+        <Row setting="removeDownloads">
+          <button
+            type="button"
+            data-offline-remove=""
+            onClick={() => props.onRemoveDownloads?.()}
+            className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            Remove downloads
+          </button>
+        </Row>
+      )}
+    </>
+  );
+}
+
 function DriveLinksRow({ props }: { props: SettingsProps }) {
   return (
     <>

@@ -190,7 +190,8 @@ export type GmailHistoryRecord = {
   id: string;
   messages?: { id: string; threadId?: string }[];
   messagesAdded?: { message: { id: string; threadId?: string } }[];
-  messagesDeleted?: { id: string; threadId?: string }[];
+  /** Gmail sends `{ message: {…} }`, like the other three; `id` is the pre-1.5.6 test shape. */
+  messagesDeleted?: { message?: { id: string; threadId?: string }; id?: string }[];
   labelsAdded?: { message: { id: string; threadId?: string }; labelIds: string[] }[];
   labelsRemoved?: { message: { id: string; threadId?: string }; labelIds: string[] }[];
 };

@@ -25,6 +25,7 @@ class EventHandlerArgs {
  * - `http`: one HTTPS exchange for Rust, which has no TLS client. Google's two API
  *   hosts only ([Http.ALLOWED_HOSTS]).
  * - `finish`: what the notification says once an action is done.
+ * - `withdraw`: take down notifications of messages deleted on the server.
  * - `keptReplies` / `releaseKept`: replies kept on the device because they could not be
  *   sent or saved, listed for the web layer and released once it has saved them.
  *
@@ -63,6 +64,21 @@ class NotifyPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun finish(invoke: Invoke) {
     MailNotifier.finish(context, invoke.getArgs())
+    invoke.resolve()
+  }
+
+  /** Messages deleted on the server: their notifications go (and an emptied group's summary). */
+  @Command
+  fun withdraw(invoke: Invoke) {
+    val args = invoke.getArgs()
+    val account = MailNotifier.validAccount(if (args.isNull("account")) null else args.optString("account"))
+    val ids = args.optJSONArray("gmailIds")
+    if (ids != null) {
+      for (i in 0 until ids.length()) {
+        val gmailId = ids.optString(i)
+        if (gmailId.isNotEmpty()) MailNotifier.cancel(context, MailNotifier.idFor(gmailId, account))
+      }
+    }
     invoke.resolve()
   }
 

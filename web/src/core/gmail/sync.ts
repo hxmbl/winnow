@@ -78,6 +78,23 @@ const VIEWS: readonly { query: string; cap: number }[] = [
 /** Pagination guard. A runaway token would otherwise page until the token expired. */
 const MAX_PAGES = 200;
 
+/** The reconciliation's listing gives up (deleting nothing) past this many pages: 200,000 ids. */
+export const RECONCILE_MAX_PAGES = 400;
+
+/** A reconciliation that would remove more than this share of a local set checks first. */
+export const RECONCILE_SUSPECT_SHARE = 0.5;
+
+/** …when at least this many messages would go. */
+export const RECONCILE_SUSPECT_MIN = 20;
+
+/** How many of the missing ids are fetched to confirm a suspicious listing. */
+export const RECONCILE_PROBES = 3;
+
+/** What one reconciliation did. `skipped` removes nothing. */
+export type ReconcileResult =
+  | { kind: "done"; removed: string[]; listed: number }
+  | { kind: "skipped"; reason: "error" | "too-large" | "inconsistent" };
+
 /** Cache writes are batched: 25 per round-trip is the sweet spot on IndexedDB. */
 const BATCH_SIZE = 25;
 
@@ -142,6 +159,11 @@ export type SyncResult = {
    */
   cacheUnpersisted: boolean;
   durationMs: number;
+  /**
+   * Which strategy ran. A full sync rebuilds the local set from the server's listing,
+   * so it counts as a reconciliation (`reconcile`) as well.
+   */
+  mode?: "full" | "incremental";
 };
 
 export type SyncOptions = {
@@ -354,7 +376,7 @@ export class GmailSyncEngine {
     const emails = await this.options.cache.all();
     report({ phase: "idle", fraction: 1, fetched: seen.size, failed, total });
 
-    return { emails, failed, truncated, cacheUnpersisted, durationMs: this.now() - started };
+    return { emails, failed, truncated, cacheUnpersisted, durationMs: this.now() - started, mode: "full" };
   }
 
   /**
@@ -448,7 +470,66 @@ export class GmailSyncEngine {
     const emails = await this.options.cache.all();
     report({ phase: "idle", fraction: 1, fetched, failed, total });
 
-    return { emails, failed, truncated: false, cacheUnpersisted, durationMs: this.now() - started };
+    return { emails, failed, truncated: false, cacheUnpersisted, durationMs: this.now() - started, mode: "incremental" };
+  }
+
+  /**
+   * Remove local copies of mail the server no longer has: the full id reconciliation.
+   *
+   * History (`incremental`) already reports `messagesDeleted`, and a re-fetch answering
+   * 404 already removes its message; this is the backstop for everything history can
+   * miss (a cursor gap, a deletion made while another client held the history window,
+   * an expunge). It lists every id in the account, trash and spam included, ids only,
+   * and removes each local message absent from that listing.
+   *
+   * Deleting is only ever done on a definite answer:
+   *
+   *   - Any error while listing (network, auth, quota, a 5xx) skips the run; nothing
+   *     is removed.
+   *   - A listing that runs past `RECONCILE_MAX_PAGES` is incomplete and skips.
+   *   - Only messages the cache held *before* the listing began are judged, so mail a
+   *     concurrent sync wrote meanwhile is never mistaken for missing.
+   *   - A suspicious answer (more than `RECONCILE_SUSPECT_SHARE` of a sizeable local set
+   *     missing) is checked first: a few of the missing ids are fetched, and unless each
+   *     answers 404 the run skips, so a truncated or wrong listing cannot empty the
+   *     mailbox.
+   */
+  async reconcile(): Promise<ReconcileResult> {
+    const local = new Set(await this.options.cache.gmailIds());
+    if (local.size === 0) return { kind: "done", removed: [], listed: 0 };
+
+    const listed = new Set<string>();
+    let pageToken: string | undefined;
+    let page = 0;
+    try {
+      do {
+        page += 1;
+        if (page > RECONCILE_MAX_PAGES) return { kind: "skipped", reason: "too-large" };
+        const response = await this.options.client.listAllIds(pageToken);
+        for (const message of response.messages ?? []) listed.add(message.id);
+        pageToken = response.nextPageToken || undefined;
+      } while (pageToken);
+    } catch {
+      return { kind: "skipped", reason: "error" };
+    }
+
+    const missing = [...local].filter((id) => !listed.has(id));
+    if (missing.length === 0) return { kind: "done", removed: [], listed: listed.size };
+
+    if (missing.length >= RECONCILE_SUSPECT_MIN && missing.length > local.size * RECONCILE_SUSPECT_SHARE) {
+      for (const id of missing.slice(0, RECONCILE_PROBES)) {
+        try {
+          await this.options.client.message(id, "minimal");
+          return { kind: "skipped", reason: "inconsistent" };
+        } catch (error) {
+          if (!(error instanceof GmailHttpError && error.status === 404)) return { kind: "skipped", reason: "error" };
+        }
+      }
+    }
+
+    await this.options.cache.remove(missing);
+    await this.flushCache();
+    return { kind: "done", removed: missing, listed: listed.size };
   }
 
   /**
@@ -512,7 +593,12 @@ export class GmailSyncEngine {
 /** Fold one history record into the run's deleted and touched sets. */
 function collectRecord(
   record: {
-    messagesDeleted?: { id: string }[];
+    /**
+     * Gmail's shape is `{ message: { id, threadId } }` (HistoryMessageDeleted). Before
+     * 1.5.6 this read `entry.id`, which Gmail never sends, so a permanent deletion was
+     * only noticed by the next full rebuild. The bare `{ id }` is still accepted.
+     */
+    messagesDeleted?: { message?: { id: string }; id?: string }[];
     messagesAdded?: { message: { id: string } }[];
     labelsAdded?: { message: { id: string } }[];
     labelsRemoved?: { message: { id: string } }[];
@@ -520,7 +606,10 @@ function collectRecord(
   deleted: Set<string>,
   touched: Set<string>,
 ): void {
-  for (const entry of record.messagesDeleted ?? []) deleted.add(entry.id);
+  for (const entry of record.messagesDeleted ?? []) {
+    const id = entry.message?.id ?? entry.id;
+    if (id) deleted.add(id);
+  }
   for (const entry of record.messagesAdded ?? []) touched.add(entry.message.id);
   for (const entry of record.labelsAdded ?? []) touched.add(entry.message.id);
   for (const entry of record.labelsRemoved ?? []) touched.add(entry.message.id);

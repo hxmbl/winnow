@@ -43,7 +43,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       store/        The store, its derived view, preferences.
       avatars/      Contact photos, Gravatar, BIMI logos, the local picture caches.
       data/         The demo mailbox seed.
-      offline/      The offline action queue (§5.10).
+      offline/      The offline action queue (§5.10); saving mail offline and the IndexedDB store (§5.10a).
       updates/      Update checks: versions, release assets per runtime, release notes, latest.json.
     platform/       The boundary. Two implementations (web.ts, desktop.ts), one interface.
     ui/             React components and the pure helpers beside them.
@@ -131,8 +131,9 @@ order for "why is this message wrong".
        From is parsed not trusted; internalDate beats the Date header;
        plain text wins over HTML
 3. written to the mirror                        core/session/session.ts (localCache)
-     winnow.gmail.cache.messages, written in idle time in chunks (idleWrite.ts) and at
-     once on pagehide or flush(); a loaded body is never
+     the account's IndexedDB database (winnow-offline@<id>, core/offline/offlineStore.ts;
+     localStorage only on a host without IndexedDB), written in idle time in chunks
+     (idleWrite.ts) and at once on pagehide or flush(); a loaded body is never
      overwritten by a metadata-only copy
 4. handed to the store                          core/store/store.ts (applySync)
 5. classified                                   core/classify/classify.ts
@@ -153,7 +154,9 @@ Opening it takes a second path: `store.loadBody` → `backend.fetchBody` →
 `client.messageBodyHtml`, written back into the mirror so the message reads
 offline afterwards. Bodies are only fetched for what is on screen, plus a
 prefetch window — `BODY_RETENTION = 500` messages, the newest 50 unread, and
-±2 rows around the open one.
+±2 rows around the open one — unless the mailbox is saved offline (§5.10a), when the
+background download has already put every body in the offline store and
+`loadMessage`/`fetchBody`/`fetchAttachment` read it from there with no request.
 
 ---
 
@@ -435,8 +438,14 @@ the store can be driven by a demo seed with no session at all.
 | `exchangeRetry.ts` | The end of a native sign-in on a WebView that may be paused (Android, behind the browser): before the code exchange and the profile read, wait for `platform.waitForForeground`, and resend only an attempt that got no HTTP response (`GoogleUnreachable`, or a bare fetch `TypeError` for the profile), backing off 0.5/1.5/3 s. `invalid_grant` and every other answer from Google are never resent. Out of attempts → `SignInUnreachable`: "Couldn't reach Google to finish signing in. Check your connection and try again." |
 
 **The offline cache** (`localCache`). A `Map<GmailId, Email>` mirror in memory,
-with `localStorage` treated as a *sink*, not a store: mutations coalesce into one
-250 ms write. The alternative — read, merge and re-serialise the whole mailbox
+with storage treated as a *sink*, not a store: mutations coalesce into one
+idle-time write. Since 1.5.6 the sink is the account's IndexedDB database
+(`core/offline/offlineStore.ts`, §5.10a) wherever the host has IndexedDB (every browser
+and WebView Winnow supports); a 1.5.5 mailbox still in `localStorage` is read once, written
+to the database, and only then removed from `localStorage`. `localStorage` stays the sink
+only without IndexedDB (and in the node test runner). `remove`, `keepOnly` and `replace`
+also drop the downloaded bodies and attachments of the messages that went, and `clear`
+deletes the database. The rest of this paragraph is the `localStorage` history: The alternative — read, merge and re-serialise the whole mailbox
 per upsert — measured 1.36 s and 6.15 MB of allocation over a 100-upsert sync.
 Writes are individually guarded because private mode and a full quota *throw*
 rather than return; a failure is recorded and surfaced by `flush()` instead of
@@ -507,7 +516,9 @@ reports honestly when the write still did not stick.
   carrying the original's `In-Reply-To`/`References` (thread ids belong to one mailbox).
 
 **`signOut()` order matters:** tokens → contacts → pending auth → message cache
-→ cursor. The cursor is last for a specific reason — a cursor left over an empty
+(the account's offline database: mailbox, downloaded bodies, attachments) → cursor →
+the offline-save answer and the reconciliation clock. The bridge deletes the database
+again after the session (`deleteOfflineData`), whatever the sign-out managed. The cursor is last for a specific reason — a cursor left over an empty
 cache makes the next sign-in sync incrementally into an empty mailbox.
 
 **`clientJson.ts` refusals,** in order: over 64 KB; not JSON or not an object; a
@@ -601,6 +612,62 @@ the message is **kept as a draft, not sent** — the safe choice, reasoned in th
 Drive links are shared only when the window ends (§13a), so nothing in the window has
 shared anything yet.
 
+### 5.10a `offline/` — saving the mailbox offline, and mail deleted on the server
+
+**The bug this replaced (1.5.5 and before).** The large-mailbox question (`STORAGE_PROMPT`,
+"This is a large mailbox, Winnow requires them to be saved, are you sure you would like to
+save this?") appears when the mirror cannot be written. The whole mailbox was one JSON
+string in one `localStorage` key, and `localStorage` is capped at ~5 MB per origin
+(Chromium and the Android WebView: ~5 million UTF-16 characters), a cap that
+`navigator.storage.persist()` does not raise. Save asked for persistence and wrote the
+same string to the same key, which threw the same `QuotaExceededError`: "Still couldn't
+save this mailbox offline." And even a mailbox that fitted held only metadata plus the
+bodies someone had opened (sync is metadata-first); attachments were never stored. Because
+the cache never landed, the cursor was never written either, so every launch was a full
+re-download. Separately, history's `messagesDeleted` was read as `entry.id` while Gmail
+sends `{ message: { id } }`, so a permanent deletion was only noticed by the next full
+rebuild.
+
+| File | Job |
+| --- | --- |
+| `offlineStore.ts` | `OfflineStore`: one IndexedDB database per account, `winnow-offline@<id>` (v1; stores `mailbox` — the mirror's JSON under `"messages"` —, `bodies` keyPath `gmailId`, `index` `{ gmailId, bytes }` for counts without reading bodies, `files` keyPath `[gmailId, attachmentId]` with index `gmailId`). A body and its files are written in one transaction. `clearDownloads` (bodies and files only) vs `clear` (deletes the database; a database another page holds open resolves after 3 s with the delete queued). `memoryOfflineStore` for tests, `gatedOfflineStore` (writes dropped after sign-out, like `gatedCache`), `deleteOfflineData(id)`. On desktop and Android the WebView keeps IndexedDB in the app's data directory, as it did `localStorage`. |
+| `downloader.ts` | `OfflineDownloader`: walks the local set (every message the cache holds — the whole inbox, the newest 500 of each other view) newest first; per message one `format=full` (or the cache's copy when it was opened already: no second download) and each attachment with an id up to `ATTACHMENT_DOWNLOAD_CAP` = 10 MB, inline pictures included; bigger ones stay on demand. Every request goes through `schedule` — the store's `bodyQueue` at `low`, one at a time, so an opened message (`high`) waits behind at most one download. Resumable by construction: the store's `index` is what is saved. Asks `conditions()` before each message (`offline`, `hidden` on a phone, `metered`, `battery`) and pauses until the next `start()` (every sync). A 404 calls `gone` (removed everywhere); a network/auth/429/5xx error pauses with `reason: "error"` and deletes nothing; any other error skips that message for the session. Batches of `DOWNLOAD_BATCH` = 25 write `offline batch` lines to the Debug log. `stop()` (sign-out, switch, Remove downloads) makes a request already on the wire write nothing. |
+| `offlineSave.ts` | The decision: `LARGE_MAILBOX` = 2,000. `offlineNextStep`: an answered account keeps its answer; otherwise a mailbox of 2,000+ messages, or one whose mirror could not be written, is asked the existing question; a smaller one is saved without asking. "Not now" asks again next launch (unchanged). `OfflineBackend` (what the session offers: the store, `decision`/`setDecision` in `winnow.offlineSave.v1@<id>`, `body`, `attachment`, `gone`), `OfflineView` (the snapshot's `offline`), `offlineSummary` ("Saved 1,234 of 1,500 · 312 MB", plus "· up to date" or why it is paused). |
+
+**The store** (`store.ts`, "Offline saving"): `afterSyncOffline` runs after every sync
+(ask / save / carry on, then `runOffline`); Save (`saveMailboxOffline`) persists, records
+`on` and starts the download; `setOfflineSave` and `removeOfflineDownloads` are Settings'.
+`dropBodyWork` stops the downloader, so signing out, switching account and the demo stop
+it. Settings → Notifications & sync → **Save mail offline** (`offlineMail`: the same answer,
+progress as its hint, `data-offline-mail` / `data-offline-saved` / `data-offline-total`)
+and **Remove downloads** (`removeDownloads`, `data-offline-remove`: deletes bodies and
+files, keeps the list, turns saving off). The host's conditions come from
+`platform/downloadConditions.ts` (`navigator.onLine`, `visibilityState` on Android or a
+coarse-pointer phone-width screen, `connection.saveData` / `type === "cellular"`, the
+Battery Status API under 20% unplugged; Android's metered-Wi-Fi flag and Battery Saver are
+not visible to a WebView).
+
+**Mail deleted on the server** — what counts as gone, and nothing else:
+
+- history `messagesDeleted` (Gmail's `{ message: { id } }`; the bare `{ id }` is still read);
+- a re-fetch (sync, or the download) answering **404**;
+- absence from a **complete** id listing: `GmailSyncEngine.reconcile` lists every id
+  (`messages.list?includeSpamTrash=true`, ids only, 500 a page, `client.listAllIds`) and
+  removes local messages that are not in it. It runs after a sync at most once a day
+  (`RECONCILE_EVERY_MS`, clock in `winnow.reconcile.v1@<id>`; so also on the first sync
+  after a launch when the last is older); a full sync (no cursor, or a history id Gmail no
+  longer has, which answers 404 and falls back to `full`) counts as one. It deletes nothing
+  on any listing error, past `RECONCILE_MAX_PAGES` = 400 pages, or when more than half of
+  20+ local messages would go unless each of `RECONCILE_PROBES` = 3 of them answers 404.
+  Only ids the cache held before the listing began are judged.
+
+Trash is a label (a message in Trash is still listed and still synced); deleting from
+Trash is a `messagesDeleted`. A network or auth error never deletes. Removal drops the
+mirror row, the body, the attachments (`localCache` → `OfflineStore`), the row on screen
+(the sync result, or `forgetGone` for a download's 404), and the notification
+(`PlatformBridge.withdrawNotifications` → browser `Notification.close()` by tag; Android
+`notify_withdraw` → `MailNotifier.cancel`; the desktop leaves its notification to time out).
+
 ### 5.11 `debug/` — Dev Options → Debug log
 
 `debugLog.ts`: an in-memory ring of at most `DEBUG_LOG_CAP` = 1,000 lines (oldest dropped),
@@ -608,7 +675,9 @@ recording only while Settings → Dev Options → **Debug log** is on (`setDebug
 set by App from `DevOptions.debugLog`; Hide Dev Options turns it off). Never stored, never
 sent, gone when the app closes; Copy and Clear in the viewer are the only ways out. Each
 line is `<ISO time> <area> <event> key=value…`, areas `sync` (store `runSync`: start, done
-with ms/counts, failed), `updates` (`useUpdates`: check, result, install, install-failed)
+with ms/counts, failed, `removed`; the session's `reconcile` / `reconcile-skipped`),
+`offline` (the download: `batch` with saved/gone/failed/bytes/ms/done/total, `paused` with
+its reason, `removed` for Remove downloads), `updates` (`useUpdates`: check, result, install, install-failed)
 and `notify` (`announce` posted, `routeNotificationAction` action and outcome). Every value
 goes through `redactValue`: email addresses become `[email]`, token/key shapes `[token]`,
 content-named fields (`subject`, `body`, `snippet`, `from`, …) only their length, and free
@@ -818,6 +887,7 @@ could be written in TypeScript, it belongs in `web/`.
 | `notify_messages` | `batch` (`NotificationBatch`, camelCase) | `()` | `notifyNewMail` (`notify_actions/`) |
 | `notify_action_result` | `result` `{ messageId, title, text, failed }` | `()` | `confirmNotificationAction` |
 | `notify_kept_replies` / `notify_release_kept` | — / `ids` | `Value[]` / `()` | `keptReplies` / `releaseKeptReplies` |
+| `notify_withdraw` | `gmailIds`, `account` | `()` | `withdrawNotifications` (Android cancels; elsewhere a no-op) |
 | `request_notification_permission` | — | `bool` | `requestNotificationPermission` |
 | `open_external` | `url` | `()` | `openExternal` |
 | `save_attachment` | `filename`, `bytes_base64` | `Option<String>` (path) | `saveFile` |
@@ -1063,7 +1133,10 @@ signed in). "Sign-out" means signing out of that account, which erases its names
 | `winnow.snooze.v1` *(shared; records carry their account)* | Snoozed conversations (account, message ids, wake time) and woken places, `core/mail/snooze.ts` via `core/store/keyedStorage.ts` | wake / unsnooze; an account's on its sign-out or removal |
 | `winnow.scheduledSend.v1` *(shared; records carry their account)* | Messages to send later (account, time, Gmail draft id, device copy of the draft), `core/mail/scheduledSend.ts` via `keyedStorage` | sent / cancelled / Edit; an account's on its sign-out or removal |
 | `winnow.drafts.v1:<account>` | Unsent composer drafts, one per context (`new`, `reply:<id>`, `forward:<id>`), for restore after a reload | send, discard |
-| `winnow.gmail.cache.messages` *(per account)* | The mailbox, as plain JSON | sign-out |
+| `winnow.gmail.cache.messages` *(per account)* | The mailbox, as plain JSON — only on a host without IndexedDB since 1.5.6; otherwise read once, moved into `winnow-offline@<id>` and removed | sign-out |
+| IndexedDB `winnow-offline@<id>` *(per account)* | The mailbox mirror (`mailbox`), downloaded bodies (`bodies`, `index`) and attachments ≤ 10 MB (`files`), `core/offline/offlineStore.ts` | sign-out / account removal (database deleted); Remove downloads (bodies and files) |
+| `winnow.offlineSave.v1` *(per account)* | The large-mailbox question's answer: `on` / `off` (absent until answered; a mailbox under 2,000 is saved without asking) | sign-out |
+| `winnow.reconcile.v1` *(per account)* | When the last full id reconciliation (or full sync) finished, ms | sign-out |
 | `winnow.gmail.cache.cursor` *(per account)* | Gmail `historyId` | sign-out |
 | `winnow.google.contacts.v1` *(per account)* | The People API snapshot | sign-out, revocation |
 | `winnow.brandLogos.v1` *(per account)* | Cached BIMI answers | sign-out, setting off |
@@ -1085,11 +1158,11 @@ signed in). "Sign-out" means signing out of that account, which erases its names
 
 | Suite | Command | What it is |
 | --- | --- | --- |
-| Unit | `npm test` | Vitest, **node** environment, `src/**/*.test.ts` plus `../proxy/**/*.test.ts`. There are no component tests, and the glob says `.ts` not `.tsx` so nobody infers there should be. |
+| Unit | `npm test` | Vitest, **node** environment (IndexedDB from the `fake-indexeddb` dev dependency, imported explicitly by `core/offline/offlineStore.test.ts`, never installed globally), `src/**/*.test.ts` plus `../proxy/**/*.test.ts`. There are no component tests, and the glob says `.ts` not `.tsx` so nobody infers there should be. |
 | Gate | `npm run check` | typecheck + lint + lint:proxy + unit |
 | Smart filters | `node scripts/smoke-filters.mjs` | Targeted smoke for "Change smart filters…", "Why it's here", Settings → Smart filters, and the faceted chip counts (with filters on, and under a search on desktop and phone: the chips stay put, their numbers change, and each tapped chip lists exactly its number; `WINNOW_SHOTS` adds `phone-search-counts.png`). Own `vite preview` on 4350 (`WINNOW_PORT`); `WINNOW_SHOTS=dir` writes screenshots. |
 | Accounts | `node scripts/smoke-accounts.mjs` | Targeted smoke for multi-account against a fake Google that knows two accounts by bearer token: a 1.3.5 session migrating with no sign-in (data moved into its namespace), Add account through Google's chooser (and a duplicate switched to), one-tap switching, a reply going out from the account that received the message, and on the Android app (a stand-in for Tauri's IPC) a notification's deep link switching account, fetching an uncached message into the full-screen reader, Back to that inbox, a summary's inbox link and a cold start from a tap (`deep_link_launch`). Own `vite preview` on 4362 (`WINNOW_PORT`). |
-| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs`, `smoke-notifications.mjs` and `smoke-accounts.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs`; `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names, and email dark mode: the demo newsletter's body dark in dark/OLED on phone and desktop with every text element ≥ 4.5:1 against what is behind it, its @media phone rule intact, no image filtered, the sun/moon toggle round trip, and the white card with the setting off or in light). |
+| End-to-end | `npm run smoke` | Playwright + Chromium against the real production build: `smoke.mjs`, then the targeted `smoke-android.mjs`, `smoke-filters.mjs`, `smoke-notifications.mjs` and `smoke-accounts.mjs`. Owns its `vite preview` on port 4173 (`WINNOW_PORT`, or point `WINNOW_URL` at your own). A native `confirm`/`alert`/`prompt` is a tripwire failure. `WINNOW_SMOKE_ONLY=offline` runs only `scripts/smoke-offline.mjs` (undo send on a phone, the offline queue against a stateful fake Gmail); `WINNOW_SMOKE_ONLY=fixes` runs only `scripts/smoke-fixes.mjs` (phone Settings' opaque backdrop, the phone menu's last row, Undo on desktop/batch/reader actions and `z`/Ctrl+Z, the status pill after a remount on the Android app, the demo's Back to your inbox), whose signed-in pages use the shared fake Gmail in `scripts/fake-gmail.mjs` (which can also delete a message for good, `state.expunge(id)`, with or without a history record, and answers the reconciliation's id listing); `WINNOW_SMOKE_PARTS=offline-save` runs `scripts/smoke-offline-save.mjs` (the mailbox and every body in IndexedDB rather than `localStorage`, newest first, Settings' "Saved N of N", an unopened newsletter opening offline, a launch with Google unreachable, a message deleted on the server leaving the list and the offline store via history and via the daily reconciliation, Remove downloads, and on the Android app the download plus `notify_withdraw` for the deleted message); `WINNOW_SMOKE_ONLY=thumb` runs only `scripts/smoke-thumb.mjs` (the status pill clear of the demo strip, forced-colours chrome, the phone compose top bar and its Delete/Save Draft sheet, Trash and Sign out confirmations, the reader pill folding on the demo newsletter and its left-handed mirror, pill/circle shapes, the shortcuts table and one-line category names, and email dark mode: the demo newsletter's body dark in dark/OLED on phone and desktop with every text element ≥ 4.5:1 against what is behind it, its @media phone rule intact, no image filtered, the sun/moon toggle round trip, and the white card with the setting off or in light). |
 | Smoke shards | `node scripts/smoke-shards.mjs <shard>` | How CI runs `npm run smoke`: as a matrix of parallel shards (`smoke-shard` in `ci.yml`, aggregated into the one `Smoke test` check). `smoke.mjs` is cut into parts gated by `part("…")` — `core` (the shared-page sequence, boot through deep links) and the self-contained sections and modules after it — selected with `WINNOW_SMOKE_PARTS=a,b` (unset runs all). `smoke-shards.mjs` maps parts and the standalone scripts to shards; `--check` (run by `npm-checks`) fails unless every part and every script in `npm run smoke` is in exactly one shard and the CI matrix lists exactly those shards. A new section after `core` gets its own `part("…")` gate and a shard entry. |
 | Theme sweep | `npm run sweep` | Manual, never in `npm run smoke` or CI. `scripts/sweep.mjs` photographs every mode (light, dark, very dark (`oled`); `system` once each way) × every accent in `ACCENT_THEMES` (read from `core/model/appearance.ts`, so a new accent is swept for free), plus the custom accent once per mode with one fixed colour (`SWEEP_CUSTOM_HEX`, a honey light mode has to darken, so the adjusted note is in the shots), on a phone (390×844, Android UA, safe-area insets) and a desktop (1440×900): inbox, reader, drawer, Settings top and scrolled to the end, the Appearance picker, compose, the status pill with Undo, and inbox clear (the shared fake Gmail with an empty inbox). Then the settings and OS preferences that change the look (sort, remote images, brand logos, Gravatar, reduced transparency, forced colours, left-handed on a phone, a small phone, a tablet) once each, a Settings dropdown open (phone and desktop, light and dark), and the phone reader scrolled partway down the long demo newsletter with its pill folded (both hands × light/dark/OLED). Checks as it goes — page/console errors, text clipped without an ellipsis or pushed off-screen, sideways scroll, and WCAG AA for primary and pill/chip text measured against the pixels behind it (a second shot with text hidden, so glass counts) — and writes contact sheets per mode × device, `sweep.pdf` and `sweep-report.md`. Reports, never fails on a finding. `WINNOW_SWEEP_OUT` (default `web/.sweep`, git-ignored), `WINNOW_SWEEP_PHASE=capture\|sheets`, `WINNOW_SWEEP_MODES` / `WINNOW_SWEEP_DEVICES` for a subset, `WINNOW_SWEEP_JOBS` (3); port 4573 by default. |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |

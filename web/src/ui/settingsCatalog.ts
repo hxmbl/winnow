@@ -251,6 +251,18 @@ export const SETTINGS = {
     explanation:
       "How often background sync asks Gmail for new mail while the window is closed. More often means quicker notifications but more requests to Google and a little more battery. While a window is open Winnow checks more often regardless.",
   },
+  offlineMail: {
+    category: "sync",
+    label: "Save mail offline",
+    explanation:
+      "Keeps this account's mail on this device so it opens without a connection: everything Winnow has synced (your whole inbox, and the newest 500 of each other mailbox), with attachments up to 10 MB each, while bigger ones download when you open them. It downloads in the background, newest first, never ahead of the message you open, and waits while you are offline, on mobile data or Data Saver, on a low battery, or in the background on a phone. This is the same choice as the large-mailbox question, and mail deleted in Gmail is deleted here too. Signing out of the account erases all of it.",
+  },
+  removeDownloads: {
+    category: "sync",
+    label: "Remove downloads",
+    explanation:
+      "Deletes the message bodies and attachments saved on this device for this account and turns Save mail offline off. The list of your mail stays, and anything you open is downloaded again as you open it.",
+  },
   oauthClient: {
     category: "google",
     label: "Your Google OAuth client",

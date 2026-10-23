@@ -211,6 +211,11 @@ export const desktopPlatform: Platform = {
     return Array.isArray(kept) ? kept : [];
   },
 
+  async withdrawNotifications(gmailIds: readonly string[], account?: string | null): Promise<void> {
+    // Android cancels them (`notify_withdraw`); the desktop shells answer without acting.
+    await invoke("notify_withdraw", { gmailIds: [...gmailIds], account: account ?? null }).catch(() => undefined);
+  },
+
   async releaseKeptReplies(requestIds: readonly string[]): Promise<void> {
     await invoke("notify_release_kept", { ids: [...requestIds] });
   },

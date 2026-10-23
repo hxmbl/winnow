@@ -178,13 +178,19 @@ export const webPlatform: WebPlatform = {
     const account = mail.account?.id;
     const whose = mail.account?.label ? `\n${mail.account.label}` : "";
     for (const message of mail.messages) {
+      const tag = account ? `winnow-${account}-${message.gmailId}` : `winnow-${message.gmailId}`;
       const notification = new NotificationCtor(message.title, {
         body: (mail.hidePreview ? "New message" : message.subject) + whose,
-        tag: account ? `winnow-${account}-${message.gmailId}` : `winnow-${message.gmailId}`,
+        tag,
         // The sender's avatar picture, under the same settings as the app's avatars;
         // none (the browser's own icon) when there is none or previews are hidden.
         ...(message.picture && !mail.hidePreview ? { icon: message.picture } : {}),
       });
+      // Kept so a message deleted on the server can take its notification down.
+      shownNotifications.set(tag, notification);
+      notification.onclose = () => {
+        if (shownNotifications.get(tag) === notification) shownNotifications.delete(tag);
+      };
       notification.onclick = () => {
         notification.close();
         globalThis.focus?.();
@@ -208,6 +214,14 @@ export const webPlatform: WebPlatform = {
         globalThis.focus?.();
         emitNotificationAction({ action: "inbox", messageId: 0, gmailId: "", origin: "web", ...(account ? { account } : {}) });
       };
+    }
+  },
+
+  async withdrawNotifications(gmailIds: readonly string[], account?: string | null): Promise<void> {
+    for (const gmailId of gmailIds) {
+      const tag = account ? `winnow-${account}-${gmailId}` : `winnow-${gmailId}`;
+      shownNotifications.get(tag)?.close();
+      shownNotifications.delete(tag);
     }
   },
 
@@ -285,6 +299,9 @@ export const webPlatform: WebPlatform = {
 
 /** Who hears a browser notification's click. Module state: the tab is the only listener. */
 const notificationHandlers = new Set<(event: NotificationActionEvent) => void>();
+
+/** The browser notifications this tab has up, by tag (`withdrawNotifications`). */
+const shownNotifications = new Map<string, Notification>();
 
 function emitNotificationAction(event: NotificationActionEvent): void {
   for (const handler of notificationHandlers) handler(event);

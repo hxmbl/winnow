@@ -105,6 +105,22 @@ pub fn release_kept(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("could not release kept replies: {e}"))
 }
 
+pub fn withdraw(
+    app: &AppHandle,
+    gmail_ids: Vec<String>,
+    account: Option<String>,
+) -> Result<(), String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Withdraw {
+        gmail_ids: Vec<String>,
+        account: Option<String>,
+    }
+    native(app)?
+        .run_mobile_plugin::<()>("withdraw", Withdraw { gmail_ids, account })
+        .map_err(|e| format!("could not withdraw notifications: {e}"))
+}
+
 fn run(app: &AppHandle, handle: &PluginHandle<Wry>, request: ActionRequest) {
     // The notification's own account (1.4.0): its tokens, never another account's.
     let tokens = plan::tokens_secret_for(request.account.as_deref())

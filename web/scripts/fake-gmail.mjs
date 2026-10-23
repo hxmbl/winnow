@@ -8,6 +8,10 @@
  * `failProfile` makes /profile answer 500 that many times first (a connect that fails).
  * `html` gives some messages an HTML body: `{ f0: { from, subject, html, text? } }`, sent
  * as multipart/alternative the way a newsletter arrives.
+ * `state.expunge(id)` deletes a message for good, as another client emptying it from the
+ * Trash would: history reports it (`messagesDeleted`, Gmail's `{ message: { id } }` shape)
+ * unless `{ quiet: true }`, its reads answer 404, and the id listing
+ * (`includeSpamTrash=true`, the daily reconciliation's) no longer has it.
  */
 export const FAKE_TOKEN = ["fake", "smoke", "access"].join("-");
 
@@ -19,7 +23,20 @@ export async function signedInContext(browser, options = {}, { count = 12, failP
   let historyId = 900;
   const touched = new Set();
   let profileFailures = failProfile;
-  const state = { moves, labels, profileCalls: 0, tokenCalls: 0, gmailCalls: 0, down: false, expired: false };
+  const deleted = new Set();
+  const state = {
+    moves, labels, profileCalls: 0, tokenCalls: 0, gmailCalls: 0, down: false, expired: false,
+    /** Ids whose whole message was read (`format=full`), in order. */
+    fullReads: [],
+    expunge(id, { quiet = false } = {}) {
+      const at = ids.indexOf(id);
+      if (at >= 0) ids.splice(at, 1);
+      labels.delete(id);
+      touched.delete(id);
+      if (!quiet) deleted.add(id);
+      historyId += 1;
+    },
+  };
   const json = (route, body, status = 200) =>
     route.fulfill({ status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
   const preflight = (route) =>
@@ -44,6 +61,9 @@ export async function signedInContext(browser, options = {}, { count = 12, failP
       return json(route, { emailAddress: "me@winnow.example", historyId: String(historyId), messagesTotal: ids.length });
     }
     if (path === "/messages") {
+      if (url.searchParams.get("includeSpamTrash") === "true") {
+        return json(route, { messages: ids.map((id) => ({ id })), resultSizeEstimate: ids.length });
+      }
       const q = url.searchParams.get("q") ?? "";
       const has = (label) => ids.filter((id) => labels.get(id).includes(label));
       let list = [];
@@ -64,6 +84,8 @@ export async function signedInContext(browser, options = {}, { count = 12, failP
       return json(route, { id, labelIds: next });
     }
     const one = /^\/messages\/(f\d+)$/.exec(path);
+    if (one && !labels.has(one[1])) return json(route, { error: { code: 404, message: "Requested entity was not found.", status: "NOT_FOUND" } }, 404);
+    if (one && url.searchParams.get("format") === "full") state.fullReads.push(one[1]);
     if (one) {
       const n = Number(one[1].slice(1));
       const rich = html[one[1]];
@@ -102,8 +124,14 @@ export async function signedInContext(browser, options = {}, { count = 12, failP
     }
     if (path === "/history") {
       const changed = [...touched];
+      const gone = [...deleted];
       touched.clear();
-      return json(route, { historyId: String(historyId), ...(changed.length ? { history: [{ id: String(historyId), labelsAdded: changed.map((id) => ({ message: { id } })) }] } : {}) });
+      deleted.clear();
+      const history = [
+        ...(changed.length ? [{ id: String(historyId), labelsAdded: changed.map((id) => ({ message: { id } })) }] : []),
+        ...(gone.length ? [{ id: String(historyId), messagesDeleted: gone.map((id) => ({ message: { id, threadId: `t-${id}` } })) }] : []),
+      ];
+      return json(route, { historyId: String(historyId), ...(history.length ? { history } : {}) });
     }
     if (path === "/drafts") return json(route, {});
     return json(route, {});

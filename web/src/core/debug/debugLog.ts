@@ -16,7 +16,7 @@
 
 export const DEBUG_LOG_CAP = 1_000;
 
-export type DebugArea = "sync" | "updates" | "notify";
+export type DebugArea = "sync" | "updates" | "notify" | "offline";
 
 export type DebugFields = Record<string, string | number | boolean | null | undefined>;
 

@@ -163,6 +163,13 @@ export interface Platform {
    */
   onNotificationAction(handler: (event: NotificationActionEvent) => void): () => void;
 
+  /**
+   * Take down the notifications of messages deleted on the server, by Gmail id, in
+   * `account`'s group. Optional; browsers close their own, Android cancels them, the
+   * desktop leaves them to time out.
+   */
+  withdrawNotifications?(gmailIds: readonly string[], account?: string | null): Promise<void>;
+
   /** Desktop: say on the notification what the app did with a press. Optional. */
   confirmNotificationAction?(messageId: number, title: string, text: string, failed: boolean): Promise<void>;
 

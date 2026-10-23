@@ -359,6 +359,26 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .build()
 }
 
+/// Take down the notifications of messages that no longer exist (deleted on the server,
+/// found by sync or the daily reconciliation). Android only; elsewhere a desktop
+/// notification is left to time out on its own.
+#[tauri::command]
+pub fn notify_withdraw(
+    app: AppHandle,
+    gmail_ids: Vec<String>,
+    account: Option<String>,
+) -> Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        android::withdraw(&app, gmail_ids, account)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, gmail_ids, account);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

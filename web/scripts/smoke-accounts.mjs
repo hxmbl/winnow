@@ -405,7 +405,7 @@ try {
       void dialog.dismiss();
     });
     await page.goto(URL);
-    await page.waitForFunction(() => document.body.innerText.includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
 
     const stored = await page.evaluate(() => {
       const registry = JSON.parse(localStorage.getItem("winnow.accounts.v1") ?? "null");
@@ -440,7 +440,7 @@ try {
     check("and says, under Add account, that Testing mode needs every address as a test user", (await page.locator("[data-account-switcher]").innerText()).includes("test users"));
     google.nextSignIn = BOB;
     await Promise.all([page.waitForURL(/\?|\/$/, { timeout: 15_000 }).catch(() => undefined), page.locator("[data-account-add]").click()]);
-    await page.waitForFunction(() => document.body.innerText.includes("Bob mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Bob mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
     const chooser = google.authorizeUrls[0] ? new globalThis.URL(google.authorizeUrls[0]).searchParams.get("prompt") : null;
     check("add: Google's account chooser is asked for", chooser === "select_account consent", String(chooser));
     check("add: the second account opens with its own mail", (await subjects(page)).includes("Bob mail 1") && !(await subjects(page)).includes("Ada mail 1"));
@@ -451,18 +451,18 @@ try {
     await openSwitcher();
     google.nextSignIn = ADA;
     await page.locator("[data-account-add]").click();
-    await page.waitForFunction(() => document.body.innerText.includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
     const afterDuplicate = await page.evaluate(() => JSON.parse(localStorage.getItem("winnow.accounts.v1") ?? "{}").accounts?.length ?? 0);
     check("add: an account already added is switched to, not added again", afterDuplicate === 2 && (await subjects(page)).includes("Ada mail 1"));
 
     // Switch with one tap.
     await openSwitcher();
     await page.locator(`[data-account-row][data-account-email="${BOB}"]`).click();
-    await page.waitForFunction(() => document.body.innerText.includes("Bob mail 1"), null, { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Bob mail 1"), null, { timeout: 10_000 }).catch(() => undefined);
     check("switch: one tap shows the other account's mail", (await subjects(page)).includes("Bob mail 1"));
     await openSwitcher();
     await page.locator(`[data-account-row][data-account-email="${ADA}"]`).click();
-    await page.waitForFunction(() => document.body.innerText.includes("Ada mail 2"), null, { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Ada mail 2"), null, { timeout: 10_000 }).catch(() => undefined);
 
     // Reply from the right address.
     await page.locator("[data-row-id]", { hasText: "Ada mail 2" }).first().click();
@@ -509,7 +509,7 @@ try {
       void dialog.dismiss();
     });
     await page.goto(URL);
-    await page.waitForFunction(() => document.body.innerText.includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
     const openSwitcher = async () => {
       await page.locator("[data-account-switcher-trigger]").first().click();
       await page.locator("[data-account-switcher]").waitFor({ timeout: 5_000 });
@@ -562,7 +562,7 @@ try {
     {
       const { ctx, page } = await androidContext(null);
       await page.goto(URL);
-      await page.waitForFunction(() => document.body.innerText.includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
+      await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
       check("the Android app opens the active account", (await subjects(page)).includes("Ada mail 1"));
       await page.evaluate((url) => window.__smokeEmit("winnow://open-url", url), link);
       await page.locator("[data-reader-subject]").waitFor({ timeout: 10_000 }).catch(() => undefined);
@@ -580,7 +580,7 @@ try {
       check("Back returns to that account's inbox", list.includes("Bob mail 1") && list.includes("Fresh from the notification") && !list.includes("Ada mail 1"), list.slice(0, 120));
 
       await page.evaluate(() => window.__smokeEmit("winnow://open-url", "winnow://open?account=acctada01&view=inbox"));
-      await page.waitForFunction(() => document.body.innerText.includes("Ada mail 1"), null, { timeout: 10_000 }).catch(() => undefined);
+      await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Ada mail 1"), null, { timeout: 10_000 }).catch(() => undefined);
       check("a summary's link opens that account's inbox", (await subjects(page)).includes("Ada mail 1") && (await page.locator("[data-reader-subject]").count()) === 0);
       await ctx.close();
     }

@@ -40,6 +40,7 @@ export const PARTS = [
   "position",
   "glass",
   "offline",
+  "offline-save",
   "attachments",
   "top-email",
   "motion",
@@ -62,7 +63,7 @@ export const SHARDS = {
   "contexts-b": { parts: ["settings", "privacy", "position", "glass", "inbox-clear", "tour"] },
   "modules-a": { parts: ["fixes", "offline", "attachments", "motion"] },
   "modules-b": { parts: ["thumb", "top-email"], scripts: ["smoke-android.mjs", "smoke-notifications.mjs"] },
-  "modules-c": { parts: ["schedule"], scripts: ["smoke-filters.mjs", "smoke-accounts.mjs"] },
+  "modules-c": { parts: ["schedule", "offline-save"], scripts: ["smoke-filters.mjs", "smoke-accounts.mjs"] },
 };
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
