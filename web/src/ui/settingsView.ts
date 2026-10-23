@@ -74,10 +74,13 @@ export function moveCategory(
 /**
  * The categories, in order. Keyboard shortcuts is left out on a touch-only device until a
  * real keyboard has been used (`shortcuts: false`, see `physicalKeyboard.ts`): a list of
- * keys nobody can press is clutter on a phone.
+ * keys nobody can press is clutter on a phone. Dev Options is left out until it has been
+ * unlocked (`dev: true`, see `devOptions.ts`: ten taps on About's version).
  */
-export function visibleCategories({ shortcuts = true }: { shortcuts?: boolean } = {}): CategoryId[] {
-  return CATEGORIES.map((category) => category.id).filter((id) => shortcuts || id !== "shortcuts");
+export function visibleCategories({ shortcuts = true, dev = false }: { shortcuts?: boolean; dev?: boolean } = {}): CategoryId[] {
+  return CATEGORIES.map((category) => category.id).filter(
+    (id) => (shortcuts || id !== "shortcuts") && (dev || id !== "dev"),
+  );
 }
 
 // ── Explanation panel ───────────────────────────────────────────────────────

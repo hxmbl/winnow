@@ -85,7 +85,7 @@ import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
 import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
-import { DEV_OPTIONS_KEY, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
+import { DEV_OPTIONS_KEY, hiddenDevOptions, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
 import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
@@ -4888,6 +4888,13 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
           emailDarkMode={preferences.emailDarkMode}
           onEmailDarkMode={(value) => store.setPreferences({ emailDarkMode: value })}
+          devUnlocked={devOptions.unlocked}
+          onUnlockDev={() => changeDevOptions({ unlocked: true })}
+          onHideDev={() => {
+            const hidden = hiddenDevOptions();
+            saveDevOptions(hidden);
+            setDevOptions(hidden);
+          }}
           purePlainText={devOptions.purePlainText}
           onPurePlainText={(value) => changeDevOptions({ purePlainText: value })}
           undoSendSeconds={preferences.undoSendSeconds}

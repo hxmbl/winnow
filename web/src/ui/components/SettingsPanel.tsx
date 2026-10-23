@@ -16,6 +16,7 @@ import { BINDINGS } from "../../core/mail/keybinds";
 import type { NotificationActions } from "../../core/notify/notifications";
 import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
 import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
+import { devUnlockTap } from "../devOptions";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
   INFO_CLOSED,
@@ -240,6 +241,11 @@ export type SettingsProps = {
   platformLabel?: string | null;
   /** Update checks (`useUpdates.ts`), for About. Absent in tests that do not need them. */
   updates?: UpdatesController | null;
+  /** Dev Options is listed: unlocked by ten taps on About's version (`ui/devOptions.ts`). */
+  devUnlocked: boolean;
+  onUnlockDev: () => void;
+  /** "Hide Dev Options": locks the category again and turns every switch in it off. */
+  onHideDev: () => void;
   /** Dev Options → Pure Plain Text (`ui/devOptions.ts`): plain text exactly as sent. */
   purePlainText: boolean;
   onPurePlainText: (value: boolean) => void;
@@ -300,7 +306,7 @@ export function Settings(props: SettingsProps) {
   const [phonePage, setPhonePage] = useState<"list" | "category">(props.initialCategory ? "category" : "list");
   const [info, dispatchInfo] = useReducer(infoReducer, INFO_CLOSED);
   const shortcutsAvailable = useShortcutsAvailable();
-  const categories = visibleCategories({ shortcuts: shortcutsAvailable });
+  const categories = visibleCategories({ shortcuts: shortcutsAvailable, dev: props.devUnlocked });
   const tabRefs = useRef(new Map<CategoryId, HTMLButtonElement | null>());
   const pageHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const listButtonRefs = useRef(new Map<CategoryId, HTMLButtonElement | null>());
@@ -548,6 +554,52 @@ export function Settings(props: SettingsProps) {
   );
 }
 
+/**
+ * About's version, which is also the way into Dev Options: ten taps unlock it, with a
+ * countdown from the seventh (`devUnlockTap`). A single tap does nothing else, as the
+ * plain text it replaced did nothing; the top bar's version shortcut and update button
+ * are separate elements and are not involved. A button so a keyboard can reach it too.
+ */
+function VersionLabel({ version, unlocked, onUnlock }: { version: string; unlocked: boolean; onUnlock: () => void }) {
+  const taps = useRef(0);
+  const [toast, setToast] = useState<{ text: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), DEV_TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [toast]);
+  return (
+    <>
+      <button
+        type="button"
+        data-version-label=""
+        onClick={() => {
+          const step = devUnlockTap(taps.current, unlocked);
+          taps.current = step.taps;
+          if (step.toast) setToast({ text: step.toast, at: Date.now() });
+          if (step.unlock) onUnlock();
+        }}
+        className="rounded-ctl px-1 text-meta font-semibold tabular-nums text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        {version}
+      </button>
+      <p
+        role="status"
+        aria-live="polite"
+        data-dev-toast=""
+        className={`pointer-events-none fixed bottom-[calc(var(--wn-phone-tabs,env(safe-area-inset-bottom,0px))+1.5rem)] left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-meta font-medium text-surface shadow-pane transition-opacity ${
+          toast ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        {toast?.text ?? ""}
+      </p>
+    </>
+  );
+}
+
+/** How long the unlock countdown's toast stays. */
+const DEV_TOAST_MS = 2_000;
+
 /** Dev Options → Pure Plain Text's one-line description, under its name. */
 const PURE_PLAIN_TEXT_HINT = "Show plain text exactly as sent, with nothing removed";
 
@@ -786,7 +838,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
       return (
         <Section>
           <Row setting="version" hint={props.platformLabel ?? undefined}>
-            <span className="text-meta font-semibold tabular-nums text-ink-body">{props.version ?? "Unknown"}</span>
+            <VersionLabel version={props.version ?? "Unknown"} unlocked={props.devUnlocked} onUnlock={props.onUnlockDev} />
           </Row>
           {props.updates && <UpdateSettings updates={props.updates} />}
           {props.onShowTour && (
@@ -812,6 +864,12 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               describedBy="winnow-pure-plain-text-hint"
             />
           </Row>
+          <div className="pt-4">
+            <button type="button" data-hide-dev-options="" onClick={props.onHideDev} className={SECONDARY_BUTTON}>
+              Hide Dev Options
+            </button>
+            <p className="mt-1.5 text-meta text-ink-subtle">Turns every switch here off and hides this section again.</p>
+          </div>
         </Section>
       );
   }

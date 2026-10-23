@@ -27,11 +27,16 @@ describe("the settings layout", () => {
 });
 
 describe("the category list", () => {
-  const all = visibleCategories();
+  const all = visibleCategories({ dev: true });
 
   it("lists every category in catalog order, Reading first", () => {
     expect(all).toEqual(CATEGORIES.map((category) => category.id));
     expect(all[0]).toBe("reading");
+  });
+
+  it("leaves Dev Options out until it is unlocked, the rest in order", () => {
+    expect(visibleCategories()).toEqual(all.filter((id) => id !== "dev"));
+    expect(all.at(-1)).toBe("dev");
   });
 
   it("moves with the arrow keys and wraps at both ends", () => {

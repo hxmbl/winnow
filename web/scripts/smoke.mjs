@@ -6700,7 +6700,7 @@ try {
     const tabLabels = await tabs.allTextContents();
     check(
       "the categories, Reading first and selected",
-      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Smart filters", "Compose", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About", "Dev Options"]) &&
+      JSON.stringify(tabLabels) === JSON.stringify(["Reading", "Smart filters", "Compose", "Appearance", "Privacy", "Notifications & sync", "Google account", "Hidden & muted senders", "Keyboard shortcuts", "About"]) &&
         (await tabs.first().getAttribute("aria-selected")) === "true",
       JSON.stringify(tabLabels),
     );
@@ -6722,7 +6722,7 @@ try {
     );
     await s.keyboard.press("End");
     await s.waitForTimeout(80);
-    check("End jumps to the last", (await title()) === "Dev Options");
+    check("End jumps to the last (Dev Options is hidden until unlocked)", (await title()) === "About");
     await s.keyboard.press("ArrowDown");
     await s.waitForTimeout(80);
     check("and ArrowDown wraps round to the first", (await title()) === "Reading");
@@ -6766,7 +6766,7 @@ try {
     check("a new category starts on its intro", (await explain.getAttribute("data-settings-explain")) === "intro" && ((await explain.textContent()) ?? "").includes("Reading"));
     // Every setting row in every category explains itself.
     let unexplained = [];
-    for (const id of ["reading", "appearance", "privacy", "sync", "google", "senders", "shortcuts", "about", "dev"]) {
+    for (const id of ["reading", "appearance", "privacy", "sync", "google", "senders", "shortcuts", "about"]) {
       await openSettingsCategory(s, id);
       for (const block of await dialog.locator("[data-setting]").all()) {
         const setting = await block.getAttribute("data-setting");
@@ -6867,7 +6867,7 @@ try {
     // has no keys to press (1.3.3). A hardware key press brings it back for the session.
     check(
       "with every category but Keyboard shortcuts (touch only, no keyboard seen yet)",
-      (await dialog.locator("button[data-category]").count()) === 10 &&
+      (await dialog.locator("button[data-category]").count()) === 9 &&
         (await dialog.locator('button[data-category="shortcuts"]').count()) === 0,
     );
     await s.keyboard.press("Shift");
@@ -7630,14 +7630,44 @@ try {
     await s.waitForSelector("[data-row-count] [data-row-id]");
     const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
     const toggle = dialog.locator('[role="switch"][aria-label="Pure Plain Text"]');
-    const openDev = async () => {
-      await s.keyboard.press(",");
-      await openSettingsCategory(s, "dev");
-    };
     const closeSettings = async () => {
       await dialog.locator("[data-settings-back]").click();
       await s.waitForTimeout(250);
     };
+    const openDev = async () => {
+      await s.keyboard.press(",");
+      await openSettingsCategory(s, "dev");
+    };
+
+    // Hidden until About's version has been tapped ten times, with a countdown from the
+    // seventh tap; nothing else happens on a tap.
+    await s.keyboard.press(",");
+    await dialog.waitFor({ timeout: 5_000 });
+    check("Dev Options is not listed until it is unlocked", (await dialog.locator('[data-category="dev"]').count()) === 0);
+    await openSettingsCategory(s, "about");
+    const version = dialog.locator("[data-version-label]");
+    const toastText = async () => ((await s.locator("[data-dev-toast]").textContent()) ?? "").trim();
+    const toasts = [];
+    for (let tap = 1; tap <= 10; tap++) {
+      await version.click();
+      await s.waitForTimeout(40);
+      toasts.push(await toastText());
+    }
+    check(
+      "ten taps on the version: silent for six, a countdown from the seventh, then unlocked",
+      JSON.stringify(toasts) ===
+        JSON.stringify(["", "", "", "", "", "", "3 taps away from Dev Options", "2 taps away from Dev Options", "1 tap away from Dev Options", "Dev Options unlocked"]),
+      JSON.stringify(toasts),
+    );
+    check(
+      "the taps open nothing else (no dialog, menu or update)",
+      (await s.locator('[role="dialog"]').count()) === 1 && (await s.locator('[role="menu"]').count()) === 0,
+    );
+    check(
+      "the unlock is saved on this device",
+      (await s.evaluate(() => JSON.parse(localStorage.getItem("winnow.devOptions.v1") ?? "null")?.unlocked)) === true,
+    );
+    await closeSettings();
 
     await openDev();
     const tabs = dialog.locator('[role="tablist"] [role="tab"]');
@@ -7656,7 +7686,10 @@ try {
         (await dialog.locator('[data-setting="purePlainText"]').count()) === 1,
       JSON.stringify({ describedBy, description }),
     );
-    check("and nothing saved while it is off", (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === null);
+    check(
+      "and only the unlock saved while it is off",
+      (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === JSON.stringify({ version: 1, unlocked: true, purePlainText: false }),
+    );
     await closeSettings();
 
     // The plain form of a message whose text starts with a blank line.
@@ -7705,9 +7738,22 @@ try {
     check("and still on after a reload", (await toggle.getAttribute("aria-checked")) === "true");
     await toggle.click();
     await s.waitForTimeout(100);
+    const afterOff = { checked: await toggle.getAttribute("aria-checked"), saved: await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1")) };
     check(
-      "turning it off removes the saved entry",
-      (await toggle.getAttribute("aria-checked")) === "false" &&
+      "turning it off keeps the unlock",
+      afterOff.checked === "false" && JSON.parse(afterOff.saved ?? "null")?.unlocked === true,
+      JSON.stringify(afterOff),
+    );
+    await toggle.click();
+    await s.waitForTimeout(100);
+    const hide = dialog.locator("[data-hide-dev-options]");
+    const lastRow = await dialog.locator("[data-settings-row], [data-hide-dev-options]").last().getAttribute("data-hide-dev-options");
+    check("Hide Dev Options is at the bottom of the section", (await hide.count()) === 1 && lastRow === "");
+    await hide.click();
+    await s.waitForTimeout(250);
+    check(
+      "hiding it unlists the section, turns its switches off and leaves nothing saved",
+      (await dialog.locator('[data-category="dev"]').count()) === 0 &&
         (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === null,
     );
     await ctx.close();
