@@ -721,6 +721,8 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `demoResume.ts` | The demo's way back to a stored session: the button's wording (`demoCtaLabel`: Connect Gmail, Back to your inbox, Sign in again) and what a failed resume means (`resumeFailure`: an expired grant shows `SESSION_EXPIRED` and the button signs in again; an unreachable Google keeps the session). App adopts the session without a Google sign-in or a revocation, checking it with a profile read first so an expired one never takes the store out of the demo. |
 | `readerPill.ts` | The phone reader's floating action pill as pure logic: when it folds to the ••• circle (reading down) and opens again (scrolling up, at the end, on a tap), and the left-handed mirror (Settings → Appearance → Left-handed moves it and the compose button to the left). |
 | `readerSwipe.ts` | A sideways swipe on the phone reader pill as pure logic (STRM-324): left steps to the next (older) message, right to the previous, by `store.moveCursor` like the masthead arrows and `j`/`k`. `PillSwipe` reuses `swipe.ts`'s edge zones, axis lock and who may swipe (finger, stylus tip); a step needs `STEP_COMMIT_PX = 64` or a flick ≥ 0.5 px/ms over ≥ 28 px; the pill follows 40% of the finger (max 36 px) and gives at most 8 px at either end (no wrap). A press that became a swipe swallows its click. |
+| `updateButton.ts` | The update button beside the version shortcut (1.5.5; `components/UpdateButton.tsx` draws it in the phone top bar and the desktop floating bar) as pure logic: one button walking Check for updates → Checking… → Update (a newer release) or No updates available / Couldn't check, back to Check for updates after `NOTICE_MS = 3000`; Update runs `useUpdates().install` (Updating… while it works). `updateButtonShown`: native builds only (`macos`, `appimage`, `deb`, `android`, `manual`), never the web build or the Docker image. |
+| `loadCheck.ts` | The every-tenth-load update check as pure logic. Every load of the app counts (cold launch, Android's resume reload, a page reload), once per bundle run, in `winnow.updates.loads.v1`; the load that brings it to `LOAD_CHECK_EVERY = 10` runs `useUpdates`' usual background check, which never blocks startup, fails silently, and on a newer release puts the version shortcut's button in Update and announces it once in the status pill (nothing installs by itself). Native builds only (`updateButtonShown`), only with "Check for updates automatically" on, online, and with no check already running; a due load that cannot check keeps the count (capped at 10). Any check that runs, "Check for updates" included, resets it. Automation never checks by itself unless the page sets `window.__WINNOW_LOAD_CHECK__` (`smoke-android.mjs` 1c). |
 | `statusPill.ts` | The status pill as pure logic: `currentNotice` (newest wins; a tie goes to a waiting send, then an undo, a flash, the sync line; an older notice still on offer comes back when the newer goes), `returnsToSync`, `noticeKey`, the countdown text and the screen-reader announcement. |
 | `windowing.ts` | Variable-height windowing arithmetic (`ESTIMATED_ROW_HEIGHT = 53`, `OVERSCAN = 6`). No fixed-height virtualiser, because rows are 53–82 px. |
 | `syncStatus.ts` | The sync line and button text as one pure function, with a documented precedence order. |
@@ -862,6 +864,10 @@ are hidden): Android draws them as the large icon, the desktop from a cache file
 | Windows | `notify-rust` WinRT toast | Button opens the composer (`tauri-winrt-notification` has no toast inputs) | Buttons | Opens the message | Webview, as Linux; only failures get a follow-up toast |
 | macOS | `tauri-plugin-notification`, one grouped notification | — | — | Reveals the window (`RunEvent::Reopen`) | Fallback: actions need `UNUserNotificationCenter` categories; `notify-rust`'s path is the deprecated `NSUserNotificationCenter` blocking a thread per notification, untestable here |
 | Browser | `Notification`, one per message | — | — | Opens the message | — (buttons need a service worker) |
+
+The Android buttons and their order (Delete, Mark read, Reply, left to right: Gmail's,
+with Winnow's labels) are `NotifyActions.kt` (`NotifyActions.shown(flags, canReply)`,
+plain Kotlin, JVM-tested in `NotifyActionsTest`); `MailNotifier` adds them in that order.
 
 Every host puts the sender first: Android's title, the desktop's summary
 (`notify_actions/desktop.rs`), with the subject (and preview) under it. Android dropped
@@ -1022,6 +1028,8 @@ signed in). "Sign-out" means signing out of that account, which erases its names
 | `winnow.brandLogos.v1` *(per account)* | Cached BIMI answers | sign-out, setting off |
 | `winnow.gravatars.v1` *(per account)* | Cached Gravatar answers, by sender address | sign-out, setting off |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
+| `winnow.updates.v1` | Update checks: automatic on/off, the last check's time and outcome, the version whose notice was let go (`ui/useUpdates.ts`) | never, by design |
+| `winnow.updates.loads.v1` | Loads since the last update check, native builds only (`ui/loadCheck.ts`) | any update check |
 | `winnow.google.setupProgress` | A half-finished setup: step, ticks, client ID draft (never the secret) | saving or removing the client, Start over |
 | `winnow.gmail.tokens@<id>` | An account's tokens (web only; 1.3.5's unscoped key is migrated) | that account's sign-out, which also revokes the grant at Google |
 | `winnow.pendingAuth`, `winnow.pendingState` | PKCE verifier, sign-in state (`sessionStorage`) | read, or 15 min |

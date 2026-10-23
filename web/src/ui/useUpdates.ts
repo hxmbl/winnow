@@ -10,6 +10,8 @@
  * - A newer version is announced once in the status pill. Dismissing it, pressing
  *   Update, or letting it go by itself all mark that version seen, and it is not
  *   announced again; a newer release is. Settings › About keeps offering it.
+ * - On a native build, every tenth load of the app also runs the background check
+ *   (`loadCheck.ts`); any check resets that count, "Check for updates" included.
  * - "What's new" (from the pill or Settings) shows the notes of every release between
  *   the installed version and the newest, newest first (`core/updates/changelog.ts`).
  */
@@ -32,6 +34,7 @@ import {
 } from "../core/updates/updates";
 import { fetchChangelog, type ChangelogEntry } from "../core/updates/changelog";
 import type { Platform } from "../platform/types";
+import { LOAD_COUNT_KEY, countLoad, countsLoads, loadCheckDue, parseLoadCount } from "./loadCheck";
 
 export const UPDATE_STATE_KEY = "winnow.updates.v1";
 
@@ -94,12 +97,37 @@ function writeState(state: UpdateState): void {
   }
 }
 
+/** Loads since the last check (`loadCheck.ts`); 0 when storage is out of reach. */
+function readLoadCount(): number {
+  try {
+    return parseLoadCount(storage()?.getItem(LOAD_COUNT_KEY));
+  } catch {
+    return 0;
+  }
+}
+
+function writeLoadCount(count: number): void {
+  try {
+    storage()?.setItem(LOAD_COUNT_KEY, String(count));
+  } catch {
+    // Unwritable storage: no load check, which is harmless.
+  }
+}
+
+/** This load of the bundle has been counted (once, whatever React's effects do). */
+let loadCounted = false;
+
 function isOnline(): boolean {
   return globalThis.navigator?.onLine !== false;
 }
 
 function automated(): boolean {
   return globalThis.navigator?.webdriver === true;
+}
+
+/** Automation that asked for the load check anyway (`smoke-android.mjs`). */
+function loadCheckOptIn(): boolean {
+  return (globalThis as { __WINNOW_LOAD_CHECK__?: unknown }).__WINNOW_LOAD_CHECK__ === true;
 }
 
 export function useUpdates(platform: Platform, flash: (text: string, ms: number) => void): UpdatesController {
@@ -152,6 +180,23 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
     };
   }, []);
 
+  /** Loads since the last check, once this load has been counted (native builds only). */
+  const [loadCount, setLoadCount] = useState<number | null>(null);
+  const resetLoadCount = useCallback(() => {
+    if (!countsLoads(runtime)) return;
+    writeLoadCount(0);
+    setLoadCount(0);
+  }, [runtime]);
+
+  // Count this load, once the runtime says it is a native build.
+  useEffect(() => {
+    if (!countsLoads(runtime) || loadCounted) return;
+    loadCounted = true;
+    const count = countLoad(readLoadCount());
+    writeLoadCount(count);
+    setLoadCount(count);
+  }, [runtime]);
+
   const checking = useRef(false);
   const runCheck = useCallback(
     async (manual: boolean) => {
@@ -161,6 +206,8 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
       if (manual) setMessage(null);
       const result = await checkForUpdate(runtime, (url, init) => globalThis.fetch(url, init));
       checking.current = false;
+      // Any check that ran restarts the count to the next load check.
+      resetLoadCount();
       setState((current) => recordCheck(current, Date.now(), result.kind !== "failed"));
       if (result.kind === "offer") {
         setOffer(result.offer);
@@ -181,7 +228,7 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
         if (manual) setMessage(`Couldn't check for updates: ${result.reason}.`);
       }
     },
-    [runtime, setState],
+    [runtime, setState, resetLoadCount],
   );
 
   // The automatic schedule: due now, or a timer for when it will be.
@@ -195,6 +242,20 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
     const timer = globalThis.setTimeout(() => void runCheck(false), msUntilDue(state, now) + 1000);
     return () => globalThis.clearTimeout(timer);
   }, [runtime, state, online, runCheck]);
+
+  // Every tenth load: the same background check, never in the way of the launch.
+  useEffect(() => {
+    if (loadCount === null) return;
+    const due = loadCheckDue({
+      runtime,
+      count: loadCount,
+      auto: state.auto,
+      online,
+      automated: automated() && !loadCheckOptIn(),
+      inFlight: checking.current,
+    });
+    if (due) void runCheck(false);
+  }, [runtime, loadCount, state.auto, online, runCheck]);
 
   // The announcement goes by itself, and that counts as seen.
   useEffect(() => {
@@ -270,7 +331,11 @@ export function useUpdates(platform: Platform, flash: (text: string, ms: number)
     [setState],
   );
 
-  const checkNow = useCallback(() => void runCheck(true), [runCheck]);
+  const checkNow = useCallback(() => {
+    // A press is a check: the count starts again now, and again when it settles.
+    resetLoadCount();
+    void runCheck(true);
+  }, [runCheck, resetLoadCount]);
 
   const openWhatsNew = useCallback(() => {
     if (!offer) return;

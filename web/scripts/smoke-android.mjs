@@ -14,6 +14,8 @@
  *   1b. The update button beside the version shortcut (1.5.5): absent on the web build;
  *      in the Android app Check for updates → Checking… → No updates available → back,
  *      and with a newer release Update, which runs the app's APK updater.
+ *   1c. Every tenth load (a reload counts) checks in the background: the newer release
+ *      puts the button in Update, nothing installs, and the count starts again.
  *
  * Separate from `smoke.mjs` so it can run alone (`node scripts/smoke-android.mjs`);
  * `npm run smoke` runs both. Same environment: WINNOW_PORT, WINNOW_CHROMIUM.
@@ -156,6 +158,10 @@ try {
       "web build: the version shows, with no update button beside it",
       (await page.locator("[data-version-text]").textContent())?.startsWith("Winnow") && (await page.locator("[data-update-shortcut]").count()) === 0,
     );
+    check(
+      "web build: loads are not counted for the every-tenth-load check",
+      (await page.evaluate(() => localStorage.getItem("winnow.updates.loads.v1"))) === null,
+    );
     await context.close();
   }
 
@@ -226,6 +232,69 @@ try {
       install?.args?.name === "Winnow_99.0.0_android-universal.apk" && /releases\/download\/v99\.0\.0\//.test(install?.args?.url ?? ""),
       JSON.stringify(install),
     );
+    check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
+    await context.close();
+  }
+
+  // ── 1c. Every tenth load checks for updates by itself ───────────────────────
+  console.log("\n── android app: the every-tenth-load check ──");
+  {
+    const context = await browser.newContext({
+      viewport: { width: 412, height: 915 },
+      userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36",
+      hasTouch: true,
+      isMobile: true,
+    });
+    await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    // Opt in (automation never checks by itself), and start eight loads in.
+    await context.addInitScript(() => {
+      window.__WINNOW_LOAD_CHECK__ = true;
+      if (localStorage.getItem("winnow.updates.loads.v1") === null) localStorage.setItem("winnow.updates.loads.v1", "8");
+    });
+    const cors = { "access-control-allow-origin": "*" };
+    let asked = 0;
+    await context.route("https://api.github.com/repos/hxmbl/winnow/releases/latest", async (route) => {
+      asked += 1;
+      await route.fulfill({
+        headers: cors,
+        json: {
+          tag_name: "v99.0.0",
+          name: "v99.0.0",
+          draft: false,
+          prerelease: false,
+          html_url: "https://github.com/hxmbl/winnow/releases/tag/v99.0.0",
+          assets: [
+            {
+              name: "Winnow_99.0.0_android-universal.apk",
+              browser_download_url: "https://github.com/hxmbl/winnow/releases/download/v99.0.0/Winnow_99.0.0_android-universal.apk",
+              size: 1,
+            },
+          ],
+        },
+      });
+    });
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error)));
+    const loads = () => page.evaluate(() => localStorage.getItem("winnow.updates.loads.v1"));
+    await page.goto(URL, { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.waitForFunction(() => localStorage.getItem("winnow.updates.loads.v1") === "9", null, { timeout: 5_000 }).catch(() => undefined);
+    check("the 9th load is counted and does not check", (await loads()) === "9" && asked === 0, `loads=${await loads()} asked=${asked}`);
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.waitForFunction(() => localStorage.getItem("winnow.updates.loads.v1") === "0", null, { timeout: 5_000 }).catch(() => undefined);
+    check("the 10th load (a reload) checks once in the background and resets the count", asked === 1 && (await loads()) === "0", `loads=${await loads()} asked=${asked}`);
+    await page.locator("[data-phone-topbar] button[data-version-toggle]").tap();
+    const button = page.locator("[data-phone-topbar] [data-update-shortcut]");
+    await button.waitFor({ timeout: 5_000 });
+    check("the newer release puts the version shortcut's button in Update", ((await button.textContent()) ?? "").trim() === "Update", (await button.textContent()) ?? "");
+    const calls = await page.evaluate(() => window.__smokeCalls.map((call) => call.cmd));
+    check("nothing installs by itself", !calls.includes("update_install_apk"));
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.waitForFunction(() => localStorage.getItem("winnow.updates.loads.v1") === "1", null, { timeout: 5_000 }).catch(() => undefined);
+    check("the next load counts from 1 again, without a check", (await loads()) === "1" && asked === 1, `loads=${await loads()} asked=${asked}`);
     check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
     await context.close();
   }
