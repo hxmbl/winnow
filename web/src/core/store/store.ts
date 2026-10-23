@@ -18,6 +18,7 @@
  * Ported from `legacy/swift-native/Sources/winnow/Store/WinnowStore.swift`.
  */
 
+import { demoRawSource } from "../mail/rawSource";
 import { summarizeAttention, type AttentionSummary } from "../classify/attention";
 import {
   MAILBOX_LABEL,
@@ -770,6 +771,11 @@ export interface MailBackend {
    * `loadMessage`.
    */
   fetchMessage?(gmailId: string): Promise<Email | null>;
+  /**
+   * One message's raw source (`format=raw`, decoded), for Dev Options → View Original.
+   * Optional: the demo has none, and builds one from the message instead.
+   */
+  fetchRaw?(gmailId: string): Promise<string>;
   /**
    * Try again to write the offline cache, after asking the platform to keep it.
    *
@@ -3919,6 +3925,19 @@ export class WinnowStore {
    * that already holds its HTML, and a fetch that failed. Each of those used to leave
    * "Loading the formatted version…" on screen forever.
    */
+  /**
+   * Dev Options → View Original: a message's raw source, from the backend's
+   * `format=raw`, or built from the message where there is no server (the demo).
+   * Rejects when the request fails; the caller says so.
+   */
+  async loadRawSource(id: number): Promise<{ raw: string; demo: boolean }> {
+    const email = this.state.all.find((candidate) => candidate.id === id);
+    if (!email) throw new Error("No such message");
+    const backend = this.backend;
+    if (backend?.fetchRaw) return { raw: await backend.fetchRaw(email.gmailId), demo: false };
+    return { raw: demoRawSource({ ...email, bodyHtml: this.bodies.get(id) ?? email.bodyHtml }), demo: true };
+  }
+
   hasLoadedBody(id: number): boolean {
     if (this.bodyChecked.has(id)) return true;
     if (!this.backend) return true;

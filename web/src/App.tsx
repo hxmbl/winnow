@@ -85,6 +85,7 @@ import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
 import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
+import { RawSourceSheet, type RawSourceState } from "./ui/components/RawSourceSheet";
 import { DEV_OPTIONS_KEY, hiddenDevOptions, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
 import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
@@ -554,6 +555,24 @@ export function App({ store, existingInstall = true }: Props) {
       return next;
     });
   }, []);
+  // Dev Options → View Original: the open sheet, and the request behind it.
+  const [rawSource, setRawSource] = useState<RawSourceState | null>(null);
+  const rawRequest = useRef(0);
+  const openRawSource = useCallback(
+    (email: Email) => {
+      const request = ++rawRequest.current;
+      setRawSource({ status: "loading", subject: email.subject });
+      store.loadRawSource(email.id).then(
+        ({ raw, demo }) => {
+          if (rawRequest.current === request) setRawSource({ status: "ready", subject: email.subject, raw, demo });
+        },
+        () => {
+          if (rawRequest.current === request) setRawSource({ status: "error", subject: email.subject });
+        },
+      );
+    },
+    [store],
+  );
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (event.key === null || event.key === DEV_OPTIONS_KEY) setDevOptions(loadDevOptions());
@@ -4748,6 +4767,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   // needing a third code path for the same operation.
                   if (snap.view.selected) s.moveManyWithUndo([snap.view.selected.id], "inbox");
                 }),
+                onViewOriginal: devOptions.viewOriginal && selected ? () => openRawSource(selected) : undefined,
                 onShowOriginal: () => {
                   // Opened in the system browser, which is a different origin from the
                   // app and the only context in which a message's own scripts can run —
@@ -4862,6 +4882,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
       )}
 
+      {rawSource && <RawSourceSheet state={rawSource} phone={phone} onClose={() => setRawSource(null)} />}
+
       {snapshot.overlay === "settings" && (
         <Settings
           sortBy={preferences.sortBy}
@@ -4897,6 +4919,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           }}
           purePlainText={devOptions.purePlainText}
           onPurePlainText={(value) => changeDevOptions({ purePlainText: value })}
+          viewOriginal={devOptions.viewOriginal}
+          onViewOriginal={(value) => changeDevOptions({ viewOriginal: value })}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           scheduledCount={snapshot.scheduled.filter((send) => send.account === store.accountKey()).length}

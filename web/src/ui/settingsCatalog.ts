@@ -329,6 +329,12 @@ export const SETTINGS = {
     explanation:
       "When a message is shown as Plain text, shows its plain-text part exactly as the sender wrote it, with nothing removed: invisible preheader filler, blank lines and leading or trailing space all stay. A message with no plain-text part has its HTML turned into text as literally as possible, including the page title and style code Winnow normally leaves out. It is still shown as text, so nothing in it can run or load. Saved on this device only.",
   },
+  viewOriginal: {
+    category: "dev",
+    label: "View Original",
+    explanation:
+      "Adds View Original to a message's ⋯ menu: the message exactly as Gmail stores it, every header and every MIME part, fetched from Gmail when you ask and shown as plain characters with a Copy button. Nothing in it is rendered, so no HTML, image or script in the message can run or load. It is not saved anywhere; in the demo the source is built on this device.",
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingId = keyof typeof SETTINGS;

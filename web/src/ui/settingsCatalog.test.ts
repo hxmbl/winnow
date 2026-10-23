@@ -61,7 +61,7 @@ describe("the settings catalog", () => {
 
   it("ends with Dev Options, which holds Pure Plain Text", () => {
     expect(CATEGORIES.at(-1)).toMatchObject({ id: "dev", label: "Dev Options" });
-    expect(settingsIn("dev")).toEqual(["purePlainText"]);
+    expect(settingsIn("dev")[0]).toBe("purePlainText");
     expect(SETTINGS.purePlainText.label).toBe("Pure Plain Text");
     // A real switch with its name and its one-line description wired for screen readers.
     expect(source).toMatch(/<Row setting="purePlainText" hint=\{PURE_PLAIN_TEXT_HINT\} hintId="winnow-pure-plain-text-hint">/);

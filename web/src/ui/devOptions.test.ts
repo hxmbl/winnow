@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_DEV_OPTIONS,
+  DEV_SWITCHES,
   DEV_OPTIONS_KEY,
   DEV_UNLOCK_TAPS,
   devUnlockTap,
@@ -8,6 +10,8 @@ import {
   saveDevOptions,
   type DevOptionsStorage,
 } from "./devOptions";
+
+const o = (patch: Partial<typeof DEFAULT_DEV_OPTIONS>) => ({ ...DEFAULT_DEV_OPTIONS, ...patch });
 
 function memory(): DevOptionsStorage & { map: Map<string, string> } {
   const map = new Map<string, string>();
@@ -22,38 +26,49 @@ function memory(): DevOptionsStorage & { map: Map<string, string> } {
 describe("Dev Options storage", () => {
   it("is locked and off by default, with nothing saved", () => {
     const storage = memory();
-    expect(loadDevOptions(storage)).toEqual({ unlocked: false, purePlainText: false });
+    expect(loadDevOptions(storage)).toEqual(o({ unlocked: false, purePlainText: false }));
     expect(storage.map.size).toBe(0);
   });
 
   it("saves the unlock and Pure Plain Text under its own key and reads them back", () => {
     const storage = memory();
-    saveDevOptions({ unlocked: true, purePlainText: true }, storage);
-    expect(JSON.parse(storage.map.get(DEV_OPTIONS_KEY)!)).toEqual({ version: 1, unlocked: true, purePlainText: true });
-    expect(loadDevOptions(storage)).toEqual({ unlocked: true, purePlainText: true });
+    saveDevOptions(o({ unlocked: true, purePlainText: true }), storage);
+    expect(JSON.parse(storage.map.get(DEV_OPTIONS_KEY)!)).toEqual({ version: 1, ...o({ unlocked: true, purePlainText: true }) });
+    expect(loadDevOptions(storage)).toEqual(o({ unlocked: true, purePlainText: true }));
   });
 
   it("keeps the unlock with every switch off", () => {
     const storage = memory();
-    saveDevOptions({ unlocked: true, purePlainText: false }, storage);
-    expect(loadDevOptions(storage)).toEqual({ unlocked: true, purePlainText: false });
+    saveDevOptions(o({ unlocked: true, purePlainText: false }), storage);
+    expect(loadDevOptions(storage)).toEqual(o({ unlocked: true, purePlainText: false }));
   });
 
   it("hiding locks it, turns every switch off and leaves no entry", () => {
     const storage = memory();
-    saveDevOptions({ unlocked: true, purePlainText: true }, storage);
+    saveDevOptions(o({ unlocked: true, purePlainText: true }), storage);
     saveDevOptions(hiddenDevOptions(), storage);
     expect(storage.map.has(DEV_OPTIONS_KEY)).toBe(false);
-    expect(loadDevOptions(storage)).toEqual({ unlocked: false, purePlainText: false });
+    expect(loadDevOptions(storage)).toEqual(o({ unlocked: false, purePlainText: false }));
     expect(Object.entries(hiddenDevOptions()).every(([, value]) => value === false)).toBe(true);
   });
 
   it("never reads a switch as on while Dev Options is locked", () => {
     const storage = memory();
     storage.map.set(DEV_OPTIONS_KEY, JSON.stringify({ version: 1, purePlainText: true }));
-    expect(loadDevOptions(storage)).toEqual({ unlocked: false, purePlainText: false });
-    saveDevOptions({ unlocked: false, purePlainText: true }, storage);
+    expect(loadDevOptions(storage)).toEqual(o({ unlocked: false, purePlainText: false }));
+    saveDevOptions(o({ unlocked: false, purePlainText: true }), storage);
     expect(storage.map.has(DEV_OPTIONS_KEY)).toBe(false);
+  });
+
+  it("saves and reads back every switch, and hiding turns every one off", () => {
+    const storage = memory();
+    for (const key of DEV_SWITCHES) {
+      saveDevOptions(o({ unlocked: true, [key]: true }), storage);
+      expect(loadDevOptions(storage)[key]).toBe(true);
+      saveDevOptions(hiddenDevOptions(), storage);
+      expect(loadDevOptions(storage)[key]).toBe(false);
+    }
+    expect(DEV_SWITCHES.every((key) => hiddenDevOptions()[key] === false)).toBe(true);
   });
 
   it("is local only: one shared key, not an account-scoped or synced one", () => {
@@ -80,9 +95,9 @@ describe("Dev Options storage", () => {
         throw new Error("denied");
       },
     };
-    expect(loadDevOptions(refusing)).toEqual({ unlocked: false, purePlainText: false });
-    expect(() => saveDevOptions({ unlocked: true, purePlainText: true }, refusing)).not.toThrow();
-    expect(loadDevOptions(null)).toEqual({ unlocked: false, purePlainText: false });
+    expect(loadDevOptions(refusing)).toEqual(o({ unlocked: false, purePlainText: false }));
+    expect(() => saveDevOptions(o({ unlocked: true, purePlainText: true }), refusing)).not.toThrow();
+    expect(loadDevOptions(null)).toEqual(o({ unlocked: false, purePlainText: false }));
   });
 });
 

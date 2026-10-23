@@ -21,6 +21,7 @@
  * planted redirect cannot trade its own code for the user's tokens.
  */
 
+import { decodeRawMessage } from "../mail/rawSource";
 import { accountKey } from "./accounts";
 import { createIdleWriter, onPageLeave, type IdleScheduler } from "./idleWrite";
 import { GoogleAuthStateMissing } from "./errors";
@@ -1486,6 +1487,11 @@ export class GmailSession {
         const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
         if (cached) await cache.upsert([withLoadedBody(cached, loaded)]);
         return loaded;
+      },
+
+      async fetchRaw(gmailId) {
+        // Dev Options → View Original: one `format=raw` request, decoded, never cached.
+        return decodeRawMessage(await client.messageRaw(gmailId));
       },
 
       async fetchMessage(gmailId) {

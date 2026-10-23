@@ -9,7 +9,7 @@
  * README or the user docs.
  *
  * Stored on this device only, under `winnow.devOptions.v1` as
- * `{ version: 1, unlocked, purePlainText }`. Not per account (nothing here is about an
+ * `{ version: 1, unlocked, ...switches }` (`DEV_SWITCHES`). Not per account (nothing here is about an
  * account), never synced, and not cleared by sign-out. Everything is off by default,
  * and all-off is saved as *no entry*, so hiding Dev Options leaves nothing behind.
  */
@@ -24,12 +24,14 @@ export type DevOptions = {
    * part exactly as sent, with none of the usual tidying (`core/mail/plainView.ts`).
    */
   purePlainText: boolean;
+  /** View Original: the reader's ⋯ menu offers the message's raw source (`core/mail/rawSource.ts`). */
+  viewOriginal: boolean;
 };
 
-export const DEFAULT_DEV_OPTIONS: DevOptions = { unlocked: false, purePlainText: false };
+export const DEFAULT_DEV_OPTIONS: DevOptions = { unlocked: false, purePlainText: false, viewOriginal: false };
 
 /** The switches inside Dev Options (everything but `unlocked`), which hiding turns off. */
-const SWITCHES = ["purePlainText"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
+export const DEV_SWITCHES = ["purePlainText", "viewOriginal"] as const satisfies ReadonlyArray<Exclude<keyof DevOptions, "unlocked">>;
 
 /** The subset of `Storage` this needs, so a test can hand in a map. */
 export interface DevOptionsStorage {
@@ -61,7 +63,7 @@ export function loadDevOptions(storage: DevOptionsStorage | null | undefined = d
     const record = parsed as Record<string, unknown>;
     if (record.unlocked !== true) return { ...DEFAULT_DEV_OPTIONS };
     const options: DevOptions = { ...DEFAULT_DEV_OPTIONS, unlocked: true };
-    for (const key of SWITCHES) options[key] = record[key] === true;
+    for (const key of DEV_SWITCHES) options[key] = record[key] === true;
     return options;
   } catch {
     return { ...DEFAULT_DEV_OPTIONS };

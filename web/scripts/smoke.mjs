@@ -7688,7 +7688,10 @@ try {
     );
     check(
       "and only the unlock saved while it is off",
-      (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === JSON.stringify({ version: 1, unlocked: true, purePlainText: false }),
+      await s.evaluate(() => {
+        const saved = JSON.parse(localStorage.getItem("winnow.devOptions.v1") ?? "null");
+        return saved?.unlocked === true && Object.entries(saved).every(([key, value]) => key === "unlocked" || key === "version" || value === false);
+      }),
     );
     await closeSettings();
 
@@ -7756,6 +7759,63 @@ try {
       (await dialog.locator('[data-category="dev"]').count()) === 0 &&
         (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === null,
     );
+    await ctx.close();
+  }
+
+  // ── Dev Options → View Original ───────────────────────────────────────────
+  section("dev options: view original");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const s = await ctx.newPage();
+    s.on("pageerror", (error) => errors.push(String(error)));
+    await s.goto(URL, { waitUntil: "networkidle" });
+    // Unlocked as the ten taps leave it (the taps themselves are checked above).
+    await s.evaluate(() => localStorage.setItem("winnow.devOptions.v1", JSON.stringify({ version: 1, unlocked: true })));
+    await s.reload({ waitUntil: "networkidle" });
+    await s.waitForSelector("[data-row-count] [data-row-id]");
+    const openMessage = async () => {
+      await s.locator("#winnow-search").fill("Introducing Hark Pro");
+      await s.waitForTimeout(300);
+      await s.locator("[data-row-count] [data-row-id]").first().click();
+      await s.waitForTimeout(300);
+      await s.locator('[data-reader] button[aria-label="More"]:visible').first().click();
+      await s.waitForTimeout(100);
+    };
+    await openMessage();
+    check("off: the ⋯ menu has no View Original", (await s.locator("[data-reader-view-original]").count()) === 0);
+    await s.keyboard.press("Escape");
+    await s.keyboard.press(",");
+    await openSettingsCategory(s, "dev");
+    const dialog = s.locator('[role="dialog"][aria-label="Settings"]');
+    const toggle = dialog.locator('[role="switch"][aria-label="View Original"]');
+    check("Dev Options has a View Original switch, off", (await toggle.getAttribute("aria-checked")) === "false");
+    await toggle.click();
+    await dialog.locator("[data-settings-back]").click();
+    await s.waitForTimeout(250);
+    await openMessage();
+    const item = s.locator("[data-reader-view-original]");
+    check("on: the ⋯ menu offers View Original", (await item.count()) === 1);
+    await item.click();
+    const sheet = s.locator('[data-raw-source][data-raw-status="ready"]');
+    await sheet.waitFor({ timeout: 5_000 });
+    const raw = await s.evaluate(() => {
+      const pre = document.querySelector("[data-raw-text]");
+      return {
+        text: pre?.textContent ?? "",
+        children: pre ? pre.children.length : -1,
+        frames: document.querySelectorAll("[data-raw-source] iframe, [data-raw-source] img, [data-raw-source] script").length,
+      };
+    });
+    check(
+      "it shows the headers, the MIME tree and the source as text, rendering nothing",
+      raw.text.startsWith("MIME structure") && raw.text.includes("multipart/alternative") && raw.text.includes("Subject: Introducing Hark Pro") &&
+        raw.text.includes("<table") && raw.children === 0 && raw.frames === 0,
+      JSON.stringify({ start: raw.text.slice(0, 60), children: raw.children, frames: raw.frames }),
+    );
+    check("with a Copy button", (await s.locator("[data-raw-copy]").count()) === 1);
+    await s.keyboard.press("Escape");
+    await s.waitForTimeout(200);
+    check("and Escape closes it", (await s.locator("[data-raw-source]").count()) === 0);
     await ctx.close();
   }
 

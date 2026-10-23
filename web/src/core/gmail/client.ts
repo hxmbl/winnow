@@ -417,6 +417,18 @@ export class GmailClient {
   }
 
   /**
+   * One message's whole RFC 5322 source (`format=raw`), for Dev Options → View
+   * Original. Base64url as Gmail sends it; `core/mail/rawSource.ts` decodes it. Never
+   * rendered, only shown as text.
+   */
+  async messageRaw(id: string): Promise<string> {
+    const message = await this.request<{ raw?: string }>(
+      `/users/me/messages/${encodeURIComponent(id)}?format=raw`,
+    );
+    return message.raw ?? "";
+  }
+
+  /**
    * Just the HTML body of one message, for a message the reader is opening.
    *
    * The same request as `message` — Gmail has no body-only endpoint — but one

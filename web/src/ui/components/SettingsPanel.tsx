@@ -249,6 +249,9 @@ export type SettingsProps = {
   /** Dev Options → Pure Plain Text (`ui/devOptions.ts`): plain text exactly as sent. */
   purePlainText: boolean;
   onPurePlainText: (value: boolean) => void;
+  /** Dev Options → View Original: the reader's ⋯ menu offers the raw source. */
+  viewOriginal: boolean;
+  onViewOriginal: (value: boolean) => void;
   /** The category Settings opens on (on a phone, straight to its page). Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
@@ -862,6 +865,14 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               onChange={props.onPurePlainText}
               label={SETTINGS.purePlainText.label}
               describedBy="winnow-pure-plain-text-hint"
+            />
+          </Row>
+          <Row setting="viewOriginal" hint="Adds View Original to a message's ⋯ menu: raw headers and MIME parts" hintId="winnow-view-original-hint">
+            <Toggle
+              checked={props.viewOriginal}
+              onChange={props.onViewOriginal}
+              label={SETTINGS.viewOriginal.label}
+              describedBy="winnow-view-original-hint"
             />
           </Row>
           <div className="pt-4">

@@ -32,6 +32,7 @@ import {
   Trash2,
   Undo2,
   X,
+  FileCode2,
 } from "lucide-react";
 import { shortcutHint } from "../../core/mail/keybinds";
 import { formatFullTime, formatRelative } from "../../core/mail/datetime";
@@ -109,6 +110,8 @@ type Actions = {
   onUnsubscribe?: () => void;
   /** Open "Change smart filters…" for this message. Absent outside the inbox. */
   onChangeFilters?: () => void;
+  /** Dev Options → View Original: the raw source. Absent unless that switch is on. */
+  onViewOriginal?: () => void;
   /** Turn image loading on for this message only. */
   onLoadRemoteContent: () => void;
   /** Load images from now on, for every message. */
@@ -281,6 +284,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
           onBlockSender={actions.onBlockSender}
           onUnsubscribe={actions.onUnsubscribe}
           onChangeFilters={actions.onChangeFilters}
+          onViewOriginal={actions.onViewOriginal}
           buttonClass="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         />
       </div>
@@ -296,7 +300,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
  * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
  * hands focus back to its button so the keyboard is not stranded.
  */
-function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUnsubscribe, onChangeFilters, buttonClass, phone, buttonContent }: {
+function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUnsubscribe, onChangeFilters, onViewOriginal, buttonClass, phone, buttonContent }: {
   view: BodyView;
   onViewChange: (next: BodyView) => void;
   hasHtml: boolean;
@@ -304,6 +308,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
   onBlockSender: () => void;
   onUnsubscribe?: () => void;
   onChangeFilters?: () => void;
+  onViewOriginal?: () => void;
   buttonClass: string;
   /**
    * The phone reader's version: the menu opens *upward* from the action bar, its rows
@@ -422,6 +427,12 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
               {view === id && <Check size={iconSize} strokeWidth={2.2} aria-hidden="true" />}
             </button>
           ))}
+          {onViewOriginal && (
+            <button type="button" role="menuitem" data-reader-view-original="" onClick={() => choose(onViewOriginal)} className={ITEM}>
+              <FileCode2 size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <span className="flex-1">View Original</span>
+            </button>
+          )}
           <div className="my-1 h-px bg-divider" aria-hidden="true" />
           {onChangeFilters && (
             <button type="button" role="menuitem" data-reader-change-filters="" onClick={() => choose(onChangeFilters)} className={ITEM}>
@@ -662,6 +673,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
             onBlockSender={actions.onBlockSender}
             onUnsubscribe={actions.onUnsubscribe}
             onChangeFilters={actions.onChangeFilters}
+            onViewOriginal={actions.onViewOriginal}
             buttonClass={BUTTON}
             phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead, leftHanded }}
             buttonContent={<MoreHorizontal {...ICON} />}
