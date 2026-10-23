@@ -15,6 +15,9 @@
  *      reading down and opens on scrolling up, at the end, and on a tap; every action is
  *      on screen and hit-testable (six with Snooze in the Inbox, five in the Trash); it
  *      keeps clear of the status pill.
+ *  5b. STRM-324: a sideways swipe on the reader pill steps to the next (left) or the
+ *      previous (right) message, never wraps at the first one, swallows the tap on the
+ *      button it started on, ticks the haptic once; a plain tap on Archive still archives.
  *   6. Shapes: every visible button, field and menu item is a pill or a circle.
  *   7. Desktop Settings → Keyboard shortcuts reads as a table (description beside its
  *      key), and "Hidden & muted senders" fits on one line in the category column.
@@ -95,6 +98,25 @@ async function swipeLeft(p, row) {
     await p.waitForTimeout(16);
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
+
+/**
+ * A sideways touch swipe across the reader pill, starting on the button labelled
+ * `label` (STRM-324): `direction` -1 is leftward (next), 1 rightward (previous).
+ */
+async function swipePill(p, label, direction) {
+  const b = await p.locator(`[data-reader-dock] button[aria-label="${label}"]`).boundingBox();
+  const cdp = await p.context().newCDPSession(p);
+  const y = b.y + b.height / 2;
+  const x0 = b.x + b.width / 2;
+  const at = (x) => [{ x, y }];
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(x0) });
+  for (let i = 1; i <= 10; i += 1) {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(x0 + direction * i * 12) });
+    await p.waitForTimeout(16);
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
 }
 
 const overlaps = (a, b) => a && b && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -436,6 +458,55 @@ export async function smokeThumb({ browser, URL, check, section, errors }) {
     check(`${tag}: the reader's Back is at its top-left`, true);
     await ctx.close();
   }
+  // ── 5b. STRM-324: a sideways swipe on the reader pill steps through the list ──
+  section("phone reader: swiping the action pill steps to the previous/next message");
+  {
+    const { ctx, p } = await phonePage(browser, URL, errors);
+    await p.evaluate(() => {
+      window.__vibrations = 0;
+      navigator.vibrate = () => {
+        window.__vibrations += 1;
+        return true;
+      };
+    });
+    const rowIds = await p
+      .locator("[data-row-count] [data-row-id] button[data-message-id]")
+      .evaluateAll((buttons) => buttons.slice(0, 3).map((b) => b.getAttribute("data-message-id")));
+    const rowCount = () => p.locator("[data-row-count] [data-row-id]").count();
+    const openId = () => p.locator("[data-reader]").getAttribute("data-reader-message", { timeout: 2_000 }).catch(() => null);
+    await p.locator(`[data-row-count] button[data-message-id="${rowIds[0]}"]`).first().tap();
+    await p.waitForSelector("[data-reader-pill-swipe]", { timeout: 5_000 });
+    await p.waitForTimeout(400);
+    check("the first message is open", (await openId()) === rowIds[0], `${await openId()} vs ${rowIds[0]}`);
+
+    // At the top of the list a swipe right (previous) does nothing: no wrap.
+    await swipePill(p, "Reply to all", 1);
+    await p.waitForTimeout(400);
+    check("at the first message a swipe right stays put (no wrap)", (await openId()) === rowIds[0], String(await openId()));
+
+    // A swipe left that starts on Archive steps to the next message and archives nothing.
+    await swipePill(p, "Archive", -1);
+    await p.waitForTimeout(500);
+    check("a swipe left on the pill opens the next message", (await openId()) === rowIds[1], `${await openId()} vs ${rowIds[1]}`);
+    // (The list behind the reader is windowed, so its rendered row count says nothing;
+    // the swipe back to the first message below is what proves it is still in the list.)
+    check("and the button it started on (Archive) did not fire", (await p.locator("[data-status-pill='undo']").count()) === 0);
+    check("a step ticks the haptic once", (await p.evaluate(() => window.__vibrations)) === 1, String(await p.evaluate(() => window.__vibrations)));
+    const pillAt = await p.locator("[data-reader-dock]").evaluate((el) => el.style.transform);
+    check("the pill springs back after the swipe", pillAt === "" || pillAt === "none", pillAt);
+
+    await swipePill(p, "Forward", 1);
+    await p.waitForTimeout(500);
+    check("a swipe right opens the previous message (the first, so it was not archived)", (await openId()) === rowIds[0], `${await openId()} vs ${rowIds[0]}`);
+
+    // A tap is still a tap: Archive archives.
+    await p.locator("[data-reader-dock] button[aria-label='Archive']").tap();
+    await p.waitForTimeout(600);
+    const label = await p.locator("[data-status-pill='undo'] [data-undo-label]").textContent({ timeout: 1_500 }).catch(() => null);
+    check("a tap on Archive still archives", label === "Archived." && (await p.locator(`[data-row-count] button[data-message-id="${rowIds[0]}"]`).count()) === 0, `${label}, rows ${await rowCount()}`);
+    await ctx.close();
+  }
+
   {
     // The compose button follows the hand on the list.
     const { ctx, p } = await phonePage(browser, URL, errors, { prefs: { leftHanded: true } });

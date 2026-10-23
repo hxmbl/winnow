@@ -1099,6 +1099,36 @@ div[data-row-count] {
 .wn-reader-pill-handle {
   transition: opacity 160ms var(--wn-glass-ease);
 }
+/*
+ * STRM-324: a sideways swipe on the pill steps to the previous/next message, so the
+ * browser keeps only vertical panning there and hands sideways moves to the pill.
+ */
+[data-reader-pill-swipe] {
+  touch-action: pan-y;
+}
+/*
+ * The message a swipe stepped to slides in from the side the finger came from (next
+ * from the right, previous from the left). The global reduced-motion rule makes it
+ * instant.
+ */
+[data-reader-pane][data-step-enter="next"] {
+  animation: wn-step-in-next 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+[data-reader-pane][data-step-enter="prev"] {
+  animation: wn-step-in-prev 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes wn-step-in-next {
+  from {
+    transform: translateX(32px);
+    opacity: 0.4;
+  }
+}
+@keyframes wn-step-in-prev {
+  from {
+    transform: translateX(-32px);
+    opacity: 0.4;
+  }
+}
 [data-reader-pill="collapsed"] .wn-reader-pill-actions,
 [data-reader-pill="open"] .wn-reader-pill-handle {
   opacity: 0;

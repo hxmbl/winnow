@@ -1334,6 +1334,19 @@ export function App({ store, existingInstall = true }: Props) {
    * document; `preventScroll` because the list is already where the user left it, and a
    * focus after a tap draws no `focus-visible` ring, so nothing on screen marks the row.
    */
+  /**
+   * The message a swipe on the phone reader's pill stepped to, and which way (STRM-324):
+   * its pane slides in from that side. Keyed on the id, so opening any other way (a
+   * row, a notification, Back) never replays it.
+   */
+  const [stepEnter, setStepEnter] = useState<{ id: number; dir: "next" | "prev" } | null>(null);
+  const stepFromPill = useCallback((step: 1 | -1) => {
+    const s = storeRef.current;
+    s.moveCursor(step);
+    const id = s.getSnapshot().view.selected?.id;
+    setStepEnter(id === undefined ? null : { id, dir: step === 1 ? "next" : "prev" });
+  }, []);
+
   const closeReader = useCallback(() => {
     const s = storeRef.current;
     if (!phoneRef.current) {
@@ -4615,6 +4628,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             key={selected?.id ?? "empty"}
             // At `lg` the width is the split's: see `[data-reader-pane]` in `index.css`.
             data-reader-pane=""
+            data-step-enter={selected && stepEnter?.id === selected.id ? stepEnter.dir : undefined}
             // `w-full min-w-0` below `lg`, and the width is not optional there.
             //
             // Without `min-w-0` this pane is a flex item whose base size is its content —
@@ -4652,6 +4666,12 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               phone={phone}
               sidebarOpen={sidebarOpen}
               onToggleSidebar={phone ? undefined : toggleSidebar}
+              // The masthead's ‹ › arrows, as a swipe on the phone's action pill. Stands
+              // down while a menu, sheet or composer is over the reader.
+              stepReach={phone ? { prev: store.canStep(-1), next: store.canStep(1) } : undefined}
+              onStep={
+                phone && !menu && !filterPicker && !sidebarOpen && !composer && snapshot.overlay === "none" ? stepFromPill : undefined
+              }
               senderPhoto={selected ? photos.get(selected.sender.toLowerCase()) : undefined}
               codeBar={
                 selected?.code ? (

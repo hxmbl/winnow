@@ -66,6 +66,7 @@ function firstLine(body: string): string {
 import { AttachmentList, type LoadedAttachment } from "./AttachmentList";
 import type { Mailbox } from "../../core/model/email";
 import { PILL_START, pillAfterScroll, pillOpened, pillOrder, type ReaderPillAction } from "../readerPill";
+import { PillSwipe, type StepDelta, type StepReach } from "../readerSwipe";
 import { AppMark } from "../AppMark";
 
 /**
@@ -451,6 +452,96 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
 }
 
 /**
+ * The pill's sideways swipe (STRM-324): left steps to the next message, right to the
+ * previous, by the same step as the masthead's arrows (`readerSwipe.ts` decides; this
+ * draws). The pill follows the finger a little and springs back on release; under
+ * reduced motion it stays put. Once a press has become a swipe, the click it would end
+ * in is swallowed, so letting go over Archive never archives. A haptic tick marks a step.
+ */
+function usePillSwipe(reach: StepReach | undefined, onStep: ((step: StepDelta) => void) | undefined) {
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  const gesture = useRef<{ id: number; swipe: PillSwipe } | null>(null);
+  /** Set once a press became a swipe; the click that ends it is swallowed. */
+  const swallowClick = useRef(false);
+  // The latest reach and handler, read at release rather than captured at press.
+  const latest = useRef({ reach, onStep });
+  latest.current = { reach, onStep };
+
+  const draw = (shift: number, settle: boolean) => {
+    const dock = dockRef.current;
+    if (!dock) return;
+    const reduce = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    if (reduce) {
+      dock.style.transform = "";
+      return;
+    }
+    dock.style.transition = settle ? "transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" : "none";
+    dock.style.transform = shift === 0 ? "" : `translateX(${shift}px)`;
+  };
+
+  const end = (pointerId: number, element: HTMLElement) => {
+    gesture.current = null;
+    if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId);
+    draw(0, true);
+  };
+
+  const handlers = onStep
+    ? {
+        onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => {
+          swallowClick.current = false;
+          if (!event.isPrimary) return;
+          gesture.current = {
+            id: event.pointerId,
+            swipe: new PillSwipe({ x: event.clientX, y: event.clientY, at: event.timeStamp }, latest.current.reach ?? { prev: false, next: false }, {
+              screenWidth: window.innerWidth,
+              pointer: event,
+            }),
+          };
+        },
+        onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => {
+          const current = gesture.current;
+          if (!current || current.id !== event.pointerId) return;
+          const wasSwiping = current.swipe.swiping;
+          const move = current.swipe.move(event.clientX, event.clientY, event.timeStamp);
+          if (move.phase === "ignored") {
+            gesture.current = null;
+            return;
+          }
+          if (move.phase !== "swiping") return;
+          if (!wasSwiping) {
+            // From here on the press is a swipe: keep its moves, and not its click.
+            swallowClick.current = true;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+          }
+          draw(move.shift, false);
+        },
+        onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => {
+          const current = gesture.current;
+          if (!current || current.id !== event.pointerId) return;
+          current.swipe.move(event.clientX, event.clientY, event.timeStamp);
+          const step = current.swipe.release();
+          end(event.pointerId, event.currentTarget);
+          if (step !== null) {
+            navigator.vibrate?.(10);
+            latest.current.onStep?.(step);
+          }
+        },
+        onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => {
+          if (gesture.current?.id === event.pointerId) end(event.pointerId, event.currentTarget);
+        },
+        onClickCapture: (event: React.MouseEvent<HTMLDivElement>) => {
+          if (!swallowClick.current) return;
+          swallowClick.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        },
+      }
+    : {};
+
+  return { dockRef, handlers };
+}
+
+/**
  * The phone reader's actions: a floating glass pill under the thumb.
  *
  * Bottom-right (bottom-left when left-handed), clear of the gesture bar, the same frost
@@ -462,7 +553,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
  * again on a scroll up, a tap, or at the end of the message. The fold is a width change
  * with the buttons fading out; under reduced motion it is only the fade.
  */
-function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName, scroller, messageKey, leftHanded }: {
+function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, hasHtml, senderName, scroller, messageKey, leftHanded, reach, onStep }: {
   starred: boolean;
   unread: boolean;
   mailbox: Mailbox;
@@ -476,8 +567,13 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
   /** Changes with the open message: a new message starts with the pill open. */
   messageKey: string | number;
   leftHanded: boolean;
+  /** Which ways a sideways swipe on the pill can step (the masthead arrows' `canStep`). */
+  reach?: StepReach;
+  /** Step to the previous (`-1`) or next (`1`) message. Absent, the pill does not swipe. */
+  onStep?: (step: StepDelta) => void;
 }) {
   const [scroll, setScroll] = useState(PILL_START);
+  const swipe = usePillSwipe(reach, onStep);
   useEffect(() => {
     setScroll(PILL_START);
     const element = scroller.current;
@@ -576,6 +672,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
 
   return (
     <div
+      ref={swipe.dockRef}
       data-reader-dock=""
       data-reader-pill={collapsed ? "collapsed" : "open"}
       data-hand={leftHanded ? "left" : "right"}
@@ -586,8 +683,10 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
       <div
         role="toolbar"
         aria-label="Message actions"
+        data-reader-pill-swipe={onStep ? "" : undefined}
         className="wn-glass wn-glass-behind wn-liquid wn-reader-pill pointer-events-auto relative h-[var(--wn-dock-h)] rounded-full"
         style={{ "--wn-pill-count": snoozable ? 6 : 5 } as React.CSSProperties}
+        {...swipe.handlers}
       >
         <div
           data-reader-pill-actions=""
@@ -682,6 +781,10 @@ type Props = {
    */
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  /** Phone: which ways a swipe on the action pill can step (the arrows' `canStep`). */
+  stepReach?: StepReach;
+  /** Phone: step to the previous (`-1`) or next (`1`) message, from a swipe on the pill. */
+  onStep?: (step: StepDelta) => void;
 };
 
 export function Reader({
@@ -708,6 +811,8 @@ export function Reader({
   onMailto,
   leftHanded = false,
   emailDark = null,
+  stepReach,
+  onStep,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -768,7 +873,7 @@ export function Reader({
     // `data-reader` so a test can reach the pane as a whole — the header's `<time>`
     // lives outside `<article>`, so "which message is open" cannot be answered from
     // the article alone.
-    <div data-reader="" data-select-scope="" className="flex min-h-0 flex-1 flex-col">
+    <div data-reader="" data-reader-message={email.id} data-select-scope="" className="flex min-h-0 flex-1 flex-col">
       {/* The action bar: its own row, at the top, the same place for every message. On a
           phone the actions are the dock at the bottom instead. */}
       {!phone && (
@@ -1139,6 +1244,8 @@ export function Reader({
           scroller={bodyRef}
           messageKey={email.id}
           leftHanded={leftHanded}
+          reach={stepReach}
+          onStep={onStep}
         />
       )}
     </div>
