@@ -10,6 +10,13 @@
 import { debugLog } from "../core/debug/debugLog";
 import type { Email } from "../core/model/email";
 import {
+  isTestNotification,
+  TEST_GMAIL_ID,
+  TEST_REPLY_HEAD,
+  testNotificationEmail,
+  testPressText,
+} from "../core/notify/testNotification";
+import {
   buildNotificationBatch,
   handleNotificationAction,
   parseKeptReply,
@@ -17,6 +24,7 @@ import {
   type NotificationAccount,
   type NotificationActionDeps,
   type NotificationActionEvent,
+  type NotificationSettings,
 } from "../core/notify/notifications";
 import type { WinnowStore } from "../core/store/store";
 import type { Platform } from "../platform/types";
@@ -419,9 +427,11 @@ export async function announce(
   account: NotificationAccount | null = openAccountTag(store),
   /** The account's own reply heads (another account's backend); the open one's by default. */
   replyHeads?: (emails: readonly Email[]) => Promise<Record<string, string>>,
+  /** Settings to use instead of the user's (the test notification shows every button). */
+  settings?: Partial<Pick<NotificationSettings, "notificationActions" | "notificationHidePreview">>,
 ): Promise<void> {
   if (emails.length === 0) return;
-  const preferences = store.getSnapshot().preferences;
+  const preferences = { ...store.getSnapshot().preferences, ...settings };
   // Only Android replies from the notification itself; elsewhere Reply opens the
   // composer, so the header blocks (a profile read each) would be built for nothing.
   const info = await platform.info().catch(() => null);
@@ -436,6 +446,48 @@ export async function announce(
   const batch = buildNotificationBatch(emails, preferences, resolvedHeads, shown, account);
   debugLog("notify", "posted", { arrived: emails.length, os: info?.os ?? "unknown", account: account?.id ?? null });
   await platform.notifyNewMail(batch);
+}
+
+/** What Send test notification reports back to Dev Options. */
+export type TestNotificationResult = "sent" | "denied" | "failed";
+
+/**
+ * Dev Options → Send test notification: the sample (`core/notify/testNotification.ts`)
+ * through `announce`, the path real mail takes, with Delete, Mark read and Reply shown
+ * and its picture (or monogram) drawn whatever the notification settings say, since it
+ * holds nothing private. Asks for permission first, as turning notifications on does.
+ */
+export async function sendTestNotification(store: WinnowStore, platform: Platform): Promise<TestNotificationResult> {
+  try {
+    if (!(await platform.requestNotificationPermission())) return "denied";
+    await announce(store, platform, [testNotificationEmail()], openAccountTag(store), async () => ({ [TEST_GMAIL_ID]: TEST_REPLY_HEAD }), {
+      notificationActions: { reply: true, trash: true, read: true },
+      notificationHidePreview: false,
+    });
+    debugLog("notify", "test-sent", {});
+    return "sent";
+  } catch (error) {
+    debugLog("notify", "test-failed", { reason: error instanceof Error ? error.message : "unknown" });
+    return "failed";
+  }
+}
+
+/** How long the status pill says what a press on the test notification did. */
+export const TEST_PRESS_FLASH_MS = 4_000;
+
+/**
+ * A press on the test notification: nothing is done to any mail (Android's native side
+ * has already answered it without a request, `plan::execute`); the app says so, and a
+ * desktop notification gets the same confirmation.
+ */
+function testPress(store: WinnowStore, platform: Platform, event: NotificationActionEvent): string {
+  if (event.action === "open" || event.action === "inbox") void platform.focusWindow();
+  store.flash(testPressText(event.action), TEST_PRESS_FLASH_MS);
+  if (event.origin === "desktop" && event.action !== "open" && event.action !== "inbox") {
+    void platform.confirmNotificationAction?.(event.messageId, "Test notification", "Nothing was changed.", false);
+  }
+  debugLog("notify", "test-press", { action: event.action, origin: event.origin });
+  return "test";
 }
 
 // ── Presses and kept replies ──────────────────────────────────────────────
@@ -469,6 +521,7 @@ export function notificationDeps(store: WinnowStore, platform: Platform, routes:
 
 /** One press (or a notification's deep link), once the app can act on it. */
 export async function routeNotificationAction(store: WinnowStore, platform: Platform, event: NotificationActionEvent): Promise<string> {
+  if (isTestNotification(event.gmailId)) return testPress(store, platform, event);
   // A native action already done needs no account to be open.
   const native = event.origin === "android" && event.action !== "open" && event.action !== "inbox";
   const routes = await accountRouter(native ? 0 : undefined);
@@ -482,7 +535,7 @@ export function wireNotifications(store: WinnowStore, platform: Platform): () =>
   const unlisten = platform.onNotificationAction((event) => {
     void routeNotificationAction(store, platform, event);
     // A failed native action was about a message the user may now want to see.
-    if (event.origin === "android" && event.outcome === "failed") {
+    if (event.origin === "android" && event.outcome === "failed" && !isTestNotification(event.gmailId)) {
       store.setNotice("A notification action didn't go through. It's shown on the notification.");
     }
   });
@@ -514,9 +567,13 @@ async function saveKeptRepliesOnce(store: WinnowStore, platform: Platform): Prom
   // Each kept reply goes to its own account's Drafts: those for an account that is not
   // open wait on the phone until it is (this runs again whenever an account is ready).
   const open = store.currentAccountId();
-  const kept = raw
-    .map(parseKeptReply)
-    .filter((reply): reply is KeptReply => reply !== null && (!reply.account || reply.account === open));
+  const parsed = raw.map(parseKeptReply);
+  // A reply typed into the test notification is never saved anywhere, only let go.
+  const tests = parsed.filter((reply): reply is KeptReply => reply !== null && isTestNotification(reply.gmailId));
+  if (tests.length > 0) await platform.releaseKeptReplies(tests.map((reply) => reply.requestId)).catch(() => undefined);
+  const kept = parsed.filter(
+    (reply): reply is KeptReply => reply !== null && !isTestNotification(reply.gmailId) && (!reply.account || reply.account === open),
+  );
   if (kept.length === 0) return;
   const { saved, failed } = await store.saveKeptReplies(kept);
   const failedIds = new Set(failed.map((reply) => reply.requestId));

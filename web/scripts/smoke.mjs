@@ -7876,6 +7876,7 @@ try {
     await s.keyboard.press(",");
     await openSettingsCategory(s, "dev");
     check("Dev Options has a Debug log switch, on as saved", (await toggle.getAttribute("aria-checked")) === "true");
+    check("the web build offers no Send test notification (no native notifier)", (await dialog.locator("[data-dev-test-notification]").count()) === 0);
     let recorded = await logText();
     for (let i = 0; i < 30 && !/ sync done /.test(recorded); i++) {
       await s.waitForTimeout(500);

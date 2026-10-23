@@ -175,7 +175,8 @@ import type { OfflineQueue } from "./core/offline/queue";
 import { OfflineIndicator } from "./ui/components/OfflineIndicator";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
-import { announce, onReplyRequest, provideAccountRouter } from "./ui/notificationActions";
+import { announce, onReplyRequest, provideAccountRouter, sendTestNotification } from "./ui/notificationActions";
+import { updateButtonShown } from "./ui/updateButton";
 import { notifiable } from "./core/notify/notifications";
 import { alreadyAddedMessage } from "./ui/accounts";
 import { exitRows } from "./ui/rowExit";
@@ -4929,6 +4930,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onFilterScores={(value) => changeDevOptions({ filterScores: value })}
           debugLog={devOptions.debugLog}
           onDebugLog={(value) => changeDevOptions({ debugLog: value })}
+          onTestNotification={updateButtonShown(updates.runtime) ? () => sendTestNotification(store, platform) : undefined}
           undoSendSeconds={preferences.undoSendSeconds}
           onUndoSendSeconds={(value) => store.setPreferences({ undoSendSeconds: value })}
           scheduledCount={snapshot.scheduled.filter((send) => send.account === store.accountKey()).length}

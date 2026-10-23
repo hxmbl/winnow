@@ -55,6 +55,11 @@ pub fn valid_gmail_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+/// Dev Options → Send test notification's sample (`TEST_GMAIL_ID` in
+/// `web/src/core/notify/testNotification.ts`; a web test pins the two together). Not
+/// hex, so never a real Gmail id: a press on it is answered without a token or a request.
+pub const TEST_GMAIL_ID: &str = "winnowtestnotification";
+
 // ── Wire ────────────────────────────────────────────────────────────────────
 
 /// One action, as the Kotlin receiver reports it.
@@ -188,6 +193,8 @@ pub enum Outcome {
     MarkedRead,
     Restored,
     Failed(Failure),
+    /// A press on the test notification: nothing was done to any mail.
+    Test,
 }
 
 /// What the notification says afterwards. Mirrors `finish` in `NotifyPlugin.kt`.
@@ -241,6 +248,12 @@ pub fn finish_for(request: &ActionRequest, outcome: &Outcome) -> Finish {
         Outcome::Trashed => ("undo", "Moved to Trash", "", true),
         Outcome::MarkedRead => ("done", "Marked as read", "", true),
         Outcome::Restored => ("done", "Moved back to Inbox", "", true),
+        Outcome::Test => (
+            "done",
+            "Test notification",
+            "Nothing was changed: it isn't a real message.",
+            true,
+        ),
         Outcome::Failed(failure) => (
             "failed",
             "Couldn't do that. Open Winnow",
@@ -282,6 +295,9 @@ pub fn execute(
         if text.trim().is_empty() {
             return Outcome::EmptyReply;
         }
+    }
+    if request.gmail_id == TEST_GMAIL_ID {
+        return Outcome::Test;
     }
     if !valid_gmail_id(&request.gmail_id) {
         return fail(Failure::Invalid);
@@ -963,6 +979,35 @@ mod tests {
             Outcome::Failed(Failure::Invalid)
         );
         assert!(t.seen.is_empty());
+    }
+
+    #[test]
+    fn the_test_notification_touches_no_mail() {
+        // No answers scripted: any request at all panics.
+        let mut t = Script::new(&[]);
+        let no_secrets = Secrets {
+            tokens: None,
+            client: None,
+        };
+        for action in ["trash", "read", "untrash"] {
+            let mut press = request(action, None);
+            press.gmail_id = TEST_GMAIL_ID.into();
+            assert_eq!(execute(&press, &no_secrets, NOW, &mut t), Outcome::Test);
+        }
+        let mut reply = request("reply", Some("hello"));
+        reply.gmail_id = TEST_GMAIL_ID.into();
+        assert_eq!(execute(&reply, &no_secrets, NOW, &mut t), Outcome::Test);
+        assert!(t.seen.is_empty());
+        let finish = finish_for(&reply, &Outcome::Test);
+        assert_eq!(finish.kind, "done");
+        assert_eq!(finish.title, "Test notification");
+        assert!(finish.release_pending);
+        assert!(valid_gmail_id(TEST_GMAIL_ID));
+        assert!(!TEST_GMAIL_ID.bytes().all(|b| b.is_ascii_hexdigit()));
+        // The web's `TEST_REPLY_HEAD` (a web test checks this is the same text), which the
+        // batch keeps only because it is a head `assemble_reply` accepts.
+        let web_head = "From: Winnow <test@winnow.invalid>\r\nTo: test@winnow.invalid\r\nSubject: Re: Test notification\r\nIn-Reply-To: <winnowtestnotification@winnow.invalid>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+        assert!(assemble_reply(web_head, "x", NOW).is_ok());
     }
 
     #[test]

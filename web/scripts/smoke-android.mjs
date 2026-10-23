@@ -16,6 +16,9 @@
  *      and with a newer release Update, which runs the app's APK updater.
  *   1c. Every tenth load (a reload counts) checks in the background: the newer release
  *      puts the button in Update, nothing installs, and the count starts again.
+ *   1d. Dev Options → Send test notification: posts the sample through `notify_messages`
+ *      with all three buttons and a reply head, and a press on it (as Rust reports one)
+ *      only says it did nothing.
  *
  * Separate from `smoke.mjs` so it can run alone (`node scripts/smoke-android.mjs`);
  * `npm run smoke` runs both. Same environment: WINNOW_PORT, WINNOW_CHROMIUM.
@@ -104,6 +107,8 @@ function fakeAndroid({ packageName, sha1 }) {
           return { channel: "android", version: "1.5.4", arch: "aarch64" };
         case "update_install_apk":
           return { kind: "opened" };
+        case "request_notification_permission":
+          return true;
         case "oauth_begin":
           // Stop the loopback flow where it starts: reaching it is the point.
           throw new Error("smoke: no loopback listener");
@@ -295,6 +300,64 @@ try {
     await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
     await page.waitForFunction(() => localStorage.getItem("winnow.updates.loads.v1") === "1", null, { timeout: 5_000 }).catch(() => undefined);
     check("the next load counts from 1 again, without a check", (await loads()) === "1" && asked === 1, `loads=${await loads()} asked=${asked}`);
+    check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
+    await context.close();
+  }
+
+  // ── 1d. Dev Options in the Android app ──────────────────────────────────────
+  console.log("\n── android app: dev options ──");
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    await context.addInitScript(() => {
+      if (localStorage.getItem("winnow.devOptions.v1") === null) localStorage.setItem("winnow.devOptions.v1", JSON.stringify({ version: 1, unlocked: true }));
+    });
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error)));
+    await page.goto(URL, { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.keyboard.press(",");
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await dialog.waitFor({ timeout: 5_000 });
+    await dialog.locator('[role="tab"][data-category="dev"]').click();
+    const send = dialog.locator("[data-dev-test-notification]");
+    await send.waitFor({ timeout: 5_000 });
+    check("Dev Options offers Send test notification in the app", (await send.count()) === 1);
+    await send.click();
+    await page.waitForSelector('[data-dev-test-notification="sent"]', { timeout: 5_000 }).catch(() => undefined);
+    const posted = await page.evaluate(() => window.__smokeCalls.filter((call) => call.cmd === "notify_messages").map((call) => call.args.batch));
+    const message = posted[0]?.messages?.[0];
+    check(
+      "it posts one sample through notify_messages, with Delete, Mark read and Reply",
+      posted.length === 1 &&
+        posted[0].messages.length === 1 &&
+        message.gmailId === "winnowtestnotification" &&
+        message.title === "Winnow" &&
+        typeof message.replyHead === "string" &&
+        posted[0].actions.reply && posted[0].actions.trash && posted[0].actions.read &&
+        posted[0].hidePreview === false,
+      JSON.stringify(posted).slice(0, 300),
+    );
+    check(
+      "and says it was sent",
+      (await send.getAttribute("data-dev-test-notification")) === "sent" &&
+        ((await dialog.locator("#winnow-test-notification-hint").textContent()) ?? "").startsWith("Sent."),
+    );
+    // A press, as Rust reports one it answered without touching Gmail.
+    const pressed = await page.evaluate((messageId) => {
+      const listen = window.__smokeCalls.find((call) => call.cmd === "plugin:event|listen" && call.args?.event === "winnow://notification-action");
+      if (!listen) return false;
+      window[`_${listen.args.handler}`]({
+        event: "winnow://notification-action",
+        id: 1,
+        payload: { action: "trash", messageId, gmailId: "winnowtestnotification", origin: "android", outcome: "done" },
+      });
+      return true;
+    }, message?.messageId ?? 1);
+    await page.waitForTimeout(300);
+    const said = await page.evaluate(() => document.body.innerText.includes("Test notification: Delete did nothing. It isn't a real message."));
+    check("a press on it touches nothing and says so", pressed && said, JSON.stringify({ pressed, said }));
     check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
     await context.close();
   }

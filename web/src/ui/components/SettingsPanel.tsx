@@ -18,6 +18,7 @@ import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
 import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
 import { devUnlockTap } from "../devOptions";
 import { DebugLogPanel } from "./DebugLogPanel";
+import type { TestNotificationResult } from "../notificationActions";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
   INFO_CLOSED,
@@ -259,6 +260,8 @@ export type SettingsProps = {
   /** Dev Options → Debug log: record sync, update and notification events in memory. */
   debugLog: boolean;
   onDebugLog: (value: boolean) => void;
+  /** Dev Options → Send test notification; absent on the web build and Docker (no native notifier). */
+  onTestNotification?: () => Promise<TestNotificationResult>;
   /** The category Settings opens on (on a phone, straight to its page). Reading unless a caller has a reason. */
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
@@ -890,6 +893,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               describedBy="winnow-filter-scores-hint"
             />
           </Row>
+          {props.onTestNotification && <TestNotificationRow send={props.onTestNotification} />}
           <Row setting="debugLog" hint="Sync, update and notification events, in memory, redacted" hintId="winnow-debug-log-hint">
             <Toggle
               checked={props.debugLog}
@@ -908,6 +912,35 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
         </Section>
       );
   }
+}
+
+const TEST_NOTIFICATION_STATUS: Record<TestNotificationResult, string> = {
+  sent: "Sent. Its buttons change nothing in your mailbox.",
+  denied: "Notifications aren't allowed for Winnow on this device.",
+  failed: "Couldn't post the test notification.",
+};
+
+/** Dev Options → Send test notification (native builds only), with what happened under it. */
+function TestNotificationRow({ send }: { send: () => Promise<TestNotificationResult> }) {
+  const [state, setState] = useState<"idle" | "sending" | TestNotificationResult>("idle");
+  const hint = state === "idle" ? "A sample, through the real notification path" : state === "sending" ? "Sending…" : TEST_NOTIFICATION_STATUS[state];
+  return (
+    <Row setting="testNotification" hint={hint} hintId="winnow-test-notification-hint">
+      <button
+        type="button"
+        data-dev-test-notification={state}
+        aria-describedby="winnow-test-notification-hint"
+        disabled={state === "sending"}
+        onClick={() => {
+          setState("sending");
+          void send().then(setState, () => setState("failed"));
+        }}
+        className={`${SECONDARY_BUTTON} disabled:opacity-60`}
+      >
+        Send test notification
+      </button>
+    </Row>
+  );
 }
 
 /**

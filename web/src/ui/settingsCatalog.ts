@@ -341,6 +341,12 @@ export const SETTINGS = {
     explanation:
       "Adds the numbers behind each line of “Why it's here”: the built-in answer, the importance score or spam likelihood, which path decided, any sender rule and how many decisions made it, and the similar-mail naive Bayes working (each shared clue's weight, the total log-odds and the probability). They are worked out on this device from what is already there. Off, Why it's here is words only, as normal.",
   },
+  testNotification: {
+    category: "dev",
+    label: "Test notification",
+    explanation:
+      "Posts a sample new-mail notification the way real mail does, with its picture and the Delete, Mark read and Reply buttons, so you can see how it looks on this device. It is not a real message: pressing its buttons changes nothing in your mailbox, and Winnow says so. Only on the installed app.",
+  },
   debugLog: {
     category: "dev",
     label: "Debug log",
