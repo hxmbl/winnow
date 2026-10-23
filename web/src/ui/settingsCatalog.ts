@@ -347,6 +347,12 @@ export const SETTINGS = {
     explanation:
       "Posts a sample new-mail notification the way real mail does, with its picture and the Delete, Mark read and Reply buttons, so you can see how it looks on this device. It is not a real message: pressing its buttons changes nothing in your mailbox, and Winnow says so. Only on the installed app.",
   },
+  devCheckNow: {
+    category: "dev",
+    label: "Check for updates",
+    explanation:
+      "Checks for a newer release now, the same check as Check now in About: it ignores the schedule and the automatic-check switch, and starts the every-tenth-load count again. The answer shows here: Update available, No updates available, or Couldn't check. It never installs anything; updating stays in About and the version's button. Only on the installed app.",
+  },
   debugLog: {
     category: "dev",
     label: "Debug log",

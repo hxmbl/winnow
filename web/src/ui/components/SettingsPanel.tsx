@@ -19,6 +19,8 @@ import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settin
 import { devUnlockTap } from "../devOptions";
 import { DebugLogPanel } from "./DebugLogPanel";
 import type { TestNotificationResult } from "../notificationActions";
+import { devCheckView } from "../devCheckNow";
+import { updateButtonShown } from "../updateButton";
 import { SettingsExplain } from "../settingsExplainContext";
 import {
   INFO_CLOSED,
@@ -894,6 +896,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             />
           </Row>
           {props.onTestNotification && <TestNotificationRow send={props.onTestNotification} />}
+          {props.updates && updateButtonShown(props.updates.runtime) && <DevCheckNowRow updates={props.updates} />}
           <Row setting="debugLog" hint="Sync, update and notification events, in memory, redacted" hintId="winnow-debug-log-hint">
             <Toggle
               checked={props.debugLog}
@@ -938,6 +941,32 @@ function TestNotificationRow({ send }: { send: () => Promise<TestNotificationRes
         className={`${SECONDARY_BUTTON} disabled:opacity-60`}
       >
         Send test notification
+      </button>
+    </Row>
+  );
+}
+
+/**
+ * Dev Options → Check now (native builds only): About's Check now, with the answer
+ * inline (`ui/devCheckNow.ts`). Only checks; installing stays in About.
+ */
+function DevCheckNowRow({ updates }: { updates: UpdatesController }) {
+  const [asked, setAsked] = useState(false);
+  const view = devCheckView(asked, updates.status, updates.offer, updates.message);
+  return (
+    <Row setting="devCheckNow" hint={view.line ?? "Ignores the schedule; never installs"} hintId="winnow-dev-check-now-hint">
+      <button
+        type="button"
+        data-dev-check-now={view.state}
+        aria-describedby="winnow-dev-check-now-hint"
+        disabled={updates.status === "checking" || updates.status === "installing"}
+        onClick={() => {
+          setAsked(true);
+          updates.checkNow();
+        }}
+        className={`${SECONDARY_BUTTON} disabled:opacity-60`}
+      >
+        Check now
       </button>
     </Row>
   );

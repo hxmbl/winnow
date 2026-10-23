@@ -18,7 +18,8 @@
  *      puts the button in Update, nothing installs, and the count starts again.
  *   1d. Dev Options → Send test notification: posts the sample through `notify_messages`
  *      with all three buttons and a reply head, and a press on it (as Rust reports one)
- *      only says it did nothing.
+ *      only says it did nothing. Check now answers inline (No updates available, Update
+ *      available, Couldn't check) and installs nothing.
  *
  * Separate from `smoke.mjs` so it can run alone (`node scripts/smoke-android.mjs`);
  * `npm run smoke` runs both. Same environment: WINNOW_PORT, WINNOW_CHROMIUM.
@@ -309,6 +310,29 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
     await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    let release = { status: 200, tag: "v1.5.4" };
+    await context.route("https://api.github.com/repos/hxmbl/winnow/releases/latest", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (release.status !== 200) return route.fulfill({ status: release.status, headers: { "access-control-allow-origin": "*" }, json: {} });
+      const version = release.tag.slice(1);
+      await route.fulfill({
+        headers: { "access-control-allow-origin": "*" },
+        json: {
+          tag_name: release.tag,
+          name: release.tag,
+          draft: false,
+          prerelease: false,
+          html_url: `https://github.com/hxmbl/winnow/releases/tag/${release.tag}`,
+          assets: [
+            {
+              name: `Winnow_${version}_android-universal.apk`,
+              browser_download_url: `https://github.com/hxmbl/winnow/releases/download/${release.tag}/Winnow_${version}_android-universal.apk`,
+              size: 1,
+            },
+          ],
+        },
+      });
+    });
     await context.addInitScript(() => {
       if (localStorage.getItem("winnow.devOptions.v1") === null) localStorage.setItem("winnow.devOptions.v1", JSON.stringify({ version: 1, unlocked: true }));
     });
@@ -358,6 +382,30 @@ try {
     await page.waitForTimeout(300);
     const said = await page.evaluate(() => document.body.innerText.includes("Test notification: Delete did nothing. It isn't a real message."));
     check("a press on it touches nothing and says so", pressed && said, JSON.stringify({ pressed, said }));
+
+    // Check now, inline.
+    const checkNow = dialog.locator("[data-dev-check-now]");
+    const checkHint = async () => ((await dialog.locator("#winnow-dev-check-now-hint").textContent()) ?? "").trim();
+    const checkFor = async (next) => {
+      release = next;
+      await checkNow.click();
+      await page.waitForFunction(
+        () => ["offer", "current", "failed"].includes(document.querySelector("[data-dev-check-now]")?.getAttribute("data-dev-check-now") ?? ""),
+        null,
+        { timeout: 5_000 },
+      ).catch(() => undefined);
+      await page.waitForTimeout(100);
+      return { state: await checkNow.getAttribute("data-dev-check-now"), hint: await checkHint() };
+    };
+    check("Dev Options offers Check now, quiet until pressed", (await checkNow.getAttribute("data-dev-check-now")) === "idle");
+    const current = await checkFor({ status: 200, tag: "v1.5.4" });
+    check("Check now: No updates available", current.state === "current" && current.hint === "No updates available", JSON.stringify(current));
+    const newer = await checkFor({ status: 200, tag: "v99.0.0" });
+    check("Check now: Update available, inline", newer.state === "offer" && newer.hint === "Update available: 99.0.0 (you have 1.5.4)", JSON.stringify(newer));
+    const down = await checkFor({ status: 503, tag: "v99.0.0" });
+    check("Check now: Couldn't check", down.state === "failed" && down.hint.startsWith("Couldn't check"), JSON.stringify(down));
+    const installed = await page.evaluate(() => window.__smokeCalls.some((call) => call.cmd === "update_install_apk"));
+    check("and nothing installs", !installed);
     check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
     await context.close();
   }
