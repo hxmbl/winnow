@@ -19,6 +19,7 @@
  */
 
 import { debugLog } from "../debug/debugLog";
+import type { CensorLevel } from "../mail/censor";
 import { OfflineDownloader, type DownloadBlock, type DownloadProgress } from "../offline/downloader";
 import { OFFLINE_UNAVAILABLE, offlineNextStep, type OfflineBackend, type OfflineView } from "../offline/offlineSave";
 import { demoRawSource } from "../mail/rawSource";
@@ -332,12 +333,12 @@ export type Preferences = {
    */
   leftHanded: boolean;
   /**
-   * Censor email addresses (Settings → Appearance): every address on screen is replaced
-   * by random letters of the same length and blurred, for screenshots and screen
-   * sharing. Off by default. Display only: what is sent to Gmail never changes. See
-   * `core/mail/censor.ts` and `ui/censorDom.ts`.
+   * Blur sensitive info (Settings → Appearance): what on screen is replaced by random
+   * letters and blurred, for screenshots and screen sharing. Off by default; each step
+   * adds to the last (emails, passwords, postal addresses, names). Display only: what is
+   * sent to Gmail never changes. See `core/mail/censor.ts` and `ui/censorDom.ts`.
    */
-  censorEmails: boolean;
+  censorLevel: CensorLevel;
   /**
    * Offer "Send as a Drive link" for a file over Gmail's 25 MB. On by default, but it does
    * nothing until the user allows `drive.file` (asked the first time, never at sign-in).
@@ -402,7 +403,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   markReadOnOpen: true,
   swipeActions: true,
   leftHanded: false,
-  censorEmails: false,
+  censorLevel: "off",
   driveLinks: true,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
@@ -562,6 +563,13 @@ export type StoreState = {
   syncTotal: number | null;
   /** The last sync threw, with this message; cleared when a sync starts or succeeds. */
   syncError: string | null;
+  /**
+   * The last sync could not reach Gmail, and the mailbox on screen is the local copy.
+   * A dropped connection is not a broken account: the cached mail stays usable, changes
+   * wait in the offline queue, and a red bar says so. Cleared by the next sync that
+   * gets through. A real problem (a revoked sign-in, a rejected client) still stops.
+   */
+  connectionLost: boolean;
   /** How many messages the last completed sync could not download. */
   syncFailed: number;
   lastSyncedAt: number | null;
@@ -1078,6 +1086,7 @@ export class WinnowStore {
       syncStage: null,
       syncTotal: null,
       syncError: null,
+      connectionLost: false,
       syncFailed: 0,
       lastSyncedAt: null,
       truncated: false,
@@ -2384,6 +2393,12 @@ export class WinnowStore {
    * never seen is noise, not news. A failure is put on screen *and* re-thrown, so
    * `connect`'s caller can decide what it means for the session.
    */
+  /**
+   * The mailbox on screen is this account's own (its offline copy or a sync's result),
+   * not the demo seed: only then can a sync that fails keep it on screen.
+   */
+  private accountMail = false;
+
   private async runSync({ initial }: { initial: boolean }): Promise<void> {
     const backend = this.backend;
     if (!backend) return;
@@ -2468,6 +2483,7 @@ export class WinnowStore {
         syncTotal: null,
         syncFraction: null,
         syncError: null,
+        connectionLost: false,
         syncFailed: result.failed,
         lastSyncedAt: Date.now(),
         recentIds: recent,
@@ -2483,6 +2499,7 @@ export class WinnowStore {
         error: result.failed > 0 ? syncFailureSummary(result.failed) : null,
       });
 
+      this.accountMail = true;
       debugLog("sync", "done", {
         initial,
         ms: Date.now() - started,
@@ -2511,14 +2528,32 @@ export class WinnowStore {
         ms: Date.now() - started,
         reason: error instanceof Error ? error.message : "unknown",
       });
+      const message = error instanceof Error ? error.message : "Could not reach Gmail.";
+      if (this.accountMail && this.state.all.length > 0 && !accountProblem(error)) {
+        // Mail is on screen and nothing is wrong with the account: keep the local copy
+        // usable instead of swapping the whole inbox for an error screen. The poll tries
+        // again on its own; the first sync that gets through clears the bar.
+        this.set({
+          status: "ready",
+          syncing: false,
+          syncPhase: null,
+          syncStage: null,
+          syncTotal: null,
+          syncError: message,
+          connectionLost: true,
+          error: null,
+        });
+        this.pendingConnect = null;
+        return;
+      }
       this.set({
         status: "error",
         syncing: false,
         syncPhase: null,
         syncStage: null,
         syncTotal: null,
-        syncError: error instanceof Error ? error.message : "Could not reach Gmail.",
-        error: error instanceof Error ? error.message : "Could not reach Gmail.",
+        syncError: message,
+        error: message,
       });
       throw error;
     }
@@ -4180,6 +4215,7 @@ export class WinnowStore {
    */
   markDemoMode(now: number = DEMO_NOW, drafts?: readonly Email[]): void {
     this.backend = undefined;
+    this.accountMail = false;
     this.pendingConnect = null;
     this.dropUndo();
     this.dropBodyWork();
@@ -4205,6 +4241,7 @@ export class WinnowStore {
       syncStage: null,
       syncTotal: null,
       syncError: null,
+      connectionLost: false,
       syncFailed: 0,
       truncated: false,
       error: null,
@@ -4242,6 +4279,7 @@ export class WinnowStore {
    * account's mail into another's view.
    */
   enterAccount(id: string | null, saved: AccountState, cached: readonly Email[] = []): void {
+    this.accountMail = cached.length > 0;
     this.backend = undefined;
     this.pendingConnect = null;
     this.dropUndo();
@@ -4278,6 +4316,7 @@ export class WinnowStore {
       syncStage: null,
       syncTotal: null,
       syncError: null,
+      connectionLost: false,
       syncFailed: 0,
       truncated: false,
       error: null,
@@ -4414,6 +4453,7 @@ export class WinnowStore {
       syncStage: null,
       syncTotal: null,
       syncError: null,
+      connectionLost: false,
       syncFailed: 0,
       truncated: false,
       error: null,
@@ -4682,4 +4722,16 @@ export function readoutIndex(
 ): number {
   if (state.selectedId !== null) return view.selectedIndex >= 0 ? view.selectedIndex : NO_CURSOR;
   return state.cursorIndex >= 0 && state.cursorIndex < view.threads.length ? state.cursorIndex : NO_CURSOR;
+}
+
+/**
+ * A sync failure that means the account itself needs attention, as opposed to Gmail
+ * being out of reach. Only these keep the blocking "Couldn't reach Gmail" screen when
+ * there is cached mail to show: a session that has to be signed in again, a build or
+ * client Google rejects, or a request Google answered with 401 or 403.
+ */
+export function accountProblem(error: unknown): boolean {
+  const { kind, status } = (error ?? {}) as { kind?: unknown; status?: unknown };
+  if (kind === "reauth_required" || kind === "config" || kind === "invalid_client") return true;
+  return status === 401 || status === 403;
 }

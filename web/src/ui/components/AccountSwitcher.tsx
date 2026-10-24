@@ -60,9 +60,13 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
       onClose={props.onClose}
       initialFocus={first}
       placement={props.phone ? "bottom" : "center"}
-      className="max-w-[420px]"
+      // A solid panel like every other sheet: without its own surface the chips and the
+      // dock showed straight through it on a phone.
+      className={`flex w-full max-w-[420px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift ${
+        props.phone ? "max-h-[85vh]" : "max-h-[80vh]"
+      }`}
     >
-      <div data-account-switcher="">
+      <div data-account-switcher="" className="thin-scroll min-h-0 flex-1 overflow-y-auto">
         <SheetHeader title="Accounts" onClose={props.onClose} touch={props.phone} />
         <ul className="flex flex-col gap-0.5 p-2" aria-label="Signed-in accounts">
           {props.accounts.map((account, index) => {

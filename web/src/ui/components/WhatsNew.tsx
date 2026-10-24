@@ -117,7 +117,7 @@ function Blocks({ blocks, onOpenLink }: { blocks: Block[]; onOpenLink: (url: str
             return (
               <pre
                 key={index}
-                className="selectable overflow-x-auto rounded-ctl bg-surface-sunken px-3 py-2 font-mono text-meta text-ink-body"
+                className="selectable overflow-x-auto rounded-inset bg-surface-sunken px-3 py-2 font-mono text-meta text-ink-body"
               >
                 {block.text}
               </pre>

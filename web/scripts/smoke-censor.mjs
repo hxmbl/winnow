@@ -39,8 +39,15 @@ async function openMailbox(p, selector) {
   await p.waitForTimeout(400);
 }
 
+/** Pick a step in Blur sensitive info's menu. */
+async function chooseLevel(p, dialog, label) {
+  await dialog.locator('[data-select="censor-level"]').click();
+  await p.locator('[role="listbox"][data-select-list="censor-level"] [role="option"]').filter({ hasText: new RegExp(`^\\s*${label.replace(/[+]/g, "\\+")}\\s*$`) }).first().click();
+  await p.waitForTimeout(200);
+}
+
 export async function smokeCensor({ browser, URL, check, section, errors }) {
-  section("censor email addresses");
+  section("blur sensitive info");
   {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const p = await ctx.newPage();
@@ -54,18 +61,17 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
     const plain = ((await p.locator("[data-reader-address]").first().textContent()) ?? "").trim();
     check("off by default: the reader shows the sender's real address", /@/.test(plain), JSON.stringify(plain));
 
-    // Settings → Appearance → Censor email addresses.
+    // Settings → Appearance → Blur sensitive info.
     await p.keyboard.press("Escape");
     await p.keyboard.press(",");
     const dialog = p.locator('[role="dialog"][aria-label="Settings"]');
     await dialog.waitFor({ timeout: 5_000 });
     await dialog.locator('[data-category="appearance"]').first().click();
-    const toggle = dialog.getByRole("switch", { name: "Censor email addresses" });
-    check("Settings → Appearance has the switch, off", (await toggle.getAttribute("aria-checked")) === "false");
-    await toggle.click();
-    await p.waitForTimeout(200);
-    const stored = await p.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").censorEmails);
-    check("turning it on is saved on the device", stored === true, String(stored));
+    const trigger = dialog.locator('[data-select="censor-level"]');
+    check("Settings → Appearance has Blur sensitive info, off", /Off/.test((await trigger.textContent()) ?? ""), (await trigger.textContent()) ?? "");
+    await chooseLevel(p, dialog, "Email addresses");
+    const stored = await p.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").censorLevel);
+    check("choosing a step is saved on the device", stored === "emails", String(stored));
     check("Settings itself shows no real address", (await leaks(p)).length === 0, JSON.stringify(await leaks(p)));
     await p.keyboard.press("Escape");
     await p.waitForTimeout(300);
@@ -75,9 +81,9 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
     await p.waitForTimeout(400);
     const censored = ((await p.locator("[data-reader-address]").first().textContent()) ?? "").trim();
     check(
-      "the reader's address is random letters of the same length, blurred",
+      "the reader's address is 12 random letters, blurred",
       !/@/.test(censored) &&
-        censored.replace(/[<>\s]/g, "").length === plain.replace(/[<>\s]/g, "").length &&
+        /^[a-z]{12}$/.test(censored.replace(/[<>\s]/g, "")) &&
         (await p.locator("[data-reader-address][data-wn-censored], [data-reader-address] [data-wn-censored]").count()) > 0,
       JSON.stringify({ plain, censored }),
     );
@@ -121,7 +127,7 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
     await p.keyboard.press(",");
     await dialog.waitFor({ timeout: 5_000 });
     await dialog.locator('[data-category="appearance"]').first().click();
-    await dialog.getByRole("switch", { name: "Censor email addresses" }).click();
+    await chooseLevel(p, dialog, "Off");
     await p.keyboard.press("Escape");
     await openMailbox(p, '[data-nav="inbox"]');
     await p.locator("[data-row-count] [data-row-id]").nth(1).click();
@@ -135,9 +141,10 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
     await ctx.close();
   }
 
-  section("censor email addresses: message bodies, and what is sent");
+  section("blur sensitive info: message bodies, passwords, and what is sent");
   {
     const SECRET = "helper.desk@support.example";
+    const PASSWORD = "Hunter-2-Secret";
     const { ctx } = await signedInContext(
       browser,
       { viewport: { width: 1440, height: 900 } },
@@ -148,7 +155,7 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
             from: `Support <${SECRET}>`,
             subject: "Your ticket",
             text: `Write to ${SECRET} any time.`,
-            html: `<p>Write to <b>${SECRET}</b> any time, or <a href="mailto:${SECRET}">mail us</a>.</p>`,
+            html: `<p>Write to <b>${SECRET}</b> any time, or <a href="mailto:${SECRET}">mail us</a>.</p><p>Password: <b>${PASSWORD}</b></p>`,
           },
         },
       },
@@ -157,7 +164,7 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
       if (window.top !== window) return;
       const key = "winnow.preferences.v1";
       const prefs = JSON.parse(localStorage.getItem(key) ?? "{}");
-      localStorage.setItem(key, JSON.stringify({ ...prefs, censorEmails: true, undoSendSeconds: 0 }));
+      localStorage.setItem(key, JSON.stringify({ ...prefs, censorLevel: "passwords", undoSendSeconds: 0 }));
     });
     // Registered after the fake's own route, so it answers the send first.
     const sends = [];
@@ -186,6 +193,10 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
     check(
       "the real address is nowhere in the markup outside data-* keys",
       !html.replace(/ data-[a-z-]+="[^"]*"/g, "").includes(SECRET),
+    );
+    check(
+      "a password after its label, in its own element, is not in the markup",
+      !html.includes(PASSWORD) && html.includes("Password:"),
     );
 
     // Reply while censored: the mail still goes to the real address.

@@ -8,6 +8,7 @@
 
 import { isAccentPreference, isAppearance, normalizeHexColor } from "../model/appearance";
 import { reviveUndoSendSeconds } from "../mail/undoSend";
+import { isCensorLevel } from "../mail/censor";
 import { DEFAULT_NOTIFICATION_ACTIONS } from "../notify/notifications";
 import type { KeyValueStorage } from "../session/accounts";
 import type { Preferences } from "./store";
@@ -73,7 +74,10 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
   if (typeof source.swipeActions === "boolean") out.swipeActions = source.swipeActions;
   if (typeof source.leftHanded === "boolean") out.leftHanded = source.leftHanded;
-  if (typeof source.censorEmails === "boolean") out.censorEmails = source.censorEmails;
+  // Blur sensitive info, with the old on/off "Censor email addresses" read as its first
+  // step: on meant email addresses, which is exactly what "emails" blurs.
+  if (isCensorLevel(source.censorLevel)) out.censorLevel = source.censorLevel;
+  else if (typeof source.censorEmails === "boolean") out.censorLevel = source.censorEmails ? "emails" : "off";
   if (typeof source.emailDarkMode === "boolean") out.emailDarkMode = source.emailDarkMode;
   if (typeof source.driveLinks === "boolean") out.driveLinks = source.driveLinks;
   // Only a delay Settings offers (or the retired 30 s, read as 20 s): anything else (a

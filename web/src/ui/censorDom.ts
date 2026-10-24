@@ -1,5 +1,5 @@
 /**
- * Censor email addresses, on the page: the DOM half of `core/mail/censor.ts`.
+ * Blur sensitive info, on the page: the DOM half of `core/mail/censor.ts`.
  *
  * **Why a watcher over the document rather than a component at every call site.** An
  * address reaches the screen from dozens of places (rows, the reader's header, the
@@ -36,7 +36,9 @@
  * has since rewritten keeps React's value) and removes the blur marks.
  */
 
-import { AddressScrambler, findAddresses, hasAddress, isAddressOnly } from "../core/mail/censor";
+import { Scrambler, nameTerms } from "../core/mail/censor";
+import type { Email } from "../core/model/email";
+import type { GoogleContact } from "../core/contacts/google";
 
 /** The mark `index.css` blurs. */
 export const CENSORED_ATTR = "data-wn-censored";
@@ -59,9 +61,9 @@ const attributes = new WeakMap<Element, Map<string, Written>>();
 const wraps = new WeakMap<Element, string>();
 
 /** One scrambler for the page's life: an address keeps its letters until the app closes. */
-let shared: AddressScrambler | null = null;
-export function sessionScrambler(): AddressScrambler {
-  shared ??= new AddressScrambler(randomSource());
+let shared: Scrambler | null = null;
+export function sessionScrambler(): Scrambler {
+  shared ??= new Scrambler(randomSource());
   return shared;
 }
 
@@ -95,23 +97,27 @@ function untouchable(node: Node): boolean {
   return !element || element.closest(UNTOUCHABLE) !== null;
 }
 
-function censorText(node: Text, scrambler: AddressScrambler): void {
+function censorText(node: Text, scrambler: Scrambler, secretFirst = false): void {
   const value = node.nodeValue ?? "";
   const known = texts.get(node);
   if (known && known.written !== value) {
     // React (or anyone) has written over it since: drop the record and a blur that no
     // longer has an address under it.
     texts.delete(node);
-    if (known.blurred && !hasAddress(value)) known.blurred.removeAttribute(CENSORED_ATTR);
+    if (known.blurred && !scrambler.has(value)) known.blurred.removeAttribute(CENSORED_ATTR);
   }
-  if (!hasAddress(value) || untouchable(node)) return;
+  // Its own write coming back through the observer: already censored.
+  if (known && known.written === value) return;
+  if (untouchable(node)) return;
+  const parts = scrambler.censorParts(value, secretFirst);
+  if (!parts.some((part) => part.censored)) return;
   const parent = node.parentElement;
   if (!parent) return;
 
   if (parent.closest(FOREIGN) && !parent.hasAttribute(WRAP_ATTR)) {
     const doc = node.ownerDocument;
     const fragment = doc.createDocumentFragment();
-    for (const part of scrambler.censorParts(value)) {
+    for (const part of parts) {
       if (!part.censored) {
         fragment.append(part.text);
         continue;
@@ -123,14 +129,15 @@ function censorText(node: Text, scrambler: AddressScrambler): void {
       fragment.append(span);
     }
     // Remember each span's original address for the way back.
-    wrapOriginals(fragment, value, scrambler);
+    wrapOriginals(fragment, value, scrambler, secretFirst);
     parent.replaceChild(fragment, node);
     return;
   }
 
-  const written = scrambler.censorText(value);
+  const written = parts.map((part) => part.text).join("");
   let blurred: Element | null = null;
-  if (isAddressOnly(value) && (parent.textContent ?? "").trim() === value.trim()) {
+  const only = parts.every((part) => part.censored || /^[\s<>()[\]"',;:]*$/.test(part.text));
+  if (only && (parent.textContent ?? "").trim() === value.trim()) {
     parent.setAttribute(CENSORED_ATTR, "");
     blurred = parent;
   }
@@ -139,22 +146,22 @@ function censorText(node: Text, scrambler: AddressScrambler): void {
 }
 
 /** Record, on each wrap span in `fragment`, the address it stands for. */
-function wrapOriginals(fragment: DocumentFragment, value: string, scrambler: AddressScrambler): void {
+function wrapOriginals(fragment: DocumentFragment, value: string, scrambler: Scrambler, secretFirst: boolean): void {
   const byScramble = new Map<string, string>();
-  for (const address of findAddresses(value)) byScramble.set(scrambler.scramble(address), address);
+  for (const found of scrambler.find(value, secretFirst)) byScramble.set(scrambler.scramble(found), found);
   for (const span of fragment.querySelectorAll(`[${WRAP_ATTR}]`)) {
     const original = byScramble.get(span.textContent ?? "");
     if (original !== undefined) wraps.set(span, original);
   }
 }
 
-function censorAttribute(element: Element, name: string, scrambler: AddressScrambler): void {
+function censorAttribute(element: Element, name: string, scrambler: Scrambler): void {
   const value = element.getAttribute(name);
   let records = attributes.get(element);
   const known = records?.get(name);
   if (known && known.written !== value) records!.delete(name);
   // Attributes are never sent anywhere, so even an input's placeholder or label is fair game.
-  if (value === null || !hasAddress(value)) return;
+  if (value === null || !scrambler.has(value)) return;
   const written = scrambler.censorText(value);
   if (!records) {
     records = new Map();
@@ -164,9 +171,14 @@ function censorAttribute(element: Element, name: string, scrambler: AddressScram
   element.setAttribute(name, written);
 }
 
-const ATTRIBUTE_SELECTOR = ATTRIBUTES.map((name) => `[${name}*="@"]`).join(",");
+/** Elements whose attributes could hold something: any `@` at the first step, any value past it. */
+const ADDRESS_ATTRIBUTES = ATTRIBUTES.map((name) => `[${name}*="@"]`).join(",");
+const ANY_ATTRIBUTES = ATTRIBUTES.map((name) => `[${name}]`).join(",");
+function attributeSelector(scrambler: Scrambler): string {
+  return scrambler.currentLevel === "emails" ? ADDRESS_ATTRIBUTES : ANY_ATTRIBUTES;
+}
 
-function censorTree(root: Node, scrambler: AddressScrambler): void {
+function censorTree(root: Node, scrambler: Scrambler): void {
   if (root.nodeType === Node.TEXT_NODE) {
     censorText(root as Text, scrambler);
     return;
@@ -174,15 +186,22 @@ function censorTree(root: Node, scrambler: AddressScrambler): void {
   if (!(root instanceof Element) && root.nodeType !== Node.DOCUMENT_NODE) return;
   const doc = root.ownerDocument ?? (root as Document);
   // Collected first: wrapping a body's text replaces nodes under the walker's feet.
-  const found: Text[] = [];
+  // A password split from its label by markup (`Password: <b>x</b>`): a text that ends
+  // on the label makes the next non-blank text's first word the password.
+  const found: { node: Text; secretFirst: boolean }[] = [];
+  let pending = false;
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if ((node.nodeValue ?? "").includes("@")) found.push(node as Text);
+    const value = node.nodeValue ?? "";
+    if (!value.trim()) continue;
+    if (pending || scrambler.mightHold(value)) found.push({ node: node as Text, secretFirst: pending });
+    pending = scrambler.endsWithSecretLabel(value);
   }
-  for (const node of found) censorText(node, scrambler);
+  for (const { node, secretFirst } of found) censorText(node, scrambler, secretFirst);
+  const selector = attributeSelector(scrambler);
   const elements: Element[] = [];
-  if (root instanceof Element && root.matches(ATTRIBUTE_SELECTOR)) elements.push(root);
-  if ("querySelectorAll" in root) elements.push(...(root as ParentNode).querySelectorAll(ATTRIBUTE_SELECTOR));
+  if (root instanceof Element && root.matches(selector)) elements.push(root);
+  if ("querySelectorAll" in root) elements.push(...(root as ParentNode).querySelectorAll(selector));
   for (const element of elements) {
     for (const name of ATTRIBUTES) censorAttribute(element, name, scrambler);
   }
@@ -216,7 +235,7 @@ function restoreTree(root: Element): void {
  * Censor `doc` until the returned function is called, which puts the originals back.
  * Idempotent per call: each call owns one observer.
  */
-export function startCensor(doc: Document, scrambler: AddressScrambler = sessionScrambler()): () => void {
+export function startCensor(doc: Document, scrambler: Scrambler = sessionScrambler()): () => void {
   const root = doc.documentElement;
   censorTree(root, scrambler);
   const observer = new MutationObserver((records) => {
@@ -247,19 +266,24 @@ export function startCensor(doc: Document, scrambler: AddressScrambler = session
  * `srcdoc` is censored before it is handed over instead. The frames run no script and
  * their links go nowhere, so link targets can be scrambled outright.
  */
-export function censorHtmlDocument(html: string, scrambler: AddressScrambler = sessionScrambler()): string {
-  if (!html.includes("@")) return html;
+export function censorHtmlDocument(html: string, scrambler: Scrambler = sessionScrambler()): string {
+  if (!scrambler.mightHold(html)) return html;
   const parsed = new DOMParser().parseFromString(html, "text/html");
-  const found: Text[] = [];
+  const found: { node: Text; secretFirst: boolean }[] = [];
+  let pending = false;
   const walker = parsed.createTreeWalker(parsed.documentElement, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const parent = node.parentElement;
-    if (parent && (parent.closest("style, script") || !hasAddress(node.nodeValue ?? ""))) continue;
-    found.push(node as Text);
+    const value = node.nodeValue ?? "";
+    if ((parent && parent.closest("style, script")) || !value.trim()) continue;
+    if (pending || scrambler.mightHold(value)) found.push({ node: node as Text, secretFirst: pending });
+    pending = scrambler.endsWithSecretLabel(value);
   }
-  for (const node of found) {
+  for (const { node, secretFirst } of found) {
+    const parts = scrambler.censorParts(node.nodeValue ?? "", secretFirst);
+    if (!parts.some((part) => part.censored)) continue;
     const fragment = parsed.createDocumentFragment();
-    for (const part of scrambler.censorParts(node.nodeValue ?? "")) {
+    for (const part of parts) {
       if (!part.censored) {
         fragment.append(part.text);
         continue;
@@ -271,10 +295,10 @@ export function censorHtmlDocument(html: string, scrambler: AddressScrambler = s
     }
     node.replaceWith(fragment);
   }
-  for (const element of parsed.querySelectorAll(ATTRIBUTE_SELECTOR)) {
+  for (const element of parsed.querySelectorAll(attributeSelector(scrambler))) {
     for (const name of ATTRIBUTES) {
       const value = element.getAttribute(name);
-      if (value !== null && hasAddress(value)) element.setAttribute(name, scrambler.censorText(value));
+      if (value !== null && scrambler.has(value)) element.setAttribute(name, scrambler.censorText(value));
     }
   }
   return `<!doctype html>${parsed.documentElement.outerHTML}`;
@@ -286,17 +310,36 @@ export function censorHtmlDocument(html: string, scrambler: AddressScrambler = s
 // (one text node, where per-address blur needs spans) censor what they render instead,
 // and re-render when the switch moves. App sets this from the preference.
 
-let active = false;
+// The value is "" when off, and otherwise a key that changes with the level and the
+// names, so a renderer that censors its own output redoes it when either moves.
+let active = "";
 const listeners = new Set<() => void>();
 
-export function setCensorActive(value: boolean): void {
-  if (active === value) return;
-  active = value;
+export function setCensorActive(value: boolean, key = "on"): void {
+  const next = value ? key || "on" : "";
+  if (active === next) return;
+  active = next;
   for (const listener of listeners) listener();
 }
 
-export function censorActive(): boolean {
+export function censorActive(): string {
   return active;
+}
+
+/**
+ * The names Blur sensitive info's last step hides: every display name on a message
+ * (sender, recipients) and in the address book, with their parts (`nameTerms`).
+ */
+export function censorNameTerms(emails: readonly Email[], contacts: readonly GoogleContact[]): string[] {
+  const names: string[] = [];
+  for (const email of emails) {
+    if (email.name) names.push(email.name);
+    for (const contact of [...(email.to ?? []), ...(email.cc ?? [])]) {
+      if (contact.name) names.push(contact.name);
+    }
+  }
+  for (const contact of contacts) if (contact.name) names.push(contact.name);
+  return nameTerms(names).sort();
 }
 
 export function subscribeCensor(listener: () => void): () => void {

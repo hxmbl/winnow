@@ -191,11 +191,11 @@ export const SETTINGS = {
     explanation:
       "On a phone, puts the controls you reach with your thumb on the left: the message actions pill, the compose button and the order of the dock. Off keeps them on the right. Saved on this device.",
   },
-  censorEmails: {
+  censorLevel: {
     category: "appearance",
-    label: "Censor email addresses",
+    label: "Blur sensitive info",
     explanation:
-      "For screenshots and sharing your screen: every email address Winnow shows, in the list, the reader, the composer, your accounts, Settings and notifications, is swapped for random letters of the same length and blurred, so copying it copies only the letters. Each address keeps its letters until you close Winnow. Mail you send is not affected: replies and recipients still use the real addresses.",
+      "For screenshots and sharing your screen: choose email addresses, then add passwords given in mail, postal addresses and the names of people Winnow knows, each step including the ones before. Everything hidden, in the list, the reader, the composer, Settings and notifications, becomes the same number of random letters and is blurred. It's best effort, not a guarantee: a password without a label, an unusual address or a name Winnow hasn't seen can get through, so check before you share. Mail you send is not affected: replies still go to the real addresses.",
   },
   remoteImages: {
     category: "privacy",

@@ -18,7 +18,7 @@ import {
   type NotificationActionEvent,
 } from "./notifications";
 import type { Email } from "../model/email";
-import { AddressScrambler } from "../mail/censor";
+import { Scrambler } from "../mail/censor";
 import { buildMime, messageIdFor } from "../gmail/mime";
 
 function mail(overrides: Partial<Email> = {}): Email {
@@ -121,7 +121,7 @@ describe("the batch", () => {
 describe("censored notifications", () => {
   it("scrambles every address a person reads and leaves the reply head and ids alone", () => {
     let x = 7;
-    const scrambler = new AddressScrambler(() => ((x = (x * 48271) % 2147483647) / 2147483647));
+    const scrambler = new Scrambler(() => ((x = (x * 48271) % 2147483647) / 2147483647));
     const nameless = mail({ name: "ada@example.com", body: "Sent from ada@example.com\nmore" });
     const batch = buildNotificationBatch([nameless], SETTINGS, { "18a": "To: ada@example.com" }, {}, {
       id: "acct-1",

@@ -49,6 +49,16 @@ import type { FeedbackEvent } from "../../core/learn/learning";
 import type { FilterLearning, LearnableFilter } from "../../core/learn/filterLearning";
 import { SmartFilterSettings } from "./SmartFilterSettings";
 import { SelectMenu } from "./SelectMenu";
+import type { CensorLevel } from "../../core/mail/censor";
+
+/** Blur sensitive info's steps, each adding to the one before it. */
+const CENSOR_CHOICES: { value: CensorLevel; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "emails", label: "Email addresses" },
+  { value: "passwords", label: "+ Passwords" },
+  { value: "addresses", label: "+ Postal addresses" },
+  { value: "names", label: "+ Names" },
+];
 import { useShortcutsAvailable } from "../physicalKeyboard";
 import { remotePicturesPaused } from "../senderPictures";
 import type { AccountSummary } from "../../core/store/store";
@@ -169,9 +179,9 @@ export type SettingsProps = {
   /** Left-handed phone layout. Null hides the row (only the phone layout has thumb controls). */
   leftHanded: boolean | null;
   onLeftHanded: (value: boolean) => void;
-  /** Censor email addresses on screen. See `Preferences.censorEmails`. */
-  censorEmails: boolean;
-  onCensorEmails: (value: boolean) => void;
+  /** Blur sensitive info on screen. See `Preferences.censorLevel`. */
+  censorLevel: CensorLevel;
+  onCensorLevel: (value: CensorLevel) => void;
   /** Email dark mode: message bodies drawn dark in the dark modes. See `Preferences.emailDarkMode`. */
   emailDarkMode: boolean;
   onEmailDarkMode: (value: boolean) => void;
@@ -724,8 +734,14 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               <Toggle checked={props.leftHanded} onChange={props.onLeftHanded} label="Left-handed" />
             </Row>
           )}
-          <Row setting="censorEmails">
-            <Toggle checked={props.censorEmails} onChange={props.onCensorEmails} label={SETTINGS.censorEmails.label} />
+          <Row setting="censorLevel">
+            <SelectMenu
+              id="censor-level"
+              label={SETTINGS.censorLevel.label}
+              options={CENSOR_CHOICES}
+              value={props.censorLevel}
+              onChange={props.onCensorLevel}
+            />
           </Row>
         </Section>
       );

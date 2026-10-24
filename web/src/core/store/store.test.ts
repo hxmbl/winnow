@@ -5,6 +5,7 @@ import {
   STORAGE_PROMPT,
   STORAGE_SAVE_FAILED,
   WinnowStore,
+  accountProblem,
   readoutIndex,
   syncFailureSummary,
   syncNotice,
@@ -1805,6 +1806,73 @@ describe("sync status state", () => {
     ).rejects.toThrow("network down");
     expect(failing.getSnapshot().syncError).toBe("network down");
     expect(failing.getSnapshot().syncing).toBe(false);
+  });
+
+  it("keeps the account's own mail on screen when Gmail can't be reached", async () => {
+    const store = demoStore();
+    store.enterAccount("acct1xx", {}, [...DEMO_EMAILS]);
+    await store.connect(backendWith(async () => {
+      throw new TypeError("Failed to fetch");
+    }), { email: "user@example.com" });
+    const snap = store.getSnapshot();
+    expect(snap.status).toBe("ready");
+    expect(snap.connectionLost).toBe(true);
+    expect(snap.error).toBeNull();
+    expect(snap.all.length).toBe(DEMO_EMAILS.length);
+
+    // A refresh that fails keeps it so; the first one that gets through clears the bar.
+    await store.refresh();
+    expect(store.getSnapshot().connectionLost).toBe(true);
+    expect(store.getSnapshot().status).toBe("ready");
+  });
+
+  it("clears the connection bar on the next sync that gets through", async () => {
+    const store = demoStore();
+    store.enterAccount("acct1xx", {}, [...DEMO_EMAILS]);
+    let fail = true;
+    await store.connect(backendWith(async () => {
+      if (fail) throw new TypeError("Failed to fetch");
+      return { emails: [...DEMO_EMAILS], failed: 0, truncated: false };
+    }), { email: "user@example.com" });
+    expect(store.getSnapshot().connectionLost).toBe(true);
+    fail = false;
+    await store.refresh();
+    expect(store.getSnapshot().connectionLost).toBe(false);
+    expect(store.getSnapshot().syncError).toBeNull();
+  });
+
+  it("still stops for a real account problem, cached mail or not", async () => {
+    const store = demoStore();
+    store.enterAccount("acct1xx", {}, [...DEMO_EMAILS]);
+    const expired = Object.assign(new Error("Your Google session has expired. Sign in again."), {
+      status: 401,
+      kind: "reauth_required",
+    });
+    await expect(store.connect(backendWith(async () => {
+      throw expired;
+    }), { email: "user@example.com" })).rejects.toThrow("expired");
+    expect(store.getSnapshot().status).toBe("error");
+    expect(store.getSnapshot().connectionLost).toBe(false);
+  });
+
+  it("never passes the demo seed off as the account's mail", async () => {
+    // Connecting from the demo with the network down: the seed is not this account's,
+    // so there is nothing to fall back on and the error screen is right.
+    const store = demoStore();
+    await expect(store.connect(backendWith(async () => {
+      throw new TypeError("Failed to fetch");
+    }), { email: "user@example.com" })).rejects.toThrow("Failed to fetch");
+    expect(store.getSnapshot().status).toBe("error");
+  });
+
+  it("tells an account problem from an unreachable Gmail", () => {
+    expect(accountProblem({ kind: "reauth_required", status: 401 })).toBe(true);
+    expect(accountProblem({ kind: "invalid_client" })).toBe(true);
+    expect(accountProblem({ status: 403 })).toBe(true);
+    expect(accountProblem({ kind: "network", status: 0 })).toBe(false);
+    expect(accountProblem({ status: 503 })).toBe(false);
+    expect(accountProblem(new TypeError("Failed to fetch"))).toBe(false);
+    expect(accountProblem(undefined)).toBe(false);
   });
 });
 

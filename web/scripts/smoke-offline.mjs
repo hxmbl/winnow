@@ -98,8 +98,11 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
     const touched = new Set();
     const json = (route, body, status = 200) =>
       route.fulfill({ status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+    /** Gmail out of reach while the device is online: every request fails at the network. */
+    let unreachable = false;
     const fake = (route) => {
       const request = route.request();
+      if (unreachable && request.method() !== "OPTIONS") return route.abort("failed");
       if (request.method() === "OPTIONS") {
         return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, PUT, DELETE" } });
       }
@@ -199,6 +202,7 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
       text: (await indicator.textContent().catch(() => null)) ?? null,
       count: await indicator.getAttribute("data-offline-queue").catch(() => null),
       alerts: await p.locator('div[role="alert"]').count(),
+      bar: ((await p.locator("[data-connection-lost]").textContent().catch(() => null)) ?? "").trim(),
       saved: await queued(),
     };
     check(
@@ -212,6 +216,11 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
       JSON.stringify(offlineShape),
     );
     check("and the queue is kept on the device", offlineShape.saved === 3, String(offlineShape.saved));
+    check(
+      "and a red bar over the mail says Gmail can't be reached",
+      offlineShape.bar === "Failed to connect to Gmail. Check your connection.",
+      JSON.stringify(offlineShape.bar),
+    );
     check("and nothing reached Gmail while offline", modifies.length === 0, modifies.join(" | "));
 
     await ctx.setOffline(false);
@@ -223,6 +232,7 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
       replayed.length >= 2 && /^o0 \+ -.*INBOX/.test(replayed[0]) && /STARRED/.test(replayed[1]) && /\+STARRED/.test(replayed[1]),
       replayed.join(" | "),
     );
+    check("back online, the red bar goes", (await p.locator("[data-connection-lost]").count()) === 0);
     check(
       "the one Gmail no longer has is dropped quietly: no error, nothing left waiting",
       (await p.locator('div[role="alert"]').count()) === 0 && (await indicator.count()) === 0 && (await queued()) === 0,
@@ -236,6 +246,28 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
       (await rowFor(0).count()) === 0 && labels.get("o0").includes("INBOX") === false,
       JSON.stringify(Object.fromEntries(labels)),
     );
+
+    // Online, but Gmail can't be reached: the local copy stays, with the red bar, and
+    // never the full-screen "Couldn't reach Gmail".
+    const rowsBefore = await p.locator("[data-row-count] [data-row-id]").count();
+    unreachable = true;
+    await p.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await p.locator("[data-connection-lost]").waitFor({ timeout: 15_000 }).catch(() => undefined);
+    const unreachableShape = {
+      bar: ((await p.locator("[data-connection-lost]").textContent().catch(() => null)) ?? "").trim(),
+      rows: await p.locator("[data-row-count] [data-row-id]").count(),
+      wall: await p.locator("[data-connection-error]").count(),
+    };
+    check(
+      "Gmail unreachable while online: the cached inbox stays, under the red bar",
+      unreachableShape.bar === "Failed to connect to Gmail. Check your connection." &&
+        unreachableShape.rows === rowsBefore && rowsBefore > 0 && unreachableShape.wall === 0,
+      JSON.stringify({ ...unreachableShape, rowsBefore }),
+    );
+    unreachable = false;
+    await p.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await p.locator("[data-connection-lost]").waitFor({ state: "detached", timeout: 15_000 }).catch(() => undefined);
+    check("and the first sync that gets through takes the bar away", (await p.locator("[data-connection-lost]").count()) === 0);
     await ctx.close();
   }
 }

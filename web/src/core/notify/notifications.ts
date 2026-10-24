@@ -12,7 +12,7 @@ import type { Draft, Email } from "../model/email";
 import { isAccountId } from "../session/accounts";
 import { displayName } from "../model/email";
 import { replySubject } from "../mail/reply";
-import { censorNotice, type AddressScrambler } from "../mail/censor";
+import { censorNotice, type Scrambler } from "../mail/censor";
 
 /** Per-message notifications at most; the rest are counted in the summary. Rust caps it too. */
 export const MAX_MESSAGE_NOTIFICATIONS = 5;
@@ -142,7 +142,7 @@ export function buildNotificationBatch(
  * block an inline reply is sent with) are untouched: censoring is for the screen, never
  * for what goes to Gmail.
  */
-export function censorNotificationBatch(batch: NotificationBatch, scrambler: AddressScrambler): NotificationBatch {
+export function censorNotificationBatch(batch: NotificationBatch, scrambler: Scrambler): NotificationBatch {
   return {
     ...batch,
     account: batch.account

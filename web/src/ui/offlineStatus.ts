@@ -17,3 +17,6 @@ export function offlineStatusText(status: QueueStatus, online: boolean): string 
   if (state === "backoff") return `Can't reach Gmail: ${changes}`;
   return `Syncing ${changes.replace(" waiting", "")}…`;
 }
+
+/** The red bar over a mailbox the last sync couldn't refresh: the local copy, still usable. */
+export const CONNECTION_LOST = "Failed to connect to Gmail. Check your connection.";

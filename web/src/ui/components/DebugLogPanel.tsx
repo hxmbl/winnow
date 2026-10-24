@@ -45,7 +45,7 @@ export function DebugLogPanel({ recording }: { recording: boolean }) {
         data-debug-log-text=""
         tabIndex={0}
         aria-label="Debug log"
-        className="selectable max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-ctl border border-hairline bg-surface-sunken p-2 font-mono text-meta text-ink-body"
+        className="selectable max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-pane border border-hairline bg-surface-sunken p-2 font-mono text-meta text-ink-body"
       >
         {lines.length > 0 ? lines.join("\n") : "Nothing recorded yet."}
       </pre>

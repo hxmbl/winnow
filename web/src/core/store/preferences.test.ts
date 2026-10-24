@@ -223,3 +223,19 @@ describe("preferences storage", () => {
     expect(() => persistPreferences(refused, { appearance: "dark" })).not.toThrow();
   });
 });
+
+describe("Blur sensitive info", () => {
+  it("starts off", () => {
+    expect(DEFAULT_PREFERENCES.censorLevel).toBe("off");
+  });
+
+  it("revives each step, and reads the old on/off switch as its first step", () => {
+    for (const level of ["off", "emails", "passwords", "addresses", "names"] as const) {
+      expect(revivePreferences({ censorLevel: level })?.censorLevel).toBe(level);
+    }
+    expect(revivePreferences({ censorEmails: true })?.censorLevel).toBe("emails");
+    expect(revivePreferences({ censorEmails: false })?.censorLevel).toBe("off");
+    expect(revivePreferences({ censorLevel: "names", censorEmails: false })?.censorLevel).toBe("names");
+    expect(revivePreferences({ censorLevel: "everything" })?.censorLevel).toBeUndefined();
+  });
+});

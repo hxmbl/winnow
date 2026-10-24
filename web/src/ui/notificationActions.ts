@@ -446,9 +446,13 @@ export async function announce(
   const monograms = info?.os === "android" ? notificationMonograms(emails, preferences.notificationHidePreview) : {};
   const shown = info?.kind === "desktop" ? await nativePictures(pictures, undefined, undefined, { monograms }) : pictures;
   const built = buildNotificationBatch(emails, preferences, resolvedHeads, shown, account);
-  // Censor email addresses covers notifications too: a notification is on the screen
+  // Blur sensitive info covers notifications too: a notification is on the screen
   // being shared as much as the app is. Display fields only; the reply heads stay real.
-  const batch = preferences.censorEmails ? censorNotificationBatch(built, sessionScrambler()) : built;
+  const scrambler = sessionScrambler();
+  if (preferences.censorLevel !== "off" && scrambler.currentLevel !== preferences.censorLevel) {
+    scrambler.configure(preferences.censorLevel);
+  }
+  const batch = preferences.censorLevel !== "off" ? censorNotificationBatch(built, scrambler) : built;
   debugLog("notify", "posted", { arrived: emails.length, os: info?.os ?? "unknown", account: account?.id ?? null });
   await platform.notifyNewMail(batch);
 }

@@ -21,7 +21,7 @@
 
 import { untilFirstMail } from "./ui/firstMail";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { setCensorActive, startCensor } from "./ui/censorDom";
+import { censorNameTerms, sessionScrambler, setCensorActive, startCensor } from "./ui/censorDom";
 import { flushSync } from "react-dom";
 import { LogIn, RefreshCw } from "lucide-react";
 import {
@@ -174,6 +174,7 @@ import { DriveGrantNeeded } from "./ui/components/DriveGrantNeeded";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import type { OfflineQueue } from "./core/offline/queue";
 import { OfflineIndicator } from "./ui/components/OfflineIndicator";
+import { CONNECTION_LOST } from "./ui/offlineStatus";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
 import { announce, onReplyRequest, provideAccountRouter, sendTestNotification } from "./ui/notificationActions";
@@ -484,20 +485,30 @@ export function App({ store, existingInstall = true }: Props) {
    */
   const leftHanded = phone && preferences.leftHanded;
   /**
-   * Censor email addresses (Settings → Appearance): the document watcher in
-   * `ui/censorDom.ts`. A layout effect, so with the switch already on at launch the
-   * first paint is censored too.
+   * Blur sensitive info (Settings → Appearance): the document watcher in
+   * `ui/censorDom.ts`. A layout effect, so with it already on at launch the first paint
+   * is censored too. At "names" it is given every name the mailbox and the address book
+   * know, and restarted when that list changes.
    */
-  const censorEmails = preferences.censorEmails;
+  const censorLevel = preferences.censorLevel;
+  const censorNames = useMemo(
+    () => (censorLevel === "names" ? censorNameTerms(snapshot.all, snapshot.googleContacts) : []),
+    [censorLevel, snapshot.all, snapshot.googleContacts],
+  );
+  const censorNamesKey = censorNames.join("\u0000");
   useLayoutEffect(() => {
-    setCensorActive(censorEmails);
-    if (!censorEmails) return;
+    if (censorLevel === "off") {
+      setCensorActive(false);
+      return;
+    }
+    sessionScrambler().configure(censorLevel, censorNamesKey ? censorNamesKey.split("\u0000") : []);
+    setCensorActive(true, `${censorLevel}:${censorNamesKey.length}`);
     const stop = startCensor(document);
     return () => {
       setCensorActive(false);
       stop();
     };
-  }, [censorEmails]);
+  }, [censorLevel, censorNamesKey]);
   useEffect(() => {
     const root = document.documentElement;
     if (leftHanded) root.setAttribute("data-hand", "left");
@@ -4254,6 +4265,22 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         </p>
       )}
 
+      {/*
+        The connection bar: the device is offline, or the last sync couldn't reach Gmail,
+        so what is on screen is the local copy. Red, so nobody mistakes it for live, but not a wall: the mailbox
+        stays usable, changes wait in the offline queue, and the bar goes by itself on
+        the first sync that gets through.
+      */}
+      {snapshot.account !== null && (snapshot.connectionLost || !online) && (
+        <div
+          role="status"
+          data-connection-lost=""
+          className="flex items-center justify-center gap-2 bg-danger px-4 py-1.5 text-center text-meta font-semibold text-canvas"
+        >
+          <span className="min-w-0">{CONNECTION_LOST}</span>
+        </div>
+      )}
+
       {snapshot.error && (
         <div
           role="alert"
@@ -4931,8 +4958,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
           emailDarkMode={preferences.emailDarkMode}
           onEmailDarkMode={(value) => store.setPreferences({ emailDarkMode: value })}
-          censorEmails={preferences.censorEmails}
-          onCensorEmails={(value) => store.setPreferences({ censorEmails: value })}
+          censorLevel={preferences.censorLevel}
+          onCensorLevel={(value) => store.setPreferences({ censorLevel: value })}
           devUnlocked={devOptions.unlocked}
           onUnlockDev={() => changeDevOptions({ unlocked: true })}
           onHideDev={() => {
