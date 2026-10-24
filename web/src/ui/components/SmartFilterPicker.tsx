@@ -42,7 +42,13 @@ export function SmartFilterPicker({
         <p className="border-b border-hairline px-5 py-3 text-meta text-ink-muted">
           Tick where {count === 1 ? "it belongs" : "they belong"}. Winnow learns from each change, on this device only.
         </p>
-        <div role="group" aria-label="Smart filters" className="min-h-0 flex-1 overflow-y-auto py-1">
+        {/*
+          One scroll area for the ticks and "Why it's here": with Dev Options' scores on,
+          the reasons can be taller than the phone, and a fixed reasons block used to
+          squeeze the ticks into a sliver while the reasons themselves could not scroll.
+        */}
+        <div data-filter-picker-scroll="" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div role="group" aria-label="Smart filters" className="py-1">
           {rows.map(({ filter, label, check }) => {
             const { Icon } = filterIcon(filter);
             return (
@@ -75,7 +81,8 @@ export function SmartFilterPicker({
             <WhyHere reasons={reasons} />
           </div>
         )}
-        <div className="flex items-center justify-between gap-3 border-t border-hairline px-5 py-3">
+        </div>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-hairline px-5 py-3">
           <span role="status" aria-live="polite" data-filter-picker-status="" className="min-w-0 truncate text-meta text-ink-muted">
             {status}
           </span>
