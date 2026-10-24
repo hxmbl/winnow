@@ -3,6 +3,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { reportedVersion } from "../core/updates/buildVersion";
 import { listen } from "@tauri-apps/api/event";
 import { exit, onBackButtonPress } from "@tauri-apps/api/app";
 import type { TokenSet } from "../core/gmail/dto";
@@ -280,13 +281,13 @@ export const desktopPlatform: Platform = {
       const wire = await invoke<Record<string, unknown>>("update_runtime");
       return {
         channel: parseChannel(wire?.channel),
-        version: typeof wire?.version === "string" ? wire.version : "0.0.0",
+        version: reportedVersion(typeof wire?.version === "string" ? wire.version : "0.0.0"),
         arch: typeof wire?.arch === "string" ? wire.arch : "unknown",
       };
     } catch {
       // A shell that predates `update_runtime`: it can only point at the release page.
       const info = await desktopPlatform.info().catch(() => null);
-      return { channel: "manual", version: info?.version ?? "0.0.0", arch: info?.arch ?? "unknown" };
+      return { channel: "manual", version: reportedVersion(info?.version ?? "0.0.0"), arch: info?.arch ?? "unknown" };
     }
   },
 
@@ -480,7 +481,7 @@ function normaliseAppInfo(wire: Record<string, unknown>): PlatformInfo {
 
   return {
     name: typeof source.name === "string" ? source.name : "Winnow",
-    version: typeof source.version === "string" ? source.version : "0.0.0",
+    version: reportedVersion(typeof source.version === "string" ? source.version : "0.0.0"),
     os: typeof source.os === "string" ? source.os : "unknown",
     arch: typeof source.arch === "string" ? source.arch : "unknown",
     kind: source.kind === "desktop" ? "desktop" : "web",

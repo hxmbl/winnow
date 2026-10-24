@@ -148,6 +148,10 @@ jobs:
     needs: prepare
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      # The tag, suffix and all, for the version the app reports (About, update checks):
+      # the manifests hold only the bare version. See web/src/core/updates/buildVersion.ts.
+      WINNOW_RELEASE_VERSION: ${{ needs.prepare.outputs.tag }}
     permissions:
       contents: write
     strategy:
@@ -333,6 +337,10 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # The tag, suffix and all, for the version the app reports (About, update checks):
+      # the manifests hold only the bare version. See web/src/core/updates/buildVersion.ts.
+      WINNOW_RELEASE_VERSION: ${{ needs.prepare.outputs.tag }}
     permissions:
       contents: write
     steps:
@@ -423,6 +431,9 @@ jobs:
     # Best-effort: its failure doesn't stop the desktop uploads.
     continue-on-error: true
     env:
+      # The tag, suffix and all, for the version the app reports (About, update checks):
+      # the manifests hold only the bare version. See web/src/core/updates/buildVersion.ts.
+      WINNOW_RELEASE_VERSION: ${{ needs.prepare.outputs.tag }}
       # Pinned so a new NDK on the runner image can't change the build under us.
       NDK_VERSION: "27.2.12479018"
     steps:

@@ -3,6 +3,7 @@
  */
 
 import type { NotificationActionEvent } from "../core/notify/notifications";
+import { reportedVersion } from "../core/updates/buildVersion";
 import type { TokenStore } from "../core/gmail/tokens";
 import { webTokenKey } from "../core/session/accounts";
 import { localStorageCredentialStore, type CredentialStore } from "../core/session/credentials";
@@ -29,7 +30,7 @@ export const MIN_BACKGROUND_POLL_SECONDS = 30;
 const WEB_INFO: PlatformInfo = {
   name: "Winnow",
   // Injected by `vite.config.ts` from package.json; absent under vitest.
-  version: typeof __WINNOW_VERSION__ === "string" ? __WINNOW_VERSION__ : "0.0.0",
+  version: reportedVersion(typeof __WINNOW_VERSION__ === "string" ? __WINNOW_VERSION__ : "0.0.0"),
   os: "browser",
   arch: "unknown",
   kind: "web",

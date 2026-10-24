@@ -67,7 +67,12 @@ function webCsp(): Plugin {
 
 export default defineConfig({
   plugins: [react(), webCsp()],
-  define: { __WINNOW_VERSION__: JSON.stringify(version) },
+  define: {
+    __WINNOW_VERSION__: JSON.stringify(version),
+    // The release tag, pre-release suffix and all, from the release workflow; "" in any
+    // other build. See `src/core/updates/buildVersion.ts`.
+    __WINNOW_RELEASE__: JSON.stringify((process.env.WINNOW_RELEASE_VERSION ?? "").trim().replace(/^v/, "")),
+  },
   base: "./",
   server: {
     host: "0.0.0.0",
