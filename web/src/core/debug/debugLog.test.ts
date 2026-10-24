@@ -39,10 +39,10 @@ describe("Debug log", () => {
     setDebugLogEnabled(true);
     for (let i = 0; i < DEBUG_LOG_CAP + 25; i++) debugLog("notify", "posted", { n: i });
     const kept = debugLogLines();
-    expect(DEBUG_LOG_CAP).toBe(1000);
+    expect(DEBUG_LOG_CAP).toBe(2000);
     expect(kept).toHaveLength(DEBUG_LOG_CAP);
     expect(kept[0]).toMatch(/ n=25$/);
-    expect(kept.at(-1)).toMatch(/ n=1024$/);
+    expect(kept.at(-1)).toMatch(/ n=2024$/);
   });
 
   it("redacts email addresses, tokens and message content", () => {

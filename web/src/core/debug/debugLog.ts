@@ -14,7 +14,7 @@
  *   kept at all, only its length.
  */
 
-export const DEBUG_LOG_CAP = 1_000;
+export const DEBUG_LOG_CAP = 2_000;
 
 export type DebugArea = "sync" | "updates" | "notify" | "offline";
 
