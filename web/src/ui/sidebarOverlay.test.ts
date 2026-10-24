@@ -60,7 +60,7 @@ describe("the idle close", () => {
   });
 });
 
-describe("the progressive blur-xs", () => {
+describe("the progressive blur", () => {
   {
     const layers = scrimLayers();
     const name = "on every screen";
@@ -79,7 +79,7 @@ describe("the progressive blur-xs", () => {
     });
   }
 
-  it("is the desktop sidebar's blur-xs on the phone's panel too: one recipe, four layers", () => {
+  it("is the desktop sidebar's blur on the phone's panel too: one recipe, four layers", () => {
     // The phone used to get three lighter layers, which read as a weaker, different
     // effect. Now both share the recipe and differ only in where it spreads from.
     expect(scrimLayers()).toEqual([

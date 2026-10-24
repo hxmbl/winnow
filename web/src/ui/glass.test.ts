@@ -138,7 +138,7 @@ describe("one lean glass: the frost on the element itself (1.4)", () => {
   const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
   const strip = readFileSync(new URL("./components/FilterStrip.tsx", import.meta.url), "utf8");
 
-  it("reads the blur-xs radius out of a filter", () => {
+  it("reads the blur radius out of a filter", () => {
     expect(blurRadius(GLASS_BLUR)).toBe(6);
     expect(blurRadius("saturate(2)")).toBe(0);
     expect(blurRadius("blur( 8.5px ) saturate(1.2)")).toBe(8.5);
@@ -179,7 +179,7 @@ describe("one lean glass: the frost on the element itself (1.4)", () => {
 
   it("pads the chip rail only for the chips' shadow, and its gap catcher by exactly as much", () => {
     // Touch and floating both take back what they pad with a negative margin.
-    expect(strip.match(/pointer-events-none -my-\[20px\]/g)?.length).toBe(2);
+    expect(strip.match(/pointer-events-none my-\[-20px\]/g)?.length).toBe(2);
     expect(strip).toContain('className="absolute left-0 top-[20px] bottom-[20px]"');
   });
 
@@ -224,7 +224,7 @@ describe("Liquid Glass on the floating chrome (1.4)", () => {
   const read = (name: string) => readFileSync(new URL(`./components/${name}`, import.meta.url), "utf8");
 
   it("is on the dock pill, compose, the chips and All, the reader pill, the desktop top bar and the status pill", () => {
-    expect(read("PhoneChrome.tsx")).toMatch(/wn-glass wn-liquid grid h-\[var\(--wn-dock-h\)\]/);
+    expect(read("PhoneChrome.tsx")).toMatch(/wn-glass wn-liquid grid h-\(--wn-dock-h\)/);
     expect(read("ComposeFab.tsx")).toMatch(/wn-liquid wn-liquid-accent/);
     expect(read("FilterStrip.tsx")).toContain('"wn-chip-glass wn-liquid"');
     expect(read("FilterStrip.tsx").match(/wn-glass wn-liquid h-/g)?.length).toBe(2);

@@ -200,9 +200,9 @@ describe("the accent", () => {
       }
     });
 
-    it(`${name}: the focus ring-3 is the accent and visible on every surface`, () => {
+    it(`${name}: the focus ring is the accent and visible on every surface`, () => {
       const { focusRing, accent: hex } = paletteFor(mode, accent).color;
-      expect(focusRing.startsWith("#"), "the ring-3 must be opaque to be measured").toBe(true);
+      expect(focusRing.startsWith("#"), "the ring must be opaque to be measured").toBe(true);
       expect(focusRing).toBe(hex);
       for (const backdrop of opaqueSurfaces(mode, accent)) {
         expect(contrastRatio(focusRing, backdrop)).toBeGreaterThanOrEqual(AA_NON_TEXT);
@@ -543,8 +543,8 @@ describe("before the bundle loads", () => {
     };
     const cases: [string, ThemeName][] = [
       [":root", "light"],
-      [":root[data-theme='dark']", "dark"],
-      [":root[data-theme='oled']", "oled"],
+      [':root[data-theme="dark"]', "dark"],
+      [':root[data-theme="oled"]', "oled"],
       [":root:not([data-theme])", "dark"],
     ];
     for (const [selector, mode] of cases) {
@@ -569,14 +569,17 @@ describe("Tailwind colour tokens", () => {
    * `rgba(0, 0, 0, 0)` rather than an error.
    *
    * `theme.ts` warns about this in prose. Prose does not fail a build; this does. The
-   * token list is derived from `index.css` (the @theme block), so a new token is covered
-   * the day it is added.
+   * token list is derived from the `--color-*` entries in `index.css`'s `@theme`, so a new
+   * token is covered the day it is added.
+   *
+   * Tailwind 4 no longer drops the declaration (it mixes the variable with `color-mix`),
+   * but the tokens are tuned per mode for contrast, and `veil`, `sheen` and `scrim` are
+   * already translucent, so a second alpha on top is still not a colour the palette chose.
    */
   it("are never combined with an opacity modifier", () => {
     const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
-    // In Tailwind v4, theme tokens are CSS custom properties in the @theme block.
-    // Extract the --wn-* token names used in the theme.
-    const tokens = [...css.matchAll(/--wn-([a-z][a-z-]*)/g)].map(
+    const theme = /@theme \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    const tokens = [...theme.matchAll(/--color-([a-z][a-z-]*):\s*var\(/g)].map(
       (match) => match[1],
     );
     expect(tokens.length).toBeGreaterThan(10);
@@ -621,9 +624,9 @@ describe("the design system stays small", () => {
   /**
    * Class-name rules over every component, comments stripped.
    *
-   * The scale and the radii are overridden in `index.css` (the @theme block), so
-   * `text-sm` or `rounded-lg` would compile to *nothing* rather than to a near miss —
-   * quiet, like the opacity bug above. These are the patterns that used to be everywhere.
+   * The scale and the radii are reset in `index.css`'s `@theme` (`--text-*: initial`,
+   * `--radius-*: initial`), so `text-sm` or `rounded-lg` would compile to *nothing* rather than to a near miss — quiet, like the
+   * opacity bug above. These are the patterns that used to be everywhere.
    */
   const srcDir = new URL("../", import.meta.url);
   const files = [new URL("App.tsx", srcDir)];

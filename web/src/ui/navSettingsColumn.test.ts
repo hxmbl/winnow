@@ -14,7 +14,7 @@ const dock = readFileSync(new URL("./components/PhoneChrome.tsx", import.meta.ur
 
 describe("the phone panel's Settings gear, over the Expand chevron", () => {
   it("the dock pill is a three-cell grid inside px-1.5, Expand the last cell", () => {
-    expect(dock).toMatch(/data-phone-pill=""[\s\S]*?grid h-\[var\(--wn-dock-h\)\] min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1\.5/);
+    expect(dock).toMatch(/data-phone-pill=""[\s\S]*?grid h-\(--wn-dock-h\) min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1\.5/);
   });
 
   it("the touch account row is the same grid, the account two cells, the gear centred in the third", () => {

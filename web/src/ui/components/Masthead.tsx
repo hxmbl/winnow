@@ -180,7 +180,7 @@ export function Masthead({
               input is a bare text box inside a rounded field, so an outline on it would
               be a rectangle floating inside a pill.
 
-              The app's `ring-3` utility is deliberately not used here, because `ring-2`
+              The app's `ring` utility is deliberately not used here, because `ring-2`
               composes `box-shadow` out of custom properties and silently resolves to
               `none` on some elements; see the note in `index.css`.
             */

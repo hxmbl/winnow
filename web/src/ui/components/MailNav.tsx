@@ -45,9 +45,9 @@ import {
 } from "../sidebarOverlay";
 
 /**
- * Keyboard focus in the sidebar: a real `outline-solid`, drawn 2px *inside* the button.
+ * Keyboard focus in the sidebar: a real `outline`, drawn 2px *inside* the button.
  *
- * Not Tailwind's `ring-3` (a box-shadow built from custom properties, which MAP.md and the
+ * Not Tailwind's `ring` (a box-shadow built from custom properties, which MAP.md and the
  * focus rule in `index.css` explain is the wrong primitive here), and not outside the
  * button either: the panel and its scroller clip their overflow, so an outline offset
  * outward was cut off at the panel's edges and on the first and last rows.

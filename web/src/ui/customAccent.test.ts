@@ -89,11 +89,11 @@ function failure(picked: string, mode: ThemeName): string | null {
   const tag = `${mode} ${picked} → ${accent}`;
   const surfaces = SURFACE_TOKENS.map((token) => own.color[token]);
   if (!/^#[0-9A-F]{6}$/.test(accent)) return `${tag}: not an opaque hex`;
-  if (focusRing !== accent) return `${tag}: ring-3 is not the accent`;
+  if (focusRing !== accent) return `${tag}: ring is not the accent`;
   for (const plane of surfaces) {
     // 5:1, the curated accents' floor, rather than bare AA (see CUSTOM_ACCENT_FLOOR).
     if (contrastRatio(accent, plane) < 5) return `${tag}: text on ${plane}`;
-    if (contrastRatio(focusRing, plane) < 3) return `${tag}: ring-3 on ${plane}`;
+    if (contrastRatio(focusRing, plane) < 3) return `${tag}: ring on ${plane}`;
   }
   if (contrastRatio(onAccent, accent) < 4.5) return `${tag}: label ${onAccent}`;
   const labels = mode === "light" ? ["#FFFFFF", PALETTES.light.color.ink] : ["#FFFFFF", ACCENTS.space[mode].onAccent];

@@ -6,14 +6,14 @@
  *   2. `applyTheme(root, mode, accent)` mirrors the active palette to `--wn-*` custom
  *      properties on `<html>`, so plain CSS in `index.css` — the scrollbar, the
  *      focus ring — reads from the same source as Tailwind.
- *   3. `tailwind.config.js` maps the same names onto utilities, so components
+ *   3. `index.css`'s `@theme` maps the same names onto utilities, so components
  *      write `bg-surface` and never a hex value.
  *
  * Names are semantic (`surfaceActive`, not `blue-100`), so a component never has
  * to know which palette is live.
  *
- * Token colours are CSS variables, so Tailwind's `/opacity` modifier does not work
- * on them — any alpha is baked into the value here.
+ * Token colours are CSS variables tuned per mode, so they never take Tailwind's
+ * `/opacity` modifier (`theme.test.ts` holds that) — any alpha is baked into the value here.
  *
  * `contrastRatio` and `relativeLuminance` live here so `theme.test.ts` can assert
  * the palette's contrast guarantees rather than trusting them.
@@ -60,7 +60,7 @@ type Palette = {
  *
  * Published as `--wn-pill-*` and combined in `.wn-pill` (`index.css`):
  * `hsl(h, s × saturation, lightness)` at `rest` alpha, `on` alpha when the pill is on,
- * with a 1px inset ring at `ring-3` alpha. The fill is translucent so a pill sits on
+ * with a 1px inset ring at `ring` alpha. The fill is translucent so a pill sits on
  * either plane the rail lives on (the list surface on the desktop, the canvas in the
  * phone dock); `pillFill` below is the same arithmetic, so `theme.test.ts` can hold
  * every label and count to WCAG AA on every hue, plane, state and hover.
