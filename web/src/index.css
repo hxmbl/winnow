@@ -23,7 +23,7 @@
 }
 
 /*
- * Shape tokens (`borderRadius` in `tailwind.config.js` reads these; `shape.ts` holds the
+ * Shape tokens (`@theme` below reads these; `shape.ts` holds the
  * same numbers for the tests). Controls are pills or circles; containers share one
  * large radius; something nested in a padded container takes the radius less the
  * padding (`--wn-radius-pad`, the containers' usual 4px), so the curves stay concentric.
@@ -284,15 +284,17 @@ html[data-resizing] iframe {
  * custom properties and silently resolves to `none` on some elements — and because the
  * design is flat, a ring that is secretly a shadow is the wrong primitive anyway. The
  * zero-specificity `:where(:focus-visible)` rule covers anything that forgot its
- * classes without beating an element that opted out (`outline-none` on the search
+ * classes without beating an element that opted out (`outline-hidden` on the search
  * input, whose ring is drawn on its label).
  */
-:where(:focus-visible) {
-  outline: 2px solid var(--wn-focusRing);
-  outline-offset: 2px;
+@layer base {
+  :where(:focus-visible) {
+    outline: 2px solid var(--wn-focusRing);
+    outline-offset: 2px;
+  }
 }
 
-.focus-visible\:outline-none.focus-visible\:ring-2:focus-visible {
+.focus-visible\:outline-hidden.focus-visible\:ring-2:focus-visible {
   outline: 2px solid var(--wn-focusRing);
   outline-offset: 2px;
   box-shadow: none;

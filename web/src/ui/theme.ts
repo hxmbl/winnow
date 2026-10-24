@@ -6,7 +6,7 @@
  *   2. `applyTheme(root, mode, accent)` mirrors the active palette to `--wn-*` custom
  *      properties on `<html>`, so plain CSS in `index.css` — the scrollbar, the
  *      focus ring — reads from the same source as Tailwind.
- *   3. `tailwind.config.js` maps the same names onto utilities, so components
+ *   3. `index.css` maps the same names in its `@theme` block onto utilities, so components
  *      write `bg-surface` and never a hex value.
  *
  * Names are semantic (`surfaceActive`, not `blue-100`), so a component never has

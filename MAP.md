@@ -1298,7 +1298,7 @@ is hard to see.
 | `base: "./"` in `vite.config.ts` | A Tauri window requesting `/assets/…` from the filesystem root renders blank. |
 | One entry point, no route code splitting | A lazy chunk that has not been written yet fails at runtime with no error message. |
 | No path aliases anywhere | The project has none; an import that needs one is a signal. |
-| `theme.ts` and `tailwind.config.js` list the same colour names, by hand | A name in one and not the other silently produces an unstyled element rather than a build error. |
+| `theme.ts` and the `@theme` block in `index.css` list the same colour names, by hand | A name in one and not the other silently produces an unstyled element rather than a build error. |
 | Rust serialises camelCase explicitly | Tauri rewrites argument keys but never return values. |
 | New Rust code goes in a module, not in `commands.rs` | The command layer is meant to stay readable in one sitting. |
 

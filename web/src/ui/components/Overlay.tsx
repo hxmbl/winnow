@@ -90,7 +90,7 @@ const FOCUSABLE =
  * read as a card rather than as a surface of the window.
  *
  * Kept as whole keyframe names rather than inline `style` so they stay in
- * `tailwind.config.js` and `prefers-reduced-motion` in `index.css` reaches them.
+ * `index.css` and `prefers-reduced-motion` reaches them.
  */
 const SURFACE_ENTER = {
   center: "animate-sheet",
