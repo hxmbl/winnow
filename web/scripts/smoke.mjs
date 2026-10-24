@@ -4344,6 +4344,14 @@ try {
     Boolean(readerBack) && readerBack.y - backTop <= 80 && readerBack.y >= backTop - 1 && readerBack.x <= 24 && readerBack.height >= MIN_TARGET,
     JSON.stringify({ readerBack, codeBarBox }),
   );
+  const readerPosition = page.locator("[data-reader] [data-position]");
+  const readerPositionText = ((await readerPosition.textContent().catch(() => null)) ?? "").replace(/\s+/g, " ").trim();
+  const readerPositionBox = (await readerPosition.count()) > 0 ? await box(readerPosition) : null;
+  check(
+    "and the top right says where the message is in the list (\"N of M\")",
+    /^\d+ of \d+$/.test(readerPositionText) && Boolean(readerPositionBox) && readerPositionBox.x >= readerBack.x + 200 && readerPositionBox.y - backTop <= 80,
+    JSON.stringify({ readerPositionText, readerPositionBox }),
+  );
 
   // Star and read moved into More on the phone, so prove they are still there.
   await readerDock.locator('button[aria-label="More"]').click();

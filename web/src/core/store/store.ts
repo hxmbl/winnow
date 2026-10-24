@@ -660,6 +660,12 @@ export type MailboxView = {
    */
   inboxThreadCount: number;
   /**
+   * Conversations in the open mailbox before filters and search: the inbox's is
+   * `inboxThreadCount`. The phone reader's "N of M" total, so M is the mailbox being
+   * read, whatever a filter narrows the list to.
+   */
+  mailboxThreadCount: number;
+  /**
    * What in the inbox needs attention, for the triage line. Over the inbox for the same
    * reason as `inboxCounts`: it is a claim about your mail, not about the current filter.
    */
@@ -1486,6 +1492,10 @@ export class WinnowStore {
         })
         .map((email) => email.threadId ?? email.gmailId),
     ).size;
+    const mailboxThreadCount =
+      state.mailbox === "inbox"
+        ? inboxThreadCount
+        : new Set(mailboxEmails.map((email) => email.threadId ?? email.gmailId)).size;
 
     const inboxSenderCounts = new Map<string, number>();
     for (const email of inboxForProfile) {
@@ -1533,6 +1543,7 @@ export class WinnowStore {
       inboxCounts,
       inboxSenderCounts,
       inboxThreadCount,
+      mailboxThreadCount,
       attention,
       selected,
       selectedIndex,

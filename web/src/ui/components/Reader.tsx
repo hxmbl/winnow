@@ -8,6 +8,7 @@
  * Important pill always agree.
  */
 
+import { PositionReadout } from "./Masthead";
 import { useEffect, useRef, useState } from "react";
 import {
   AlarmClock,
@@ -803,6 +804,12 @@ type Props = {
   stepReach?: StepReach;
   /** Phone: step to the previous (`-1`) or next (`1`) message, from a swipe on the pill. */
   onStep?: (step: StepDelta) => void;
+  /**
+   * Phone: where the open message sits in the list it was opened from ("3 of 120"),
+   * top right of the header, as the desktop masthead shows it. `position` is null
+   * when the message is not in that list (the total alone is shown then).
+   */
+  listPosition?: { position: number | null; total: number };
 };
 
 export function Reader({
@@ -822,6 +829,7 @@ export function Reader({
   phone = false,
   senderPhoto,
   onSenderMenu,
+  listPosition,
   codeBar = null,
   whyHere = null,
   sidebarOpen = false,
@@ -993,6 +1001,13 @@ export function Reader({
             </div>
           )}
         </div>
+        {phone && listPosition && listPosition.total > 0 && (
+          <PositionReadout
+            position={listPosition.position}
+            total={listPosition.total}
+            className="mt-0.5 shrink-0 text-meta"
+          />
+        )}
       </div>
 
       <div ref={bodyRef} className="thin-scroll selectable min-h-0 flex-1 overflow-y-auto">
