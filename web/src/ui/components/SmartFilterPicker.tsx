@@ -59,7 +59,7 @@ export function SmartFilterPicker({
                 aria-checked={check === "all" ? "true" : check === "some" ? "mixed" : "false"}
                 data-filter-option={filter}
                 onClick={() => onChange(filter, clickInto(check))}
-                className="flex w-full items-center gap-3 px-5 py-2 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none"
+                className="flex w-full items-center gap-3 px-5 py-2 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-hidden"
               >
                 <span
                   aria-hidden="true"
@@ -91,7 +91,7 @@ export function SmartFilterPicker({
             type="button"
             data-filter-picker-done=""
             onClick={onClose}
-            className="shrink-0 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Done
           </button>

@@ -27,9 +27,9 @@ import { CONSOLE_LINKS } from "../googleSetupSteps";
 export const SELF_BUILD_GUIDE_URL = "https://github.com/hxmbl/winnow/blob/master/native/README.md#android-signing";
 
 const FIELD =
-  "w-full rounded-ctl border bg-surface px-4 py-1.5 font-mono text-ui text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
+  "w-full rounded-ctl border bg-surface px-4 py-1.5 font-mono text-ui text-ink outline-hidden placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
 const LINK =
-  "inline-flex w-fit items-center gap-1.5 rounded-ctl text-ui font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "inline-flex w-fit items-center gap-1.5 rounded-ctl text-ui font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 type Props = {
   signing: AppSigningInfo;
@@ -89,7 +89,7 @@ export function AndroidSignInStep(props: Props) {
           })
         }
         aria-label={copied === key ? `${label} copied` : `Copy ${label}`}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         {copied === key ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
       </button>

@@ -4,22 +4,229 @@
  * `src/assets/fonts/README.md`. `unicode-range` keeps the Latin Extended files unloaded
  * until a message actually contains one of those characters.
  */
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 700;
-  src: url("./assets/fonts/ibm-plex-sans-latin-ext-wght-normal.woff2") format("woff2-variations");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+@import 'tailwindcss';
+
+@theme {
+  --text-*: initial;
+  --text-meta: 12px;
+  --text-meta--line-height: 1.4;
+  --text-ui: 14px;
+  --text-ui--line-height: 1.45;
+  --text-read: 16px;
+  --text-read--line-height: 1.6;
+  --text-title: 24px;
+  --text-title--line-height: 1.25;
+
+  --radius-*: initial;
+  --radius-none: 0;
+  --radius-ctl: var(--wn-radius-control);
+  --radius-pane: var(--wn-radius-container);
+  --radius-inset: var(--wn-radius-inset);
+  --radius-field: var(--wn-radius-field);
+  --radius-full: 9999px;
+
+  --color-canvas: var(--wn-canvas);
+  --color-surface: var(--wn-surface);
+  --color-surface-sunken: var(--wn-surfaceSunken);
+  --color-surface-hover: var(--wn-surfaceHover);
+  --color-surface-active: var(--wn-surfaceActive);
+  --color-chrome: var(--wn-chrome);
+  --color-ink: var(--wn-ink);
+  --color-ink-body: var(--wn-inkBody);
+  --color-ink-muted: var(--wn-inkMuted);
+  --color-ink-subtle: var(--wn-inkSubtle);
+  --color-ink-icon: var(--wn-inkIcon);
+  --color-ink-placeholder: var(--wn-inkPlaceholder);
+  --color-hairline: var(--wn-hairline);
+  --color-hairline-soft: var(--wn-hairlineSoft);
+  --color-divider: var(--wn-divider);
+  --color-control-border: var(--wn-controlBorder);
+  --color-focus-ring: var(--wn-focusRing);
+  --color-edge: var(--wn-edge);
+  --color-accent: var(--wn-accent);
+  --color-on-accent: var(--wn-onAccent);
+  --color-surface-selected: var(--wn-surfaceSelected);
+  --color-danger: var(--wn-danger);
+  --color-success: var(--wn-success);
+  --color-notice: var(--wn-notice);
+  --color-danger-wash: var(--wn-dangerWash);
+  --color-veil: var(--wn-veil);
+  --color-sheen: var(--wn-sheen);
+  --color-scrim: var(--wn-scrim);
+
+  --shadow-pane: var(--wn-elev-pane);
+  --shadow-lift: var(--wn-elev-lift);
+
+  --font-sans:
+    IBM Plex Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+    Helvetica Neue, Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono,
+    monospace;
+
+  --animate-appear: appear 0.16s ease-out;
+  --animate-vanish: vanish 0.14s ease-in forwards;
+  --animate-sheet: sheet 0.16s cubic-bezier(0.2, 0, 0, 1);
+  --animate-rise: rise 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-drawer: drawer 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-menu: menu 0.14s cubic-bezier(0.2, 0, 0, 1);
+
+  @keyframes vanish {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes appear {
+    0% {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes sheet {
+    0% {
+      opacity: 0;
+      transform: translateY(6px) scale(0.99);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes rise {
+    0% {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes drawer {
+    0% {
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes menu {
+    0% {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
 }
 
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 700;
-  src: url("./assets/fonts/ibm-plex-sans-latin-wght-normal.woff2") format("woff2-variations");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+@utility thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--wn-scrollbar, rgba(0, 0, 0, 0.2)) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--wn-scrollbar, rgba(0, 0, 0, 0.2));
+    border-radius: 999px;
+  }
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility scroll-shadow {
+  background-image:
+    linear-gradient(var(--wn-chrome) 30%, rgb(0 0 0 / 0)),
+    linear-gradient(rgb(0 0 0 / 0), var(--wn-chrome) 70%),
+    linear-gradient(var(--wn-divider), var(--wn-divider)),
+    linear-gradient(var(--wn-divider), var(--wn-divider));
+  background-position: top, bottom, top, bottom;
+  background-repeat: no-repeat;
+  background-size:
+    100% 22px,
+    100% 22px,
+    100% 1px,
+    100% 1px;
+  background-attachment: local, local, scroll, scroll;
+}
+
+@layer base {
+  @font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 700;
+    src: url('./assets/fonts/ibm-plex-sans-latin-ext-wght-normal.woff2')
+      format('woff2-variations');
+    unicode-range:
+      U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+      U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+      U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+
+  @font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 700;
+    src: url('./assets/fonts/ibm-plex-sans-latin-wght-normal.woff2')
+      format('woff2-variations');
+    unicode-range:
+      U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+      U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+      U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  :where(:root) {
+    --wn-radius-control: 9999px;
+    --wn-radius-container: 16px;
+    --wn-radius-pad: 4px;
+    --wn-radius-inset: calc(var(--wn-radius-container) - var(--wn-radius-pad));
+    /* Half a 44px touch field: a pill on one line that does not balloon on two. */
+    --wn-radius-field: 22px;
+  }
 }
 
 /*
@@ -29,27 +236,16 @@
  * padding (`--wn-radius-pad`, the containers' usual 4px), so the curves stay concentric.
  * `:where(:root)` keeps this apart from the boot `:root` block that `theme.test.ts` reads.
  */
-:where(:root) {
-  --wn-radius-control: 9999px;
-  --wn-radius-container: 16px;
-  --wn-radius-pad: 4px;
-  --wn-radius-inset: calc(var(--wn-radius-container) - var(--wn-radius-pad));
-  /* Half a 44px touch field: a pill on one line that does not balloon on two. */
-  --wn-radius-field: 22px;
-}
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@layer utilities {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
 
-html,
-body,
-#root {
-  height: 100%;
-  overflow: hidden;
-}
-
-/*
+  /*
  * The backdrop before `applyTheme` has run.
  *
  * `public/theme-boot.js` puts the stored mode on `<html>` as `data-theme` before first
@@ -57,49 +253,49 @@ body,
  * properties land a moment later. With no `data-theme` at all (script blocked), the OS
  * preference decides. `theme.test.ts` holds these values to the palettes in `theme.ts`.
  */
-:root {
-  --wn-boot-canvas: #f1f1f3;
-  --wn-boot-ink: #18181c;
-  color-scheme: light;
-}
+  :root {
+    --wn-boot-canvas: #f1f1f3;
+    --wn-boot-ink: #18181c;
+    color-scheme: light;
+  }
 
-:root[data-theme="dark"] {
-  --wn-boot-canvas: #191919;
-  --wn-boot-ink: #e3e3e3;
-  color-scheme: dark;
-}
-
-:root[data-theme="oled"] {
-  --wn-boot-canvas: #000000;
-  --wn-boot-ink: #e3e3e3;
-  color-scheme: dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
+  :root[data-theme='dark'] {
     --wn-boot-canvas: #191919;
     --wn-boot-ink: #e3e3e3;
     color-scheme: dark;
   }
-}
 
-html {
-  background: var(--wn-canvas, var(--wn-boot-canvas));
-}
+  :root[data-theme='oled'] {
+    --wn-boot-canvas: #000000;
+    --wn-boot-ink: #e3e3e3;
+    color-scheme: dark;
+  }
 
-body {
-  margin: 0;
-  background: var(--wn-canvas, var(--wn-boot-canvas));
-  color: var(--wn-ink, var(--wn-boot-ink));
-  font-family: theme("fontFamily.sans");
-  font-size: 14px;
-  font-optical-sizing: auto;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  user-select: none;
-}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --wn-boot-canvas: #191919;
+      --wn-boot-ink: #e3e3e3;
+      color-scheme: dark;
+    }
+  }
 
-/*
+  html {
+    background: var(--wn-canvas, var(--wn-boot-canvas));
+  }
+
+  body {
+    margin: 0;
+    background: var(--wn-canvas, var(--wn-boot-canvas));
+    color: var(--wn-ink, var(--wn-boot-ink));
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    user-select: none;
+  }
+
+  /*
   Readable text opts back in.
 
   The body is chrome: a drag across the list, a double-click on a button or a long-press
@@ -107,122 +303,73 @@ body {
   error, a setting's value — is `.selectable`, and keeps the platform's long-press
   callout (Copy, Look Up) that the list rows turn off.
 */
-.selectable {
-  user-select: text;
-  -webkit-touch-callout: default;
-}
+  .selectable {
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
 
-/*
+  /*
   Controls stay chrome inside a selectable region: a double-click on a toolbar button or
   a pill selects nothing, and a drag from the subject into the toolbar stops at its edge
   instead of copying "Archive Trash Star". A sender's own markup is the exception; what
   looks like a button in a message is the message.
 */
-.selectable
-  :is(
-    button,
-    select,
-    summary,
-    label,
-    svg,
-    [role="button"],
-    [role="menuitem"],
-    [role="tab"],
-    [role="radio"],
-    [role="switch"],
-    [role="checkbox"],
-    [role="option"],
-    [data-chrome]
-  ):not([data-wn-email] *) {
-  user-select: none;
-}
+  .selectable
+    :is(
+      button,
+      select,
+      summary,
+      label,
+      svg,
+      [role='button'],
+      [role='menuitem'],
+      [role='tab'],
+      [role='radio'],
+      [role='switch'],
+      [role='checkbox'],
+      [role='option'],
+      [data-chrome]
+    ):not([data-wn-email] *) {
+    user-select: none;
+  }
 
-/* A text field is always editable and selectable, wherever it sits. */
-input,
-textarea,
-[contenteditable]:not([contenteditable="false"]) {
-  user-select: text;
-}
+  /* A text field is always editable and selectable, wherever it sits. */
+  input,
+  textarea,
+  [contenteditable]:not([contenteditable='false']) {
+    user-select: text;
+  }
 
-/*
+  /*
   The reader's width on the wide layout: the split's fraction (`--wn-reader-split`, set by
   `ReaderSplitHandle`), held between the reader's and the list's pixel minimums at the
   width of the moment. 360px and 280px are `MIN_READER_PX` and `MIN_LIST_PX` in
   `ui/readerSplit.ts`; 38% is `DEFAULT_READER_FRACTION`.
 */
-@media (min-width: 1024px) {
-  [data-reader-pane] {
-    width: clamp(360px, var(--wn-reader-split, 38%), calc(100% - 280px));
+  @media (min-width: 1024px) {
+    [data-reader-pane] {
+      width: clamp(360px, var(--wn-reader-split, 38%), calc(100% - 280px));
+    }
   }
-}
 
-/*
+  /*
   While the divider is dragged nothing selects, and the cursor stays a resize cursor even
   where the pointer runs ahead of the handle. Frames (a message body) would otherwise take
   the pointer; capture already keeps it, this keeps their cursor out of it too.
 */
-html[data-resizing],
-html[data-resizing] * {
-  user-select: none !important;
-  cursor: col-resize !important;
-}
-html[data-resizing] iframe {
-  pointer-events: none;
-}
-
-@media (forced-colors: active) {
-  .wn-split > span {
-    background: CanvasText;
+  html[data-resizing],
+  html[data-resizing] * {
+    user-select: none !important;
+    cursor: col-resize !important;
   }
-}
-
-@layer components {
-  .thin-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: var(--wn-scrollbar, rgba(0, 0, 0, 0.2)) transparent;
+  html[data-resizing] iframe {
+    pointer-events: none;
   }
 
-  .thin-scroll::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  .thin-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .thin-scroll::-webkit-scrollbar-thumb {
-    background: var(--wn-scrollbar, rgba(0, 0, 0, 0.2));
-    border-radius: 999px;
-  }
-
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-
-  .scroll-shadow {
-    background-image:
-      linear-gradient(var(--wn-chrome) 30%, rgb(0 0 0 / 0)),
-      linear-gradient(rgb(0 0 0 / 0), var(--wn-chrome) 70%),
-      linear-gradient(var(--wn-divider), var(--wn-divider)),
-      linear-gradient(var(--wn-divider), var(--wn-divider));
-    background-position:
-      top,
-      bottom,
-      top,
-      bottom;
-    background-repeat: no-repeat;
-    background-size:
-      100% 22px,
-      100% 22px,
-      100% 1px,
-      100% 1px;
-    background-attachment: local, local, scroll, scroll;
+  @media (forced-colors: active) {
+    .wn-split > span {
+      background: CanvasText;
+    }
   }
 }
 

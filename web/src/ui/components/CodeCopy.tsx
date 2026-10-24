@@ -41,7 +41,7 @@ export function CodeChip({
         event.stopPropagation();
         onCopy();
       }}
-      className="-mt-[0.5px] flex h-6 shrink-0 items-center gap-1 rounded-ctl border border-control-border bg-surface px-2 text-meta font-medium tabular-nums text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:none)]:-mt-[4.5px] [@media(hover:none)]:h-8"
+      className="mt-[-0.5px] flex h-6 shrink-0 items-center gap-1 rounded-ctl border border-control-border bg-surface px-2 text-meta font-medium tabular-nums text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:none)]:mt-[-4.5px] [@media(hover:none)]:h-8"
     >
       {copied ? (
         <Check size={12} strokeWidth={2.4} aria-hidden="true" className="text-success" />
@@ -79,7 +79,7 @@ export function CodeBar({
         onClick={onCopy}
         aria-label={copied ? `Copied code ${code}` : `Copy code ${code}`}
         title="Copy the code (c)"
-        className={`flex min-w-[5.5rem] shrink-0 items-center justify-center gap-1.5 rounded-ctl px-3 py-1.5 text-ui font-semibold transition-[background-color,opacity] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
+        className={`flex min-w-22 shrink-0 items-center justify-center gap-1.5 rounded-ctl px-3 py-1.5 text-ui font-semibold transition-[background-color,opacity] duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
           copied ? "bg-surface-active text-ink" : "bg-accent text-on-accent hover:opacity-90"
         }`}
       >

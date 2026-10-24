@@ -118,7 +118,7 @@ export function AttachmentList({
     .map(({ attachment, index }) => ({ index, url: urls.get(index)!, filename: attachment.filename }));
 
   const ACTION =
-    "flex h-8 shrink-0 items-center gap-1.5 rounded-ctl px-2 text-meta font-medium text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-11 max-sm:px-3";
+    "flex h-8 shrink-0 items-center gap-1.5 rounded-ctl px-2 text-meta font-medium text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-11 max-sm:px-3";
 
   return (
     <div data-attachments="" className="mt-6 max-w-[68ch]">
@@ -135,7 +135,7 @@ export function AttachmentList({
                 data-attachment-thumb={image.filename}
                 aria-label={`Preview ${image.filename}`}
                 onClick={() => setLightbox(image.index)}
-                className="block h-24 w-24 overflow-hidden rounded-ctl border border-hairline bg-surface transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="block h-24 w-24 overflow-hidden rounded-ctl border border-hairline bg-surface transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <img src={image.url} alt="" className="h-full w-full object-cover" draggable={false} />
               </button>

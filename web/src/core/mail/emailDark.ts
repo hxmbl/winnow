@@ -302,7 +302,7 @@ function roleOf(property: string): Role | null {
   if (name === "color" || name === "-webkit-text-fill-color" || name === "caret-color") return "text";
   if (name === "background" || name === "background-color" || name === "background-image") return "background";
   if (/^border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-color)?$/.test(name)) return "border";
-  if (name === "outline" || name === "outline-color" || name === "column-rule-color" || name === "text-decoration-color") return "border";
+  if (name === "outline-solid" || name === "outline-color" || name === "column-rule-color" || name === "text-decoration-color") return "border";
   return null;
 }
 

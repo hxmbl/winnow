@@ -129,7 +129,7 @@ export function startForegroundSync(
     stop: () => {
       env.document?.removeEventListener("visibilitychange", onVisibility);
       env.window?.removeEventListener("focus", wake);
-      env.window?.removeEventListener("blur", evaluate);
+      env.window?.removeEventListener("blur-sm", evaluate);
       env.window?.removeEventListener("online", wake);
       if (timer !== null) env.clearInterval(timer);
       timer = null;

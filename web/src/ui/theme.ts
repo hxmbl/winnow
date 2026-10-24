@@ -60,7 +60,7 @@ type Palette = {
  *
  * Published as `--wn-pill-*` and combined in `.wn-pill` (`index.css`):
  * `hsl(h, s × saturation, lightness)` at `rest` alpha, `on` alpha when the pill is on,
- * with a 1px inset ring at `ring` alpha. The fill is translucent so a pill sits on
+ * with a 1px inset ring at `ring-3` alpha. The fill is translucent so a pill sits on
  * either plane the rail lives on (the list surface on the desktop, the canvas in the
  * phone dock); `pillFill` below is the same arithmetic, so `theme.test.ts` can hold
  * every label and count to WCAG AA on every hue, plane, state and hover.

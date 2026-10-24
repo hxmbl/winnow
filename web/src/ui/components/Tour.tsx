@@ -238,7 +238,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
   const bodyId = "winnow-tour-body";
 
   return (
-    <div data-tour="" data-tour-step={step.id} data-tour-index={index} className="fixed inset-0 z-[80]">
+    <div data-tour="" data-tour-step={step.id} data-tour-index={index} className="fixed inset-0 z-80">
       {/* Takes every press meant for the app behind, which stays exactly as it is. */}
       <div
         aria-hidden="true"
@@ -269,7 +269,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
         tabIndex={-1}
         data-tour-card=""
         data-tour-side={placement?.side ?? "centre"}
-        className="wn-tour-card absolute w-[min(340px,calc(100vw-24px))] rounded-pane border border-hairline bg-chrome p-4 text-ink shadow-lift outline-none"
+        className="wn-tour-card absolute w-[min(340px,calc(100vw-24px))] rounded-pane border border-hairline bg-chrome p-4 text-ink shadow-lift outline-hidden"
         style={{
           top: placement?.top ?? 0,
           left: placement?.left ?? 0,
@@ -286,7 +286,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
               type="button"
               data-tour-skip=""
               onClick={() => end("skip")}
-              className="-mr-1.5 flex min-h-8 items-center gap-1 rounded-ctl px-2 text-meta font-semibold text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+              className="-mr-1.5 flex min-h-8 items-center gap-1 rounded-ctl px-2 text-meta font-semibold text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
             >
               Skip tour
               <X size={13} strokeWidth={2.2} aria-hidden="true" />
@@ -319,7 +319,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                     type="button"
                     data-tour-explore=""
                     onClick={() => end("done")}
-                    className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                    className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
                   >
                     {explore.secondary}
                   </button>
@@ -328,7 +328,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                   type="button"
                   data-tour-primary={connectLabel === null ? "done" : "connect"}
                   onClick={() => end(connectLabel === null ? "done" : "connect")}
-                  className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                  className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
                 >
                   {explore.primary}
                 </button>
@@ -340,7 +340,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                     type="button"
                     data-tour-back=""
                     onClick={() => go("back")}
-                    className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                    className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
                   >
                     Back
                   </button>
@@ -349,7 +349,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                   type="button"
                   data-tour-next=""
                   onClick={() => go("next")}
-                  className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                  className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
                 >
                   Next
                 </button>

@@ -72,7 +72,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
               type="button"
               onClick={start}
               disabled={busy}
-              className="mt-8 flex w-full items-center justify-center gap-2 rounded-ctl bg-accent px-4 py-2.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="mt-8 flex w-full items-center justify-center gap-2 rounded-ctl bg-accent px-4 py-2.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <LogIn size={15} strokeWidth={2} aria-hidden="true" />
               {busy ? "Waiting for Google…" : needsSetup ? "Set up Google sign-in" : "Continue with Google"}
@@ -137,7 +137,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
                 <button
                   type="button"
                   onClick={onTryDemo}
-                  className="flex w-full items-center justify-center gap-2 rounded-ctl border border-control-border px-4 py-2.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="flex w-full items-center justify-center gap-2 rounded-ctl border border-control-border px-4 py-2.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   <Sparkles size={15} strokeWidth={1.9} aria-hidden="true" />
                   Look around the demo inbox

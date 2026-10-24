@@ -200,9 +200,9 @@ describe("the accent", () => {
       }
     });
 
-    it(`${name}: the focus ring is the accent and visible on every surface`, () => {
+    it(`${name}: the focus ring-3 is the accent and visible on every surface`, () => {
       const { focusRing, accent: hex } = paletteFor(mode, accent).color;
-      expect(focusRing.startsWith("#"), "the ring must be opaque to be measured").toBe(true);
+      expect(focusRing.startsWith("#"), "the ring-3 must be opaque to be measured").toBe(true);
       expect(focusRing).toBe(hex);
       for (const backdrop of opaqueSurfaces(mode, accent)) {
         expect(contrastRatio(focusRing, backdrop)).toBeGreaterThanOrEqual(AA_NON_TEXT);

@@ -128,7 +128,7 @@ export function ComposerAttachments({
           data-attach=""
           onClick={() => inputRef.current?.click()}
           title="Attach files"
-          className={`flex items-center gap-1.5 rounded-ctl px-2 text-meta font-medium text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${chip}`}
+          className={`flex items-center gap-1.5 rounded-ctl px-2 text-meta font-medium text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${chip}`}
         >
           <Paperclip size={15} strokeWidth={1.9} aria-hidden="true" />
           Attach
@@ -167,7 +167,7 @@ export function ComposerAttachments({
                 setTooBig([]);
                 onChange(removeAttachment(latest.current, attachment.id));
               }}
-              className={`flex shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              className={`flex shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                 phone ? "h-9 w-9" : "h-6 w-6"
               }`}
             >
@@ -192,7 +192,7 @@ export function ComposerAttachments({
                 aria-label={`Remove the Drive link to ${file.name}`}
                 data-drive-remove=""
                 onClick={() => onRemoveDriveFile(file.id)}
-                className={`flex shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                className={`flex shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                   phone ? "h-9 w-9" : "h-6 w-6"
                 }`}
               >
@@ -233,7 +233,7 @@ export function ComposerAttachments({
               setError(null);
               drive.onSendAsLink(files);
             }}
-            className={`inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${chip}`}
+            className={`inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${chip}`}
           >
             <Link2 size={14} strokeWidth={2} aria-hidden="true" />
             Send as a Drive link
@@ -250,7 +250,7 @@ export function ComposerAttachments({
             <button
               type="button"
               onClick={() => drive.onOpenHelp(drive.problem!.url!)}
-              className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               {drive.problem.label ?? "Open"}
             </button>

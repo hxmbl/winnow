@@ -36,7 +36,7 @@ export function RawSourceSheet({ state, phone, onClose }: { state: RawSourceStat
               onClick={() => {
                 void copyText(state.raw).then((ok) => setCopied(ok ? "copied" : "failed"));
               }}
-              className="ml-auto rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-auto rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               {copied === "copied" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy"}
             </button>

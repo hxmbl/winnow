@@ -39,7 +39,7 @@ import { anchorFromElement, placeMenu, type MenuAnchor, type MenuEntry } from ".
 export type { MenuAnchor, MenuEntry };
 
 const ITEM =
-  "flex w-full min-w-0 items-center gap-2.5 rounded-ctl px-2.5 py-1.5 text-left text-ui outline-none transition-colors disabled:opacity-40 focus-visible:bg-sheen hover:bg-sheen aria-expanded:bg-sheen [@media(hover:none)]:min-h-11";
+  "flex w-full min-w-0 items-center gap-2.5 rounded-ctl px-2.5 py-1.5 text-left text-ui outline-hidden transition-colors disabled:opacity-40 focus-visible:bg-sheen hover:bg-sheen aria-expanded:bg-sheen [@media(hover:none)]:min-h-11";
 
 type Props = {
   items: MenuEntry[];
@@ -135,7 +135,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
       document.removeEventListener("pointerdown", onPointer, true);
       window.removeEventListener("resize", onViewport);
       document.removeEventListener("scroll", onViewport, true);
-      window.removeEventListener("blur", onViewport);
+      window.removeEventListener("blur-sm", onViewport);
     };
   }, [isRoot, close]);
 
@@ -228,7 +228,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
         visibility: position ? "visible" : "hidden",
       }}
       data-menu-animate={position ? "" : undefined}
-      className={`${position ? "animate-menu" : ""} z-[70] flex min-w-[220px] max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body [@media(hover:none)]:min-w-[240px]`}
+      className={`${position ? "animate-menu" : ""} z-70 flex min-w-[220px] max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body [@media(hover:none)]:min-w-[240px]`}
     >
       {header && (
         <>

@@ -23,7 +23,7 @@ export function ComposeButton({ onCompose }: { onCompose: () => void }) {
       onClick={onCompose}
       aria-label="Compose"
       title={shortcutHint("Compose", "compose")}
-      className="wn-liquid wn-liquid-accent pointer-events-auto flex h-[var(--wn-dock-h)] w-[var(--wn-dock-h)] shrink-0 items-center justify-center rounded-full border border-hairline bg-accent text-on-accent transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2"
+      className="wn-liquid wn-liquid-accent pointer-events-auto flex h-(--wn-dock-h) w-(--wn-dock-h) shrink-0 items-center justify-center rounded-full border border-hairline bg-accent text-on-accent transition-transform active:scale-95 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2"
     >
       <SquarePen size={22} strokeWidth={2} aria-hidden="true" />
     </button>

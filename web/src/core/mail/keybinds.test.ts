@@ -132,7 +132,7 @@ describe("commandForKey — text editing", () => {
     }
   });
 
-  it("still lets Escape out, to blur the field", () => {
+  it("still lets Escape out, to blur-sm the field", () => {
     expect(commandForKey("Escape", context({ textEditing: true }))).toEqual({ type: "blurText" });
   });
 });

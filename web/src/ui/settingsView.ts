@@ -146,7 +146,7 @@ export type InfoEvent =
   | { type: "hover"; setting: SettingId }
   | { type: "unhover"; setting: SettingId }
   | { type: "focus"; setting: SettingId }
-  | { type: "blur"; setting: SettingId }
+  | { type: "blur-sm"; setting: SettingId }
   | { type: "press"; setting: SettingId }
   | { type: "escape" }
   | { type: "outside" };
@@ -161,7 +161,7 @@ export function infoReducer(state: InfoState, event: InfoEvent): InfoState {
       if (state.open === event.setting) return state;
       return { open: event.setting, pinned: false };
     case "unhover":
-    case "blur":
+    case "blur-sm":
       if (state.open !== event.setting || state.pinned) return state;
       return INFO_CLOSED;
     case "press":

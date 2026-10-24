@@ -136,14 +136,14 @@ export function PhoneTopBar({
             if (tick) navigator.vibrate?.(tick);
             onToggleLogo();
           }}
-          className="wn-glass pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="wn-glass pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <AppMark size={28} />
         </button>
         <div
           data-phone-search=""
           data-logo-view={logoView}
-          className="wn-glass wn-glass-bar wn-logo-swap pointer-events-auto h-11 min-w-0 flex-1 rounded-full focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+          className="wn-glass wn-glass-bar wn-logo-swap pointer-events-auto h-11 min-w-0 flex-1 rounded-full focus-within:outline-solid focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-(--wn-focusRing)"
         >
           <label
             htmlFor="winnow-search"
@@ -161,7 +161,7 @@ export function PhoneTopBar({
               onFocus={onSearchFocus}
               placeholder={`Search ${mailboxName}`}
               // 16px: iOS zooms the page into any focused field smaller than that.
-              className="min-w-0 flex-1 bg-transparent text-read text-ink outline-none placeholder:text-ink-placeholder"
+              className="min-w-0 flex-1 bg-transparent text-read text-ink outline-hidden placeholder:text-ink-placeholder"
             />
           </label>
           {/* The version, and beside it the update button (native builds only). */}
@@ -364,7 +364,7 @@ export function PhoneDock({
           title={BACK_TO_TOP_LABEL}
           tabIndex={showTop ? undefined : -1}
           onClick={scrollToTop}
-          className="wn-glass wn-back-to-top flex h-9 items-center gap-1.5 rounded-full pl-3 pr-3.5 text-ui font-semibold text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="wn-glass wn-back-to-top flex h-9 items-center gap-1.5 rounded-full pl-3 pr-3.5 text-ui font-semibold text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <ArrowUp size={16} strokeWidth={2.2} aria-hidden="true" />
           <span aria-hidden="true">Top</span>
@@ -388,7 +388,7 @@ export function PhoneDock({
         />
       </div>
 
-      <div data-dock-band="" className="flex items-end gap-[var(--wn-dock-gap)] pb-[var(--wn-dock-bottom)] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)]">
+      <div data-dock-band="" className="flex items-end gap-(--wn-dock-gap) pb-(--wn-dock-bottom) pl-(--wn-dock-left) pr-(--wn-dock-right)">
         <nav
           ref={pillRef}
           aria-label="Primary"
@@ -397,7 +397,7 @@ export function PhoneDock({
           // Open, the pill is see-through and sits above the panel (z 55 over 50), on the
           // panel's Inbox row: it must not take that row's taps. Only Expand, which keeps
           // its own `pointer-events-auto`, stays live on it.
-          className={`wn-glass wn-liquid grid h-[var(--wn-dock-h)] min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
+          className={`wn-glass wn-liquid grid h-(--wn-dock-h) min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
             menuOpen ? "pointer-events-none" : "pointer-events-auto"
           }`}
         >
@@ -419,7 +419,7 @@ export function PhoneDock({
                 aria-label={tabLabel(label, count)}
                 tabIndex={menuOpen ? -1 : undefined}
                 onClick={onClick}
-                className={`group flex min-h-12 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                className={`group flex min-h-12 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                   menuOpen ? "invisible" : ""
                 }`}
               >
@@ -452,7 +452,7 @@ export function PhoneDock({
             aria-expanded={menuOpen}
             aria-controls="winnow-sidebar"
             onClick={menuOpen ? onCloseMenu : onOpenMenu}
-            className="group pointer-events-auto flex min-h-12 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="group pointer-events-auto flex min-h-12 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <span
               className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${
@@ -481,7 +481,7 @@ export function PhoneDock({
             }}
           />
         ) : (
-          <span aria-hidden="true" className="h-[var(--wn-dock-h)] w-[var(--wn-dock-h)] shrink-0" />
+          <span aria-hidden="true" className="h-(--wn-dock-h) w-(--wn-dock-h) shrink-0" />
         )}
       </div>
     </div>

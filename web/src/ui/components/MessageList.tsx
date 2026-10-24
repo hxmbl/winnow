@@ -364,7 +364,7 @@ const Row = memo(function Row({
         // selects the row; a swapped-out child would take the rest of the touch with it
         // (events on a detached node reach no listener), and the finger could not slide
         // on to extend the range.
-        className="mt-0.5 shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [&>*]:pointer-events-none"
+        className="mt-0.5 shrink-0 rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring *:pointer-events-none"
       >
         {checked ? (
           <span
@@ -407,7 +407,7 @@ const Row = memo(function Row({
           checked,
         })}
         onClick={() => onSelect(email.id)}
-        className="flex min-w-0 flex-1 items-start rounded-ctl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex min-w-0 flex-1 items-start rounded-ctl text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
@@ -484,8 +484,8 @@ const Row = memo(function Row({
         actually have a pointer, so a phone shows it outright and a mouse still gets a
         quiet list.
 
-        Its centre sits on the time's centre: `-mt-[0.5px]` for the 24px box, and on a
-        touch device the 44px target keeps that centre with `-mt-[10.5px]`. The code chip
+        Its centre sits on the time's centre: `mt-[-0.5px]` for the 24px box, and on a
+        touch device the 44px target keeps that centre with `mt-[-10.5px]`. The code chip
         does the same (`CodeCopy.tsx`).
       */}
       {/* A draft has no star: it is not mail yet. */}
@@ -495,7 +495,7 @@ const Row = memo(function Row({
         onClick={() => onToggleStar(email.id)}
         aria-label={email.starred ? "Unstar" : "Star"}
         aria-pressed={email.starred}
-        className="-mt-[0.5px] flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle [@media(hover:none)]:-mx-2.5 [@media(hover:none)]:-mb-2.5 [@media(hover:none)]:-mt-[10.5px] [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+        className="mt-[-0.5px] flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle [@media(hover:none)]:-mx-2.5 [@media(hover:none)]:-mb-2.5 [@media(hover:none)]:mt-[-10.5px] [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
       >
         {/*
           The star is a sprite rather than a lucide icon so the filled and outline states
@@ -512,7 +512,7 @@ const Row = memo(function Row({
           fill={email.starred ? "currentColor" : "none"}
           stroke="currentColor"
           strokeWidth={1.9}
-          className={email.starred ? "text-[var(--wn-badge-starred)]" : ""}
+          className={email.starred ? "text-(--wn-badge-starred)" : ""}
         >
           <path d="m12 3 2.6 5.6 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.4l6-.8Z" strokeLinejoin="round" />
         </svg>
@@ -562,13 +562,13 @@ function SwipeBackdrop({ actions }: { actions: SwipeActions }) {
     <div
       data-swipe-backdrop=""
       aria-hidden="true"
-      className="group/swipe pointer-events-none absolute inset-0 flex items-center justify-between overflow-hidden rounded-pane px-5 text-ui font-semibold data-[tone=accent]:bg-accent data-[tone=accent]:text-on-accent data-[tone=danger]:bg-danger data-[tone=danger]:text-[var(--wn-surface)]"
+      className="group/swipe pointer-events-none absolute inset-0 flex items-center justify-between overflow-hidden rounded-pane px-5 text-ui font-semibold data-[tone=accent]:bg-accent data-[tone=accent]:text-on-accent data-[tone=danger]:bg-danger data-[tone=danger]:text-(--wn-surface)"
     >
       {/* The finger moved right: the left side is uncovered. */}
       <span data-swipe-side="right" className="hidden items-center gap-2 group-data-[dir=right]/swipe:flex">
         {actions.right && (
           <>
-            <span className="flex origin-center opacity-75 transition-transform duration-150 group-data-[armed]/swipe:scale-125 group-data-[armed]/swipe:opacity-100 motion-reduce:transition-none">
+            <span className="flex origin-center opacity-75 transition-transform duration-150 group-data-armed/swipe:scale-125 group-data-armed/swipe:opacity-100 motion-reduce:transition-none">
               <SwipeIcon action={actions.right} />
             </span>
             {SWIPE_LABEL[actions.right]}
@@ -579,7 +579,7 @@ function SwipeBackdrop({ actions }: { actions: SwipeActions }) {
         {actions.left && (
           <>
             {SWIPE_LABEL[actions.left]}
-            <span className="flex origin-center opacity-75 transition-transform duration-150 group-data-[armed]/swipe:scale-125 group-data-[armed]/swipe:opacity-100 motion-reduce:transition-none">
+            <span className="flex origin-center opacity-75 transition-transform duration-150 group-data-armed/swipe:scale-125 group-data-armed/swipe:opacity-100 motion-reduce:transition-none">
               <SwipeIcon action={actions.left} />
             </span>
           </>
@@ -711,12 +711,12 @@ function Empty({
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       {remedy ? (
         <>
-          <p className="max-w-[26rem] text-ui text-ink-body">{remedy.body}</p>
+          <p className="max-w-104 text-ui text-ink-body">{remedy.body}</p>
           {remedy.action && (
             <button
               type="button"
               onClick={remedy.action.run}
-              className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               {remedy.action.label}
             </button>
@@ -1623,7 +1623,7 @@ function MessageList({
     scroller.addEventListener("scroll", onScroll, { passive: true });
     dragCleanup.current = () => {
       window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("blur-sm", onBlur);
       scroller.removeEventListener("scroll", onScroll);
     };
   };

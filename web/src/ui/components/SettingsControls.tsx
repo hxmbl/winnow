@@ -145,9 +145,9 @@ export function InfoButton({ setting }: { setting: SettingId }) {
           if (event.pointerType === "mouse") dispatchInfo({ type: "unhover", setting });
         }}
         onFocus={() => dispatchInfo({ type: "focus", setting })}
-        onBlur={() => dispatchInfo({ type: "blur", setting })}
+        onBlur={() => dispatchInfo({ type: "blur-sm", setting })}
         onClick={() => dispatchInfo({ type: "press", setting })}
-        className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-2.5 after:content-['']"
+        className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-2.5 after:content-['']"
       >
         <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
       </button>
@@ -158,7 +158,7 @@ export function InfoButton({ setting }: { setting: SettingId }) {
             id={tipId}
             role="tooltip"
             data-setting-popover={setting}
-            className="fixed z-[70] rounded-pane border border-hairline bg-chrome p-3 shadow-lift"
+            className="fixed z-70 rounded-pane border border-hairline bg-chrome p-3 shadow-lift"
             style={{
               top: place?.top ?? 0,
               left: place?.left ?? 0,
@@ -295,7 +295,7 @@ export function RadioCards<T extends string>({
                 else return;
                 event.preventDefault();
               }}
-              className={`flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-ctl border px-2 py-1.5 text-meta transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
+              className={`flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-ctl border px-2 py-1.5 text-meta transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11 ${
                 checked
                   ? "border-accent bg-surface-selected font-semibold text-ink"
                   : "border-hairline font-medium text-ink-muted hover:bg-surface-hover hover:text-ink-body"
@@ -339,14 +339,14 @@ export function Toggle({
       aria-label={label}
       aria-describedby={describedBy}
       onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
         checked ? "bg-accent" : "bg-surface-active"
       }`}
     >
       <span
         aria-hidden="true"
         className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-surface transition-transform ${
-          checked ? "translate-x-[1.125rem]" : "translate-x-0.5"
+          checked ? "translate-x-4.5" : "translate-x-0.5"
         }`}
       />
     </button>

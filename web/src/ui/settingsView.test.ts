@@ -111,17 +111,17 @@ describe("the (?) popover", () => {
     expect(infoReducer(open, { type: "unhover", setting: "gravatars" })).toEqual(INFO_CLOSED);
   });
 
-  it("opens on focus and closes on blur", () => {
+  it("opens on focus and closes on blur-sm", () => {
     const open = infoReducer(INFO_CLOSED, { type: "focus", setting: "brandLogos" });
     expect(open.open).toBe("brandLogos");
-    expect(infoReducer(open, { type: "blur", setting: "brandLogos" })).toEqual(INFO_CLOSED);
+    expect(infoReducer(open, { type: "blur-sm", setting: "brandLogos" })).toEqual(INFO_CLOSED);
   });
 
   it("a tap pins it open, and a second tap closes it", () => {
     const pinned = infoReducer(INFO_CLOSED, { type: "press", setting: "gravatars" });
     expect(pinned).toEqual({ open: "gravatars", pinned: true });
     expect(infoReducer(pinned, { type: "unhover", setting: "gravatars" })).toBe(pinned);
-    expect(infoReducer(pinned, { type: "blur", setting: "gravatars" })).toBe(pinned);
+    expect(infoReducer(pinned, { type: "blur-sm", setting: "gravatars" })).toBe(pinned);
     expect(infoReducer(pinned, { type: "press", setting: "gravatars" })).toEqual(INFO_CLOSED);
   });
 
