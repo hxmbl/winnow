@@ -459,7 +459,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
     return () => {
       window.removeEventListener("pointerup", release);
       window.removeEventListener("pointercancel", release);
-      window.removeEventListener("blur-sm", release);
+      window.removeEventListener("blur", release);
       window.removeEventListener("pointermove", moved);
     };
   }, [open, armIdle]);

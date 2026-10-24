@@ -138,7 +138,7 @@ describe("one lean glass: the frost on the element itself (1.4)", () => {
   const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
   const strip = readFileSync(new URL("./components/FilterStrip.tsx", import.meta.url), "utf8");
 
-  it("reads the blur-sm radius out of a filter", () => {
+  it("reads the blur-xs radius out of a filter", () => {
     expect(blurRadius(GLASS_BLUR)).toBe(6);
     expect(blurRadius("saturate(2)")).toBe(0);
     expect(blurRadius("blur( 8.5px ) saturate(1.2)")).toBe(8.5);

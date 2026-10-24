@@ -543,8 +543,8 @@ describe("before the bundle loads", () => {
     };
     const cases: [string, ThemeName][] = [
       [":root", "light"],
-      [':root[data-theme="dark"]', "dark"],
-      [':root[data-theme="oled"]', "oled"],
+      [":root[data-theme='dark']", "dark"],
+      [":root[data-theme='oled']", "oled"],
       [":root:not([data-theme])", "dark"],
     ];
     for (const [selector, mode] of cases) {
@@ -569,15 +569,14 @@ describe("Tailwind colour tokens", () => {
    * `rgba(0, 0, 0, 0)` rather than an error.
    *
    * `theme.ts` warns about this in prose. Prose does not fail a build; this does. The
-   * token list is derived from `tailwind.config.js`, so a new token is covered the day it
-   * is added.
+   * token list is derived from `index.css` (the @theme block), so a new token is covered
+   * the day it is added.
    */
   it("are never combined with an opacity modifier", () => {
-    const config = readFileSync(new URL("../../tailwind.config.js", import.meta.url), "utf8");
-    // Keys are quoted when they contain a dash and bare otherwise, so the pattern
-    // accepts both. Matching only the quoted ones would silently omit `surface` — the
-    // token this test exists to protect.
-    const tokens = [...config.matchAll(/["']?([a-z][a-z-]*)["']?:\s*"var\(/g)].map(
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    // In Tailwind v4, theme tokens are CSS custom properties in the @theme block.
+    // Extract the --wn-* token names used in the theme.
+    const tokens = [...css.matchAll(/--wn-([a-z][a-z-]*)/g)].map(
       (match) => match[1],
     );
     expect(tokens.length).toBeGreaterThan(10);
@@ -622,9 +621,9 @@ describe("the design system stays small", () => {
   /**
    * Class-name rules over every component, comments stripped.
    *
-   * The scale and the radii are overridden in `tailwind.config.js`, so `text-sm` or
-   * `rounded-lg` would compile to *nothing* rather than to a near miss — quiet, like the
-   * opacity bug above. These are the patterns that used to be everywhere.
+   * The scale and the radii are overridden in `index.css` (the @theme block), so
+   * `text-sm` or `rounded-lg` would compile to *nothing* rather than to a near miss —
+   * quiet, like the opacity bug above. These are the patterns that used to be everywhere.
    */
   const srcDir = new URL("../", import.meta.url);
   const files = [new URL("App.tsx", srcDir)];

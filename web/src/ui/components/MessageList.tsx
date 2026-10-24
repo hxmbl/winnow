@@ -1623,7 +1623,7 @@ function MessageList({
     scroller.addEventListener("scroll", onScroll, { passive: true });
     dragCleanup.current = () => {
       window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("blur-sm", onBlur);
+      window.removeEventListener("blur", onBlur);
       scroller.removeEventListener("scroll", onScroll);
     };
   };

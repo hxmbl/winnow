@@ -145,7 +145,7 @@ export function InfoButton({ setting }: { setting: SettingId }) {
           if (event.pointerType === "mouse") dispatchInfo({ type: "unhover", setting });
         }}
         onFocus={() => dispatchInfo({ type: "focus", setting })}
-        onBlur={() => dispatchInfo({ type: "blur-sm", setting })}
+        onBlur={() => dispatchInfo({ type: "blur", setting })}
         onClick={() => dispatchInfo({ type: "press", setting })}
         className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-2.5 after:content-['']"
       >

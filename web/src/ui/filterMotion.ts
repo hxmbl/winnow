@@ -12,7 +12,7 @@
  *   enter  rows new to the view fade in, a few milliseconds apart down the screen.
  *
  * Fast on purpose, under the app's rule that nothing runs much past 220ms (the note on
- * `animation` in `tailwind.config.js`): leaving is 130ms, the slide 200ms after a 20ms
+ * `animation` in `index.css`): leaving is 130ms, the slide 200ms after a 20ms
  * beat, and the last row to arrive is in by 250ms. Only what is on screen moves; the list
  * is windowed, and rows outside the window are not in the DOM at all.
  *

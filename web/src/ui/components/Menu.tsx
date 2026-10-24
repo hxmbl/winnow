@@ -135,7 +135,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
       document.removeEventListener("pointerdown", onPointer, true);
       window.removeEventListener("resize", onViewport);
       document.removeEventListener("scroll", onViewport, true);
-      window.removeEventListener("blur-sm", onViewport);
+      window.removeEventListener("blur", onViewport);
     };
   }, [isRoot, close]);
 
