@@ -202,7 +202,7 @@ export function StatusPill(props: Props) {
             ? // A ghost answers to its own name, so nothing that looks for the pill finds it.
               { "data-pill-leaving": pill.kind, "aria-hidden": true, inert: true }
             : { "data-status-pill": pill.kind })}
-          className="pointer-events-none fixed z-[35] flex justify-center px-4"
+          className="pointer-events-none fixed z-35 flex justify-center px-4"
           style={style}
         >
           <div
@@ -289,7 +289,7 @@ function PillButton({
       aria-label={label}
       title={label}
       {...{ [data]: "" }}
-      className={`flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full px-2.5 font-semibold transition-colors hover:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+      className={`flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full px-2.5 font-semibold transition-colors hover:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
         primary ? "text-accent" : "text-ink-subtle hover:text-ink"
       } ${label ? "px-0" : ""}`}
     >

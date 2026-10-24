@@ -122,13 +122,13 @@ type Props = {
 type Imported = { type: ClientJsonType; projectId?: string; warnings: string[] };
 
 const FIELD =
-  "w-full rounded-ctl border bg-surface px-4 py-1.5 font-mono text-ui text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
+  "w-full rounded-ctl border bg-surface px-4 py-1.5 font-mono text-ui text-ink outline-hidden placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
 const PRIMARY =
-  "rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 const LINK =
-  "inline-flex w-fit items-center gap-1.5 rounded-ctl text-ui font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "inline-flex w-fit items-center gap-1.5 rounded-ctl text-ui font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 const SECONDARY =
-  "rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 /** One numbered instruction inside a step. */
 function Item({ children }: { children: React.ReactNode }) {
@@ -495,7 +495,7 @@ export function GoogleSetup(props: Props) {
         type="button"
         onClick={onCopy}
         aria-label={done ? `${label} copied` : `Copy ${label}`}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         {done ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
       </button>
@@ -519,7 +519,7 @@ export function GoogleSetup(props: Props) {
             type="button"
             onClick={() => fileRef.current?.click()}
             aria-describedby={`${ids}-import-hint`}
-            className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <FileJson size={14} strokeWidth={2} aria-hidden="true" />
             Import JSON
@@ -569,7 +569,7 @@ export function GoogleSetup(props: Props) {
                           event.preventDefault();
                           openLink(url);
                         }}
-                        className="inline-flex items-center gap-0.5 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                        className="inline-flex items-center gap-0.5 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                       >
                         {api.name}
                         <ExternalLink size={11} aria-hidden="true" />
@@ -733,7 +733,7 @@ export function GoogleSetup(props: Props) {
                   type="button"
                   onClick={() => void remove()}
                   aria-disabled={busy !== null}
-                  className="rounded-ctl bg-danger px-4 py-1.5 text-ui font-semibold text-[var(--wn-surface)] transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="rounded-ctl bg-danger px-4 py-1.5 text-ui font-semibold text-(--wn-surface) transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   {busy === "remove" ? "Removing…" : props.signedIn ? "Remove and sign out" : "Remove"}
                 </button>
@@ -754,7 +754,7 @@ export function GoogleSetup(props: Props) {
                   focusAfter.current = "keep";
                   setConfirmRemove(true);
                 }}
-                className="shrink-0 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="shrink-0 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 Remove…
               </button>
@@ -999,7 +999,7 @@ export function GoogleSetup(props: Props) {
               <button
                 type="button"
                 onClick={props.onClose}
-                className="shrink-0 rounded-ctl text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="shrink-0 rounded-ctl text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 data-setup-demo=""
               >
                 Continue in demo
@@ -1016,7 +1016,7 @@ export function GoogleSetup(props: Props) {
                   aria-label={`Step ${index + 1}: ${item.title}${done.includes(item.id) ? " (done)" : ""}`}
                   data-done={done.includes(item.id) || undefined}
                   data-setup-step-button={item.id}
-                  className="flex w-full flex-col gap-1.5 rounded-ctl py-1 text-left max-sm:min-h-11 max-sm:justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="flex w-full flex-col gap-1.5 rounded-ctl py-1 text-left max-sm:min-h-11 max-sm:justify-center focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   <span
                     aria-hidden="true"
@@ -1048,7 +1048,7 @@ export function GoogleSetup(props: Props) {
               ref={headingRef}
               id={headingId}
               tabIndex={-1}
-              className="text-read font-semibold text-ink outline-none"
+              className="text-read font-semibold text-ink outline-hidden"
               data-setup-heading=""
             >
               {current_.title}
@@ -1062,7 +1062,7 @@ export function GoogleSetup(props: Props) {
                 <button
                   type="button"
                   onClick={startOver}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   <RotateCcw size={12} aria-hidden="true" />
                   Start over

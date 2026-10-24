@@ -47,12 +47,12 @@ export function InboxClear({
         data-empty-scope={kind.scope}
       >
         <Icon size={22} strokeWidth={1.5} className="text-ink-subtle" aria-hidden="true" />
-        <p className="max-w-[26rem] text-ui text-ink-muted">{quietLine(kind, line)}</p>
+        <p className="max-w-104 text-ui text-ink-muted">{quietLine(kind, line)}</p>
         {action && (
           <button
             type="button"
             onClick={action.run}
-            className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+            className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
           >
             {action.label}
           </button>
@@ -97,7 +97,7 @@ export function InboxClear({
         <button
           type="button"
           onClick={action.run}
-          className="mt-3 rounded-ctl px-2 py-1 text-meta font-semibold text-ink-subtle underline underline-offset-2 hover:text-ink-body max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="mt-3 rounded-ctl px-2 py-1 text-meta font-semibold text-ink-subtle underline underline-offset-2 hover:text-ink-body max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           data-clear-action=""
         >
           {action.label}

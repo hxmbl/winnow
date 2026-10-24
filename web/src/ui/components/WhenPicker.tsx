@@ -27,7 +27,7 @@ type Props = {
 };
 
 const FIELD =
-  "min-h-10 w-full rounded-ctl border border-control-border bg-surface px-3.5 py-1.5 text-ui text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "min-h-10 w-full rounded-ctl border border-control-border bg-surface px-3.5 py-1.5 text-ui text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 export function WhenPicker({ title, note, initial, confirmLabel, onConfirm, onCancel, now = Date.now }: Props) {
   const start = toLocalInputs(initial);
@@ -104,14 +104,14 @@ export function WhenPicker({ title, note, initial, confirmLabel, onConfirm, onCa
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Cancel
           </button>
           <button
             type="submit"
             data-when-confirm=""
-            className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {confirmLabel}
           </button>
@@ -145,7 +145,7 @@ export function ScheduledSheet({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const BUTTON =
-    "rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+    "rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
   return (
     <Sheet
       label={`Scheduled: ${subject || "(no subject)"}`}
@@ -181,7 +181,7 @@ export function ScheduledSheet({
             type="button"
             data-scheduled-send=""
             onClick={onSendNow}
-            className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Send now
           </button>

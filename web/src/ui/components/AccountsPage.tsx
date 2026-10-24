@@ -67,7 +67,7 @@ export type AccountsPageProps = {
  */
 const PHONE_END = "calc(var(--wn-phone-tabs, env(safe-area-inset-bottom, 0px)) + 1rem)";
 
-const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+const FOCUS = "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 export function AccountsPage(props: AccountsPageProps) {
   const [asked, setView] = useState<AccountsView>(ACCOUNTS_LIST);
@@ -132,7 +132,7 @@ export function AccountsPage(props: AccountsPageProps) {
         ref={headingRef}
         tabIndex={-1}
         data-accounts-title=""
-        className={`min-w-0 flex-1 truncate font-semibold text-ink outline-none ${props.phone ? "text-read" : "px-2 text-read"} ${selected && !props.phone ? "!px-1" : ""}`}
+        className={`min-w-0 flex-1 truncate font-semibold text-ink outline-hidden ${props.phone ? "text-read" : "px-2 text-read"} ${selected && !props.phone ? "px-1!" : ""}`}
       >
         {title}
       </h2>
@@ -229,7 +229,7 @@ function ActionRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className={`block text-ui font-medium ${danger ? "text-danger" : "text-ink"}`}>{label}</span>
-        {hint && <span className="block text-meta text-ink-subtle [overflow-wrap:anywhere]">{hint}</span>}
+        {hint && <span className="block text-meta text-ink-subtle wrap-anywhere">{hint}</span>}
       </span>
     </button>
   );
@@ -412,13 +412,13 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
 
       {can.canEdit && (
         <div className="mt-1 border-t border-hairline px-2.5 pt-1">
-          <SettingBlock setting="accountColor" className="!mx-0 !px-0">
+          <SettingBlock setting="accountColor" className="mx-0! px-0!">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <SettingLabel setting="accountColor" id={`winnow-account-colour-${account.id}`} />
               <ColourPicker account={account} scheme={props.scheme} phone={props.phone} onColor={props.onColor} />
             </div>
           </SettingBlock>
-          <SettingBlock setting="accountNotify" className="!mx-0 !px-0">
+          <SettingBlock setting="accountNotify" className="mx-0! px-0!">
             <div className={`flex items-center justify-between gap-2 ${props.phone ? "min-h-11" : ""}`}>
               <SettingLabel setting="accountNotify" />
               <span data-accounts-notify={account.id} className="flex">

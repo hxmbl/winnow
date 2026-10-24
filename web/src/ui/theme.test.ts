@@ -569,15 +569,17 @@ describe("Tailwind colour tokens", () => {
    * `rgba(0, 0, 0, 0)` rather than an error.
    *
    * `theme.ts` warns about this in prose. Prose does not fail a build; this does. The
-   * token list is derived from `tailwind.config.js`, so a new token is covered the day it
-   * is added.
+   * token list is derived from the `--color-*` entries in `index.css`'s `@theme`, so a new
+   * token is covered the day it is added.
+   *
+   * Tailwind 4 no longer drops the declaration (it mixes the variable with `color-mix`),
+   * but the tokens are tuned per mode for contrast, and `veil`, `sheen` and `scrim` are
+   * already translucent, so a second alpha on top is still not a colour the palette chose.
    */
   it("are never combined with an opacity modifier", () => {
-    const config = readFileSync(new URL("../../tailwind.config.js", import.meta.url), "utf8");
-    // Keys are quoted when they contain a dash and bare otherwise, so the pattern
-    // accepts both. Matching only the quoted ones would silently omit `surface` — the
-    // token this test exists to protect.
-    const tokens = [...config.matchAll(/["']?([a-z][a-z-]*)["']?:\s*"var\(/g)].map(
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    const theme = /@theme \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    const tokens = [...theme.matchAll(/--color-([a-z][a-z-]*):\s*var\(/g)].map(
       (match) => match[1],
     );
     expect(tokens.length).toBeGreaterThan(10);
@@ -622,8 +624,8 @@ describe("the design system stays small", () => {
   /**
    * Class-name rules over every component, comments stripped.
    *
-   * The scale and the radii are overridden in `tailwind.config.js`, so `text-sm` or
-   * `rounded-lg` would compile to *nothing* rather than to a near miss — quiet, like the
+   * The scale and the radii are reset in `index.css`'s `@theme` (`--text-*: initial`,
+   * `--radius-*: initial`), so `text-sm` or `rounded-lg` would compile to *nothing* rather than to a near miss — quiet, like the
    * opacity bug above. These are the patterns that used to be everywhere.
    */
   const srcDir = new URL("../", import.meta.url);

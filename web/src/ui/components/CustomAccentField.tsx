@@ -85,7 +85,7 @@ export function CustomAccentField({
             const hex = normalizeHexColor(event.target.value);
             if (hex) onChange(hex);
           }}
-          className="wn-color-well h-8 w-8 shrink-0 cursor-pointer overflow-hidden rounded-full border border-hairline bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-10 max-sm:w-10"
+          className="wn-color-well h-8 w-8 shrink-0 cursor-pointer overflow-hidden rounded-full border border-hairline bg-transparent p-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-10 max-sm:w-10"
         />
         <span>Colour</span>
       </label>
@@ -109,7 +109,7 @@ export function CustomAccentField({
             commit();
           }
         }}
-        className={`w-24 rounded-ctl border bg-surface px-2.5 py-1 text-meta tabular-nums text-ink outline-none focus-visible:border-accent max-sm:min-h-10 ${
+        className={`w-24 rounded-ctl border bg-surface px-2.5 py-1 text-meta tabular-nums text-ink outline-hidden focus-visible:border-accent max-sm:min-h-10 ${
           valid ? "border-hairline" : "border-danger"
         }`}
       />

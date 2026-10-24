@@ -8,7 +8,7 @@ import { clearDebugLog, debugLogLines, debugLogText, subscribeDebugLog, DEBUG_LO
 import { copyText } from "../clipboard";
 
 const BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
+  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
 
 export function DebugLogPanel({ recording }: { recording: boolean }) {
   const lines = useSyncExternalStore(subscribeDebugLog, debugLogLines, debugLogLines);

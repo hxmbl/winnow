@@ -6,14 +6,14 @@
  *   2. `applyTheme(root, mode, accent)` mirrors the active palette to `--wn-*` custom
  *      properties on `<html>`, so plain CSS in `index.css` — the scrollbar, the
  *      focus ring — reads from the same source as Tailwind.
- *   3. `index.css` maps the same names in its `@theme` block onto utilities, so components
+ *   3. `index.css`'s `@theme` maps the same names onto utilities, so components
  *      write `bg-surface` and never a hex value.
  *
  * Names are semantic (`surfaceActive`, not `blue-100`), so a component never has
  * to know which palette is live.
  *
- * Token colours are CSS variables, so Tailwind's `/opacity` modifier does not work
- * on them — any alpha is baked into the value here.
+ * Token colours are CSS variables tuned per mode, so they never take Tailwind's
+ * `/opacity` modifier (`theme.test.ts` holds that) — any alpha is baked into the value here.
  *
  * `contrastRatio` and `relativeLuminance` live here so `theme.test.ts` can assert
  * the palette's contrast guarantees rather than trusting them.

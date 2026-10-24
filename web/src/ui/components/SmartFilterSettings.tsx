@@ -16,9 +16,9 @@ import { LEARNABLE_FILTERS, type FilterLearning, type LearnableFilter, type Send
 import { learntSummary, ruleText } from "../smartFilterSettings";
 
 const SECONDARY =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 const DANGER =
-  "rounded-ctl bg-danger px-3 py-1.5 text-meta font-semibold text-surface transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl bg-danger px-3 py-1.5 text-meta font-semibold text-surface transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 export function SmartFilterSettings({
   model,
@@ -178,7 +178,7 @@ function FilterLearnt({
                 data-sender-rule-remove={rule.key}
                 aria-label={`Remove the rule for ${rule.key}`}
                 onClick={() => onRemoveRule(filter, rule.key)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-ctl px-2 py-1 font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="inline-flex shrink-0 items-center gap-1 rounded-ctl px-2 py-1 font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <X size={12} strokeWidth={2.2} aria-hidden="true" />
                 Remove

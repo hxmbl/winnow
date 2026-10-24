@@ -53,7 +53,7 @@ export function ErrorText({ text, className = "", copyable = true }: Props): Rea
           aria-label={open ? "Show less" : "Show the whole message"}
           title={open ? "Show less" : "Show the whole message"}
           onClick={() => setOpen((value) => !value)}
-          className="mt-px shrink-0 rounded-ctl text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="mt-px shrink-0 rounded-ctl text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <ChevronDown
             size={12}
@@ -65,7 +65,7 @@ export function ErrorText({ text, className = "", copyable = true }: Props): Rea
       )}
       <span
         data-error-copy=""
-        className={`selectable min-w-0 break-words ${long && !open ? "line-clamp-2" : ""}`}
+        className={`selectable min-w-0 wrap-break-word ${long && !open ? "line-clamp-2" : ""}`}
       >
         {text}
       </span>
@@ -78,7 +78,7 @@ export function ErrorText({ text, className = "", copyable = true }: Props): Rea
           onClick={() => {
             void copyText(text).then((ok) => setCopied(ok));
           }}
-          className="mt-px shrink-0 rounded-ctl p-0.5 text-ink-subtle transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="mt-px shrink-0 rounded-ctl p-0.5 text-ink-subtle transition-colors hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           {copied ? (
             <Check size={12} strokeWidth={2.2} aria-hidden="true" />

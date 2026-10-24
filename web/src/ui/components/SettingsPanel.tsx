@@ -326,7 +326,7 @@ function useSettingsLayout(): SettingsLayout {
 const PHONE_SETTINGS_END = "calc(var(--wn-phone-tabs, env(safe-area-inset-bottom, 0px)) + 1rem)";
 
 const BACK_BUTTON =
-  "inline-flex items-center gap-1.5 rounded-ctl px-2 py-1.5 text-ui font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "inline-flex items-center gap-1.5 rounded-ctl px-2 py-1.5 text-ui font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 /**
  * Settings: a full-window page that replaces the mail until Back (or Escape).
@@ -430,7 +430,7 @@ export function Settings(props: SettingsProps) {
                             phoneFocus.current = "page";
                             setPhonePage("category");
                           }}
-                          className="flex min-h-12 w-full items-center justify-between gap-3 rounded-ctl px-3 text-left text-read font-medium text-ink-body transition-colors active:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                          className="flex min-h-12 w-full items-center justify-between gap-3 rounded-ctl px-3 text-left text-read font-medium text-ink-body transition-colors active:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                         >
                           {categoryOf(id).label}
                           <ChevronRight size={18} className="text-ink-subtle" aria-hidden="true" />
@@ -455,7 +455,7 @@ export function Settings(props: SettingsProps) {
                     // A small chevron in full ink (the owner's call, 1.3.3): small, so it
                     // does not compete with the title, but never faint. The 44px tap
                     // target stays; only the drawn glyph is small.
-                    className="flex h-11 w-9 items-center justify-center rounded-ctl text-ink transition-colors active:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    className="flex h-11 w-9 items-center justify-center rounded-ctl text-ink transition-colors active:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >
                     <ChevronLeft size={22} strokeWidth={2.4} aria-hidden="true" />
                   </button>
@@ -463,7 +463,7 @@ export function Settings(props: SettingsProps) {
                     ref={pageHeadingRef}
                     tabIndex={-1}
                     data-settings-title=""
-                    className="text-read font-semibold text-ink outline-none"
+                    className="text-read font-semibold text-ink outline-hidden"
                   >
                     {category.label}
                   </h2>
@@ -534,7 +534,7 @@ export function Settings(props: SettingsProps) {
                       choose(next);
                       tabRefs.current.get(next)?.focus();
                     }}
-                    className={`rounded-ctl px-2.5 py-2 text-left text-ui leading-snug [overflow-wrap:anywhere] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                    className={`rounded-ctl px-2.5 py-2 text-left text-ui leading-snug wrap-anywhere transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                       selected
                         ? "bg-surface-selected font-semibold text-ink"
                         : "font-medium text-ink-muted hover:bg-surface-hover hover:text-ink-body"
@@ -566,7 +566,7 @@ export function Settings(props: SettingsProps) {
               data-settings-body=""
               className="selectable scroll-shadow thin-scroll min-h-0 flex-1 overflow-y-auto px-8 pb-8"
             >
-              <div className="max-w-[40rem]">{content}</div>
+              <div className="max-w-160">{content}</div>
             </div>
           </div>
 
@@ -578,13 +578,13 @@ export function Settings(props: SettingsProps) {
               data-explains={explanation.setting ?? undefined}
               aria-live="polite"
               aria-label="About this setting"
-              className="min-h-0 overflow-y-auto px-8 pt-[4.75rem]"
+              className="min-h-0 overflow-y-auto px-8 pt-19"
             >
               <p className="text-meta font-semibold text-ink-subtle">
                 {explanation.kind === "intro" ? "About this section" : "About this setting"}
               </p>
               <h3 className="mt-1 text-read font-semibold text-ink">{explanation.title}</h3>
-              <p className="mt-2 max-w-[28rem] text-ui leading-relaxed text-ink-muted">{explanation.body}</p>
+              <p className="mt-2 max-w-md text-ui leading-relaxed text-ink-muted">{explanation.body}</p>
               {explanation.kind === "intro" && (
                 <p className="mt-4 text-meta text-ink-subtle">Point at a setting to see what it does.</p>
               )}
@@ -621,7 +621,7 @@ function VersionLabel({ version, unlocked, onUnlock }: { version: string; unlock
           if (step.toast) setToast({ text: step.toast, at: Date.now() });
           if (step.unlock) onUnlock();
         }}
-        className="rounded-ctl px-1 text-meta font-semibold tabular-nums text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="rounded-ctl px-1 text-meta font-semibold tabular-nums text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         {version}
       </button>
@@ -685,7 +685,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
                 type="button"
                 data-settings-open-scheduled=""
                 onClick={props.onOpenScheduled}
-                className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 Open Scheduled
               </button>
@@ -808,7 +808,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
                             notificationActions: { ...props.notificationActions, [button.key]: !on },
                           })
                         }
-                        className={`rounded-ctl px-2.5 py-1 text-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                        className={`rounded-ctl px-2.5 py-1 text-meta font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                           on ? "bg-surface text-ink shadow-pane" : "text-ink-muted hover:text-ink-body"
                         }`}
                       >
@@ -870,7 +870,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             */}
             <dl
               data-settings-shortcuts=""
-              className="grid max-w-[34rem] grid-cols-[minmax(6rem,max-content)_minmax(0,1fr)] items-baseline gap-x-5 gap-y-1.5"
+              className="grid max-w-136 grid-cols-[minmax(6rem,max-content)_minmax(0,1fr)] items-baseline gap-x-5 gap-y-1.5"
             >
               {BINDINGS.map((binding) => (
                 <div key={binding.keys} data-shortcut-row="" className="contents">
@@ -911,7 +911,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
                 event.preventDefault();
                 props.onOpenLink(SOURCE_URL);
               }}
-              className="text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               github.com/hxmbl/winnow
             </a>
@@ -1152,7 +1152,7 @@ function ReadingSettings({ props }: { props: SettingsProps }) {
                     props.onResetSorting();
                     setResetStep("done");
                   }}
-                  className="rounded-ctl bg-danger px-3 py-1.5 text-meta font-semibold text-surface transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="rounded-ctl bg-danger px-3 py-1.5 text-meta font-semibold text-surface transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   Reset
                 </button>
@@ -1210,7 +1210,7 @@ function InfoSlot({ setting }: { setting: SettingId }) {
 }
 
 const SECONDARY_BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 function LearningHistory({ events }: { events: readonly FeedbackEvent[] }) {
   return (
@@ -1280,7 +1280,7 @@ function OfflineMailRows({ props }: { props: SettingsProps }) {
             type="button"
             data-offline-remove=""
             onClick={() => props.onRemoveDownloads?.()}
-            className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Remove downloads
           </button>
@@ -1302,7 +1302,7 @@ function DriveLinksRow({ props }: { props: SettingsProps }) {
             type="button"
             data-drive-revoke=""
             onClick={props.onOpenGooglePermissions}
-            className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Remove at Google
           </button>
@@ -1326,7 +1326,7 @@ function AccountsSettings({ props }: { props: SettingsProps }) {
           type="button"
           data-settings-manage-accounts=""
           onClick={props.onManageAccounts}
-          className="inline-flex items-center gap-1 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="inline-flex items-center gap-1 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           Manage
           <ChevronRight size={14} aria-hidden="true" />
@@ -1356,7 +1356,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
         <button
           type="button"
           onClick={props.onGoogleAccount}
-          className="rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           {props.googleClient ? "Change" : "Set up"}
         </button>
@@ -1387,7 +1387,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
                 type="button"
                 onClick={props.onImproveSuggestions}
                 disabled={props.contactsBusy}
-                className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 {props.contactsBusy ? "Waiting for Google…" : "Connect"}
               </button>
@@ -1405,7 +1405,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
                 <button
                   type="button"
                   onClick={() => props.onOpenContactsHelp?.(props.contactsProblem!.url!)}
-                  className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   Turn on the People API
                 </button>
@@ -1476,4 +1476,4 @@ function SenderSettings({ props }: { props: SettingsProps }) {
 }
 
 const SENDER_BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";

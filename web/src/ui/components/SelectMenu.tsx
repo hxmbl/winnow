@@ -194,7 +194,7 @@ export function SelectMenu<T extends string | number>({
             openAt(selectedIndex);
           }
         }}
-        className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-control-border bg-surface pl-3 pr-2 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 aria-expanded:bg-surface-hover max-sm:h-10 max-sm:pl-3.5"
+        className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-control-border bg-surface pl-3 pr-2 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 aria-expanded:bg-surface-hover max-sm:h-10 max-sm:pl-3.5"
       >
         {current?.swatch && <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: current.swatch }} />}
         <span className="truncate">{current?.label}</span>
@@ -212,7 +212,7 @@ export function SelectMenu<T extends string | number>({
             data-select-list={id}
             onKeyDown={onListKey}
             style={{ position: "fixed", top: place?.top ?? 0, left: place?.left ?? 0, visibility: place ? "visible" : "hidden" }}
-            className={`${place ? "animate-menu" : ""} z-[70] flex max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body shadow-lift outline-none`}
+            className={`${place ? "animate-menu" : ""} z-70 flex max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body shadow-lift outline-hidden`}
           >
             {options.map((option, index) => {
               const selected = index === selectedIndex;
@@ -230,7 +230,7 @@ export function SelectMenu<T extends string | number>({
                     if (!option.disabled && index !== active) setActive(index);
                   }}
                   onClick={() => choose(index)}
-                  className={`flex min-h-8 cursor-default select-none items-center gap-2.5 rounded-ctl px-2.5 py-1.5 text-ui transition-colors data-[active]:bg-sheen [@media(hover:none)]:min-h-11 ${
+                  className={`flex min-h-8 cursor-default select-none items-center gap-2.5 rounded-ctl px-2.5 py-1.5 text-ui transition-colors data-active:bg-sheen [@media(hover:none)]:min-h-11 ${
                     option.disabled ? "opacity-40" : ""
                   } ${selected ? "font-semibold text-ink" : ""}`}
                 >
