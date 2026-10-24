@@ -10,7 +10,8 @@
  * - **What.** A `PICTURE_BYTES_PX`-pixel square (96: the largest avatar is 36 CSS px,
  *   which this covers at 2x and nearly 3x), drawn the way the avatar shows it and
  *   encoded as a WebP data URL (PNG where the engine cannot write WebP). Typically 2–8 KB;
- *   anything over `MAX_PICTURE_DATA_CHARS` is not kept.
+ *   anything over `MAX_PICTURE_DATA_CHARS` is not kept, and a source over
+ *   `MAX_PICTURE_SOURCE_PX` is not captured at all.
  * - **Keyed by the picture's URL** (`pictureKey`), not by sender: a contact who changes
  *   their photo gets a new URL and so a new copy, and the old one ages out. Gravatar's
  *   size option is dropped from the key, so the list's and the reader's sizes share one.
@@ -74,8 +75,18 @@ export const TOUCH_PERSIST_MS = 60 * 60 * 1000;
  * how long before the same URL is tried again this session: the lookup caches' miss TTL.
  */
 export const CAPTURE_RETRY_MS = LOGO_MISS_TTL_MS;
-/** The longest data URL kept: a 96px picture that big is not a picture worth keeping. */
-export const MAX_PICTURE_DATA_CHARS = 60_000;
+/**
+ * The longest data URL kept, about 18 KB of image: a 96px WebP is 2–8 KB, so this only
+ * turns away noise-like pictures. With `MAX_PICTURE_BYTES_ENTRIES` it bounds the whole
+ * store at about 4.7 MB per account.
+ */
+export const MAX_PICTURE_DATA_CHARS = 24_000;
+/**
+ * The largest source picture captured, px on its longer side. Anything bigger is a photo
+ * pretending to be an avatar; it still draws from its URL, but is not decoded onto a
+ * canvas just to be thrown away at 96px.
+ */
+export const MAX_PICTURE_SOURCE_PX = 2048;
 /** Captures waiting behind the concurrency limit, at most; the oldest are dropped. */
 export const MAX_QUEUED_CAPTURES = 50;
 /** A stored time further ahead than this is a bad clock or a bad write. */

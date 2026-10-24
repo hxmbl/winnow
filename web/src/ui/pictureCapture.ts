@@ -15,7 +15,7 @@
  * falls back to PNG by itself).
  */
 
-import { isPictureData, type CapturePicture } from "../core/avatars/pictureBytes";
+import { MAX_PICTURE_SOURCE_PX, isPictureData, type CapturePicture } from "../core/avatars/pictureBytes";
 import { drawPicture } from "./notificationActions";
 
 /** How long one background capture may take before it is given up, ms. */
@@ -47,10 +47,14 @@ export function canvasCapture(timeoutMs = PICTURE_CAPTURE_MS): CapturePicture {
           canvas.height = px;
           const context = canvas.getContext("2d");
           if (!context) return done(null);
+          if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_PICTURE_SOURCE_PX) return done(null);
           if (!drawPicture(context, img, { width: img.naturalWidth, height: img.naturalHeight }, px, null)) return done(null);
-          const webp = canvas.toDataURL("image/webp", 0.85);
-          const data = isPictureData(webp) ? webp : canvas.toDataURL("image/png");
-          done(isPictureData(data) ? data : null);
+          // WebP at 0.85, then 0.6 if that is over the size cap, then PNG (an engine with
+          // no WebP encoder hands back PNG for both); whichever first fits is kept.
+          for (const data of [canvas.toDataURL("image/webp", 0.85), canvas.toDataURL("image/webp", 0.6), canvas.toDataURL("image/png")]) {
+            if (isPictureData(data)) return done(data);
+          }
+          done(null);
         } catch {
           // A tainted canvas (no CORS header) throws on `getImageData` / `toDataURL`.
           done(null);
