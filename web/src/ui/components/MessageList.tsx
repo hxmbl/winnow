@@ -13,6 +13,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, Check, Mail, MailOpen, Trash2 } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { useFilterSwitchMotion } from "./useFilterSwitchMotion";
 import { CodeChip } from "./CodeCopy";
 import { codeChipVisible } from "../../core/mail/otp";
 import { anchorFromElement, type MenuAnchor } from "../menuPlacement";
@@ -801,6 +802,14 @@ type Props = {
    */
   listView?: string;
   /**
+   * The mailbox and smart filters alone (`viewKey`), without the search or the sort. A
+   * change here is a switch, and the list animates across it (`useFilterSwitchMotion`):
+   * the rows that go fade out, the rows that stay slide into place, the new ones fade in.
+   * Nothing else animates the list's contents this way, so a sync, a search being typed
+   * or a new sort stays a plain redraw.
+   */
+  switchView?: string;
+  /**
    * The store's cursor for revealing only, when it differs from the highlighted
    * `cursorIndex`: the phone shows no current row, but `j`/`k` in its reader still move
    * through the list, and Back should land where they went. Defaults to `cursorIndex`.
@@ -845,6 +854,7 @@ function MessageList({
   swipe = null,
   topInset = 0,
   listView = "",
+  switchView = "",
   revealIndex,
   lead,
   className = "",
@@ -1102,6 +1112,21 @@ function MessageList({
       setScrollTop(0);
     }
   }, [listView, scroller]);
+
+  /**
+   * Whether the mounted rows are the ones the scroll position calls for, which after a
+   * switch's jump to the top takes one more commit. The switch motion measures the new
+   * rows only then. Same test the scroll listener uses to decide whether to re-render.
+   */
+  const windowSettled = useCallback((): boolean => {
+    if (!scroller) return false;
+    const w = windowInputs.current;
+    const isHeader = (i: number) => w.items[i]?.kind === "header";
+    const key = (at: number) => windowKey(w.offsets, isHeader, at, w.contentTop, w.viewportHeight, w.topInset);
+    return key(scroller.scrollTop) === key(w.scrollTop);
+  }, [scroller]);
+  // After the jump to the top above, so the first commit it sees has already asked for it.
+  useFilterSwitchMotion(scroller, switchView, topInset, windowSettled);
 
   /**
    * Bring the cursor's row into view — once per navigation, and only if it is off screen.

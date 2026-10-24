@@ -319,15 +319,57 @@ html[data-resizing] iframe {
  * change both.
  *
  * Hover lays the mode's sheen over the tint rather than replacing it.
+ *
+ * Switching a pill on is motion, not a cut (1.6.x): its tint deepens, its ring and a
+ * soft glow in its own hue come up (the brief's "ambient light, not outlines"), and its
+ * label darkens, all over `--wn-chip-motion` on a decelerating curve, while the pill
+ * switched off eases back the same way at the same time. The glass chips paint their
+ * tint as a gradient layer, which CSS cannot interpolate, so the strengths are the
+ * registered numbers below (`--pill-a`, `--pill-ring-a`, `--pill-glow-a`): the browser
+ * tweens a registered number, and every rule that paints a pill reads them rather than
+ * the recipe directly. Rest and on still come from the recipe, so the AA arithmetic in
+ * `theme.ts` holds at both ends. Reduced motion: the global rule makes it a cut again.
  */
+@property --pill-a {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --pill-ring-a {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --pill-glow-a {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
 .wn-pill {
   --pill-tone: var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-l);
-  background-color: hsl(var(--pill-tone) / var(--wn-pill-rest));
+  --pill-a: var(--wn-pill-rest);
+  --pill-ring-a: 0;
+  --pill-glow-a: 0;
+  background-color: hsl(var(--pill-tone) / var(--pill-a));
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a)),
+    0 0 16px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
   color: var(--wn-pill-ink);
+  transition:
+    --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
+    --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
+    --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
+    background-color var(--wn-chip-motion) var(--wn-chip-ease),
+    color var(--wn-chip-motion) var(--wn-chip-ease);
 }
+/*
+ * On: the recipe's stronger tint and ring, and a glow at a little over half the ring's
+ * strength — light around the chip, never a second outline.
+ */
 .wn-pill[data-on] {
-  background-color: hsl(var(--pill-tone) / var(--wn-pill-on));
-  box-shadow: inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring));
+  --pill-a: var(--wn-pill-on);
+  --pill-ring-a: var(--wn-pill-ring);
+  --pill-glow-a: calc(var(--wn-pill-ring) * 0.55);
   color: var(--wn-pill-inkOn);
 }
 .wn-pill:hover {
@@ -532,6 +574,13 @@ html[data-resizing] iframe {
   /* Pills settle rather than snap: background, opacity and the press scale. */
   --wn-glass-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --wn-glass-motion: 200ms;
+  /*
+   * A smart-filter chip switching on or off (`.wn-pill`): a touch under the glass's
+   * 200ms, on the standard decelerating curve, so a digit pressed twice in a row never
+   * meets a chip still settling from the first.
+   */
+  --wn-chip-motion: 190ms;
+  --wn-chip-ease: cubic-bezier(0.2, 0, 0, 1);
   /* A soft, diffuse lift: a near contact shadow and a wide, faint spread. */
   --wn-glass-lift:
     0 1px 1px rgb(0 0 0 / 0.18),
@@ -571,14 +620,30 @@ html[data-resizing] iframe {
  * buttons that give, not the whole bar. Reduced motion: the global rule makes these
  * instant and the press scale is dropped below.
  */
-.wn-glass,
-.wn-pill.wn-chip-glass {
+.wn-glass {
   transition:
     background-color var(--wn-glass-motion) var(--wn-glass-ease),
     border-color var(--wn-glass-motion) var(--wn-glass-ease),
     box-shadow var(--wn-glass-motion) var(--wn-glass-ease),
     opacity var(--wn-glass-motion) var(--wn-glass-ease),
     transform var(--wn-glass-motion) var(--wn-glass-ease);
+}
+/*
+ * A chip's own list: its tint, ring and glow strengths and its label (see `.wn-pill`),
+ * plus the plate behind the label, the border and the hover and press sheens, all on the
+ * chip's curve. No transform: a chip never scales (below).
+ */
+.wn-pill.wn-chip-glass {
+  transition:
+    --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
+    --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
+    --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
+    --wn-chip-plate var(--wn-chip-motion) var(--wn-chip-ease),
+    background-color var(--wn-chip-motion) var(--wn-chip-ease),
+    border-color var(--wn-chip-motion) var(--wn-chip-ease),
+    box-shadow var(--wn-chip-motion) var(--wn-chip-ease),
+    color var(--wn-chip-motion) var(--wn-chip-ease),
+    opacity var(--wn-chip-motion) var(--wn-chip-ease);
 }
 .wn-glass-bar button,
 [data-phone-pill] button {
@@ -787,10 +852,7 @@ button.wn-glass:not([data-rail-item]):active,
     display: none;
   }
   .wn-pill.wn-chip-glass.wn-liquid {
-    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest)));
-  }
-  .wn-pill.wn-chip-glass.wn-liquid[data-on] {
-    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on)));
+    background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a)));
   }
 }
 
@@ -822,23 +884,35 @@ button.wn-glass:not([data-rail-item]):active,
  * over a band: the rail has no background at all, and the list scrolls visibly
  * underneath. The plate behind the label is a horizontal band of the stronger text
  * tint that fades out over the chip's rounded ends, where the frost stays light.
+ *
+ * One shadow list for every state (1.6.x): the ring, the hover sheen, the press sheen,
+ * the glass's edge and lift, and the glow, each always present and only its colour or
+ * strength changing (`--pill-ring-a`, `--pill-hover`, `--pill-press`, `--pill-glow-a`).
+ * Two shadow lists of different shapes cannot be interpolated, so the old per-state
+ * lists cut from one to the next however the transition was written.
  */
+@property --wn-chip-plate {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 72%;
+}
 .wn-pill.wn-chip-glass {
   --wn-chip-plate: var(--wn-glass-text, 72%);
+  --pill-hover: transparent;
+  --pill-press: transparent;
   border: 1px solid var(--wn-hairline);
   background-color: var(--wn-glass-base, var(--wn-surface));
-  background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest)));
+  background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a)));
   box-shadow:
+    inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a)),
+    inset 0 0 0 999px var(--pill-hover),
+    inset 0 0 0 999px var(--pill-press),
     var(--wn-glass-edge),
-    var(--wn-glass-lift);
+    var(--wn-glass-lift),
+    0 0 18px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
 }
 .wn-pill.wn-chip-glass[data-on] {
   --wn-chip-plate: var(--wn-glass-text-on, 76%);
-  background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on)));
-  box-shadow:
-    inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
-    var(--wn-glass-edge),
-    var(--wn-glass-lift);
 }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
   (background: color-mix(in srgb, red 50%, transparent)) {
@@ -847,12 +921,7 @@ button.wn-glass:not([data-rail-item]):active,
     --wn-chip-text: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-chip-plate), transparent);
     background-color: transparent;
     background-image:
-      linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest))),
-      linear-gradient(to right, var(--wn-chip-frost), var(--wn-chip-text) 14px, var(--wn-chip-text) calc(100% - 14px), var(--wn-chip-frost));
-  }
-  .wn-pill.wn-chip-glass[data-on] {
-    background-image:
-      linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on))),
+      linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a))),
       linear-gradient(to right, var(--wn-chip-frost), var(--wn-chip-text) 14px, var(--wn-chip-text) calc(100% - 14px), var(--wn-chip-frost));
   }
 }
@@ -873,36 +942,22 @@ button.wn-glass:not([data-rail-item]):active,
 }
 /* Hover is a sheen over the tint: a `filter` here would cut the frost off from the list. */
 .wn-pill.wn-chip-glass:hover {
-  box-shadow:
-    inset 0 0 0 999px var(--wn-sheen),
-    var(--wn-glass-edge),
-    var(--wn-glass-lift);
-}
-.wn-pill.wn-chip-glass[data-on]:hover {
-  box-shadow:
-    inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
-    inset 0 0 0 999px var(--wn-sheen),
-    var(--wn-glass-edge),
-    var(--wn-glass-lift);
+  --pill-hover: var(--wn-sheen);
 }
 /*
  * Pressed (and held, and long-pressed): a deeper sheen, never a transform or a radius
  * change, so the chip stays a pill from press to release.
  */
 .wn-pill.wn-chip-glass:active,
-.wn-pill.wn-chip-glass:has(> button:active),
+.wn-pill.wn-chip-glass:has(> button:active) {
+  transform: none;
+  --pill-hover: var(--wn-sheen);
+  --pill-press: var(--wn-sheen);
+}
+/* "All" beside the chips: plain glass, the same deeper sheen when pressed. */
 button.wn-glass[data-rail-item]:active {
   transform: none;
   box-shadow:
-    inset 0 0 0 999px var(--wn-sheen),
-    inset 0 0 0 999px var(--wn-sheen),
-    var(--wn-glass-edge),
-    var(--wn-glass-lift);
-}
-.wn-pill.wn-chip-glass[data-on]:active,
-.wn-pill.wn-chip-glass[data-on]:has(> button:active) {
-  box-shadow:
-    inset 0 0 0 1px hsl(var(--pill-tone) / var(--wn-pill-ring)),
     inset 0 0 0 999px var(--wn-sheen),
     inset 0 0 0 999px var(--wn-sheen),
     var(--wn-glass-edge),
@@ -1049,10 +1104,7 @@ div[data-row-count] {
     background-image: none !important;
   }
   .wn-pill.wn-chip-glass {
-    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-rest)), hsl(var(--pill-tone) / var(--wn-pill-rest))) !important;
-  }
-  .wn-pill.wn-chip-glass[data-on] {
-    background-image: linear-gradient(hsl(var(--pill-tone) / var(--wn-pill-on)), hsl(var(--pill-tone) / var(--wn-pill-on))) !important;
+    background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a))) !important;
   }
 }
 @media (forced-colors: active) {

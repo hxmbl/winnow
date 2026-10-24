@@ -13,6 +13,12 @@
  * soft tint so a row of twenty reads as one quiet line rather than a shelf of sweets;
  * the one that is on gets a stronger tint, a ring in its hue and a heavier label.
  *
+ * Switching one is motion rather than a cut: the tapped pill's tint deepens and a soft
+ * glow in its hue comes up while the one it replaces eases back, both over ~190ms. That
+ * lives in `index.css` (`.wn-pill`, its registered `--pill-*` strengths), not here, so the
+ * pill's markup only says which state it is in (`data-on`). The list's half of the switch
+ * is `useFilterSwitchMotion`.
+ *
  * A pill only switches its filter on and off; there is no control to hide a bucket
  * from the rail. "All" clears the active filters.
  */
@@ -317,7 +323,7 @@ export const FilterStrip = memo(function FilterStrip({
             data-empty={count === 0 && !on ? "" : undefined}
             // The pill's identity only; the mode's recipe turns it into a fill.
             style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}
-            className={`wn-pill relative flex shrink-0 items-center rounded-full transition-colors duration-150 ${glass ? "wn-chip-glass wn-liquid" : ""}`}
+            className={`wn-pill relative flex shrink-0 items-center rounded-full ${glass ? "wn-chip-glass wn-liquid" : ""}`}
           >
             <button
               type="button"

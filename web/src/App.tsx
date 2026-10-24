@@ -4706,6 +4706,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // scrolls with the list under it.
             topInset={phone ? (selected ? 0 : phoneBarHeight) : listChromeHeight}
             listView={`${viewKey(emptyContext)}|${preferences.sortBy}|${snapshot.searchQuery.trim()}`}
+            switchView={viewKey(emptyContext)}
             lead={
               phone ? (
                 snapshot.account === null || connectNotice ? (

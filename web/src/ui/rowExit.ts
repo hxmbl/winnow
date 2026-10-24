@@ -31,6 +31,48 @@ export function rowExitAllowed(reducedMotion: boolean, rect: { top: number; bott
 }
 
 /**
+ * A ghost of `element`: a copy of its pixels, fixed over `rect` (where it sits on screen
+ * now) and clipped to `clip` (the list's visible band), stripped of every id, data
+ * attribute, accessible name and title so no query, screen reader or click can find it.
+ * Not yet in the document; the caller appends it and removes it when its motion is done.
+ *
+ * Shared with the filter switch (`useFilterSwitchMotion`), whose leaving rows are ghosts
+ * of the same kind: `[data-message-id]` and `[data-row-id]` keep meaning "a row in the
+ * list" while anything fades out over it.
+ */
+export function ghostOf(
+  element: HTMLElement,
+  rect: { left: number; top: number; width: number; height: number; bottom: number },
+  clip: { top: number; bottom: number },
+): HTMLElement {
+  const ghost = element.cloneNode(true) as HTMLElement;
+  for (const node of [ghost, ...ghost.querySelectorAll<HTMLElement>("*")]) {
+    for (const attribute of [...node.attributes]) {
+      if (attribute.name === "id" || attribute.name.startsWith("data-") || attribute.name.startsWith("aria-") || attribute.name === "title") {
+        node.removeAttribute(attribute.name);
+      }
+    }
+  }
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.inert = true;
+  ghost.dataset.rowGhost = "";
+  Object.assign(ghost.style, {
+    position: "fixed",
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    margin: "0",
+    pointerEvents: "none",
+    zIndex: "10",
+    // Clipped to the list, so a row half under the floating header leaves no ghost
+    // over the header.
+    clipPath: `inset(${Math.max(0, clip.top - rect.top)}px 0 ${Math.max(0, rect.bottom - clip.bottom)}px 0)`,
+  });
+  return ghost;
+}
+
+/**
  * Lay a ghost over each of `ids`' rows that is on screen, then let `remove` take the
  * rows out. Safe to call with ids that are not mounted (they are skipped).
  */
@@ -49,30 +91,7 @@ export function exitRows(ids: readonly number[], remove: () => void): void {
     const row = scroller.querySelector<HTMLElement>(`[data-row-id="${id}"]`);
     const rect = row?.getBoundingClientRect() ?? null;
     if (!row || !rowExitAllowed(false, rect, box.bottom) || !rect) continue;
-    const ghost = row.cloneNode(true) as HTMLElement;
-    for (const node of [ghost, ...ghost.querySelectorAll<HTMLElement>("*")]) {
-      for (const attribute of [...node.attributes]) {
-        if (attribute.name === "id" || attribute.name.startsWith("data-") || attribute.name.startsWith("aria-") || attribute.name === "title") {
-          node.removeAttribute(attribute.name);
-        }
-      }
-    }
-    ghost.setAttribute("aria-hidden", "true");
-    ghost.inert = true;
-    ghost.dataset.rowGhost = "";
-    Object.assign(ghost.style, {
-      position: "fixed",
-      left: `${rect.left}px`,
-      top: `${rect.top}px`,
-      width: `${rect.width}px`,
-      height: `${rect.height}px`,
-      margin: "0",
-      pointerEvents: "none",
-      zIndex: "10",
-      // Clipped to the list, so a row half under the floating header leaves no ghost
-      // over the header.
-      clipPath: `inset(${Math.max(0, box.top - rect.top)}px 0 ${Math.max(0, rect.bottom - box.bottom)}px 0)`,
-    });
+    const ghost = ghostOf(row, rect, box);
     ghosts.push(ghost);
   }
   remove();
