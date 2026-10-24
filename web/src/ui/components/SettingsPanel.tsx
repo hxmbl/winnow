@@ -734,6 +734,11 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               <Toggle checked={props.leftHanded} onChange={props.onLeftHanded} label="Left-handed" />
             </Row>
           )}
+        </Section>
+      );
+    case "privacy":
+      return (
+        <Section>
           <Row setting="censorLevel">
             <SelectMenu
               id="censor-level"
@@ -743,11 +748,6 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               onChange={props.onCensorLevel}
             />
           </Row>
-        </Section>
-      );
-    case "privacy":
-      return (
-        <Section>
           {/*
             Remote images: three states, because there are three intentions.
 

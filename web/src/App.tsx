@@ -485,7 +485,7 @@ export function App({ store, existingInstall = true }: Props) {
    */
   const leftHanded = phone && preferences.leftHanded;
   /**
-   * Blur sensitive info (Settings → Appearance): the document watcher in
+   * Blur sensitive info (Settings → Privacy): the document watcher in
    * `ui/censorDom.ts`. A layout effect, so with it already on at launch the first paint
    * is censored too. At "names" it is given every name the mailbox and the address book
    * know, and restarted when that list changes.

@@ -192,7 +192,7 @@ export const SETTINGS = {
       "On a phone, puts the controls you reach with your thumb on the left: the message actions pill, the compose button and the order of the dock. Off keeps them on the right. Saved on this device.",
   },
   censorLevel: {
-    category: "appearance",
+    category: "privacy",
     label: "Blur sensitive info",
     explanation:
       "For screenshots and sharing your screen: choose email addresses, then add passwords given in mail, postal addresses and the names of people Winnow knows, each step including the ones before. Everything hidden, in the list, the reader, the composer, Settings and notifications, becomes the same number of random letters and is blurred. It's best effort, not a guarantee: a password without a label, an unusual address or a name Winnow hasn't seen can get through, so check before you share. Mail you send is not affected: replies still go to the real addresses.",

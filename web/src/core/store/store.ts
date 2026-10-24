@@ -333,7 +333,7 @@ export type Preferences = {
    */
   leftHanded: boolean;
   /**
-   * Blur sensitive info (Settings → Appearance): what on screen is replaced by random
+   * Blur sensitive info (Settings → Privacy): what on screen is replaced by random
    * letters and blurred, for screenshots and screen sharing. Off by default; each step
    * adds to the last (emails, passwords, postal addresses, names). Display only: what is
    * sent to Gmail never changes. See `core/mail/censor.ts` and `ui/censorDom.ts`.

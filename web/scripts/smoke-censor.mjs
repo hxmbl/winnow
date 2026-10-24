@@ -1,5 +1,5 @@
 /**
- * Censor email addresses (Settings → Appearance; `ui/censorDom.ts`).
+ * Blur sensitive info (Settings → Privacy; `ui/censorDom.ts`).
  *
  * The promise is about what a screenshot, a copy or a screen reader can get: with the
  * switch on, no real address is in the page's text or in the attributes that tooltips,
@@ -61,14 +61,14 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
     const plain = ((await p.locator("[data-reader-address]").first().textContent()) ?? "").trim();
     check("off by default: the reader shows the sender's real address", /@/.test(plain), JSON.stringify(plain));
 
-    // Settings → Appearance → Blur sensitive info.
+    // Settings → Privacy → Blur sensitive info.
     await p.keyboard.press("Escape");
     await p.keyboard.press(",");
     const dialog = p.locator('[role="dialog"][aria-label="Settings"]');
     await dialog.waitFor({ timeout: 5_000 });
-    await dialog.locator('[data-category="appearance"]').first().click();
+    await dialog.locator('[data-category="privacy"]').first().click();
     const trigger = dialog.locator('[data-select="censor-level"]');
-    check("Settings → Appearance has Blur sensitive info, off", /Off/.test((await trigger.textContent()) ?? ""), (await trigger.textContent()) ?? "");
+    check("Settings → Privacy has Blur sensitive info, off", /Off/.test((await trigger.textContent()) ?? ""), (await trigger.textContent()) ?? "");
     await chooseLevel(p, dialog, "Email addresses");
     const stored = await p.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").censorLevel);
     check("choosing a step is saved on the device", stored === "emails", String(stored));
@@ -126,7 +126,7 @@ export async function smokeCensor({ browser, URL, check, section, errors }) {
     // Off again: the real addresses come back, without a reload.
     await p.keyboard.press(",");
     await dialog.waitFor({ timeout: 5_000 });
-    await dialog.locator('[data-category="appearance"]').first().click();
+    await dialog.locator('[data-category="privacy"]').first().click();
     await chooseLevel(p, dialog, "Off");
     await p.keyboard.press("Escape");
     await openMailbox(p, '[data-nav="inbox"]');

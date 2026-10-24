@@ -1,5 +1,5 @@
 /**
- * Blur sensitive info (Settings → Appearance → "Blur sensitive info").
+ * Blur sensitive info (Settings → Privacy → "Blur sensitive info").
  *
  * For screenshots and screen sharing. A stepped choice, each step adding to the one
  * before it:
