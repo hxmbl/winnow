@@ -312,19 +312,33 @@ export function largeIconSource(picture: string | null | undefined, drawn: strin
  * that cannot be drawn is left out (the app icon shows), never passed on as a URL. With
  * `monograms` (Android), a message whose picture is missing or failed gets its sender's
  * monogram instead, as the list's avatar does; a monogram that cannot be drawn is none.
+ *
+ * A picture that cannot be loaded now (offline, or a host that sends no CORS header and
+ * so cannot be drawn to a canvas) is drawn from the avatar's kept copy instead, when
+ * there is one (`cachedPicture`, the same gated bytes cache the avatars use): a
+ * `data:` URL is the page's own and always readable. The network copy is tried first
+ * because it is drawn at the notification's own size; the kept one is 96px.
  */
 export async function nativePictures(
   pictures: Readonly<Record<string, string>>,
   rasterise: Rasterise = notificationRasterise(),
   size = NATIVE_PICTURE_PIXELS,
-  { monograms = {}, drawMonogram = canvasMonogram }: { monograms?: Readonly<Record<string, Monogram>>; drawMonogram?: DrawMonogram } = {},
+  {
+    monograms = {},
+    drawMonogram = canvasMonogram,
+    cachedPicture = keptPicture,
+  }: { monograms?: Readonly<Record<string, Monogram>>; drawMonogram?: DrawMonogram; cachedPicture?: (url: string) => string | null } = {},
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   const ids = new Set([...Object.keys(pictures), ...Object.keys(monograms)]);
   await Promise.all(
     [...ids].map(async (id) => {
       const url = pictures[id];
-      const drawn = url ? (isNativePicture(url) ? url : await rasterise(url, size).catch(() => null)) : null;
+      let drawn = url ? (isNativePicture(url) ? url : await rasterise(url, size).catch(() => null)) : null;
+      if (url && !drawn) {
+        const copy = cachedPicture(url);
+        if (copy) drawn = await rasterise(copy, size).catch(() => null);
+      }
       switch (largeIconSource(url, drawn, monograms[id])) {
         case "picture":
           out[id] = drawn as string;
@@ -340,6 +354,11 @@ export async function nativePictures(
     }),
   );
   return out;
+}
+
+/** The avatar's kept copy of a picture URL, under the sources the app is drawing from. */
+function keptPicture(url: string): string | null {
+  return currentSenderPictures().bytes?.get(url)?.data ?? null;
 }
 
 // ── Reply requests ────────────────────────────────────────────────────────

@@ -218,6 +218,26 @@ describe("native notifications get the picture as bytes, never a URL (1.3.3)", (
     ]);
   });
 
+  it("a picture that cannot be loaded now is drawn from the avatar's kept copy; the network copy is tried first", async () => {
+    const COPY = "data:image/webp;base64,UklGRg==";
+    const asked: string[] = [];
+    const rasterise = async (url: string) => {
+      asked.push(url);
+      return url === COPY ? PNG : null;
+    };
+    const kept = (url: string) => (url === LOGO ? COPY : null);
+    const out = await nativePictures({ g1: LOGO, g2: GRAVATAR }, rasterise, NATIVE_PICTURE_PIXELS, { cachedPicture: kept });
+    expect(out).toEqual({ g1: PNG });
+    expect(asked).toEqual([LOGO, GRAVATAR, COPY]);
+    // A picture that draws from the network never touches the copy.
+    const fromNetwork = await nativePictures({ g1: LOGO }, async () => PNG, NATIVE_PICTURE_PIXELS, {
+      cachedPicture: () => {
+        throw new Error("not asked");
+      },
+    });
+    expect(fromNetwork).toEqual({ g1: PNG });
+  });
+
   it("a rasteriser that answers something that is not a PNG/JPEG data URL is ignored", async () => {
     expect(await nativePictures({ g1: GRAVATAR }, async () => GRAVATAR)).toEqual({});
   });

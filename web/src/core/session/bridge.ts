@@ -37,6 +37,7 @@ import { adoptDeviceLearning, migrateToAccounts, type MigrationOutcome } from ".
 import { LightSync } from "./lightSync";
 import { loadAccountState, wipeAccountStorage } from "../store/accountState";
 import { deleteOfflineData } from "../offline/offlineStore";
+import { deletePictureBytes } from "../avatars/pictureBytes";
 import type { Email } from "../model/email";
 
 /** The namespace an account being added signs in under, until its address is known. */
@@ -332,6 +333,8 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
       wipeAccountStorage(storage, id, record.email);
       // And its offline database (mailbox, downloaded bodies, attachments).
       await deleteOfflineData(id);
+      // And its kept sender pictures (`winnow-pictures@<id>`): who mails it, as images.
+      await deletePictureBytes(id);
       // Its snoozes and scheduled sends live in the shared records, tagged with its
       // address (and, for a send going out from it, its id): they go with it too.
       store.forgetAccountRecords(record.email, id);

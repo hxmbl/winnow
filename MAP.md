@@ -41,7 +41,7 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       contacts/     People API sync, the contact index, suggestions.
       mail/         Sanitising, quoting, dates, codes, unsubscribe, keybinds.
       store/        The store, its derived view, preferences.
-      avatars/      Contact photos, Gravatar, BIMI logos, the local picture caches.
+      avatars/      Contact photos, Gravatar, BIMI logos, the local picture caches (answers and bytes).
       data/         The demo mailbox seed.
       offline/      The offline action queue (§5.10); saving mail offline and the IndexedDB store (§5.10a).
       updates/      Update checks: versions, release assets per runtime, release notes, latest.json;
@@ -575,6 +575,27 @@ URI or origin. The secret never appears in an error, a warning or a log.
   address, `?d=404`, probed as a credential-less, no-referrer `<img>`; never for
   malformed, no-reply or relayed ("via") senders.
 - `photos.ts` is contact photos, opt-in, from the People API only.
+- `pictureBytes.ts` keeps the pictures themselves (not just their URLs) on the device,
+  so a recent sender's avatar draws at once and offline. IndexedDB
+  `winnow-pictures@<id>` (one per account; store `pictures`, keyPath `key`, index
+  `kind`), keyed by the picture URL (`pictureKey`: https only, Gravatar's size query
+  dropped), each a 96px (`PICTURE_BYTES_PX`) WebP/PNG data URL ≤ 60,000 chars, tagged
+  `contact` / `gravatar` / `logo`. The 200 most recently drawn (`MAX_PICTURE_BYTES_ENTRIES`,
+  LRU by `usedAt`, written back at most hourly); fresh for the hit TTL (7 days), a stale
+  copy is still drawn and refreshed in the background when drawn online; dropped after
+  30 days without a refresh. Warmed into a `Map` at startup (`ready`), so `get` is
+  synchronous. Captured by `ui/pictureCapture.ts` (`canvasCapture`: anonymous,
+  no-referrer `<img>` → canvas, two at a time); a host without CORS taints the canvas
+  and is simply not kept (retried after a day), offline nothing is captured. The avatar
+  (`Avatar.tsx` via `usePictureBytes`/`pictureTries` in `ui/senderPictures.ts`) tries the
+  copy first, then the URL; a URL already on screen is not swapped for its new copy.
+  Gated by `gatedPictureBytes` (inside `senderPictureSources`): with Remote images =
+  Never, or Gravatar / brand logos off, those copies are never served or captured.
+  Cleared: sign-out (database deleted), account removal (`deletePictureBytes` in the
+  bridge), a switch off (`clearKind`), the contacts grant `not_granted` (contact photos).
+  None in the demo. Native notifications fall back to the kept copy when the picture
+  cannot be loaded (`nativePictures`' `cachedPicture`). IndexedDB helpers shared with
+  the offline store live in `core/offline/idb.ts`.
 - No favicon lookup, and Gravatar only behind its own switch: each tells a third party who mails you.
 - `data/demo.ts` seeds **57 messages** against a fixed instant
   (`DEMO_NOW = 2026-05-09T18:00Z`), plus `DEMO_TRASH` (12 records),
@@ -809,7 +830,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `PullRefresh.tsx` | Pull-to-refresh on the phone's list, which replaces the briefing strip once an account is connected (the demo and a disconnected phone keep a compact one-line strip with Connect Gmail). Past the threshold it ticks, then spins on the same action as Sync now and hands the result ("Synced just now · N waiting on you", or the error) to the status pill, which says it in the same place and glass. The rules live in `pullRefresh.ts`. |
 | `StatusPill.tsx` | The one in-app notification surface: the pull's frosted pill (`.wn-glass.wn-glass-bar`, full round), fixed and centred over the list's pane just under its chrome (the phone's top bar or the desktop's floating header, `+16px`), or under the window's safe area when the list is hidden (a phone reading, a narrow window with the reader open), so it never meets the dock or its chips and pushes nothing down. It shows one notice, newest first: a send in its undo window (Undo, Send now, a countdown), the store's undo offer (Undo, Dismiss), a flash (Dismiss) or a pull's result; when an action notice ends it says the sync line for `SYNC_RETURN_MS`, then goes. One always-mounted polite live region says each notice once (never the countdown). It takes the list pane as an element (App's callback-ref state), not a ref, so it re-measures whenever the pane mounts again (sign-out → demo). Rules in `statusPill.ts`. |
 | `SelectionBar.tsx` | The batch bar, using the same `archiveLabel` and `moveTargets` helpers as the row menu so the two cannot disagree. |
-| `Avatar.tsx` | Contact photo → Gravatar → BIMI logo → monogram. Every picture is an `<img>`; the monogram stays present under a loaded logo so a transparent logo does not let the letter through. |
+| `Avatar.tsx` | Contact photo → Gravatar → BIMI logo → monogram, each from its kept copy (`core/avatars/pictureBytes.ts`) when there is one, then its URL. Every picture is an `<img>`; the monogram stays present under a loaded logo so a transparent logo does not let the letter through. |
 | `ShortcutSheet.tsx` | The cheat sheet, rendered from `BINDINGS`. |
 | `CodeCopy.tsx` | The code chip in a row and the code bar in the reader. |
 | `ErrorText.tsx` | Selectable failure copy, collapsed under a disclosure when long — the one text in the app a user needs to copy. |
@@ -1165,6 +1186,7 @@ signed in). "Sign-out" means signing out of that account, which erases its names
 | `winnow.google.contacts.v1` *(per account)* | The People API snapshot | sign-out, revocation |
 | `winnow.brandLogos.v1` *(per account)* | Cached BIMI answers | sign-out, setting off |
 | `winnow.gravatars.v1` *(per account)* | Cached Gravatar answers, by sender address | sign-out, setting off |
+| IndexedDB `winnow-pictures@<id>` *(per account)* | Sender pictures as small data URLs (contact photos, Gravatars, brand logos), the 200 most recently drawn, `core/avatars/pictureBytes.ts` | sign-out / account removal (database deleted); a source's switch off, contacts grant gone (that kind) |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
 | `winnow.updates.v1` | Update checks: automatic on/off, the last check's time and outcome, the version whose notice was let go (`ui/useUpdates.ts`) | never, by design |
 | `winnow.devOptions.v1` | Settings → Dev Options: `{ version: 1, unlocked, purePlainText, viewOriginal, filterScores, debugLog, betaUpdates, … }` (`ui/devOptions.ts`, `DEV_SWITCHES`); this device only, shared by every account, absent until unlocked | Hide Dev Options |

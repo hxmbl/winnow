@@ -29,6 +29,7 @@
  */
 
 import type { Attachment, BodySource, LoadedBody } from "../model/email";
+import { committed, deleteDatabase, done, lazyConnection, type IdbFactory } from "./idb";
 
 /** A message's whole body, as kept offline. */
 export type StoredBody = {
@@ -155,68 +156,29 @@ export function memoryOfflineStore(): OfflineStore & { readonly files: Map<strin
   };
 }
 
-type IdbFactory = Pick<IDBFactory, "open" | "deleteDatabase">;
-
-/** How long a sign-out waits on a database another page still holds open. */
-const CLEAR_BLOCKED_MS = 3000;
-
 const MAILBOX_KEY = "messages";
-
-/** Promise over one request. */
-function done<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
-  });
-}
-
-/** Promise over a whole transaction: resolves once it has committed. */
-function committed(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
-    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
-  });
-}
 
 /**
  * The IndexedDB store. The connection is opened on first use and dropped by `clear`
  * (a database cannot be deleted while this page holds it open).
  */
 export function indexedDbOfflineStore(name: string, idb: IdbFactory | undefined = globalThis.indexedDB): OfflineStore {
-  let db: Promise<IDBDatabase> | null = null;
-
-  const open = (): Promise<IDBDatabase> => {
-    if (!idb) return Promise.reject(new Error("IndexedDB is not available"));
-    db ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const request = idb.open(name, 1);
-      request.onupgradeneeded = () => {
-        const database = request.result;
-        if (!database.objectStoreNames.contains("mailbox")) database.createObjectStore("mailbox");
-        if (!database.objectStoreNames.contains("bodies")) database.createObjectStore("bodies", { keyPath: "gmailId" });
-        if (!database.objectStoreNames.contains("index")) database.createObjectStore("index", { keyPath: "gmailId" });
-        if (!database.objectStoreNames.contains("files")) {
-          const files = database.createObjectStore("files", { keyPath: ["gmailId", "attachmentId"] });
-          files.createIndex("gmailId", "gmailId");
-        }
-      };
-      request.onsuccess = () => {
-        const database = request.result;
-        // Another tab deleting this database (its sign-out) closes ours instead of blocking it.
-        database.onversionchange = () => {
-          database.close();
-          db = null;
-        };
-        resolve(database);
-      };
-      request.onerror = () => reject(request.error ?? new Error("could not open the offline store"));
-      request.onblocked = () => reject(new Error("the offline store is open elsewhere"));
-    }).catch((error: unknown) => {
-      db = null;
-      throw error;
-    });
-    return db;
-  };
+  const connection = lazyConnection(
+    name,
+    1,
+    (database) => {
+      if (!database.objectStoreNames.contains("mailbox")) database.createObjectStore("mailbox");
+      if (!database.objectStoreNames.contains("bodies")) database.createObjectStore("bodies", { keyPath: "gmailId" });
+      if (!database.objectStoreNames.contains("index")) database.createObjectStore("index", { keyPath: "gmailId" });
+      if (!database.objectStoreNames.contains("files")) {
+        const files = database.createObjectStore("files", { keyPath: ["gmailId", "attachmentId"] });
+        files.createIndex("gmailId", "gmailId");
+      }
+    },
+    idb,
+    "the offline store",
+  );
+  const open = (): Promise<IDBDatabase> => connection.open();
 
   /** Delete one message's files inside an open transaction. */
   const deleteFiles = (tx: IDBTransaction, gmailId: string): void => {
@@ -305,21 +267,9 @@ export function indexedDbOfflineStore(name: string, idb: IdbFactory | undefined 
     },
     async clear() {
       if (!idb) return;
-      const pending = db;
-      db = null;
-      if (pending) (await pending.catch(() => null))?.close();
-      await new Promise<void>((resolve, reject) => {
-        const request = idb.deleteDatabase(name);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error ?? new Error("could not delete the offline store"));
-        // Another tab still has it open: it closes on `versionchange` and the delete
-        // finishes then. A page that never lets go must not hang a sign-out, so after
-        // `CLEAR_BLOCKED_MS` this resolves while the delete stays queued: the browser
-        // runs it as soon as the last connection closes.
-        request.onblocked = () => {
-          setTimeout(resolve, CLEAR_BLOCKED_MS);
-        };
-      });
+      // A database cannot be deleted while this page holds it open (`deleteDatabase`).
+      await connection.close();
+      await deleteDatabase(idb, name, "the offline store");
     },
   };
 }

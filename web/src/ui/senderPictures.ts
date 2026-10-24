@@ -7,6 +7,11 @@
  * brand logo. Anything else — or a picture that fails to load — is the monogram, which
  * is also what renders first: nothing here blocks a row.
  *
+ * Each picture drawn is also kept as bytes on the device (`core/avatars/pictureBytes.ts`):
+ * an avatar draws the kept copy first, so a recent sender's picture is there at once and
+ * offline, and the copy is refreshed in the background when it is stale. Only for the
+ * sources whose switches are on (`gatedPictureBytes`).
+ *
  * A context rather than props because the list, the reader header and the sender menu
  * all draw avatars, and threading two lookups through each of them would make every
  * row component care about where pictures come from.
@@ -17,11 +22,23 @@ import type { LogoState } from "../core/avatars/logoCache";
 import { senderDomain } from "../core/avatars/bimi";
 import { gravatarImageUrl, type ImageProbe } from "../core/avatars/gravatar";
 import type { ImagePolicy } from "../core/mail/imageConsent";
+import type { PictureKind, StoredPicture } from "../core/avatars/pictureBytes";
 
 /** What the cache exposes; the demo implements it from a fixed table. */
 export interface LogoSource {
   peek(address: string): LogoState;
   request(address: string): Promise<string | null>;
+  subscribe(listener: () => void): () => void;
+  getVersion(): number;
+}
+
+/** What the picture-bytes cache exposes to avatars (`PictureBytesCache`). */
+export interface PictureBytesSource {
+  /** The kept copy of a picture URL, fresh or stale, or `null`. Synchronous. */
+  get(url: string): StoredPicture | null;
+  isStale(url: string): boolean;
+  touch(url: string): void;
+  remember(url: string, kind: PictureKind): Promise<boolean>;
   subscribe(listener: () => void): () => void;
   getVersion(): number;
 }
@@ -33,6 +50,11 @@ export type SenderPictures = {
   gravatars: LogoSource | null;
   /** `null` when brand logos are off. */
   logos: LogoSource | null;
+  /**
+   * Pictures kept as bytes, already gated to the sources above (`gatedPictureBytes`).
+   * Absent or `null`: none (the demo, tests), and avatars draw from URLs alone.
+   */
+  bytes?: PictureBytesSource | null;
 };
 
 /**
@@ -50,12 +72,43 @@ export function senderPictureSources(input: {
   gravatars: LogoSource | null;
   logos: LogoSource | null;
   imagePolicy: ImagePolicy;
+  bytes?: PictureBytesSource | null;
 }): SenderPictures {
   const remote = input.imagePolicy !== "never";
+  const gravatars = remote ? input.gravatars : null;
+  const logos = remote ? input.logos : null;
   return {
     photos: input.photos,
-    gravatars: remote ? input.gravatars : null,
-    logos: remote ? input.logos : null,
+    gravatars,
+    logos,
+    bytes: input.bytes
+      ? gatedPictureBytes(input.bytes, { contact: true, gravatar: gravatars !== null, logo: logos !== null })
+      : null,
+  };
+}
+
+/**
+ * The bytes cache as avatars may use it: a kept copy is only handed out, and a new one
+ * only captured, for a source that is on right now. So with Remote images = Never, or
+ * "Gravatar photos" / "Show brand logos" off, a Gravatar or logo still on disk (its
+ * clear may not have landed yet) is never drawn — not even for a URL some other path
+ * still holds. Contact photos are the user's own synced contacts and follow the contacts
+ * grant, which clears them (`App`).
+ */
+export function gatedPictureBytes(bytes: PictureBytesSource, allowed: Readonly<Record<PictureKind, boolean>>): PictureBytesSource {
+  const get = (url: string): StoredPicture | null => {
+    const record = bytes.get(url);
+    return record && allowed[record.kind] ? record : null;
+  };
+  return {
+    get,
+    isStale: (url) => bytes.isStale(url),
+    touch: (url) => {
+      if (get(url)) bytes.touch(url);
+    },
+    remember: (url, kind) => (allowed[kind] ? bytes.remember(url, kind) : Promise.resolve(false)),
+    subscribe: (listener) => bytes.subscribe(listener),
+    getVersion: () => bytes.getVersion(),
   };
 }
 
@@ -64,7 +117,7 @@ export function remotePicturesPaused(imagePolicy: ImagePolicy): boolean {
   return imagePolicy === "never";
 }
 
-const EMPTY: SenderPictures = { photos: new Map(), gravatars: null, logos: null };
+const EMPTY: SenderPictures = { photos: new Map(), gravatars: null, logos: null, bytes: null };
 
 export const SenderPicturesContext = createContext<SenderPictures>(EMPTY);
 
@@ -83,7 +136,8 @@ export function isRelayedName(name: string | undefined): boolean {
 }
 
 /**
- * The picture URLs to try for a sender, best first. Empty means the monogram.
+ * The pictures to try for a sender, best first, each with its source. Empty means the
+ * monogram.
  *
  * `photo` is an explicit photo a caller already has; otherwise the context's contact
  * photos are consulted. Gravatar and the brand logo are only looked up when there is no
@@ -92,7 +146,7 @@ export function isRelayedName(name: string | undefined): boolean {
  * a sender with a Gravatar needs no DNS lookup for their domain at all (a logo already
  * cached is still kept as the fallback). `size` is the avatar's, in CSS pixels.
  */
-export function useSenderPictures(address: string, photo?: string, name?: string, size = 32): string[] {
+export function useSenderPictures(address: string, photo?: string, name?: string, size = 32): PictureCandidate[] {
   const sources = useContext(SenderPicturesContext);
   const { contactPhoto, wantGravatar, wantLogo } = pictureWants(sources, address, photo, name);
   const gravatars = wantGravatar ? sources.gravatars : null;
@@ -112,7 +166,35 @@ export function useSenderPictures(address: string, photo?: string, name?: string
   useEffect(() => {
     if (askLogo && logos && state.kind === "unknown") void logos.request(address);
   }, [askLogo, state.kind, logos, address, version]);
-  return orderPictures(contactPhoto, gravatar, state, size);
+  return orderPictureCandidates(contactPhoto, gravatar, state, size);
+}
+
+/**
+ * The bytes cache avatars draw from, with the avatar re-rendered when it changes (the
+ * warm at startup landing, a copy captured, a source cleared). `null` when there is none.
+ */
+export function usePictureBytes(): PictureBytesSource | null {
+  const bytes = useContext(SenderPicturesContext).bytes ?? null;
+  useSyncExternalStore(bytes ? bytes.subscribe : noopSubscribe, bytes ? bytes.getVersion : zero, zero);
+  return bytes;
+}
+
+/** One `src` an avatar may try: a picture's kept copy (`cached`) or its URL. */
+export type PictureTry = PictureCandidate & { src: string; cached: boolean };
+
+/**
+ * The `src`s an avatar tries, best first: for each picture, its kept copy when there is
+ * one, then its URL — so a copy that fails to decode falls back to the network exactly
+ * as before, and a picture with no copy is drawn from its URL as before.
+ */
+export function pictureTries(candidates: readonly PictureCandidate[], bytes: PictureBytesSource | null): PictureTry[] {
+  const out: PictureTry[] = [];
+  for (const candidate of candidates) {
+    const copy = bytes?.get(candidate.url)?.data;
+    if (copy) out.push({ ...candidate, src: copy, cached: true });
+    out.push({ ...candidate, src: candidate.url, cached: false });
+  }
+  return out;
 }
 
 /**
@@ -191,22 +273,35 @@ export function currentSenderPictures(): SenderPictures {
   return currentSources;
 }
 
+/** A picture to try for a sender, and which source (and so which switch) it is from. */
+export type PictureCandidate = { url: string; kind: PictureKind };
+
 /**
  * The order, on its own so it is tested: contact photo, Gravatar (sized for the
  * avatar), brand logo, and the logo only once Gravatar has answered — until then the
  * monogram holds, rather than a logo that the person's photo then replaces.
  */
+export function orderPictureCandidates(
+  contactPhoto: string | undefined,
+  gravatar: LogoState,
+  logo: LogoState,
+  size: number,
+): PictureCandidate[] {
+  const out: PictureCandidate[] = [];
+  if (contactPhoto) out.push({ url: contactPhoto, kind: "contact" });
+  if (gravatar.kind === "logo") out.push({ url: gravatarImageUrl(gravatar.url, size), kind: "gravatar" });
+  if (gravatar.kind !== "unknown" && logo.kind === "logo") out.push({ url: logo.url, kind: "logo" });
+  return out;
+}
+
+/** `orderPictureCandidates`, URLs only: what a notification is given. */
 export function orderPictures(
   contactPhoto: string | undefined,
   gravatar: LogoState,
   logo: LogoState,
   size: number,
 ): string[] {
-  const out: string[] = [];
-  if (contactPhoto) out.push(contactPhoto);
-  if (gravatar.kind === "logo") out.push(gravatarImageUrl(gravatar.url, size));
-  if (gravatar.kind !== "unknown" && logo.kind === "logo") out.push(logo.url);
-  return out;
+  return orderPictureCandidates(contactPhoto, gravatar, logo, size).map((candidate) => candidate.url);
 }
 
 /**

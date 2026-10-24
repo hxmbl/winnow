@@ -145,6 +145,8 @@ import { Avatar } from "./ui/components/Avatar";
 import { imageProbe, publishSenderPictures, senderPictureSources, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
 import { GRAVATAR_STORAGE_KEY, GravatarCache } from "./core/avatars/gravatar";
 import { contactPhotoMap } from "./core/avatars/photos";
+import { defaultPictureBytesStorage, memoryPictureBytesStorage, PictureBytesCache } from "./core/avatars/pictureBytes";
+import { canvasCapture } from "./ui/pictureCapture";
 import { BrandLogoCache, LOGO_STORAGE_KEY, localLogoStorage } from "./core/avatars/logoCache";
 import { keyFor } from "./core/store/accountState";
 import { dohResolver } from "./core/avatars/bimi";
@@ -386,6 +388,22 @@ export function App({ store, existingInstall = true }: Props) {
     const isOnline = () => globalThis.navigator?.onLine !== false;
     return new GravatarCache({ probe: imageProbe(isOnline), isOnline, storage: localLogoStorage(keyFor(GRAVATAR_STORAGE_KEY, cacheAccount)) });
   }, [cacheAccount]);
+  /**
+   * The pictures themselves, as small copies on the device (`core/avatars/pictureBytes`):
+   * one IndexedDB database per account, like the offline mail, warmed into memory now so
+   * the first rows draw their senders' pictures at once. Cleared with the lookups above
+   * (sign-out, a switch going off) and with the contacts grant. No account yet (starting
+   * up, the demo, signed out): memory only, so no database is made for nobody.
+   */
+  const pictureBytes = useMemo(
+    () =>
+      new PictureBytesCache({
+        storage: cacheAccount ? defaultPictureBytesStorage(cacheAccount) : memoryPictureBytesStorage(),
+        capture: canvasCapture(),
+        isOnline: () => globalThis.navigator?.onLine !== false,
+      }),
+    [cacheAccount],
+  );
 
   // ── Refs the keyboard handler reads ─────────────────────────────────────
   // The handler is registered once and reads through these, because
@@ -894,6 +912,7 @@ export function App({ store, existingInstall = true }: Props) {
     // Brand logos are cached per sender domain: a list of who mails this account.
     logoCache.clear();
     gravatarCache.clear();
+    void pictureBytes.clear();
     const bridge = sessionRef.current;
     try {
       if (bridge) {
@@ -908,7 +927,7 @@ export function App({ store, existingInstall = true }: Props) {
       );
     }
     await store.signOut();
-  }, [store, logoCache, gravatarCache]);
+  }, [store, logoCache, gravatarCache, pictureBytes]);
 
   /**
    * Sign in from the demo mailbox.
@@ -1489,6 +1508,21 @@ export function App({ store, existingInstall = true }: Props) {
   useEffect(() => {
     if (snapshot.status === "signed_out" || !preferences.gravatars) gravatarCache.clear();
   }, [snapshot.status, preferences.gravatars, gravatarCache]);
+  // The kept picture copies follow the same switches, one source at a time; signed out,
+  // the account's whole picture database goes. Contact photos go when the contacts grant
+  // does ("not_granted": declined or revoked), not while it is still being checked.
+  useEffect(() => {
+    if (snapshot.status === "signed_out") void pictureBytes.clear();
+  }, [snapshot.status, pictureBytes]);
+  useEffect(() => {
+    if (!preferences.brandLogos) void pictureBytes.clearKind("logo");
+  }, [preferences.brandLogos, pictureBytes]);
+  useEffect(() => {
+    if (!preferences.gravatars) void pictureBytes.clearKind("gravatar");
+  }, [preferences.gravatars, pictureBytes]);
+  useEffect(() => {
+    if (snapshot.contactsAccess === "not_granted") void pictureBytes.clearKind("contact");
+  }, [snapshot.contactsAccess, pictureBytes]);
 
   // Back online: logos that could not be looked up while offline are asked for again.
   useEffect(() => {
@@ -1516,8 +1550,10 @@ export function App({ store, existingInstall = true }: Props) {
         gravatars: gravatars ? gravatarCache : null,
         logos: brandLogos ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
         imagePolicy,
+        // The demo's pictures are bundled; nothing of it is kept.
+        bytes: isDemo ? null : pictureBytes,
       }),
-    [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache, imagePolicy],
+    [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache, imagePolicy, pictureBytes],
   );
   // The same sources for a new-mail notification's sender picture (`announce`).
   useEffect(() => {
@@ -3240,6 +3276,7 @@ export function App({ store, existingInstall = true }: Props) {
     forgetDeviceDrafts();
     logoCache.clear();
     gravatarCache.clear();
+    void pictureBytes.clear();
     setAccountBusy(true);
     try {
       await bridge.accounts.signOutAll({ revoke: true });
@@ -3247,7 +3284,7 @@ export function App({ store, existingInstall = true }: Props) {
       setAccountBusy(false);
       setOfflineQueue(bridge.offlineQueue);
     }
-  }, [forgetDeviceDrafts, logoCache, gravatarCache]);
+  }, [forgetDeviceDrafts, logoCache, gravatarCache, pictureBytes]);
 
   /** Asked first on a phone, like the single sign-out: the row sits under the thumb. */
   const confirmSignOutAccount = useCallback((id: string) => {
