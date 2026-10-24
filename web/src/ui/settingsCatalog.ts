@@ -335,6 +335,12 @@ export const SETTINGS = {
     explanation:
       "A short walk round Winnow: where your mailboxes are, how to read a message, what smart filters do and where the menu is. It opens by itself once, the first time Winnow starts on a device, and this plays it again. Watching it changes nothing.",
   },
+  source: {
+    category: "about",
+    label: "Source code",
+    explanation:
+      "Winnow's code, releases and issue tracker live on GitHub. Open it to read the source, download a build or report a problem.",
+  },
   licence: {
     category: "about",
     label: "Licence",

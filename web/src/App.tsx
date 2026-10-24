@@ -5059,6 +5059,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           platformLabel={info ? platformLabel(info) : null}
           updates={updates}
           onShowTour={replayTour}
+          onOpenLink={(url) => void platform.openExternal(url)}
           onClose={() => store.setOverlay("none")}
         />
       )}

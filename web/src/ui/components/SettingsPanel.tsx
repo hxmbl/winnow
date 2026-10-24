@@ -66,6 +66,9 @@ import { accountsSummary } from "../accountsPage";
 import type { UpdatesController } from "../useUpdates";
 import { operatorUpdate } from "../../core/updates/updates";
 
+/** Where Winnow's code lives, linked from About. */
+export const SOURCE_URL = "https://github.com/hxmbl/winnow";
+
 /** Under a remote-picture switch that is on but paused by Remote images = Never. */
 const REMOTE_PAUSED_HINT = "Paused: Remote images is set to Never";
 
@@ -290,6 +293,8 @@ export type SettingsProps = {
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
   onShowTour?: () => void;
+  /** Opens a page in the system browser (About → Source code). */
+  onOpenLink?: (url: string) => void;
   onClose: () => void;
 };
 
@@ -895,6 +900,22 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               </button>
             </Row>
           )}
+          <Row setting="source">
+            <a
+              href={SOURCE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-source-link=""
+              onClick={(event) => {
+                if (!props.onOpenLink) return;
+                event.preventDefault();
+                props.onOpenLink(SOURCE_URL);
+              }}
+              className="text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              github.com/hxmbl/winnow
+            </a>
+          </Row>
           <Row setting="licence">
             <span className="text-meta font-semibold text-ink-body">MIT</span>
           </Row>
