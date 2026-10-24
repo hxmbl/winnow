@@ -90,7 +90,7 @@ const FOCUSABLE =
  * read as a card rather than as a surface of the window.
  *
  * Kept as whole keyframe names rather than inline `style` so they stay in
- * `tailwind.config.js` and `prefers-reduced-motion` in `index.css` reaches them.
+ * `index.css`'s `@theme` and `prefers-reduced-motion` in `index.css` reaches them.
  */
 const SURFACE_ENTER = {
   center: "animate-sheet",
@@ -203,7 +203,7 @@ export function Sheet({
         // at z-50, the phone dock raised over it at 55, every other sheet at 60, and
         // menus and popovers at 70. A sheet or menu opened from Settings must never
         // land under the dock.
-        backdrop === "opaque" ? "z-50" : "z-[60]"
+        backdrop === "opaque" ? "z-50" : "z-60"
       } flex ${
         placement === "left"
           ? // Flush to the edge and full height: the drawer *is* the left side of the
@@ -243,7 +243,7 @@ export function Sheet({
         aria-activedescendant={activeDescendant}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`outline-none ${SURFACE_ENTER[placement]} ${className}`}
+        className={`outline-hidden ${SURFACE_ENTER[placement]} ${className}`}
       >
         {children}
       </div>
@@ -304,16 +304,16 @@ export function ConfirmDialog({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           Keep editing
         </button>
         <button
           type="button"
           onClick={onConfirm}
-          className={`rounded-ctl px-4 py-1.5 text-ui font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+          className={`rounded-ctl px-4 py-1.5 text-ui font-semibold transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
             destructive
-              ? "bg-danger text-[var(--wn-surface)]"
+              ? "bg-danger text-(--wn-surface)"
               : "bg-accent text-on-accent"
           }`}
         >
@@ -360,7 +360,7 @@ export function SheetHeader({
         type="button"
         onClick={onClose}
         aria-label={`Close ${title}`}
-        className={`flex ${touch ? "h-11 w-11" : "h-7 w-7"} items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+        className={`flex ${touch ? "h-11 w-11" : "h-7 w-7"} items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring`}
       >
         <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
           <path d="M6 6l12 12M18 6L6 18" />
@@ -405,7 +405,7 @@ export function ActionSheet({
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const ITEM =
-    "flex min-h-[56px] w-full items-center justify-center px-4 text-read transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring";
+    "flex min-h-[56px] w-full items-center justify-center px-4 text-read transition-colors active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring";
   return (
     <Sheet
       label={label}

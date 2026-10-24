@@ -38,7 +38,7 @@ export function Lightbox({
     onChange(images[(at + by + images.length) % images.length]!.index);
   };
   const BUTTON =
-    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-11 max-sm:w-11";
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-11 max-sm:w-11";
 
   // Portalled to the body: the reader pane animates in with a transform, and a fixed
   // overlay inside a transformed ancestor is positioned against that ancestor, not the

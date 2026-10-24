@@ -1292,13 +1292,14 @@ is hard to see.
 
 | Rule | Why |
 | --- | --- |
-| Token colours are CSS variables, so Tailwind's `/opacity` never applies to them | `rgb(var(--wn-veil) / 0.5)` is not a colour and renders nothing. `theme.test.ts` asserts this over every token. |
-| `fontSize` and `borderRadius` are **overridden**, not extended | So `text-sm` does not exist and an arbitrary `text-[13px]` is caught by a test. |
+| Token colours are CSS variables, so Tailwind's `/opacity` never applies to them | Under Tailwind 3 `rgb(var(--wn-veil) / 0.5)` was not a colour and rendered nothing; Tailwind 4 mixes it with `color-mix`, which bypasses the per-mode contrast tuning (and `veil`, `sheen`, `scrim` are already translucent). `theme.test.ts` asserts this over every token. |
+| The type scale and radii are **reset** (`--text-*: initial`, `--radius-*: initial` in `@theme`), not extended | So `text-sm` does not exist and an arbitrary `text-[13px]` is caught by a test. |
+| The app's own CSS in `index.css` sits in `@layer utilities`, after Tailwind's | Tailwind 4 layers its output, and unlayered CSS beats every layer regardless of specificity, so `:where(:focus-visible)` would override `focus-visible:-outline-offset-2` and the like. Same layer, later in order, is how Tailwind 3 behaved. |
 | Focus rings are `outline`, never Tailwind's `ring` | `ring-2` composes `box-shadow` out of custom properties and silently resolves to `none`. |
 | `base: "./"` in `vite.config.ts` | A Tauri window requesting `/assets/…` from the filesystem root renders blank. |
 | One entry point, no route code splitting | A lazy chunk that has not been written yet fails at runtime with no error message. |
 | No path aliases anywhere | The project has none; an import that needs one is a signal. |
-| `theme.ts` and `tailwind.config.js` list the same colour names, by hand | A name in one and not the other silently produces an unstyled element rather than a build error. |
+| `theme.ts` and the `@theme` block in `index.css` list the same colour names, by hand | A name in one and not the other silently produces an unstyled element rather than a build error. |
 | Rust serialises camelCase explicitly | Tauri rewrites argument keys but never return values. |
 | New Rust code goes in a module, not in `commands.rs` | The command layer is meant to stay readable in one sitting. |
 

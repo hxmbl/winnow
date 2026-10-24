@@ -37,7 +37,7 @@ export function SetupFix({ help, steps = SETUP_STEPS, onGoToStep }: { help: Goog
         <button
           type="button"
           onClick={() => onGoToStep(index)}
-          className="inline-flex w-fit items-center gap-1 rounded-ctl text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="inline-flex w-fit items-center gap-1 rounded-ctl text-meta font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           data-setup-fix-step={help.step}
         >
           <ArrowLeft size={12} aria-hidden="true" />
@@ -63,7 +63,7 @@ export function SetupTroubleshoot({ kind, steps = SETUP_STEPS, onGoToStep }: { k
         aria-expanded={open}
         aria-controls={panel}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between gap-2 rounded-pane px-3 py-2 text-left text-ui font-medium text-ink-body hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex w-full items-center justify-between gap-2 rounded-pane px-3 py-2 text-left text-ui font-medium text-ink-body hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         Google showed an error?
         <ChevronDown size={14} className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
@@ -80,7 +80,7 @@ export function SetupTroubleshoot({ kind, steps = SETUP_STEPS, onGoToStep }: { k
             spellCheck={false}
             onChange={(event) => setText(event.target.value)}
             placeholder="Error 400: redirect_uri_mismatch"
-            className="w-full resize-none rounded-pane border border-hairline bg-surface px-2.5 py-1.5 font-mono text-meta text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent max-sm:text-ui"
+            className="w-full resize-none rounded-pane border border-hairline bg-surface px-2.5 py-1.5 font-mono text-meta text-ink outline-hidden placeholder:text-ink-placeholder focus-visible:border-accent max-sm:text-ui"
             data-setup-google-said=""
           />
           <ul className="flex flex-wrap gap-1.5" aria-label="Common errors">
@@ -89,7 +89,7 @@ export function SetupTroubleshoot({ kind, steps = SETUP_STEPS, onGoToStep }: { k
                 <button
                   type="button"
                   onClick={() => setText(item.sample)}
-                  className="rounded-full border border-hairline px-2.5 py-0.5 text-left font-mono text-meta text-ink-muted hover:bg-surface-hover hover:text-ink max-sm:min-h-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="rounded-full border border-hairline px-2.5 py-0.5 text-left font-mono text-meta text-ink-muted hover:bg-surface-hover hover:text-ink max-sm:min-h-9 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   {item.label}
                 </button>

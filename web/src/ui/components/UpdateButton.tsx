@@ -53,7 +53,7 @@ export function UpdateButton({ updates, phone }: { updates: UpdatesController | 
           updates.install();
         }
       }}
-      className={`shrink-0 whitespace-nowrap rounded-full font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-70 ${
+      className={`shrink-0 whitespace-nowrap rounded-full font-semibold transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-70 ${
         phone ? "mr-1 h-9 px-3.5 text-meta" : "h-7 px-3 text-meta"
       } ${view === "update" ? "bg-accent text-on-accent" : "bg-sheen text-ink-body hover:text-ink"}`}
     >

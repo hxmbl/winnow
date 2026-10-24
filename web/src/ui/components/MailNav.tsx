@@ -53,7 +53,7 @@ import {
  * outward was cut off at the panel's edges and on the first and last rows.
  */
 export const SIDEBAR_FOCUS =
-  "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring";
+  "focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring";
 
 export type NavFolder = { id: Mailbox; label: string; unread: number };
 
@@ -679,7 +679,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
           clearIdle();
         }}
         data-morph={touch ? "" : undefined}
-        className={`wn-sidebar-panel fixed z-50 flex flex-col overflow-hidden border border-hairline outline-none ${
+        className={`wn-sidebar-panel fixed z-50 flex flex-col overflow-hidden border border-hairline outline-hidden ${
           touch ? "wn-glass" : "left-2 top-2 max-h-[calc(100dvh-1rem)] w-60 rounded-pane"
         }`}
       >

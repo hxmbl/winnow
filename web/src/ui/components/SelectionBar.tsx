@@ -52,8 +52,8 @@ export function SelectionBar({
   const [moveAnchor, setMoveAnchor] = useState<MenuAnchor | null>(null);
 
   const button = phone
-    ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-    : "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+    ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+    : "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
   const iconSize = phone ? 19 : 14;
   const label = (text: string) => (phone ? <span className="sr-only">{text}</span> : <span>{text}</span>);
 
@@ -112,7 +112,7 @@ export function SelectionBar({
         onClick={onTrash}
         aria-label={phone ? trashText : undefined}
         data-destructive={mailbox === "trash" ? "" : undefined}
-        className={`${button} ${mailbox === "trash" ? "!text-danger" : ""}`}
+        className={`${button} ${mailbox === "trash" ? "text-danger!" : ""}`}
       >
         {scheduled ? <AlarmClockOff size={iconSize} strokeWidth={1.9} aria-hidden="true" /> : <Trash2 size={iconSize} strokeWidth={1.9} aria-hidden="true" />}
         {label(trashText)}

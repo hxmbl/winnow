@@ -186,11 +186,11 @@ export function ReaderSplitHandle({ containerRef }: { containerRef: RefObject<HT
           commit(DEFAULT_READER_FRACTION);
         }}
         onKeyDown={onKeyDown}
-        className="wn-split group absolute inset-y-0 -left-1 flex w-2 cursor-col-resize touch-none select-none justify-center focus-visible:outline-none"
+        className="wn-split group absolute inset-y-0 -left-1 flex w-2 cursor-col-resize touch-none select-none justify-center focus-visible:outline-hidden"
       >
         <span
           aria-hidden="true"
-          className="h-full w-px bg-hairline-soft transition-colors duration-150 group-hover:bg-divider group-focus-visible:w-0.5 group-focus-visible:bg-focus-ring group-data-[dragging]:w-0.5 group-data-[dragging]:bg-accent"
+          className="h-full w-px bg-hairline-soft transition-colors duration-150 group-hover:bg-divider group-focus-visible:w-0.5 group-focus-visible:bg-focus-ring group-data-dragging:w-0.5 group-data-dragging:bg-accent"
         />
       </div>
     </div>

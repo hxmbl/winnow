@@ -126,7 +126,7 @@ function ReplyAllToggle({ replyAll, onChange }: { replyAll: boolean; onChange: (
       aria-pressed={replyAll === value}
       data-reply-all={value ? "all" : "one"}
       onClick={() => onChange(value)}
-      className={`rounded-ctl px-2 py-0.5 text-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-9 ${
+      className={`rounded-ctl px-2 py-0.5 text-meta font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-9 ${
         replyAll === value ? "bg-surface-active text-ink" : "text-ink-subtle hover:bg-surface-hover hover:text-ink-body"
       }`}
     >
@@ -169,7 +169,7 @@ function DraftStatus({
           data-allow-drafts=""
           onClick={onAllow}
           disabled={allowing}
-          className="shrink-0 rounded-ctl px-1.5 py-0.5 font-medium text-accent underline-offset-2 hover:underline disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="shrink-0 rounded-ctl px-1.5 py-0.5 font-medium text-accent underline-offset-2 hover:underline disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           {allowing ? "Waiting for Google…" : "Allow"}
         </button>
@@ -356,7 +356,7 @@ export function Composer({
       returnFocus={laterMenu.trigger}
       onClose={() => setLaterMenu(null)}
       header={
-        <span data-send-later-note="" className="block max-w-[17rem] text-meta leading-snug text-ink-muted">
+        <span data-send-later-note="" className="block max-w-68 text-meta leading-snug text-ink-muted">
           {SEND_LATER_NOTE}
         </span>
       }
@@ -431,7 +431,7 @@ export function Composer({
         requestAnimationFrame(() => ccRef.current?.focus());
       }}
       title="Add Cc and Bcc recipients"
-      className="mt-1 shrink-0 rounded-ctl px-1.5 py-1 text-meta font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-10"
+      className="mt-1 shrink-0 rounded-ctl px-1.5 py-1 text-meta font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-10"
     >
       Cc/Bcc
     </button>
@@ -482,7 +482,7 @@ export function Composer({
               data-composer-from-picker=""
               value={fromId ?? fromOptions[0].id}
               onChange={(event) => onFromChange(event.target.value)}
-              className="min-w-0 flex-1 truncate rounded-ctl bg-transparent px-1 text-ui text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="min-w-0 flex-1 truncate rounded-ctl bg-transparent px-1 text-ui text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               {fromOptions.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -548,7 +548,7 @@ export function Composer({
               type="button"
               onClick={improveSuggestions.onClick}
               disabled={improveSuggestions.busy}
-              className="self-start text-ink-subtle underline-offset-2 transition-colors hover:text-ink-body hover:underline disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="self-start text-ink-subtle underline-offset-2 transition-colors hover:text-ink-body hover:underline disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               {improveSuggestions.busy
                 ? "Waiting for Google…"
@@ -569,7 +569,7 @@ export function Composer({
             aria-label="Subject"
             value={subject}
             onChange={(event) => onChange({ subject: event.target.value })}
-            className="min-w-0 flex-1 rounded-ctl border border-hairline bg-surface px-4 py-1.5 text-ui text-ink outline-none focus-visible:border-accent max-sm:min-h-10 max-sm:text-read"
+            className="min-w-0 flex-1 rounded-ctl border border-hairline bg-surface px-4 py-1.5 text-ui text-ink outline-hidden focus-visible:border-accent max-sm:min-h-10 max-sm:text-read"
           />
         </div>
 
@@ -582,9 +582,9 @@ export function Composer({
           // Send stays inside the sheet on a 900px window rather than below its fold.
           rows={phone ? 8 : docked ? 6 : mode === "new" ? 12 : 16}
           spellCheck
-          className={`selectable thin-scroll w-full rounded-pane border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-none focus-visible:border-accent ${
+          className={`selectable thin-scroll w-full rounded-pane border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-hidden focus-visible:border-accent ${
             // 16px on a phone: iOS zooms into any focused field smaller than that.
-            phone ? "min-h-[10rem] flex-1 resize-none text-read" : "resize-y text-ui"
+            phone ? "min-h-40 flex-1 resize-none text-read" : "resize-y text-ui"
           }`}
         />
 
@@ -609,7 +609,7 @@ export function Composer({
             // their recipients is wrong.
             disabled={!canSend}
             title={sendTitle}
-            className="inline-flex items-center gap-2 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="inline-flex items-center gap-2 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             {sending ? "Sending…" : "Send"}
             {!sending && (
@@ -631,7 +631,7 @@ export function Composer({
               title="Send later…"
               disabled={!canSend}
               onClick={(event) => openLater(event.currentTarget)}
-              className="inline-flex items-center rounded-ctl bg-accent px-2 text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="inline-flex items-center rounded-ctl bg-accent px-2 text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
             </button>
@@ -640,11 +640,11 @@ export function Composer({
           <button
             type="button"
             onClick={onDiscard}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Discard
           </button>
-          <span className="ml-auto max-w-[19rem] text-right text-meta leading-snug text-ink-subtle">
+          <span className="ml-auto max-w-76 text-right text-meta leading-snug text-ink-subtle">
             {hint}
           </span>
         </div>
@@ -700,7 +700,7 @@ export function Composer({
             type="button"
             onClick={onClose}
             aria-label={`Close ${title}`}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
               <path d="M6 6l12 12M18 6L6 18" />
@@ -801,7 +801,7 @@ function PhoneComposerBar({
         type="button"
         data-composer-cancel=""
         onClick={onCancel}
-        className="flex h-11 items-center justify-self-start rounded-ctl px-3 text-read text-accent transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex h-11 items-center justify-self-start rounded-ctl px-3 text-read text-accent transition-colors active:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         Cancel
       </button>
@@ -818,7 +818,7 @@ function PhoneComposerBar({
           title="Send later (or hold Send)"
           disabled={!canSend}
           onClick={(event) => onSendLater(event.currentTarget)}
-          className="flex h-11 w-11 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex h-11 w-11 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <Clock size={20} strokeWidth={2} aria-hidden="true" />
         </button>
@@ -833,7 +833,7 @@ function PhoneComposerBar({
         onPointerUp={sendPress?.onPointerUp}
         onPointerLeave={sendPress?.onPointerLeave}
         onContextMenu={sendPress?.onContextMenu}
-        className="group flex h-11 w-11 items-center justify-center rounded-full [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="group flex h-11 w-11 items-center justify-center rounded-full [-webkit-touch-callout:none] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <span
           aria-hidden="true"

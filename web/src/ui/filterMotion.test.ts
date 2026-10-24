@@ -26,7 +26,7 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 describe("the filter switch's motion: timings", () => {
   it("stays inside the app's motion budget", () => {
-    // The tailwind.config.js rule: nothing much past 220ms.
+    // The index.css rule: nothing much past 220ms.
     expect(SWITCH_LEAVE_MS).toBeGreaterThanOrEqual(120);
     expect(SWITCH_LEAVE_MS).toBeLessThanOrEqual(150);
     expect(SWITCH_MOVE_DELAY_MS + SWITCH_MOVE_MS).toBeLessThanOrEqual(220);

@@ -67,7 +67,7 @@ function Inlines({ nodes, onOpenLink }: { nodes: Inline[]; onOpenLink: (url: str
                   event.preventDefault();
                   onOpenLink(node.href);
                 }}
-                className="break-words text-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="wrap-break-word text-accent underline-offset-2 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <Inlines nodes={node.children} onOpenLink={onOpenLink} />
               </a>
@@ -226,7 +226,7 @@ export function WhatsNew(props: Props) {
             ref={close}
             type="button"
             onClick={props.onClose}
-            className="rounded-ctl px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="rounded-ctl px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Close
           </button>
@@ -235,7 +235,7 @@ export function WhatsNew(props: Props) {
               type="button"
               data-whats-new-action=""
               onClick={props.onAction}
-              className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               {props.actionLabel}
             </button>

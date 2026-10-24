@@ -139,7 +139,7 @@ type Actions = {
  * of boxes. At rest they are almost invisible; the fill is the hover.
  */
 const QUIET_BUTTON =
-  "rounded-ctl bg-sheen px-3 py-1.5 text-meta font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+  "rounded-ctl bg-sheen px-3 py-1.5 text-meta font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 /**
  * One button of the action bar: icon, its word when the pane has room (a container
@@ -159,13 +159,13 @@ function ActionButton({ action, onClick, children, tipStart = false }: { action:
       aria-pressed={action.pressed ?? undefined}
       aria-keyshortcuts={key ?? undefined}
       data-reader-action={action.id}
-      className={`wn-action group/action relative flex h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-ctl text-ui font-medium transition-[background-color,color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring active:scale-[0.96] motion-reduce:active:scale-100 ${
+      className={`wn-action group/action relative flex h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-ctl text-ui font-medium transition-[background-color,color,transform] duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring active:scale-[0.96] motion-reduce:active:scale-100 ${
         action.primary
           ? "bg-accent px-2.5 text-on-accent hover:opacity-90"
           : action.text
             ? "px-2 text-ink-body hover:bg-surface-hover hover:text-ink"
             : "px-0 text-ink-icon hover:bg-surface-hover hover:text-ink"
-      } ${action.pressed ? "text-[var(--wn-badge-starred)]" : ""}`}
+      } ${action.pressed ? "text-(--wn-badge-starred)" : ""}`}
     >
       {children}
       {action.text && <span className="wn-action-text whitespace-nowrap">{action.text}</span>}
@@ -252,7 +252,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
           aria-label="Open sidebar"
           title={shortcutHint("Sidebar", "toggleSidebar")}
           aria-keyshortcuts="["
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
         >
           <AppMark size={26} />
         </button>
@@ -262,7 +262,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
         onClick={onClose}
         aria-label="Back to the list"
         aria-keyshortcuts="Escape"
-        className="wn-action relative flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
+        className="wn-action relative flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
       >
         <X size={16} strokeWidth={2} aria-hidden="true" />
         <span aria-hidden="true" className="wn-tip" data-tip="start">
@@ -290,7 +290,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
           onUnsubscribe={actions.onUnsubscribe}
           onChangeFilters={actions.onChangeFilters}
           onViewOriginal={actions.onViewOriginal}
-          buttonClass="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          buttonClass="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         />
       </div>
     </div>
@@ -354,8 +354,8 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
   };
 
   const ITEM = phone
-    ? "flex min-h-11 w-full items-center gap-2.5 rounded-ctl px-3 text-left text-ui font-medium text-ink-body transition-colors active:bg-sheen focus-visible:bg-sheen focus-visible:outline-none"
-    : "flex w-full items-center gap-2 rounded-ctl px-2.5 py-1.5 text-left text-meta font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-none";
+    ? "flex min-h-11 w-full items-center gap-2.5 rounded-ctl px-3 text-left text-ui font-medium text-ink-body transition-colors active:bg-sheen focus-visible:bg-sheen focus-visible:outline-hidden"
+    : "flex w-full items-center gap-2 rounded-ctl px-2.5 py-1.5 text-left text-meta font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-hidden";
   const iconSize = phone ? 16 : 13;
 
   return (
@@ -381,7 +381,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
               ? // Above the floating action pill, on the thumb's side. Fixed rather than
                 // absolute: the pill clips its own contents while it folds.
                 `fixed bottom-[calc(var(--wn-dock-bottom)+var(--wn-dock-h)+0.5rem)] z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-pane border border-hairline bg-chrome p-1.5 shadow-lift ${
-                  phone.leftHanded ? "left-[var(--wn-dock-left)]" : "right-[var(--wn-dock-right)]"
+                  phone.leftHanded ? "left-(--wn-dock-left)" : "right-(--wn-dock-right)"
                 }`
               : "absolute right-0 top-8 z-30 w-60 rounded-pane border border-hairline bg-surface p-1 shadow-pane"
           }
@@ -400,7 +400,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
                   strokeWidth={1.9}
                   aria-hidden="true"
                   fill={phone.starred ? "currentColor" : "none"}
-                  className={phone.starred ? "text-[var(--wn-badge-starred)]" : "text-ink-muted"}
+                  className={phone.starred ? "text-(--wn-badge-starred)" : "text-ink-muted"}
                 />
                 <span className="flex-1">{phone.starred ? "Unstar" : "Star"}</span>
               </button>
@@ -609,7 +609,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
 
   const BUTTON =
-    "flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-ink-body transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+    "flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-ink-body transition-colors active:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
   const ICON = { size: 21, strokeWidth: 1.8, "aria-hidden": true } as const;
 
   const button = (id: ReaderPillAction) => {
@@ -634,7 +634,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
             aria-label={trashLabel}
             title={trashLabel}
             data-destructive={mailbox === "trash" ? "" : undefined}
-            className={`${BUTTON} ${mailbox === "trash" ? "!text-danger" : ""}`}
+            className={`${BUTTON} ${mailbox === "trash" ? "text-danger!" : ""}`}
           >
             <Trash2 {...ICON} />
           </button>
@@ -693,15 +693,15 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
       data-reader-dock=""
       data-reader-pill={collapsed ? "collapsed" : "open"}
       data-hand={leftHanded ? "left" : "right"}
-      className={`pointer-events-none fixed bottom-[var(--wn-dock-bottom)] z-30 flex ${
-        leftHanded ? "left-[var(--wn-dock-left)] justify-start" : "right-[var(--wn-dock-right)] justify-end"
+      className={`pointer-events-none fixed bottom-(--wn-dock-bottom) z-30 flex ${
+        leftHanded ? "left-(--wn-dock-left) justify-start" : "right-(--wn-dock-right) justify-end"
       }`}
     >
       <div
         role="toolbar"
         aria-label="Message actions"
         data-reader-pill-swipe={onStep ? "" : undefined}
-        className="wn-glass wn-glass-behind wn-liquid wn-reader-pill pointer-events-auto relative h-[var(--wn-dock-h)] rounded-full"
+        className="wn-glass wn-glass-behind wn-liquid wn-reader-pill pointer-events-auto relative h-(--wn-dock-h) rounded-full"
         style={{ "--wn-pill-count": snoozable ? 6 : 5 } as React.CSSProperties}
         {...swipe.handlers}
       >
@@ -720,7 +720,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
           tabIndex={collapsed ? undefined : -1}
           aria-hidden={collapsed ? undefined : true}
           onClick={() => setScroll(pillOpened)}
-          className={`wn-reader-pill-handle absolute inset-y-0 flex w-[var(--wn-dock-h)] items-center justify-center rounded-full text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+          className={`wn-reader-pill-handle absolute inset-y-0 flex w-(--wn-dock-h) items-center justify-center rounded-full text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
             leftHanded ? "left-0" : "right-0"
           }`}
         >
@@ -943,7 +943,7 @@ export function Reader({
             data-reader-back=""
             onClick={onClose}
             aria-label="Back to the list"
-            className="-ml-3 flex h-11 w-9 shrink-0 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="-ml-3 flex h-11 w-9 shrink-0 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <ChevronLeft size={26} strokeWidth={2.1} aria-hidden="true" />
           </button>
@@ -954,7 +954,7 @@ export function Reader({
           aria-label={`Sender options for ${displayName(email)}`}
           aria-haspopup="menu"
           onClick={(event) => onSenderMenu?.(event.currentTarget)}
-          className="mt-0.5 shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="mt-0.5 shrink-0 rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <Avatar name={displayName(email)} address={email.sender} photo={senderPhoto} size={36} />
         </button>
@@ -981,7 +981,7 @@ export function Reader({
             <p
               key={line.field}
               data-reader-recipients={line.field}
-              className="selectable mt-1 break-words text-meta text-ink-subtle"
+              className="selectable mt-1 wrap-break-word text-meta text-ink-subtle"
             >
               <span className="text-ink-muted">{line.field}</span> {line.text}
             </p>
@@ -1060,7 +1060,7 @@ export function Reader({
                 <button
                   type="button"
                   onClick={actions.onShowOriginal}
-                  className="rounded-ctl px-3 py-1.5 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="rounded-ctl px-3 py-1.5 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
                   Open the original
                 </button>
@@ -1132,7 +1132,7 @@ export function Reader({
               <button
                 type="button"
                 onClick={actions.onShowOriginal}
-                className="text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 Open the original
               </button>
@@ -1184,7 +1184,7 @@ export function Reader({
                     type="button"
                     data-why-change=""
                     onClick={actions.onChangeFilters}
-                    className="rounded-ctl px-1.5 py-1 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    className="rounded-ctl px-1.5 py-1 text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >
                     Change smart filters…
                   </button>
@@ -1230,7 +1230,7 @@ export function Reader({
                       <button
                         type="button"
                         onClick={() => actions.onOpenMessage(message.id)}
-                        className="flex w-full items-baseline gap-2 rounded-ctl px-2 py-1.5 text-left text-ui transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                        className="flex w-full items-baseline gap-2 rounded-ctl px-2 py-1.5 text-left text-ui transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                       >
                         {/* Weight only for unread, as in the list. */}
                         <span

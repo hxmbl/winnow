@@ -1,311 +1,577 @@
+@import 'tailwindcss';
+
 /*
- * Typefaces, self-hosted: nothing is fetched from a font CDN, in the browser or in the
- * desktop app (whose CSP only allows `font-src 'self'`). Licences and provenance are in
- * `src/assets/fonts/README.md`. `unicode-range` keeps the Latin Extended files unloaded
- * until a message actually contains one of those characters.
+ * The design tokens, as Tailwind 4 theme variables (this was `tailwind.config.js` under
+ * Tailwind 3). Every name here becomes a utility: `--color-surface` is `bg-surface`,
+ * `--radius-ctl` is `rounded-ctl`, `--text-ui` is `text-ui`.
  */
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 700;
-  src: url("./assets/fonts/ibm-plex-sans-latin-ext-wght-normal.woff2") format("woff2-variations");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
+@theme {
+  /*
+   * The type scale. Four steps and nothing else.
+   *
+   * Reset rather than extended (`--text-*: initial`), so Tailwind's own `text-sm`/`text-lg`
+   * do not exist and an arbitrary `text-[13px]` is caught by `theme.test.ts`. Hierarchy
+   * comes from weight and colour inside a step, not from a fifth size.
+   *
+   *   meta  12px — timestamps, counts, captions, section labels
+   *   ui    14px — rows, controls, everything you scan
+   *   read  16px — message bodies, dialog titles, phone inputs (iOS zooms below 16)
+   *   title 24px — the reader's subject
+   */
+  --text-*: initial;
+  --text-meta: 12px;
+  --text-meta--line-height: 1.4;
+  --text-ui: 14px;
+  --text-ui--line-height: 1.45;
+  --text-read: 16px;
+  --text-read--line-height: 1.6;
+  --text-title: 24px;
+  --text-title--line-height: 1.25;
 
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 700;
-  src: url("./assets/fonts/ibm-plex-sans-latin-wght-normal.woff2") format("woff2-variations");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  /*
+   * Shape language (1.3.2, the owner's "round/pill"): two radii and their nesting, from
+   * the custom properties below (`--wn-radius-*`), so nothing picks its own. Reset like
+   * the type scale, so `rounded-lg` compiles to nothing. `full` is kept for things that
+   * are genuinely round (a dot, a switch) and is not a control radius.
+   *
+   *   ctl    every interactive control: a full pill, or a circle when it is icon-only
+   *          and square (buttons, fields, segmented controls, chips, menu-item and
+   *          suggestion highlights, the status pill).
+   *   pane   every container (sheets, dialogs, menus, cards, lists, the reader's HTML
+   *          card, multi-line fields): one large radius.
+   *   inset  something nested inside a padded container: the container's radius less
+   *          its padding, so the curves stay concentric.
+   *   field  a control that can grow to several lines (the To field once its chips
+   *          wrap): a pill's end radius on one line, a rounded box on more.
+   */
+  --radius-*: initial;
+  --radius-none: 0;
+  --radius-ctl: var(--wn-radius-control);
+  --radius-pane: var(--wn-radius-container);
+  --radius-inset: var(--wn-radius-inset);
+  --radius-field: var(--wn-radius-field);
+  --radius-full: 9999px;
+
+  /*
+   * Every colour resolves to a custom property written by `applyTheme`, so a scheme
+   * change is one `style.setProperty` sweep rather than a re-render of every styled
+   * element. Keep these names in sync with the palettes in `src/ui/theme.ts` — a name
+   * that exists in one and not the other silently produces an unstyled element rather
+   * than a build error.
+   */
+  --color-canvas: var(--wn-canvas);
+  --color-surface: var(--wn-surface);
+  --color-surface-sunken: var(--wn-surfaceSunken);
+  --color-surface-hover: var(--wn-surfaceHover);
+  --color-surface-active: var(--wn-surfaceActive);
+  --color-chrome: var(--wn-chrome);
+  --color-ink: var(--wn-ink);
+  --color-ink-body: var(--wn-inkBody);
+  --color-ink-muted: var(--wn-inkMuted);
+  --color-ink-subtle: var(--wn-inkSubtle);
+  --color-ink-icon: var(--wn-inkIcon);
+  --color-ink-placeholder: var(--wn-inkPlaceholder);
+  --color-hairline: var(--wn-hairline);
+  --color-hairline-soft: var(--wn-hairlineSoft);
+  --color-divider: var(--wn-divider);
+  --color-control-border: var(--wn-controlBorder);
+  --color-focus-ring: var(--wn-focusRing);
+  /* Transparent except on OLED, where it is the only thing separating black planes. */
+  --color-edge: var(--wn-edge);
+  /*
+   * The accent. One colour, four jobs: unread, selection, focus and the primary action.
+   * Anything else that wants colour is asking for the wrong thing.
+   */
+  --color-accent: var(--wn-accent);
+  --color-on-accent: var(--wn-onAccent);
+  --color-surface-selected: var(--wn-surfaceSelected);
+  --color-danger: var(--wn-danger);
+  --color-success: var(--wn-success);
+  --color-notice: var(--wn-notice);
+  --color-danger-wash: var(--wn-dangerWash);
+  /*
+   * Depth without borders. `veil` is the translucent fill for anything that floats over
+   * content and is paired with a `backdrop-filter`; `sheen` is selection expressed as a
+   * low-alpha wash of the palette's own ink, so it darkens on a light scheme and lightens
+   * on a dark one; `scrim` is what the drawer dims. None of them takes an `/opacity`
+   * modifier (`theme.test.ts` asserts that over every colour token here).
+   */
+  --color-veil: var(--wn-veil);
+  --color-sheen: var(--wn-sheen);
+  --color-scrim: var(--wn-scrim);
+
+  /*
+   * Flat for now: both resolve to `none` (see `theme.ts`), and the hooks stay so
+   * elevation can come back as one token change rather than a sweep of every pane.
+   */
+  --shadow-pane: var(--wn-elev-pane);
+  --shadow-lift: var(--wn-elev-lift);
+
+  /*
+   * IBM Plex Sans for the interface, self-hosted (see `src/assets/fonts`). The system
+   * stack stays behind it so a missing file degrades to a native app rather than to
+   * Times. One family for everything, the subject and plain-text bodies included: the
+   * reader used to set those in a serif, and the owner found the serif subject out of
+   * place beside the Plex interface (2026-10). `--font-serif` is reset, so `font-serif`
+   * cannot creep back in. Mono is for message bodies and addresses, where digits should
+   * line up.
+   */
+  --font-serif: initial;
+  --font-sans:
+    "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+
+  /*
+   * A few animations, all short.
+   *
+   * Anything longer starts to read as the app being slow rather than the content being
+   * new, and in a keyboard-driven client a transition that outlasts your next keypress is
+   * actively hostile.
+   *
+   *   appear  the reader appearing. 160ms: long enough to read as motion, short enough
+   *           that holding `j` does not queue up a backlog of cross-fades.
+   *   vanish  the status pill leaving: a quick fade, kept short so the next notice never
+   *           waits.
+   *   sheet   the sheet rising. Slightly slower, because a sheet is a bigger object and a
+   *           bigger object needs a little more time to arrive.
+   *   rise    a phone's action sheet rising from the bottom edge.
+   *   drawer  the navigation drawer coming out of the left edge. Translation only, and no
+   *           scale: it is a *place* arriving rather than a card appearing, and a scale
+   *           would make a full-height surface visibly shrink as it opened, which reads
+   *           as a bug rather than as motion. 180ms with a decelerating curve, so it
+   *           leaves quickly and settles softly — the opposite of the ease-out used for
+   *           content, because nothing here is being *replaced*.
+   *   menu    a menu opening: a quick fade and a 3% grow from its anchor's side. 140ms,
+   *           so a right-click and a keypress into the menu never wait on it.
+   */
+  --animate-appear: appear 0.16s ease-out;
+  --animate-vanish: vanish 0.14s ease-in forwards;
+  --animate-sheet: sheet 0.16s cubic-bezier(0.2, 0, 0, 1);
+  --animate-rise: rise 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-drawer: drawer 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-menu: menu 0.14s cubic-bezier(0.2, 0, 0, 1);
+
+  @keyframes vanish {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes appear {
+    0% {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes sheet {
+    0% {
+      opacity: 0;
+      transform: translateY(6px) scale(0.99);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes rise {
+    0% {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes drawer {
+    0% {
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes menu {
+    0% {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
 }
 
 /*
- * Shape tokens (`borderRadius` in `tailwind.config.js` reads these; `shape.ts` holds the
- * same numbers for the tests). Controls are pills or circles; containers share one
- * large radius; something nested in a padded container takes the radius less the
- * padding (`--wn-radius-pad`, the containers' usual 4px), so the curves stay concentric.
- * `:where(:root)` keeps this apart from the boot `:root` block that `theme.test.ts` reads.
+ * What Tailwind 3's Preflight did that Tailwind 4's no longer does, kept so the app looks
+ * and behaves as it did: the default border colour (gray-200 then, `currentcolor` now; an
+ * element with a bare `border` and no colour class relied on it), a pointer over buttons,
+ * search fields drawn as plain text fields, and table cells' own padding. Tailwind 4 zeroes
+ * every element's padding; Tailwind 3 left cells alone, and a message's HTML depends on
+ * that: `revert-layer` brings back the browser's 1px and, above all, a sender's
+ * `cellpadding`, which the rich render (`[data-wn-email]`) keeps.
  */
-:where(:root) {
-  --wn-radius-control: 9999px;
-  --wn-radius-container: 16px;
-  --wn-radius-pad: 4px;
-  --wn-radius-inset: calc(var(--wn-radius-container) - var(--wn-radius-pad));
-  /* Half a 44px touch field: a pill on one line that does not balloon on two. */
-  --wn-radius-field: 22px;
-}
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: #e5e7eb;
+  }
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
 
-html,
-body,
-#root {
-  height: 100%;
-  overflow: hidden;
-}
+  :disabled {
+    cursor: default;
+  }
 
-/*
- * The backdrop before `applyTheme` has run.
- *
- * `public/theme-boot.js` puts the stored mode on `<html>` as `data-theme` before first
- * paint; these rules give each mode its canvas and ink until the palette's own `--wn-*`
- * properties land a moment later. With no `data-theme` at all (script blocked), the OS
- * preference decides. `theme.test.ts` holds these values to the palettes in `theme.ts`.
- */
-:root {
-  --wn-boot-canvas: #f1f1f3;
-  --wn-boot-ink: #18181c;
-  color-scheme: light;
-}
+  td,
+  th {
+    padding: revert-layer;
+  }
 
-:root[data-theme="dark"] {
-  --wn-boot-canvas: #191919;
-  --wn-boot-ink: #e3e3e3;
-  color-scheme: dark;
-}
-
-:root[data-theme="oled"] {
-  --wn-boot-canvas: #000000;
-  --wn-boot-ink: #e3e3e3;
-  color-scheme: dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --wn-boot-canvas: #191919;
-    --wn-boot-ink: #e3e3e3;
-    color-scheme: dark;
+  [type="search"] {
+    -webkit-appearance: textfield;
+    appearance: textfield;
+    outline-offset: -2px;
   }
 }
 
-html {
-  background: var(--wn-canvas, var(--wn-boot-canvas));
-}
+@utility thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--wn-scrollbar, rgba(0, 0, 0, 0.2)) transparent;
 
-body {
-  margin: 0;
-  background: var(--wn-canvas, var(--wn-boot-canvas));
-  color: var(--wn-ink, var(--wn-boot-ink));
-  font-family: theme("fontFamily.sans");
-  font-size: 14px;
-  font-optical-sizing: auto;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  user-select: none;
-}
-
-/*
-  Readable text opts back in.
-
-  The body is chrome: a drag across the list, a double-click on a button or a long-press
-  on a row must not paint a selection. Text a user reads — a message, its header, an
-  error, a setting's value — is `.selectable`, and keeps the platform's long-press
-  callout (Copy, Look Up) that the list rows turn off.
-*/
-.selectable {
-  user-select: text;
-  -webkit-touch-callout: default;
-}
-
-/*
-  Controls stay chrome inside a selectable region: a double-click on a toolbar button or
-  a pill selects nothing, and a drag from the subject into the toolbar stops at its edge
-  instead of copying "Archive Trash Star". A sender's own markup is the exception; what
-  looks like a button in a message is the message.
-*/
-.selectable
-  :is(
-    button,
-    select,
-    summary,
-    label,
-    svg,
-    [role="button"],
-    [role="menuitem"],
-    [role="tab"],
-    [role="radio"],
-    [role="switch"],
-    [role="checkbox"],
-    [role="option"],
-    [data-chrome]
-  ):not([data-wn-email] *) {
-  user-select: none;
-}
-
-/* A text field is always editable and selectable, wherever it sits. */
-input,
-textarea,
-[contenteditable]:not([contenteditable="false"]) {
-  user-select: text;
-}
-
-/*
-  The reader's width on the wide layout: the split's fraction (`--wn-reader-split`, set by
-  `ReaderSplitHandle`), held between the reader's and the list's pixel minimums at the
-  width of the moment. 360px and 280px are `MIN_READER_PX` and `MIN_LIST_PX` in
-  `ui/readerSplit.ts`; 38% is `DEFAULT_READER_FRACTION`.
-*/
-@media (min-width: 1024px) {
-  [data-reader-pane] {
-    width: clamp(360px, var(--wn-reader-split, 38%), calc(100% - 280px));
-  }
-}
-
-/*
-  While the divider is dragged nothing selects, and the cursor stays a resize cursor even
-  where the pointer runs ahead of the handle. Frames (a message body) would otherwise take
-  the pointer; capture already keeps it, this keeps their cursor out of it too.
-*/
-html[data-resizing],
-html[data-resizing] * {
-  user-select: none !important;
-  cursor: col-resize !important;
-}
-html[data-resizing] iframe {
-  pointer-events: none;
-}
-
-@media (forced-colors: active) {
-  .wn-split > span {
-    background: CanvasText;
-  }
-}
-
-@layer components {
-  .thin-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: var(--wn-scrollbar, rgba(0, 0, 0, 0.2)) transparent;
-  }
-
-  .thin-scroll::-webkit-scrollbar {
+  &::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
 
-  .thin-scroll::-webkit-scrollbar-track {
+  &::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  .thin-scroll::-webkit-scrollbar-thumb {
+  &::-webkit-scrollbar-thumb {
     background: var(--wn-scrollbar, rgba(0, 0, 0, 0.2));
     border-radius: 999px;
   }
+}
 
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 
-  .no-scrollbar::-webkit-scrollbar {
+  &::-webkit-scrollbar {
     display: none;
   }
+}
 
-  .scroll-shadow {
-    background-image:
-      linear-gradient(var(--wn-chrome) 30%, rgb(0 0 0 / 0)),
-      linear-gradient(rgb(0 0 0 / 0), var(--wn-chrome) 70%),
-      linear-gradient(var(--wn-divider), var(--wn-divider)),
-      linear-gradient(var(--wn-divider), var(--wn-divider));
-    background-position:
-      top,
-      bottom,
-      top,
-      bottom;
-    background-repeat: no-repeat;
-    background-size:
-      100% 22px,
-      100% 22px,
-      100% 1px,
-      100% 1px;
-    background-attachment: local, local, scroll, scroll;
+@utility scroll-shadow {
+  background-image:
+    linear-gradient(var(--wn-chrome) 30%, rgb(0 0 0 / 0)),
+    linear-gradient(rgb(0 0 0 / 0), var(--wn-chrome) 70%),
+    linear-gradient(var(--wn-divider), var(--wn-divider)),
+    linear-gradient(var(--wn-divider), var(--wn-divider));
+  background-position: top, bottom, top, bottom;
+  background-repeat: no-repeat;
+  background-size:
+    100% 22px,
+    100% 22px,
+    100% 1px,
+    100% 1px;
+  background-attachment: local, local, scroll, scroll;
+}
+
+@layer base {
+  /*
+   * Typefaces, self-hosted: nothing is fetched from a font CDN, in the browser or in the
+   * desktop app (whose CSP only allows `font-src 'self'`). Licences and provenance are in
+   * `src/assets/fonts/README.md`. `unicode-range` keeps the Latin Extended files unloaded
+   * until a message actually contains one of those characters.
+   */
+  @font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 700;
+    src: url('./assets/fonts/ibm-plex-sans-latin-ext-wght-normal.woff2')
+      format('woff2-variations');
+    unicode-range:
+      U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+      U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+      U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+
+  @font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 700;
+    src: url('./assets/fonts/ibm-plex-sans-latin-wght-normal.woff2')
+      format('woff2-variations');
+    unicode-range:
+      U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+      U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+      U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  /*
+   * Shape tokens (the `--radius-*` entries in `@theme` above read these; `shape.ts` holds
+   * the same numbers for the tests). Controls are pills or circles; containers share one
+   * large radius; something nested in a padded container takes the radius less the
+   * padding (`--wn-radius-pad`, the containers' usual 4px), so the curves stay concentric.
+   * `:where(:root)` keeps this apart from the boot `:root` block that `theme.test.ts` reads.
+   */
+  :where(:root) {
+    --wn-radius-control: 9999px;
+    --wn-radius-container: 16px;
+    --wn-radius-pad: 4px;
+    --wn-radius-inset: calc(var(--wn-radius-container) - var(--wn-radius-pad));
+    /* Half a 44px touch field: a pill on one line that does not balloon on two. */
+    --wn-radius-field: 22px;
   }
 }
 
 /*
- * The desktop sidebar's glass (`MailNav.tsx`).
- *
- * A progressive blur from the sidebar's root, its left edge, outward: three stacked
- * `backdrop-filter` layers at 2, 6 and 14px, each masked by a left-to-right gradient so
- * the strong blur lives at the left and only the faint one reaches the right. Over them,
- * the surface at about three-quarters opacity. Where `color-mix` is missing the tint is
- * the opaque surface, which only loses the translucency.
+ * Everything below is the app's own CSS, kept in Tailwind's `utilities` layer after the
+ * generated utilities. Tailwind 4 puts its output in native cascade layers, and unlayered
+ * CSS beats every layer whatever its specificity; under Tailwind 3 these rules sat after
+ * the utilities with no layers at all, so a more specific utility (`focus-visible:…`,
+ * `hover:…`) still won over them and a zero-specificity rule (`:where(:focus-visible)`)
+ * lost to any class. Being last in the same layer keeps exactly that. `@property` cannot
+ * be layered, which is why the layer closes around the few registrations.
  */
-.wn-sidebar-blur {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
+@layer utilities {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
 
-.wn-sidebar-blur-1 {
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
-}
+  /*
+   * The backdrop before `applyTheme` has run.
+   *
+   * `public/theme-boot.js` puts the stored mode on `<html>` as `data-theme` before first
+   * paint; these rules give each mode its canvas and ink until the palette's own `--wn-*`
+   * properties land a moment later. With no `data-theme` at all (script blocked), the OS
+   * preference decides. `theme.test.ts` holds these values to the palettes in `theme.ts`.
+   */
+  :root {
+    --wn-boot-canvas: #f1f1f3;
+    --wn-boot-ink: #18181c;
+    color-scheme: light;
+  }
 
-.wn-sidebar-blur-2 {
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 30%, transparent 80%);
-  mask-image: linear-gradient(to right, #000 0%, #000 30%, transparent 80%);
-}
+  :root[data-theme="dark"] {
+    --wn-boot-canvas: #191919;
+    --wn-boot-ink: #e3e3e3;
+    color-scheme: dark;
+  }
 
-.wn-sidebar-blur-3 {
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  -webkit-mask-image: linear-gradient(to right, #000 0%, transparent 45%);
-  mask-image: linear-gradient(to right, #000 0%, transparent 45%);
-}
+  :root[data-theme="oled"] {
+    --wn-boot-canvas: #000000;
+    --wn-boot-ink: #e3e3e3;
+    color-scheme: dark;
+  }
 
-.wn-sidebar-tint {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: var(--wn-surface);
-}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --wn-boot-canvas: #191919;
+      --wn-boot-ink: #e3e3e3;
+      color-scheme: dark;
+    }
+  }
 
-@supports (background: color-mix(in srgb, red 50%, transparent)) {
+  html {
+    background: var(--wn-canvas, var(--wn-boot-canvas));
+  }
+
+  body {
+    margin: 0;
+    background: var(--wn-canvas, var(--wn-boot-canvas));
+    color: var(--wn-ink, var(--wn-boot-ink));
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    user-select: none;
+  }
+
+  /*
+    Readable text opts back in.
+
+    The body is chrome: a drag across the list, a double-click on a button or a long-press
+    on a row must not paint a selection. Text a user reads — a message, its header, an
+    error, a setting's value — is `.selectable`, and keeps the platform's long-press
+    callout (Copy, Look Up) that the list rows turn off.
+  */
+  .selectable {
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  /*
+    Controls stay chrome inside a selectable region: a double-click on a toolbar button or
+    a pill selects nothing, and a drag from the subject into the toolbar stops at its edge
+    instead of copying "Archive Trash Star". A sender's own markup is the exception; what
+    looks like a button in a message is the message.
+  */
+  .selectable
+    :is(
+      button,
+      select,
+      summary,
+      label,
+      svg,
+      [role="button"],
+      [role="menuitem"],
+      [role="tab"],
+      [role="radio"],
+      [role="switch"],
+      [role="checkbox"],
+      [role="option"],
+      [data-chrome]
+    ):not([data-wn-email] *) {
+    user-select: none;
+  }
+
+  /* A text field is always editable and selectable, wherever it sits. */
+  input,
+  textarea,
+  [contenteditable]:not([contenteditable="false"]) {
+    user-select: text;
+  }
+
+  /*
+    The reader's width on the wide layout: the split's fraction (`--wn-reader-split`, set by
+    `ReaderSplitHandle`), held between the reader's and the list's pixel minimums at the
+    width of the moment. 360px and 280px are `MIN_READER_PX` and `MIN_LIST_PX` in
+    `ui/readerSplit.ts`; 38% is `DEFAULT_READER_FRACTION`.
+  */
+  @media (min-width: 1024px) {
+    [data-reader-pane] {
+      width: clamp(360px, var(--wn-reader-split, 38%), calc(100% - 280px));
+    }
+  }
+
+  /*
+    While the divider is dragged nothing selects, and the cursor stays a resize cursor even
+    where the pointer runs ahead of the handle. Frames (a message body) would otherwise take
+    the pointer; capture already keeps it, this keeps their cursor out of it too.
+  */
+  html[data-resizing],
+  html[data-resizing] * {
+    user-select: none !important;
+    cursor: col-resize !important;
+  }
+  html[data-resizing] iframe {
+    pointer-events: none;
+  }
+
+  @media (forced-colors: active) {
+    .wn-split > span {
+      background: CanvasText;
+    }
+  }
+
+
+  /*
+   * The desktop sidebar's glass (`MailNav.tsx`).
+   *
+   * A progressive blur from the sidebar's root, its left edge, outward: three stacked
+   * `backdrop-filter` layers at 2, 6 and 14px, each masked by a left-to-right gradient so
+   * the strong blur lives at the left and only the faint one reaches the right. Over them,
+   * the surface at about three-quarters opacity. Where `color-mix` is missing the tint is
+   * the opaque surface, which only loses the translucency.
+   */
+  .wn-sidebar-blur {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .wn-sidebar-blur-1 {
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
+  .wn-sidebar-blur-2 {
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    -webkit-mask-image: linear-gradient(to right, #000 0%, #000 30%, transparent 80%);
+    mask-image: linear-gradient(to right, #000 0%, #000 30%, transparent 80%);
+  }
+
+  .wn-sidebar-blur-3 {
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    -webkit-mask-image: linear-gradient(to right, #000 0%, transparent 45%);
+    mask-image: linear-gradient(to right, #000 0%, transparent 45%);
+  }
+
   .wn-sidebar-tint {
-    background: linear-gradient(
-      to right,
-      color-mix(in srgb, var(--wn-surface) 80%, transparent),
-      color-mix(in srgb, var(--wn-surface) 72%, transparent)
-    );
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: var(--wn-surface);
   }
-}
 
-/*
- * The focus ring: the accent, drawn as an outline.
- *
- * An outline rather than Tailwind's `ring` because `ring-2` composes `box-shadow` out of
- * custom properties and silently resolves to `none` on some elements — and because the
- * design is flat, a ring that is secretly a shadow is the wrong primitive anyway. The
- * zero-specificity `:where(:focus-visible)` rule covers anything that forgot its
- * classes without beating an element that opted out (`outline-none` on the search
- * input, whose ring is drawn on its label).
- */
-:where(:focus-visible) {
-  outline: 2px solid var(--wn-focusRing);
-  outline-offset: 2px;
-}
+  @supports (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-sidebar-tint {
+      background: linear-gradient(
+        to right,
+        color-mix(in srgb, var(--wn-surface) 80%, transparent),
+        color-mix(in srgb, var(--wn-surface) 72%, transparent)
+      );
+    }
+  }
 
-.focus-visible\:outline-none.focus-visible\:ring-2:focus-visible {
-  outline: 2px solid var(--wn-focusRing);
-  outline-offset: 2px;
-  box-shadow: none;
-}
+  /*
+   * The focus ring: the accent, drawn as an outline.
+   *
+   * An outline rather than Tailwind's `ring` because `ring-2` composes `box-shadow` out of
+   * custom properties and silently resolves to `none` on some elements — and because the
+   * design is flat, a ring that is secretly a shadow is the wrong primitive anyway. The
+   * zero-specificity `:where(:focus-visible)` rule covers anything that forgot its
+   * classes without beating an element that opted out (`outline-hidden` on the search
+   * input, whose ring is drawn on its label).
+   */
+  :where(:focus-visible) {
+    outline: 2px solid var(--wn-focusRing);
+    outline-offset: 2px;
+  }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  .focus-visible\:outline-hidden.focus-visible\:ring-2:focus-visible {
+    outline: 2px solid var(--wn-focusRing);
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -345,536 +611,538 @@ html[data-resizing] iframe {
   inherits: false;
   initial-value: 0;
 }
-.wn-pill {
-  --pill-tone: var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-l);
-  --pill-a: var(--wn-pill-rest);
-  --pill-ring-a: 0;
-  --pill-glow-a: 0;
-  background-color: hsl(var(--pill-tone) / var(--pill-a));
-  box-shadow:
-    inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a)),
-    0 0 16px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
-  color: var(--wn-pill-ink);
-  transition:
-    --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
-    --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
-    --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
-    background-color var(--wn-chip-motion) var(--wn-chip-ease),
-    color var(--wn-chip-motion) var(--wn-chip-ease);
-}
-/*
- * On: the recipe's stronger tint and ring, and a glow at a little over half the ring's
- * strength — light around the chip, never a second outline.
- */
-.wn-pill[data-on] {
-  --pill-a: var(--wn-pill-on);
-  --pill-ring-a: var(--wn-pill-ring);
-  --pill-glow-a: calc(var(--wn-pill-ring) * 0.55);
-  color: var(--wn-pill-inkOn);
-}
-.wn-pill:hover {
-  background-image: linear-gradient(var(--wn-sheen), var(--wn-sheen));
-}
-.wn-pill-count {
-  color: var(--wn-pill-count);
-}
-
-/*
- * A pill's hue as text: the list row's "Urgent" word, in the colour of the Urgent chip
- * on the rail. Same `--pill-h` / `--pill-s` the pill takes, at the mode's text
- * lightness (`textLightness` in `theme.ts`, checked for AA by `pillInk`'s tests).
- */
-.wn-signal-ink {
-  color: hsl(var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-textL));
-}
-
-/*
- * The sidebar as an overlay (`Sidebar` in `MailNav.tsx`).
- *
- * The panel slides in from the left edge and the scrim fades in behind it. Both stay
- * mounted, so closing animates too: `visibility` flips to hidden only once the slide
- * has finished, which keeps the off-screen panel and the full-screen blur out of the
- * paint (and the tab order) while closed.
- *
- * The opacity sits on each scrim layer rather than on the scrim: an ancestor with
- * `opacity` below 1 is a backdrop root, and a `backdrop-filter` under one blurs
- * nothing.
- */
-.wn-sidebar-panel {
-  transform: translateX(calc(-100% - 1rem));
-  visibility: hidden;
-  transition:
-    transform 160ms cubic-bezier(0.4, 0, 1, 1),
-    visibility 0s linear 160ms;
-}
-
-.wn-sidebar-panel[data-open] {
-  transform: none;
-  visibility: visible;
-  transition:
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    visibility 0s;
-}
-
-.wn-scrim {
-  visibility: hidden;
-  pointer-events: none;
-  touch-action: none;
-  transition: visibility 0s linear 180ms;
-}
-
-.wn-scrim[data-open] {
-  visibility: visible;
-  pointer-events: auto;
-  transition: visibility 0s;
-}
-
-.wn-scrim-layer,
-.wn-scrim-tint {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 180ms ease-in;
-}
-
-.wn-scrim[data-open] .wn-scrim-layer,
-.wn-scrim[data-open] .wn-scrim-tint {
-  opacity: 1;
-  transition: opacity 240ms ease-out;
-}
-
-/*
- * The tint: the mode's scrim colour, heavier at the sidebar and lighter further away,
- * spreading from the same point as the blur (`SCRIM_ORIGIN` in `sidebarOverlay.ts`).
- */
-.wn-scrim-tint {
-  background: var(--wn-scrim);
-}
-
-@supports (background: color-mix(in srgb, red 50%, transparent)) {
-  .wn-scrim-tint {
-    background: radial-gradient(
-      circle farthest-corner at var(--wn-sidebar-edge) var(--wn-sidebar-mid, 50%),
-      color-mix(in srgb, var(--wn-scrim) 70%, transparent),
-      color-mix(in srgb, var(--wn-scrim) 25%, transparent)
-    );
+@layer utilities {
+  .wn-pill {
+    --pill-tone: var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-l);
+    --pill-a: var(--wn-pill-rest);
+    --pill-ring-a: 0;
+    --pill-glow-a: 0;
+    background-color: hsl(var(--pill-tone) / var(--pill-a));
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a)),
+      0 0 16px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
+    color: var(--wn-pill-ink);
+    transition:
+      --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
+      --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
+      --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
+      background-color var(--wn-chip-motion) var(--wn-chip-ease),
+      color var(--wn-chip-motion) var(--wn-chip-ease);
   }
-}
-
-/* No backdrop-filter: no glass, just the plain tint at full strength. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .wn-scrim-layer {
-    display: none;
+  /*
+   * On: the recipe's stronger tint and ring, and a glow at a little over half the ring's
+   * strength — light around the chip, never a second outline.
+   */
+  .wn-pill[data-on] {
+    --pill-a: var(--wn-pill-on);
+    --pill-ring-a: var(--wn-pill-ring);
+    --pill-glow-a: calc(var(--wn-pill-ring) * 0.55);
+    color: var(--wn-pill-inkOn);
+  }
+  .wn-pill:hover {
+    background-image: linear-gradient(var(--wn-sheen), var(--wn-sheen));
+  }
+  .wn-pill-count {
+    color: var(--wn-pill-count);
   }
 
-  .wn-scrim-tint {
-    background: var(--wn-scrim);
+  /*
+   * A pill's hue as text: the list row's "Urgent" word, in the colour of the Urgent chip
+   * on the rail. Same `--pill-h` / `--pill-s` the pill takes, at the mode's text
+   * lightness (`textLightness` in `theme.ts`, checked for AA by `pillInk`'s tests).
+   */
+  .wn-signal-ink {
+    color: hsl(var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-textL));
   }
-}
 
-/* Reduced motion: no slide and no fade, it is simply there or not. */
-@media (prefers-reduced-motion: reduce) {
-  .wn-sidebar-panel,
-  .wn-sidebar-panel[data-open],
-  .wn-scrim,
-  .wn-scrim[data-open],
+  /*
+   * The sidebar as an overlay (`Sidebar` in `MailNav.tsx`).
+   *
+   * The panel slides in from the left edge and the scrim fades in behind it. Both stay
+   * mounted, so closing animates too: `visibility` flips to hidden only once the slide
+   * has finished, which keeps the off-screen panel and the full-screen blur out of the
+   * paint (and the tab order) while closed.
+   *
+   * The opacity sits on each scrim layer rather than on the scrim: an ancestor with
+   * `opacity` below 1 is a backdrop root, and a `backdrop-filter` under one blurs
+   * nothing.
+   */
+  .wn-sidebar-panel {
+    transform: translateX(calc(-100% - 1rem));
+    visibility: hidden;
+    transition:
+      transform 160ms cubic-bezier(0.4, 0, 1, 1),
+      visibility 0s linear 160ms;
+  }
+
+  .wn-sidebar-panel[data-open] {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      visibility 0s;
+  }
+
+  .wn-scrim {
+    visibility: hidden;
+    pointer-events: none;
+    touch-action: none;
+    transition: visibility 0s linear 180ms;
+  }
+
+  .wn-scrim[data-open] {
+    visibility: visible;
+    pointer-events: auto;
+    transition: visibility 0s;
+  }
+
   .wn-scrim-layer,
-  .wn-scrim-tint,
+  .wn-scrim-tint {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 180ms ease-in;
+  }
+
   .wn-scrim[data-open] .wn-scrim-layer,
   .wn-scrim[data-open] .wn-scrim-tint {
-    transition: none !important;
-  }
-}
-
-/*
- * Reduced transparency: no glass at all. The sidebar is the opaque surface and the
- * scrim is the plain tint, both of which read the same with every blur layer gone.
- * After the `@supports` rules above so it wins over the translucent tints.
- */
-@media (prefers-reduced-transparency: reduce) {
-  .wn-sidebar-blur,
-  .wn-scrim-layer {
-    display: none;
+    opacity: 1;
+    transition: opacity 240ms ease-out;
   }
 
-  .wn-sidebar-tint {
-    background: var(--wn-surface);
-  }
-
+  /*
+   * The tint: the mode's scrim colour, heavier at the sidebar and lighter further away,
+   * spreading from the same point as the blur (`SCRIM_ORIGIN` in `sidebarOverlay.ts`).
+   */
   .wn-scrim-tint {
     background: var(--wn-scrim);
   }
-}
 
-/*
- * Forced colours (Windows High Contrast): the system's palette replaces ours, so the
- * glass is noise. The sidebar is the system canvas with a visible border, the scrim
- * draws nothing (the dialog is still modal, and the app behind it is still inert), and
- * the blur layers are dropped, since a backdrop-filter ignores the forced palette and
- * would leave the text behind it smeared rather than hidden.
- */
-@media (forced-colors: active) {
-  .wn-sidebar-blur,
-  .wn-scrim-layer,
-  .wn-scrim-tint {
-    display: none;
+  @supports (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-scrim-tint {
+      background: radial-gradient(
+        circle farthest-corner at var(--wn-sidebar-edge) var(--wn-sidebar-mid, 50%),
+        color-mix(in srgb, var(--wn-scrim) 70%, transparent),
+        color-mix(in srgb, var(--wn-scrim) 25%, transparent)
+      );
+    }
   }
 
-  .wn-sidebar-panel {
-    background: Canvas;
-    border: 1px solid CanvasText;
+  /* No backdrop-filter: no glass, just the plain tint at full strength. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .wn-scrim-layer {
+      display: none;
+    }
+
+    .wn-scrim-tint {
+      background: var(--wn-scrim);
+    }
   }
-}
 
-/* The rail's edge fades are gradients, which forced colours drop, so the step button sat
-   over the label it was meant to fade out. An opaque button at least covers its part. */
-@media (forced-colors: active) {
-  [data-rail-edge] button {
-    background: Canvas;
+  /* Reduced motion: no slide and no fade, it is simply there or not. */
+  @media (prefers-reduced-motion: reduce) {
+    .wn-sidebar-panel,
+    .wn-sidebar-panel[data-open],
+    .wn-scrim,
+    .wn-scrim[data-open],
+    .wn-scrim-layer,
+    .wn-scrim-tint,
+    .wn-scrim[data-open] .wn-scrim-layer,
+    .wn-scrim[data-open] .wn-scrim-tint {
+      transition: none !important;
+    }
   }
-}
 
-/*
- * The phone's floating dock (`PhoneDock` in `PhoneChrome.tsx`) and the menu panel it
- * grows into (`Sidebar` in `MailNav.tsx`, on a phone).
- *
- * Geometry, in one place so the dock, the panel and the chip rail agree without
- * measuring each other: the pill is inset from the left edge and stops a gap short of
- * the compose button, a circle as tall as the pill at the right inset. Everything sits
- * clear of the safe area at the bottom (the Android gesture bar, the iOS home bar).
- */
-:root {
-  --wn-dock-inset: 12px;
-  --wn-dock-h: 60px;
-  --wn-dock-gap: 10px;
-  --wn-dock-left: calc(var(--wn-dock-inset) + env(safe-area-inset-left, 0px));
-  --wn-dock-right: calc(var(--wn-dock-inset) + env(safe-area-inset-right, 0px));
-  --wn-dock-bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 8px));
-  --wn-dock-pill-w: calc(100vw - var(--wn-dock-left) - var(--wn-dock-right) - var(--wn-dock-h) - var(--wn-dock-gap));
-}
-
-/*
- * The glass (1.4: one universal recipe; `glass.ts` has the numbers and why).
- *
- * The tint is the mode's glass base at `--wn-glass-text` opacity on the dock and the
- * panel, both of which carry icons or words across their whole face; a chip is frost at
- * `--wn-glass-rim` with a plate at the text opacity behind its label. The frost is light
- * (`--wn-glass-filter`, the owner's ask) and sits straight on the element. A hairline
- * edge and an inner highlight on top (`--wn-glass-edge`), and a soft shadow in the mode's
- * scrim colour, so it reads as raised in every mode.
- *
- * Nothing above a glass may be a backdrop root (opacity < 1, filter, mask, clip-path,
- * backdrop-filter, or will-change of those), or its frost sees only that ancestor: the
- * chip's hover is a sheen, not `filter: brightness`, for that reason.
- */
-:root {
-  /* The light frost, on the glass itself. `GLASS_BLUR` in `glass.ts`. */
-  --wn-glass-filter: blur(6px) saturate(1.8);
-  /* Pills settle rather than snap: background, opacity and the press scale. */
-  --wn-glass-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --wn-glass-motion: 200ms;
   /*
-   * A smart-filter chip switching on or off (`.wn-pill`): a touch under the glass's
-   * 200ms, on the standard decelerating curve, so a digit pressed twice in a row never
-   * meets a chip still settling from the first.
+   * Reduced transparency: no glass at all. The sidebar is the opaque surface and the
+   * scrim is the plain tint, both of which read the same with every blur layer gone.
+   * After the `@supports` rules above so it wins over the translucent tints.
    */
-  --wn-chip-motion: 190ms;
-  --wn-chip-ease: cubic-bezier(0.2, 0, 0, 1);
-  /* A soft, diffuse lift: a near contact shadow and a wide, faint spread. */
-  --wn-glass-lift:
-    0 1px 1px rgb(0 0 0 / 0.18),
-    0 10px 30px -10px var(--wn-scrim);
-  --wn-glass-sheen: rgb(255 255 255 / 0.08);
-}
-:root[data-theme="light"] {
-  --wn-glass-lift:
-    0 1px 1px rgb(16 12 52 / 0.06),
-    0 10px 30px -10px rgb(16 12 52 / 0.2);
-  --wn-glass-sheen: rgb(255 255 255 / 0.75);
-}
-/*
- * The edge light, declared on the glass itself (not `:root`) so a chip's own
- * `--wn-glass-sheen` (dark and OLED, below) is the one it reads; `:where` keeps it at
- * zero specificity, so `.wn-liquid`'s rim (later, also `:where`) replaces it.
- */
-:where(.wn-glass, .wn-chip-glass) {
-  --wn-glass-edge: inset 0 1px 0 var(--wn-glass-sheen);
-}
-.wn-glass {
-  background: var(--wn-glass-base, var(--wn-surface));
-  border: 1px solid var(--wn-hairline);
-  box-shadow:
-    var(--wn-glass-edge),
-    var(--wn-glass-lift);
-}
-.wn-glass:not(.wn-sidebar-panel),
-.wn-pill.wn-chip-glass {
-  position: relative;
-}
+  @media (prefers-reduced-transparency: reduce) {
+    .wn-sidebar-blur,
+    .wn-scrim-layer {
+      display: none;
+    }
 
-/*
- * Motion on every floating pill: background, opacity and transform ease out over
- * ~200ms, and a pill that is itself a button gives a little under the finger (0.97).
- * The bars and the dock's pill hold controls rather than being one, so it is their
- * buttons that give, not the whole bar. Reduced motion: the global rule makes these
- * instant and the press scale is dropped below.
- */
-.wn-glass {
-  transition:
-    background-color var(--wn-glass-motion) var(--wn-glass-ease),
-    border-color var(--wn-glass-motion) var(--wn-glass-ease),
-    box-shadow var(--wn-glass-motion) var(--wn-glass-ease),
-    opacity var(--wn-glass-motion) var(--wn-glass-ease),
-    transform var(--wn-glass-motion) var(--wn-glass-ease);
-}
-/*
- * A chip's own list: its tint, ring and glow strengths and its label (see `.wn-pill`),
- * plus the plate behind the label, the border and the hover and press sheens, all on the
- * chip's curve. No transform: a chip never scales (below).
- */
-.wn-pill.wn-chip-glass {
-  transition:
-    --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
-    --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
-    --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
-    --wn-chip-plate var(--wn-chip-motion) var(--wn-chip-ease),
-    background-color var(--wn-chip-motion) var(--wn-chip-ease),
-    border-color var(--wn-chip-motion) var(--wn-chip-ease),
-    box-shadow var(--wn-chip-motion) var(--wn-chip-ease),
-    color var(--wn-chip-motion) var(--wn-chip-ease),
-    opacity var(--wn-chip-motion) var(--wn-chip-ease);
-}
-.wn-glass-bar button,
-[data-phone-pill] button {
-  transition:
-    background-color var(--wn-glass-motion) var(--wn-glass-ease),
-    color var(--wn-glass-motion) var(--wn-glass-ease),
-    opacity var(--wn-glass-motion) var(--wn-glass-ease),
-    transform var(--wn-glass-motion) var(--wn-glass-ease);
-}
-/*
- * Not the smart-filter chips (nor "All" beside them): a chip answers a press with a
- * sheen instead (below, `[data-rail-item]:active`), so its shape never changes from
- * press to release (1.3.3).
- */
-button.wn-glass:not([data-rail-item]):active,
-.wn-glass-bar button:active,
-[data-phone-pill] button:active {
-  transform: scale(0.97);
-}
-@media (prefers-reduced-motion: reduce) {
+    .wn-sidebar-tint {
+      background: var(--wn-surface);
+    }
+
+    .wn-scrim-tint {
+      background: var(--wn-scrim);
+    }
+  }
+
+  /*
+   * Forced colours (Windows High Contrast): the system's palette replaces ours, so the
+   * glass is noise. The sidebar is the system canvas with a visible border, the scrim
+   * draws nothing (the dialog is still modal, and the app behind it is still inert), and
+   * the blur layers are dropped, since a backdrop-filter ignores the forced palette and
+   * would leave the text behind it smeared rather than hidden.
+   */
+  @media (forced-colors: active) {
+    .wn-sidebar-blur,
+    .wn-scrim-layer,
+    .wn-scrim-tint {
+      display: none;
+    }
+
+    .wn-sidebar-panel {
+      background: Canvas;
+      border: 1px solid CanvasText;
+    }
+  }
+
+  /* The rail's edge fades are gradients, which forced colours drop, so the step button sat
+     over the label it was meant to fade out. An opaque button at least covers its part. */
+  @media (forced-colors: active) {
+    [data-rail-edge] button {
+      background: Canvas;
+    }
+  }
+
+  /*
+   * The phone's floating dock (`PhoneDock` in `PhoneChrome.tsx`) and the menu panel it
+   * grows into (`Sidebar` in `MailNav.tsx`, on a phone).
+   *
+   * Geometry, in one place so the dock, the panel and the chip rail agree without
+   * measuring each other: the pill is inset from the left edge and stops a gap short of
+   * the compose button, a circle as tall as the pill at the right inset. Everything sits
+   * clear of the safe area at the bottom (the Android gesture bar, the iOS home bar).
+   */
+  :root {
+    --wn-dock-inset: 12px;
+    --wn-dock-h: 60px;
+    --wn-dock-gap: 10px;
+    --wn-dock-left: calc(var(--wn-dock-inset) + env(safe-area-inset-left, 0px));
+    --wn-dock-right: calc(var(--wn-dock-inset) + env(safe-area-inset-right, 0px));
+    --wn-dock-bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+    --wn-dock-pill-w: calc(100vw - var(--wn-dock-left) - var(--wn-dock-right) - var(--wn-dock-h) - var(--wn-dock-gap));
+  }
+
+  /*
+   * The glass (1.4: one universal recipe; `glass.ts` has the numbers and why).
+   *
+   * The tint is the mode's glass base at `--wn-glass-text` opacity on the dock and the
+   * panel, both of which carry icons or words across their whole face; a chip is frost at
+   * `--wn-glass-rim` with a plate at the text opacity behind its label. The frost is light
+   * (`--wn-glass-filter`, the owner's ask) and sits straight on the element. A hairline
+   * edge and an inner highlight on top (`--wn-glass-edge`), and a soft shadow in the mode's
+   * scrim colour, so it reads as raised in every mode.
+   *
+   * Nothing above a glass may be a backdrop root (opacity < 1, filter, mask, clip-path,
+   * backdrop-filter, or will-change of those), or its frost sees only that ancestor: the
+   * chip's hover is a sheen, not `filter: brightness`, for that reason.
+   */
+  :root {
+    /* The light frost, on the glass itself. `GLASS_BLUR` in `glass.ts`. */
+    --wn-glass-filter: blur(6px) saturate(1.8);
+    /* Pills settle rather than snap: background, opacity and the press scale. */
+    --wn-glass-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --wn-glass-motion: 200ms;
+    /*
+     * A smart-filter chip switching on or off (`.wn-pill`): a touch under the glass's
+     * 200ms, on the standard decelerating curve, so a digit pressed twice in a row never
+     * meets a chip still settling from the first.
+     */
+    --wn-chip-motion: 190ms;
+    --wn-chip-ease: cubic-bezier(0.2, 0, 0, 1);
+    /* A soft, diffuse lift: a near contact shadow and a wide, faint spread. */
+    --wn-glass-lift:
+      0 1px 1px rgb(0 0 0 / 0.18),
+      0 10px 30px -10px var(--wn-scrim);
+    --wn-glass-sheen: rgb(255 255 255 / 0.08);
+  }
+  :root[data-theme="light"] {
+    --wn-glass-lift:
+      0 1px 1px rgb(16 12 52 / 0.06),
+      0 10px 30px -10px rgb(16 12 52 / 0.2);
+    --wn-glass-sheen: rgb(255 255 255 / 0.75);
+  }
+  /*
+   * The edge light, declared on the glass itself (not `:root`) so a chip's own
+   * `--wn-glass-sheen` (dark and OLED, below) is the one it reads; `:where` keeps it at
+   * zero specificity, so `.wn-liquid`'s rim (later, also `:where`) replaces it.
+   */
+  :where(.wn-glass, .wn-chip-glass) {
+    --wn-glass-edge: inset 0 1px 0 var(--wn-glass-sheen);
+  }
+  .wn-glass {
+    background: var(--wn-glass-base, var(--wn-surface));
+    border: 1px solid var(--wn-hairline);
+    box-shadow:
+      var(--wn-glass-edge),
+      var(--wn-glass-lift);
+  }
+  .wn-glass:not(.wn-sidebar-panel),
+  .wn-pill.wn-chip-glass {
+    position: relative;
+  }
+
+  /*
+   * Motion on every floating pill: background, opacity and transform ease out over
+   * ~200ms, and a pill that is itself a button gives a little under the finger (0.97).
+   * The bars and the dock's pill hold controls rather than being one, so it is their
+   * buttons that give, not the whole bar. Reduced motion: the global rule makes these
+   * instant and the press scale is dropped below.
+   */
+  .wn-glass {
+    transition:
+      background-color var(--wn-glass-motion) var(--wn-glass-ease),
+      border-color var(--wn-glass-motion) var(--wn-glass-ease),
+      box-shadow var(--wn-glass-motion) var(--wn-glass-ease),
+      opacity var(--wn-glass-motion) var(--wn-glass-ease),
+      transform var(--wn-glass-motion) var(--wn-glass-ease);
+  }
+  /*
+   * A chip's own list: its tint, ring and glow strengths and its label (see `.wn-pill`),
+   * plus the plate behind the label, the border and the hover and press sheens, all on the
+   * chip's curve. No transform: a chip never scales (below).
+   */
+  .wn-pill.wn-chip-glass {
+    transition:
+      --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
+      --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
+      --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
+      --wn-chip-plate var(--wn-chip-motion) var(--wn-chip-ease),
+      background-color var(--wn-chip-motion) var(--wn-chip-ease),
+      border-color var(--wn-chip-motion) var(--wn-chip-ease),
+      box-shadow var(--wn-chip-motion) var(--wn-chip-ease),
+      color var(--wn-chip-motion) var(--wn-chip-ease),
+      opacity var(--wn-chip-motion) var(--wn-chip-ease);
+  }
+  .wn-glass-bar button,
+  [data-phone-pill] button {
+    transition:
+      background-color var(--wn-glass-motion) var(--wn-glass-ease),
+      color var(--wn-glass-motion) var(--wn-glass-ease),
+      opacity var(--wn-glass-motion) var(--wn-glass-ease),
+      transform var(--wn-glass-motion) var(--wn-glass-ease);
+  }
+  /*
+   * Not the smart-filter chips (nor "All" beside them): a chip answers a press with a
+   * sheen instead (below, `[data-rail-item]:active`), so its shape never changes from
+   * press to release (1.3.3).
+   */
   button.wn-glass:not([data-rail-item]):active,
   .wn-glass-bar button:active,
   [data-phone-pill] button:active {
-    transform: none;
+    transform: scale(0.97);
   }
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
-  (background: color-mix(in srgb, red 50%, transparent)) {
-  .wn-glass {
-    background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
+  @media (prefers-reduced-motion: reduce) {
+    button.wn-glass:not([data-rail-item]):active,
+    .wn-glass-bar button:active,
+    [data-phone-pill] button:active {
+      transform: none;
+    }
   }
-  .wn-glass,
-  .wn-pill.wn-chip-glass {
-    -webkit-backdrop-filter: var(--wn-glass-filter);
-    backdrop-filter: var(--wn-glass-filter);
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+    (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-glass {
+      background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
+    }
+    .wn-glass,
+    .wn-pill.wn-chip-glass {
+      -webkit-backdrop-filter: var(--wn-glass-filter);
+      backdrop-filter: var(--wn-glass-filter);
+    }
   }
-}
 
-/*
- * A glass that opens a fixed-position menu from inside itself (the phone reader pill's
- * More, the desktop selection bar's Move to) carries its tint and frost on an inset
- * `::before` instead (`.wn-glass-behind`). A `backdrop-filter` on the element would make
- * it the containing block of every fixed descendant, so the menu would be placed against
- * the pill and clipped by it rather than the screen. Same tint, same frost, same box:
- * the layer is the element's own padding box, under its sheen and its content.
- */
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
-  (background: color-mix(in srgb, red 50%, transparent)) {
-  .wn-glass.wn-glass-behind {
-    isolation: isolate;
-    background: transparent;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+  /*
+   * A glass that opens a fixed-position menu from inside itself (the phone reader pill's
+   * More, the desktop selection bar's Move to) carries its tint and frost on an inset
+   * `::before` instead (`.wn-glass-behind`). A `backdrop-filter` on the element would make
+   * it the containing block of every fixed descendant, so the menu would be placed against
+   * the pill and clipped by it rather than the screen. Same tint, same frost, same box:
+   * the layer is the element's own padding box, under its sheen and its content.
+   */
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+    (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-glass.wn-glass-behind {
+      isolation: isolate;
+      background: transparent;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    .wn-glass.wn-glass-behind::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      border-radius: inherit;
+      pointer-events: none;
+      background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
+      -webkit-backdrop-filter: var(--wn-glass-filter);
+      backdrop-filter: var(--wn-glass-filter);
+    }
   }
-  .wn-glass.wn-glass-behind::before {
+
+  /*
+   * The phone chip rail's haze (1.3.3, a deliberate outlier): what is left in the gaps
+   * between the chips. A light blur of whatever scrolls behind them and nothing else: no
+   * tint, no fill, no hairline, and masked to fade out above and below the chips, so it
+   * has no edge to see. Over an empty plane (inbox clear) it is invisible, and over rows it
+   * softens their text, the same on every screen and state. Behind the chips
+   * (`z-index: -1`, first in paint order), so each chip's own frost lies over it.
+   */
+  .wn-rail-haze {
+    position: relative;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .wn-rail-haze::before {
+      content: "";
+      position: absolute;
+      inset: -12px 0;
+      z-index: -1;
+      pointer-events: none;
+      -webkit-backdrop-filter: blur(5px);
+      backdrop-filter: blur(5px);
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+      mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+    .wn-rail-haze::before {
+      content: none;
+    }
+  }
+
+  /* No blur to read through: the same tint, nearly opaque. */
+  @supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and
+    (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-glass {
+      background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
+    }
+  }
+
+  /*
+   * The desktop's floating bars (the list's top bar, the selection bar): the same glass,
+   * its text tint raised to `--wn-glass-bar`, because these carry muted text ("of 39")
+   * across their face rather than icons. Everything else (blur, rim, fallback, reduced
+   * transparency, forced colours) is `.wn-glass`'s own.
+   */
+  .wn-glass.wn-glass-bar {
+    --wn-glass-text: var(--wn-glass-bar, 80%);
+  }
+
+  /*
+   * Liquid Glass (1.4), on the small floating chrome: the dock pill, the compose circle,
+   * the filter chips, the reader pill, the desktop's floating top bar and the status
+   * pill. Always alongside `.wn-glass` or `.wn-chip-glass` (or, for compose, the accent),
+   * whose tint it keeps: the AA arithmetic in `glass.test.ts` holds as it is. It adds:
+   *
+   * - a lit rim: bright at the top left, soft at the bottom right, with a faint inner glow
+   *   (`--wn-glass-edge`, `LIQUID` in `glass.ts`);
+   * - a sheen across the face (`::after`, under the content);
+   * - in Chromium, an edge-only refraction (`#wn-liquid`, `index.html`): within ~10px of
+   *   each side the backdrop bends inward, the middle and the glass's own text never do.
+   *
+   * Elsewhere it is the lean frost with the rim and sheen. Apple's native material, where
+   * WebKit offers it, replaces all of it (the guarded block below).
+   */
+  :where(.wn-liquid) {
+    --wn-glass-edge:
+      inset 1px 1px 0 color-mix(in srgb, #fff var(--wn-liquid-rim-light, 50%), transparent),
+      inset -1px -1px 0 color-mix(in srgb, #fff var(--wn-liquid-rim-shade, 15%), transparent),
+      inset 0 0 12px color-mix(in srgb, #fff var(--wn-liquid-glow, 5%), transparent);
+  }
+  .wn-liquid {
+    position: relative;
+    isolation: isolate;
+  }
+  .wn-liquid::after {
     content: "";
     position: absolute;
     inset: 0;
     z-index: -1;
     border-radius: inherit;
     pointer-events: none;
-    background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-text, 72%), transparent);
-    -webkit-backdrop-filter: var(--wn-glass-filter);
-    backdrop-filter: var(--wn-glass-filter);
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, #fff var(--wn-liquid-sheen, 6%), transparent),
+      transparent 40%,
+      transparent 70%,
+      color-mix(in srgb, #fff calc(var(--wn-liquid-sheen, 6%) * 0.35), transparent)
+    );
   }
-}
-
-/*
- * The phone chip rail's haze (1.3.3, a deliberate outlier): what is left in the gaps
- * between the chips. A light blur of whatever scrolls behind them and nothing else: no
- * tint, no fill, no hairline, and masked to fade out above and below the chips, so it
- * has no edge to see. Over an empty plane (inbox clear) it is invisible, and over rows it
- * softens their text, the same on every screen and state. Behind the chips
- * (`z-index: -1`, first in paint order), so each chip's own frost lies over it.
- */
-.wn-rail-haze {
-  position: relative;
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .wn-rail-haze::before {
-    content: "";
-    position: absolute;
-    inset: -12px 0;
-    z-index: -1;
-    pointer-events: none;
-    -webkit-backdrop-filter: blur(5px);
-    backdrop-filter: blur(5px);
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
-    mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
-  }
-}
-@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
-  .wn-rail-haze::before {
-    content: none;
-  }
-}
-
-/* No blur to read through: the same tint, nearly opaque. */
-@supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and
-  (background: color-mix(in srgb, red 50%, transparent)) {
-  .wn-glass {
-    background: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
-  }
-}
-
-/*
- * The desktop's floating bars (the list's top bar, the selection bar): the same glass,
- * its text tint raised to `--wn-glass-bar`, because these carry muted text ("of 39")
- * across their face rather than icons. Everything else (blur, rim, fallback, reduced
- * transparency, forced colours) is `.wn-glass`'s own.
- */
-.wn-glass.wn-glass-bar {
-  --wn-glass-text: var(--wn-glass-bar, 80%);
-}
-
-/*
- * Liquid Glass (1.4), on the small floating chrome: the dock pill, the compose circle,
- * the filter chips, the reader pill, the desktop's floating top bar and the status
- * pill. Always alongside `.wn-glass` or `.wn-chip-glass` (or, for compose, the accent),
- * whose tint it keeps: the AA arithmetic in `glass.test.ts` holds as it is. It adds:
- *
- * - a lit rim: bright at the top left, soft at the bottom right, with a faint inner glow
- *   (`--wn-glass-edge`, `LIQUID` in `glass.ts`);
- * - a sheen across the face (`::after`, under the content);
- * - in Chromium, an edge-only refraction (`#wn-liquid`, `index.html`): within ~10px of
- *   each side the backdrop bends inward, the middle and the glass's own text never do.
- *
- * Elsewhere it is the lean frost with the rim and sheen. Apple's native material, where
- * WebKit offers it, replaces all of it (the guarded block below).
- */
-:where(.wn-liquid) {
-  --wn-glass-edge:
-    inset 1px 1px 0 color-mix(in srgb, #fff var(--wn-liquid-rim-light, 50%), transparent),
-    inset -1px -1px 0 color-mix(in srgb, #fff var(--wn-liquid-rim-shade, 15%), transparent),
-    inset 0 0 12px color-mix(in srgb, #fff var(--wn-liquid-glow, 5%), transparent);
-}
-.wn-liquid {
-  position: relative;
-  isolation: isolate;
-}
-.wn-liquid::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, #fff var(--wn-liquid-sheen, 6%), transparent),
-    transparent 40%,
-    transparent 70%,
-    color-mix(in srgb, #fff calc(var(--wn-liquid-sheen, 6%) * 0.35), transparent)
-  );
-}
-/* The compose circle: the accent, a little translucent, with the same rim and lift. */
-.wn-liquid-accent {
-  --wn-liquid-sheen: var(--wn-liquid-accent-sheen, 8%);
-  --wn-liquid-glow: 0%;
-  background-color: var(--wn-accent);
-  box-shadow:
-    var(--wn-glass-edge),
-    var(--wn-glass-lift);
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
-  (background: color-mix(in srgb, red 50%, transparent)) {
+  /* The compose circle: the accent, a little translucent, with the same rim and lift. */
   .wn-liquid-accent {
-    background-color: color-mix(in srgb, var(--wn-accent) var(--wn-liquid-accent, 86%), transparent);
-    -webkit-backdrop-filter: var(--wn-glass-filter);
-    backdrop-filter: var(--wn-glass-filter);
+    --wn-liquid-sheen: var(--wn-liquid-accent-sheen, 8%);
+    --wn-liquid-glow: 0%;
+    background-color: var(--wn-accent);
+    box-shadow:
+      var(--wn-glass-edge),
+      var(--wn-glass-lift);
   }
-}
-/*
- * Chromium (Android WebView, WebView2, Chrome): the refraction. The other engines parse
- * `url()` here too without bending anything, so Gecko and WebKit are ruled out by name.
- */
-@supports (backdrop-filter: url(#wn-liquid)) and (not (-moz-appearance: none)) and (not (font: -apple-system-body)) {
-  .wn-glass.wn-liquid,
-  .wn-pill.wn-chip-glass.wn-liquid,
-  .wn-liquid-accent.wn-liquid {
-    backdrop-filter: var(--wn-glass-filter) url(#wn-liquid);
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+    (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-liquid-accent {
+      background-color: color-mix(in srgb, var(--wn-accent) var(--wn-liquid-accent, 86%), transparent);
+      -webkit-backdrop-filter: var(--wn-glass-filter);
+      backdrop-filter: var(--wn-glass-filter);
+    }
   }
-  .wn-glass.wn-glass-behind.wn-liquid {
-    backdrop-filter: none;
+  /*
+   * Chromium (Android WebView, WebView2, Chrome): the refraction. The other engines parse
+   * `url()` here too without bending anything, so Gecko and WebKit are ruled out by name.
+   */
+  @supports (backdrop-filter: url(#wn-liquid)) and (not (-moz-appearance: none)) and (not (font: -apple-system-body)) {
+    .wn-glass.wn-liquid,
+    .wn-pill.wn-chip-glass.wn-liquid,
+    .wn-liquid-accent.wn-liquid {
+      backdrop-filter: var(--wn-glass-filter) url(#wn-liquid);
+    }
+    .wn-glass.wn-glass-behind.wn-liquid {
+      backdrop-filter: none;
+    }
+    .wn-glass.wn-glass-behind.wn-liquid::before {
+      backdrop-filter: var(--wn-glass-filter) url(#wn-liquid);
+    }
   }
-  .wn-glass.wn-glass-behind.wn-liquid::before {
-    backdrop-filter: var(--wn-glass-filter) url(#wn-liquid);
-  }
-}
 
-/* WebKit with Apple's native glass enabled: a guarded progressive enhancement. */
-@supports (-apple-visual-effect: -apple-system-glass-material) {
-  .wn-glass,
-  .wn-liquid {
-    -apple-visual-effect: -apple-system-glass-material;
-    background: transparent;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-    box-shadow: var(--wn-glass-lift);
+  /* WebKit with Apple's native glass enabled: a guarded progressive enhancement. */
+  @supports (-apple-visual-effect: -apple-system-glass-material) {
+    .wn-glass,
+    .wn-liquid {
+      -apple-visual-effect: -apple-system-glass-material;
+      background: transparent;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      box-shadow: var(--wn-glass-lift);
+    }
+    .wn-liquid::after { display: none; }
   }
-  .wn-liquid::after { display: none; }
-}
-/* Under the native material a chip still says which filter it is: its hue stays. */
-@supports (-apple-visual-effect: -apple-system-glass-material) {
-  .wn-glass.wn-glass-behind::before {
-    display: none;
+  /* Under the native material a chip still says which filter it is: its hue stays. */
+  @supports (-apple-visual-effect: -apple-system-glass-material) {
+    .wn-glass.wn-glass-behind::before {
+      display: none;
+    }
+    .wn-pill.wn-chip-glass.wn-liquid {
+      background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a)));
+    }
   }
-  .wn-pill.wn-chip-glass.wn-liquid {
-    background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a)));
-  }
-}
 
-/*
- * The accent's wash (1.4): the list's backdrop, barely perceptibly in the accent's hue, so
- * the glass over it has a trace of colour to frost. Two soft radial glows over the surface
- * (`WASH` in `glass.ts`: per mode, 7%/6% at most, so it never reads as a tinted app and
- * every row ink keeps AA at their strongest). The only large area the accent reaches. Viewport-anchored
- * (`background-attachment: fixed`) on the few planes that carry it, none of which scroll,
- * so the list pane and the pinned day line up seamlessly; the rows inside the scroller
- * are transparent and scroll over it.
- */
-.wn-backdrop {
-  background-color: var(--wn-surface);
-  background-image:
-    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--wn-accent) var(--wn-wash-near, 0%), transparent), transparent),
-    radial-gradient(100% 65% at 0% 100%, color-mix(in srgb, var(--wn-accent) var(--wn-wash-far, 0%), transparent), transparent);
-  background-attachment: fixed;
-}
-@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  /*
+   * The accent's wash (1.4): the list's backdrop, barely perceptibly in the accent's hue, so
+   * the glass over it has a trace of colour to frost. Two soft radial glows over the surface
+   * (`WASH` in `glass.ts`: per mode, 7%/6% at most, so it never reads as a tinted app and
+   * every row ink keeps AA at their strongest). The only large area the accent reaches. Viewport-anchored
+   * (`background-attachment: fixed`) on the few planes that carry it, none of which scroll,
+   * so the list pane and the pinned day line up seamlessly; the rows inside the scroller
+   * are transparent and scroll over it.
+   */
   .wn-backdrop {
-    background-image: none;
+    background-color: var(--wn-surface);
+    background-image:
+      radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--wn-accent) var(--wn-wash-near, 0%), transparent), transparent),
+      radial-gradient(100% 65% at 0% 100%, color-mix(in srgb, var(--wn-accent) var(--wn-wash-far, 0%), transparent), transparent);
+    background-attachment: fixed;
+  }
+  @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+    .wn-backdrop {
+      background-image: none;
+    }
   }
 }
 
@@ -896,607 +1164,609 @@ button.wn-glass:not([data-rail-item]):active,
   inherits: false;
   initial-value: 72%;
 }
-.wn-pill.wn-chip-glass {
-  --wn-chip-plate: var(--wn-glass-text, 72%);
-  --pill-hover: transparent;
-  --pill-press: transparent;
-  border: 1px solid var(--wn-hairline);
-  background-color: var(--wn-glass-base, var(--wn-surface));
-  background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a)));
-  box-shadow:
-    inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a)),
-    inset 0 0 0 999px var(--pill-hover),
-    inset 0 0 0 999px var(--pill-press),
-    var(--wn-glass-edge),
-    var(--wn-glass-lift),
-    0 0 18px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
-}
-.wn-pill.wn-chip-glass[data-on] {
-  --wn-chip-plate: var(--wn-glass-text-on, 76%);
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
-  (background: color-mix(in srgb, red 50%, transparent)) {
+@layer utilities {
   .wn-pill.wn-chip-glass {
-    --wn-chip-frost: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-rim, 62%), transparent);
-    --wn-chip-text: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-chip-plate), transparent);
-    background-color: transparent;
-    background-image:
-      linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a))),
-      linear-gradient(to right, var(--wn-chip-frost), var(--wn-chip-text) 14px, var(--wn-chip-text) calc(100% - 14px), var(--wn-chip-frost));
+    --wn-chip-plate: var(--wn-glass-text, 72%);
+    --pill-hover: transparent;
+    --pill-press: transparent;
+    border: 1px solid var(--wn-hairline);
+    background-color: var(--wn-glass-base, var(--wn-surface));
+    background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a)));
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a)),
+      inset 0 0 0 999px var(--pill-hover),
+      inset 0 0 0 999px var(--pill-press),
+      var(--wn-glass-edge),
+      var(--wn-glass-lift),
+      0 0 18px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
   }
-}
-@supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and
-  (background: color-mix(in srgb, red 50%, transparent)) {
-  .wn-pill.wn-chip-glass {
-    background-color: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
+  .wn-pill.wn-chip-glass[data-on] {
+    --wn-chip-plate: var(--wn-glass-text-on, 76%);
   }
-}
-/*
- * Dark and OLED chips, more vibrant (1.3.3): with the brighter recipe (`theme.ts`), the
- * top highlight is lifted toward white and the hairline takes the chip's own hue, light,
- * so each chip has a lit edge instead of a grey one. Paint only: contrast is the fill's.
- */
-:root:is([data-theme="dark"], [data-theme="oled"]) .wn-pill.wn-chip-glass {
-  --wn-glass-sheen: rgb(255 255 255 / 0.16);
-  border-color: hsl(var(--pill-h) calc(var(--pill-s) * 1%) 78% / 0.24);
-}
-/* Hover is a sheen over the tint: a `filter` here would cut the frost off from the list. */
-.wn-pill.wn-chip-glass:hover {
-  --pill-hover: var(--wn-sheen);
-}
-/*
- * Pressed (and held, and long-pressed): a deeper sheen, never a transform or a radius
- * change, so the chip stays a pill from press to release.
- */
-.wn-pill.wn-chip-glass:active,
-.wn-pill.wn-chip-glass:has(> button:active) {
-  transform: none;
-  --pill-hover: var(--wn-sheen);
-  --pill-press: var(--wn-sheen);
-}
-/* "All" beside the chips: plain glass, the same deeper sheen when pressed. */
-button.wn-glass[data-rail-item]:active {
-  transform: none;
-  box-shadow:
-    inset 0 0 0 999px var(--wn-sheen),
-    inset 0 0 0 999px var(--wn-sheen),
-    var(--wn-glass-edge),
-    var(--wn-glass-lift);
-}
-/*
- * A pinned chip with nothing in the open mailbox (`data-empty`, 1.3.3): its words and
- * count fall back to the muted ink. Colour only: opacity or a filter on the chip would
- * cut its frost off from the list.
- */
-.wn-pill[data-empty] {
-  color: var(--wn-inkMuted);
-}
-/* "All", on the rail beside the chips: plain glass, no hue. */
-.wn-chip-plain {
-  border-radius: 999px;
-}
-
-/*
- * The list scrolls under the floating chrome, so its end is padded by the chrome's
- * height (`--wn-phone-dock`, published by the dock) and its last row can scroll clear
- * of the chips, the pill and the compose button. `div[...]` to outrank the scroller's
- * own `pb-4` utility; with no dock on screen the variable is unset and this is that 1rem.
- */
-div[data-row-count] {
-  padding-bottom: calc(var(--wn-phone-dock, 0px) + 1rem);
-  scroll-padding-bottom: calc(var(--wn-phone-dock, 0px) + 0.5rem);
-}
-
-/*
- * The menu panel on a phone grows out of the pill: anchored at the pill's left and
- * bottom, as wide as it, and revealed upward by a `clip-path` that starts as the pill's
- * own rounded rectangle and opens to the panel's. Its contents fade in once it has room.
- * `visibility` flips only after the collapse, so a closed panel is out of the paint and
- * the tab order. Reduced motion: the global rule above makes both instant.
- */
-.wn-sidebar-panel[data-morph] {
-  left: var(--wn-dock-left);
-  bottom: var(--wn-dock-bottom);
-  width: var(--wn-dock-pill-w);
-  max-height: calc(100dvh - var(--wn-dock-bottom) - max(1rem, env(safe-area-inset-top, 0px)));
-  border-radius: var(--wn-radius-container);
-  transform: none;
-  opacity: 1;
-  clip-path: inset(calc(100% - var(--wn-dock-h)) 0 0 0 round calc(var(--wn-dock-h) / 2));
-  transition:
-    clip-path 200ms cubic-bezier(0.4, 0, 1, 1),
-    visibility 0s linear 200ms;
-}
-.wn-sidebar-panel[data-morph][data-open] {
-  clip-path: inset(0 0 0 0 round var(--wn-radius-container));
-  transition:
-    clip-path 300ms cubic-bezier(0.16, 1, 0.3, 1),
-    visibility 0s;
-}
-.wn-sidebar-panel[data-morph] .wn-morph-content {
-  opacity: 0;
-  transform: translateY(8px);
-  transition:
-    opacity 100ms ease-in,
-    transform 160ms ease-in;
-}
-.wn-sidebar-panel[data-morph][data-open] .wn-morph-content {
-  opacity: 1;
-  transform: none;
-  transition:
-    opacity 180ms ease-out 60ms,
-    transform 260ms cubic-bezier(0.16, 1, 0.3, 1) 40ms;
-}
-/* The panel is frosted by `.wn-glass` itself; the desktop's layered blur steps aside. */
-.wn-sidebar-panel[data-morph] .wn-sidebar-blur,
-.wn-sidebar-panel[data-morph] .wn-sidebar-tint {
-  display: none;
-}
-
-/* The dock's pill, while the panel it grew into is open: only Expand stays on it. */
-:root .wn-glass[data-phone-pill][data-expanded] {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-/* And its liquid sheen goes with it, so nothing is left over the panel's Inbox row. */
-:root .wn-glass[data-phone-pill][data-expanded]::after {
-  content: none;
-}
-
-/*
- * The phone's back-to-top pill, centred above the chips. Hidden it takes no taps and is
- * out of the paint and the tab order (`visibility` flips after the fade); shown it fades
- * in and rises 8px. Reduced motion: no slide, and the global rule makes the fade instant.
- */
-.wn-back-to-top {
-  opacity: 0;
-  transform: translateY(8px);
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity 140ms ease-in,
-    transform 180ms ease-in,
-    visibility 0s linear 180ms;
-}
-.wn-back-to-top[data-shown]:active {
-  transform: scale(0.97);
-}
-.wn-back-to-top[data-shown] {
-  opacity: 1;
-  transform: none;
-  visibility: visible;
-  pointer-events: auto;
-  transition:
-    opacity 180ms ease-out,
-    transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
-    visibility 0s;
-}
-@media (prefers-reduced-motion: reduce) {
-  .wn-back-to-top,
-  .wn-back-to-top[data-shown],
-  .wn-back-to-top[data-shown]:active {
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and
+    (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-pill.wn-chip-glass {
+      --wn-chip-frost: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-rim, 62%), transparent);
+      --wn-chip-text: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-chip-plate), transparent);
+      background-color: transparent;
+      background-image:
+        linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a))),
+        linear-gradient(to right, var(--wn-chip-frost), var(--wn-chip-text) 14px, var(--wn-chip-text) calc(100% - 14px), var(--wn-chip-frost));
+    }
+  }
+  @supports (not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))) and
+    (background: color-mix(in srgb, red 50%, transparent)) {
+    .wn-pill.wn-chip-glass {
+      background-color: color-mix(in srgb, var(--wn-glass-base, var(--wn-surface)) var(--wn-glass-fallback, 94%), transparent);
+    }
+  }
+  /*
+   * Dark and OLED chips, more vibrant (1.3.3): with the brighter recipe (`theme.ts`), the
+   * top highlight is lifted toward white and the hairline takes the chip's own hue, light,
+   * so each chip has a lit edge instead of a grey one. Paint only: contrast is the fill's.
+   */
+  :root:is([data-theme="dark"], [data-theme="oled"]) .wn-pill.wn-chip-glass {
+    --wn-glass-sheen: rgb(255 255 255 / 0.16);
+    border-color: hsl(var(--pill-h) calc(var(--pill-s) * 1%) 78% / 0.24);
+  }
+  /* Hover is a sheen over the tint: a `filter` here would cut the frost off from the list. */
+  .wn-pill.wn-chip-glass:hover {
+    --pill-hover: var(--wn-sheen);
+  }
+  /*
+   * Pressed (and held, and long-pressed): a deeper sheen, never a transform or a radius
+   * change, so the chip stays a pill from press to release.
+   */
+  .wn-pill.wn-chip-glass:active,
+  .wn-pill.wn-chip-glass:has(> button:active) {
     transform: none;
-    transition: none;
+    --pill-hover: var(--wn-sheen);
+    --pill-press: var(--wn-sheen);
   }
-}
+  /* "All" beside the chips: plain glass, the same deeper sheen when pressed. */
+  button.wn-glass[data-rail-item]:active {
+    transform: none;
+    box-shadow:
+      inset 0 0 0 999px var(--wn-sheen),
+      inset 0 0 0 999px var(--wn-sheen),
+      var(--wn-glass-edge),
+      var(--wn-glass-lift);
+  }
+  /*
+   * A pinned chip with nothing in the open mailbox (`data-empty`, 1.3.3): its words and
+   * count fall back to the muted ink. Colour only: opacity or a filter on the chip would
+   * cut its frost off from the list.
+   */
+  .wn-pill[data-empty] {
+    color: var(--wn-inkMuted);
+  }
+  /* "All", on the rail beside the chips: plain glass, no hue. */
+  .wn-chip-plain {
+    border-radius: 999px;
+  }
 
-/* Reduced transparency: the floating glass is solid (compose, the solid accent), the chips keep only their tint. */
-@media (prefers-reduced-transparency: reduce) {
-  .wn-liquid::after,
-  .wn-glass.wn-glass-behind::before {
+  /*
+   * The list scrolls under the floating chrome, so its end is padded by the chrome's
+   * height (`--wn-phone-dock`, published by the dock) and its last row can scroll clear
+   * of the chips, the pill and the compose button. `div[...]` to outrank the scroller's
+   * own `pb-4` utility; with no dock on screen the variable is unset and this is that 1rem.
+   */
+  div[data-row-count] {
+    padding-bottom: calc(var(--wn-phone-dock, 0px) + 1rem);
+    scroll-padding-bottom: calc(var(--wn-phone-dock, 0px) + 0.5rem);
+  }
+
+  /*
+   * The menu panel on a phone grows out of the pill: anchored at the pill's left and
+   * bottom, as wide as it, and revealed upward by a `clip-path` that starts as the pill's
+   * own rounded rectangle and opens to the panel's. Its contents fade in once it has room.
+   * `visibility` flips only after the collapse, so a closed panel is out of the paint and
+   * the tab order. Reduced motion: the global rule above makes both instant.
+   */
+  .wn-sidebar-panel[data-morph] {
+    left: var(--wn-dock-left);
+    bottom: var(--wn-dock-bottom);
+    width: var(--wn-dock-pill-w);
+    max-height: calc(100dvh - var(--wn-dock-bottom) - max(1rem, env(safe-area-inset-top, 0px)));
+    border-radius: var(--wn-radius-container);
+    transform: none;
+    opacity: 1;
+    clip-path: inset(calc(100% - var(--wn-dock-h)) 0 0 0 round calc(var(--wn-dock-h) / 2));
+    transition:
+      clip-path 200ms cubic-bezier(0.4, 0, 1, 1),
+      visibility 0s linear 200ms;
+  }
+  .wn-sidebar-panel[data-morph][data-open] {
+    clip-path: inset(0 0 0 0 round var(--wn-radius-container));
+    transition:
+      clip-path 300ms cubic-bezier(0.16, 1, 0.3, 1),
+      visibility 0s;
+  }
+  .wn-sidebar-panel[data-morph] .wn-morph-content {
+    opacity: 0;
+    transform: translateY(8px);
+    transition:
+      opacity 100ms ease-in,
+      transform 160ms ease-in;
+  }
+  .wn-sidebar-panel[data-morph][data-open] .wn-morph-content {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 180ms ease-out 60ms,
+      transform 260ms cubic-bezier(0.16, 1, 0.3, 1) 40ms;
+  }
+  /* The panel is frosted by `.wn-glass` itself; the desktop's layered blur steps aside. */
+  .wn-sidebar-panel[data-morph] .wn-sidebar-blur,
+  .wn-sidebar-panel[data-morph] .wn-sidebar-tint {
     display: none;
   }
-  .wn-liquid-accent {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-    background-color: var(--wn-accent) !important;
-  }
-  .wn-glass,
-  .wn-pill.wn-chip-glass {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-    background-color: var(--wn-glass-base, var(--wn-surface)) !important;
-  }
-  .wn-glass {
-    background-image: none !important;
-  }
-  .wn-pill.wn-chip-glass {
-    background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a))) !important;
-  }
-}
-@media (forced-colors: active) {
-  .wn-liquid::after,
-  .wn-glass.wn-glass-behind::before {
-    display: none;
-  }
-  .wn-liquid-accent {
+
+  /* The dock's pill, while the panel it grew into is open: only Expand stays on it. */
+  :root .wn-glass[data-phone-pill][data-expanded] {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  .wn-glass,
-  .wn-pill.wn-chip-glass {
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-    background: Canvas;
-    border: 1px solid CanvasText;
+  /* And its liquid sheen goes with it, so nothing is left over the panel's Inbox row. */
+  :root .wn-glass[data-phone-pill][data-expanded]::after {
+    content: none;
   }
-}
 
-/*
- * The phone reader's action pill (`ReaderPill` in `Reader.tsx`, rules in `readerPill.ts`).
- * Open it is five 48px circles in the glass; folded it is one circle as tall as the dock,
- * the ••• handle. The fold is the width easing in from the far side while the buttons
- * fade out and the handle fades in, all on the dock's own curve. Reduced motion: no
- * width change (it simply is one size or the other), only the fade.
- */
-.wn-reader-pill {
-  /* Over a message, where a photo can be solid: the bars' higher tint keeps its icons at 3:1. */
-  --wn-glass-text: var(--wn-glass-bar, 80%);
-  /* One 48px button per action (`--wn-pill-count`: 6 with Snooze, 5 where there is none). */
-  width: calc(var(--wn-pill-count, 5) * 48px + (var(--wn-pill-count, 5) - 1) * 2px + 12px + 2px);
-  overflow: hidden;
-  transition:
-    width 260ms var(--wn-glass-ease),
-    background-color var(--wn-glass-motion) var(--wn-glass-ease);
-}
-[data-reader-pill="collapsed"] .wn-reader-pill {
-  /* Over a message, where a photo can be solid: the bars' higher tint keeps its icons at 3:1. */
-  --wn-glass-text: var(--wn-glass-bar, 80%);
-  width: var(--wn-dock-h);
-}
-.wn-reader-pill-actions,
-.wn-reader-pill-handle {
-  transition: opacity 160ms var(--wn-glass-ease);
-}
-/*
- * STRM-324: a sideways swipe on the pill steps to the previous/next message, so the
- * browser keeps only vertical panning there and hands sideways moves to the pill.
- */
-[data-reader-pill-swipe] {
-  touch-action: pan-y;
-}
-/*
- * The message a swipe stepped to slides in from the side the finger came from (next
- * from the right, previous from the left). The global reduced-motion rule makes it
- * instant.
- */
-[data-reader-pane][data-step-enter="next"] {
-  animation: wn-step-in-next 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-[data-reader-pane][data-step-enter="prev"] {
-  animation: wn-step-in-prev 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-@keyframes wn-step-in-next {
-  from {
-    transform: translateX(32px);
-    opacity: 0.4;
+  /*
+   * The phone's back-to-top pill, centred above the chips. Hidden it takes no taps and is
+   * out of the paint and the tab order (`visibility` flips after the fade); shown it fades
+   * in and rises 8px. Reduced motion: no slide, and the global rule makes the fade instant.
+   */
+  .wn-back-to-top {
+    opacity: 0;
+    transform: translateY(8px);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity 140ms ease-in,
+      transform 180ms ease-in,
+      visibility 0s linear 180ms;
   }
-}
-@keyframes wn-step-in-prev {
-  from {
-    transform: translateX(-32px);
-    opacity: 0.4;
+  .wn-back-to-top[data-shown]:active {
+    transform: scale(0.97);
   }
-}
-[data-reader-pill="collapsed"] .wn-reader-pill-actions,
-[data-reader-pill="open"] .wn-reader-pill-handle {
-  opacity: 0;
-  pointer-events: none;
-}
-@media (prefers-reduced-motion: reduce) {
+  .wn-back-to-top[data-shown] {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
+    transition:
+      opacity 180ms ease-out,
+      transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+      visibility 0s;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wn-back-to-top,
+    .wn-back-to-top[data-shown],
+    .wn-back-to-top[data-shown]:active {
+      transform: none;
+      transition: none;
+    }
+  }
+
+  /* Reduced transparency: the floating glass is solid (compose, the solid accent), the chips keep only their tint. */
+  @media (prefers-reduced-transparency: reduce) {
+    .wn-liquid::after,
+    .wn-glass.wn-glass-behind::before {
+      display: none;
+    }
+    .wn-liquid-accent {
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      background-color: var(--wn-accent) !important;
+    }
+    .wn-glass,
+    .wn-pill.wn-chip-glass {
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      background-color: var(--wn-glass-base, var(--wn-surface)) !important;
+    }
+    .wn-glass {
+      background-image: none !important;
+    }
+    .wn-pill.wn-chip-glass {
+      background-image: linear-gradient(hsl(var(--pill-tone) / var(--pill-a)), hsl(var(--pill-tone) / var(--pill-a))) !important;
+    }
+  }
+  @media (forced-colors: active) {
+    .wn-liquid::after,
+    .wn-glass.wn-glass-behind::before {
+      display: none;
+    }
+    .wn-liquid-accent {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    .wn-glass,
+    .wn-pill.wn-chip-glass {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      background: Canvas;
+      border: 1px solid CanvasText;
+    }
+  }
+
+  /*
+   * The phone reader's action pill (`ReaderPill` in `Reader.tsx`, rules in `readerPill.ts`).
+   * Open it is five 48px circles in the glass; folded it is one circle as tall as the dock,
+   * the ••• handle. The fold is the width easing in from the far side while the buttons
+   * fade out and the handle fades in, all on the dock's own curve. Reduced motion: no
+   * width change (it simply is one size or the other), only the fade.
+   */
   .wn-reader-pill {
-    transition: none !important;
+    /* Over a message, where a photo can be solid: the bars' higher tint keeps its icons at 3:1. */
+    --wn-glass-text: var(--wn-glass-bar, 80%);
+    /* One 48px button per action (`--wn-pill-count`: 6 with Snooze, 5 where there is none). */
+    width: calc(var(--wn-pill-count, 5) * 48px + (var(--wn-pill-count, 5) - 1) * 2px + 12px + 2px);
+    overflow: hidden;
+    transition:
+      width 260ms var(--wn-glass-ease),
+      background-color var(--wn-glass-motion) var(--wn-glass-ease);
+  }
+  [data-reader-pill="collapsed"] .wn-reader-pill {
+    /* Over a message, where a photo can be solid: the bars' higher tint keeps its icons at 3:1. */
+    --wn-glass-text: var(--wn-glass-bar, 80%);
+    width: var(--wn-dock-h);
   }
   .wn-reader-pill-actions,
   .wn-reader-pill-handle {
-    transition-duration: 160ms !important;
+    transition: opacity 160ms var(--wn-glass-ease);
   }
-}
-/*
- * Left-handed (`data-hand="left"` on the root, phone only): the dock's compose button
- * moves to the left edge and the pill to its right, and the menu panel that grows out
- * of the pill follows it. The pill's own tabs keep their order (Inbox first), which the
- * panel's layout above it is built around.
- */
-:root[data-hand="left"] [data-dock-band]:not([data-phone-chips]) {
-  flex-direction: row-reverse;
-}
-:root[data-hand="left"] .wn-sidebar-panel[data-morph] {
-  left: calc(var(--wn-dock-left) + var(--wn-dock-h) + var(--wn-dock-gap));
-}
+  /*
+   * STRM-324: a sideways swipe on the pill steps to the previous/next message, so the
+   * browser keeps only vertical panning there and hands sideways moves to the pill.
+   */
+  [data-reader-pill-swipe] {
+    touch-action: pan-y;
+  }
+  /*
+   * The message a swipe stepped to slides in from the side the finger came from (next
+   * from the right, previous from the left). The global reduced-motion rule makes it
+   * instant.
+   */
+  [data-reader-pane][data-step-enter="next"] {
+    animation: wn-step-in-next 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  [data-reader-pane][data-step-enter="prev"] {
+    animation: wn-step-in-prev 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes wn-step-in-next {
+    from {
+      transform: translateX(32px);
+      opacity: 0.4;
+    }
+  }
+  @keyframes wn-step-in-prev {
+    from {
+      transform: translateX(-32px);
+      opacity: 0.4;
+    }
+  }
+  [data-reader-pill="collapsed"] .wn-reader-pill-actions,
+  [data-reader-pill="open"] .wn-reader-pill-handle {
+    opacity: 0;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wn-reader-pill {
+      transition: none !important;
+    }
+    .wn-reader-pill-actions,
+    .wn-reader-pill-handle {
+      transition-duration: 160ms !important;
+    }
+  }
+  /*
+   * Left-handed (`data-hand="left"` on the root, phone only): the dock's compose button
+   * moves to the left edge and the pill to its right, and the menu panel that grows out
+   * of the pill follows it. The pill's own tabs keep their order (Inbox first), which the
+   * panel's layout above it is built around.
+   */
+  :root[data-hand="left"] [data-dock-band]:not([data-phone-chips]) {
+    flex-direction: row-reverse;
+  }
+  :root[data-hand="left"] .wn-sidebar-panel[data-morph] {
+    left: calc(var(--wn-dock-left) + var(--wn-dock-h) + var(--wn-dock-gap));
+  }
 
-/*
- * Forced colours, the floating chrome as a whole (1.3.2, from the theme sweep).
- *
- * Each pill above is already the system canvas, but the gaps between them were not:
- * with no frost to blur it, the list showed sharp through the spaces between the chips,
- * between the chips and the dock, and around the phone's top bar, and row text ran into
- * the chip labels and icons. So the bands that hold floating chrome are opaque `Canvas`
- * too, with a `CanvasText` rule where they meet the list, and take the taps that would
- * otherwise reach rows nobody can see. No transitions: under a forced palette a fading
- * background is a frame of see-through.
- */
-@media (forced-colors: active) {
-  [data-phone-topbar],
-  [data-phone-selection-slot],
-  [data-dock-band],
-  [data-list-chrome],
-  [data-sticky-day],
-  [data-status-pill] > * {
-    background: Canvas !important;
-    color: CanvasText;
+  /*
+   * Forced colours, the floating chrome as a whole (1.3.2, from the theme sweep).
+   *
+   * Each pill above is already the system canvas, but the gaps between them were not:
+   * with no frost to blur it, the list showed sharp through the spaces between the chips,
+   * between the chips and the dock, and around the phone's top bar, and row text ran into
+   * the chip labels and icons. So the bands that hold floating chrome are opaque `Canvas`
+   * too, with a `CanvasText` rule where they meet the list, and take the taps that would
+   * otherwise reach rows nobody can see. No transitions: under a forced palette a fading
+   * background is a frame of see-through.
+   */
+  @media (forced-colors: active) {
+    [data-phone-topbar],
+    [data-phone-selection-slot],
+    [data-dock-band],
+    [data-list-chrome],
+    [data-sticky-day],
+    [data-status-pill] > * {
+      background: Canvas !important;
+      color: CanvasText;
+    }
+    [data-phone-topbar] {
+      border-bottom: 1px solid CanvasText;
+      pointer-events: auto;
+    }
+    [data-dock-band] {
+      pointer-events: auto;
+    }
+    [data-phone-chips][data-dock-band] {
+      margin-bottom: 0;
+      padding-bottom: 4px;
+      border-top: 1px solid CanvasText;
+    }
+    [data-phone-chips][data-dock-band].invisible {
+      border-top: 0;
+    }
+    [data-status-pill] > * {
+      border: 1px solid CanvasText;
+    }
+    .wn-glass,
+    .wn-pill.wn-chip-glass,
+    [data-dock-band] {
+      transition: none !important;
+    }
+    /* A disabled control still says it is one: the system's grey, not a faded fill. */
+    button:disabled {
+      color: GrayText;
+    }
   }
-  [data-phone-topbar] {
-    border-bottom: 1px solid CanvasText;
-    pointer-events: auto;
-  }
-  [data-dock-band] {
-    pointer-events: auto;
-  }
-  [data-phone-chips][data-dock-band] {
-    margin-bottom: 0;
-    padding-bottom: 4px;
-    border-top: 1px solid CanvasText;
-  }
-  [data-phone-chips][data-dock-band].invisible {
-    border-top: 0;
-  }
-  [data-status-pill] > * {
-    border: 1px solid CanvasText;
-  }
-  .wn-glass,
-  .wn-pill.wn-chip-glass,
-  [data-dock-band] {
-    transition: none !important;
-  }
-  /* A disabled control still says it is one: the system's grey, not a faded fill. */
-  button:disabled {
-    color: GrayText;
-  }
-}
 
-/*
- * The logo's version toggle (`logoVersion.ts`): the bar's middle holds the search field
- * and "Winnow 1.2.2" stacked in one grid cell, and crossfades between them. The hidden
- * one is `visibility: hidden` once its fade is over, so it takes no taps and no Tab, but
- * it stays mounted: search keeps its query. Reduced motion swaps them instantly.
- */
-.wn-logo-swap {
-  display: grid;
-  align-items: center;
-}
-.wn-logo-swap > * {
-  grid-area: 1 / 1;
-  min-width: 0;
-  transition:
-    opacity 180ms var(--wn-glass-ease),
-    visibility 0s linear 0s;
-}
-.wn-logo-swap > :not([data-shown]) {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity 180ms var(--wn-glass-ease),
-    visibility 0s linear 180ms;
-}
-@media (prefers-reduced-motion: reduce) {
-  .wn-logo-swap > *,
-  .wn-logo-swap > :not([data-shown]),
-  /* The version text sits inside its row (beside the update button) and inherits the row's visibility. */
-  .wn-logo-swap [data-version-text] {
-    transition: none;
+  /*
+   * The logo's version toggle (`logoVersion.ts`): the bar's middle holds the search field
+   * and "Winnow 1.2.2" stacked in one grid cell, and crossfades between them. The hidden
+   * one is `visibility: hidden` once its fade is over, so it takes no taps and no Tab, but
+   * it stays mounted: search keeps its query. Reduced motion swaps them instantly.
+   */
+  .wn-logo-swap {
+    display: grid;
+    align-items: center;
   }
-}
-
-/*
- * The reader's action bar (`ActionBar` in `Reader.tsx`).
- *
- * The words on its buttons follow the *pane's* width, not the window's: a container
- * query, so a narrow reader beside a wide list drops to icons, and nothing about it
- * depends on the message shown (no layout shift from one message to the next).
- */
-.wn-reader-actions {
-  container-type: inline-size;
-  container-name: reader-actions;
-}
-
-@container reader-actions (max-width: 34rem) {
-  .wn-action-text {
-    display: none;
+  .wn-logo-swap > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+    transition:
+      opacity 180ms var(--wn-glass-ease),
+      visibility 0s linear 0s;
   }
-}
+  .wn-logo-swap > :not([data-shown]) {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity 180ms var(--wn-glass-ease),
+      visibility 0s linear 180ms;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wn-logo-swap > *,
+    .wn-logo-swap > :not([data-shown]),
+    /* The version text sits inside its row (beside the update button) and inherits the row's visibility. */
+    .wn-logo-swap [data-version-text] {
+      transition: none;
+    }
+  }
 
-/*
- * The action tooltip: the action's name and its key, under the button. Drawn by CSS on
- * hover (after a short pause, so sweeping across the bar does not flash a row of them)
- * and at once on keyboard focus. Absolutely placed, so it never moves anything.
- */
-.wn-tip {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: var(--wn-radius-control);
-  background: var(--wn-ink);
-  color: var(--wn-canvas);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.4;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate(var(--wn-tip-x, -50%), -2px);
-  transition:
-    opacity 120ms ease-out,
-    transform 120ms ease-out;
-}
+  /*
+   * The reader's action bar (`ActionBar` in `Reader.tsx`).
+   *
+   * The words on its buttons follow the *pane's* width, not the window's: a container
+   * query, so a narrow reader beside a wide list drops to icons, and nothing about it
+   * depends on the message shown (no layout shift from one message to the next).
+   */
+  .wn-reader-actions {
+    container-type: inline-size;
+    container-name: reader-actions;
+  }
 
-/* At the bar's start the tooltip hangs from the button's left edge, inside the pane. */
-.wn-tip[data-tip="start"] {
-  left: 0;
-  --wn-tip-x: 0px;
-}
+  @container reader-actions (max-width: 34rem) {
+    .wn-action-text {
+      display: none;
+    }
+  }
 
-.wn-tip-key {
-  padding: 0 5px;
-  border-radius: var(--wn-radius-control);
-  background: color-mix(in srgb, var(--wn-canvas) 18%, transparent);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.wn-action:hover .wn-tip {
-  opacity: 1;
-  transform: translate(var(--wn-tip-x, -50%), 0);
-  transition-delay: 350ms;
-}
-
-.wn-action:focus-visible .wn-tip {
-  opacity: 1;
-  transform: translate(var(--wn-tip-x, -50%), 0);
-}
-
-@media (hover: none) {
+  /*
+   * The action tooltip: the action's name and its key, under the button. Drawn by CSS on
+   * hover (after a short pause, so sweeping across the bar does not flash a row of them)
+   * and at once on keyboard focus. Absolutely placed, so it never moves anything.
+   */
   .wn-tip {
-    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: var(--wn-radius-control);
+    background: var(--wn-ink);
+    color: var(--wn-canvas);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(var(--wn-tip-x, -50%), -2px);
+    transition:
+      opacity 120ms ease-out,
+      transform 120ms ease-out;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .wn-tip {
-    transition: none;
+  /* At the bar's start the tooltip hangs from the button's left edge, inside the pane. */
+  .wn-tip[data-tip="start"] {
+    left: 0;
+    --wn-tip-x: 0px;
+  }
+
+  .wn-tip-key {
+    padding: 0 5px;
+    border-radius: var(--wn-radius-control);
+    background: color-mix(in srgb, var(--wn-canvas) 18%, transparent);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .wn-action:hover .wn-tip {
+    opacity: 1;
+    transform: translate(var(--wn-tip-x, -50%), 0);
+    transition-delay: 350ms;
+  }
+
+  .wn-action:focus-visible .wn-tip {
+    opacity: 1;
     transform: translate(var(--wn-tip-x, -50%), 0);
   }
-}
 
-/*
- * The filter strip's input (`FilterStrip`, `useRailMotion`).
- *
- * Over the strip, a swipe is sideways or nothing: `pan-x` on the scroller and everything
- * in it (the chips and the catcher behind their gaps) so a vertical drag never scrolls
- * the list underneath, and the strip's own overscroll never chains anywhere. Taps still
- * work: `pan-x` only withholds vertical panning and zoom.
- */
-.wn-rail-scroller,
-.wn-rail-scroller > * {
-  touch-action: pan-x;
-}
-.wn-rail-scroller {
-  overscroll-behavior: contain;
-}
-/*
- * No browser press highlight on the chips (1.3.3). Android's WebView and Chrome draw a
- * tap highlight under a held finger, a rectangle that ignores the pill's radius, so a
- * held chip looked square until it went away. The chip's own pressed sheen is the
- * feedback; a long press opens no callout and selects no text.
- */
-.wn-rail-scroller,
-.wn-rail-scroller *,
-.wn-pill,
-.wn-glass {
-  -webkit-tap-highlight-color: transparent;
-  -webkit-touch-callout: none;
-}
-
-/*
- * A sheet that replaces the screen rather than sitting over it (`Sheet backdrop="opaque"`,
- * Settings on a phone). The backdrop is the chrome colour, not the scrim, so the app
- * underneath never shows through: not while the panel rises in (it starts transparent),
- * not along the bottom edge under the gesture bar. The shadow repeats the backdrop
- * below the window's bottom edge, so a viewport that grows before the next layout (the
- * keyboard or a browser toolbar going away) uncovers more chrome, never the inbox.
- */
-.wn-backdrop-opaque {
-  background: var(--wn-chrome);
-  box-shadow: 0 50vh 0 0 var(--wn-chrome);
-}
-
-/* The defs for the glass's SVG filter (`index.html`): in the document, out of the layout. */
-.wn-svg-defs {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-/*
- * The custom accent's colour well (`CustomAccentField.tsx`, 1.4.0): the native
- * `<input type="color">` drawn as a plain round swatch, without the browser's inner
- * padding and square border, so it matches the accent cards' dots.
- */
-.wn-color-well {
-  -webkit-appearance: none;
-  appearance: none;
-}
-.wn-color-well::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-.wn-color-well::-webkit-color-swatch {
-  border: none;
-  border-radius: 9999px;
-}
-.wn-color-well::-moz-color-swatch {
-  border: none;
-  border-radius: 9999px;
-}
-
-/*
- * The first-run tour (`components/Tour.tsx`, 1.5). The spotlight is a hole made by its
- * own shadow: one rounded box over the target, its outer shadow dimming everything else,
- * with an accent ring so the hole reads on the light scheme's pale surfaces too. It
- * glides between steps and simply jumps under reduced motion.
- */
-:root {
-  --wn-tour-dim: rgba(16, 16, 20, 0.5);
-}
-:root[data-theme="dark"],
-:root[data-theme="oled"] {
-  --wn-tour-dim: rgba(0, 0, 0, 0.62);
-}
-.wn-tour-spotlight {
-  box-shadow:
-    0 0 0 2px var(--wn-accent),
-    0 0 0 200vmax var(--wn-tour-dim);
-  transition:
-    top 220ms ease,
-    left 220ms ease,
-    width 220ms ease,
-    height 220ms ease;
-}
-.wn-tour-card {
-  animation: wn-tour-in 180ms ease-out;
-}
-@keyframes wn-tour-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
+  @media (hover: none) {
+    .wn-tip {
+      display: none;
+    }
   }
-}
-@media (prefers-reduced-motion: reduce) {
+
+  @media (prefers-reduced-motion: reduce) {
+    .wn-tip {
+      transition: none;
+      transform: translate(var(--wn-tip-x, -50%), 0);
+    }
+  }
+
+  /*
+   * The filter strip's input (`FilterStrip`, `useRailMotion`).
+   *
+   * Over the strip, a swipe is sideways or nothing: `pan-x` on the scroller and everything
+   * in it (the chips and the catcher behind their gaps) so a vertical drag never scrolls
+   * the list underneath, and the strip's own overscroll never chains anywhere. Taps still
+   * work: `pan-x` only withholds vertical panning and zoom.
+   */
+  .wn-rail-scroller,
+  .wn-rail-scroller > * {
+    touch-action: pan-x;
+  }
+  .wn-rail-scroller {
+    overscroll-behavior: contain;
+  }
+  /*
+   * No browser press highlight on the chips (1.3.3). Android's WebView and Chrome draw a
+   * tap highlight under a held finger, a rectangle that ignores the pill's radius, so a
+   * held chip looked square until it went away. The chip's own pressed sheen is the
+   * feedback; a long press opens no callout and selects no text.
+   */
+  .wn-rail-scroller,
+  .wn-rail-scroller *,
+  .wn-pill,
+  .wn-glass {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  /*
+   * A sheet that replaces the screen rather than sitting over it (`Sheet backdrop="opaque"`,
+   * Settings on a phone). The backdrop is the chrome colour, not the scrim, so the app
+   * underneath never shows through: not while the panel rises in (it starts transparent),
+   * not along the bottom edge under the gesture bar. The shadow repeats the backdrop
+   * below the window's bottom edge, so a viewport that grows before the next layout (the
+   * keyboard or a browser toolbar going away) uncovers more chrome, never the inbox.
+   */
+  .wn-backdrop-opaque {
+    background: var(--wn-chrome);
+    box-shadow: 0 50vh 0 0 var(--wn-chrome);
+  }
+
+  /* The defs for the glass's SVG filter (`index.html`): in the document, out of the layout. */
+  .wn-svg-defs {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  /*
+   * The custom accent's colour well (`CustomAccentField.tsx`, 1.4.0): the native
+   * `<input type="color">` drawn as a plain round swatch, without the browser's inner
+   * padding and square border, so it matches the accent cards' dots.
+   */
+  .wn-color-well {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .wn-color-well::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+  .wn-color-well::-webkit-color-swatch {
+    border: none;
+    border-radius: 9999px;
+  }
+  .wn-color-well::-moz-color-swatch {
+    border: none;
+    border-radius: 9999px;
+  }
+
+  /*
+   * The first-run tour (`components/Tour.tsx`, 1.5). The spotlight is a hole made by its
+   * own shadow: one rounded box over the target, its outer shadow dimming everything else,
+   * with an accent ring so the hole reads on the light scheme's pale surfaces too. It
+   * glides between steps and simply jumps under reduced motion.
+   */
+  :root {
+    --wn-tour-dim: rgba(16, 16, 20, 0.5);
+  }
+  :root[data-theme="dark"],
+  :root[data-theme="oled"] {
+    --wn-tour-dim: rgba(0, 0, 0, 0.62);
+  }
   .wn-tour-spotlight {
-    transition: none;
+    box-shadow:
+      0 0 0 2px var(--wn-accent),
+      0 0 0 200vmax var(--wn-tour-dim);
+    transition:
+      top 220ms ease,
+      left 220ms ease,
+      width 220ms ease,
+      height 220ms ease;
   }
   .wn-tour-card {
-    animation: none;
+    animation: wn-tour-in 180ms ease-out;
   }
-}
+  @keyframes wn-tour-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wn-tour-spotlight {
+      transition: none;
+    }
+    .wn-tour-card {
+      animation: none;
+    }
+  }
 
-/*
- * Censor email addresses (Settings → Appearance; `ui/censorDom.ts`). The text under this
- * mark is already random letters; the blur says "an address was here" without inviting
- * anyone to read the noise. Kept on under forced colours and reduced motion: it is a
- * privacy mark, not decoration.
- */
-[data-wn-censored] {
-  filter: blur(4px);
+  /*
+   * Censor email addresses (Settings → Appearance; `ui/censorDom.ts`). The text under this
+   * mark is already random letters; the blur says "an address was here" without inviting
+   * anyone to read the noise. Kept on under forced colours and reduced motion: it is a
+   * privacy mark, not decoration.
+   */
+  [data-wn-censored] {
+    filter: blur(4px);
+  }
 }
