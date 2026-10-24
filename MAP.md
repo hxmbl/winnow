@@ -579,7 +579,7 @@ URI or origin. The secret never appears in an error, a warning or a log.
   so a recent sender's avatar draws at once and offline. IndexedDB
   `winnow-pictures@<id>` (one per account; store `pictures`, keyPath `key`, index
   `kind`), keyed by the picture URL (`pictureKey`: https only, Gravatar's size query
-  dropped), each a 96px (`PICTURE_BYTES_PX`) WebP/PNG data URL ≤ 60,000 chars, tagged
+  dropped), each a 96px (`PICTURE_BYTES_PX`) WebP/PNG data URL ≤ 24,000 chars (sources over 2048px not captured), tagged
   `contact` / `gravatar` / `logo`. The 200 most recently drawn (`MAX_PICTURE_BYTES_ENTRIES`,
   LRU by `usedAt`, written back at most hourly); fresh for the hit TTL (7 days), a stale
   copy is still drawn and refreshed in the background when drawn online; dropped after
