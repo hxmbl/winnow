@@ -15,6 +15,10 @@
  * Accessibility: one polite live region, always mounted, says each notice once (not
  * every tick of a countdown) and that Undo is there; the pill itself is ordinary
  * buttons in reading order. Reduced motion: the global rule makes the entrance instant.
+ *
+ * Leaving: when nothing is left to say, the last pill stays for `LEAVE_MS` as a ghost
+ * (no buttons to hit, out of the accessibility tree) while it fades out, so it eases
+ * away instead of blinking off. A new notice during the fade replaces it at once.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -71,6 +75,9 @@ type Props = {
    */
   avoid?: string;
 };
+
+/** How long the pill takes to fade out, ms (`animate-vanish`): quick, like its entrance. */
+export const LEAVE_MS = 140;
 
 /** The gap between the chrome and the pill, px: where a pull's result rests. */
 const GAP = 16;
@@ -158,7 +165,28 @@ export function StatusPill(props: Props) {
     return () => window.clearInterval(timer);
   }, [shown?.kind]);
 
-  const place = useAnchor(props.anchor, props.inset, props.avoid, shown !== null);
+  // The last pill, kept while it fades out (see "Leaving" above).
+  const [leaving, setLeaving] = useState<{ notice: PillNotice; now: number } | null>(null);
+  const lastShown = useRef<{ notice: PillNotice; now: number } | null>(null);
+  if (shown) lastShown.current = { notice: shown, now };
+  const shownKey = shown === null ? null : noticeKey(shown);
+  useLayoutEffect(() => {
+    if (shownKey !== null) {
+      setLeaving(null);
+      return;
+    }
+    const last = lastShown.current;
+    lastShown.current = null;
+    if (!last) return;
+    setLeaving(last);
+    const timer = window.setTimeout(() => setLeaving((current) => (current === last ? null : current)), LEAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [shownKey]);
+  const ghost = shown ? null : leaving;
+  const pill = shown ?? ghost?.notice ?? null;
+  const pillNow = shown ? now : (ghost?.now ?? now);
+
+  const place = useAnchor(props.anchor, props.inset, props.avoid, pill !== null);
   const style: React.CSSProperties = place
     ? { left: place.left, width: place.width, top: place.top }
     : { left: 0, right: 0, top: `max(${GAP}px, calc(env(safe-area-inset-top, 0px) + 8px))` };
@@ -168,28 +196,31 @@ export function StatusPill(props: Props) {
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-pill-announce="">
         {pillAnnouncement(live)}
       </p>
-      {shown && (
+      {pill && (
         <div
-          data-status-pill={shown.kind}
+          {...(ghost
+            ? // A ghost answers to its own name, so nothing that looks for the pill finds it.
+              { "data-pill-leaving": pill.kind, "aria-hidden": true, inert: true }
+            : { "data-status-pill": pill.kind })}
           className="pointer-events-none fixed z-[35] flex justify-center px-4"
           style={style}
         >
           <div
-            key={noticeKey(shown)}
-            {...(shown.kind === "sending" ? { "data-send-pending": "" } : {})}
-            className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full animate-appear items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
-              shown.kind === "sync" ? "pr-4" : "pr-1"
-            } ${shown.kind === "sync" && !shown.ok ? "text-danger" : "text-ink-body"}`}
+            key={ghost ? "leaving" : noticeKey(pill)}
+            {...(pill.kind === "sending" && !ghost ? { "data-send-pending": "" } : {})}
+            className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full ${ghost ? "animate-vanish" : "animate-appear"} items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
+              pill.kind === "sync" ? "pr-4" : "pr-1"
+            } ${pill.kind === "sync" && !pill.ok ? "text-danger" : "text-ink-body"}`}
           >
             <span
-              data-pill-text=""
-              {...(shown.kind === "undo" ? { "data-undo-label": "" } : {})}
+              {...(ghost ? {} : { "data-pill-text": "" })}
+              {...(pill.kind === "undo" && !ghost ? { "data-undo-label": "" } : {})}
               className="selectable min-w-0 truncate tabular-nums"
-              title={pillText(shown, now)}
+              title={pillText(pill, pillNow)}
             >
-              {pillText(shown, now)}
+              {pillText(pill, pillNow)}
             </span>
-            {shown.kind === "undo" && (
+            {pill.kind === "undo" && (
               <>
                 <PillButton onClick={props.onUndo} primary data="data-pill-undo">
                   Undo
@@ -199,7 +230,7 @@ export function StatusPill(props: Props) {
                 </PillButton>
               </>
             )}
-            {shown.kind === "sending" && (
+            {pill.kind === "sending" && (
               <>
                 <PillButton onClick={props.onUndoSend} primary data="data-send-undo">
                   Undo
@@ -209,16 +240,16 @@ export function StatusPill(props: Props) {
                 </PillButton>
               </>
             )}
-            {shown.kind === "update" && (
+            {pill.kind === "update" && (
               <>
                 {props.onWhatsNew && (
                   <PillButton onClick={props.onWhatsNew} data="data-pill-whats-new">
                     What's new
                   </PillButton>
                 )}
-                {shown.button && props.onUpdate && (
+                {pill.button && props.onUpdate && (
                   <PillButton onClick={props.onUpdate} primary data="data-pill-update">
-                    {shown.button}
+                    {pill.button}
                   </PillButton>
                 )}
                 <PillButton onClick={props.onDismissUpdate ?? (() => undefined)} label="Dismiss" data="data-pill-dismiss">
@@ -226,7 +257,7 @@ export function StatusPill(props: Props) {
                 </PillButton>
               </>
             )}
-            {shown.kind === "flash" && (
+            {pill.kind === "flash" && (
               <PillButton onClick={props.onDismissFlash} label="Dismiss" data="data-pill-dismiss">
                 <X size={14} strokeWidth={2.2} aria-hidden="true" />
               </PillButton>

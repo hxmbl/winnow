@@ -155,6 +155,8 @@ export default {
         // The reader appearing. 160ms: long enough to read as motion, short
         // enough that holding `j` does not queue up a backlog of cross-fades.
         appear: "appear 0.16s ease-out",
+        // The status pill leaving: a quick fade, kept short so the next notice never waits.
+        vanish: "vanish 0.14s ease-in forwards",
         // The sheet rising. Slightly slower, because a sheet is a bigger object
         // and a bigger object needs a little more time to arrive.
         sheet: "sheet 0.16s cubic-bezier(0.2, 0, 0, 1)",
@@ -177,6 +179,10 @@ export default {
       },
 
       keyframes: {
+        vanish: {
+          "0%": { opacity: "1" },
+          "100%": { opacity: "0" },
+        },
         appear: {
           "0%": { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
