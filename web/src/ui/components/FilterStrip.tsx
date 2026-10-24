@@ -254,9 +254,9 @@ export const FilterStrip = memo(function FilterStrip({
         // on the phone the gaps get only the rail's light haze (`.wn-rail-haze`).
         className={`wn-rail-scroller no-scrollbar relative flex items-center overflow-x-auto ${
           touch
-            ? "pointer-events-none -my-[20px] gap-[var(--wn-rail-gap)] py-[28px] [--wn-rail-gap:0.5rem] pl-[var(--wn-dock-left)] pr-[var(--wn-dock-right)] scroll-px-[var(--wn-dock-inset)] [&>*]:pointer-events-auto"
+            ? "pointer-events-none my-[-20px] gap-(--wn-rail-gap) py-[28px] [--wn-rail-gap:0.5rem] pl-(--wn-dock-left) pr-(--wn-dock-right) scroll-px-(--wn-dock-inset) *:pointer-events-auto"
             : floating
-              ? "pointer-events-none -my-[20px] gap-[var(--wn-rail-gap)] pl-0.5 pr-2 [--wn-rail-gap:0.375rem] py-[26px] [&>*]:pointer-events-auto"
+              ? "pointer-events-none my-[-20px] gap-(--wn-rail-gap) pl-0.5 pr-2 [--wn-rail-gap:0.375rem] py-[26px] *:pointer-events-auto"
               : "gap-1"
         }`}
 
@@ -266,7 +266,7 @@ export const FilterStrip = memo(function FilterStrip({
           tall as the strip's own box, so a wheel, a swipe or a tap in a gap between two
           chips lands on the strip instead of falling through to the list under it (the
           scroller itself lets events through, for the shadow padding above and below the
-          chips: inset by exactly that padding, the `-my-[20px]` above). First in the rail so the chips paint over it and the CSS that finds the
+          chips: inset by exactly that padding, the `my-[-20px]` above). First in the rail so the chips paint over it and the CSS that finds the
           first and last chip is undisturbed; sized in `update` above.
         */}
         {glass && (
@@ -299,7 +299,7 @@ export const FilterStrip = memo(function FilterStrip({
             type="button"
             data-rail-item=""
             onClick={onClear}
-            className={`${touch ? "wn-glass wn-liquid h-11 px-4" : floating ? "wn-glass wn-liquid h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+            className={`${touch ? "wn-glass wn-liquid h-11 px-4" : floating ? "wn-glass wn-liquid h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             <span>All</span>
           </button>
@@ -336,7 +336,7 @@ export const FilterStrip = memo(function FilterStrip({
               // Always set: a long label is truncated, and this is where it is whole.
               title={digit ? `${label} (${digit})` : label}
               aria-keyshortcuts={digit ?? undefined}
-              className={`relative flex ${tabHeight} items-center rounded-full text-ui whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              className={`relative flex ${tabHeight} items-center rounded-full text-ui whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                 touch ? "gap-2 px-4" : floating ? "gap-1.5 px-3.5" : "gap-1.5 px-2.5"
               }`}
             >
@@ -350,7 +350,7 @@ export const FilterStrip = memo(function FilterStrip({
                 address is, and an unbroken 60-character one was wider than a medium
                 window's whole rail. The full label is in the title and the name.
               */}
-              <span data-pill-label="" className="grid min-w-0 max-w-[14rem]">
+              <span data-pill-label="" className="grid min-w-0 max-w-56">
                 <span aria-hidden="true" className="invisible col-start-1 row-start-1 truncate font-semibold">
                   {label}
                 </span>

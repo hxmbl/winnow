@@ -83,7 +83,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
                   aria-current={account.active ? "true" : undefined}
                   disabled={props.busy && !account.active}
                   onClick={() => (account.active ? props.onClose() : props.onSwitch(account.id))}
-                  className={`flex w-full items-center gap-3 rounded-ctl px-2.5 text-left transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                  className={`flex w-full items-center gap-3 rounded-ctl px-2.5 text-left transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                     props.phone ? "min-h-14 py-2" : "min-h-12 py-1.5"
                   } ${account.active ? "bg-surface-selected" : ""}`}
                 >
@@ -112,7 +112,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
             data-account-add=""
             disabled={props.busy || full}
             onClick={props.onAdd}
-            className={`flex w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+            className={`flex w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
               props.phone ? "min-h-12" : "min-h-10"
             }`}
           >
@@ -133,7 +133,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
               data-account-demo=""
               disabled={props.busy}
               onClick={props.onOpenDemo}
-              className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <FlaskConical size={17} aria-hidden="true" className="ml-1.5 mr-1.5 shrink-0" />
               Open demo inbox
@@ -143,7 +143,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
             type="button"
             data-account-manage=""
             onClick={props.onManage}
-            className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <Settings size={17} aria-hidden="true" className="ml-1.5 mr-1.5 shrink-0" />
             Manage accounts
@@ -178,7 +178,7 @@ export function AccountButton({
       aria-label={label}
       title={label}
       onClick={onOpen}
-      className={`pointer-events-auto relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${glass ? "wn-glass" : "hover:bg-surface-hover"}`}
+      className={`pointer-events-auto relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${glass ? "wn-glass" : "hover:bg-surface-hover"}`}
     >
       <Avatar lookup={false} name={active?.email ?? "You"} address={active?.email ?? "you@winnow.demo"} />
       {active && <AccountDot color={active.color} scheme={scheme} className="absolute bottom-1 right-1" />}

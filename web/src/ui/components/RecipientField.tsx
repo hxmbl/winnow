@@ -229,7 +229,7 @@ export function RecipientField({
           // is one box. `focus-within` rather than `focus-visible` on the input: the focus
           // ring should follow the field the user is in, not the last thing they clicked.
           className={`flex min-h-[36px] flex-wrap items-center gap-1.5 rounded-field border bg-surface px-2.5 py-1 transition-colors ${
-            invalid.length > 0 ? "border-[var(--wn-danger)]" : "border-hairline"
+            invalid.length > 0 ? "border-(--wn-danger)" : "border-hairline"
           } focus-within:border-accent`}
         >
           {recipients.map((address, position) => {
@@ -243,7 +243,7 @@ export function RecipientField({
                 aria-invalid={bad || undefined}
                 className={`inline-flex max-w-full items-center gap-0.5 rounded-ctl border py-0.5 pl-2.5 pr-0.5 text-meta ${
                   bad
-                    ? "border-[var(--wn-danger)] text-[var(--wn-danger)]"
+                    ? "border-(--wn-danger) text-(--wn-danger)"
                     : "border-hairline bg-surface-sunken text-ink-body"
                 }`}
               >
@@ -254,7 +254,7 @@ export function RecipientField({
                   // "Remove" alone says which of the eight only by position.
                   aria-label={`Remove ${label}`}
                   onClick={() => removeAt(position)}
-                  className={`flex ${CHIP_BUTTON} shrink-0 items-center justify-center rounded-ctl text-current opacity-60 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring`}
+                  className={`flex ${CHIP_BUTTON} shrink-0 items-center justify-center rounded-ctl text-current opacity-60 transition-opacity hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring`}
                 >
                   <X size={13} strokeWidth={2.2} aria-hidden="true" />
                 </button>
@@ -301,9 +301,9 @@ export function RecipientField({
               // half-written one and losing the half would be its own small betrayal.
               commit(`${query}${pasted}`);
             }}
-            // `min-w-[7rem]` so the field does not collapse to nothing once chips fill the
+            // `min-w-28` so the field does not collapse to nothing once chips fill the
             // row, and `grow` so there is always somewhere to type.
-            className="min-w-[7rem] flex-1 text-ellipsis border-0 bg-transparent px-1 py-0.5 text-ui text-ink outline-none placeholder:text-ink-placeholder max-sm:text-read"
+            className="min-w-28 flex-1 text-ellipsis border-0 bg-transparent px-1 py-0.5 text-ui text-ink outline-hidden placeholder:text-ink-placeholder max-sm:text-read"
           />
         </div>
 

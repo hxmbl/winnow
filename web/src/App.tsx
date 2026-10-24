@@ -4012,7 +4012,7 @@ export function App({ store, existingInstall = true }: Props) {
   if (snapshot.status === "error") {
     return (
       <div className="flex h-dvh items-center justify-center bg-canvas px-6">
-        <div data-select-scope="" className="max-w-[36rem] text-center">
+        <div data-select-scope="" className="max-w-xl text-center">
           <h1 className="selectable text-title font-semibold tracking-[-0.01em] text-ink">Couldn&rsquo;t reach Gmail</h1>
           <p data-connection-error="" className="mt-2 text-ui text-ink-muted">
             {snapshot.error && <ErrorText text={snapshot.error} className="text-left" />}
@@ -4023,14 +4023,14 @@ export function App({ store, existingInstall = true }: Props) {
               onClick={() => {
                 void store.retryConnection();
               }}
-              className="rounded-ctl bg-accent px-4 py-2 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl bg-accent px-4 py-2 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               Try again
             </button>
             <button
               type="button"
               onClick={enterDemo}
-              className="rounded-ctl border border-control-border px-4 py-2 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="rounded-ctl border border-control-border px-4 py-2 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               Use the demo inbox
             </button>
@@ -4217,7 +4217,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 disabled={signingIn || resuming}
                 data-demo-cta={resumable ? "resume" : "connect"}
                 // The demo's one primary action, so it is the one filled control in view.
-                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
                 {demoCta}
@@ -4232,7 +4232,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 aria-label={sync.button}
                 title={sync.button}
                 data-sync-button=""
-                className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <RefreshCw
                   size={12}
@@ -4264,7 +4264,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         onClick={connectOrResume}
         disabled={signingIn || resuming}
         data-demo-cta={resumable ? "resume" : "connect"}
-        className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
         {demoCta}
@@ -4333,7 +4333,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           <button
             type="button"
             onClick={store.dismissError.bind(store)}
-            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Dismiss
           </button>
@@ -4353,7 +4353,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           <button
             type="button"
             onClick={store.dismissNotice.bind(store)}
-            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             Dismiss
           </button>
@@ -4380,7 +4380,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             <button
               type="button"
               onClick={store.dismissStoragePrompt.bind(store)}
-              className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               Dismiss
             </button>
@@ -4390,7 +4390,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 type="button"
                 disabled={snapshot.storagePrompt === "saving"}
                 onClick={() => void store.saveMailboxOffline()}
-                className="font-semibold text-ink hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
+                className="font-semibold text-ink hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
               >
                 {snapshot.storagePrompt === "saving" ? "Saving…" : "Save"}
               </button>
@@ -4398,7 +4398,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 type="button"
                 disabled={snapshot.storagePrompt === "saving"}
                 onClick={store.declineMailboxStorage.bind(store)}
-                className="font-semibold text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
+                className="font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
               >
                 Not now
               </button>
@@ -4526,7 +4526,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             on a row a bar's height further down than the one it meant.
           */}
           {phone && !selected && (
-            <div data-phone-chrome="" className="pointer-events-none absolute inset-x-0 top-0 z-[31]">
+            <div data-phone-chrome="" className="pointer-events-none absolute inset-x-0 top-0 z-31">
               {selection.size > 0 ? (
                 <div
                   data-phone-selection-slot=""

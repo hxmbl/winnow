@@ -268,7 +268,7 @@ function RichBody({
       const button = document.createElement("button");
       button.type = "button";
       button.className =
-        "flex h-7 w-7 items-center justify-center rounded-full bg-white text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring";
+        "flex h-7 w-7 items-center justify-center rounded-full bg-white text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
       button.setAttribute("aria-label", "Copy code");
       button.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 
@@ -416,7 +416,7 @@ function AsSent({ email, imagesAllowed }: { email: Email; imagesAllowed: boolean
       srcDoc={shown}
       sandbox=""
       referrerPolicy="no-referrer"
-      className="h-[38rem] w-full rounded-pane border border-hairline bg-white"
+      className="h-152 w-full rounded-pane border border-hairline bg-white"
     />
   );
 }
@@ -456,7 +456,7 @@ function Proxied({ email, document, fetched, blocked }: {
         srcDoc={shown}
         sandbox=""
         referrerPolicy="no-referrer"
-        className="h-[38rem] w-full rounded-pane border border-hairline bg-white"
+        className="h-152 w-full rounded-pane border border-hairline bg-white"
       />
     </div>
   );
@@ -500,7 +500,7 @@ function DarkToggle({ original, onToggle }: { original: boolean; onToggle: () =>
         aria-pressed={original}
         title={label}
         onClick={onToggle}
-        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-meta font-medium text-ink-muted transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-meta font-medium text-ink-muted transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         {original ? <Moon size={13} strokeWidth={1.9} aria-hidden="true" /> : <Sun size={13} strokeWidth={1.9} aria-hidden="true" />}
         {label}

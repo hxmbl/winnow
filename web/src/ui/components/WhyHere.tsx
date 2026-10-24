@@ -45,7 +45,7 @@ export function WhyHere({
           type="button"
           data-why-change=""
           onClick={onChange}
-          className="self-start rounded-ctl text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="self-start rounded-ctl text-meta font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           Change smart filters…
         </button>

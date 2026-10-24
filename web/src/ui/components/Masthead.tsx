@@ -150,7 +150,7 @@ export function Masthead({
           aria-label="Open sidebar"
           title={shortcutHint("Sidebar", "toggleSidebar")}
           aria-keyshortcuts="["
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <PanelLeft size={17} strokeWidth={1.9} aria-hidden="true" />
         </button>
@@ -165,7 +165,7 @@ export function Masthead({
           aria-label={VERSION_TOGGLE_LABEL}
           title={VERSION_TOGGLE_LABEL}
           onClick={onToggleLogo}
-          className="-ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="-ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <AppMark size={30} />
         </button>
@@ -180,13 +180,13 @@ export function Masthead({
               input is a bare text box inside a rounded field, so an outline on it would
               be a rectangle floating inside a pill.
 
-              The app's `ring` utility is deliberately not used here, because `ring-2`
+              The app's `ring-3` utility is deliberately not used here, because `ring-2`
               composes `box-shadow` out of custom properties and silently resolves to
               `none` on some elements; see the note in `index.css`.
             */
             // Solid, inside the glass: typed text and the placeholder never sit over
             // moving mail.
-            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-edge bg-canvas px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--wn-focusRing)]"
+            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-edge bg-canvas px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline-solid focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-(--wn-focusRing)"
           >
             <Search size={14} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
             <input
@@ -197,7 +197,7 @@ export function Masthead({
               onChange={(event) => onSearchChange(event.target.value)}
               onFocus={onSearchFocus}
               placeholder="Search"
-              className="min-w-0 flex-1 bg-transparent text-ui font-medium text-ink outline-none placeholder:text-ink-placeholder"
+              className="min-w-0 flex-1 bg-transparent text-ui font-medium text-ink outline-hidden placeholder:text-ink-placeholder"
             />
           </label>
           {/* The version, and beside it the update button (native builds only). */}
@@ -218,7 +218,7 @@ export function Masthead({
           */}
           <div className="flex shrink-0 items-center gap-0.5">
             <span
-              className="mr-2 hidden max-w-[9rem] truncate text-ui font-medium text-ink-muted xl:inline"
+              className="mr-2 hidden max-w-36 truncate text-ui font-medium text-ink-muted xl:inline"
               title={listTitle}
             >
               {listTitle}
@@ -229,7 +229,7 @@ export function Masthead({
               onClick={onPrev}
               aria-label="Previous message"
               disabled={!canPrev}
-              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronLeft size={17} />
             </button>
@@ -238,7 +238,7 @@ export function Masthead({
               onClick={onNext}
               aria-label="Next message"
               disabled={!canNext}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronRight size={17} />
             </button>
@@ -257,7 +257,7 @@ export function Masthead({
             onClick={onCompose}
             aria-label="Compose"
             title={shortcutHint("Compose", "compose")}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:px-3.5"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring lg:px-3.5"
           >
             <SquarePen size={16} strokeWidth={2} aria-hidden="true" />
             <span className="hidden lg:inline">Compose</span>
