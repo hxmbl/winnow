@@ -4759,7 +4759,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               // down while a menu, sheet or composer is over the reader.
               stepReach={phone ? { prev: store.canStep(-1), next: store.canStep(1) } : undefined}
               listPosition={
-                phone ? { position: view.selectedIndex >= 0 ? view.selectedIndex + 1 : null, total: Math.max(view.mailboxThreadCount, view.threads.length) } : undefined
+                phone ? { position: view.selectedIndex >= 0 ? view.selectedIndex + 1 : null, total: view.threads.length } : undefined
               }
               onStep={
                 phone && !menu && !filterPicker && !sidebarOpen && !composer && snapshot.overlay === "none" ? stepFromPill : undefined

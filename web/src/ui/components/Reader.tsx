@@ -806,7 +806,8 @@ type Props = {
   onStep?: (step: StepDelta) => void;
   /**
    * Phone: where the open message sits in the list it was opened from ("3 of 120"),
-   * top right of the header, as the desktop masthead shows it. `position` is null
+   * top right of the header, as the desktop masthead shows it. The list is the mailbox
+   * being read, narrowed by any smart filter or search, so N and M always agree. `position` is null
    * when the message is not in that list (the total alone is shown then).
    */
   listPosition?: { position: number | null; total: number };
