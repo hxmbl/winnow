@@ -1,7 +1,7 @@
 /**
  * The account switcher (1.4.0): the sheet the avatar in the phone top bar and the
  * desktop sidebar header opens. Each signed-in account with its avatar, address,
- * unread count and colour dot, the open one ticked; one tap switches. Then Add account,
+ * unread count and colour glow, the open one ticked; one tap switches. Then Add account,
  * with the Testing-mode note, the demo inbox, and Manage accounts, which opens the
  * Accounts page (`AccountsPage.tsx`).
  *
@@ -38,14 +38,28 @@ export type AccountSwitcherProps = {
   onClose: () => void;
 };
 
-/** The small coloured dot that tells accounts apart at a glance. */
-export function AccountDot({ color, scheme, className = "" }: { color: string; scheme: ThemeName; className?: string }) {
+/**
+ * The account's colour as light around its avatar (it was a dot badge until 1.6.3): a thin
+ * ring in the account's colour tells accounts apart, and the open account also gets a soft
+ * halo, which is how the inbox you're in reads at a glance. Static, so there is nothing for
+ * reduced motion to stop. Colour is never the only cue: the open account's row carries
+ * `aria-current` and a tick, and the trigger's label names the account. Under forced colours
+ * the browser drops the shadow, and those cues remain.
+ *
+ * Place it inside the `relative` wrapper that holds the avatar; it covers the avatar exactly.
+ */
+export function AccountGlow({ color, scheme, active }: { color: string; scheme: ThemeName; active: boolean }) {
+  const hex = accountColorHex(color, scheme);
+  // 8-digit hex rather than color-mix: the Linux and Android WebViews both read it.
+  const ring = `0 0 0 1.5px ${hex}`;
+  const halo = `0 0 10px 2px ${hex}${scheme === "light" ? "73" : "8C"}`;
   return (
     <span
       aria-hidden="true"
-      data-account-dot={color}
-      className={`inline-block h-3 w-3 shrink-0 rounded-full border-2 border-chrome ${className}`}
-      style={{ background: accountColorHex(color, scheme) }}
+      data-account-glow={color}
+      data-account-glow-active={active ? "" : undefined}
+      className="pointer-events-none absolute inset-0 rounded-full"
+      style={{ boxShadow: active ? `${ring}, ${halo}` : ring }}
     />
   );
 }
@@ -89,7 +103,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
                 >
                   <span className="relative shrink-0">
                     <Avatar lookup={false} name={account.email} address={account.email} />
-                    <AccountDot color={account.color} scheme={props.scheme} className="absolute -bottom-0.5 -right-0.5" />
+                    <AccountGlow color={account.color} scheme={props.scheme} active={account.active} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ui font-medium text-ink">{account.email || "Your account"}</span>
@@ -154,7 +168,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
   );
 }
 
-/** The avatar that opens the switcher: the open account's, with its colour dot. */
+/** The avatar that opens the switcher: the open account's, glowing in its colour. */
 export function AccountButton({
   accounts,
   scheme,
@@ -180,8 +194,10 @@ export function AccountButton({
       onClick={onOpen}
       className={`pointer-events-auto relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${glass ? "wn-glass" : "hover:bg-surface-hover"}`}
     >
-      <Avatar lookup={false} name={active?.email ?? "You"} address={active?.email ?? "you@winnow.demo"} />
-      {active && <AccountDot color={active.color} scheme={scheme} className="absolute bottom-1 right-1" />}
+      <span className="relative flex rounded-full">
+        <Avatar lookup={false} name={active?.email ?? "You"} address={active?.email ?? "you@winnow.demo"} />
+        {active && <AccountGlow color={active.color} scheme={scheme} active />}
+      </span>
       {others > 0 && (
         <span data-account-others="" aria-hidden="true" className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-accent" />
       )}

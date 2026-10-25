@@ -436,7 +436,9 @@ try {
       await page.locator("[data-account-switcher]").waitFor({ timeout: 5_000 });
     };
     await openSwitcher();
-    check("the switcher lists the account with its address and a colour dot", (await page.locator(`[data-account-row][data-account-email="${ADA}"] [data-account-dot]`).count()) === 1);
+    check("the switcher lists the account with its address, glowing in its colour", (await page.locator(`[data-account-row][data-account-email="${ADA}"] [data-account-glow]`).count()) === 1);
+    check("the open account glows and is marked current; there is no dot badge any more", (await page.locator(`[data-account-row][aria-current="true"] [data-account-glow-active]`).count()) === 1 && (await page.locator("[data-account-dot]").count()) === 0);
+    check("the trigger avatar glows for the open account", (await page.locator("[data-account-switcher-trigger] [data-account-glow-active]").count()) === 1);
     check("and says, under Add account, that Testing mode needs every address as a test user", (await page.locator("[data-account-switcher]").innerText()).includes("test users"));
     google.nextSignIn = BOB;
     await Promise.all([page.waitForURL(/\?|\/$/, { timeout: 15_000 }).catch(() => undefined), page.locator("[data-account-add]").click()]);

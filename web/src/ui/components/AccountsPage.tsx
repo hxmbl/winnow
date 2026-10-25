@@ -15,7 +15,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ArrowLeft, ArrowLeftRight, Check, ChevronLeft, ChevronRight, FlaskConical, KeyRound, LogOut, Plus, Settings as SettingsIcon } from "lucide-react";
 import { Sheet } from "./Overlay";
 import { Avatar } from "./Avatar";
-import { AccountDot } from "./AccountSwitcher";
+import { AccountGlow } from "./AccountSwitcher";
 import { SettingBlock, SettingLabel, Toggle } from "./SettingsControls";
 import { SettingsExplain } from "../settingsExplainContext";
 import { INFO_CLOSED, infoReducer } from "../settingsView";
@@ -281,7 +281,7 @@ function AccountsListScreen({
                 >
                   <span className="relative shrink-0">
                     <Avatar lookup={false} name={account.email} address={account.email} />
-                    <AccountDot color={account.color} scheme={props.scheme} className="absolute -bottom-0.5 -right-0.5" />
+                    <AccountGlow color={account.color} scheme={props.scheme} active={account.active} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ui font-medium text-ink">{account.email || "Your account"}</span>
@@ -383,7 +383,7 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
       <div className="flex items-center gap-3 px-2.5 pb-3 pt-2">
         <span className="relative shrink-0">
           <Avatar lookup={false} name={account.email} address={account.email} />
-          <AccountDot color={account.color} scheme={props.scheme} className="absolute -bottom-0.5 -right-0.5" />
+          <AccountGlow color={account.color} scheme={props.scheme} active={account.active} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="selectable block truncate text-ui font-medium text-ink">{email}</span>
