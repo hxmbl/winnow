@@ -46,7 +46,7 @@ xattr -dr com.apple.quarantine /Applications/Winnow.app
 
 ## Updates
 
-Winnow checks GitHub for new releases on launch and every few hours. Shows once in the status pill when an update is available. **What's new** shows release notes since your version.
+Winnow checks GitHub for new releases on launch and every few hours. Shows once in the status pill when an update is available. **What's new** shows release notes since your version. Every version's notes are also in [CHANGELOG.md](CHANGELOG.md); maintainers write them there before a release (see `native/README.md`, "Release notes").
 
 How it updates depends on how you run it:
 

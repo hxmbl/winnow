@@ -224,8 +224,9 @@ Run **Actions → Cut release → Run workflow** on `master`. Pick `patch`, `min
 `major` or an exact version, optionally a pre-release suffix (`beta.1` tags
 `v1.2.0-beta.1` and publishes it as a pre-release), and leave **publish** on.
 
-It runs `web/scripts/bump-version.mjs` to set the version in all six manifests,
-commits `Release vX.Y.Z` to `master`, tags it, and dispatches CI on the tag. A push
+It runs `web/scripts/bump-version.mjs` to set the version in all six manifests and
+move `CHANGELOG.md`'s Unreleased notes under the new version (see "Release notes"
+below), commits `Release vX.Y.Z` to `master`, tags it, and dispatches CI on the tag. A push
 made with `GITHUB_TOKEN` triggers no workflows, so the dispatch replaces the usual
 tag push. When CI passes it hands off to `release.yml`, which builds the draft. Its
 last job publishes the draft only if all four bundles are attached (plus the updater
@@ -234,10 +235,50 @@ release-signed. Anything missing (Android is allowed to fail) leaves
 the draft for you to finish or publish by hand.
 
 Pushing a `v*` tag by hand works the same way: bump the manifests yourself
-(`node web/scripts/bump-version.mjs X.Y.Z`, commit), push the tag, and once CI
+(`node web/scripts/bump-version.mjs X.Y.Z`, which also moves the changelog's
+Unreleased notes; commit), push the tag, and once CI
 passes the release builds and publishes behind the same guards (all four bundles,
 a release-signed APK), or stays a draft if one is missing. A `-suffix` tag is a
 pre-release; anything else becomes Latest.
+
+### Release notes
+
+`CHANGELOG.md` at the repository root ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/))
+is where release notes are written. Add user-facing entries under `## [Unreleased]`
+(`### Added`, `### Changed`, `### Removed`, `### Fixed`, `### Security`) as changes
+land. Then:
+
+- **Bump.** `bump-version.mjs <ver>` (in the bump PR, or Cut release's own bump) moves
+  Unreleased under `## [<ver>] - <today>`, adding to that section if it already exists
+  (the final release after its betas), and repoints the compare links. It refuses,
+  before changing any manifest, when the version would have no notes: no section and
+  an empty Unreleased. A bump to the version already in the manifests with an empty
+  Unreleased changes nothing. `--date YYYY-MM-DD` sets the date.
+- **Cut.** Cut release prints the tag's notes into its summary and fails before
+  tagging if there are none.
+- **Release body.** `release.yml`'s Prepare job writes the draft as `## What's new`
+  (the section), then the Downloads table, then GitHub's generated "What's Changed".
+- **latest.json.** Its `notes` are the body's "What's new" (so edits made on the
+  draft before it publishes are carried, as before), falling back to the tag's
+  `CHANGELOG.md` section if the heading was removed.
+
+A tag reads `## [<exact version>]` first (`v1.6.0-beta.2` → `## [1.6.0-beta.2]`); a
+pre-release then falls back to its plain version (`v1.7.0-beta.1` → `## [1.7.0]`, the
+notes so far), which is what a Cut release with a pre-release suffix produces. A stable
+version's section covers everything since the previous stable one, since the stable
+channel's What's new never shows the betas.
+
+**No notes, no release.** A tag whose `CHANGELOG.md` has no non-empty section fails
+the Prepare job with an error before any draft is created or anything is built.
+Generic text was the alternative, and it is what releases used to carry: it reaches
+every installed app's What's new and `latest.json`, can't be taken back once
+published, and a re-run costs only minutes. If a hand-pushed tag lacks its section,
+Prepare also tries the default branch's `CHANGELOG.md`, so the fix is to add the
+section on `master` and re-run the failed jobs; no re-tag needed.
+
+Locally: `node web/scripts/release-notes.mjs notes v1.6.3` prints a tag's notes,
+`whats-new` the body's opening, and `lint` checks the file's shape (CI runs it). The
+rules are in `web/src/core/updates/releaseNotes.ts`.
 
 ## Updates
 
@@ -267,7 +308,7 @@ the download deleted.
 `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. With them, a tag build also attaches
 `Winnow_<v>_universal.app.tar.gz`, its `.sig`, the AppImage's `.sig` and
-`latest.json` (whose `notes` are the release body), and the publish guard requires
+`latest.json` (whose `notes` are the release's "What's new", see "Release notes"), and the publish guard requires
 them. Without them the release builds and publishes as before, with no `latest.json`;
 installed apps then open the release page instead of updating themselves. The public
 key in `tauri.conf.json` must match the private key: replacing the key means every

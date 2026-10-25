@@ -8,12 +8,19 @@
  *   node scripts/bump-version.mjs 1.4.0    # exactly this (may equal the current one)
  *
  * Refuses to go backwards, and refuses when the manifests already disagree.
+ *
+ * It also moves CHANGELOG.md's `## [Unreleased]` entries under `## [<new version>]`
+ * (added to that section when it already exists, say for the final release after a
+ * beta), and refuses, before touching anything, when the new version would have no
+ * notes: no section and an empty Unreleased. `--date YYYY-MM-DD` sets the section's
+ * date (default: today, UTC). The release workflow fails the same way without notes.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promoteUnreleased } from "../src/core/updates/releaseNotes.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
@@ -24,8 +31,11 @@ function fail(message) {
   process.exit(1);
 }
 
-const arg = process.argv[2];
-if (!arg) fail("usage: bump-version.mjs <patch|minor|major|MAJOR.MINOR.PATCH>");
+const argv = process.argv.slice(2);
+const dateAt = argv.indexOf("--date");
+const date = dateAt >= 0 ? argv.splice(dateAt, 2)[1] : new Date().toISOString().slice(0, 10);
+const arg = argv[0];
+if (!arg) fail("usage: bump-version.mjs <patch|minor|major|MAJOR.MINOR.PATCH> [--date YYYY-MM-DD]");
 
 // check-version exits 1 with the list of disagreements, which it prints itself.
 let current;
@@ -53,6 +63,15 @@ const cmp = (a, b) => {
   return 0;
 };
 if (cmp(next, current) < 0) fail(`${next} is older than the current ${current}`);
+
+// The notes first: a version without any is refused before a manifest changes.
+const changelogPath = resolve(repo, "CHANGELOG.md");
+let changelog;
+try {
+  changelog = promoteUnreleased(readFileSync(changelogPath, "utf8"), next, date);
+} catch (error) {
+  fail(`CHANGELOG.md: ${error.message}`);
+}
 
 /** Replace exactly one match of `pattern` in `path`, or fail naming the file. */
 function edit(path, pattern, replace) {
@@ -107,6 +126,11 @@ edit("native/src-tauri/tauri.conf.json", new RegExp(`^(  "version": )"${esc}"`, 
   if (i < 0) fail(`${path}: no winnow-app package`);
   blocks[i] = blocks[i].replace(new RegExp(`^version = "${esc}"$`, "m"), `version = "${next}"`);
   writeFileSync(file, blocks.join(""));
+}
+
+if (changelog.action !== "kept") {
+  writeFileSync(changelogPath, changelog.text);
+  console.error(`CHANGELOG.md: Unreleased ${changelog.action === "created" ? "moved under" : "added to"} ## [${next}]`);
 }
 
 // Prove every file now agrees on the new version.

@@ -92,6 +92,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
           PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # Any tag with a "-" is a pre-release and never Latest
@@ -104,7 +105,26 @@ jobs:
             exit 0
           fi
 
-          cat > "$RUNNER_TEMP/notes.md" <<'EOF'
+          # "What's new" is the tag's CHANGELOG.md section (web/scripts/release-notes.mjs):
+          # its exact version, or a pre-release's plain one. If the tag's copy has none,
+          # the default branch's is tried, so notes added after a tag was pushed count on
+          # a re-run. Neither: the release stops here, before any draft or build, rather
+          # than going out with generic notes.
+          WHATS_NEW="$RUNNER_TEMP/whats-new.md"
+          if node web/scripts/release-notes.mjs whats-new "$TAG" > "$WHATS_NEW" 2> "$RUNNER_TEMP/notes.err"; then
+            cat "$RUNNER_TEMP/notes.err" >&2
+          else
+            echo "The tag's CHANGELOG.md has no notes for $TAG; trying $DEFAULT_BRANCH's."
+            gh api -H "Accept: application/vnd.github.raw" \
+              "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$DEFAULT_BRANCH" \
+              > "$RUNNER_TEMP/CHANGELOG.md" || : > "$RUNNER_TEMP/CHANGELOG.md"
+            node web/scripts/release-notes.mjs whats-new "$TAG" "$RUNNER_TEMP/CHANGELOG.md" > "$WHATS_NEW"
+            echo "::notice title=Release notes::$TAG's notes come from $DEFAULT_BRANCH's CHANGELOG.md."
+          fi
+          cat "$WHATS_NEW"
+
+          cp "$WHATS_NEW" "$RUNNER_TEMP/notes.md"
+          cat >> "$RUNNER_TEMP/notes.md" <<'EOF'
           ## Downloads
 
           | Platform | File |
@@ -665,8 +685,9 @@ jobs:
         run: gh release upload "$TAG" "$RUNNER_TEMP"/android/*.apk --clobber --repo "$GITHUB_REPOSITORY"
 
   # latest.json for the Tauri updater, from the signatures the builds attached and the
-  # release notes (so the updater's `notes` match the Releases page). Only with the
-  # signing key; publishing regenerates it so notes edited on the draft are carried.
+  # release's "What's new" (its CHANGELOG.md section, so the updater's `notes` match the
+  # Releases page). Only with the signing key; publishing regenerates it so notes
+  # edited on the draft are carried.
   updater-manifest:
     name: Updater manifest
     needs: [prepare, build]
@@ -697,7 +718,10 @@ jobs:
           SIGS="$RUNNER_TEMP/sigs"
           mkdir -p "$SIGS"
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig' --dir "$SIGS" --clobber
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          # The notes are the body's "What's new" (seeded from CHANGELOG.md, and whatever
+          # was edited on the draft since), else the tag's CHANGELOG.md section.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          node web/scripts/release-notes.mjs from-body "$RUNNER_TEMP/body.md" "$TAG" > "$RUNNER_TEMP/notes.md"
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             node web/scripts/updater-manifest.mjs "$SIGS" "$VERSION" "$TAG" "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/latest.json"
           gh release upload "$TAG" "$RUNNER_TEMP/latest.json" --clobber --repo "$GITHUB_REPOSITORY"
@@ -775,7 +799,10 @@ jobs:
           SIGS="$RUNNER_TEMP/sigs"
           mkdir -p "$SIGS"
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig' --dir "$SIGS" --clobber
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          # The notes are the body's "What's new" (seeded from CHANGELOG.md, and whatever
+          # was edited on the draft since), else the tag's CHANGELOG.md section.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          node web/scripts/release-notes.mjs from-body "$RUNNER_TEMP/body.md" "$TAG" > "$RUNNER_TEMP/notes.md"
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             node web/scripts/updater-manifest.mjs "$SIGS" "$VERSION" "$TAG" "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/latest.json"
           gh release upload "$TAG" "$RUNNER_TEMP/latest.json" --clobber --repo "$GITHUB_REPOSITORY"
