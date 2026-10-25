@@ -59,8 +59,14 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 
 # Self-update (`src/updater.rs`): the macOS app and the AppImage replace themselves
 # from the release's signed `latest.json`. Linux and macOS only; Windows has no build.
+#
+# Default features minus `zip`. That feature only unpacks Windows `.zip` updates and
+# gzipped AppImages (`.AppImage.tar.gz`, the old v1 updater format). Winnow ships neither:
+# the updater artifacts are a plain `.AppImage` and the macOS `.app.tar.gz`, whose tar
+# and flate2 the plugin always uses on macOS. Leaving it on kept `zip` 4.x in Cargo.lock,
+# with path-traversal advisories (RUSTSEC-2026-0367/-0368/-0369), for code never built.
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 
 # Android: `keyring` has no Android backend, so secrets go through the keyring
 # project's own Android store instead: values in SharedPreferences, encrypted
