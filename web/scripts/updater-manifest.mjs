@@ -6,7 +6,8 @@
  *
  * Finds `*_universal.app.tar.gz.sig` and `*.AppImage.sig` in the directory, reads each
  * signature, and builds the manifest with `src/core/updates/manifest.ts` (run directly:
- * Node 23.6+ strips the types). The notes are the GitHub release body, so the updater's
+ * Node 23.6+ strips the types). The notes are the release's "What's new", which is the
+ * version's CHANGELOG.md section (`release-notes.mjs from-body`), so the updater's
  * `notes` match the Releases page. Fails when neither signature is there.
  */
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";

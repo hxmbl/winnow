@@ -94,6 +94,10 @@ jobs:
       - name: Check versions
         run: node scripts/check-version.mjs
 
+      # Each version's section is its release notes (release.yml), so the file must parse.
+      - name: Check CHANGELOG.md
+        run: node scripts/release-notes.mjs lint
+
       - name: Check the smoke shards cover npm run smoke
         run: node scripts/smoke-shards.mjs --check
 

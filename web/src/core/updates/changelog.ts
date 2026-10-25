@@ -3,7 +3,9 @@
  * newest, newest first, and a small Markdown reader for them.
  *
  * The notes are each release's `body` from GitHub (`/releases`), the same text the
- * Releases page shows and the release workflow copies into `latest.json`'s `notes`.
+ * Releases page shows. Since the CHANGELOG.md wiring it opens with "What's new" (the
+ * version's CHANGELOG.md section, also `latest.json`'s `notes`; see `releaseNotes.ts`),
+ * then the Downloads table.
  *
  * The Markdown is parsed into plain data, never HTML: the UI renders it as React text
  * nodes, so nothing in a release body can run script, embed a frame, or load a remote

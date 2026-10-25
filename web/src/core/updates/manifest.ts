@@ -27,7 +27,7 @@ export type ManifestInput = {
   tag: string;
   /** `owner/repo`. */
   repo: string;
-  /** The release notes (the GitHub release body). */
+  /** The release notes: the release body's "What's new", i.e. the version's CHANGELOG.md section. */
   notes: string;
   /** RFC 3339. */
   pubDate: string;

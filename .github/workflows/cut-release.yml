@@ -1,8 +1,9 @@
 name: Cut release
 
-# One button for a release: bumps every manifest, commits and tags on master, then
-# runs CI on the tag, which hands off to Release. With "publish" on (the default),
-# Release takes the draft live once every bundle is attached and the APK is
+# One button for a release: bumps every manifest, moves CHANGELOG.md's Unreleased
+# notes under the new version (refusing a version with no notes), commits and tags on
+# master, then runs CI on the tag, which hands off to Release. With "publish" on (the
+# default), Release takes the draft live once every bundle is attached and the APK is
 # release-signed; otherwise it stops at the draft. A hand-pushed tag publishes the
 # same way, behind the same guards.
 on:
@@ -80,6 +81,15 @@ jobs:
           fi
           # Same check the release itself makes, so a bad tag fails here, before any push.
           node web/scripts/check-version.mjs "$TAG" > /dev/null
+          # bump-version.mjs moved CHANGELOG.md's Unreleased under the version (or refused
+          # when there was nothing to move). Release takes "What's new" and latest.json's
+          # notes from that section; a tag without one is never cut.
+          node web/scripts/release-notes.mjs notes "$TAG" > "$RUNNER_TEMP/notes.md"
+          {
+            echo "### What's new in $TAG"
+            echo
+            cat "$RUNNER_TEMP/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
           printf 'version=%s\ntag=%s\n' "$VERSION" "$TAG" | tee -a "$GITHUB_OUTPUT"
 
       - name: Commit, tag and push

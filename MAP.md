@@ -45,7 +45,8 @@ web/                The whole product: logic, UI and the Gmail client, in one bu
       data/         The demo mailbox seed.
       offline/      The offline action queue (§5.10); saving mail offline and the IndexedDB store (§5.10a).
       updates/      Update checks: versions, release assets per runtime, release notes, latest.json;
-                    the stable/Beta channels and the pre-release rule (releaseFlags.ts).
+                    the stable/Beta channels and the pre-release rule (releaseFlags.ts);
+                    CHANGELOG.md → release notes (releaseNotes.ts).
     platform/       The boundary. Two implementations (web.ts, desktop.ts), one interface.
     ui/             React components and the pure helpers beside them.
   scripts/          check-version.mjs, bump-version.mjs, smoke.mjs, sweep.mjs, bundle.mjs — see §11.
@@ -1223,7 +1224,15 @@ signed in). "Sign-out" means signing out of that account, which erases its names
   rejects anything else. `tauri.conf.json` is the authority.
 - `bump-version.mjs` — sets one version in all six manifests (`patch`, `minor`,
   `major` or exact), editing in place so formatting survives, then re-runs
-  `check-version.mjs`. Used by the Cut release workflow.
+  `check-version.mjs`. Also moves `CHANGELOG.md`'s `## [Unreleased]` under the new
+  version, and refuses (before touching a manifest) a version that would have no
+  notes. Used by the Cut release workflow.
+- `release-notes.mjs` — a tag's `CHANGELOG.md` section (`notes`, `whats-new`), the
+  notes in a release body (`from-body`), `promote` and `lint` (CI's npm-checks).
+  Rules in `core/updates/releaseNotes.ts`: exact version, then a pre-release's plain
+  version, never generic text. `release.yml` opens the release body with it ("What's
+  new" above Downloads) and fills `latest.json`'s `notes` from it; a tag without a
+  section fails Prepare. See `native/README.md`, "Release notes".
 - `bundle.mjs` — bundle kinds are named per host (asking macOS for a `deb`
   declines quietly rather than erroring), and success is asserted by looking for
   the file. Preflights `hdiutil` and `create-dmg` so a missing one is a sentence
