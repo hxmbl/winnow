@@ -1220,6 +1220,7 @@ signed in). "Sign-out" means signing out of that account, which erases its names
 | Smoke shards | `node scripts/smoke-shards.mjs <shard>` | How CI runs `npm run smoke`: as a matrix of parallel shards (`smoke-shard` in `ci.yml`, aggregated into the one `Smoke test` check). `smoke.mjs` is cut into parts gated by `part("…")` — `core` (the shared-page sequence, boot through deep links) and the self-contained sections and modules after it — selected with `WINNOW_SMOKE_PARTS=a,b` (unset runs all). `smoke-shards.mjs` maps parts and the standalone scripts to shards; `--check` (run by `npm-checks`) fails unless every part and every script in `npm run smoke` is in exactly one shard and the CI matrix lists exactly those shards. A new section after `core` gets its own `part("…")` gate and a shard entry. |
 | Theme sweep | `npm run sweep` | Manual, never in `npm run smoke` or CI. `scripts/sweep.mjs` photographs every mode (light, dark, very dark (`oled`); `system` once each way) × every accent in `ACCENT_THEMES` (read from `core/model/appearance.ts`, so a new accent is swept for free), plus the custom accent once per mode with one fixed colour (`SWEEP_CUSTOM_HEX`, a honey light mode has to darken, so the adjusted note is in the shots), on a phone (390×844, Android UA, safe-area insets) and a desktop (1440×900): inbox, reader, drawer, Settings top and scrolled to the end, the Appearance picker, compose, the status pill with Undo, and inbox clear (the shared fake Gmail with an empty inbox). Then the settings and OS preferences that change the look (sort, remote images, brand logos, Gravatar, reduced transparency, forced colours, left-handed on a phone, a small phone, a tablet) once each, a Settings dropdown open (phone and desktop, light and dark), and the phone reader scrolled partway down the long demo newsletter with its pill folded (both hands × light/dark/OLED). Checks as it goes — page/console errors, text clipped without an ellipsis or pushed off-screen, sideways scroll, and WCAG AA for primary and pill/chip text measured against the pixels behind it (a second shot with text hidden, so glass counts) — and writes contact sheets per mode × device, `sweep.pdf` and `sweep-report.md`. Reports, never fails on a finding. `WINNOW_SWEEP_OUT` (default `web/.sweep`, git-ignored), `WINNOW_SWEEP_PHASE=capture\|sheets`, `WINNOW_SWEEP_MODES` / `WINNOW_SWEEP_DEVICES` for a subset, `WINNOW_SWEEP_JOBS` (3); port 4573 by default. |
 | Secrets | `minesweep --config .minesweep.yml --fail-on high .` | CI job 1, and the pre-commit hook. |
+| Dependency advisories | `node web/scripts/audit-advisories.mjs` | CI job `advisories`: `npm audit` (full and `--omit=dev`) and `cargo audit` on the committed lockfiles; fails only on a new high/critical shipped advisory. Accepted ones in `.github/advisory-allowlist.json`; policy in `SECURITY.md`. |
 
 `web/scripts/`:
 
@@ -1227,6 +1228,10 @@ signed in). "Sign-out" means signing out of that account, which erases its names
   `package-lock.json` twice, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock`), all
   plain `MAJOR.MINOR.PATCH`, because a suffix lives only in the tag and WiX
   rejects anything else. `tauri.conf.json` is the authority.
+- `audit-advisories.mjs` — the dependency advisory gate (CI's `advisories` job): runs
+  `npm audit` and `cargo audit` against the lockfiles, never installs or updates, and
+  fails only on an unaccepted high/critical advisory in what ships. The allowlist is
+  `.github/advisory-allowlist.json`; the policy, `SECURITY.md`.
 - `bump-version.mjs` — sets one version in all six manifests (`patch`, `minor`,
   `major` or exact), editing in place so formatting survives, then re-runs
   `check-version.mjs`. Also moves `CHANGELOG.md`'s `## [Unreleased]` under the new

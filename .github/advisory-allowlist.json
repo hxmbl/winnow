@@ -1,0 +1,50 @@
+{
+  "$comment": "Advisories accepted or inapplicable for Winnow, read by web/scripts/audit-advisories.mjs (CI job 'Dependency advisories'). Each entry needs id, ecosystem (npm|cargo), package and reason; tracking and revisit say where the decision lives and what would reopen it. An entry matches one advisory in one package only. Remove an entry when the scanner stops reporting it (the job prints it as STALE). Policy: SECURITY.md, 'Dependency advisories'.",
+  "advisories": [
+    {
+      "id": "RUSTSEC-2024-0429",
+      "ecosystem": "cargo",
+      "package": "glib",
+      "kind": "unsound",
+      "reason": "glib 0.18.5 is Linux-only (Tauri -> wry/tao/muda/tray-icon -> gtk 0.18 / webkit2gtk 2.0.2). The unsound VariantStrIter is only constructed by Variant::array_iter_str, and neither Winnow nor any crate in the locked tree calls it (checked at f3dd399). Fixed only in glib >= 0.20, which the GTK3 stack (gtk ^0.18, webkit2gtk =2.0.2, required by the newest wry 0.57.1) cannot take.",
+      "tracking": "STRM-410",
+      "revisit": "Tauri/wry moving off gtk 0.18 / webkit2gtk 2.0.x, a glib 0.18.x release, or any crate in the tree starting to call array_iter_str (re-run the grep in SECURITY.md)."
+    },
+    {
+      "id": "RUSTSEC-2024-0370",
+      "ecosystem": "cargo",
+      "package": "proc-macro-error",
+      "kind": "unmaintained",
+      "reason": "Unmaintained, not a vulnerability. Build-time proc macro on Linux only (glib-macros / gtk3-macros in the GTK3 stack); nothing of it ships in the binary. No compatible replacement without leaving gtk-rs 0.18.",
+      "tracking": "STRM-409",
+      "revisit": "Same trigger as glib: the GTK3 stack moving off gtk-rs 0.18."
+    },
+    {
+      "id": "RUSTSEC-2026-0370",
+      "ecosystem": "cargo",
+      "package": "zvariant",
+      "kind": "unmaintained",
+      "reason": "Unmaintained (merged into zbus 6), not a vulnerability. Linux D-Bus stack through zbus 5.19 (notify-rust, tauri-plugin-opener, tauri-plugin-single-instance); the newest stable release of each (4.18.2, 2.7.2, 2.5.4) still requires zbus ^5.",
+      "tracking": "STRM-409",
+      "revisit": "notify-rust / tauri-plugin-opener / tauri-plugin-single-instance releasing on zbus 6."
+    },
+    {
+      "id": "RUSTSEC-2026-0371",
+      "ecosystem": "cargo",
+      "package": "zbus_names",
+      "kind": "unmaintained",
+      "reason": "Unmaintained (merged into zbus 6), not a vulnerability. Same Linux D-Bus path as zvariant.",
+      "tracking": "STRM-409",
+      "revisit": "notify-rust / tauri-plugin-opener / tauri-plugin-single-instance releasing on zbus 6."
+    },
+    {
+      "id": "RUSTSEC-2026-0372",
+      "ecosystem": "cargo",
+      "package": "zvariant_derive",
+      "kind": "unmaintained",
+      "reason": "Unmaintained (merged into zbus 6), not a vulnerability. Build-time derive macro for zvariant on Linux.",
+      "tracking": "STRM-409",
+      "revisit": "notify-rust / tauri-plugin-opener / tauri-plugin-single-instance releasing on zbus 6."
+    }
+  ]
+}
