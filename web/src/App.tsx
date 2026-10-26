@@ -175,7 +175,7 @@ import { DriveConsent } from "./ui/components/DriveConsent";
 import { DriveGrantNeeded } from "./ui/components/DriveGrantNeeded";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import type { OfflineQueue } from "./core/offline/queue";
-import { OfflineIndicator } from "./ui/components/OfflineIndicator";
+import { useSyncIndicator } from "./ui/useSyncIndicator";
 import { CONNECTION_LOST } from "./ui/offlineStatus";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
@@ -737,6 +737,8 @@ export function App({ store, existingInstall = true }: Props) {
   driveAccessRef.current = driveAccess;
   /** The bridge's offline queue, as state so the indicator mounts when it exists. */
   const [offlineQueue, setOfflineQueue] = useState<OfflineQueue | null>(null);
+  // The small disc by the status pill while the offline queue holds changes.
+  const syncIndicator = useSyncIndicator(offlineQueue);
 
   // ── Google contacts ──────────────────────────────────────────────────────
 
@@ -4423,8 +4425,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         />
       )}
 
-      <OfflineIndicator queue={offlineQueue} />
-
       {/*
         The status pill: the one place an action says what it did and offers Undo
         ("Moved to Trash.", "Draft discarded.", "Sending in 8s…", "Draft saved."), and
@@ -4453,6 +4453,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         inset={phone ? phoneBarHeight : listChromeHeight}
         // The phone demo strip (Connect Gmail) heads the list right where the pill rests.
         avoid={phone ? '[data-briefing="compact"]' : undefined}
+        sync={syncIndicator}
       />
 
       {/*

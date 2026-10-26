@@ -1,6 +1,7 @@
 /**
- * The "Offline: N changes waiting" line, as a pure function of the queue's status
- * (`core/offline/queue.ts`), so its wording and when it shows are tested without React.
+ * The sync indicator's words ("Offline: N changes waiting", "Syncing 1 change…"), as a
+ * pure function of the queue's status (`core/offline/queue.ts`), so its wording and when
+ * it shows are tested without React. The indicator itself is `syncIndicator.ts`.
  *
  * Subtle on purpose: it is a fact about the mail, not an error. It shows only while
  * something waits, and says why it waits, because "waiting" alone reads like a hang.

@@ -7,6 +7,11 @@
  * Gmail (the pattern the pull-to-refresh checks use) and Playwright's network emulation:
  * `setOffline(true)` turns `navigator.onLine` false and fires `offline`, and every request
  * fails the way a dead network does.
+ *
+ * The sync indicator (`ui/components/SyncIndicator.tsx`) is checked here too: a small
+ * disc by the status pill that replaced the "Syncing 1 change…" bar, which pushed the
+ * whole app down. In the demo, which has no queue, `window.__WINNOW_SYNC_PREVIEW__`
+ * forces a status (honoured only under automation).
  */
 
 const FAKE_TOKEN = ["fake", "offline", "access"].join("-");
@@ -179,6 +184,8 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
         return JSON.parse((id && localStorage.getItem(`winnow.offlineQueue.v1@${id}`)) ?? "null")?.entries?.length ?? 0;
       });
     check("online with nothing waiting, there is no offline line", (await indicator.count()) === 0);
+    const listTop = () => p.evaluate(() => document.querySelector("[data-row-count]")?.getBoundingClientRect().top ?? null);
+    const topBefore = await listTop();
 
     await ctx.setOffline(true);
     await p.waitForTimeout(200);
@@ -198,6 +205,10 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
     await p.waitForTimeout(400);
 
     const offlineShape = {
+      listTop: await listTop(),
+      // The red "Failed to connect" bar is in the layout on purpose; the indicator isn't.
+      redBar: await p.evaluate(() => document.querySelector("[data-connection-lost]")?.getBoundingClientRect().height ?? 0),
+      disc: await p.locator("[data-sync-indicator]").getAttribute("data-sync-indicator").catch(() => null),
       archivedGone: (await rowFor(0).count()) === 0,
       text: (await indicator.textContent().catch(() => null)) ?? null,
       count: await indicator.getAttribute("data-offline-queue").catch(() => null),
@@ -216,6 +227,11 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
       JSON.stringify(offlineShape),
     );
     check("and the queue is kept on the device", offlineShape.saved === 3, String(offlineShape.saved));
+    check(
+      "and the sync indicator is a still disc that moves nothing: only the red bar's height moves the list",
+      offlineShape.disc === "waiting" && offlineShape.listTop !== null && Math.abs(offlineShape.listTop - topBefore - offlineShape.redBar) < 0.5,
+      JSON.stringify({ disc: offlineShape.disc, top: offlineShape.listTop, topBefore, redBar: offlineShape.redBar }),
+    );
     check(
       "and a red bar over the mail says Gmail can't be reached",
       offlineShape.bar === "Failed to connect to Gmail. Check your connection.",
@@ -269,5 +285,122 @@ export async function smokeOffline({ browser, URL, check, section, errors }) {
     await p.locator("[data-connection-lost]").waitFor({ state: "detached", timeout: 15_000 }).catch(() => undefined);
     check("and the first sync that gets through takes the bar away", (await p.locator("[data-connection-lost]").count()) === 0);
     await ctx.close();
+  }
+
+  section("sync indicator");
+  {
+    const SYNCING = { waiting: 1, sends: 0, state: "replaying" };
+    const open = async (options) => {
+      const ctx = await browser.newContext(options);
+      await ctx.addInitScript(() => localStorage.setItem("winnow.preferences.v1", JSON.stringify({ tourDone: true })));
+      const p = await ctx.newPage();
+      p.on("pageerror", (error) => errors.push(String(error)));
+      await p.goto(URL, { waitUntil: "networkidle" });
+      await p.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+      await p.waitForTimeout(300);
+      return { ctx, p };
+    };
+    const force = (p, status) =>
+      p.evaluate((value) => {
+        window.__WINNOW_SYNC_PREVIEW__ = value;
+        window.dispatchEvent(new Event("winnow-sync-preview"));
+      }, status);
+    const measure = (p) =>
+      p.evaluate(() => {
+        const box = (el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width };
+        };
+        const disc = document.querySelector("[data-sync-indicator]");
+        let fixed = false;
+        for (let el = disc; el; el = el.parentElement) if (getComputedStyle(el).position === "fixed") fixed = true;
+        return {
+          listTop: document.querySelector("[data-row-count]")?.getBoundingClientRect().top ?? null,
+          list: box(document.querySelector("[data-row-count]")),
+          disc: box(disc),
+          fixed,
+          hidden: disc?.getAttribute("aria-hidden") ?? null,
+          title: disc?.getAttribute("title") ?? null,
+          placement: disc?.getAttribute("data-sync-placement") ?? null,
+          status: (document.querySelector("[data-sync-announce]")?.textContent ?? "").trim(),
+          role: document.querySelector("[data-sync-announce]")?.getAttribute("role") ?? null,
+          pill: box(document.querySelector("[data-status-pill] > div > div")),
+          spinner: disc ? getComputedStyle(disc.querySelector("[data-sync-spinner]")).display : null,
+          dot: disc ? getComputedStyle(disc.querySelector("[data-sync-dot]")).display : null,
+        };
+      });
+
+    for (const [name, options] of [
+      ["desktop", { viewport: { width: 1440, height: 900 } }],
+      ["phone", { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }],
+    ]) {
+      const { ctx, p } = await open(options);
+      const before = await measure(p);
+      await force(p, SYNCING);
+      await p.waitForTimeout(150);
+      const early = await measure(p);
+      check(`${name}: a quick sync doesn't flash the indicator (nothing in its first 150 ms)`, early.disc === null && early.status === "", JSON.stringify(early));
+      await p.locator("[data-sync-indicator]").waitFor({ timeout: 3_000 }).catch(() => undefined);
+      await p.waitForTimeout(250);
+      const on = await measure(p);
+      check(
+        `${name}: syncing shows a small fixed disc and the inbox list's top doesn't move`,
+        on.disc !== null && on.fixed && on.disc.w <= 32 && on.listTop === before.listTop,
+        JSON.stringify({ before: before.listTop, on }),
+      );
+      check(
+        `${name}: it says "Syncing 1 change…" in a polite status region; the disc itself is decoration with the same tooltip`,
+        on.status === "Syncing 1 change…" && on.role === "status" && on.hidden === "true" && on.title === "Syncing 1 change…",
+        JSON.stringify(on),
+      );
+      check(
+        `${name}: with no pill it sits centred over the list, where the pill rests`,
+        on.placement === "centre" && on.list && Math.abs(on.disc.cx - on.list.cx) <= 2,
+        JSON.stringify({ disc: on.disc, list: on.list }),
+      );
+      check(`${name}: it spins (no reduced motion)`, on.spinner !== "none" && on.dot === "none", JSON.stringify(on));
+      await force(p, null);
+      await p.locator("[data-sync-indicator]").waitFor({ state: "detached", timeout: 3_000 }).catch(() => undefined);
+      const off = await measure(p);
+      check(`${name}: when the queue empties it fades away and the list still hasn't moved`, off.disc === null && off.status === "" && off.listTop === before.listTop, JSON.stringify(off));
+      await ctx.close();
+    }
+
+    {
+      const { ctx, p } = await open({ viewport: { width: 1440, height: 900 } });
+      await force(p, SYNCING);
+      await p.locator("[data-sync-indicator]").waitFor({ timeout: 3_000 }).catch(() => undefined);
+      await p.locator("body").click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+      await p.keyboard.press("j");
+      await p.waitForTimeout(120);
+      await p.keyboard.press("e");
+      await p.locator("[data-status-pill]").waitFor({ timeout: 4_000 }).catch(() => undefined);
+      await p.waitForTimeout(300);
+      const beside = await measure(p);
+      check(
+        "with the pill showing, the disc sits just right of it, level with it",
+        beside.placement === "beside" && beside.pill && beside.disc.left >= beside.pill.right && beside.disc.left - beside.pill.right <= 12 &&
+          Math.abs(beside.disc.cy - beside.pill.cy) <= 1.5,
+        JSON.stringify({ disc: beside.disc, pill: beside.pill }),
+      );
+      await ctx.close();
+    }
+
+    {
+      const { ctx, p } = await open({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+      await force(p, SYNCING);
+      await p.locator("[data-sync-indicator]").waitFor({ timeout: 3_000 }).catch(() => undefined);
+      const still = await measure(p);
+      check("under reduced motion it doesn't spin: a still dot instead", still.spinner === "none" && still.dot !== "none", JSON.stringify(still));
+      await force(p, { waiting: 2, sends: 0, state: "offline" });
+      await p.waitForTimeout(100);
+      const waiting = await p.evaluate(() => ({
+        kind: document.querySelector("[data-sync-indicator]")?.getAttribute("data-sync-indicator") ?? null,
+        status: (document.querySelector("[data-sync-announce]")?.textContent ?? "").trim(),
+      }));
+      check("changes waiting offline: a still cloud that says so", waiting.kind === "waiting" && waiting.status === "Offline: 2 changes waiting", JSON.stringify(waiting));
+      await ctx.close();
+    }
   }
 }

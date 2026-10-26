@@ -16,6 +16,10 @@
  * every tick of a countdown) and that Undo is there; the pill itself is ordinary
  * buttons in reading order. Reduced motion: the global rule makes the entrance instant.
  *
+ * The sync indicator rides in the same row (`SyncIndicator.tsx`): a small disc beside
+ * the pill on its right, or where the pill rests when there is no pill. It replaced the
+ * "Syncing 1 change…" bar that pushed the whole app down; like the pill it takes no room.
+ *
  * Leaving: when nothing is left to say, the last pill stays for `LEAVE_MS` as a ghost
  * (no buttons to hit, out of the accessibility tree) while it fades out, so it eases
  * away instead of blinking off. A new notice during the fade replaces it at once.
@@ -23,6 +27,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { BADGE_GAP, BADGE_SIZE, badgePlacement } from "../syncIndicator";
+import type { SyncIndicatorState } from "../useSyncIndicator";
+import { SyncAnnouncer, SyncDisc } from "./SyncIndicator";
 import {
   SYNC_RETURN_MS,
   currentNotice,
@@ -74,6 +81,8 @@ type Props = {
    * pill's place the pill drops below it, following it as the list scrolls.
    */
   avoid?: string;
+  /** The sync indicator to show beside the pill, or in its place (`useSyncIndicator`). */
+  sync?: SyncIndicatorState;
 };
 
 /** How long the pill takes to fade out, ms (`animate-vanish`): quick, like its entrance. */
@@ -186,7 +195,9 @@ export function StatusPill(props: Props) {
   const pill = shown ?? ghost?.notice ?? null;
   const pillNow = shown ? now : (ghost?.now ?? now);
 
-  const place = useAnchor(props.anchor, props.inset, props.avoid, pill !== null);
+  const sync = props.sync ?? { badge: null, leaving: false };
+  const disc = sync.badge;
+  const place = useAnchor(props.anchor, props.inset, props.avoid, pill !== null || disc !== null);
   const style: React.CSSProperties = place
     ? { left: place.left, width: place.width, top: place.top }
     : { left: 0, right: 0, top: `max(${GAP}px, calc(env(safe-area-inset-top, 0px) + 8px))` };
@@ -196,6 +207,14 @@ export function StatusPill(props: Props) {
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-pill-announce="">
         {pillAnnouncement(live)}
       </p>
+      <SyncAnnouncer {...sync} />
+      {disc && !pill && (
+        <div data-sync-row="" className="pointer-events-none fixed z-35 flex justify-center px-4" style={style}>
+          <div className="relative h-10 w-0">
+            <SyncDisc badge={disc} leaving={sync.leaving} placement={badgePlacement(false)} />
+          </div>
+        </div>
+      )}
       {pill && (
         <div
           {...(ghost
@@ -205,63 +224,70 @@ export function StatusPill(props: Props) {
           className="pointer-events-none fixed z-35 flex justify-center px-4"
           style={style}
         >
+          {/* The pill stays centred; the disc hangs off its right edge, room kept for it. */}
           <div
-            key={ghost ? "leaving" : noticeKey(pill)}
-            {...(pill.kind === "sending" && !ghost ? { "data-send-pending": "" } : {})}
-            className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full ${ghost ? "animate-vanish" : "animate-appear"} items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
-              pill.kind === "sync" ? "pr-4" : "pr-1"
-            } ${pill.kind === "sync" && !pill.ok ? "text-danger" : "text-ink-body"}`}
+            className="relative flex max-w-full justify-center"
+            style={disc ? { maxWidth: `calc(100% - ${2 * (BADGE_SIZE + BADGE_GAP)}px)` } : undefined}
           >
-            <span
-              {...(ghost ? {} : { "data-pill-text": "" })}
-              {...(pill.kind === "undo" && !ghost ? { "data-undo-label": "" } : {})}
-              className="selectable min-w-0 truncate tabular-nums"
-              title={pillText(pill, pillNow)}
+            <div
+              key={ghost ? "leaving" : noticeKey(pill)}
+              {...(pill.kind === "sending" && !ghost ? { "data-send-pending": "" } : {})}
+              className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full ${ghost ? "animate-vanish" : "animate-appear"} items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
+                pill.kind === "sync" ? "pr-4" : "pr-1"
+              } ${pill.kind === "sync" && !pill.ok ? "text-danger" : "text-ink-body"}`}
             >
-              {pillText(pill, pillNow)}
-            </span>
-            {pill.kind === "undo" && (
-              <>
-                <PillButton onClick={props.onUndo} primary data="data-pill-undo">
-                  Undo
-                </PillButton>
-                <PillButton onClick={props.onDismissUndo} label="Dismiss" data="data-pill-dismiss">
+              <span
+                {...(ghost ? {} : { "data-pill-text": "" })}
+                {...(pill.kind === "undo" && !ghost ? { "data-undo-label": "" } : {})}
+                className="selectable min-w-0 truncate tabular-nums"
+                title={pillText(pill, pillNow)}
+              >
+                {pillText(pill, pillNow)}
+              </span>
+              {pill.kind === "undo" && (
+                <>
+                  <PillButton onClick={props.onUndo} primary data="data-pill-undo">
+                    Undo
+                  </PillButton>
+                  <PillButton onClick={props.onDismissUndo} label="Dismiss" data="data-pill-dismiss">
+                    <X size={14} strokeWidth={2.2} aria-hidden="true" />
+                  </PillButton>
+                </>
+              )}
+              {pill.kind === "sending" && (
+                <>
+                  <PillButton onClick={props.onUndoSend} primary data="data-send-undo">
+                    Undo
+                  </PillButton>
+                  <PillButton onClick={props.onSendNow} data="data-send-now">
+                    Send now
+                  </PillButton>
+                </>
+              )}
+              {pill.kind === "update" && (
+                <>
+                  {props.onWhatsNew && (
+                    <PillButton onClick={props.onWhatsNew} data="data-pill-whats-new">
+                      What's new
+                    </PillButton>
+                  )}
+                  {pill.button && props.onUpdate && (
+                    <PillButton onClick={props.onUpdate} primary data="data-pill-update">
+                      {pill.button}
+                    </PillButton>
+                  )}
+                  <PillButton onClick={props.onDismissUpdate ?? (() => undefined)} label="Dismiss" data="data-pill-dismiss">
+                    <X size={14} strokeWidth={2.2} aria-hidden="true" />
+                  </PillButton>
+                </>
+              )}
+              {pill.kind === "flash" && (
+                <PillButton onClick={props.onDismissFlash} label="Dismiss" data="data-pill-dismiss">
                   <X size={14} strokeWidth={2.2} aria-hidden="true" />
                 </PillButton>
-              </>
-            )}
-            {pill.kind === "sending" && (
-              <>
-                <PillButton onClick={props.onUndoSend} primary data="data-send-undo">
-                  Undo
-                </PillButton>
-                <PillButton onClick={props.onSendNow} data="data-send-now">
-                  Send now
-                </PillButton>
-              </>
-            )}
-            {pill.kind === "update" && (
-              <>
-                {props.onWhatsNew && (
-                  <PillButton onClick={props.onWhatsNew} data="data-pill-whats-new">
-                    What's new
-                  </PillButton>
-                )}
-                {pill.button && props.onUpdate && (
-                  <PillButton onClick={props.onUpdate} primary data="data-pill-update">
-                    {pill.button}
-                  </PillButton>
-                )}
-                <PillButton onClick={props.onDismissUpdate ?? (() => undefined)} label="Dismiss" data="data-pill-dismiss">
-                  <X size={14} strokeWidth={2.2} aria-hidden="true" />
-                </PillButton>
-              </>
-            )}
-            {pill.kind === "flash" && (
-              <PillButton onClick={props.onDismissFlash} label="Dismiss" data="data-pill-dismiss">
-                <X size={14} strokeWidth={2.2} aria-hidden="true" />
-              </PillButton>
-            )}
+              )}
+            </div>
+            {disc && <SyncDisc badge={disc} leaving={sync.leaving} placement={badgePlacement(true)} />}
           </div>
         </div>
       )}

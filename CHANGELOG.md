@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Changed
+
+- Syncing no longer pushes the app down. The "Syncing 1 change…" bar across the top is now a small spinner beside the status pill (or where the pill sits), and it only appears when a sync takes more than a moment. Changes waiting offline show as a small cloud in the same place; hover it to read why.
+
 ## [1.6.3] - 2026-10-25
 
 A security release, with one small change to how accounts look.
