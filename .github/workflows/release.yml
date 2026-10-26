@@ -249,7 +249,7 @@ jobs:
           xcode-select -p
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
         with:
           tool: cargo-binstall
 
@@ -501,7 +501,7 @@ jobs:
           key: release-android
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
         with:
           tool: cargo-binstall
 

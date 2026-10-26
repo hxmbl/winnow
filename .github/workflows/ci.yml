@@ -293,7 +293,7 @@ jobs:
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
         with:
           tool: cargo-binstall
 
@@ -401,7 +401,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
         with:
           tool: cargo-binstall
 
@@ -467,7 +467,7 @@ jobs:
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
         with:
           tool: cargo-binstall
 
