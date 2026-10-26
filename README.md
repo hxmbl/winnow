@@ -1,6 +1,18 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/icon-dark.png">
+    <img src="docs/images/icon-light.png" width="96" height="96" alt="Winnow logo: two paper planes">
+  </picture>
+</p>
+
 # Winnow
 
 Gmail, but it sorts the noise out for you and shows its working.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.webp">
+  <img src="docs/images/hero-light.webp" width="1600" alt="Winnow's demo inbox on the desktop: smart filter pills (Important, Deliveries, New contacts, Action needed) above a one-line summary of what's waiting, the message list with a copy-code chip and Urgent tags, and an open message whose &quot;Why it's here&quot; section explains each filter it landed in">
+</picture>
 
 I made this because Gmail kept burying mail I actually needed. Not spam, not
 promotions — just mail. Winnow reads everything, decides what each message *is*
@@ -43,6 +55,13 @@ xattr -dr com.apple.quarantine /Applications/Winnow.app
 **Windows**: No desktop build. Run the web app: `docker compose up -d` in a clone, then open http://localhost:8080. Or build it yourself: `cd web && npm install && npm run build`, then serve `web/dist`.
 
 **Linux**: AppImage needs FUSE 2 (`libfuse2`) on some distros; the `.deb` doesn't.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/phone-dark.webp">
+    <img src="docs/images/phone-light.webp" width="300" alt="Winnow's demo inbox on a phone: search at the top, the message list, smart filter pills floating above a glass dock with Inbox, Sent and a compose button">
+  </picture>
+</p>
 
 ## Updates
 
@@ -190,6 +209,11 @@ Twenty-one, and a message sits in several at once — Important, Action needed a
 | Long reads | long, and not urgent |
 | Social | a social network notification |
 | Unsafe | likely junk or phishing |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/buckets-dark.webp">
+  <img src="docs/images/buckets-light.webp" width="800" alt="The filter pills with Action needed switched on: each pill shows its count, and the list narrows to the messages waiting on a reply">
+</picture>
 
 Where it learned all that is a screen too: **Settings → How Winnow sorts** lists every star, unstar and hidden bucket it has taken as a lesson, with what it had predicted at the time, and offers one reset that throws the lot away. A guess that learns from you only beats one that doesn't if you can read the ledger.
 
