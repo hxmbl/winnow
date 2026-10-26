@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-10-26
+
 ### Changed
 
 - Syncing no longer pushes the app down. The "Syncing 1 change…" bar across the top is now a small spinner beside the status pill (or where the pill sits), and it only appears when a sync takes more than a moment. Changes waiting offline show as a small cloud in the same place; hover it to read why.
@@ -427,7 +429,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.6.3...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.6.4...HEAD
+[1.6.4]: https://github.com/hxmbl/winnow/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/hxmbl/winnow/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/hxmbl/winnow/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/hxmbl/winnow/compare/v1.6.0...v1.6.1
