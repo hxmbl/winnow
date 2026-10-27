@@ -32,7 +32,7 @@
  *
  * Privacy, mirroring the lookup caches: one database per account
  * (`winnow-pictures@<id>`); `clear` (sign-out) deletes it; `clearKind` drops one source's
- * copies when its switch goes off ("Gravatar photos", "Show brand logos", or the
+ * copies when its switch goes off ("Sender pictures" for Gravatar and logos, or the
  * contacts grant). Serving is gated one level up (`gatedPictureBytes` in
  * `ui/senderPictures.ts`): with Remote images = Never, or a switch off, a cached
  * Gravatar or logo is never drawn, whatever is still on disk.

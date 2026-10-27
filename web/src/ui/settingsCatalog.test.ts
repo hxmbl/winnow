@@ -53,10 +53,16 @@ describe("the settings catalog", () => {
     expect(rendered.filter((id) => !(id in SETTINGS))).toEqual([]);
   });
 
-  it("names the privacy cost of the two picture sources", () => {
-    expect(SETTINGS.brandLogos.explanation).toMatch(/Cloudflare/);
-    expect(SETTINGS.brandLogos.explanation).toMatch(/DNS-over-HTTPS/);
-    expect(SETTINGS.gravatars.explanation).toMatch(/hashed copy of each sender's address/);
+  it("names the privacy cost of both picture sources in the one Sender pictures switch", () => {
+    expect(SETTINGS.senderPictures.label).toBe("Sender pictures");
+    expect(SETTINGS.senderPictures.category).toBe("privacy");
+    expect(SETTINGS.senderPictures.explanation).toMatch(/Gravatar a hashed copy of the address/);
+    expect(SETTINGS.senderPictures.explanation).toMatch(/Cloudflare's DNS-over-HTTPS/);
+    expect(SETTINGS.senderPictures.explanation).toMatch(/paused while Remote images is set to Never/);
+    // The two old switches are gone, so no explanation or row can point at them.
+    expect(SETTING_IDS as readonly string[]).not.toContain("brandLogos");
+    expect(SETTING_IDS as readonly string[]).not.toContain("gravatars");
+    expect(source).not.toMatch(/setting="(brandLogos|gravatars)"/);
   });
 
   it("ends with Dev Options, which holds Pure Plain Text", () => {

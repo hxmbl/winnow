@@ -14,9 +14,14 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- The Inbox now says when sender pictures are off, with Keep off and Turn on, and what turning them on sends. If Remote images is set to Never it says that is what pauses them, and opens Privacy settings rather than changing anything. Keep off hides it for good.
+
 ### Changed
 
 - Building Winnow yourself is documented in BUILDING.md: what to install (with the exact packages for Debian and Ubuntu, Arch and Fedora), the web app, the desktop app on Linux and macOS, and the Android app. The README keeps a short version.
+- "Show brand logos" and "Gravatar photos" are now one switch, Sender pictures, in Settings › Privacy. It is still off by default and still paused while Remote images is set to Never. If you had either one on, Sender pictures is on after the update.
 
 ## [1.7.0] - 2026-10-29
 
