@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.6.5-beta] - 2026-10-27 (pre-release)
+
 ### Fixed
 
 - Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.
@@ -437,7 +439,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.6.4...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.6.5-beta...HEAD
+[1.6.5-beta]: https://github.com/hxmbl/winnow/compare/v1.6.4...v1.6.5-beta
 [1.6.4]: https://github.com/hxmbl/winnow/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/hxmbl/winnow/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/hxmbl/winnow/compare/v1.6.1...v1.6.2
