@@ -26,6 +26,7 @@ import {
   type AuthErrorKind,
   type TokenSet,
 } from "./dto";
+import { debugLog } from "../debug/debugLog";
 
 /** Refresh this far before the real expiry, so an in-flight request cannot expire. */
 export const EXPIRY_SLACK_MS = 60_000;
@@ -320,6 +321,8 @@ export class TokenManager {
     if (client.clientSecret) body.set("client_secret", client.clientSecret);
 
     let response: Response;
+    const started = Date.now();
+    debugLog("auth", "token-refresh", { generation });
     try {
       response = await this.fetchImpl(GOOGLE_TOKEN_URL, {
         method: "POST",
@@ -327,12 +330,14 @@ export class TokenManager {
         body: body.toString(),
       });
     } catch (error) {
+      debugLog("network", "token-refresh-unreachable", { error: error instanceof Error ? error.name : typeof error, ms: Date.now() - started });
       throw new GmailError(
         `Could not reach Google: ${error instanceof Error ? error.message : "network error"}`,
         0,
         "network",
       );
     }
+    debugLog("auth", "token-refresh-answered", { status: response.status, ms: Date.now() - started });
 
     if (!response.ok) {
       const text = await response.text();
@@ -430,6 +435,9 @@ export class TokenManager {
   /** POST a code exchange and adopt what comes back. Shared by both exchanges. */
   private async requestTokens(body: URLSearchParams, issuedTo?: string): Promise<TokenSet> {
     let response: Response;
+    const started = Date.now();
+    const grant = body.get("grant_type") ?? "unknown";
+    debugLog("auth", "token-request", { grant, withSecret: body.has("client_secret") });
     try {
       response = await this.fetchImpl(GOOGLE_TOKEN_URL, {
         method: "POST",
@@ -437,6 +445,7 @@ export class TokenManager {
         body: body.toString(),
       });
     } catch (error) {
+      debugLog("network", "token-request-unreachable", { grant, error: error instanceof Error ? error.name : typeof error, ms: Date.now() - started });
       // No HTTP response at all — the one failure `exchangeWithRetry` may resend.
       throw new GoogleUnreachable(
         `Could not reach Google: ${error instanceof Error ? error.message : "network error"}`,
@@ -446,8 +455,10 @@ export class TokenManager {
     if (!response.ok) {
       const text = await response.text();
       const [message, kind] = describeTokenRejection(response.status, text);
+      debugLog("auth", "token-request-rejected", { grant, status: response.status, kind, ms: Date.now() - started });
       throw new GmailError(message, response.status, kind);
     }
+    debugLog("auth", "token-request-ok", { grant, status: response.status, ms: Date.now() - started });
 
     const payload = (await response.json()) as {
       access_token: string;

@@ -960,7 +960,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               />
             </Row>
           )}
-          <Row setting="debugLog" hint="Sync, update and notification events, in memory, redacted" hintId="winnow-debug-log-hint">
+          <Row setting="debugLog" hint="Sign-in, sync, network and app events, in memory, redacted" hintId="winnow-debug-log-hint">
             <Toggle
               checked={props.debugLog}
               onChange={props.onDebugLog}

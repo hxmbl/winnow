@@ -387,7 +387,7 @@ export const SETTINGS = {
     category: "dev",
     label: "Debug log",
     explanation:
-      "While on, Winnow keeps a log of sync, update-check and notification events here: what happened, ids, counts and how long it took. It is kept in memory only, at most 2,000 lines, and is gone when Winnow closes; nothing is recorded while it is off. Email addresses, tokens and anything from a message's content are removed before a line is kept, and Copy and Clear are the only ways it leaves this screen.",
+      "While on, Winnow keeps a log here of sign-in steps, sync, network errors, update checks, notifications and the app going to the background and back: what happened, ids, counts and how long it took. On the installed app it includes the app's native side too, such as the sign-in listener. It is kept in memory only, at most 10,000 lines, and is gone when Winnow closes; nothing is recorded while it is off. Email addresses, tokens, sign-in codes and anything from a message's content are removed before a line is kept, and Copy and Clear are the only ways it leaves this screen.",
   },
 } as const satisfies Record<string, SettingDefinition>;
 

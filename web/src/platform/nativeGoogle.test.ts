@@ -77,4 +77,16 @@ describe("openSignInPage", () => {
     await openSignInPage("https://accounts.google.com/x", false, call);
     expect(call.mock.calls.map(([command]) => command)).toEqual(["open_external"]);
   });
+
+  it("reports whether Android kept the app running behind the tab", async () => {
+    const kept = vi.fn<Call>(async () => ({ keptAlive: true, keepAlive: "running" }));
+    expect(await openSignInPage("https://accounts.google.com/x", true, kept)).toEqual({ via: "custom-tab", keptAlive: true, keepAlive: "running" });
+    // An older shell answers nothing: the tab still opened, unprotected.
+    const old = vi.fn<Call>(async () => undefined);
+    expect(await openSignInPage("https://accounts.google.com/x", true, old)).toEqual({ via: "custom-tab", keptAlive: false, keepAlive: "unknown" });
+    const browser = vi.fn<Call>(async (command) => {
+      if (command === "open_sign_in_tab") throw new Error("no tab");
+    });
+    expect(await openSignInPage("https://accounts.google.com/x", true, browser)).toEqual({ via: "browser", keptAlive: false, keepAlive: "none" });
+  });
 });

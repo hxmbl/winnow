@@ -9,6 +9,7 @@
 //! | --- | --- |
 //! | OS keychain for OAuth tokens | [`secrets`] |
 //! | Loopback HTTP listener for the OAuth redirect | [`oauth`] |
+//! | The native half of Dev Options → Debug log | [`debug_log`] |
 //! | Native notifications, dock badge, tray | [`lib`] |
 //! | Notification actions: Reply, Delete, Mark read | [`notify_actions`] |
 //! | Background sync ticks while the window is hidden | [`scheduler`] |
@@ -25,6 +26,7 @@
 //! in TypeScript, it belongs in `web/`.
 
 pub mod commands;
+pub mod debug_log;
 pub mod deep_link;
 pub mod files;
 pub mod google_signin;
@@ -111,6 +113,8 @@ pub fn run() {
             commands::oauth_begin,
             commands::oauth_await,
             commands::oauth_cancel,
+            commands::debug_log_set_enabled,
+            commands::debug_log_drain,
             commands::open_external,
             commands::google_signin_info,
             commands::google_signin_authorize,
@@ -165,6 +169,13 @@ pub fn run() {
             ))?;
 
             app.manage(oauth::Sessions::default());
+
+            // Native debug-log lines wait in `debug_log` until the webview drains them;
+            // this nudges it when the first one of a batch arrives.
+            let handle = app.handle().clone();
+            debug_log::set_notifier(move || {
+                let _ = tauri::Emitter::emit(&handle, debug_log::DEBUG_LOG_EVENT, ());
+            });
             deep_link::register(app.handle())?;
             #[cfg(desktop)]
             tray::build(app.handle())?;
@@ -173,6 +184,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                crate::dlog!("app", "window-focus", focused = focused);
+            }
             // Closing the window hides to the tray rather than quitting: an
             // inbox client that syncs in the background should keep syncing.
             // Android has no close button to intercept, so nothing to do there.
@@ -201,6 +215,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = &event {
                 tray::reveal(app);
+            }
+
+            match &event {
+                tauri::RunEvent::Ready => crate::dlog!("app", "ready"),
+                tauri::RunEvent::ExitRequested { .. } => crate::dlog!("app", "exit-requested"),
+                _ => {}
             }
 
             let _ = (app, &event);

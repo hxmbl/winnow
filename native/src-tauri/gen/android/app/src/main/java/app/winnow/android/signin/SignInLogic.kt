@@ -61,4 +61,14 @@ object SignInLogic {
     val match = Regex("^https://([^/?#:]+)(?::\\d+)?(?:[/?#].*)?$").find(url) ?: return false
     return match.groupValues[1].equals("accounts.google.com", ignoreCase = true)
   }
+
+  /** `ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE`, as a literal for JVM tests. */
+  const val FOREGROUND_SERVICE_TYPE_SHORT_SERVICE = 2048
+
+  /**
+   * The foreground service type for the sign-in keep-alive: `shortService` where it
+   * exists (Android 14, API 34, and later, where a type is required), none before.
+   */
+  fun keepAliveServiceType(sdk: Int): Int =
+    if (sdk >= 34) FOREGROUND_SERVICE_TYPE_SHORT_SERVICE else 0
 }

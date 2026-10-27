@@ -35,7 +35,13 @@ import { deviceStorage } from "./core/store/storage";
 import { parseDeepLink } from "./core/notify/notifications";
 import { watchPhysicalKeyboard } from "./ui/physicalKeyboard";
 import { isExistingInstall } from "./ui/tour";
+import { installLifecycleDebugLog } from "./core/debug/lifecycle";
+import { syncNativeDebugLog } from "./core/debug/debugLog";
 import "./index.css";
+
+// Dev Options → Debug log: app lifecycle, connectivity and stray errors, recorded only
+// while the log is on. Coming back to the front pulls in the native shell's lines.
+installLifecycleDebugLog(() => void syncNativeDebugLog());
 
 // From the first key press, not from when Settings opens: Keyboard shortcuts shows on a
 // touch device once a real keyboard has been used this session (`physicalKeyboard.ts`).
@@ -274,6 +280,10 @@ void platform
  */
 function wireDesktopEvents(): void {
   if (!isTauri()) return;
+
+  // The native half of Dev Options → Debug log (Rust: the sign-in listener, the
+  // Custom Tab, window and deep-link events), drained into the same log.
+  desktopPlatformExtras.installNativeDebugLog();
 
   // A `winnow://` link is either a message to open or just "wake up". Either way the
   // window has to come forward: a link that opened the app behind the frontmost

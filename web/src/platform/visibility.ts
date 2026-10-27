@@ -10,6 +10,8 @@
  * Resolves `true` when the page is visible, `false` on timeout.
  */
 
+import { debugLog } from "../core/debug/debugLog";
+
 type VisibilityDocument = {
   visibilityState?: string;
   addEventListener(type: string, listener: () => void): void;
@@ -42,10 +44,12 @@ export function waitUntilVisible(
   if (!doc || typeof doc.visibilityState !== "string") return Promise.resolve(true);
   if (doc.visibilityState === "visible") return Promise.resolve(true);
 
+  debugLog("app", "wait-visible-start", { visibility: doc.visibilityState, timeoutMs });
   return new Promise<boolean>((resolve) => {
     const finish = (visible: boolean) => {
       doc.removeEventListener("visibilitychange", onChange);
       env.clearTimeout(timer);
+      debugLog("app", "wait-visible-done", { visible });
       resolve(visible);
     };
     const onChange = () => {

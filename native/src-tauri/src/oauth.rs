@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 /// The token the TypeScript layer puts where the loopback port belongs.
@@ -92,10 +92,66 @@ impl AuthSession {
 #[derive(Default)]
 pub struct Sessions(pub Mutex<HashMap<u16, AuthSession>>);
 
-/// Bind an ephemeral loopback port and hand back the raw listener, so the
-/// caller can learn the port before `tiny_http` takes ownership of it.
-fn bind() -> std::io::Result<std::net::TcpListener> {
-    std::net::TcpListener::bind(("127.0.0.1", 0))
+/// How long a listener lives with nobody collecting its outcome.
+///
+/// `oauth_await` has its own (shorter) timeout and stops the listener when it ends;
+/// this is only the backstop for a listener whose waiter never came, so a crashed
+/// page cannot leave a thread holding a port for the life of the app.
+pub const MAX_LISTENER_LIFETIME: Duration = Duration::from_secs(15 * 60);
+
+/// How often the listener notes in the debug log that it is still waiting.
+const HEARTBEAT: Duration = Duration::from_secs(15);
+
+/// A gap between two polls longer than this means the thread did not run at all —
+/// on Android, the process was frozen behind the browser. Logged, because it is the
+/// one piece of evidence that explains "127.0.0.1 took too long to respond".
+const STALL: Duration = Duration::from_secs(3);
+
+/// Where Google will send the browser back to, read from the authorize URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedirectTarget {
+    /// `127.0.0.1`, `localhost` or `[::1]`, as written in the URI.
+    pub host: String,
+    /// The path the callback arrives on (`/winnow-oauth`).
+    pub path: String,
+}
+
+/// Read `redirect_uri` out of an authorize URL that still has [`PORT_PLACEHOLDER`]
+/// in it. `None` when there is no readable loopback redirect URI.
+pub fn redirect_target(authorize_url: &str) -> Option<RedirectTarget> {
+    let url = url::Url::parse(authorize_url).ok()?;
+    let redirect = url
+        .query_pairs()
+        .find(|(key, _)| key == "redirect_uri")
+        .map(|(_, value)| value.into_owned())?;
+    // The placeholder is not a port `Url` will parse; any number stands in for it.
+    let redirect = url::Url::parse(&redirect.replace(PORT_PLACEHOLDER, "1")).ok()?;
+    if redirect.scheme() != "http" {
+        return None;
+    }
+    let host = match redirect.host()? {
+        url::Host::Ipv6(ip) => format!("[{ip}]"),
+        other => other.to_string(),
+    };
+    Some(RedirectTarget {
+        host,
+        path: redirect.path().to_string(),
+    })
+}
+
+/// The address to listen on for a redirect host.
+///
+/// It has to be the address the browser will connect to. `127.0.0.1` and `[::1]` are
+/// literal; `localhost` is resolved by the browser, usually to `127.0.0.1` but on some
+/// systems to `::1` first, which is why Winnow's own redirect URI names `127.0.0.1`
+/// (and why Google recommends the literal for desktop clients). A `localhost` redirect
+/// still gets `127.0.0.1`, which is what every browser falls back to.
+fn bind_addr(host: &str) -> std::net::IpAddr {
+    if host == "[::1]" {
+        std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)
+    } else {
+        std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+    }
 }
 
 /// Start a listener, and return the session the webview will drive.
@@ -103,33 +159,69 @@ fn bind() -> std::io::Result<std::net::TcpListener> {
 /// `authorize_url` comes from the TypeScript layer with [`PORT_PLACEHOLDER`] in
 /// place of the loopback port; it is substituted here, once the port is known.
 pub fn begin(authorize_url: String) -> Result<AuthSession, String> {
+    begin_with(authorize_url, MAX_LISTENER_LIFETIME)
+}
+
+/// [`begin`] with the listener's lifetime as a parameter, for tests.
+pub fn begin_with(authorize_url: String, lifetime: Duration) -> Result<AuthSession, String> {
     if !authorize_url.contains(PORT_PLACEHOLDER) {
         // Refusing is the point. Substituting nothing would produce a URL whose
         // `redirect_uri` names a port we are not listening on, and the sign-in
         // would then hang until the timeout and blame the user's network.
+        crate::dlog!("auth", "listener-refused", reason = "no-port-placeholder");
         return Err(format!(
             "the authorize URL must contain {PORT_PLACEHOLDER} where the loopback port goes"
         ));
     }
 
-    let listener = bind().map_err(|e| format!("could not open a loopback port: {e}"))?;
-    let port = listener
+    let target = redirect_target(&authorize_url);
+    let host = target
+        .as_ref()
+        .map_or_else(|| "127.0.0.1".to_string(), |t| t.host.clone());
+    // `None` only for a URL whose redirect could not be read; then any path may carry
+    // the callback, which is how the listener behaved before it knew the path.
+    let callback_path = target.as_ref().map(|t| t.path.clone());
+
+    let ip = bind_addr(&host);
+    let listener = std::net::TcpListener::bind((ip, 0)).map_err(|e| {
+        crate::dlog!("auth", "listener-bind-failed", ip = ip, error = e.kind());
+        format!("could not open a loopback port: {e}")
+    })?;
+    let local = listener
         .local_addr()
-        .map_err(|e| format!("could not read the loopback address: {e}"))?
-        .port();
+        .map_err(|e| format!("could not read the loopback address: {e}"))?;
+    let port = local.port();
 
     let authorize_url = authorize_url.replace(PORT_PLACEHOLDER, &port.to_string());
+    crate::dlog!(
+        "auth",
+        "listener-bound",
+        addr = local,
+        redirect_host = host,
+        redirect_path = callback_path.as_deref().unwrap_or("(any)"),
+        lifetime_s = lifetime.as_secs(),
+    );
+    if host == "localhost" {
+        crate::dlog!(
+            "auth",
+            "listener-warning",
+            reason = "redirect-names-localhost"
+        );
+    }
 
     let cancel = Arc::new(AtomicBool::new(false));
     let (tx, rx) = oneshot::channel::<AuthOutcome>();
 
     let thread_cancel = Arc::clone(&cancel);
+    let config = ServeConfig {
+        base: format!("http://127.0.0.1:{port}/"),
+        callback_path,
+        lifetime,
+    };
     std::thread::Builder::new()
         .name("winnow-oauth".into())
-        .spawn(move || serve(listener, port, tx, thread_cancel))
+        .spawn(move || serve(listener, config, tx, thread_cancel))
         .map_err(|e| format!("could not start the loopback listener: {e}"))?;
-    // `listener` moved into the thread; `port` is only used to build the base
-    // URL, which the thread recomputes from the same value.
 
     Ok(AuthSession {
         port,
@@ -277,17 +369,158 @@ fn escape_html(value: &str) -> String {
     out
 }
 
-/// Poll the listener until the redirect arrives, the user cancels, or we hit
-/// the 5-minute mark that the Swift implementation used as well.
+/// What `serve` needs besides the socket.
+struct ServeConfig {
+    /// `http://127.0.0.1:<port>/`, for resolving origin-form request targets.
+    base: String,
+    /// The path the callback arrives on; `None` accepts it on any path.
+    callback_path: Option<String>,
+    /// Stop after this long even if nobody cancelled (see [`MAX_LISTENER_LIFETIME`]).
+    lifetime: Duration,
+}
+
+/// Resolve a request target against the listener's base URL. `None` when it will
+/// not parse.
+fn parse_target(target: &str, base: &str) -> Option<url::Url> {
+    // Split the request target into path and query *before* handing anything to
+    // `Url`. An earlier version folded the whole target — query string and all —
+    // into `set_path`, so `query_pairs()` was always empty and the listener never
+    // once read a `code`: it answered 204s until the timeout blamed the network.
+    let (path, query) = match target.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (target, None),
+    };
+    if path.starts_with("http://") || path.starts_with("https://") {
+        // Absolute-form request target (RFC 7230 §5.3.2): parse it whole rather than
+        // grafting it onto the base.
+        return url::Url::parse(target).ok();
+    }
+    let normalised = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    let mut url = url::Url::parse(base).ok()?;
+    url.set_path(&normalised);
+    url.set_query(query);
+    Some(url)
+}
+
+/// The names of the query parameters, for the debug log: never their values. Names
+/// outside the OAuth set are counted, not listed, since a stray request can put
+/// anything there.
+fn query_keys(url: &url::Url) -> String {
+    const KNOWN: [&str; 8] = [
+        "code",
+        "state",
+        "error",
+        "error_description",
+        "scope",
+        "authuser",
+        "prompt",
+        "hd",
+    ];
+    let mut known = Vec::new();
+    let mut other = 0usize;
+    for (key, _) in url.query_pairs() {
+        match KNOWN.iter().find(|k| **k == key) {
+            Some(k) if !known.contains(k) => known.push(*k),
+            Some(_) => {}
+            None => other += 1,
+        }
+    }
+    let mut out = known.join(",");
+    if other > 0 {
+        if !out.is_empty() {
+            out.push(',');
+        }
+        out.push_str(&format!("+{other}"));
+    }
+    if out.is_empty() {
+        out.push_str("(none)");
+    }
+    out
+}
+
+/// A path as the debug log may show it: at most 64 characters.
+fn path_for_log(path: &str) -> String {
+    if path.chars().count() > 64 {
+        let mut short: String = path.chars().take(64).collect();
+        short.push('…');
+        short
+    } else {
+        path.to_string()
+    }
+}
+
+/// What the redirect carried, or `None` when the request has neither a code nor an
+/// error (a prefetch, a reload of the bare path).
+fn read_outcome(url: &url::Url) -> Option<AuthOutcome> {
+    // Read the query *once*: a second walk is a second chance to disagree.
+    let mut code = None;
+    let mut error = None;
+    let mut description = None;
+    let mut state = String::new();
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "code" => code = Some(value.into_owned()),
+            "state" => state = value.into_owned(),
+            "error" => error = Some(value.into_owned()),
+            "error_description" => description = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+    match (code, error) {
+        (Some(code), _) => Some(AuthOutcome::Code { code, state }),
+        (None, Some(error)) => Some(AuthOutcome::Error {
+            description: description.unwrap_or_else(|| error.clone()),
+            error,
+            state,
+        }),
+        _ => None,
+    }
+}
+
+/// Answer with a short plain-text body. Every request gets an answer: a socket that
+/// accepts and then says nothing is what a browser reports as "took too long".
+fn answer_text(request: tiny_http::Request, status: u16, body: &str) -> std::io::Result<()> {
+    request.respond(
+        tiny_http::Response::from_string(body)
+            .with_status_code(status)
+            .with_header(
+                tiny_http::Header::from_bytes(
+                    &b"Content-Type"[..],
+                    &b"text/plain; charset=utf-8"[..],
+                )
+                .unwrap(),
+            )
+            .with_header(
+                tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap(),
+            ),
+    )
+}
+
+/// The body for a callback-path request that carries no answer yet.
+const WAITING_TEXT: &str =
+    "Winnow is waiting for Google to send you back here. Finish signing in at Google.";
+
+/// Serve until the redirect arrives, the user cancels, or the lifetime runs out.
+///
+/// The listener stays up and answering the whole time: every request gets a reply,
+/// and only a GET on the callback path that carries a `code` or an `error` ends it.
+/// A favicon probe, a prefetch of the bare callback path, a HEAD, or a request on any
+/// other path is answered and the wait goes on, so nothing can use up "the" request
+/// before Google's redirect arrives.
 fn serve(
     listener: std::net::TcpListener,
-    port: u16,
+    config: ServeConfig,
     tx: oneshot::Sender<AuthOutcome>,
     cancel: Arc<AtomicBool>,
 ) {
     let server = match tiny_http::Server::from_listener(listener, None) {
         Ok(server) => server,
         Err(_) => {
+            crate::dlog!("auth", "listener-start-failed");
             let _ = tx.send(AuthOutcome::Error {
                 error: "loopback_failed".into(),
                 description: "The local sign-in listener could not start.".into(),
@@ -296,120 +529,139 @@ fn serve(
             return;
         }
     };
+    crate::dlog!("auth", "listener-waiting");
 
-    let base = format!("http://127.0.0.1:{port}/");
+    let started = Instant::now();
+    let mut last_poll = started;
+    let mut last_beat = started;
+    let mut requests = 0u32;
+    let mut tx = Some(tx);
 
-    while !cancel.load(Ordering::SeqCst) {
+    let reason = loop {
+        if cancel.load(Ordering::SeqCst) {
+            break "cancelled";
+        }
+        if started.elapsed() >= config.lifetime {
+            break "expired";
+        }
+
+        let now = Instant::now();
+        let gap = now.duration_since(last_poll);
+        if gap >= STALL {
+            // The poll below returns every 250 ms, so a gap this long means the thread
+            // was not scheduled at all: on Android, the app was frozen in the
+            // background. Any connection made meanwhile sat unanswered in the queue.
+            crate::dlog!(
+                "auth",
+                "listener-stalled",
+                gap_ms = gap.as_millis(),
+                waited_s = started.elapsed().as_secs(),
+            );
+        }
+        last_poll = now;
+        if now.duration_since(last_beat) >= HEARTBEAT {
+            crate::dlog!(
+                "auth",
+                "listener-heartbeat",
+                waited_s = started.elapsed().as_secs(),
+                requests = requests,
+            );
+            last_beat = now;
+        }
+
         let request = match server.recv_timeout(Duration::from_millis(250)) {
             Ok(Some(request)) => request,
             Ok(None) => continue,
-            Err(_) => break,
-        };
-
-        // Split the request target into path and query *before* handing anything to
-        // `Url`. The bug this replaces folded the whole target — query string and
-        // all — into `set_path`, so `query_pairs()` was always empty and the
-        // listener never once read a `code` or an `error`. It did not fail; it
-        // looped, answering 204s and waiting for a redirect it was structurally
-        // incapable of parsing, until the five-minute timeout blamed the user's
-        // network. Three tests asserted this behaviour passed, because they
-        // exercised the *transport* and never checked that anything came back.
-        let (path, query) = match request.url().split_once('?') {
-            Some((path, query)) => (path, Some(query)),
-            None => (request.url(), None),
-        };
-
-        // One parse, and the whole request target goes through it. The previous
-        // shape built a `Url` from the *base* and then grafted the path on, which
-        // meant a request target that failed to parse was silently dropped with
-        // the `Request` still alive — dropped without being answered, so the
-        // browser sat waiting on a socket that had accepted and then said nothing.
-        // Two `continue`s here are the bug; parsing up front means there is
-        // exactly one, and it is an `else`.
-        let is_absolute = path.starts_with("http://") || path.starts_with("https://");
-        let url = if is_absolute {
-            // Absolute-form request target (RFC 7230 §5.3.2): parse it whole
-            // rather than grafting it onto the base.
-            match url::Url::parse(path) {
-                Ok(parsed) => parsed,
-                Err(_) => {
-                    answer_bad_request(request);
-                    continue;
-                }
-            }
-        } else {
-            let normalised = if path.starts_with('/') {
-                path.to_string()
-            } else {
-                format!("/{path}")
-            };
-            match url::Url::parse(&base) {
-                Ok(mut url) => {
-                    // `set_path` percent-decodes nothing and treats `?` as an
-                    // ordinary character, so the query is handed over separately.
-                    url.set_path(&normalised);
-                    url.set_query(query);
-                    url
-                }
-                Err(_) => {
-                    answer_bad_request(request);
-                    continue;
-                }
+            Err(e) => {
+                crate::dlog!("auth", "listener-accept-failed", error = e.kind());
+                break "accept-error";
             }
         };
+        requests += 1;
+        let method = request.method().clone();
 
-        // Read the query *once*. It was previously walked twice — once for
-        // `code`/`state`/`error` and again inside the error arm for
-        // `error_description` — which is both a second parse of every pair and a
-        // second chance for the two walks to disagree.
-        let mut code = None;
-        let mut error = None;
-        let mut description = None;
-        let mut state = String::new();
-        for (key, value) in url.query_pairs() {
-            match key.as_ref() {
-                "code" => code = Some(value.into_owned()),
-                "state" => state = value.into_owned(),
-                "error" => error = Some(value.into_owned()),
-                "error_description" => description = Some(value.into_owned()),
-                _ => {}
-            }
+        let Some(url) = parse_target(request.url(), &config.base) else {
+            crate::dlog!(
+                "auth",
+                "listener-request",
+                n = requests,
+                method = method,
+                path = "(unparseable)",
+            );
+            answer_bad_request(request);
+            continue;
+        };
+        let path = url.path().to_string();
+        crate::dlog!(
+            "auth",
+            "listener-request",
+            n = requests,
+            method = method,
+            path = path_for_log(&path),
+            query = query_keys(&url),
+        );
+
+        let on_callback = config
+            .callback_path
+            .as_deref()
+            .map_or(true, |callback| callback == path);
+        if !on_callback {
+            let sent = answer_text(request, 404, "Not found");
+            crate::dlog!(
+                "auth",
+                "listener-answered",
+                n = requests,
+                status = 404,
+                ok = sent.is_ok(),
+            );
+            continue;
+        }
+        if method != tiny_http::Method::Get {
+            // A HEAD or a preflight must not consume the code: only the browser's
+            // own navigation (a GET) completes the sign-in.
+            let sent = answer_text(request, 405, "Method not allowed");
+            crate::dlog!(
+                "auth",
+                "listener-answered",
+                n = requests,
+                status = 405,
+                ok = sent.is_ok(),
+            );
+            continue;
         }
 
-        let outcome = match (code, error) {
-            (Some(code), _) => Some(AuthOutcome::Code { code, state }),
-            (None, Some(error)) => Some(AuthOutcome::Error {
-                description: description.unwrap_or_else(|| error.clone()),
-                error,
-                state,
-            }),
-            // A favicon probe or a stray health check — answer and keep waiting.
-            _ => None,
-        };
-
-        let Some(outcome) = outcome else {
-            let _ = request.respond(tiny_http::Response::from_string("").with_status_code(204));
+        let Some(outcome) = read_outcome(&url) else {
+            let sent = answer_text(request, 400, WAITING_TEXT);
+            crate::dlog!(
+                "auth",
+                "listener-answered",
+                n = requests,
+                status = 400,
+                reason = "no-code-or-error",
+                ok = sent.is_ok(),
+            );
             continue;
         };
 
-        let (status, body) = match &outcome {
-            AuthOutcome::Code { .. } => (200, success_page(cfg!(target_os = "android"))),
+        let (status, body, kind) = match &outcome {
+            AuthOutcome::Code { .. } => (200, success_page(cfg!(target_os = "android")), "code"),
             AuthOutcome::Error {
                 error, description, ..
             } => (
                 400,
                 ERROR_PAGE
-                    .replace("{ERROR}", error)
-                    // Google's `error_description` is prose written for a person,
-                    // and it was parsed and then thrown away — the page showed the
-                    // bare code (`access_denied`) where the explanation should be.
-                    // It is also attacker-influenceable, so it is escaped and
-                    // truncated: a hostile redirect must not be able to inject
-                    // markup into a page served from `127.0.0.1`.
+                    // Google's own error code: short, and from a fixed vocabulary,
+                    // but escaped all the same.
+                    .replace("{ERROR}", &escape_html(error))
+                    // Google's `error_description` is prose written for a person. It
+                    // is also attacker-influenceable, so it is escaped and truncated:
+                    // a hostile redirect must not inject markup into a page served
+                    // from `127.0.0.1`.
                     .replace("{DETAIL}", &escape_html(description)),
+                "error",
             ),
         };
-        let _ = request.respond(
+        let sent = request.respond(
             tiny_http::Response::from_string(body)
                 .with_status_code(status)
                 .with_header(
@@ -423,11 +675,34 @@ fn serve(
                     tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap(),
                 ),
         );
+        crate::dlog!(
+            "auth",
+            "listener-callback",
+            n = requests,
+            outcome = kind,
+            status = status,
+            page_sent = sent.is_ok(),
+            waited_s = started.elapsed().as_secs(),
+        );
 
-        // The webview stops caring once the sender is dropped.
-        let _ = tx.send(outcome);
-        break;
-    }
+        // The outcome counts whether or not the page reached the browser: the code is
+        // what the app needs, and the browser may have gone away after sending it.
+        let delivered = tx.take().map(|tx| tx.send(outcome).is_ok());
+        crate::dlog!(
+            "auth",
+            "listener-delivered",
+            to_app = delivered.unwrap_or(false),
+        );
+        break "answered";
+    };
+
+    crate::dlog!(
+        "auth",
+        "listener-closed",
+        reason = reason,
+        requests = requests,
+        waited_s = started.elapsed().as_secs(),
+    );
 }
 
 #[cfg(test)]
@@ -488,7 +763,7 @@ mod tests {
                 if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
                     use std::io::Write;
                     let _ = stream.write_all(
-                        b"GET /?state=xyz&code=abc123 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+                        b"GET /winnow-oauth?state=xyz&code=abc123 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
                     );
                     let mut response = String::new();
                     use std::io::Read;
@@ -528,7 +803,7 @@ mod tests {
                 if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
                     use std::io::Write;
                     let _ = stream.write_all(
-                        b"GET /?error=access_denied&error_description=User+said+no HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+                        b"GET /winnow-oauth?error=access_denied&error_description=User+said+no HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
                     );
                     return;
                 }
@@ -789,5 +1064,264 @@ mod tests {
             "the description was parsed but never rendered: {body}"
         );
         assert!(body.contains("access_denied"));
+    }
+    // ── Listener robustness ───────────────────────────────────────────────────
+    //
+    // The Android 15 report was "127.0.0.1 took too long to respond": a socket that
+    // accepted and never answered. These pin that the listener answers *everything*,
+    // keeps waiting through anything that is not the real callback, and closes only
+    // when it is told to.
+
+    /// Send raw bytes on one connection and read until the server closes it.
+    fn raw_exchange(port: u16, bytes: &[u8]) -> String {
+        use std::io::{Read, Write};
+        for _ in 0..100 {
+            if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                stream.write_all(bytes).unwrap();
+                let mut response = String::new();
+                let _ = stream.read_to_string(&mut response);
+                return response;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        String::new()
+    }
+
+    fn get(path: &str) -> Vec<u8> {
+        format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").into_bytes()
+    }
+
+    /// The receiver's answer, or `None` if nothing came within `wait`.
+    fn outcome_within(
+        receiver: oneshot::Receiver<AuthOutcome>,
+        wait: Duration,
+    ) -> Option<Result<AuthOutcome, oneshot::error::RecvError>> {
+        block_on(async { tokio::time::timeout(wait, receiver).await.ok() })
+    }
+
+    #[test]
+    fn stray_requests_before_the_callback_are_answered_and_do_not_consume_it() {
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+        let receiver = session.take_receiver().unwrap();
+
+        // A favicon probe, the right code on the wrong path, a prefetch of the bare
+        // callback path, and a HEAD carrying the code: each answered, none final.
+        let favicon = raw_exchange(port, &get("/favicon.ico"));
+        assert!(favicon.starts_with("HTTP/1.1 404"), "{favicon}");
+        let wrong_path = raw_exchange(port, &get("/?state=s1&code=not-here"));
+        assert!(wrong_path.starts_with("HTTP/1.1 404"), "{wrong_path}");
+        let bare = raw_exchange(port, &get("/winnow-oauth"));
+        assert!(bare.starts_with("HTTP/1.1 400"), "{bare}");
+        assert!(bare.contains("waiting for Google"), "{bare}");
+        let head = raw_exchange(
+            port,
+            b"HEAD /winnow-oauth?state=s1&code=early HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+        assert!(head.starts_with("HTTP/1.1 405"), "{head}");
+        assert!(!session.cancel.load(Ordering::SeqCst));
+
+        // Then the real redirect still lands.
+        let page = raw_exchange(port, &get("/winnow-oauth?state=s1&code=the-code"));
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        match outcome_within(receiver, Duration::from_secs(5)) {
+            Some(Ok(AuthOutcome::Code { code, state })) => {
+                assert_eq!(code, "the-code");
+                assert_eq!(state, "s1");
+            }
+            _ => panic!("the callback after the strays should have been captured"),
+        }
+    }
+
+    #[test]
+    fn several_requests_on_one_connection_are_each_answered() {
+        // Browsers reuse a keep-alive connection: the favicon probe and the redirect
+        // can arrive on the same socket, one after the other.
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+        let receiver = session.take_receiver().unwrap();
+
+        let browser = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let mut stream = loop {
+                if let Ok(stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                    break stream;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+                .unwrap();
+            let mut first = [0u8; 256];
+            let n = stream.read(&mut first).unwrap_or(0);
+            let first = String::from_utf8_lossy(&first[..n]).to_string();
+            stream
+                .write_all(&get("/winnow-oauth?state=k&code=keepalive"))
+                .unwrap();
+            let mut rest = String::new();
+            let _ = stream.read_to_string(&mut rest);
+            (first, rest)
+        });
+
+        let outcome = outcome_within(receiver, Duration::from_secs(5));
+        let (first, rest) = browser.join().unwrap();
+        assert!(first.starts_with("HTTP/1.1 404"), "{first}");
+        assert!(rest.contains("Signed in to Winnow"), "{rest}");
+        assert!(matches!(
+            outcome,
+            Some(Ok(AuthOutcome::Code { ref code, .. })) if code == "keepalive"
+        ));
+    }
+
+    #[test]
+    fn a_connection_that_never_sends_does_not_block_the_callback() {
+        // Chrome opens speculative connections it may never use. One sitting idle on
+        // the listener must not hold up the redirect on another.
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+        let receiver = session.take_receiver().unwrap();
+
+        let _idle = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let page = raw_exchange(port, &get("/winnow-oauth?state=i&code=after-idle"));
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        assert!(matches!(
+            outcome_within(receiver, Duration::from_secs(5)),
+            Some(Ok(AuthOutcome::Code { ref code, .. })) if code == "after-idle"
+        ));
+    }
+
+    #[test]
+    fn a_late_callback_is_still_captured() {
+        // The user takes their time at Google: many idle polls pass, then the
+        // redirect arrives and is read like any other.
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+        let receiver = session.take_receiver().unwrap();
+
+        let early = raw_exchange(port, &get("/favicon.ico"));
+        assert!(early.starts_with("HTTP/1.1 404"));
+        std::thread::sleep(Duration::from_millis(1_600));
+        assert!(!session.cancel.load(Ordering::SeqCst));
+
+        let page = raw_exchange(port, &get("/winnow-oauth?state=l&code=late"));
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        assert!(matches!(
+            outcome_within(receiver, Duration::from_secs(5)),
+            Some(Ok(AuthOutcome::Code { ref code, .. })) if code == "late"
+        ));
+    }
+
+    #[test]
+    fn the_listener_closes_when_cancelled_and_not_before() {
+        let session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+
+        // Still up after a stray request and a pause.
+        assert!(raw_exchange(port, &get("/favicon.ico")).starts_with("HTTP/1.1 404"));
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+
+        // Closed (refused, not hanging) soon after a cancel.
+        session.abort();
+        let mut refused = false;
+        for _ in 0..40 {
+            std::thread::sleep(Duration::from_millis(50));
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+                refused = true;
+                break;
+            }
+        }
+        assert!(refused, "a cancelled listener should stop accepting");
+    }
+
+    #[test]
+    fn a_listener_nobody_waits_on_expires() {
+        let mut session = begin_with(AUTH_URL.into(), Duration::from_millis(300)).unwrap();
+        let receiver = session.take_receiver().unwrap();
+        // The sender is dropped without an outcome, which `oauth_await` reports as
+        // "the sign-in listener closed before Google replied".
+        assert!(matches!(
+            outcome_within(receiver, Duration::from_secs(5)),
+            Some(Err(_))
+        ));
+    }
+
+    #[test]
+    fn the_redirect_target_is_read_from_the_authorize_url() {
+        assert_eq!(
+            redirect_target(AUTH_URL),
+            Some(RedirectTarget {
+                host: "127.0.0.1".into(),
+                path: "/winnow-oauth".into()
+            })
+        );
+        let v6 = AUTH_URL.replace("127.0.0.1", "%5B%3A%3A1%5D");
+        assert_eq!(
+            redirect_target(&v6).map(|t| t.host),
+            Some("[::1]".to_string())
+        );
+        assert_eq!(
+            bind_addr("[::1]"),
+            std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)
+        );
+        assert_eq!(
+            bind_addr("localhost"),
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+        );
+        assert_eq!(
+            redirect_target("https://accounts.google.com/auth?x=1"),
+            None
+        );
+    }
+
+    #[test]
+    fn query_keys_name_parameters_but_never_their_values() {
+        let url = url::Url::parse(
+            "http://127.0.0.1:1/winnow-oauth?state=S3CR3T&code=4%2F0Abc&scope=gmail&junk=x&more=y",
+        )
+        .unwrap();
+        let keys = query_keys(&url);
+        assert_eq!(keys, "state,code,scope,+2");
+        assert!(!keys.contains("S3CR3T") && !keys.contains("0Abc"));
+        let bare = url::Url::parse("http://127.0.0.1:1/favicon.ico").unwrap();
+        assert_eq!(query_keys(&bare), "(none)");
+    }
+
+    #[test]
+    fn the_debug_log_sees_each_request_by_path_and_never_the_code() {
+        let _serial = crate::debug_log::tests::SERIAL.lock();
+        crate::debug_log::drain();
+        crate::debug_log::set_enabled(true);
+
+        let mut session = begin(AUTH_URL.into()).unwrap();
+        let port = session.port;
+        let receiver = session.take_receiver().unwrap();
+        raw_exchange(port, &get("/favicon.ico"));
+        raw_exchange(
+            port,
+            &get("/winnow-oauth?state=STATE-VALUE-77&code=CODE-VALUE-99"),
+        );
+        let _ = outcome_within(receiver, Duration::from_secs(5));
+        // Let the listener write its closing line.
+        std::thread::sleep(Duration::from_millis(100));
+        crate::debug_log::set_enabled(false);
+
+        let log = crate::debug_log::drain().join("\n");
+        assert!(log.contains("rust:listener-bound addr=127.0.0.1:"), "{log}");
+        assert!(log.contains("path=/favicon.ico"), "{log}");
+        assert!(log.contains("path=/winnow-oauth query=state,code"), "{log}");
+        assert!(log.contains("rust:listener-callback"), "{log}");
+        assert!(
+            log.contains("rust:listener-closed reason=answered"),
+            "{log}"
+        );
+        assert!(!log.contains("CODE-VALUE-99"), "the code leaked: {log}");
+        assert!(!log.contains("STATE-VALUE-77"), "the state leaked: {log}");
     }
 }

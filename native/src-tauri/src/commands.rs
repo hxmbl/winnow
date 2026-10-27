@@ -190,6 +190,7 @@ pub async fn oauth_begin(
     authorize_url: String,
 ) -> Result<OAuthBegin> {
     let session = crate::oauth::begin(authorize_url)?;
+    crate::dlog!("auth", "oauth-begin", port = session.port);
     let response = OAuthBegin {
         port: session.port,
         authorize_url: session.auth_url.clone(),
@@ -213,6 +214,7 @@ pub async fn oauth_begin(
 /// The entry is removed when the wait finishes, whoever won it.
 #[tauri::command]
 pub async fn oauth_await(
+    app: AppHandle,
     sessions: State<'_, Sessions>,
     port: u16,
     timeout_ms: Option<u64>,
@@ -232,6 +234,7 @@ pub async fn oauth_await(
         // have different causes: the first is a stale port from a previous
         // attempt, the second is a double `await` on the same one.
         let known = sessions.0.lock().contains_key(&port);
+        crate::dlog!("auth", "oauth-await-refused", port = port, known = known);
         return Err(if known {
             "that sign-in attempt has already been waited on".into()
         } else {
@@ -240,13 +243,53 @@ pub async fn oauth_await(
     };
 
     let wait = std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000));
+    crate::dlog!(
+        "auth",
+        "oauth-await-start",
+        port = port,
+        timeout_ms = wait.as_millis()
+    );
+    let started = std::time::Instant::now();
     let result = tokio::time::timeout(wait, receiver).await;
+    let waited_ms = started.elapsed().as_millis();
 
     // Whoever won, the session is done: free the port so the next attempt can
     // bind, and so `oauth_cancel` cannot abort a sign-in that has already
     // completed.
     if let Some(session) = sessions.0.lock().remove(&port) {
         session.abort();
+    }
+    // The sign-in no longer needs the app kept running behind the browser.
+    end_sign_in_keep_alive(&app);
+
+    match &result {
+        Ok(Ok(AuthOutcome::Code { .. })) => {
+            crate::dlog!(
+                "auth",
+                "oauth-await-done",
+                outcome = "code",
+                waited_ms = waited_ms
+            )
+        }
+        Ok(Ok(AuthOutcome::Error { error, .. })) => crate::dlog!(
+            "auth",
+            "oauth-await-done",
+            outcome = "error",
+            error = error,
+            waited_ms = waited_ms
+        ),
+        Ok(Err(_)) => crate::dlog!(
+            "auth",
+            "oauth-await-done",
+            outcome = "listener-closed",
+            waited_ms = waited_ms
+        ),
+        Err(_) => crate::dlog!(
+            "auth",
+            "oauth-await-done",
+            outcome = "timeout",
+            waited_ms = waited_ms
+        ),
     }
 
     match result {
@@ -263,10 +306,50 @@ pub async fn oauth_await(
 /// Cancel button and a cancellation that fails is indistinguishable from one that
 /// worked — there is nothing left to do either way.
 #[tauri::command]
-pub fn oauth_cancel(sessions: State<'_, Sessions>, port: u16) {
-    if let Some(session) = sessions.0.lock().remove(&port) {
+pub fn oauth_cancel(app: AppHandle, sessions: State<'_, Sessions>, port: u16) {
+    let found = sessions.0.lock().remove(&port);
+    crate::dlog!(
+        "auth",
+        "oauth-cancel",
+        port = port,
+        running = found.is_some()
+    );
+    if let Some(session) = found {
         session.abort();
     }
+    end_sign_in_keep_alive(&app);
+}
+
+/// Let the app be frozen in the background again (Android): stop the short foreground
+/// service `open_sign_in_tab` started for the sign-in. Fire and forget; elsewhere a
+/// no-op.
+fn end_sign_in_keep_alive(app: &AppHandle) {
+    #[cfg(target_os = "android")]
+    {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let result =
+                crate::google_signin::call(&app, "endKeepAlive", serde_json::json!({})).await;
+            crate::dlog!("auth", "keep-alive-end", ok = result.is_ok());
+        });
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
+}
+
+// ── Debug log ───────────────────────────────────────────────────────────────
+
+/// Dev Options → Debug log switched on or off; Rust records only while it is on.
+#[tauri::command]
+pub fn debug_log_set_enabled(enabled: bool) {
+    crate::debug_log::set_enabled(enabled);
+    crate::dlog!("app", "debug-log-on", native = true);
+}
+
+/// The native lines recorded since the last drain, oldest first.
+#[tauri::command]
+pub fn debug_log_drain() -> Vec<String> {
+    crate::debug_log::drain()
 }
 
 // ── Notifications ───────────────────────────────────────────────────────────
@@ -366,9 +449,21 @@ pub async fn google_signin_authorize(
     };
     #[cfg(target_os = "android")]
     {
-        crate::google_signin::call(&app, "authorize", request.payload())
+        crate::dlog!(
+            "auth",
+            "native-authorize-start",
+            scopes = request.scopes.len()
+        );
+        let result = crate::google_signin::call(&app, "authorize", request.payload())
             .await
-            .unwrap_or_else(|e| unavailable("failed", e))
+            .unwrap_or_else(|e| unavailable("failed", e));
+        crate::dlog!(
+            "auth",
+            "native-authorize-done",
+            kind = result.get("kind").and_then(|v| v.as_str()).unwrap_or("?"),
+            reason = result.get("reason").and_then(|v| v.as_str()).unwrap_or("-")
+        );
+        result
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -379,18 +474,39 @@ pub async fn google_signin_authorize(
 
 /// Open Google's consent page in a Custom Tab over the app (Android). Elsewhere an
 /// error, and the web layer uses `open_external` instead.
+///
+/// Before the tab opens, the Kotlin side starts a short foreground service so Android
+/// does not freeze Winnow while it sits behind the browser: a frozen app cannot answer
+/// the loopback redirect, which the browser reports as "127.0.0.1 took too long to
+/// respond". The answer says whether that worked (`{ keptAlive, keepAlive }`), for
+/// the debug log; the tab opens either way.
 #[tauri::command]
-pub async fn open_sign_in_tab(app: AppHandle, url: String) -> Result<()> {
+pub async fn open_sign_in_tab(app: AppHandle, url: String) -> Result<serde_json::Value> {
     let parsed = crate::google_signin::sign_in_tab_url(&url)?;
     #[cfg(target_os = "android")]
     {
-        crate::google_signin::call(
+        let result = crate::google_signin::call(
             &app,
             "openTab",
             serde_json::json!({ "url": parsed.as_str() }),
         )
-        .await
-        .map(|_| ())
+        .await;
+        match &result {
+            Ok(answer) => crate::dlog!(
+                "auth",
+                "sign-in-tab-opened",
+                kept_alive = answer
+                    .get("keptAlive")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                keep_alive = answer
+                    .get("keepAlive")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?")
+            ),
+            Err(_) => crate::dlog!("auth", "sign-in-tab-failed"),
+        }
+        result
     }
     #[cfg(not(target_os = "android"))]
     {

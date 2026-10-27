@@ -2437,6 +2437,7 @@ export class WinnowStore {
             : progress.phase;
           const stage = progress.stage ?? null;
           const changed = this.state.syncPhase !== phase || this.state.syncStage !== stage;
+          if (changed) debugLog("sync", "phase", { phase, stage, fetched: progress.fetched, total: progress.total ?? null, ms: Date.now() - started });
           this.state = {
             ...this.state,
             syncing: true,
@@ -2526,6 +2527,9 @@ export class WinnowStore {
       debugLog("sync", "failed", {
         initial,
         ms: Date.now() - started,
+        kind: error instanceof Error ? ((error as { kind?: unknown }).kind as string | undefined) ?? error.name : typeof error,
+        status: typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : undefined,
+        online: globalThis.navigator?.onLine,
         reason: error instanceof Error ? error.message : "unknown",
       });
       const message = error instanceof Error ? error.message : "Could not reach Gmail.";

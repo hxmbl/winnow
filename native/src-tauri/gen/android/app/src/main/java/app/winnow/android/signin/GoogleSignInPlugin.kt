@@ -45,7 +45,9 @@ class OpenTabArgs {
  *   has an Android client for this package name and signing certificate; otherwise it
  *   answers DEVELOPER_ERROR.
  * - `signingInfo`: the package name and the running APK's SHA-1, for the setup guide.
- * - `openTab`: Google's consent page in a Custom Tab, for the browser fallback.
+ * - `openTab`: Google's consent page in a Custom Tab, for the browser fallback, with
+ *   [SignInKeepAliveService] started first so the loopback listener can answer.
+ * - `endKeepAlive`: stop that service once the sign-in is over.
  *
  * Every command resolves; none rejects except `openTab`. A sign-in that cannot finish
  * resolves `{ kind: "unavailable", reason, detail }` and the web layer opens the browser
@@ -138,6 +140,9 @@ class GoogleSignInPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject("a sign-in tab opens Google's consent page only")
       return
     }
+    // Keep Winnow running while the tab is in front, or Android may freeze it and the
+    // loopback listener cannot answer Google's redirect (SignInKeepAliveService).
+    val keptAlive = SignInKeepAliveService.start(activity)
     try {
       // Opened from the activity, without NEW_TASK, so the tab sits in Winnow's own task:
       // the success page's winnow://signed-in link brings the single-task activity back
@@ -147,12 +152,26 @@ class GoogleSignInPlugin(private val activity: Activity) : Plugin(activity) {
         .setUrlBarHidingEnabled(false)
         .build()
         .launchUrl(activity, Uri.parse(url))
-      invoke.resolve()
+      val answer = JSObject()
+      answer.put("keptAlive", keptAlive)
+      answer.put("keepAlive", SignInKeepAliveService.state)
+      invoke.resolve(answer)
     } catch (e: ActivityNotFoundException) {
+      SignInKeepAliveService.stop(activity)
       invoke.reject("no browser can open the sign-in page")
     } catch (e: Exception) {
+      SignInKeepAliveService.stop(activity)
       invoke.reject(e.message ?: "the sign-in page could not be opened")
     }
+  }
+
+  /** The sign-in finished, timed out or was cancelled: let Android freeze us again. */
+  @Command
+  fun endKeepAlive(invoke: Invoke) {
+    SignInKeepAliveService.stop(activity)
+    val answer = JSObject()
+    answer.put("keepAlive", SignInKeepAliveService.state)
+    invoke.resolve(answer)
   }
 
   private fun finish(invoke: Invoke, result: AuthorizationResult) {

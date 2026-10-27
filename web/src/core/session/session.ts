@@ -881,10 +881,22 @@ export class GmailSession {
     // Adding an account: Google's account chooser first, so another account can be
     // picked instead of the browser's current one. `consent` stays, or there is no
     // refresh token.
-    await this.authorize(GMAIL_SCOPE, options.chooseAccount ? { prompt: "select_account consent" } : {});
-
-    const profile = await this.profileAfterAuthorize();
-    return { email: profile.emailAddress };
+    const started = Date.now();
+    debugLog("auth", "sign-in-start", { chooseAccount: Boolean(options.chooseAccount) });
+    try {
+      await this.authorize(GMAIL_SCOPE, options.chooseAccount ? { prompt: "select_account consent" } : {});
+      const profile = await this.profileAfterAuthorize();
+      debugLog("auth", "sign-in-done", { ms: Date.now() - started });
+      return { email: profile.emailAddress };
+    } catch (error) {
+      debugLog("auth", "sign-in-failed", {
+        kind: error instanceof GmailError ? error.kind : error instanceof Error ? error.name : typeof error,
+        status: error instanceof GmailError ? error.status : undefined,
+        reason: error instanceof Error ? error.message : undefined,
+        ms: Date.now() - started,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -894,11 +906,23 @@ export class GmailSession {
    * left a WebView that was still behind the browser, and the Gmail client lets a
    * bare `TypeError: Failed to fetch` through. A profile read is safe to repeat.
    */
-  private profileAfterAuthorize(): ReturnType<GmailClient["profile"]> {
-    return retryWhileUnreachable(() => this.client.profile(), {
-      retryable: isFetchRejection,
-      waitForForeground: () => this.waitForForeground(),
-    });
+  private async profileAfterAuthorize(): ReturnType<GmailClient["profile"]> {
+    debugLog("auth", "profile-read-start");
+    try {
+      const profile = await retryWhileUnreachable(() => this.client.profile(), {
+        retryable: isFetchRejection,
+        waitForForeground: () => this.waitForForeground(),
+        label: "profile",
+      });
+      debugLog("auth", "profile-read-ok");
+      return profile;
+    } catch (error) {
+      debugLog("auth", "profile-read-failed", {
+        kind: error instanceof GmailError ? error.kind : error instanceof Error ? error.name : typeof error,
+        status: error instanceof GmailError ? error.status : undefined,
+      });
+      throw error;
+    }
   }
 
   private waitForForeground(): Promise<unknown> {
@@ -925,8 +949,21 @@ export class GmailSession {
 
     const before = await this.tokens.current().catch(() => null);
     const incremental = Boolean(intent.purpose);
-    if (await this.authorizeNatively(stored, scope, before, incremental)) return;
+    debugLog("auth", "authorize-start", {
+      purpose: intent.purpose ?? "sign-in",
+      incremental,
+      nativeConfigured: Boolean(stored?.nativeAndroid),
+      hadSession: Boolean(before),
+    });
+    if (await this.authorizeNatively(stored, scope, before, incremental)) {
+      debugLog("auth", "authorize-done", { path: "native" });
+      return;
+    }
     scope = browserFallbackScope(scope, before, incremental);
+    debugLog("auth", "authorize-path", {
+      path: "browser",
+      nativeFallback: this.lastNativeFallback ? this.lastNativeFallback.split(":")[0] : undefined,
+    });
 
     const pkce = await createPkcePair();
     const redirectUri = await this.redirectUri();
@@ -953,6 +990,11 @@ export class GmailSession {
     const outcome = await this.platform.beginSignIn({
       authorizeUrl,
       timeoutMs: SIGN_IN_TIMEOUT_MS,
+    });
+    debugLog("auth", "redirect-outcome", {
+      kind: outcome.kind,
+      error: outcome.kind === "error" ? outcome.error : undefined,
+      stateMatches: outcome.kind === "code" ? stateMatches(pkce.state, outcome.state) : undefined,
     });
 
     if (outcome.kind === "cancelled") {
@@ -1003,6 +1045,7 @@ export class GmailSession {
     // paused behind the browser, so the exchange waits for the app to be in front and
     // resends a request that never reached Google (never one Google answered).
     const code = outcome.code;
+    debugLog("auth", "code-exchange-start", { verifierFrom: pending?.verifier ? "stash" : "memory" });
     await exchangeWithRetry(() => this.tokens.exchangeCode({
       code,
       // Prefer the stashed verifier: on the web the `pkce` local is from before
@@ -1014,8 +1057,16 @@ export class GmailSession {
       // browser, and Google rejects an exchange that names the placeholder
       // instead — see `LOOPBACK_REDIRECT_URI` and `desktop.ts`'s `redirectUriIn`.
       redirectUri: outcome.redirectUri ?? redirectUri,
-    }), { waitForForeground: () => this.waitForForeground() });
+    }), { waitForForeground: () => this.waitForForeground(), label: "code-exchange" }).catch((error: unknown) => {
+      debugLog("auth", "code-exchange-failed", {
+        kind: error instanceof GmailError ? error.kind : error instanceof Error ? error.name : typeof error,
+        status: error instanceof GmailError ? error.status : undefined,
+      });
+      throw error;
+    });
+    debugLog("auth", "code-exchange-ok");
     this.writable = true;
+    debugLog("auth", "authorize-done", { path: "browser" });
   }
 
   /**
@@ -1040,11 +1091,13 @@ export class GmailSession {
     // client may not be the one that granted it.
     const scopes = scopeList(incremental ? before?.scope : undefined, scope);
     let result: NativeSignInResult;
+    debugLog("auth", "native-start", { scopes: scopes.length });
     try {
       result = await this.platform.nativeGoogleSignIn({ serverClientId: server.clientId, scopes });
     } catch (error) {
       result = { kind: "unavailable", reason: "failed", detail: error instanceof Error ? error.message : String(error) };
     }
+    debugLog("auth", "native-result", { kind: result.kind, reason: result.kind === "unavailable" ? result.reason : undefined });
     if (result.kind === "cancelled") throw new GmailError("Sign-in was cancelled.", 0, "declined");
     if (result.kind === "unavailable") {
       this.lastNativeFallback = `${result.reason}: ${result.detail}`;
@@ -1055,9 +1108,14 @@ export class GmailSession {
     try {
       await exchangeWithRetry(() => this.tokens.exchangeServerAuthCode({ code, client: server }), {
         waitForForeground: () => this.waitForForeground(),
+        label: "native-exchange",
       });
     } catch (error) {
       this.lastNativeFallback = `exchange: ${error instanceof Error ? error.message : String(error)}`;
+      debugLog("auth", "native-exchange-failed", {
+        kind: error instanceof GmailError ? error.kind : error instanceof Error ? error.name : typeof error,
+        status: error instanceof GmailError ? error.status : undefined,
+      });
       return false;
     }
     this.lastNativeFallback = null;
