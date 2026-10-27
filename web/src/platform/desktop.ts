@@ -27,6 +27,7 @@ import type {
 } from "./types";
 import { parseNativeSignInResult, parseSigningInfo, unavailable } from "./nativeGoogle";
 import { waitUntilVisible } from "./visibility";
+import { debugLog, setNativeDebugBridge, syncNativeDebugLog } from "../core/debug/debugLog";
 import { parseNotificationAction, type NotificationActionEvent } from "../core/notify/notifications";
 import { parseChannel, type UpdateOffer, type UpdateRuntime } from "../core/updates/updates";
 import type { InstallOutcome } from "./types";
@@ -37,6 +38,8 @@ const DEEP_LINK_EVENT = "winnow://open-url";
 const TRAY_ACTION_EVENT = "winnow://tray-action";
 /** `notify_actions::ACTION_EVENT`. */
 const NOTIFICATION_ACTION_EVENT = "winnow://notification-action";
+/** `debug_log::DEBUG_LOG_EVENT`: native debug-log lines are waiting. */
+const DEBUG_LOG_EVENT = "winnow://debug-log";
 
 type AuthOutcome =
   | { kind: "code"; code: string; state: string }
@@ -47,6 +50,7 @@ const TIMED_OUT = /\btimed?[\s-]?out\b/i;
 const ABANDONED = /\b(cancel|abort|close|disconnect|drop|abandon)\w*\b/i;
 
 async function abandonSignIn(port: number): Promise<void> {
+  debugLog("auth", "loopback-abandon", { port });
   if (activePort === port) activePort = null;
   await invoke("oauth_cancel", { port }).catch(() => undefined);
 }
@@ -112,14 +116,30 @@ export const desktopPlatform: Platform = {
   },
 
   async beginSignIn(request: SignInRequest): Promise<SignInResult> {
-    const begun = await invoke<{ port: number; authorize_url: string }>("oauth_begin", {
-      authorizeUrl: request.authorizeUrl,
-    });
+    const android = androidWebView();
+    debugLog("auth", "loopback-begin", { android, timeoutMs: request.timeoutMs });
+    let begun: { port: number; authorize_url: string };
+    try {
+      begun = await invoke<{ port: number; authorize_url: string }>("oauth_begin", {
+        authorizeUrl: request.authorizeUrl,
+      });
+    } catch (error) {
+      debugLog("auth", "loopback-begin-failed", { reason: describeIpcError(error, "the listener did not start") });
+      throw error;
+    }
     activePort = begun.port;
+    const redirect = redirectUriIn(begun.authorize_url);
+    debugLog("auth", "loopback-listening", {
+      port: begun.port,
+      // Host and path only: the URI carries no secrets, but the log keeps to the shape.
+      redirect: redirect ? redirect.replace(/^http:\/\/([^/]+)(\/[^?#]*).*$/, "$1$2") : "missing",
+    });
 
     try {
-      await openSignInPage(begun.authorize_url, androidWebView());
+      const opened = await openSignInPage(begun.authorize_url, android);
+      debugLog("auth", "consent-page-opened", { via: opened.via, keptAlive: opened.keptAlive, keepAlive: opened.keepAlive });
     } catch (error) {
+      debugLog("auth", "consent-page-failed", { reason: describeIpcError(error, "the browser could not be opened") });
       await abandonSignIn(begun.port);
       return {
         kind: "unavailable",
@@ -127,18 +147,26 @@ export const desktopPlatform: Platform = {
       };
     }
 
+    const started = Date.now();
+    debugLog("auth", "redirect-wait-start", { port: begun.port });
     try {
       const outcome = await invoke<AuthOutcome>("oauth_await", {
         port: begun.port,
         timeoutMs: request.timeoutMs,
       });
+      debugLog("auth", "redirect-wait-done", {
+        outcome: outcome.kind,
+        error: outcome.kind === "error" ? outcome.error : undefined,
+        ms: Date.now() - started,
+      });
       if (outcome.kind !== "code") return outcome;
-      const redirectUri = redirectUriIn(begun.authorize_url);
-      return redirectUri ? { ...outcome, redirectUri } : outcome;
+      return redirect ? { ...outcome, redirectUri: redirect } : outcome;
     } catch (error) {
       const message = describeIpcError(error, "the sign-in listener stopped");
-      if (TIMED_OUT.test(message)) return { kind: "timeout" };
-      if (ABANDONED.test(message)) return { kind: "cancelled" };
+      const kind = TIMED_OUT.test(message) ? "timeout" : ABANDONED.test(message) ? "cancelled" : "unavailable";
+      debugLog("auth", "redirect-wait-failed", { kind, reason: message, ms: Date.now() - started });
+      if (kind === "timeout") return { kind: "timeout" };
+      if (kind === "cancelled") return { kind: "cancelled" };
       return { kind: "unavailable", detail: message };
     } finally {
       activePort = null;
@@ -306,6 +334,31 @@ export const desktopPlatform: Platform = {
 
 export const desktopPlatformExtras = {
   /**
+   * Connect Dev Options → Debug log to the shell's own log (`debug_log.rs`): the switch
+   * reaches Rust, and Rust's lines are drained in whenever it says some are waiting. A
+   * shell that predates the commands answers with errors, which are ignored.
+   */
+  installNativeDebugLog(): () => void {
+    setNativeDebugBridge({
+      setEnabled: (on) => invoke("debug_log_set_enabled", { enabled: on }),
+      drain: async () => {
+        const lines = await invoke<unknown>("debug_log_drain");
+        return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : [];
+      },
+    });
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listen(DEBUG_LOG_EVENT, () => void syncNativeDebugLog())
+      .then((fn) => (cancelled ? fn() : (unlisten = fn)))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      setNativeDebugBridge(null);
+    };
+  },
+
+  /**
    * The links the OS launched the app for (`deep_link_launch`): asked once the webview
    * listens, since the shell's own event for a cold start fires before it does. Empty
    * when there are none, or from a shell that predates the command.
@@ -400,17 +453,31 @@ export async function openSignInPage(
   url: string,
   android: boolean,
   call: (command: string, args: Record<string, unknown>) => Promise<unknown> = invoke,
-): Promise<void> {
+): Promise<OpenedSignInPage> {
   if (android) {
     try {
-      await call("open_sign_in_tab", { url });
-      return;
-    } catch {
+      const answer = (await call("open_sign_in_tab", { url })) as { keptAlive?: unknown; keepAlive?: unknown } | null;
+      return {
+        via: "custom-tab",
+        keptAlive: answer?.keptAlive === true,
+        keepAlive: typeof answer?.keepAlive === "string" ? answer.keepAlive : "unknown",
+      };
+    } catch (error) {
+      debugLog("auth", "custom-tab-failed", { reason: describeIpcError(error, "the tab did not open") });
       // Fall through to the system browser.
     }
   }
   await call("open_external", { url });
+  return { via: "browser", keptAlive: false, keepAlive: android ? "none" : "not-needed" };
 }
+
+/** How `openSignInPage` opened Google, for the debug log. */
+export type OpenedSignInPage = {
+  via: "custom-tab" | "browser";
+  /** Android: whether the sign-in keep-alive service started (`SignInKeepAliveService`). */
+  keptAlive: boolean;
+  keepAlive: string;
+};
 
 /**
  * Install an offer through the shell (`updater.rs`). Exported with its `invoke` as a

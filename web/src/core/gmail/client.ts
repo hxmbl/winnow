@@ -36,6 +36,7 @@ import {
   type GmailSendResponse,
 } from "./dto";
 import { decodeBody, htmlPart } from "./mapper";
+import { debugLog } from "../debug/debugLog";
 import { SNOOZED_LABEL } from "../mail/snooze";
 
 /** Gmail's maximum page size. Asking for more is silently clamped. */
@@ -329,10 +330,16 @@ export class GmailClient {
     const method = init.method ?? "GET";
     // An upload is charged as the call it uploads for: `?uploadType=` is not part of it.
     const costPath = init.upload ? path.replace(/\?uploadType=[a-z]+$/, "") : path;
+    // For Dev Options → Debug log: the API path without its query (a search's `q` is
+    // the user's words), so ids survive and nothing typed does.
+    const logPath = path.split("?")[0];
     const send = async (bearer: string) => {
       for (let attempt = 0; ; attempt += 1) {
         await this.bucket.take(costOf(costPath, method));
-        const response = await this.fetchImpl(url, {
+        const started = Date.now();
+        let response: Awaited<ReturnType<typeof this.fetchImpl>>;
+        try {
+          response = await this.fetchImpl(url, {
           method,
           headers: {
             Authorization: `Bearer ${bearer}`,
@@ -343,10 +350,30 @@ export class GmailClient {
                 : { "Content-Type": "application/json" }),
           },
           body: init.upload ? init.upload.body : init.body === undefined ? undefined : JSON.stringify(init.body),
-        });
+          });
+        } catch (error) {
+          debugLog("network", "gmail-unreachable", {
+            method,
+            path: logPath,
+            attempt,
+            error: error instanceof Error ? error.name : typeof error,
+            ms: Date.now() - started,
+          });
+          throw error;
+        }
         const text = await response.text();
         const limited = isRateLimited(response.status, text);
         const flaky = !limited && isServerError(response.status);
+        if (!response.ok) {
+          debugLog("network", "gmail-http-error", {
+            method,
+            path: logPath,
+            status: response.status,
+            attempt,
+            rateLimited: limited,
+            ms: Date.now() - started,
+          });
+        }
         if ((!limited && !flaky) || attempt >= (limited ? MAX_RETRIES : MAX_SERVER_RETRIES)) {
           return { response, text };
         }
@@ -363,6 +390,7 @@ export class GmailClient {
     const { response, text } = await send(token);
 
     if (response.status === 401 && init.allowRetry !== false && this.onUnauthorized) {
+      debugLog("auth", "gmail-unauthorized-refresh", { path: logPath });
       const refreshed = await this.onUnauthorized();
       if (!refreshed) {
         throw new GmailError("Your Google session has expired. Sign in again.", 401, "reauth_required");

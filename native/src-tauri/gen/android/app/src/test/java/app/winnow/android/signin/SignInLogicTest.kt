@@ -49,4 +49,12 @@ class SignInLogicTest {
     assertFalse(SignInLogic.isSignInUrl("winnow://signed-in"))
     assertFalse(SignInLogic.isSignInUrl(null))
   }
+
+  @Test
+  fun theSignInKeepAliveIsAShortServiceFromAndroid14() {
+    assertEquals(2048, SignInLogic.keepAliveServiceType(34))
+    assertEquals(2048, SignInLogic.keepAliveServiceType(35))
+    assertEquals(0, SignInLogic.keepAliveServiceType(33))
+    assertEquals(0, SignInLogic.keepAliveServiceType(24))
+  }
 }

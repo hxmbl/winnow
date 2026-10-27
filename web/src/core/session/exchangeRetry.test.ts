@@ -10,7 +10,8 @@
  * unreachable.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearDebugLog, debugLogText, setDebugLogEnabled } from "../debug/debugLog";
 import {
   EXCHANGE_RETRY_DELAYS_MS,
   EXCHANGE_UNREACHABLE_MESSAGE,
@@ -196,5 +197,30 @@ describe("retryWhileUnreachable (the profile read after sign-in)", () => {
     expect(isFetchRejection(new GoogleUnreachable("Could not reach Google: Failed to fetch"))).toBe(true);
     expect(isFetchRejection(new SyntaxError("Unexpected end of JSON input"))).toBe(false);
     expect(isFetchRejection(new GmailError("invalid_grant", 400, "state_mismatch"))).toBe(false);
+  });
+});
+
+describe("the debug log", () => {
+  afterEach(() => {
+    setDebugLogEnabled(false);
+    clearDebugLog();
+  });
+
+  it("records each attempt, the foreground wait and the retry, never the code", async () => {
+    setDebugLogEnabled(true);
+    let calls = 0;
+    const result = await exchangeWithRetry(
+      async () => {
+        calls += 1;
+        if (calls === 1) throw new GoogleUnreachable("Could not reach Google: Failed to fetch");
+        return "tokens";
+      },
+      { waitForForeground: async () => true, sleep: async () => undefined, label: "code-exchange" },
+    );
+    expect(result).toBe("tokens");
+    const log = debugLogText();
+    expect(log).toMatch(/auth foreground-wait for=code-exchange attempt=0 visible=true/);
+    expect(log).toMatch(/auth attempt-failed for=code-exchange attempt=0 kind=network status=0 retry=true delayMs=500/);
+    expect(log).toMatch(/auth attempt-ok for=code-exchange attempt=1/);
   });
 });

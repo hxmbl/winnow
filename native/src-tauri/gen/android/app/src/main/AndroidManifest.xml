@@ -9,6 +9,12 @@
       to allow "Install unknown apps" for Winnow.
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!--
+      Sign-in keep-alive (signin/SignInKeepAliveService.kt): a short foreground service
+      while the user is at Google, so Android does not freeze Winnow and the loopback
+      listener can answer the redirect. shortService needs no type-specific permission.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -56,6 +62,12 @@
           Notification buttons (Reply, Delete, Mark read, Undo). Not exported: only the
           PendingIntents Winnow itself posts can reach it. See notify/MailNotifier.kt.
         -->
+        <!-- Runs only while a browser sign-in is open; see signin/SignInKeepAliveService.kt. -->
+        <service
+            android:name=".signin.SignInKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
+
         <receiver
             android:name=".notify.NotifyActionReceiver"
             android:exported="false" />

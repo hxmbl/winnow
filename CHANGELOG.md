@@ -14,6 +14,14 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Fixed
+
+- Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.
+
+### Changed
+
+- Dev Options → Debug log keeps up to 10,000 lines and records far more: every step of signing in, sync stages, network errors, and the app going to the background and back, including the app's own native side on Android and desktop. Copying a full log no longer freezes the screen.
+
 ## [1.6.4] - 2026-10-26
 
 ### Changed

@@ -48,6 +48,13 @@ pub fn register(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.clone();
     app.deep_link().on_open_url(move |event| {
         for url in event.urls() {
+            // Scheme and host only (`winnow://signed-in`): a query can name an account.
+            crate::dlog!(
+                "app",
+                "deep-link",
+                scheme = url.scheme(),
+                host = url.host_str().unwrap_or("-")
+            );
             let _ = handle.emit(OPEN_URL_EVENT, url.to_string());
         }
     });

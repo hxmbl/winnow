@@ -18,6 +18,7 @@
  */
 
 import { GmailError, GoogleUnreachable } from "../gmail/dto";
+import { debugLog } from "../debug/debugLog";
 
 /** What the user reads when Google could not be reached at all. */
 export const EXCHANGE_UNREACHABLE_MESSAGE =
@@ -43,6 +44,8 @@ export type RetryOptions = {
   delaysMs?: readonly number[];
   /** Injectable for tests. */
   sleep?: (ms: number) => Promise<void>;
+  /** What this is, for Dev Options → Debug log (`code-exchange`, `profile`). */
+  label?: string;
 };
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -70,12 +73,29 @@ export async function retryWhileUnreachable<T>(
   const retryable = options.retryable ?? isUnreachable;
   const waitForForeground = options.waitForForeground ?? (() => Promise.resolve());
 
+  const label = options.label ?? "request";
+
   for (let attempt = 0; ; attempt++) {
     // A platform that cannot tell, or a wait that throws, must not cost the sign-in.
-    await waitForForeground().catch(() => undefined);
+    const waitStarted = Date.now();
+    const foreground = await waitForForeground().catch(() => undefined);
+    debugLog("auth", "foreground-wait", { for: label, attempt, visible: typeof foreground === "boolean" ? foreground : undefined, ms: Date.now() - waitStarted });
+    const started = Date.now();
     try {
-      return await operation();
+      const result = await operation();
+      debugLog("auth", "attempt-ok", { for: label, attempt, ms: Date.now() - started });
+      return result;
     } catch (error) {
+      const again = retryable(error) && attempt < delays.length;
+      debugLog("auth", "attempt-failed", {
+        for: label,
+        attempt,
+        kind: error instanceof GmailError ? error.kind : error instanceof Error ? error.name : typeof error,
+        status: error instanceof GmailError ? error.status : undefined,
+        retry: again,
+        delayMs: again ? delays[attempt] : undefined,
+        ms: Date.now() - started,
+      });
       if (!retryable(error)) throw error;
       if (attempt >= delays.length) throw new SignInUnreachable();
       await sleep(delays[attempt]);
