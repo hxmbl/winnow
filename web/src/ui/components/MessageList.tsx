@@ -429,7 +429,8 @@ const Row = memo(function Row({
                   {signal.label}
                 </span>
               )}
-              <span className="text-meta tabular-nums text-ink-subtle">{time}</span>
+              {/* A fixed-width, right-aligned time keeps every row's icon in one column, whether it reads 9:15 PM, 11:14 PM or 26 Oct. */}
+              <span data-row-time="" className="min-w-[8.5ch] text-right text-meta tabular-nums text-ink-subtle">{time}</span>
             </span>
           </span>
 
@@ -520,7 +521,7 @@ function SignalIcon({ signal, filter }: { signal: RowSignal; filter: BuiltinSmar
       title={signal.title}
       data-icon-filter={signal.danger ? undefined : filter}
       data-row-signal={filter}
-      className={`inline-flex items-center self-center ${signal.danger ? "text-danger" : ""}`}
+      className={`inline-flex size-4 shrink-0 items-center justify-center self-center ${signal.danger ? "text-danger" : ""}`}
     >
       <Icon size={16} strokeWidth={2} className="shrink-0" />
     </span>

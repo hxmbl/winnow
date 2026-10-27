@@ -24,6 +24,7 @@ adds. See `native/README.md`, "Cutting a release".
 - Smart filter colours now mean something: warm colours for mail that needs attention, blue for trust (Security, Top contacts, New contacts), green for money (Promos, Receipts), brown for deliveries. Quieter filters such as Unread, Files, Newsletters and Read later are plain grey.
 - Dev Options → Debug log keeps up to 10,000 lines and records far more: every step of signing in, sync stages, network errors, and the app going to the background and back, including the app's own native side on Android and desktop. Copying a full log no longer freezes the screen.
 - Clearing the debug log now asks first, so one tap can't throw away a log you haven't copied yet.
+- Smart filter icons are all the same size now. Each one fills the same square, so the Important marker no longer looks bigger than the Deliveries box, on the filter rail, in inbox rows and in the reader. Inbox row icons also line up in one column next to the time.
 
 ### Security
 
