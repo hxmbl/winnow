@@ -23,6 +23,7 @@ adds. See `native/README.md`, "Cutting a release".
 - Smart filters now have icons. Each chip on the filter rail shows its icon before the name, and an inbox row marks Unsafe, Urgent, Security or Important mail with that filter's icon next to the time (hover it to see the name). Important uses the marker you know from Gmail, and Urgent a warning triangle.
 - Smart filter colours now mean something: warm colours for mail that needs attention, blue for trust (Security, Top contacts, New contacts), green for money (Promos, Receipts), brown for deliveries. Quieter filters such as Unread, Files, Newsletters and Read later are plain grey.
 - Dev Options → Debug log keeps up to 10,000 lines and records far more: every step of signing in, sync stages, network errors, and the app going to the background and back, including the app's own native side on Android and desktop. Copying a full log no longer freezes the screen.
+- Clearing the debug log now asks first, so one tap can't throw away a log you haven't copied yet.
 
 ### Security
 

@@ -268,6 +268,7 @@ export function ConfirmDialog({
   title,
   body,
   confirmLabel,
+  cancelLabel = "Keep editing",
   destructive = true,
   onConfirm,
   onCancel,
@@ -275,6 +276,8 @@ export function ConfirmDialog({
   title: string;
   body: string;
   confirmLabel: string;
+  /** The safe answer's words. Defaults to the draft-discard wording it was made for. */
+  cancelLabel?: string;
   /** Red for "this loses something", ink for "this is just a step". */
   destructive?: boolean;
   onConfirm: () => void;
@@ -306,7 +309,7 @@ export function ConfirmDialog({
           onClick={onCancel}
           className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          Keep editing
+          {cancelLabel}
         </button>
         <button
           type="button"

@@ -7932,9 +7932,18 @@ try {
       (await s.evaluate(() => JSON.parse(localStorage.getItem("winnow.devOptions.v1") ?? "null")?.debugLog)) === false &&
         ((await dialog.locator("[data-debug-log]").textContent()) ?? "").includes("not recording"),
     );
+    const before = await logText();
     await dialog.locator("[data-debug-log-clear]").click();
-    await s.waitForTimeout(100);
-    check("Clear empties it", (await logText()) === "Nothing recorded yet.");
+    await s.waitForTimeout(150);
+    check("Clear asks first", (await s.getByRole("button", { name: "Clear log" }).count()) === 1 && (await logText()) === before);
+    await s.getByRole("button", { name: "Cancel", exact: true }).click();
+    await s.waitForTimeout(150);
+    check("Cancel keeps every line", (await s.getByRole("button", { name: "Clear log" }).count()) === 0 && (await logText()) === before);
+    await dialog.locator("[data-debug-log-clear]").click();
+    await s.waitForTimeout(150);
+    await s.getByRole("button", { name: "Clear log" }).click();
+    await s.waitForTimeout(150);
+    check("Clear log empties it", (await logText()) === "Nothing recorded yet.");
     await dialog.locator("[data-hide-dev-options]").click();
     await s.waitForTimeout(250);
     check("Hide Dev Options leaves nothing saved", (await s.evaluate(() => localStorage.getItem("winnow.devOptions.v1"))) === null);

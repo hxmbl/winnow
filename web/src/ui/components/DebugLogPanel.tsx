@@ -20,6 +20,7 @@ import {
   DEBUG_LOG_SHOWN,
 } from "../../core/debug/debugLog";
 import { copyText } from "../clipboard";
+import { ConfirmDialog } from "./Overlay";
 
 const BUTTON =
   "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
@@ -27,6 +28,8 @@ const BUTTON =
 export function DebugLogPanel({ recording }: { recording: boolean }) {
   const lines = useSyncExternalStore(subscribeDebugLog, debugLogLines, debugLogLines);
   const [copied, setCopied] = useState<"idle" | "copying" | "copied" | "failed">("idle");
+  // Clearing loses lines nobody may have copied yet (often the ones a bug report needs), so it asks first.
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   // Opening the viewer pulls in the native lines waiting in the shell.
   useEffect(() => {
@@ -64,10 +67,7 @@ export function DebugLogPanel({ recording }: { recording: boolean }) {
           type="button"
           data-debug-log-clear=""
           disabled={lines.length === 0}
-          onClick={() => {
-            clearDebugLog();
-            setCopied("idle");
-          }}
+          onClick={() => setConfirmingClear(true)}
           className={BUTTON}
         >
           Clear
@@ -81,6 +81,20 @@ export function DebugLogPanel({ recording }: { recording: boolean }) {
       >
         {visibleDebugText(lines)}
       </pre>
+      {confirmingClear && (
+        <ConfirmDialog
+          title="Clear the debug log?"
+          body={`This deletes all ${lines.length.toLocaleString("en-GB")} recorded lines. Copy them first if you need them for a bug report.`}
+          confirmLabel="Clear log"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            clearDebugLog();
+            setCopied("idle");
+            setConfirmingClear(false);
+          }}
+          onCancel={() => setConfirmingClear(false)}
+        />
+      )}
     </div>
   );
 }
