@@ -43,6 +43,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
+import { boxIcon } from "./filterIconBox";
 import { ImportantMarker } from "./ImportantMarker";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../core/model/signals";
 
@@ -60,7 +61,7 @@ import { FILTER_LABELS, type BuiltinSmartFilter } from "../core/model/signals";
  */
 export const FILTER_ICONS: Record<
   BuiltinSmartFilter,
-  React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
+  React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; viewBox?: string }>
 > = {
   /** The importance marker people know from Gmail (our own drawing, `ImportantMarker`). */
   important: ImportantMarker,
@@ -87,6 +88,14 @@ export const FILTER_ICONS: Record<
   low_priority: Clock3,
   long_reads: BookOpen,
 };
+
+/**
+ * What `filterIcon` hands out: each glyph above in one square box at one visual size and
+ * stroke weight (`boxIcon`). Built once, not per render.
+ */
+const BOXED_ICONS = Object.fromEntries(
+  (Object.keys(FILTER_ICONS) as BuiltinSmartFilter[]).map((id) => [id, boxIcon(id, FILTER_ICONS[id])]),
+) as Record<BuiltinSmartFilter, React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>>;
 
 /**
  * Why Winnow thinks a message is in a bucket, in a few words.
@@ -138,7 +147,7 @@ export function filterIcon(
   title: string;
 } {
   return {
-    Icon: FILTER_ICONS[id],
+    Icon: BOXED_ICONS[id],
     label: FILTER_LABELS[id],
     title: FILTER_EXPLANATIONS[id],
   };

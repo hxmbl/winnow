@@ -363,7 +363,7 @@ export const FilterStrip = memo(function FilterStrip({
                     data-pill-icon={id.id}
                     data-icon-filter={neutral ? undefined : id.id}
                     data-icon-neutral={neutral ? "" : undefined}
-                    className={`${neutral ? "" : "wn-signal-ink "}-ml-0.5 ${touch ? "-mr-1" : "-mr-0.5"} flex shrink-0`}
+                    className={`${neutral ? "" : "wn-signal-ink "}-ml-0.5 ${touch ? "-mr-1" : "-mr-0.5"} inline-flex size-4 shrink-0 items-center justify-center`}
                   >
                     <Icon size={16} strokeWidth={2} />
                   </span>

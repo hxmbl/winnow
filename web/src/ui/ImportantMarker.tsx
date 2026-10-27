@@ -7,17 +7,19 @@ export function ImportantMarker({
   size = 24,
   strokeWidth = 2,
   className,
+  viewBox = "0 0 24 24",
 }: {
   size?: number;
   strokeWidth?: number;
   className?: string;
+  viewBox?: string;
 }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox={viewBox}
       fill="currentColor"
       stroke="currentColor"
       strokeWidth={strokeWidth}
