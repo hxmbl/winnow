@@ -19,6 +19,10 @@ adds. See `native/README.md`, "Cutting a release".
 - Smart filters now have icons. Each chip on the filter rail shows its icon before the name, and an inbox row marks Unsafe, Urgent, Security or Important mail with that filter's icon next to the time (hover it to see the name). Important uses the marker you know from Gmail, and Urgent a warning triangle.
 - Smart filter colours now mean something: warm colours for mail that needs attention, blue for trust (Security, Top contacts, New contacts), green for money (Promos, Receipts), brown for deliveries. Quieter filters such as Unread, Files, Newsletters and Read later are plain grey.
 
+### Security
+
+- Updated the Kotlin build tooling for the Android app to 2.4.21 (GHSA-r937-wjx7-w2jp). It's only used to build the app, so the app itself works exactly as before.
+
 ## [1.6.4] - 2026-10-26
 
 ### Changed
