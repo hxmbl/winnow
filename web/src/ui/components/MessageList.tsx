@@ -41,7 +41,7 @@ import {
   type EmailSignals,
 } from "../../core/model/signals";
 import { filterIcon } from "../filterIcons";
-import { FILTER_HUES } from "../filterColors";
+import { ensureIconInkStyles } from "../filterIconInk";
 import type { SortBy } from "../../core/classify/scoring";
 import type { EmptyReason, ThreadRow } from "../../core/classify/pipeline";
 import { InboxClear } from "./InboxClear";
@@ -168,35 +168,28 @@ type RowProps = {
 };
 
 /**
- * What Winnow thinks of a row, as one word.
+ * What Winnow thinks of a row, as one mark.
  *
- * It used to be a glyph per judgement — bookmark, bolt, shield — and most rows carried
- * two or three of them, which is a cluster of tiny icons you have to decode rather than
- * a signal. Now a row says at most one thing, and only when it is worth interrupting the
- * scan for: unsafe, urgent, or security, in that order. "Important" is not shown here; it
- * fired on most of the inbox, so as a label it said nothing, and it is what the rail and
- * the triage line are for. A message that arrived in the last sync says "New" when it
- * has nothing more pressing to say.
+ * It used to be a cluster of glyphs per judgement and most rows carried two or three of
+ * them, which is a set of tiny icons you have to decode rather than a signal. Now a row
+ * says at most one thing, only when it is worth interrupting the scan for: unsafe,
+ * urgent, security or important, in that order. It is drawn as that smart filter's icon
+ * alone, in the filter's chip colour, on the sender line before the time; the name is in
+ * its tooltip. A message that arrived in the last sync says "New" when it has nothing
+ * more pressing to say.
  *
  * Every judgement still reaches a screen reader through the row's accessible name, and
  * the reader still lists them all with their reasons.
  */
-const ROW_SIGNAL_ORDER: readonly BuiltinSmartFilter[] = ["unsafe", "urgent", "security"];
+const ROW_SIGNAL_ORDER: readonly BuiltinSmartFilter[] = ["unsafe", "urgent", "security", "important"];
 
 type RowSignal = {
   label: string;
   title: string;
   danger: boolean;
-  /** Drawn in this smart filter's chip colour rather than grey (Urgent only). */
-  hue?: BuiltinSmartFilter;
+  /** The smart filter behind the signal: drawn as its icon in its chip's colour. */
+  filter?: BuiltinSmartFilter;
 };
-
-/**
- * Words drawn in their chip's colour. Urgent is the one a glance has to catch, so it
- * takes the Urgent chip's hue from the rail (`FILTER_HUES`, at the mode's text
- * lightness); the rest stay grey so colour keeps meaning something.
- */
-const TINTED_SIGNALS: ReadonlySet<BuiltinSmartFilter> = new Set(["urgent"]);
 
 function rowSignal(indicators: readonly BuiltinSmartFilter[], fresh: boolean): RowSignal | null {
   const id = ROW_SIGNAL_ORDER.find((candidate) => indicators.includes(candidate));
@@ -205,7 +198,7 @@ function rowSignal(indicators: readonly BuiltinSmartFilter[], fresh: boolean): R
       label: FILTER_LABELS[id],
       title: filterIcon(id).title,
       danger: id === "unsafe",
-      hue: TINTED_SIGNALS.has(id) ? id : undefined,
+      filter: id,
     };
   }
   if (fresh) return { label: "New", title: "Arrived in the last sync", danger: false };
@@ -430,20 +423,9 @@ const Row = memo(function Row({
               )}
             </span>
             <span className="flex shrink-0 items-baseline gap-2">
-              {signal && (
-                <span
-                  title={signal.title}
-                  aria-hidden="true"
-                  data-row-signal={signal.hue ?? ""}
-                  className={`text-meta font-medium ${
-                    signal.danger ? "text-danger" : signal.hue ? "wn-signal-ink" : "text-ink-muted"
-                  }`}
-                  style={
-                    signal.hue
-                      ? ({ "--pill-h": FILTER_HUES[signal.hue].h, "--pill-s": FILTER_HUES[signal.hue].s } as React.CSSProperties)
-                      : undefined
-                  }
-                >
+              {signal?.filter && <SignalIcon signal={signal} filter={signal.filter} />}
+              {signal && !signal.filter && (
+                <span title={signal.title} aria-hidden="true" data-row-signal="" className="text-meta font-medium text-ink-muted">
                   {signal.label}
                 </span>
               )}
@@ -521,6 +503,29 @@ const Row = memo(function Row({
     </div>
   );
 });
+
+/**
+ * A row signal as its smart filter's icon alone, in that filter's chip colour
+ * (`filterIconInk`, per mode); Unsafe takes the danger colour. The filter's name and
+ * reason are in the tooltip and in `aria-label`. (The row button's own accessible name
+ * already lists every judgement in words.)
+ */
+function SignalIcon({ signal, filter }: { signal: RowSignal; filter: BuiltinSmartFilter }) {
+  const { Icon } = filterIcon(filter);
+  ensureIconInkStyles();
+  return (
+    <span
+      role="img"
+      aria-label={signal.label}
+      title={signal.title}
+      data-icon-filter={signal.danger ? undefined : filter}
+      data-row-signal={filter}
+      className={`inline-flex items-center self-center ${signal.danger ? "text-danger" : ""}`}
+    >
+      <Icon size={16} strokeWidth={2} className="shrink-0" />
+    </span>
+  );
+}
 
 /** The icon for a swipe action, as the backdrop shows it. */
 function SwipeIcon({ action }: { action: SwipeAction }) {

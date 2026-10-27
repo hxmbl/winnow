@@ -647,9 +647,10 @@
   }
 
   /*
-   * A pill's hue as text: the list row's "Urgent" word, in the colour of the Urgent chip
-   * on the rail. Same `--pill-h` / `--pill-s` the pill takes, at the mode's text
-   * lightness (`textLightness` in `theme.ts`, checked for AA by `pillInk`'s tests).
+   * A pill's hue as text or an icon: a smart filter chip's icon, in the chip's own hue.
+   * Same `--pill-h` / `--pill-s` the pill takes, at the mode's text lightness
+   * (`textLightness` in `theme.ts`, checked for AA by `pillInk`'s tests). Where that
+   * lightness is not enough, `filterIconInk` overrides it per mode.
    */
   .wn-signal-ink {
     color: hsl(var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-textL));

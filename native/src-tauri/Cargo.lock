@@ -5568,7 +5568,7 @@ dependencies = [
 
 [[package]]
 name = "winnow-app"
-version = "1.6.5"
+version = "1.6.4"
 dependencies = [
  "android-native-keyring-store",
  "base64 0.22.1",

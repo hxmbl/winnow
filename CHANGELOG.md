@@ -14,15 +14,19 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
-## [1.6.5] - 2026-10-27
-
 ### Fixed
 
 - Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.
 
 ### Changed
 
+- Smart filters now have icons. Each chip on the filter rail shows its icon before the name, and an inbox row marks Unsafe, Urgent, Security or Important mail with that filter's icon next to the time (hover it to see the name). Important uses the marker you know from Gmail, and Urgent a warning triangle.
+- Smart filter colours now mean something: warm colours for mail that needs attention, blue for trust (Security, Top contacts, New contacts), green for money (Promos, Receipts), brown for deliveries. Quieter filters such as Unread, Files, Newsletters and Read later are plain grey.
 - Dev Options → Debug log keeps up to 10,000 lines and records far more: every step of signing in, sync stages, network errors, and the app going to the background and back, including the app's own native side on Android and desktop. Copying a full log no longer freezes the screen.
+
+### Security
+
+- Updated the Kotlin build tooling for the Android app to 2.4.21 (GHSA-r937-wjx7-w2jp). It's only used to build the app, so the app itself works exactly as before.
 
 ## [1.6.4] - 2026-10-26
 
@@ -439,8 +443,7 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.6.5...HEAD
-[1.6.5]: https://github.com/hxmbl/winnow/compare/v1.6.4...v1.6.5
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.6.4...HEAD
 [1.6.4]: https://github.com/hxmbl/winnow/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/hxmbl/winnow/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/hxmbl/winnow/compare/v1.6.1...v1.6.2

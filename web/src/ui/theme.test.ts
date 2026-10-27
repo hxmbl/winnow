@@ -51,7 +51,7 @@ import {
   resolveScheme,
   type ThemeName,
 } from "./theme";
-import { FILTER_HUES, senderHue, type PillHue } from "./filterColors";
+import { FILTER_HUES, NEUTRAL_FILTERS, senderHue, type PillHue } from "./filterColors";
 import { BUILTIN_FILTERS } from "../core/model/signals";
 import {
   ACCENT_THEMES,
@@ -749,9 +749,10 @@ describe("filter pill colours", () => {
       }
     });
 
-    it(`${mode}: no two builtin pills share a colour`, () => {
-      const fills = BUILTIN_FILTERS.map((id) => pillFill(FILTER_HUES[id], mode, color.surface, { on: true }));
-      expect(new Set(fills).size).toBe(BUILTIN_FILTERS.length);
+    it(`${mode}: no two coloured builtin pills share a colour (neutral ones share the one grey)`, () => {
+      const coloured = BUILTIN_FILTERS.filter((id) => !NEUTRAL_FILTERS.has(id));
+      const fills = coloured.map((id) => pillFill(FILTER_HUES[id], mode, color.surface, { on: true }));
+      expect(new Set(fills).size).toBe(coloured.length);
     });
   }
 

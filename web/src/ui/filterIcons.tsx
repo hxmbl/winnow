@@ -2,10 +2,11 @@
  * The smart-filter icon vocabulary: one map, one meaning per bucket, read by both the
  * list row and the reader.
  *
- * The shape carries the meaning and the colour is gone, so a bucket reads the same in
- * dark mode, in a screenshot, and to anyone with a colour vision deficiency.
- * `important` is a filled star because importance is what a star means everywhere;
- * `urgent` is a lightning bolt; `security` is a shield. An icon the user already
+ * The shape carries the meaning, so a bucket reads the same in dark mode, in a
+ * screenshot, and to anyone with a colour vision deficiency. The colour (the chip's hue,
+ * from `filterColors`) only backs it up.
+ * `important` is the importance marker people already know from Gmail; `urgent` is a
+ * warning triangle; `security` is a shield. An icon the user already
  * recognises needs no legend, and a legend is a thing to be read once and remembered
  * forever.
  *
@@ -21,7 +22,6 @@
  */
 
 import {
-  Bookmark,
   BookOpen,
   CalendarDays,
   Circle,
@@ -38,11 +38,12 @@ import {
   ShieldAlert,
   Siren,
   Star,
+  TriangleAlert,
   UserPlus,
   UserRound,
   Users,
-  Zap,
 } from "lucide-react";
+import { ImportantMarker } from "./ImportantMarker";
 import { FILTER_LABELS, type BuiltinSmartFilter } from "../core/model/signals";
 
 /**
@@ -61,8 +62,10 @@ export const FILTER_ICONS: Record<
   BuiltinSmartFilter,
   React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
 > = {
-  important: Bookmark,
-  urgent: Zap,
+  /** The importance marker people know from Gmail (our own drawing, `ImportantMarker`). */
+  important: ImportantMarker,
+  /** A warning triangle: act now. A different shape from Important's marker. */
+  urgent: TriangleAlert,
   needs_action: Reply,
   security: ShieldAlert,
   unsafe: Siren,

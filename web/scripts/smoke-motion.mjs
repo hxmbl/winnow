@@ -545,7 +545,14 @@ export async function smokeMotion({ browser, url, check, section, errors = [] })
     await cdp.send("Input.synthesizeScrollGesture", { x: Math.round(gap.x), y: Math.round(gap.y), yDistance: -320, gestureSourceType: "touch", speed: 1200 });
     await settle(p, 400);
     check("a vertical swipe starting in a gap does not scroll the list", (await listTop(p)) === 0, `${await listTop(p)}px`);
-    const chip = await p.locator(`${scope} [data-rail-scroller] > [data-rail-item]`).nth(1).boundingBox();
+    // A chip whose middle is on screen: the tap in the gap above leaves the strip scrolled
+    // (a pill's width decides how far), so a fixed index can sit off the left edge.
+    const chip = await p.evaluate((sel) => {
+      const r = [...document.querySelectorAll(`${sel} [data-rail-scroller] > [data-rail-item][data-rail-key]`)]
+        .map((el) => el.getBoundingClientRect())
+        .find((b) => b.width > 0 && b.left + b.width / 2 > 8 && b.left + b.width / 2 < innerWidth - 8);
+      return r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null;
+    }, scope);
     await cdp.send("Input.synthesizeScrollGesture", { x: Math.round(chip.x + chip.width / 2), y: Math.round(chip.y + chip.height / 2), yDistance: -320, gestureSourceType: "touch", speed: 1200 });
     await settle(p, 400);
     check("nor one starting on a chip", (await listTop(p)) === 0, `${await listTop(p)}px`);

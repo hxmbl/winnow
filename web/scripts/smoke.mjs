@@ -567,14 +567,21 @@ try {
         });
     });
   const restPaint = await pillPaint();
-  // Sender pills share a colour per domain, on purpose; the buckets are all distinct.
-  const buckets = restPaint.filter((pill) => !pill.key.startsWith("sender:"));
+  // Sender pills share a colour per domain, on purpose, and the neutral buckets (Unread,
+  // Files, Quiet contacts, Newsletters, Read later, Long reads) share one grey, on
+  // purpose: colour only goes where it means something. The coloured buckets are all
+  // distinct, and the neutral ones are all the same grey.
+  const NEUTRAL_KEYS = ["unread", "attachments", "quiet_contacts", "newsletters", "low_priority", "long_reads"];
+  const isNeutral = (pill) => NEUTRAL_KEYS.includes(pill.key);
+  const buckets = restPaint.filter((pill) => !pill.key.startsWith("sender:") && !isNeutral(pill));
+  const neutrals = restPaint.filter(isNeutral);
   check(
-    "every pill has a tint of its own: non-transparent, and no two buckets alike",
+    "every pill has a tint: non-transparent, no two coloured buckets alike, the neutral ones one grey",
     restPaint.length > 5 &&
       restPaint.every((pill) => pill.alpha > 0) &&
-      new Set(buckets.map((pill) => pill.fill)).size === buckets.length,
-    `${new Set(restPaint.map((pill) => pill.fill)).size} fills over ${restPaint.length} pills, ${buckets.length} buckets`,
+      new Set(buckets.map((pill) => pill.fill)).size === buckets.length &&
+      new Set(neutrals.map((pill) => pill.fill)).size <= 1,
+    `${new Set(restPaint.map((pill) => pill.fill)).size} fills over ${restPaint.length} pills, ${buckets.length} coloured buckets, ${neutrals.length} neutral`,
   );
   check(
     "the pills are rounded capsules, not text tabs",
@@ -1783,9 +1790,9 @@ try {
    * The same vocabulary in the list, said once.
    *
    * Rows used to carry a cluster of glyphs — bookmark, bolt, shield — on most messages.
-   * A row now says at most one thing, as a word (unsafe, urgent or security, else "New"),
-   * from the same `ui/filterIcons` explanations the reader uses, so hovering it still
-   * says *why*.
+   * A row now says at most one thing: one smart filter's icon (unsafe, urgent, security
+   * or important), else the word "New", with the same `ui/filterIcons` explanations the
+   * reader uses, so hovering it still says *why*.
    */
   const rowFilters = await page.evaluate(() => {
     const rows = [...document.querySelectorAll("[data-message-id]")].slice(0, 12);
@@ -1798,8 +1805,8 @@ try {
     }));
   });
   check(
-    "list rows carry one signal at most, as a word rather than an icon cluster",
-    rowFilters.every((row) => row.glyphs === 0 && row.labels.length <= 1) &&
+    "list rows carry one signal at most, one icon rather than an icon cluster",
+    rowFilters.every((row) => row.glyphs <= 1 && row.labels.length <= 1) &&
       rowFilters.some((row) => row.labels.length === 1),
     JSON.stringify(rowFilters.filter((r) => r.labels.length > 0).slice(0, 3)),
   );
@@ -1808,29 +1815,26 @@ try {
     rowFilters.every((row) => row.labels.every((l) => (l.title ?? "").length > l.text.length + 8)),
     JSON.stringify(rowFilters.flatMap((r) => r.labels).slice(0, 4)),
   );
-  // "Urgent" is not grey: it is drawn in the Urgent chip's hue, the same `--pill-h` the
-  // rail's Urgent pill carries, so a glance down the list catches it.
+  // Urgent is not grey: its icon is drawn in the Urgent chip's red, so a glance down the
+  // list catches it, and its name is in the tooltip and the accessible name.
   const urgentInk = await page.evaluate(() => {
-    const word = document.querySelector('[data-row-signal="urgent"]');
-    const chip = [...document.querySelectorAll("[data-rail-scroller] button[aria-pressed]")].find((pill) =>
-      /^Urgent\b/.test(pill.getAttribute("aria-label") ?? pill.textContent ?? ""),
-    );
-    if (!word) return null;
-    const rgb = (getComputedStyle(word).color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const mark = document.querySelector('[data-row-signal="urgent"]');
+    if (!mark) return null;
+    const rgb = (getComputedStyle(mark).color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
     return {
-      text: word.textContent?.trim(),
-      color: getComputedStyle(word).color,
+      label: mark.getAttribute("aria-label"),
+      title: mark.getAttribute("title"),
+      icon: Boolean(mark.querySelector("svg")),
+      text: (mark.textContent ?? "").trim(),
+      color: getComputedStyle(mark).color,
       spread: Math.max(...rgb) - Math.min(...rgb),
       redLeads: rgb[0] > rgb[1] && rgb[0] > rgb[2],
-      wordHue: getComputedStyle(word).getPropertyValue("--pill-h").trim(),
-      chipHue: chip ? getComputedStyle(chip).getPropertyValue("--pill-h").trim() : null,
-      muted: getComputedStyle(word).color === getComputedStyle(document.documentElement).getPropertyValue("--wn-inkMuted"),
     };
   });
   check(
-    "a row's Urgent word is coloured like the Urgent chip, not grey",
-    Boolean(urgentInk) && urgentInk.text === "Urgent" && urgentInk.spread > 60 && urgentInk.redLeads &&
-      urgentInk.wordHue !== "" && (urgentInk.chipHue === null || urgentInk.chipHue === urgentInk.wordHue),
+    "a row's Urgent mark is an icon in the Urgent chip's red, named in its tooltip",
+    Boolean(urgentInk) && urgentInk.label === "Urgent" && urgentInk.icon && urgentInk.text === "" &&
+      /^Urgent/.test(urgentInk.title ?? "") && urgentInk.spread > 60 && urgentInk.redLeads,
     JSON.stringify(urgentInk),
   );
 
