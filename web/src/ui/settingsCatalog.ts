@@ -201,19 +201,13 @@ export const SETTINGS = {
     category: "privacy",
     label: "Remote images",
     explanation:
-      "Images in mail are often tracking pixels: loading one tells the sender you opened the message, when, and roughly where from your IP address. Ask each time shows a button on each message; Always loads them without asking; Never keeps them blocked, and also pauses Gravatar photos and brand logos, in the app and in notifications; contact photos and initials still show. Messages with images allowed are shown in a sandbox that runs none of the sender's code.",
+      "Images in mail are often tracking pixels: loading one tells the sender you opened the message, when, and roughly where from your IP address. Ask each time shows a button on each message; Always loads them without asking; Never keeps them blocked, and also pauses Sender pictures (Gravatar and brand logos), in the app and in notifications; contact photos and initials still show. Messages with images allowed are shown in a sandbox that runs none of the sender's code.",
   },
-  brandLogos: {
+  senderPictures: {
     category: "privacy",
-    label: "Show brand logos",
+    label: "Sender pictures",
     explanation:
-      "Shows a company's logo beside its mail, from the logo it publishes for email (BIMI). To find it, Winnow looks up each sender's domain with Cloudflare's DNS-over-HTTPS resolver, for every sender in your list whether you open the mail or not, then loads the logo from the sender's own site. Off by default for that reason; logos are not certificate-verified. Paused while Remote images is set to Never.",
-  },
-  gravatars: {
-    category: "privacy",
-    label: "Gravatar photos",
-    explanation:
-      "Shows a sender's Gravatar picture when they are not in your contacts. Winnow sends Gravatar a hashed copy of each sender's address, not the address itself, but a hash of a common address can be guessed, so Gravatar can still learn who mails you. Off by default, and paused while Remote images is set to Never.",
+      "Shows a sender's Gravatar picture when they are not in your contacts, and a company's logo from the one it publishes for email (BIMI). For every sender in your list, opened or not, Winnow sends Gravatar a hashed copy of the address (a hash of a common address can be guessed, so Gravatar can still learn who mails you) and looks up the sender's domain with Cloudflare's DNS-over-HTTPS resolver, then loads any logo from the sender's own site. Off by default for that reason, and paused while Remote images is set to Never; logos are not certificate-verified. Contact photos and initials always show.",
   },
   driveLinks: {
     category: "privacy",

@@ -8,6 +8,7 @@
  * Important pill always agree.
  */
 
+import { QUIET_BUTTON } from "../quietButton";
 import { PositionReadout } from "./Masthead";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -132,14 +133,6 @@ type Actions = {
   onOpenAttachment: (index: number) => void;
 };
 
-/**
- * A quiet text button, for the places in this pane that are not the toolbar.
- *
- * `bg-sheen` rather than a bordered pill: four outlined pills in a column is a column
- * of boxes. At rest they are almost invisible; the fill is the hover.
- */
-const QUIET_BUTTON =
-  "rounded-ctl bg-sheen px-3 py-1.5 text-meta font-medium text-ink-body transition-colors hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
 /**
  * One button of the action bar: icon, its word when the pane has room (a container

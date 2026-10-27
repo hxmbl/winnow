@@ -2,8 +2,8 @@
  * A sender's avatar: their real photo when Winnow has one, otherwise a quiet monogram.
  *
  * Pictures come from `useSenderPictures`: the user's own Google contacts first (only
- * once they opted in to contact suggestions), then — when "Gravatar photos" is on — the
- * sender's Gravatar, then — when "Show brand logos" is on — the sender domain's BIMI logo. The monogram renders until a picture is known and stays
+ * once they opted in to contact suggestions), then — when "Sender pictures" is on — the
+ * sender's Gravatar, then — when the same switch is on — the sender domain's BIMI logo. The monogram renders until a picture is known and stays
  * when none is, or when one fails to load (revoked, offline, CSP, a broken URL): each
  * candidate is tried in turn and a failure falls through to the next. No favicon
  * lookups, and Gravatar only behind its own switch: each tells a third party who mails

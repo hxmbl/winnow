@@ -1588,7 +1588,7 @@ export const DEMO_CONTACTS: readonly GoogleContact[] = [
 
 /**
  * The demo's brand logos, by sender domain: what a BIMI lookup would have found, as
- * bundled images. Shown only when "Show brand logos" is on, exactly like the real thing,
+ * bundled images. Shown only when "Sender pictures" is on, exactly like the real thing,
  * and never looked up over the network.
  */
 export const DEMO_BRAND_LOGOS: Readonly<Record<string, string>> = {

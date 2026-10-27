@@ -135,19 +135,58 @@ describe("theme persistence", () => {
   });
 });
 
-describe("brand logos preference", () => {
+describe("Sender pictures preference", () => {
   it("is off by default and survives a restart only as a boolean", () => {
-    expect(DEFAULT_PREFERENCES.brandLogos).toBe(false);
-    expect(revivePreferences({ brandLogos: true })).toMatchObject({ brandLogos: true });
-    expect(revivePreferences({ brandLogos: "yes" })?.brandLogos).toBeUndefined();
+    expect(DEFAULT_PREFERENCES.senderPictures).toBe(false);
+    expect(revivePreferences({ senderPictures: true })).toMatchObject({ senderPictures: true });
+    expect(revivePreferences({ senderPictures: false })).toMatchObject({ senderPictures: false });
+    expect(revivePreferences({ senderPictures: "yes" })?.senderPictures).toBeUndefined();
+  });
+
+  it("migrates the two old switches: either one on turns the merged one on", () => {
+    expect(revivePreferences({ brandLogos: true })?.senderPictures).toBe(true);
+    expect(revivePreferences({ gravatars: true })?.senderPictures).toBe(true);
+    expect(revivePreferences({ brandLogos: true, gravatars: false })?.senderPictures).toBe(true);
+    expect(revivePreferences({ brandLogos: false, gravatars: true })?.senderPictures).toBe(true);
+    expect(revivePreferences({ brandLogos: false, gravatars: false })?.senderPictures).toBe(false);
+    expect(revivePreferences({ brandLogos: false })?.senderPictures).toBe(false);
+  });
+
+  it("never reads a non-boolean old switch as consent", () => {
+    expect(revivePreferences({ brandLogos: "yes", gravatars: 1 })?.senderPictures).toBeUndefined();
+    expect(revivePreferences({})?.senderPictures).toBeUndefined();
+  });
+
+  it("prefers the new key over the old ones when both are stored", () => {
+    expect(revivePreferences({ senderPictures: false, brandLogos: true, gravatars: true })?.senderPictures).toBe(false);
+  });
+
+  it("drops the old keys, so the next write stores only the merged switch", () => {
+    const revived = revivePreferences({ brandLogos: true, gravatars: false }) as Record<string, unknown>;
+    expect("brandLogos" in revived).toBe(false);
+    expect("gravatars" in revived).toBe(false);
+    const storage = memoryBacking();
+    storage.setItem(PREFERENCES_KEY, JSON.stringify({ gravatars: true, appearance: "dark" }));
+    persistPreferences(storage, { sortBy: "date" });
+    const written = JSON.parse(storage.getItem(PREFERENCES_KEY) ?? "{}") as Record<string, unknown>;
+    expect(written).toMatchObject({ senderPictures: true, appearance: "dark", sortBy: "date" });
+    expect(written.gravatars).toBeUndefined();
   });
 });
 
-describe("Gravatar preference", () => {
-  it("is off by default and survives a restart only as a boolean", () => {
-    expect(DEFAULT_PREFERENCES.gravatars).toBe(false);
-    expect(revivePreferences({ gravatars: true })).toMatchObject({ gravatars: true });
-    expect(revivePreferences({ gravatars: "yes" })?.gravatars).toBeUndefined();
+describe("Sender pictures notice answer", () => {
+  it("is unanswered by default and only true survives a restart", () => {
+    expect(DEFAULT_PREFERENCES.pictureNoticeDismissed).toBe(false);
+    expect(revivePreferences({ pictureNoticeDismissed: true })).toMatchObject({ pictureNoticeDismissed: true });
+    expect(revivePreferences({ pictureNoticeDismissed: false })?.pictureNoticeDismissed).toBeUndefined();
+    expect(revivePreferences({ pictureNoticeDismissed: "true" })?.pictureNoticeDismissed).toBeUndefined();
+  });
+
+  it("is kept across a partial write", () => {
+    const storage = memoryBacking();
+    persistPreferences(storage, { pictureNoticeDismissed: true });
+    persistPreferences(storage, { sortBy: "sender" });
+    expect(loadPreferences(storage)).toMatchObject({ pictureNoticeDismissed: true, sortBy: "sender" });
   });
 });
 

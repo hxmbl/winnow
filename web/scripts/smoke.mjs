@@ -5710,14 +5710,41 @@ try {
       "brand logos are off by default: a brand sender gets the monogram",
       (await avatarFor(sp, "Northline").getAttribute("data-avatar")) === "monogram",
     );
-    check("Settings offers Show brand logos, off", await sp.evaluate(() => {
+    check("Settings offers Sender pictures, off", await sp.evaluate(() => {
       const raw = localStorage.getItem("winnow.preferences.v1");
-      return !raw || JSON.parse(raw).brandLogos !== true;
+      return !raw || JSON.parse(raw).senderPictures !== true;
     }));
+    // The inbox says why: "Sender pictures are off", with Keep off / Turn on.
+    await sp.locator("input[type='search']").first().fill("");
+    await sp.keyboard.press("Escape");
+    await sp.waitForTimeout(200);
+    const notice = sp.locator('[data-picture-notice="off"]');
+    check(
+      "the inbox heads its list with the Sender pictures notice",
+      (await notice.count()) === 1 && /Sender pictures are off/.test((await notice.textContent()) ?? "") &&
+        (await notice.getByRole("button", { name: "Keep off" }).count()) === 1 &&
+        (await notice.getByRole("button", { name: "Turn on" }).count()) === 1,
+    );
+    await notice.getByRole("button", { name: "Keep off" }).click();
+    await sp.waitForTimeout(150);
+    check("Keep off hides it", (await sp.locator("[data-picture-notice]").count()) === 0);
+    await sp.reload({ waitUntil: "networkidle" });
+    await sp.waitForSelector("[data-row-count] [data-row-id]");
+    check(
+      "and it stays gone after a restart, with the pictures still off",
+      (await sp.locator("[data-picture-notice]").count()) === 0 &&
+        (await sp.evaluate(() => {
+          const prefs = JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}");
+          return prefs.pictureNoticeDismissed === true && prefs.senderPictures !== true;
+        })),
+    );
     check("no console errors on the pictures pass", spErrors.length === 0, spErrors.slice(0, 3).join(" | "));
     await ctx.close();
 
-    // Brand logos on: the demo answers from bundled logos, with no lookup off the origin.
+    // Sender pictures on, seeded the pre-merge way (`brandLogos: true` migrates to
+    // `senderPictures`): the demo answers logos from bundled images, with no lookup off the
+    // origin. Gravatar is on too under the one switch; it is answered 404 here and is the
+    // only remote host allowed.
     const onCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await onCtx.addInitScript(() => {
       if (!sessionStorage.getItem("seeded-logos")) {
@@ -5725,8 +5752,12 @@ try {
         sessionStorage.setItem("seeded-logos", "1");
       }
     });
+    await onCtx.route("https://gravatar.com/**", (route) =>
+      route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" }, body: "Not Found" }),
+    );
     const on = await onCtx.newPage();
     on.on("request", (request) => {
+      if (request.url().startsWith("https://gravatar.com/")) return;
       if (!request.url().startsWith(origin) && !request.url().startsWith("data:")) offOrigin.push(request.url());
     });
     await on.goto(URL, { waitUntil: "networkidle" });
@@ -5734,8 +5765,9 @@ try {
     await search(on, "deals@shop");
     const northline = avatarFor(on, "Northline");
     await northline.locator("img").waitFor({ timeout: 3_000 }).catch(() => undefined);
-    check("with Show brand logos on, a brand sender shows its logo", (await northline.getAttribute("data-avatar")) === "photo");
+    check("with Sender pictures on, a brand sender shows its logo", (await northline.getAttribute("data-avatar")) === "photo");
     check("and the logo loaded", await imageLoaded(northline));
+    check("an old brandLogos blob migrated to the one switch, so no notice", (await on.locator("[data-picture-notice]").count()) === 0);
     await search(on, "Marcus");
     check("a person with no picture still gets the monogram", (await avatarFor(on, "Marcus").getAttribute("data-avatar")) === "monogram");
     await on.locator("input[type='search']").first().fill("");
@@ -5745,8 +5777,8 @@ try {
     await on.keyboard.press(",");
     await on.waitForTimeout(300);
     await openSettingsCategory(on, "privacy");
-    const toggle = on.locator('[aria-label="Show brand logos"]');
-    check("Settings has a Show brand logos switch", (await toggle.count()) === 1);
+    const toggle = on.locator('[aria-label="Sender pictures"]');
+    check("Settings has one Sender pictures switch", (await toggle.count()) === 1 && (await on.locator('[aria-label="Show brand logos"], [aria-label="Gravatar photos"]').count()) === 0);
     if ((await toggle.count()) === 1) {
       check("which is on", (await toggle.getAttribute("aria-checked")) === "true");
       await toggle.click();
@@ -5773,7 +5805,7 @@ try {
     );
     await brokenCtx.close();
 
-    // Gravatar photos: off by default, its own switch, and when on, the d=404 URL for
+    // Gravatar (under Sender pictures): off by default, and when on, the d=404 URL for
     // the SHA-256 of the address — intercepted here, never the real network. Marcus has
     // a Gravatar; everyone else is a 404, so Northline falls through to its logo.
     const sha = (address) => createHash("sha256").update(address.trim().toLowerCase()).digest("hex");
@@ -5810,19 +5842,16 @@ try {
     await gd.keyboard.press(",");
     await gd.waitForTimeout(300);
     await openSettingsCategory(gd, "privacy");
-    const gDefaultToggle = gd.locator('[aria-label="Gravatar photos"]');
-    check("Settings has a Gravatar photos switch", (await gDefaultToggle.count()) === 1);
+    const gDefaultToggle = gd.locator('[aria-label="Sender pictures"]');
+    check("Settings has a Sender pictures switch", (await gDefaultToggle.count()) === 1);
     check("which is off by default", (await gDefaultToggle.getAttribute("aria-checked")) === "false");
-    await gd.locator('[data-setting="gravatars"]').hover();
+    await gd.locator('[data-setting="senderPictures"]').hover();
     await gd.waitForTimeout(100);
     check(
-      "beside Show brand logos, explained as sending a hashed address to Gravatar",
+      "explained as sending a hashed address to Gravatar and a DNS lookup per domain",
       await gd.evaluate(() => {
-        const text = document.querySelector('[data-settings-body]')?.innerText ?? "";
-        const logos = text.indexOf("Show brand logos");
-        const grav = text.indexOf("Gravatar photos");
         const about = document.querySelector("[data-settings-explain]")?.textContent ?? "";
-        return logos >= 0 && grav > logos && /hashed copy of each sender's address/.test(about);
+        return /Gravatar a hashed copy of the address/.test(about) && /Cloudflare's DNS-over-HTTPS/.test(about);
       }),
     );
     await gDefaultCtx.close();
@@ -5830,7 +5859,7 @@ try {
     const gCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await gCtx.addInitScript(() => {
       if (!sessionStorage.getItem("seeded-gravatars")) {
-        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ gravatars: true, brandLogos: true }));
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ senderPictures: true }));
         sessionStorage.setItem("seeded-gravatars", "1");
       }
     });
@@ -5874,8 +5903,8 @@ try {
     await g.keyboard.press(",");
     await g.waitForTimeout(300);
     await openSettingsCategory(g, "privacy");
-    const gToggle = g.locator('[aria-label="Gravatar photos"]');
-    check("the Gravatar switch shows on", (await gToggle.getAttribute("aria-checked")) === "true");
+    const gToggle = g.locator('[aria-label="Sender pictures"]');
+    check("the Sender pictures switch shows on", (await gToggle.getAttribute("aria-checked")) === "true");
     await gToggle.click();
     await g.waitForTimeout(150);
     check("and turns off", (await gToggle.getAttribute("aria-checked")) === "false");
@@ -6766,35 +6795,35 @@ try {
     await s.keyboard.press("ArrowDown");
     await s.keyboard.press("ArrowDown");
     await s.waitForTimeout(80);
-    check("Privacy shows its own settings", (await title()) === "Privacy" && (await dialog.locator('[data-setting="brandLogos"]').count()) === 1);
+    check("Privacy shows its own settings", (await title()) === "Privacy" && (await dialog.locator('[data-setting="senderPictures"]').count()) === 1);
     check("with no (?) buttons, since the column explains them", (await dialog.locator("[data-setting-info]").count()) === 0);
     check("and no explanation copy under the rows", !((await dialog.locator("[data-settings-body]").innerText()).includes("Cloudflare")));
 
     // Hover: the column describes the row, and keeps it after the pointer leaves.
-    await dialog.locator('[data-setting="brandLogos"]').hover();
+    await dialog.locator('[data-setting="senderPictures"]').hover();
     await s.waitForTimeout(80);
     check(
       "hovering a setting explains it in the right column",
-      (await explain.getAttribute("data-explains")) === "brandLogos" && /Cloudflare's DNS-over-HTTPS/.test((await explain.textContent()) ?? ""),
+      (await explain.getAttribute("data-explains")) === "senderPictures" && /Cloudflare's DNS-over-HTTPS/.test((await explain.textContent()) ?? ""),
     );
     await s.mouse.move(700, 850);
     await s.waitForTimeout(80);
-    check("and the explanation stays after the pointer leaves", (await explain.getAttribute("data-explains")) === "brandLogos");
-    await dialog.locator('[data-setting="gravatars"]').hover();
+    check("and the explanation stays after the pointer leaves", (await explain.getAttribute("data-explains")) === "senderPictures");
+    await dialog.locator('[data-setting="driveLinks"]').hover();
     await s.waitForTimeout(80);
     check(
       "the next hover replaces it",
-      (await explain.getAttribute("data-explains")) === "gravatars" && /hashed copy of each sender's address/.test((await explain.textContent()) ?? ""),
+      (await explain.getAttribute("data-explains")) === "driveLinks" && /Drive/.test((await explain.textContent()) ?? ""),
     );
     await s.mouse.move(700, 850);
 
     // Keyboard focus does the same, with no pointer involved.
-    await dialog.locator('[role="switch"][aria-label="Show brand logos"]').focus();
+    await dialog.locator('[role="switch"][aria-label="Sender pictures"]').focus();
     await s.waitForTimeout(80);
-    check("keyboard focus entering a setting explains it", (await explain.getAttribute("data-explains")) === "brandLogos");
+    check("keyboard focus entering a setting explains it", (await explain.getAttribute("data-explains")) === "senderPictures");
     await s.keyboard.press("Tab");
     await s.waitForTimeout(80);
-    check("and Tab to the next setting moves the explanation", (await explain.getAttribute("data-explains")) === "gravatars");
+    check("and Tab to the next setting moves the explanation", (await explain.getAttribute("data-explains")) === "driveLinks");
 
     // Choosing another category starts on its intro.
     await openSettingsCategory(s, "reading");
@@ -6839,12 +6868,12 @@ try {
     check(
       "every setting has a (?) named for it",
       JSON.stringify(labels) ===
-        JSON.stringify(["About Blur sensitive info", "About Remote images", "About Show brand logos", "About Gravatar photos", "About Big files as Drive links"]),
+        JSON.stringify(["About Blur sensitive info", "About Remote images", "About Sender pictures", "About Big files as Drive links"]),
       JSON.stringify(labels),
     );
     check("and the explanations are not printed under the rows", !((await dialog.innerText()).includes("Cloudflare")));
-    const info = dialog.locator('[data-setting-info="brandLogos"]');
-    const tip = s.locator('[role="tooltip"][data-setting-popover="brandLogos"]');
+    const info = dialog.locator('[data-setting-info="senderPictures"]');
+    const tip = s.locator('[role="tooltip"][data-setting-popover="senderPictures"]');
     check("closed, it says so", (await info.getAttribute("aria-expanded")) === "false" && (await tip.count()) === 0);
     await info.hover();
     await s.waitForTimeout(150);
@@ -6870,12 +6899,12 @@ try {
     await s.keyboard.press("Escape");
     await s.waitForTimeout(100);
     check("Escape closes the popover and leaves Settings open", (await tip.count()) === 0 && (await dialog.count()) === 1);
-    await dialog.locator('[data-setting-info="gravatars"]').focus();
+    await dialog.locator('[data-setting-info="driveLinks"]').focus();
     await s.waitForTimeout(100);
-    check("keyboard focus on the (?) shows it", await s.locator('[data-setting-popover="gravatars"]').isVisible());
+    check("keyboard focus on the (?) shows it", await s.locator('[data-setting-popover="driveLinks"]').isVisible());
     await s.keyboard.press("Shift+Tab");
     await s.waitForTimeout(100);
-    check("and moving focus away hides it", (await s.locator('[data-setting-popover="gravatars"]').count()) === 0);
+    check("and moving focus away hides it", (await s.locator('[data-setting-popover="driveLinks"]').count()) === 0);
     await dialog.locator("[data-settings-back]").click();
     await s.waitForTimeout(200);
     check("Back returns to the mail here too", (await s.locator('[role="dialog"]').count()) === 0);
@@ -6946,23 +6975,23 @@ try {
       backGlyph.chevron && backGlyph.glyph <= 24 && backGlyph.tap >= 44 && backGlyph.ink,
       JSON.stringify(backGlyph),
     );
-    check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 5 && !((await dialog.innerText()).includes("Cloudflare")));
-    await dialog.locator('[data-setting-info="gravatars"]').tap();
+    check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 4 && !((await dialog.innerText()).includes("Cloudflare")));
+    await dialog.locator('[data-setting-info="senderPictures"]').tap();
     await s.waitForTimeout(150);
-    const tip = s.locator('[data-setting-popover="gravatars"]');
+    const tip = s.locator('[data-setting-popover="senderPictures"]');
     const tipBox = await tip.boundingBox();
     check(
       "a tap opens the explanation, inside the screen",
       Boolean(tipBox) && tipBox.x >= 0 && tipBox.x + tipBox.width <= 390 && tipBox.y >= 0 && tipBox.y + tipBox.height <= 844 &&
-        /hashed copy of each sender's address/.test((await tip.textContent()) ?? ""),
+        /hashed copy of the address/.test((await tip.textContent()) ?? ""),
       JSON.stringify(tipBox),
     );
     await dialog.locator("[data-settings-title]").tap();
     await s.waitForTimeout(150);
     check("a tap elsewhere closes it", (await tip.count()) === 0);
-    await dialog.locator('[data-setting-info="gravatars"]').tap();
+    await dialog.locator('[data-setting-info="senderPictures"]').tap();
     await s.waitForTimeout(100);
-    await dialog.locator('[data-setting-info="gravatars"]').tap();
+    await dialog.locator('[data-setting-info="senderPictures"]').tap();
     await s.waitForTimeout(100);
     check("and a second tap on the (?) closes it too", (await tip.count()) === 0);
     await dialog.locator("[data-settings-back]").tap();

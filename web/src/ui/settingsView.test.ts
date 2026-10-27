@@ -61,7 +61,7 @@ describe("the category list", () => {
   });
 
   it("selecting the current category again keeps what was pointed at", () => {
-    const pointed = pointAt(initialExplain("privacy"), "gravatars");
+    const pointed = pointAt(initialExplain("privacy"), "senderPictures");
     expect(selectCategory(pointed, "privacy")).toBe(pointed);
   });
 });
@@ -74,22 +74,22 @@ describe("the explanation panel", () => {
   });
 
   it("shows the setting that hover or focus points at, with the catalog's copy", () => {
-    const state = pointAt(initialExplain("privacy"), "brandLogos");
+    const state = pointAt(initialExplain("privacy"), "driveLinks");
     expect(explanationFor(state)).toEqual({
       kind: "setting",
-      setting: "brandLogos",
-      title: SETTINGS.brandLogos.label,
-      body: SETTINGS.brandLogos.explanation,
+      setting: "driveLinks",
+      title: SETTINGS.driveLinks.label,
+      body: SETTINGS.driveLinks.explanation,
     });
   });
 
   it("stays on the last one pointed at when the pointer leaves", () => {
-    const state = pointAt(initialExplain("privacy"), "gravatars");
-    expect(explanationFor(pointerLeft(state)).setting).toBe("gravatars");
+    const state = pointAt(initialExplain("privacy"), "senderPictures");
+    expect(explanationFor(pointerLeft(state)).setting).toBe("senderPictures");
   });
 
   it("moves to the next one pointed at", () => {
-    const state = pointAt(pointAt(initialExplain("privacy"), "gravatars"), "remoteImages");
+    const state = pointAt(pointAt(initialExplain("privacy"), "senderPictures"), "remoteImages");
     expect(explanationFor(state).setting).toBe("remoteImages");
   });
 
@@ -99,50 +99,50 @@ describe("the explanation panel", () => {
   });
 
   it("returns the same state when the same setting is pointed at again", () => {
-    const state = pointAt(initialExplain("privacy"), "gravatars");
-    expect(pointAt(state, "gravatars")).toBe(state);
+    const state = pointAt(initialExplain("privacy"), "senderPictures");
+    expect(pointAt(state, "senderPictures")).toBe(state);
   });
 });
 
 describe("the (?) popover", () => {
   it("opens on hover and closes when the pointer leaves", () => {
-    const open = infoReducer(INFO_CLOSED, { type: "hover", setting: "gravatars" });
-    expect(open).toEqual({ open: "gravatars", pinned: false });
-    expect(infoReducer(open, { type: "unhover", setting: "gravatars" })).toEqual(INFO_CLOSED);
+    const open = infoReducer(INFO_CLOSED, { type: "hover", setting: "senderPictures" });
+    expect(open).toEqual({ open: "senderPictures", pinned: false });
+    expect(infoReducer(open, { type: "unhover", setting: "senderPictures" })).toEqual(INFO_CLOSED);
   });
 
   it("opens on focus and closes on blur", () => {
-    const open = infoReducer(INFO_CLOSED, { type: "focus", setting: "brandLogos" });
-    expect(open.open).toBe("brandLogos");
-    expect(infoReducer(open, { type: "blur", setting: "brandLogos" })).toEqual(INFO_CLOSED);
+    const open = infoReducer(INFO_CLOSED, { type: "focus", setting: "driveLinks" });
+    expect(open.open).toBe("driveLinks");
+    expect(infoReducer(open, { type: "blur", setting: "driveLinks" })).toEqual(INFO_CLOSED);
   });
 
   it("a tap pins it open, and a second tap closes it", () => {
-    const pinned = infoReducer(INFO_CLOSED, { type: "press", setting: "gravatars" });
-    expect(pinned).toEqual({ open: "gravatars", pinned: true });
-    expect(infoReducer(pinned, { type: "unhover", setting: "gravatars" })).toBe(pinned);
-    expect(infoReducer(pinned, { type: "blur", setting: "gravatars" })).toBe(pinned);
-    expect(infoReducer(pinned, { type: "press", setting: "gravatars" })).toEqual(INFO_CLOSED);
+    const pinned = infoReducer(INFO_CLOSED, { type: "press", setting: "senderPictures" });
+    expect(pinned).toEqual({ open: "senderPictures", pinned: true });
+    expect(infoReducer(pinned, { type: "unhover", setting: "senderPictures" })).toBe(pinned);
+    expect(infoReducer(pinned, { type: "blur", setting: "senderPictures" })).toBe(pinned);
+    expect(infoReducer(pinned, { type: "press", setting: "senderPictures" })).toEqual(INFO_CLOSED);
   });
 
   it("a click on a hovered popover pins it rather than closing it", () => {
-    const hovered = infoReducer(INFO_CLOSED, { type: "hover", setting: "gravatars" });
-    expect(infoReducer(hovered, { type: "press", setting: "gravatars" })).toEqual({ open: "gravatars", pinned: true });
+    const hovered = infoReducer(INFO_CLOSED, { type: "hover", setting: "senderPictures" });
+    expect(infoReducer(hovered, { type: "press", setting: "senderPictures" })).toEqual({ open: "senderPictures", pinned: true });
   });
 
   it("Escape and a tap elsewhere close it, pinned or not", () => {
-    const pinned = infoReducer(INFO_CLOSED, { type: "press", setting: "gravatars" });
+    const pinned = infoReducer(INFO_CLOSED, { type: "press", setting: "senderPictures" });
     expect(infoReducer(pinned, { type: "escape" })).toEqual(INFO_CLOSED);
     expect(infoReducer(pinned, { type: "outside" })).toEqual(INFO_CLOSED);
     expect(infoReducer(INFO_CLOSED, { type: "escape" })).toBe(INFO_CLOSED);
   });
 
   it("only one is open at a time", () => {
-    const first = infoReducer(INFO_CLOSED, { type: "press", setting: "gravatars" });
-    const second = infoReducer(first, { type: "hover", setting: "brandLogos" });
-    expect(second).toEqual({ open: "brandLogos", pinned: false });
+    const first = infoReducer(INFO_CLOSED, { type: "press", setting: "senderPictures" });
+    const second = infoReducer(first, { type: "hover", setting: "driveLinks" });
+    expect(second).toEqual({ open: "driveLinks", pinned: false });
     // Leaving the first button no longer affects the second popover.
-    expect(infoReducer(second, { type: "unhover", setting: "gravatars" })).toBe(second);
+    expect(infoReducer(second, { type: "unhover", setting: "senderPictures" })).toBe(second);
   });
 });
 

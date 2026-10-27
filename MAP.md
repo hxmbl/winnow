@@ -591,13 +591,13 @@ URI or origin. The secret never appears in an error, a warning or a log.
   (`Avatar.tsx` via `usePictureBytes`/`pictureTries` in `ui/senderPictures.ts`) tries the
   copy first, then the URL; a URL already on screen is not swapped for its new copy.
   Gated by `gatedPictureBytes` (inside `senderPictureSources`): with Remote images =
-  Never, or Gravatar / brand logos off, those copies are never served or captured.
+  Never, or Sender pictures off, those copies are never served or captured.
   Cleared: sign-out (database deleted), account removal (`deletePictureBytes` in the
   bridge), a switch off (`clearKind`), the contacts grant `not_granted` (contact photos).
   None in the demo. Native notifications fall back to the kept copy when the picture
   cannot be loaded (`nativePictures`' `cachedPicture`). IndexedDB helpers shared with
   the offline store live in `core/offline/idb.ts`.
-- No favicon lookup, and Gravatar only behind its own switch: each tells a third party who mails you.
+- No favicon lookup, and Gravatar and brand logos only behind the Sender pictures switch: each tells a third party who mails you.
 - `data/demo.ts` seeds **57 messages** against a fixed instant
   (`DEMO_NOW = 2026-05-09T18:00Z`), plus `DEMO_TRASH` (12 records),
   `DEMO_CONTACTS`, `DEMO_BRAND_LOGOS` and `demoNewsletter.ts` for the rich view.
@@ -826,6 +826,7 @@ plus OS, applied as CSS custom properties), and **the layout**.
 | `SetupTroubleshoot.tsx` | `SetupFix` (a Google error as a plain fix plus a link back to its step) and "Google showed an error?" on step 5, which explains text pasted off Google's own error pages. Both read `core/session/googleErrors.ts`. |
 | `CustomAccentField.tsx` | The custom accent's field under the accent cards (1.4.0): the native `<input type="color">` (drawn round, `.wn-color-well`) and a hex text field (committed on Enter or blur; not a colour puts the old value back), plus the "Adjusted slightly for contrast" note when the mode on screen moved the colour. The Custom card opens the native picker in the same click (`openRef` → `showPicker()`), so the field stays in the page visually hidden (`sr-only`, `aria-hidden`, out of the tab order) until Custom is the accent. Until then the card's swatch is a soft conic wheel of the curated hues (`CUSTOM_SWATCH_IDLE`). |
 | `InboxClear.tsx` + `InboxClear.css` | The good-news empty states. Clear (Inbox empty, or only held-back junk left, or one smart filter worked to the end): `AppMark single` (only the leading plane, recentred) at the end of a dashed trail in accent light, a time-of-day line, and a one-time motion plus a phone haptic when the last row goes (`useClearCelebration.ts`; nothing moves under reduced motion). Quiet (empty folder, or filters that match nothing): one line and the remedy. `inboxClear.ts` decides which and what they say; search keeps `MessageList`'s own remedy screen. |
+| `PictureNotice.tsx` | "Sender pictures are off" at the top of the Inbox (`lead` of `MessageList`, under the demo strip or briefing): the reader's "Images are off" panel, slimmer, with Keep off / Turn on (`data-picture-notice="off"`), or, with Remote images = Never, "Sender pictures are paused" with Keep off / Open Privacy settings (`"paused"`), which changes nothing itself. `ui/pictureNotice.ts` decides which and holds the copy; any answer, or changing the switch in Settings, sets `Preferences.pictureNoticeDismissed`. |
 | `ComposeFab.tsx` | `ComposeButton`: the phone's round compose pencil in the accent (Liquid Glass since 1.4: `.wn-liquid-accent`), a circle as tall as the dock's pill, beside it in the dock's bottom row (it used to float over the list and cover rows). `App.tsx` decides when it is offered. |
 | `RecipientField.tsx` | The composer's To, Cc and Bcc fields: chips plus an ARIA 1.2 editable combobox. Nothing is highlighted until an arrow key, Tab only accepts after navigation (WCAG 2.1.1), Escape is consumed only while the list is open. |
 | `Overlay.tsx` | `Sheet`, `ConfirmDialog`, `SheetHeader`. Focus moved in and restored on unmount, Tab trapped by `getClientRects()` (because `offsetParent` is null for a fixed element). `ConfirmDialog` exists because `window.confirm` is unimplemented in a Tauri webview. `backdrop="opaque"` (`.wn-backdrop-opaque`) paints chrome instead of the scrim, for a panel that replaces the screen: phone Settings, where the app also hides and inerts `main` (`data-covered`) so no frame of the entrance shows the inbox. |
@@ -1192,8 +1193,8 @@ signed in). "Sign-out" means signing out of that account, which erases its names
 | `winnow.reconcile.v1` *(per account)* | When the last full id reconciliation (or full sync) finished, ms | sign-out |
 | `winnow.gmail.cache.cursor` *(per account)* | Gmail `historyId` | sign-out |
 | `winnow.google.contacts.v1` *(per account)* | The People API snapshot | sign-out, revocation |
-| `winnow.brandLogos.v1` *(per account)* | Cached BIMI answers | sign-out, setting off |
-| `winnow.gravatars.v1` *(per account)* | Cached Gravatar answers, by sender address | sign-out, setting off |
+| `winnow.brandLogos.v1` *(per account)* | Cached BIMI answers | sign-out, Sender pictures off |
+| `winnow.gravatars.v1` *(per account)* | Cached Gravatar answers, by sender address | sign-out, Sender pictures off |
 | IndexedDB `winnow-pictures@<id>` *(per account)* | Sender pictures as small data URLs (contact photos, Gravatars, brand logos), the 200 most recently drawn, `core/avatars/pictureBytes.ts` | sign-out / account removal (database deleted); a source's switch off, contacts grant gone (that kind) |
 | `winnow.google.oauthClient` | The user's OAuth client (web only) | setup |
 | `winnow.updates.v1` | Update checks: automatic on/off, the last check's time and outcome, the version whose notice was let go (`ui/useUpdates.ts`) | never, by design |

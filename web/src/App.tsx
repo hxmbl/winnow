@@ -174,6 +174,8 @@ import {
 import { DriveConsent } from "./ui/components/DriveConsent";
 import { DriveGrantNeeded } from "./ui/components/DriveGrantNeeded";
 import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
+import { pictureNotice } from "./ui/pictureNotice";
+import { PictureNotice } from "./ui/components/PictureNotice";
 import type { OfflineQueue } from "./core/offline/queue";
 import { useSyncIndicator } from "./ui/useSyncIndicator";
 import { CONNECTION_LOST } from "./ui/offlineStatus";
@@ -369,8 +371,7 @@ export function App({ store, existingInstall = true }: Props) {
   const snapshot = useStore(store);
   const { view, preferences } = snapshot;
   /**
-   * Brand logos (BIMI), behind "Show brand logos", and Gravatar photos, behind "Gravatar
-   * photos". One pair per account (1.4.0): each is a list of who mails that account, so
+   * Brand logos (BIMI) and Gravatar photos, both behind "Sender pictures". One pair per account (1.4.0): each is a list of who mails that account, so
    * it is stored under the account's namespace and never read from another's. Cleared on
    * sign-out and when the setting is turned off.
    */
@@ -1505,23 +1506,22 @@ export function App({ store, existingInstall = true }: Props) {
   // Signed out by any route (the button, an expired session): who mailed that account
   // is the account's data. Turning the setting off forgets the lookups too.
   useEffect(() => {
-    if (snapshot.status === "signed_out" || !preferences.brandLogos) logoCache.clear();
-  }, [snapshot.status, preferences.brandLogos, logoCache]);
-  useEffect(() => {
-    if (snapshot.status === "signed_out" || !preferences.gravatars) gravatarCache.clear();
-  }, [snapshot.status, preferences.gravatars, gravatarCache]);
-  // The kept picture copies follow the same switches, one source at a time; signed out,
+    if (snapshot.status === "signed_out" || !preferences.senderPictures) {
+      logoCache.clear();
+      gravatarCache.clear();
+    }
+  }, [snapshot.status, preferences.senderPictures, logoCache, gravatarCache]);
+  // The kept picture copies follow the same switch, one source at a time; signed out,
   // the account's whole picture database goes. Contact photos go when the contacts grant
   // does ("not_granted": declined or revoked), not while it is still being checked.
   useEffect(() => {
     if (snapshot.status === "signed_out") void pictureBytes.clear();
   }, [snapshot.status, pictureBytes]);
   useEffect(() => {
-    if (!preferences.brandLogos) void pictureBytes.clearKind("logo");
-  }, [preferences.brandLogos, pictureBytes]);
-  useEffect(() => {
-    if (!preferences.gravatars) void pictureBytes.clearKind("gravatar");
-  }, [preferences.gravatars, pictureBytes]);
+    if (preferences.senderPictures) return;
+    void pictureBytes.clearKind("logo");
+    void pictureBytes.clearKind("gravatar");
+  }, [preferences.senderPictures, pictureBytes]);
   useEffect(() => {
     if (snapshot.contactsAccess === "not_granted") void pictureBytes.clearKind("contact");
   }, [snapshot.contactsAccess, pictureBytes]);
@@ -1541,21 +1541,21 @@ export function App({ store, existingInstall = true }: Props) {
   // fictional, so their hashes say nothing about anyone, and the switch is the thing to
   // try out.
   const isDemo = snapshot.contactsAccess === "demo";
-  const brandLogos = preferences.brandLogos;
-  const gravatars = preferences.gravatars;
+  // One switch, "Sender pictures", turns both remote sources on or off together.
+  const remotePictures = preferences.senderPictures;
   // Remote images = Never pauses both remote lookups (`senderPictureSources`).
   const imagePolicy = preferences.imagePolicy;
   const senderPictures = useMemo<SenderPictures>(
     () =>
       senderPictureSources({
         photos,
-        gravatars: gravatars ? gravatarCache : null,
-        logos: brandLogos ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
+        gravatars: remotePictures ? gravatarCache : null,
+        logos: remotePictures ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
         imagePolicy,
         // The demo's pictures are bundled; nothing of it is kept.
         bytes: isDemo ? null : pictureBytes,
       }),
-    [photos, gravatars, gravatarCache, brandLogos, isDemo, logoCache, imagePolicy, pictureBytes],
+    [photos, remotePictures, gravatarCache, isDemo, logoCache, imagePolicy, pictureBytes],
   );
   // The same sources for a new-mail notification's sender picture (`announce`).
   useEffect(() => {
@@ -4273,6 +4273,30 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
       </button>
     </div>
   );
+  /** "Sender pictures are off" (`ui/pictureNotice.ts`), at the top of the Inbox. */
+  const pictureNoticeKind = pictureNotice({
+    senderPictures: preferences.senderPictures,
+    imagePolicy: preferences.imagePolicy,
+    dismissed: preferences.pictureNoticeDismissed,
+    mailbox: snapshot.mailbox,
+    rowCount: view.threads.length,
+  });
+  const pictureNoticeEl = pictureNoticeKind ? (
+    <PictureNotice
+      kind={pictureNoticeKind}
+      onKeepOff={() => store.setPreferences({ pictureNoticeDismissed: true })}
+      onAct={() => {
+        if (pictureNoticeKind === "off") {
+          store.setPreferences({ senderPictures: true, pictureNoticeDismissed: true });
+          return;
+        }
+        // Paused by Remote images = Never: nothing is changed from here. Settings ›
+        // Privacy has both controls and says what each one sends.
+        setSettingsCategory("privacy");
+        store.setOverlay("settings");
+      }}
+    />
+  ) : null;
   const connectNotice = connectError ? (
     <div role="alert" className="px-4 pb-2 text-meta font-medium text-danger">
               <ErrorText text={connectError} />
@@ -4710,16 +4734,18 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             switchView={viewKey(emptyContext)}
             lead={
               phone ? (
-                snapshot.account === null || connectNotice ? (
+                snapshot.account === null || connectNotice || pictureNoticeEl ? (
                   <>
                     {snapshot.account === null && compactBriefing}
                     {connectNotice}
+                    {pictureNoticeEl}
                   </>
                 ) : undefined
               ) : (
                 <>
                   {briefing}
                   {connectNotice}
+                  {pictureNoticeEl}
                 </>
               )
             }
@@ -5028,10 +5054,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             store.setOverlay("none");
             store.setMailbox("scheduled");
           }}
-          brandLogos={preferences.brandLogos}
-          onBrandLogos={(value) => store.setPreferences({ brandLogos: value })}
-          gravatars={preferences.gravatars}
-          onGravatars={(value) => store.setPreferences({ gravatars: value })}
+          senderPictures={preferences.senderPictures}
+          // Changing the switch here is an answer too, so the inbox notice stays gone.
+          onSenderPictures={(value) => store.setPreferences({ senderPictures: value, pictureNoticeDismissed: true })}
           notificationsEnabled={preferences.notificationsEnabled}
           onNotifications={(notificationsEnabled) => {
             store.setPreferences({ notificationsEnabled });
