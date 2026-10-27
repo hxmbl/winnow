@@ -245,6 +245,44 @@ jobs:
         working-directory: native/src-tauri
         run: cargo test --locked
 
+  # Known advisories in the two locked graphs: `npm audit` on web/package-lock.json
+  # (full tree and --omit=dev) and `cargo audit` on native/src-tauri/Cargo.lock. Fails
+  # only on a new high/critical advisory in what ships; dev-only, moderate/low and
+  # Cargo's unmaintained/unsound warnings are reported, and accepted or inapplicable
+  # advisories live in .github/advisory-allowlist.json, each with its reason. Policy and
+  # the local command: SECURITY.md, "Dependency advisories". Reads the lockfiles only:
+  # nothing is installed into the tree or updated, and the last step proves it. Runs on
+  # every event, since a new advisory lands without any change here.
+  advisories:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # A pinned scanner: a new cargo-audit release can change what is reported, so it
+      # moves only in a reviewed commit. The advisory databases themselves are live.
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
+        with:
+          tool: cargo-audit@0.22.2
+
+      - name: Audit locked dependencies
+        run: node web/scripts/audit-advisories.mjs
+
+      - name: Lockfiles untouched
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
   # Debug, unbundled: proves the Rust side compiles without paying for LTO and packaging.
   # Runs on master too, so PRs inherit a warm debug cache.
   build:
