@@ -28,6 +28,9 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { filterKey, type FilterId } from "../../core/model/signals";
 import { digitFor, scrollToReveal, stepRail, type PillItem, type RailGeometry } from "../rail";
 import { useRailMotion } from "./useRailMotion";
+import { filterIcon } from "../filterIcons";
+import { ensureIconInkStyles } from "../filterIconInk";
+import { NEUTRAL_FILTERS } from "../filterColors";
 
 export type { PillItem } from "../rail";
 
@@ -345,6 +348,27 @@ export const FilterStrip = memo(function FilterStrip({
                 the cell is always as wide as the bolder one, so switching a pill on
                 thickens its text without nudging every pill after it along the rail.
               */}
+              {/*
+                A smart filter's icon, left of the label, in the chip's hue. Unread has
+                none (the row's unread dot already says it); neutral buckets take the
+                label's ink.
+              */}
+              {id.kind === "builtin" && id.id !== "unread" && (() => {
+                const { Icon } = filterIcon(id.id);
+                ensureIconInkStyles();
+                const neutral = NEUTRAL_FILTERS.has(id.id);
+                return (
+                  <span
+                    aria-hidden="true"
+                    data-pill-icon={id.id}
+                    data-icon-filter={neutral ? undefined : id.id}
+                    data-icon-neutral={neutral ? "" : undefined}
+                    className={`${neutral ? "" : "wn-signal-ink "}-ml-0.5 flex shrink-0`}
+                  >
+                    <Icon size={16} strokeWidth={2} />
+                  </span>
+                );
+              })()}
               {/*
                 Capped, with an ellipsis: a sender pill is "From " plus whatever the
                 address is, and an unbroken 60-character one was wider than a medium
