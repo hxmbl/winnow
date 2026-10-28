@@ -19,6 +19,10 @@ adds. See `native/README.md`, "Cutting a release".
 - On a phone, the reader's ••• menu (Star, Mark unread, Show as, View Original, Unsubscribe and the rest) is now the same frosted glass as the action pill it opens from, instead of a solid black sheet. The other menus you open on a phone, such as Snooze from the pill, the account menu and the menu behind a sender's picture, match it. The frost is a little thicker than the pill's so every word stays readable over a busy email or a photo. With "reduce transparency" or high-contrast colours turned on in your phone's settings, menus stay solid.
 - On a phone, tapping the Inbox button in the bottom bar while a smart filter (like Important) is on now turns the filter off and shows all your mail, the same as tapping All. With no filter on, it still takes you back to the top of the list, and from another mailbox it still just opens Inbox.
 
+### Fixed
+
+- Tapping a new-mail notification on Android now opens that email, in the right account, instead of just opening Winnow. It works whether Winnow was open in the background or fully closed (including notifications from background sync), and if the email hasn't reached the app yet, Winnow fetches it first. Tapping a "new messages" summary opens that account's inbox.
+
 ## [1.7.0] - 2026-10-28
 
 ### Added

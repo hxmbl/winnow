@@ -32,13 +32,13 @@ import type { Email } from "./core/model/email";
 import { accountRouter, announce, routeNotificationAction, saveKeptReplies, wireNotifications } from "./ui/notificationActions";
 import { loadAccountState, persistAccountState } from "./core/store/accountState";
 import { deviceStorage } from "./core/store/storage";
-import { parseDeepLink } from "./core/notify/notifications";
+import { deepLinkRoute, wireDeepLinks } from "./ui/deepLinks";
 import { backgroundServiceConfig } from "./core/notify/backgroundService";
 import { loadAccounts } from "./core/session/accounts";
 import { watchPhysicalKeyboard } from "./ui/physicalKeyboard";
 import { isExistingInstall } from "./ui/tour";
 import { installLifecycleDebugLog } from "./core/debug/lifecycle";
-import { syncNativeDebugLog } from "./core/debug/debugLog";
+import { debugLog, syncNativeDebugLog } from "./core/debug/debugLog";
 import "./index.css";
 
 // Dev Options → Debug log: app lifecycle, connectivity and stray errors, recorded only
@@ -327,11 +327,18 @@ function wireDesktopEvents(): void {
 
   // A `winnow://` link is either a message to open or just "wake up". Either way the
   // window has to come forward: a link that opened the app behind the frontmost
-  // window reads as nothing happening at all.
-  const unlistenLink = desktopPlatformExtras.onDeepLink(openDeepLink);
-  // A cold start from a notification's tap: the link was emitted before this listened,
-  // so it is asked for (`deep_link_launch`; an older shell without it answers nothing).
-  void desktopPlatformExtras.launchLinks().then((urls) => urls.forEach(openDeepLink));
+  // window reads as nothing happening at all. A cold start from a notification's tap
+  // was announced before this listened, so it is asked for (`deep_link_launch`; an
+  // older shell without it answers nothing); on Android the tap is also kept natively
+  // after the event delivers it, and taken so it never opens twice (`deepLinks.ts`).
+  const unlistenLink = wireDeepLinks(
+    {
+      onDeepLink: (handler) => desktopPlatformExtras.onDeepLink(handler),
+      launchLinks: () => desktopPlatformExtras.launchLinks(),
+      keepsDeliveredLinks: async () => (await platform.info()).os === "android",
+    },
+    openDeepLink,
+  );
 
   // The ids here must match `tray.rs`'s menu items exactly. They are strings across
   // an IPC boundary with no shared type, so this switch is the only place the two
@@ -373,22 +380,10 @@ function wireDesktopEvents(): void {
  */
 function openDeepLink(url: string): void {
   void platform.focusWindow();
-  const link = parseDeepLink(url);
-  // Android's sign-in success page links here only to bring the app forward; the
-  // sign-in itself finishes in `session.ts`, so there is nothing else to do.
-  if (!link || link.kind === "signed-in") return;
-  if (link.kind === "open") {
-    void store.refresh();
-    return;
-  }
-  void routeNotificationAction(store, platform, {
-    action: link.kind === "message" ? "open" : "inbox",
-    messageId: link.kind === "message" ? link.messageId : 0,
-    gmailId: link.kind === "message" ? link.gmailId : "",
-    // Asked of the app, not reported as done: the tap only opens.
-    origin: "desktop",
-    ...(link.account ? { account: link.account } : {}),
-  });
+  const route = deepLinkRoute(url);
+  debugLog("notify", "link", { route: route.kind });
+  if (route.kind === "refresh") void store.refresh();
+  if (route.kind === "action") void routeNotificationAction(store, platform, route.event);
 }
 
 createRoot(container).render(
