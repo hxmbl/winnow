@@ -57,6 +57,7 @@ describe("the export allowlist", () => {
       "unreadBadge",
       "backgroundSync",
       "backgroundSyncInterval",
+      "gmailListener",
       "autoCheckUpdates",
       "readerFraction",
       "devOptionsUnlocked",

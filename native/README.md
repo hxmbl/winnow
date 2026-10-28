@@ -181,6 +181,10 @@ The catches, also in the setting's (?) help:
   Android 12+), and the code does the rest.
 - Not Play-friendly: Google Play restricts notification-listener use. Fine for the
   GitHub APK, which is how Winnow ships.
+- Gmail's own notifications are Gmail's. Winnow reads them but never hides or changes
+  them, so mail from a sender muted or blocked in Winnow can still show a Gmail
+  notification. Turning that off is done in the Gmail app's notification settings; this
+  is by design (decided on STRM-442).
 
 ### Android signing
 

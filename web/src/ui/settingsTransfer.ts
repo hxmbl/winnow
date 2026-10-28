@@ -51,6 +51,7 @@ export const EXPORTED_PREFERENCE_KEYS = [
   "unreadBadge",
   "backgroundSync",
   "backgroundSyncInterval",
+  "gmailListener",
 ] as const satisfies ReadonlyArray<keyof Preferences>;
 
 /**
