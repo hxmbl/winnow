@@ -17,9 +17,10 @@
  *      the filter, and never the other way: one correction is enough for an address.
  *      A rule for a whole domain is broader, so it needs more: corrections from at least
  *      `MIN_DOMAIN_ADDRESSES` different addresses at that domain, all the same way. A
- *      sender or domain with corrections both ways has no rule. Your own domain (the
- *      signed-in account's) and shared domains — gmail.com, outlook.com — never become a
- *      domain rule, only addresses. An exact address beats its domain. Sender rules are
+ *      sender or domain with corrections both ways has no rule. Your own domains — the
+ *      signed-in account's, and any you have written to several people at
+ *      (`workDomains.ts`) — and shared domains such as gmail.com and outlook.com never
+ *      become a domain rule, only addresses. An exact address beats its domain. Sender rules are
  *      listed in Settings, one per sender, and each can be removed.
  *   3. **Similar mail you corrected.** A per-filter naive Bayes over the message's clues
  *      (`filterClues.ts`). Generic clues — Gmail's category, a no-reply address, a
@@ -119,6 +120,15 @@ export const MAX_CLUES = 20;
 /** Distinct clues across every correction. Past it, the rarest words are dropped. */
 export const MAX_VOCABULARY = 1200;
 export const SNAPSHOT_VERSION = 1;
+
+const NO_DOMAINS: ReadonlySet<string> = new Set();
+
+function sameDomains(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const domain of a) if (!b.has(domain)) return false;
+  return true;
+}
 
 // ── Storage shape ───────────────────────────────────────────────────────────
 
@@ -271,10 +281,21 @@ export type Decision =
 export class FilterLearning {
   readonly owner: string | null;
   readonly corrections: readonly FilterCorrection[];
+  /**
+   * Domains that count as yours besides the account's own, read from your Sent mail
+   * (`workDomains.ts`). Never stored: the store sets them from the mailbox with
+   * `withWorkDomains`, and every model made from this one keeps them.
+   */
+  readonly workDomains: ReadonlySet<string>;
 
-  private constructor(owner: string | null, corrections: readonly FilterCorrection[]) {
+  private constructor(
+    owner: string | null,
+    corrections: readonly FilterCorrection[],
+    workDomains: ReadonlySet<string> = NO_DOMAINS,
+  ) {
     this.owner = owner;
     this.corrections = corrections;
+    this.workDomains = workDomains;
   }
 
   static empty(owner: string | null = null): FilterLearning {
@@ -305,7 +326,30 @@ export class FilterLearning {
 
   /** The same corrections, claimed by an account. */
   withOwner(owner: string | null): FilterLearning {
-    return owner === this.owner ? this : new FilterLearning(owner, this.corrections);
+    return owner === this.owner ? this : new FilterLearning(owner, this.corrections, this.workDomains);
+  }
+
+  private workCache: { domains: ReadonlySet<string>; model: FilterLearning } | null = null;
+
+  /**
+   * The same corrections, with these domains counted as yours. Returns this model when
+   * they are the domains it already has, and the same new model when asked twice in a
+   * row for the same set, so the store's identity memos keep hitting.
+   */
+  withWorkDomains(domains: ReadonlySet<string>): FilterLearning {
+    if (sameDomains(domains, this.workDomains)) return this;
+    if (this.workCache && this.workCache.domains === domains) return this.workCache.model;
+    const model = new FilterLearning(this.owner, this.corrections, domains);
+    this.workCache = { domains, model };
+    return model;
+  }
+
+  /**
+   * True when a domain is yours and so never gets a domain rule: the account's own, or
+   * one you have written to several people at.
+   */
+  isOwnDomain(domain: string): boolean {
+    return domain !== "" && (domain === this.ownDomain || this.workDomains.has(domain));
   }
 
   /**
@@ -339,13 +383,13 @@ export class FilterLearning {
     };
     const kept = this.corrections.filter((c) => !(c.message === email.gmailId && c.filter === filter));
     kept.push(correction);
-    return new FilterLearning(this.owner, capVocabulary(kept.slice(-MAX_CORRECTIONS)));
+    return new FilterLearning(this.owner, capVocabulary(kept.slice(-MAX_CORRECTIONS)), this.workDomains);
   }
 
   /** Forget everything, or one filter's corrections. */
   reset(filter?: LearnableFilter): FilterLearning {
-    if (!filter) return new FilterLearning(this.owner, []);
-    return new FilterLearning(this.owner, this.corrections.filter((c) => c.filter !== filter));
+    if (!filter) return new FilterLearning(this.owner, [], this.workDomains);
+    return new FilterLearning(this.owner, this.corrections.filter((c) => c.filter !== filter), this.workDomains);
   }
 
   /**
@@ -365,7 +409,7 @@ export class FilterLearning {
       }
       return c.address === lower ? { ...c, address: "" } : c;
     });
-    return new FilterLearning(this.owner, next);
+    return new FilterLearning(this.owner, next, this.workDomains);
   }
 
   // ── Derived, memoised on this instance ──
@@ -453,12 +497,12 @@ export class FilterLearning {
 
   /**
    * The rule a tally makes, or null. Corrections both ways make no rule; a domain also
-   * needs `MIN_DOMAIN_ADDRESSES` distinct addresses, and is never the account's own or a
-   * shared one.
+   * needs `MIN_DOMAIN_ADDRESSES` distinct addresses, and is never one of yours
+   * (`isOwnDomain`) or a shared one.
    */
   private ruleFrom(filter: LearnableFilter, kind: "address" | "domain", key: string): SenderRule | null {
     if (!key) return null;
-    if (kind === "domain" && (!canRuleDomain(key) || key === this.ownDomain)) return null;
+    if (kind === "domain" && (!canRuleDomain(key) || this.isOwnDomain(key))) return null;
     const tally = this.senders().get(`${filter}|${kind}|${key}`);
     if (!tally) return null;
     if (tally.in > 0 && tally.out > 0) return null;

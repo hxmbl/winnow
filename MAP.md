@@ -327,7 +327,10 @@ That is the only input; nothing is learned from opening or ignoring mail.
   own corrections, one is enough; a registrable domain only with corrections from at
   least `MIN_DOMAIN_ADDRESSES = 2` distinct addresses there; a sender or domain with
   corrections both ways has no rule; the account's own domain — `northwind.example` in
-  the demo — and gmail.com-style shared domains never get a domain rule) → **per-filter
+  the demo — any domain the user has sent mail to `MIN_WORK_RECIPIENTS = 3` distinct
+  people at (`workDomains.ts`, read from Sent by the store's `learningModel()` and set
+  with `withWorkDomains`, never stored), and gmail.com-style shared domains never get a
+  domain rule) → **per-filter
   naive Bayes** over the clues, with the built-in answer as the prior at
   `BUILT_IN_ODDS = 3` to 1. Generic clues (`c:*`, `h:no-reply`, `h:list-unsubscribe`,
   `h:attachments`, `p:date`) never count; all words together count as one clue at most;

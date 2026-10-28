@@ -22,6 +22,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Changed
 
+- Smart filter corrections no longer make a rule for your whole workplace when you use a personal account. If you've written to three or more people at a domain, Winnow treats it like your own: correcting mail from two colleagues teaches a rule for each of them, not for everyone at the company. This is worked out on your device from your Sent mail.
 - Icons are drawn at four sizes with one stroke weight throughout the app, so icons next to each other no longer differ by a pixel or two. Dialogs come in three widths, and spacing, dividers and section labels are more consistent. The inbox-clear messages are plainer.
 - Buttons are consistent across the app: every filled and outlined button now comes in the same three heights with the same padding and weight, so two buttons side by side no longer differ by a pixel or two.
 - A smart filter chip that's switched on no longer glows, and the open account's avatar no longer has a halo: the coloured ring, the tint and the tick already show which is on.

@@ -101,6 +101,7 @@ import {
   type FilterLearningSnapshot,
   type LearnableFilter,
 } from "../learn/filterLearning";
+import { workDomainsFromSent } from "../learn/workDomains";
 import { explainFilters, type FilterReason } from "../learn/filterExplain";
 import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
 import type { SyncProgress, SyncStage } from "../gmail/sync";
@@ -1131,7 +1132,7 @@ export class WinnowStore {
 
   getSnapshot = (): Snapshot => {
     this.key = String(this.version);
-    return { ...this.state, view: this.deriveCached(), key: this.key };
+    return { ...this.state, filterLearning: this.learningModel(), view: this.deriveCached(), key: this.key };
   };
 
   /** The current view, for non-React callers (the keybind handler, tests). */
@@ -1299,7 +1300,7 @@ export class WinnowStore {
       hit.weights === weights &&
       hit.trash === trash &&
       hit.blocked === blocked &&
-      hit.filterLearning === state.filterLearning
+      hit.filterLearning === this.learningModel()
     ) {
       return { profile: hit.profile, signals: hit.signals };
     }
@@ -1355,7 +1356,7 @@ export class WinnowStore {
       baseSignals = classifyAll(inboxForProfile, profile, weights);
       for (const email of inboxForProfile) byEmail.set(email, baseSignals.get(email.id)!);
     }
-    const filterLearning = state.filterLearning;
+    const filterLearning = this.learningModel();
     // The clue background is only read by learning, so with nothing learned it is not
     // built at all; otherwise it is kept while the inbox holds the same message objects
     // (a star, a weight-free re-derive), since `clueBackground`'s own memo is keyed on
@@ -1391,7 +1392,7 @@ export class WinnowStore {
       }
       base.set(email.id, signal);
     }
-    const learning = this.state.filterLearning;
+    const learning = this.learningModel();
     if (learning.isEmpty) return base;
     const background = this.inboxCache?.background ?? EMPTY_BACKGROUND;
     return applyFilterLearning(emails, base, learning, background);
@@ -4490,6 +4491,16 @@ export class WinnowStore {
     this.setFilterLearning(next);
   }
 
+  /**
+   * The corrections as they are applied: `state.filterLearning` with the domains your
+   * Sent mail shows are yours (`workDomains.ts`), so colleagues at a work domain never
+   * share a domain rule even when the account is a personal one. Memoised on the
+   * mailbox and the model, so it keeps its identity until either changes.
+   */
+  private learningModel(): FilterLearning {
+    return this.state.filterLearning.withWorkDomains(workDomainsFromSent(this.state.all));
+  }
+
   private setFilterLearning(model: FilterLearning): void {
     this.state = { ...this.state, filterLearning: model };
     this.onPersist?.({ filterLearning: model.toSnapshot() });
@@ -4578,7 +4589,7 @@ export class WinnowStore {
     const base = cache?.baseSignals.get(id);
     const learned = cache?.signals.get(id);
     if (!cache || !base || !learned) return [];
-    return explainFilters(email, base, learned, cache.profile, this.state.filterLearning, {
+    return explainFilters(email, base, learned, cache.profile, this.learningModel(), {
       background: cache.background,
       weights: cache.weights,
       scores,
@@ -4598,7 +4609,7 @@ export class WinnowStore {
     const weights = this.state.learning.weights;
     const base = classifyEmail(email, profile, weights);
     const learned = this.mailboxSignals([email], profile).get(id) ?? base;
-    return explainFilters(email, base, learned, profile, this.state.filterLearning, {
+    return explainFilters(email, base, learned, profile, this.learningModel(), {
       background: cache?.background ?? EMPTY_BACKGROUND,
       weights: cache?.weights ?? weights,
       scores,

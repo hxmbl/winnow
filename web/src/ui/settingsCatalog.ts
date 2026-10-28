@@ -117,7 +117,7 @@ export const SETTINGS = {
     category: "filters",
     label: "What's been learnt",
     explanation:
-      "Every time you move a message with “Change smart filters…”, Winnow keeps that correction. One correction teaches a rule for that exact sender; a rule for a whole domain needs corrections from two of its addresses, all the same way, and never covers your own domain or shared ones like gmail.com. Similar mail is judged by specific clues such as tracking and order numbers, and only after two similar corrections. Remove any sender rule here; it is all stored on this device only, never synced, and erased when you sign out or switch account.",
+      "Every time you move a message with “Change smart filters…”, Winnow keeps that correction. One correction teaches a rule for that exact sender; a rule for a whole domain needs corrections from two of its addresses, all the same way, and never covers your own domain, a domain where you've written to three or more people (your workplace, say), or shared ones like gmail.com. Similar mail is judged by specific clues such as tracking and order numbers, and only after two similar corrections. Remove any sender rule here; it is all stored on this device only, never synced, and erased when you sign out or switch account.",
   },
   resetFilterLearning: {
     category: "filters",
