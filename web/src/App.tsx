@@ -5057,7 +5057,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           unreadBadge={preferences.unreadBadge}
           onUnreadBadge={(value) => store.setPreferences({ unreadBadge: value })}
           onNotificationSettings={(patch) => store.setPreferences(patch)}
-          backgroundSync={info?.backgroundSync ?? null}
+          backgroundSyncAvailable={info?.backgroundSync ?? null}
+          backgroundSync={preferences.backgroundSync}
           onBackgroundSync={(backgroundSync) => store.setPreferences({ backgroundSync })}
           backgroundSyncInterval={preferences.backgroundSyncInterval}
           onBackgroundSyncInterval={(backgroundSyncInterval) =>
