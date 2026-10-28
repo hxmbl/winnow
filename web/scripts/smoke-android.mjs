@@ -20,6 +20,13 @@
  *      with all three buttons and a reply head, and a press on it (as Rust reports one)
  *      only says it did nothing. Check now answers inline (No updates available, Update
  *      available, Couldn't check) and installs nothing.
+ *   4. Settings switches (STRM-426), phone in OLED: at every switch's centre, and 23px
+ *      out each way (its 48×48 press box), the switch is what `elementFromPoint` finds;
+ *      a tap on a row's name presses its switch and a tap on (?) does not; Space and
+ *      Enter toggle; the off knob is not black on black. The Android app offers no
+ *      "Keep syncing while closed" switch (it has no background sync, and the switch it
+ *      used to show was drawn from that capability, so it never moved); the desktop
+ *      app's switch turns off and back on.
  *
  * Separate from `smoke.mjs` so it can run alone (`node scripts/smoke-android.mjs`);
  * `npm run smoke` runs both. Same environment: WINNOW_PORT, WINNOW_CHROMIUM.
@@ -520,6 +527,155 @@ try {
     await setup.locator('[data-setup-step-button="android"]').click();
     check("an unreadable certificate says so instead of showing a fingerprint",
       (await setup.locator("[data-android-no-sha1]").count()) === 1 && (await setup.locator('[data-copy-value="sha1"]').count()) === 0);
+    await context.close();
+  }
+
+  // ── 4. Settings switches: press box, row tap, keyboard, OLED off state ─────
+  console.log("\n── settings switches (phone, OLED) ──");
+  const oled = () => {
+    if (window.top !== window) return;
+    const raw = localStorage.getItem("winnow.preferences.v1");
+    localStorage.setItem("winnow.preferences.v1", JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), appearance: "oled" }));
+  };
+  const openSyncSettings = async (page) => {
+    await page.goto(URL, { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.locator("[data-phone-dock] button[data-dock-expand]").tap();
+    await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await page.waitForTimeout(400);
+    await page.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').tap();
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await dialog.waitFor({ timeout: 5_000 });
+    await page.waitForTimeout(450);
+    await dialog.locator('[data-category="sync"]').first().tap();
+    await page.waitForTimeout(600);
+    return dialog;
+  };
+  /** For each switch: is it the hit target at its centre and at ±23px each way? */
+  const hitReport = (page) =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('[role="dialog"][aria-label="Settings"] [role="switch"]')].map((sw) => {
+        const r = sw.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const at = (x, y) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit === sw || sw.contains(hit);
+        };
+        const misses = [[0, 0], [-23, 0], [23, 0], [0, -23], [0, 23]].filter(([dx, dy]) => !at(cx + dx, cy + dy));
+        return { label: sw.getAttribute("aria-label"), size: `${Math.round(r.width)}x${Math.round(r.height)}`, centre: at(cx, cy), misses };
+      }),
+    );
+  {
+    const context = await browser.newContext({
+      viewport: { width: 412, height: 915 },
+      userAgent: "Mozilla/5.0 (Linux; Android 15; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36",
+      hasTouch: true,
+      isMobile: true,
+      colorScheme: "dark",
+    });
+    await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    await context.addInitScript(oled);
+    await context.route(/^https:\/\/(?!(gmail|oauth2|people|www)\.googleapis\.com)/, (route) => route.fulfill({ status: 204, body: "" }));
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error)));
+    const dialog = await openSyncSettings(page);
+    const report = await hitReport(page);
+    check("Notifications & sync has switches to press", report.length >= 2, report.map((r) => r.label).join(", "));
+    for (const row of report) {
+      check(`"${row.label}" is the hit target at its centre`, row.centre);
+      check(`"${row.label}" presses through a 48x48 box`, row.misses.length === 0, `drawn ${row.size}, misses at ${JSON.stringify(row.misses)}`);
+    }
+    check(
+      "the Android app offers no background-sync switch, and says why",
+      (await dialog.locator('[role="switch"][aria-label="Keep syncing while closed"]').count()) === 0 &&
+        (await dialog.locator('[data-background-sync-note="native-note"]').count()) === 1,
+    );
+
+    const badge = dialog.locator('[role="switch"][aria-label="Unread count on the app icon"]');
+    const badgeRow = dialog.locator('[data-setting="unreadBadge"]');
+    const before = await badge.getAttribute("aria-checked");
+    await badgeRow.getByText("Unread count on the app icon", { exact: true }).tap();
+    await page.waitForTimeout(250);
+    const afterName = await badge.getAttribute("aria-checked");
+    check("a tap on a row's name presses its switch", afterName !== before, `${before} -> ${afterName}`);
+    await badgeRow.locator("[data-setting-info]").tap();
+    await page.waitForTimeout(250);
+    check(
+      "a tap on (?) opens its help and leaves the switch alone",
+      (await badge.getAttribute("aria-checked")) === afterName && (await page.locator('[data-setting-popover="unreadBadge"]').count()) === 1,
+    );
+    const info = await badgeRow.locator("[data-setting-info]").boundingBox();
+    const infoBox = await badgeRow.locator("[data-setting-info]").evaluate((el) => {
+      const after = getComputedStyle(el, "::after");
+      const r = el.getBoundingClientRect();
+      return { w: r.width - 2 * parseFloat(after.left), h: r.height - 2 * parseFloat(after.top) };
+    });
+    check("the (?) button presses through at least 44x44", infoBox.w >= 44 && infoBox.h >= 44, `${info?.width}x${info?.height} drawn, ${infoBox.w}x${infoBox.h} box`);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+
+    await badge.focus();
+    const k0 = await badge.getAttribute("aria-checked");
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(150);
+    const k1 = await badge.getAttribute("aria-checked");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(150);
+    const k2 = await badge.getAttribute("aria-checked");
+    check("Space and Enter toggle a focused switch", k1 !== k0 && k2 === k0, `${k0} -> ${k1} -> ${k2}`);
+
+    const off = await dialog.locator('[role="switch"][aria-checked="false"]').first().evaluate((sw) => ({
+      track: getComputedStyle(sw).backgroundColor,
+      knob: getComputedStyle(sw.querySelector("span")).backgroundColor,
+    }));
+    check("on OLED an off switch is not black on black", off.knob !== "rgb(0, 0, 0)" && off.track !== "rgb(0, 0, 0)" && off.track !== "rgb(42, 42, 42)", JSON.stringify(off));
+    check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
+    await context.close();
+  }
+
+  // The desktop app, where the switch exists: it must turn off and come back on.
+  console.log("\n── settings switches (desktop app: keep syncing while closed) ──");
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    await context.addInitScript(() => {
+      const internals = window.__TAURI_INTERNALS__;
+      const invoke = internals.invoke.bind(internals);
+      internals.invoke = async (cmd, args) =>
+        cmd === "app_info" ? { ...(await invoke(cmd, args)), os: "linux", arch: "x86_64", backgroundSync: true } : invoke(cmd, args);
+    });
+    await context.route(/^https:\/\/(?!(gmail|oauth2|people|www)\.googleapis\.com)/, (route) => route.fulfill({ status: 204, body: "" }));
+    const page = await context.newPage();
+    await page.goto(URL, { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.keyboard.press(",");
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await dialog.waitFor({ timeout: 5_000 });
+    const tab = dialog.locator('[role="tab"][data-category="sync"]');
+    if ((await tab.count()) > 0) await tab.click();
+    else await dialog.locator('[data-category="sync"]').first().click();
+    await page.waitForTimeout(400);
+    const sync = dialog.locator('[role="switch"][aria-label="Keep syncing while closed"]');
+    const interval = () => dialog.locator('[data-setting="syncInterval"]').count();
+    const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").backgroundSync);
+    const s0 = await sync.getAttribute("aria-checked");
+    await sync.click();
+    await page.waitForTimeout(250);
+    const s1 = await sync.getAttribute("aria-checked");
+    const p1 = await stored();
+    const i1 = await interval();
+    await dialog.locator('[data-setting="backgroundSync"]').getByText("Keep syncing while closed", { exact: true }).click();
+    await page.waitForTimeout(250);
+    const s2 = await sync.getAttribute("aria-checked");
+    const p2 = await stored();
+    check(
+      "the desktop switch shows the preference: on, off, and on again (from its name)",
+      s0 === "true" && s1 === "false" && p1 === false && s2 === "true" && p2 === true,
+      `${s0} -> ${s1} (${p1}) -> ${s2} (${p2})`,
+    );
+    check("its interval shows only while it is on", i1 === 0 && (await interval()) === 1);
     await context.close();
   }
 } catch (error) {
