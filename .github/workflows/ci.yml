@@ -271,7 +271,7 @@ jobs:
       # A pinned scanner: a new cargo-audit release can change what is reported, so it
       # moves only in a reviewed commit. The advisory databases themselves are live.
       - name: Install cargo-audit
-        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit@0.22.2
 
@@ -331,7 +331,7 @@ jobs:
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-binstall
 
@@ -439,7 +439,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-binstall
 
@@ -505,7 +505,7 @@ jobs:
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2.87.31  # v2.87.32 (2026-10-26) fails on macOS runners; unpin once fixed
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-binstall
 
