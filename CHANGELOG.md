@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- Export and import settings. Settings → About → Export settings saves how Winnow is set up to a small file: appearance, reading and compose choices, privacy switches, notifications and sync, the update switch, the reader's width and Dev Options. It never includes your sign-in, Google client, accounts, mail, contacts, hidden or muted senders, or anything Winnow has learnt from you. In the browser the file downloads, on a computer a save dialog asks where, and on Android the system's save screen opens so you can put it in Downloads or anywhere else. Import settings… reads that file on another device, shows exactly what it would change, and changes nothing until you press Apply; anything it doesn't recognise is ignored, and a file from a newer Winnow is refused.
+
 ### Changed
 
 - On a phone, the reader's ••• menu (Star, Mark unread, Show as, View Original, Unsubscribe and the rest) is now the same frosted glass as the action pill it opens from, instead of a solid black sheet. The other menus you open on a phone, such as Snooze from the pill, the account menu and the menu behind a sender's picture, match it. The frost is a little thicker than the pill's so every word stays readable over a busy email or a photo. With "reduce transparency" or high-contrast colours turned on in your phone's settings, menus stay solid.
