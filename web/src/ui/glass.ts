@@ -20,6 +20,14 @@
  * against the real pill arithmetic (`pillFill`). Only that zone is raised; the rim
  * stays light.
  *
+ * Menus on a phone (`.wn-glass-menu`: the reader's More, and every popover menu opened
+ * from the dock, its panel, the reader pill or a row) are the same glass with the tint
+ * raised to `menu`. They carry words, a small heading and red danger rows over anything,
+ * a message's photo included, so `menu` is the lowest tint that keeps each of those at AA
+ * over solid black and solid white (`SOLID_BACKDROPS`), which `glass.test.ts` checks. Still
+ * below `fallback`: the frost stays visible. STRM-440: the reader's More was a solid sheet
+ * under a see-through pill.
+ *
  * Liquid Glass (`.wn-liquid`, `LIQUID`) is the same tint and frost with a lit rim, a
  * sheen across the face and, in Chromium, an edge-only refraction (`LIQUID_FILTER`, the
  * SVG filter `#wn-liquid` in `index.html`). It is for the small floating chrome: the
@@ -52,6 +60,11 @@ export type GlassRecipe = {
    * `inkMuted` at AA rather than the 3:1 an icon needs, so their tint can sit higher.
    */
   bar: number;
+  /**
+   * Menus on a phone (`.wn-glass-menu`). Words, the "Show as" heading (`inkSubtle`) and
+   * danger rows over a message, where a photo can be solid black or white: AA over both.
+   */
+  menu: number;
   /** With no `backdrop-filter` there is no frost to read through: nearly opaque. */
   fallback: number;
 };
@@ -67,11 +80,11 @@ export function blurRadius(filter: string): number {
 
 export const GLASS: Record<ThemeName, GlassRecipe> = {
   // Dark ink on a pale tint: the worst backdrop is something dark (the accent, an avatar).
-  light: { base: "surface", rim: 0.62, text: 0.72, textOn: 0.76, bar: 0.72, fallback: 0.94 },
+  light: { base: "surface", rim: 0.62, text: 0.72, textOn: 0.76, bar: 0.72, menu: 0.86, fallback: 0.94 },
   // Light ink: the worst is something bright. The canvas (darker than the surface) is
   // the base, so the frost is a shade darker than the list and the ink keeps its edge.
-  dark: { base: "canvas", rim: 0.62, text: 0.68, textOn: 0.84, bar: 0.76, fallback: 0.94 },
-  oled: { base: "surface", rim: 0.62, text: 0.62, textOn: 0.74, bar: 0.68, fallback: 0.94 },
+  dark: { base: "canvas", rim: 0.62, text: 0.68, textOn: 0.84, bar: 0.76, menu: 0.86, fallback: 0.94 },
+  oled: { base: "surface", rim: 0.62, text: 0.62, textOn: 0.74, bar: 0.68, menu: 0.78, fallback: 0.94 },
 };
 
 /**
@@ -188,6 +201,7 @@ export function glassProperties(scheme: ThemeName, color: Record<string, string>
     "--wn-glass-text": pct(recipe.text),
     "--wn-glass-text-on": pct(recipe.textOn),
     "--wn-glass-bar": pct(recipe.bar),
+    "--wn-glass-menu": pct(recipe.menu),
     "--wn-glass-fallback": pct(recipe.fallback),
     "--wn-liquid-sheen": pct(liquid.sheen),
     "--wn-liquid-rim-light": pct(liquid.rimLight),

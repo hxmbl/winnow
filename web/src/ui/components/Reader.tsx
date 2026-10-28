@@ -9,7 +9,8 @@
  */
 
 import { PositionReadout } from "./Masthead";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlarmClock,
   AlarmClockOff,
@@ -304,6 +305,11 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
  * footer under every message; both were on screen for every message and used for almost
  * none. Here they cost one icon. Closes on a choice, an outside click, or Escape, and
  * hands focus back to its button so the keyboard is not stranded.
+ *
+ * On a phone it is the same frosted glass as the pill it opens from (STRM-440: it was a
+ * solid sheet over a see-through pill), its tint raised for words (`.wn-glass-menu`). It
+ * renders into `document.body`, as `Menu` does: inside the pill, the pill (folding,
+ * swiping, clipping) would be its frost's backdrop and its fixed position's reference.
  */
 function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUnsubscribe, onChangeFilters, onViewOriginal, buttonClass, phone, buttonContent }: {
   view: BodyView;
@@ -325,12 +331,15 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
 
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -357,6 +366,9 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
     ? "flex min-h-11 w-full items-center gap-2.5 rounded-ctl px-3 text-left text-ui font-medium text-ink-body transition-colors active:bg-sheen focus-visible:bg-sheen focus-visible:outline-hidden"
     : "flex w-full items-center gap-2 rounded-ctl px-2.5 py-1.5 text-left text-meta font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-hidden";
   const iconSize: IconSize = phone ? 20 : 16;
+  /** The phone's menu goes to the body; the desktop's stays under its button. */
+  const portal = (menu: React.ReactElement) =>
+    phone && typeof document !== "undefined" ? createPortal(menu, document.body) : menu;
 
   return (
     <div ref={rootRef} className="relative">
@@ -366,21 +378,27 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
         aria-label="More"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         title="More"
         onClick={() => setOpen((was) => !was)}
         className={buttonClass}
       >
         {buttonContent ?? <Icon icon={MoreHorizontal} size={16} />}
       </button>
-      {open && (
+      {open && portal(
         <div
+          ref={menuRef}
+          id={menuId}
           role="menu"
           aria-label="More actions"
+          data-reader-more-menu={phone ? "phone" : "desktop"}
+          // `.wn-glass` positions itself `relative`, which outranks the `fixed` utility.
+          style={phone ? { position: "fixed" } : undefined}
           className={
             phone
-              ? // Above the floating action pill, on the thumb's side. Fixed rather than
-                // absolute: the pill clips its own contents while it folds.
-                `fixed bottom-[calc(var(--wn-dock-bottom)+var(--wn-dock-h)+0.5rem)] z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-pane border border-hairline bg-chrome p-1.5 shadow-lift ${
+              ? // Above the floating action pill, on the thumb's side, in the pill's glass.
+                // In the body, so the menus' layer (z-70) is its own.
+                `wn-glass wn-glass-menu bottom-[calc(var(--wn-dock-bottom)+var(--wn-dock-h)+0.5rem)] z-70 w-[min(18rem,calc(100vw-1.5rem))] rounded-pane p-1.5 ${
                   phone.leftHanded ? "left-(--wn-dock-left)" : "right-(--wn-dock-right)"
                 }`
               : "absolute right-0 top-8 z-30 w-60 rounded-pane border border-hairline bg-surface p-1 shadow-pane"
@@ -455,7 +473,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
             <Icon icon={Ban} size={iconSize} />
             <span className="min-w-0 flex-1 truncate">Hide everything from {senderName}</span>
           </button>
-        </div>
+        </div>,
       )}
     </div>
   );
