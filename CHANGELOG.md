@@ -14,10 +14,15 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- Instant mail on Android through the Gmail app. Turn on "Instant mail via the Gmail app" in Settings → Notifications & sync and allow Notification access for Winnow when Android asks. When the Gmail app gets new mail, Winnow checks straight away, even with the app closed, and shows its own notification in place of Gmail's (Gmail's is only taken down once Winnow's is showing). It needs the Gmail app installed and signed in to the same accounts, with its notifications allowed. Winnow looks only at the Gmail app's notifications and ignores every other app's.
+
 ### Changed
 
 - On a phone, the reader's ••• menu (Star, Mark unread, Show as, View Original, Unsubscribe and the rest) is now the same frosted glass as the action pill it opens from, instead of a solid black sheet. The other menus you open on a phone, such as Snooze from the pill, the account menu and the menu behind a sender's picture, match it. The frost is a little thicker than the pill's so every word stays readable over a busy email or a photo. With "reduce transparency" or high-contrast colours turned on in your phone's settings, menus stay solid.
 - On a phone, tapping the Inbox button in the bottom bar while a smart filter (like Important) is on now turns the filter off and shows all your mail, the same as tapping All. With no filter on, it still takes you back to the top of the list, and from another mailbox it still just opens Inbox.
+- Background sync on Android checks for new mail every 5 minutes instead of every minute, which uses less battery. With "Instant mail via the Gmail app" on, it checks every 10 minutes as a backup, since the Gmail app's notifications bring new mail sooner.
 
 ## [1.7.0] - 2026-10-28
 
