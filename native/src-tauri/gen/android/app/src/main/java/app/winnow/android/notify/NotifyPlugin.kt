@@ -29,6 +29,8 @@ class EventHandlerArgs {
  * - `clearAccount`: an account signed out here; `active`: what is up, for the web layer.
  * - `keptReplies` / `releaseKept`: replies kept on the device because they could not be
  *   sent or saved, listed for the web layer and released once it has saved them.
+ * - `launchLinks`: the `winnow://` link a notification's tap opened the app with, taken
+ *   once ([LaunchLinks]); Rust's `deep_link_launch` answers the web layer with it.
  *
  * None of these is granted to the webview (no `winnow-notify:` permission exists in
  * the capabilities), so only Rust can call them: `http` in particular must never be
@@ -121,6 +123,15 @@ class NotifyPlugin(private val activity: Activity) : Plugin(activity) {
       for (i in 0 until ids.length()) PendingReplies.remove(context, ids.optString(i))
     }
     invoke.resolve()
+  }
+
+  @Command
+  fun launchLinks(invoke: Invoke) {
+    val items = org.json.JSONArray()
+    LaunchLinks.take().forEach { items.put(it) }
+    val result = JSObject()
+    result.put("items", items)
+    invoke.resolve(result)
   }
 
   companion object {

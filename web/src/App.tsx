@@ -79,6 +79,7 @@ import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
 import type { AppSigningInfo, BackgroundServiceStatus } from "./platform/types";
 import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
+import { useSettingsTransfer } from "./ui/useSettingsTransfer";
 import { useUpdates } from "./ui/useUpdates";
 import { WhatsNew } from "./ui/components/WhatsNew";
 import { offerButton } from "./core/updates/updates";
@@ -710,6 +711,26 @@ export function App({ store, existingInstall = true }: Props) {
   // and always in Settings › About.
   const flashUpdate = useCallback((text: string, ms: number) => store.flash(text, ms), [store]);
   const updates = useUpdates(platform, flashUpdate, devOptions.betaUpdates);
+
+  // Settings › About › Export settings / Import settings… (`ui/useSettingsTransfer.ts`).
+  const setPreferences = useCallback((patch: Partial<typeof preferences>) => store.setPreferences(patch), [store]);
+  // An imported "Notify me about new mail" asks the OS first, as the switch does.
+  const askNotificationPermission = useCallback(() => {
+    void platform.requestNotificationPermission().then((granted) => {
+      if (!granted) store.setPreferences({ notificationsEnabled: false });
+    });
+  }, [store]);
+  const settingsTransfer = useSettingsTransfer({
+    platform,
+    info,
+    preferences,
+    setPreferences,
+    devOptions,
+    setDevOptions,
+    autoCheckUpdates: updates.auto,
+    setAutoCheckUpdates: updates.setAuto,
+    onNotificationsEnabled: askNotificationPermission,
+  });
 
   // ── Sign-in ──────────────────────────────────────────────────────────────
 
@@ -5144,6 +5165,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           platformLabel={info ? platformLabel(info) : null}
           updates={updates}
           onShowTour={replayTour}
+          settingsTransfer={settingsTransfer}
           onOpenLink={(url) => void platform.openExternal(url)}
           onClose={() => store.setOverlay("none")}
         />

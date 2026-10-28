@@ -359,6 +359,18 @@ export const SETTINGS = {
     explanation:
       "A short walk round Winnow: where your mailboxes are, how to read a message, what smart filters do and where the menu is. It opens by itself once, the first time Winnow starts on a device, and this plays it again. Watching it changes nothing.",
   },
+  exportSettings: {
+    category: "about",
+    label: "Export settings",
+    explanation:
+      "Saves how Winnow is set up here to a small file you can keep, share or import on another device: appearance, reading and compose choices, privacy switches, notifications and sync, the update switch, the reader's width and Dev Options. It never includes your sign-in, Google client, accounts, mail, contacts, hidden or muted senders, or anything Winnow has learnt from you. The file is plain text, so you can open it and check.",
+  },
+  importSettings: {
+    category: "about",
+    label: "Import settings",
+    explanation:
+      "Reads a file made by Export settings and shows what it would change before anything does. Only settings Winnow knows are taken; anything else in the file is ignored, and a file from a newer Winnow is refused. Your accounts, mail and what Winnow has learnt are never touched.",
+  },
   source: {
     category: "about",
     label: "Source code",

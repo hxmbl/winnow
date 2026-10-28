@@ -69,6 +69,8 @@ import type { UpdatesController } from "../useUpdates";
 import { operatorUpdate } from "../../core/updates/updates";
 import { buttonClass } from "../button";
 import { Icon } from "./Icon";
+import { diffSettings, parseSettingsFile, type ExportedSettings, type SettingChange } from "../settingsTransfer";
+import type { SettingsTransfer } from "../useSettingsTransfer";
 
 /** Where Winnow's code lives, linked from About. */
 export const SOURCE_URL = "https://github.com/hxmbl/winnow";
@@ -319,6 +321,8 @@ export type SettingsProps = {
   initialCategory?: CategoryId;
   /** About › "Show the tour again": closes Settings and plays the first-run tour. */
   onShowTour?: () => void;
+  /** About › Export settings / Import settings… (`ui/settingsTransfer.ts`). Absent in tests that do not need it. */
+  settingsTransfer?: SettingsTransfer | null;
   /** Opens a page in the system browser (About → Source code). */
   onOpenLink?: (url: string) => void;
   onClose: () => void;
@@ -1006,6 +1010,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               </button>
             </Row>
           )}
+          {props.settingsTransfer && <SettingsTransferRows transfer={props.settingsTransfer} />}
           <Row setting="source">
             <a
               href={SOURCE_URL}
@@ -1317,6 +1322,141 @@ function InfoSlot({ setting }: { setting: SettingId }) {
 
 const SECONDARY_BUTTON =
   buttonClass("secondary", "sm");
+
+const PRIMARY_BUTTON = buttonClass("primary", "sm");
+
+type ImportStep =
+  | { kind: "idle" }
+  | { kind: "review"; settings: ExportedSettings; changes: SettingChange[]; ignored: number }
+  | { kind: "message"; text: string };
+
+/**
+ * About › Export settings and Import settings…. Export saves the allowlisted file the way
+ * this host saves files (a download, the save dialog, Android's save picker). Import reads
+ * a chosen file, says what it would change, and changes nothing until Apply.
+ */
+function SettingsTransferRows({ transfer }: { transfer: SettingsTransfer }) {
+  const [exportLine, setExportLine] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [step, setStep] = useState<ImportStep>({ kind: "idle" });
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const applyRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (step.kind === "review") applyRef.current?.focus();
+  }, [step.kind]);
+
+  const runExport = () => {
+    setExporting(true);
+    setExportLine(null);
+    transfer
+      .exportFile()
+      .then(setExportLine, (error: unknown) =>
+        setExportLine(`Couldn't save the file${error instanceof Error && error.message ? `: ${error.message}` : "."}`),
+      )
+      .finally(() => setExporting(false));
+  };
+
+  const readFile = async (file: File | undefined) => {
+    if (!file) return;
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setStep({ kind: "message", text: "Couldn't read that file." });
+      return;
+    }
+    const parsed = parseSettingsFile(text);
+    if (!parsed.ok) {
+      setStep({ kind: "message", text: parsed.reason });
+      return;
+    }
+    const changes = diffSettings(transfer.current(), parsed.settings);
+    if (changes.length === 0) {
+      setStep({ kind: "message", text: "Nothing to change: that file matches your settings." });
+      return;
+    }
+    setStep({ kind: "review", settings: parsed.settings, changes, ignored: parsed.ignored.length });
+  };
+
+  return (
+    <>
+      <Row setting="exportSettings" hint={exportLine ?? undefined}>
+        <button type="button" data-export-settings="" disabled={exporting} onClick={runExport} className={`${SECONDARY_BUTTON} disabled:opacity-60`}>
+          {exporting ? "Saving…" : "Export settings"}
+        </button>
+      </Row>
+      <Row setting="importSettings">
+        <button type="button" data-import-settings="" onClick={() => fileRef.current?.click()} className={SECONDARY_BUTTON}>
+          Import settings…
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,application/json"
+          tabIndex={-1}
+          aria-hidden="true"
+          className="hidden"
+          data-testid="import-settings-file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            void readFile(file).finally(() => {
+              // Let the same file be chosen again.
+              if (fileRef.current) fileRef.current.value = "";
+            });
+          }}
+        />
+      </Row>
+      {step.kind === "message" && (
+        <p role="status" data-import-settings-message="" className="pb-1 text-meta text-ink-muted">
+          {step.text}
+        </p>
+      )}
+      {step.kind === "review" && (
+        <div role="group" aria-label="Import these settings?" data-import-settings-review="" className="flex flex-col gap-2 pb-1">
+          <p className="text-meta font-medium text-ink-body">
+            {step.changes.length === 1 ? "This file changes 1 setting:" : `This file changes ${step.changes.length} settings:`}
+          </p>
+          <ul className="flex flex-col gap-1 rounded-pane border border-hairline bg-surface-sunken p-2 text-meta text-ink-body">
+            {step.changes.map((change) => (
+              <li key={change.key} data-import-change={change.key} className="flex flex-wrap gap-x-2">
+                <span className="font-medium">{change.label}</span>
+                <span className="text-ink-muted">
+                  {change.from} → {change.to}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {step.ignored > 0 && (
+            <p className="text-meta text-ink-muted">
+              {step.ignored === 1
+                ? "1 entry in the file isn't a setting this Winnow uses, so it's ignored."
+                : `${step.ignored} entries in the file aren't settings this Winnow uses, so they're ignored.`}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              ref={applyRef}
+              type="button"
+              data-import-settings-apply=""
+              onClick={() => {
+                transfer.apply(step.settings);
+                const count = step.changes.length;
+                setStep({ kind: "message", text: count === 1 ? "Imported 1 setting." : `Imported ${count} settings.` });
+              }}
+              className={PRIMARY_BUTTON}
+            >
+              Apply
+            </button>
+            <button type="button" onClick={() => setStep({ kind: "idle" })} className={SECONDARY_BUTTON}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function LearningHistory({ events }: { events: readonly FeedbackEvent[] }) {
   return (
