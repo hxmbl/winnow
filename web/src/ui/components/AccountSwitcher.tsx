@@ -1,7 +1,7 @@
 /**
  * The account switcher (1.4.0): the sheet the avatar in the phone top bar and the
  * desktop sidebar header opens. Each signed-in account with its avatar, address,
- * unread count and colour glow, the open one ticked; one tap switches. Then Add account,
+ * unread count and colour ring, the open one ticked; one tap switches. Then Add account,
  * with the Testing-mode note, the demo inbox, and Manage accounts, which opens the
  * Accounts page (`AccountsPage.tsx`).
  *
@@ -40,27 +40,25 @@ export type AccountSwitcherProps = {
 };
 
 /**
- * The account's colour as light around its avatar (it was a dot badge until 1.6.3): a thin
- * ring in the account's colour tells accounts apart, and the open account also gets a soft
- * halo, which is how the inbox you're in reads at a glance. Static, so there is nothing for
- * reduced motion to stop. Colour is never the only cue: the open account's row carries
- * `aria-current` and a tick, and the trigger's label names the account. Under forced colours
- * the browser drops the shadow, and those cues remain.
+ * The account's colour as a thin ring around its avatar (it was a dot badge until 1.6.3,
+ * and the open account also had a soft halo until the UI refinement pass): the ring tells
+ * accounts apart. Colour is never the only cue: the open account's row carries
+ * `aria-current` and a tick, and the trigger's label names the account. Under forced
+ * colours the browser drops the shadow, and those cues remain. `data-account-glow-active`
+ * still marks the open account for tests and styling.
  *
  * Place it inside the `relative` wrapper that holds the avatar; it covers the avatar exactly.
  */
 export function AccountGlow({ color, scheme, active }: { color: string; scheme: ThemeName; active: boolean }) {
   const hex = accountColorHex(color, scheme);
-  // 8-digit hex rather than color-mix: the Linux and Android WebViews both read it.
   const ring = `0 0 0 1.5px ${hex}`;
-  const halo = `0 0 10px 2px ${hex}${scheme === "light" ? "73" : "8C"}`;
   return (
     <span
       aria-hidden="true"
       data-account-glow={color}
       data-account-glow-active={active ? "" : undefined}
       className="pointer-events-none absolute inset-0 rounded-full"
-      style={{ boxShadow: active ? `${ring}, ${halo}` : ring }}
+      style={{ boxShadow: ring }}
     />
   );
 }
@@ -167,7 +165,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
   );
 }
 
-/** The avatar that opens the switcher: the open account's, glowing in its colour. */
+/** The avatar that opens the switcher: the open account's, ringed in its colour. */
 export function AccountButton({
   accounts,
   scheme,

@@ -770,6 +770,17 @@ describe("the design system stays small", () => {
     expect(controls).toEqual([]);
   });
 
+  it("lights nothing decoratively: no glow on an on chip, no halo on the open account", () => {
+    // The ring (and the chip's tint, the account's tick and aria-current) carry the state.
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/--pill-glow-a/);
+    const accounts = readFileSync(new URL("components/AccountSwitcher.tsx", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
+    expect(accounts).not.toMatch(/halo|0 0 \d+px \d+px/);
+    expect(accounts).toContain("boxShadow: ring");
+  });
+
   it("uses only the two radii", () => {
     expect(offenders(/\brounded(?:-[trblse]{1,2})?-(?:sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g)).toEqual([]);
     // A bare `rounded` has no value in the overridden scale, so it renders square.

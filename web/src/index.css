@@ -603,12 +603,11 @@
  *
  * Hover lays the mode's sheen over the tint rather than replacing it.
  *
- * Switching a pill on is motion, not a cut (1.6.x): its tint deepens, its ring and a
- * soft glow in its own hue come up (the brief's "ambient light, not outlines"), and its
- * label darkens, all over `--wn-chip-motion` on a decelerating curve, while the pill
+ * Switching a pill on is motion, not a cut (1.6.x): its tint deepens, its ring comes
+ * up and its label darkens (no glow: the ring and tint already say "on"), all over `--wn-chip-motion` on a decelerating curve, while the pill
  * switched off eases back the same way at the same time. The glass chips paint their
  * tint as a gradient layer, which CSS cannot interpolate, so the strengths are the
- * registered numbers below (`--pill-a`, `--pill-ring-a`, `--pill-glow-a`): the browser
+ * registered numbers below (`--pill-a`, `--pill-ring-a`): the browser
  * tweens a registered number, and every rule that paints a pill reads them rather than
  * the recipe directly. Rest and on still come from the recipe, so the AA arithmetic in
  * `theme.ts` holds at both ends. Reduced motion: the global rule makes it a cut again.
@@ -623,37 +622,25 @@
   inherits: false;
   initial-value: 0;
 }
-@property --pill-glow-a {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
-}
 @layer utilities {
   .wn-pill {
     --pill-tone: var(--pill-h) calc(var(--pill-s) * var(--wn-pill-sat) * 1%) var(--wn-pill-l);
     --pill-a: var(--wn-pill-rest);
     --pill-ring-a: 0;
-    --pill-glow-a: 0;
     background-color: hsl(var(--pill-tone) / var(--pill-a));
     box-shadow:
-      inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a)),
-      0 0 16px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
+      inset 0 0 0 1px hsl(var(--pill-tone) / var(--pill-ring-a));
     color: var(--wn-pill-ink);
     transition:
       --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
       --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
-      --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
       background-color var(--wn-chip-motion) var(--wn-chip-ease),
       color var(--wn-chip-motion) var(--wn-chip-ease);
   }
-  /*
-   * On: the recipe's stronger tint and ring, and a glow at a little over half the ring's
-   * strength — light around the chip, never a second outline.
-   */
+  /* On: the recipe's stronger tint and ring. No glow around it: the ring and tint say it. */
   .wn-pill[data-on] {
     --pill-a: var(--wn-pill-on);
     --pill-ring-a: var(--wn-pill-ring);
-    --pill-glow-a: calc(var(--wn-pill-ring) * 0.55);
     color: var(--wn-pill-inkOn);
   }
   .wn-pill:hover {
@@ -914,7 +901,7 @@
       transform var(--wn-glass-motion) var(--wn-glass-ease);
   }
   /*
-   * A chip's own list: its tint, ring and glow strengths and its label (see `.wn-pill`),
+   * A chip's own list: its tint and ring strengths and its label (see `.wn-pill`),
    * plus the plate behind the label, the border and the hover and press sheens, all on the
    * chip's curve. No transform: a chip never scales (below).
    */
@@ -922,7 +909,6 @@
     transition:
       --pill-a var(--wn-chip-motion) var(--wn-chip-ease),
       --pill-ring-a var(--wn-chip-motion) var(--wn-chip-ease),
-      --pill-glow-a var(--wn-chip-motion) var(--wn-chip-ease),
       --wn-chip-plate var(--wn-chip-motion) var(--wn-chip-ease),
       background-color var(--wn-chip-motion) var(--wn-chip-ease),
       border-color var(--wn-chip-motion) var(--wn-chip-ease),
@@ -1172,8 +1158,8 @@
  * tint that fades out over the chip's rounded ends, where the frost stays light.
  *
  * One shadow list for every state (1.6.x): the ring, the hover sheen, the press sheen,
- * the glass's edge and lift, and the glow, each always present and only its colour or
- * strength changing (`--pill-ring-a`, `--pill-hover`, `--pill-press`, `--pill-glow-a`).
+ * the glass's edge and lift, each always present and only its colour or strength
+ * changing (`--pill-ring-a`, `--pill-hover`, `--pill-press`).
  * Two shadow lists of different shapes cannot be interpolated, so the old per-state
  * lists cut from one to the next however the transition was written.
  */
@@ -1195,8 +1181,7 @@
       inset 0 0 0 999px var(--pill-hover),
       inset 0 0 0 999px var(--pill-press),
       var(--wn-glass-edge),
-      var(--wn-glass-lift),
-      0 0 18px -4px hsl(var(--pill-tone) / var(--pill-glow-a));
+      var(--wn-glass-lift);
   }
   .wn-pill.wn-chip-glass[data-on] {
     --wn-chip-plate: var(--wn-glass-text-on, 76%);
@@ -1700,7 +1685,7 @@
   }
   /*
    * The room the glass rail's scroller keeps above and below the chips so their lift
-   * shadow (and an on chip's glow) is not clipped, taken back with a negative margin so the
+   * lift shadow (`--wn-glass-lift`, which reaches ~20px below a chip) is not clipped, taken back with a negative margin so the
    * rail lays out as if it were not there. One number, read by the scroller's padding and
    * margin and by the catcher's inset (`FilterStrip.tsx`).
    */
