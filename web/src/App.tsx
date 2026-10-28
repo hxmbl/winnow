@@ -4218,8 +4218,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 onClick={connectOrResume}
                 disabled={signingIn || resuming}
                 data-demo-cta={resumable ? "resume" : "connect"}
-                // The demo's one primary action, so it is the one filled control in view.
-                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3 py-1.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                // Secondary, like the sync button it replaces: Compose is the one filled
+                // control on the list side, and the accent means that one primary action.
+                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-sheen px-3 py-1.5 text-meta font-semibold text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
                 {demoCta}
@@ -4266,7 +4267,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         onClick={connectOrResume}
         disabled={signingIn || resuming}
         data-demo-cta={resumable ? "resume" : "connect"}
-        className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-ctl bg-accent px-3.5 text-meta font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-ctl bg-sheen px-3.5 text-meta font-semibold text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
         {demoCta}

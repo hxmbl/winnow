@@ -268,7 +268,11 @@ function RichBody({
       const button = document.createElement("button");
       button.type = "button";
       button.className =
-        "flex h-7 w-7 items-center justify-center rounded-full bg-white text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+        // The button sits on the email's own page, not the app's: `.wn-copy-code` gives it
+        // that page's fixed colours (white card), and email dark mode recolours it with the
+        // rest of the dark baseline (`inlineEmailDarkCss`). No app theme token here, which is
+        // what once put the app's light-grey dark-mode ink on a white button.
+        "wn-copy-code flex h-7 w-7 items-center justify-center rounded-ctl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
       button.setAttribute("aria-label", "Copy code");
       button.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 

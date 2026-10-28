@@ -652,6 +652,32 @@ describe("the design system stays small", () => {
     expect(offenders(/\btext-(?:xs|sm|base|lg|[2-9]?xl)\b/g)).toEqual([]);
   });
 
+  it("keeps the stylesheets on the four type sizes too", () => {
+    // The class-name scan above cannot see CSS, which is where an 11px tooltip key and two
+    // hard-coded 12/14px sizes hid. Every `font-size` in a stylesheet names a scale step
+    // (or inherits one); `font:` shorthands are not used.
+    const cssFiles: URL[] = [];
+    const walkCss = (dir: URL): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const child = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dir);
+        if (entry.isDirectory()) walkCss(child);
+        else if (entry.name.endsWith(".css")) cssFiles.push(child);
+      }
+    };
+    walkCss(srcDir);
+    expect(cssFiles.map((url) => url.pathname)).toContainEqual(expect.stringMatching(/\/index\.css$/));
+    const bad: string[] = [];
+    for (const url of cssFiles) {
+      const css = readFileSync(url, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const match of css.matchAll(/font-size\s*:\s*([^;}]+)/g)) {
+        const value = match[1].trim();
+        if (!/^(?:var\(--text-(?:meta|ui|read|title)\)|inherit)$/.test(value)) bad.push(`${url.pathname.split("/").pop()}: ${value}`);
+      }
+      for (const match of css.matchAll(/(?<![-\w])font\s*:\s*(\d[^;}]*)/g)) bad.push(`${url.pathname.split("/").pop()}: font: ${match[1]}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
   it("uses only the two radii", () => {
     expect(offenders(/\brounded(?:-[trblse]{1,2})?-(?:sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g)).toEqual([]);
     // A bare `rounded` has no value in the overridden scale, so it renders square.

@@ -433,7 +433,9 @@ export function PhoneDock({
                     <span
                       aria-hidden="true"
                       data-dock-badge=""
-                      className="absolute right-1.5 top-1 min-w-[1.15rem] rounded-full bg-accent px-1 text-center text-meta font-semibold leading-[1.15rem] tabular-nums text-on-accent"
+                      // A muted count, like the rail, the account switcher and the palette: colour
+                      // is not how a count says "unread" anywhere else.
+                      className="absolute right-1.5 top-1 min-w-5 rounded-full bg-surface-active px-1 text-center text-meta font-semibold leading-5 tabular-nums text-ink"
                     >
                       {badge}
                     </span>

@@ -14,7 +14,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ArchiveRestore, Check, Mail, MailOpen, Trash2 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { useFilterSwitchMotion } from "./useFilterSwitchMotion";
-import { CodeChip } from "./CodeCopy";
+import { CodeChip, CodeChipRoom } from "./CodeCopy";
 import { codeChipVisible } from "../../core/mail/otp";
 import { anchorFromElement, type MenuAnchor } from "../menuPlacement";
 import {
@@ -438,14 +438,17 @@ const Row = memo(function Row({
             Subject and preview share the second line. No dash between them: the preview
             is set apart by colour and a gap, and it is the part that gives way.
           */}
-          <span className="block truncate text-ui">
-            <span
-              data-row-subject=""
-              className={unread ? "font-semibold text-ink" : "font-normal text-ink-body"}
-            >
-              {email.subject || "(no subject)"}
+          <span className="flex min-w-0 text-ui">
+            <span className="min-w-0 flex-1 truncate">
+              <span
+                data-row-subject=""
+                className={unread ? "font-semibold text-ink" : "font-normal text-ink-body"}
+              >
+                {email.subject || "(no subject)"}
+              </span>
+              {email.body && <span className="ml-2 text-ink-subtle">{email.body}</span>}
             </span>
-            {email.body && <span className="ml-2 text-ink-subtle">{email.body}</span>}
+            {chipCode && <CodeChipRoom code={chipCode} />}
           </span>
         </span>
       </button>
@@ -453,9 +456,10 @@ const Row = memo(function Row({
       {/*
         "Copy 418 902", for a code that arrived in the last five minutes. A sibling of the
         row button like the star, marked `data-row-control` so a press on it never starts
-        a drag-select, a long-press or an open.
+        a drag-select, a long-press or an open. Drawn on the preview line over the room
+        `CodeChipRoom` keeps there, so the time keeps its column (`CodeCopy.tsx`).
       */}
-      {chipCode && <CodeChip code={chipCode} copied={codeCopied} onCopy={() => onCopyCode(email.id)} />}
+      {chipCode && <CodeChip code={chipCode} copied={codeCopied} draft={draft} onCopy={() => onCopyCode(email.id)} />}
 
       {/*
         The star.
