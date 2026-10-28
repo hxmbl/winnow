@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-28
+
 ### Added
 
 - Background sync on Android. With "Keep syncing while closed" on (Settings → Notifications & sync, on by default) and notifications on, Winnow checks Gmail about once a minute even when the app is closed, and tells you about new mail as it does while it's open. Delete and Mark read work from the notification with the app closed; a reply typed there waits until you next open Winnow. While it runs Android shows a silent "Checking for new mail" notification, as it does for any app that keeps working in the background: Hide it opens its settings, and hiding it doesn't stop syncing. If Android is restricting Winnow's battery use, an Allow button asks it to stop, so new mail isn't held back while the phone is idle. Syncing starts again after the phone restarts or Winnow updates.
@@ -459,7 +461,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.6.4...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/hxmbl/winnow/compare/v1.6.4...v1.7.0
 [1.6.4]: https://github.com/hxmbl/winnow/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/hxmbl/winnow/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/hxmbl/winnow/compare/v1.6.1...v1.6.2
