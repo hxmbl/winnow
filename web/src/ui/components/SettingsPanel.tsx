@@ -17,6 +17,8 @@ import { BINDINGS } from "../../core/mail/keybinds";
 import type { NotificationActions } from "../../core/notify/notifications";
 import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
 import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
+import { BACKGROUND_SYNC_NOTE, backgroundSyncOffer } from "../backgroundSyncSetting";
+import { backgroundServiceHint, type BackgroundServiceStatus } from "../../core/notify/backgroundService";
 import { devUnlockTap } from "../devOptions";
 import { DebugLogPanel } from "./DebugLogPanel";
 import type { TestNotificationResult } from "../notificationActions";
@@ -212,8 +214,25 @@ export type SettingsProps = {
   unreadBadge: boolean;
   onUnreadBadge: (value: boolean) => void;
   onNotificationSettings: (patch: { notificationActions?: NotificationActions; notificationHidePreview?: boolean }) => void;
-  /** Null on the web, where there is no background thread to hand. */
-  backgroundSync: boolean | null;
+  /**
+   * Whether this build can keep syncing with the window closed (`info.backgroundSync`):
+   * true in the desktop app, false in the Android app, null on the web or before the
+   * platform has answered. Only decides whether the switch is offered.
+   */
+  backgroundSyncAvailable: boolean | null;
+  /** The user's choice (`preferences.backgroundSync`): what the switch shows. */
+  backgroundSync: boolean;
+  /** `info.os === "android"`: the switch runs the background service, with no interval. */
+  isAndroid?: boolean;
+  /**
+   * Android: the background service's status, and its two system dialogs (battery
+   * restrictions, the persistent notification's settings). Absent elsewhere.
+   */
+  backgroundService?: {
+    status: BackgroundServiceStatus | null;
+    onAllowBackground: () => void;
+    onHideNotification: () => void;
+  } | null;
   onBackgroundSync: (value: boolean) => void;
   backgroundSyncInterval: number;
   onBackgroundSyncInterval: (value: number) => void;
@@ -833,28 +852,87 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             <Toggle checked={props.unreadBadge} onChange={props.onUnreadBadge} label="Unread count on the app icon" />
           </Row>
           <OfflineMailRows props={props} />
-          {props.isDesktop && props.backgroundSync !== null ? (
-            <>
-              <Row setting="backgroundSync">
-                <Toggle checked={props.backgroundSync} onChange={props.onBackgroundSync} label="Keep syncing while closed" />
-              </Row>
-              {props.backgroundSync && (
-                <Row setting="syncInterval">
-                  <SelectMenu
-                    id="sync-interval"
-                    label="Check for new mail every"
-                    options={SYNC_INTERVALS}
-                    value={props.backgroundSyncInterval}
-                    onChange={props.onBackgroundSyncInterval}
-                  />
-                </Row>
-              )}
-            </>
-          ) : (
-            <p data-settings-empty="" className="pt-2 text-meta text-ink-subtle">
-              Background sync is only in the desktop app. Here, Winnow syncs while this tab is open.
-            </p>
-          )}
+          {(() => {
+            /*
+              The switch shows the preference, never the capability. It used to read
+              `info.backgroundSync`, so in the Android app (which reports false) it sat at
+              Off whatever was tapped, and on the desktop it sat at On, so turning it off
+              paused automatic sync where nobody could see it and it never came back on.
+            */
+            const offer = backgroundSyncOffer({
+              isNative: props.isDesktop,
+              available: props.backgroundSyncAvailable,
+              android: props.isAndroid === true,
+            });
+            if (offer === "service") {
+              // Android: the switch starts and stops the background service (STRM-427).
+              const service = props.backgroundService ?? null;
+              const status = service?.status ?? null;
+              const hint = backgroundServiceHint(
+                { backgroundSync: props.backgroundSync, notificationsEnabled: props.notificationsEnabled },
+                status,
+              );
+              const working = props.backgroundSync && props.notificationsEnabled;
+              return (
+                <>
+                  <Row setting="backgroundSync" hint={hint ?? undefined} hintId="winnow-background-sync-hint">
+                    <span data-background-sync="service" data-background-running={status?.running ? "" : undefined} className="contents">
+                      <Toggle checked={props.backgroundSync} onChange={props.onBackgroundSync} label="Keep syncing while closed" describedBy={hint ? "winnow-background-sync-hint" : undefined} />
+                    </span>
+                  </Row>
+                  {working && status && !status.batteryUnrestricted && (
+                    <Row setting="batteryUnrestricted" hint="Without it, Android can delay new mail while the phone is idle.">
+                      <button
+                        type="button"
+                        data-background-battery=""
+                        onClick={service?.onAllowBackground}
+                        className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      >
+                        Allow
+                      </button>
+                    </Row>
+                  )}
+                  {working && (
+                    <Row setting="syncNotification" hint="Silent. Hiding it doesn't stop syncing.">
+                      <button
+                        type="button"
+                        data-background-hide-notification=""
+                        onClick={service?.onHideNotification}
+                        className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      >
+                        Hide it
+                      </button>
+                    </Row>
+                  )}
+                </>
+              );
+            }
+            if (offer === "switch") {
+              return (
+                <>
+                  <Row setting="backgroundSync">
+                    <Toggle checked={props.backgroundSync} onChange={props.onBackgroundSync} label="Keep syncing while closed" />
+                  </Row>
+                  {props.backgroundSync && (
+                    <Row setting="syncInterval">
+                      <SelectMenu
+                        id="sync-interval"
+                        label="Check for new mail every"
+                        options={SYNC_INTERVALS}
+                        value={props.backgroundSyncInterval}
+                        onChange={props.onBackgroundSyncInterval}
+                      />
+                    </Row>
+                  )}
+                </>
+              );
+            }
+            return (
+              <p data-settings-empty="" data-background-sync-note={offer} className="pt-2 text-meta text-ink-subtle">
+                {BACKGROUND_SYNC_NOTE[offer]}
+              </p>
+            );
+          })()}
         </Section>
       );
     case "google":

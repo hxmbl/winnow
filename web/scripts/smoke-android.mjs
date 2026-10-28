@@ -20,6 +20,15 @@
  *      with all three buttons and a reply head, and a press on it (as Rust reports one)
  *      only says it did nothing. Check now answers inline (No updates available, Update
  *      available, Couldn't check) and installs nothing.
+ *   4. Settings switches (STRM-426), phone in OLED: at every switch's centre, and 23px
+ *      out each way (its 48×48 press box), the switch is what `elementFromPoint` finds;
+ *      a tap on a row's name presses its switch and a tap on (?) does not; Space and
+ *      Enter toggle; the off knob is not black on black. The Android app offers
+ *      "Keep syncing while closed" (STRM-427) with no interval: it is on by default and
+ *      the background service is told to run for the stored account
+ *      (`background_service_configure`); the battery Allow row asks Android and goes
+ *      once restrictions are off; Hide it opens the sync notification's settings; and a
+ *      tap on the name turns it off (the service's rows go) and on again. The desktop app's switch turns off and back on.
  *
  * Separate from `smoke.mjs` so it can run alone (`node scripts/smoke-android.mjs`);
  * `npm run smoke` runs both. Same environment: WINNOW_PORT, WINNOW_CHROMIUM.
@@ -66,6 +75,7 @@ function fakeAndroid({ packageName, sha1 }) {
   const secrets = new Map();
   let nextId = 1;
   window.__smokeCalls = calls;
+  const service = { enabled: false, running: false, batteryUnrestricted: false, notificationsAllowed: true };
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
     transformCallback(callback) {
@@ -89,7 +99,7 @@ function fakeAndroid({ packageName, sha1 }) {
             kind: "desktop",
             nativeOAuth: true,
             nativeSecrets: true,
-            backgroundSync: false,
+            backgroundSync: true,
             saveFiles: true,
           };
         case "secrets_get":
@@ -113,6 +123,19 @@ function fakeAndroid({ packageName, sha1 }) {
         case "oauth_begin":
           // Stop the loopback flow where it starts: reaching it is the point.
           throw new Error("smoke: no loopback listener");
+        // The background service (MailSyncService.kt), as the Kotlin plugin answers:
+        // on exactly when the config says so; battery restricted until allowed.
+        case "background_service_configure":
+          service.enabled = args?.config?.enabled === true;
+          service.running = service.enabled;
+          return { ...service };
+        case "background_service_status":
+          return { ...service };
+        case "background_service_battery":
+          service.batteryUnrestricted = true;
+          return { ...service };
+        case "background_service_notification_settings":
+          return null;
         case "plugin:event|listen":
           return nextId++;
         default:
@@ -520,6 +543,206 @@ try {
     await setup.locator('[data-setup-step-button="android"]').click();
     check("an unreadable certificate says so instead of showing a fingerprint",
       (await setup.locator("[data-android-no-sha1]").count()) === 1 && (await setup.locator('[data-copy-value="sha1"]').count()) === 0);
+    await context.close();
+  }
+
+  // ── 4. Settings switches: press box, row tap, keyboard, OLED off state ─────
+  console.log("\n── settings switches (phone, OLED) ──");
+  const oled = () => {
+    if (window.top !== window) return;
+    const raw = localStorage.getItem("winnow.preferences.v1");
+    localStorage.setItem("winnow.preferences.v1", JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), appearance: "oled", notificationsEnabled: true }));
+    // One stored account, so the background service has something to sync (its tokens
+    // would be in the keychain; the service reads them itself, never the web layer).
+    if (!localStorage.getItem("winnow.accounts.v1")) {
+      localStorage.setItem("winnow.accounts.v1", JSON.stringify({ version: 1, active: "smoke1234", accounts: [{ id: "smoke1234", email: "smoke@example.com", color: "space", notify: true, addedAt: 1 }] }));
+    }
+  };
+  const openSyncSettings = async (page) => {
+    await page.goto(URL, { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.locator("[data-phone-dock] button[data-dock-expand]").tap();
+    await page.locator("[data-sidebar][data-open]").waitFor({ state: "visible", timeout: 5_000 });
+    await page.waitForTimeout(400);
+    await page.locator('[data-sidebar] [data-nav-account] button[aria-label="Settings"]').tap();
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await dialog.waitFor({ timeout: 5_000 });
+    await page.waitForTimeout(450);
+    await dialog.locator('[data-category="sync"]').first().tap();
+    await page.waitForTimeout(600);
+    return dialog;
+  };
+  /** For each switch: is it the hit target at its centre and at ±23px each way? */
+  const hitReport = (page) =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('[role="dialog"][aria-label="Settings"] [role="switch"]')].map((sw) => {
+        const r = sw.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const at = (x, y) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit === sw || sw.contains(hit);
+        };
+        const misses = [[0, 0], [-23, 0], [23, 0], [0, -23], [0, 23]].filter(([dx, dy]) => !at(cx + dx, cy + dy));
+        return { label: sw.getAttribute("aria-label"), size: `${Math.round(r.width)}x${Math.round(r.height)}`, centre: at(cx, cy), misses };
+      }),
+    );
+  {
+    const context = await browser.newContext({
+      viewport: { width: 412, height: 915 },
+      userAgent: "Mozilla/5.0 (Linux; Android 15; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36",
+      hasTouch: true,
+      isMobile: true,
+      colorScheme: "dark",
+    });
+    await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    await context.addInitScript(oled);
+    await context.route(/^https:\/\/(?!(gmail|oauth2|people|www)\.googleapis\.com)/, (route) => route.fulfill({ status: 204, body: "" }));
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error)));
+    const dialog = await openSyncSettings(page);
+    const report = await hitReport(page);
+    check("Notifications & sync has switches to press", report.length >= 2, report.map((r) => r.label).join(", "));
+    for (const row of report) {
+      check(`"${row.label}" is the hit target at its centre`, row.centre);
+      check(`"${row.label}" presses through a 48x48 box`, row.misses.length === 0, `drawn ${row.size}, misses at ${JSON.stringify(row.misses)}`);
+    }
+    // Android has background sync now (STRM-427): the switch is there, shows the
+    // preference, and every change is handed to the background service.
+    const keep = dialog.locator('[role="switch"][aria-label="Keep syncing while closed"]');
+    check(
+      "the Android app offers the background-sync switch, with no interval and no note",
+      (await keep.count()) === 1 &&
+        (await dialog.locator('[data-background-sync="service"]').count()) === 1 &&
+        (await dialog.locator("#sync-interval").count()) === 0 &&
+        (await dialog.locator("[data-background-sync-note]").count()) === 0,
+    );
+    const configures = () =>
+      page.evaluate(() => window.__smokeCalls.filter((call) => call.cmd === "background_service_configure").map((call) => call.args?.config ?? null));
+    const told = await configures();
+    check(
+      "it is on by default, and the background service is handed a config with the stored account",
+      (await keep.getAttribute("aria-checked")) === "true" && told.length >= 1 && told.at(-1)?.accounts?.some((a) => a.id === "smoke1234"),
+      JSON.stringify(told.at(-1)),
+    );
+    // An account is stored (its session is on the device), so the service is told to run
+    // even while the demo is on screen: it syncs that account, not the demo. The signed-in
+    // case is smoke-accounts.mjs part 5b.
+    check("with an account stored, the service is told to run", told.at(-1)?.enabled === true, JSON.stringify(told.at(-1)));
+    const allow = dialog.locator("[data-background-battery]");
+    check(
+      "with battery restrictions on, an Allow row and a Hide it row show",
+      (await allow.count()) === 1 && (await dialog.locator("[data-background-hide-notification]").count()) === 1,
+    );
+    if ((await allow.count()) === 1) {
+      await allow.tap();
+      await page.waitForTimeout(400);
+      check(
+        "Allow asks Android, and the row goes once restrictions are off",
+        (await page.evaluate(() => window.__smokeCalls.some((call) => call.cmd === "background_service_battery"))) &&
+          (await allow.count()) === 0,
+      );
+    }
+    await dialog.locator("[data-background-hide-notification]").tap();
+    await page.waitForTimeout(200);
+    check(
+      "Hide it opens the sync notification's system settings",
+      await page.evaluate(() => window.__smokeCalls.some((call) => call.cmd === "background_service_notification_settings")),
+    );
+    await dialog.locator('[data-setting="backgroundSync"]').getByText("Keep syncing while closed", { exact: true }).tap();
+    await page.waitForTimeout(500);
+    check(
+      "a tap on its name turns it off, and the service's rows go with it",
+      (await keep.getAttribute("aria-checked")) === "false" && (await dialog.locator("[data-background-hide-notification]").count()) === 0,
+    );
+    await keep.tap();
+    await page.waitForTimeout(500);
+    check("and a tap on the switch turns it back on", (await keep.getAttribute("aria-checked")) === "true");
+
+    const badge = dialog.locator('[role="switch"][aria-label="Unread count on the app icon"]');
+    const badgeRow = dialog.locator('[data-setting="unreadBadge"]');
+    const before = await badge.getAttribute("aria-checked");
+    await badgeRow.getByText("Unread count on the app icon", { exact: true }).tap();
+    await page.waitForTimeout(250);
+    const afterName = await badge.getAttribute("aria-checked");
+    check("a tap on a row's name presses its switch", afterName !== before, `${before} -> ${afterName}`);
+    await badgeRow.locator("[data-setting-info]").tap();
+    await page.waitForTimeout(250);
+    check(
+      "a tap on (?) opens its help and leaves the switch alone",
+      (await badge.getAttribute("aria-checked")) === afterName && (await page.locator('[data-setting-popover="unreadBadge"]').count()) === 1,
+    );
+    const info = await badgeRow.locator("[data-setting-info]").boundingBox();
+    const infoBox = await badgeRow.locator("[data-setting-info]").evaluate((el) => {
+      const after = getComputedStyle(el, "::after");
+      const r = el.getBoundingClientRect();
+      return { w: r.width - 2 * parseFloat(after.left), h: r.height - 2 * parseFloat(after.top) };
+    });
+    check("the (?) button presses through at least 44x44", infoBox.w >= 44 && infoBox.h >= 44, `${info?.width}x${info?.height} drawn, ${infoBox.w}x${infoBox.h} box`);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+
+    await badge.focus();
+    const k0 = await badge.getAttribute("aria-checked");
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(150);
+    const k1 = await badge.getAttribute("aria-checked");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(150);
+    const k2 = await badge.getAttribute("aria-checked");
+    check("Space and Enter toggle a focused switch", k1 !== k0 && k2 === k0, `${k0} -> ${k1} -> ${k2}`);
+
+    const off = await dialog.locator('[role="switch"][aria-checked="false"]').first().evaluate((sw) => ({
+      track: getComputedStyle(sw).backgroundColor,
+      knob: getComputedStyle(sw.querySelector("span")).backgroundColor,
+    }));
+    check("on OLED an off switch is not black on black", off.knob !== "rgb(0, 0, 0)" && off.track !== "rgb(0, 0, 0)" && off.track !== "rgb(42, 42, 42)", JSON.stringify(off));
+    check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
+    await context.close();
+  }
+
+  // The desktop app, where the switch exists: it must turn off and come back on.
+  console.log("\n── settings switches (desktop app: keep syncing while closed) ──");
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    await context.addInitScript(fakeAndroid, { packageName: PACKAGE, sha1: SHA1 });
+    await context.addInitScript(() => {
+      const internals = window.__TAURI_INTERNALS__;
+      const invoke = internals.invoke.bind(internals);
+      internals.invoke = async (cmd, args) =>
+        cmd === "app_info" ? { ...(await invoke(cmd, args)), os: "linux", arch: "x86_64", backgroundSync: true } : invoke(cmd, args);
+    });
+    await context.route(/^https:\/\/(?!(gmail|oauth2|people|www)\.googleapis\.com)/, (route) => route.fulfill({ status: 204, body: "" }));
+    const page = await context.newPage();
+    await page.goto(URL, { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-row-count] [data-row-id]", { timeout: 15_000 });
+    await page.keyboard.press(",");
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await dialog.waitFor({ timeout: 5_000 });
+    const tab = dialog.locator('[role="tab"][data-category="sync"]');
+    if ((await tab.count()) > 0) await tab.click();
+    else await dialog.locator('[data-category="sync"]').first().click();
+    await page.waitForTimeout(400);
+    const sync = dialog.locator('[role="switch"][aria-label="Keep syncing while closed"]');
+    const interval = () => dialog.locator('[data-setting="syncInterval"]').count();
+    const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("winnow.preferences.v1") ?? "{}").backgroundSync);
+    const s0 = await sync.getAttribute("aria-checked");
+    await sync.click();
+    await page.waitForTimeout(250);
+    const s1 = await sync.getAttribute("aria-checked");
+    const p1 = await stored();
+    const i1 = await interval();
+    await dialog.locator('[data-setting="backgroundSync"]').getByText("Keep syncing while closed", { exact: true }).click();
+    await page.waitForTimeout(250);
+    const s2 = await sync.getAttribute("aria-checked");
+    const p2 = await stored();
+    check(
+      "the desktop switch shows the preference: on, off, and on again (from its name)",
+      s0 === "true" && s1 === "false" && p1 === false && s2 === "true" && p2 === true,
+      `${s0} -> ${s1} (${p1}) -> ${s2} (${p2})`,
+    );
+    check("its interval shows only while it is on", i1 === 0 && (await interval()) === 1);
     await context.close();
   }
 } catch (error) {

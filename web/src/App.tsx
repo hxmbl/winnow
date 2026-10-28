@@ -76,7 +76,7 @@ import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
 import { DelayedSend } from "./core/mail/undoSend";
 import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
-import type { AppSigningInfo } from "./platform/types";
+import type { AppSigningInfo, BackgroundServiceStatus } from "./platform/types";
 import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
 import { useUpdates } from "./ui/useUpdates";
@@ -675,6 +675,34 @@ export function App({ store, existingInstall = true }: Props) {
       cancelled = true;
     };
   }, []);
+
+  // ── Background sync on Android ───────────────────────────────────────────
+  // The service's status for Settings (running, battery restrictions, notification
+  // permission). Read while Settings is open, again whenever the app comes back in front
+  // (after Android's battery dialog or system settings), and after the switch or
+  // notifications change. The service itself is configured from `main.tsx`.
+  const isAndroid = info?.os === "android";
+  const settingsShown = snapshot.overlay === "settings";
+  const [backgroundStatus, setBackgroundStatus] = useState<BackgroundServiceStatus | null>(null);
+  useEffect(() => {
+    if (!isAndroid || !settingsShown || !platform.backgroundServiceStatus) return;
+    let cancelled = false;
+    const read = () =>
+      void platform.backgroundServiceStatus?.().then((status) => {
+        if (!cancelled) setBackgroundStatus(status);
+      });
+    // The config push is debounced (400 ms); read after it has landed.
+    const timer = setTimeout(read, 900);
+    const onVisible = () => {
+      if (globalThis.document?.visibilityState === "visible") read();
+    };
+    globalThis.document?.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      globalThis.document?.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [isAndroid, settingsShown, preferences.backgroundSync, preferences.notificationsEnabled]);
 
   // ── Updates ──────────────────────────────────────────────────────────────
   // Checks GitHub on launch and every few hours; installs the way this copy runs
@@ -5057,7 +5085,18 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           unreadBadge={preferences.unreadBadge}
           onUnreadBadge={(value) => store.setPreferences({ unreadBadge: value })}
           onNotificationSettings={(patch) => store.setPreferences(patch)}
-          backgroundSync={info?.backgroundSync ?? null}
+          backgroundSyncAvailable={info?.backgroundSync ?? null}
+          backgroundSync={preferences.backgroundSync}
+          isAndroid={isAndroid}
+          backgroundService={
+            isAndroid
+              ? {
+                  status: backgroundStatus,
+                  onAllowBackground: () => void platform.requestBatteryExemption?.().then(setBackgroundStatus),
+                  onHideNotification: () => void platform.openSyncNotificationSettings?.(),
+                }
+              : null
+          }
           onBackgroundSync={(backgroundSync) => store.setPreferences({ backgroundSync })}
           backgroundSyncInterval={preferences.backgroundSyncInterval}
           onBackgroundSyncInterval={(backgroundSyncInterval) =>

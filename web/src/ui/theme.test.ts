@@ -967,3 +967,30 @@ describe("1.3.2 contrast margins", () => {
     expect(contrastRatio("#A0A0A0", PALETTES.dark.color.surfaceActive)).toBeLessThan(SUBTLE_FLOOR);
   });
 });
+
+describe("an off switch (STRM-426)", () => {
+  // Non-text contrast (WCAG 1.4.11) for the parts that say "a switch, and it's off": in
+  // the dark modes the knob against its track and against the planes a row sits on, and
+  // the track a visible step off the plane. Light keeps its long-standing look and is
+  // held only to the token existing.
+  for (const mode of MODES) {
+    const color = PALETTES[mode].color;
+    it(`${mode}: has its own off track and knob`, () => {
+      expect(color.switchTrackOff).toMatch(/^#[0-9A-F]{6}$/i);
+      expect(color.switchKnobOff).toMatch(/^#[0-9A-F]{6}$/i);
+    });
+    if (mode === "light") continue;
+    it(`${mode}: the knob stands out from its track and from the page`, () => {
+      expect(contrastRatio(color.switchKnobOff, color.switchTrackOff)).toBeGreaterThanOrEqual(3);
+      for (const plane of ["canvas", "surface", "surfaceHover", "chrome"]) {
+        expect(contrastRatio(color.switchKnobOff, color[plane])).toBeGreaterThanOrEqual(3);
+      }
+    });
+    it(`${mode}: the track is a visible step off the page, not the pressed grey`, () => {
+      expect(color.switchTrackOff).not.toBe(color.surfaceActive);
+      for (const plane of ["canvas", "surface", "chrome"]) {
+        expect(contrastRatio(color.switchTrackOff, color[plane])).toBeGreaterThanOrEqual(1.6);
+      }
+    });
+  }
+});

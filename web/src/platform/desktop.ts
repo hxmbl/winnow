@@ -30,7 +30,8 @@ import { waitUntilVisible } from "./visibility";
 import { debugLog, setNativeDebugBridge, syncNativeDebugLog } from "../core/debug/debugLog";
 import { parseNotificationAction, type NotificationActionEvent } from "../core/notify/notifications";
 import { parseChannel, type UpdateOffer, type UpdateRuntime } from "../core/updates/updates";
-import type { InstallOutcome } from "./types";
+import type { ActiveNotice, BackgroundServiceConfig, BackgroundServiceStatus, InstallOutcome } from "./types";
+import { parseActiveNotices, parseBackgroundStatus } from "../core/notify/backgroundService";
 
 /** Events from Rust. */
 const SYNC_TICK_EVENT = "winnow://sync-tick";
@@ -241,8 +242,35 @@ export const desktopPlatform: Platform = {
   },
 
   async withdrawNotifications(gmailIds: readonly string[], account?: string | null): Promise<void> {
-    // Android cancels them (`notify_withdraw`); the desktop shells answer without acting.
+    // `notify_withdraw`: Android cancels them and rebuilds the summary; Linux closes them
+    // over D-Bus; macOS removes a batch once all of it is handled; Windows clears once none is left.
     await invoke("notify_withdraw", { gmailIds: [...gmailIds], account: account ?? null }).catch(() => undefined);
+  },
+
+  async clearNotifications(account: string | null): Promise<void> {
+    await invoke("notify_clear_account", { account }).catch(() => undefined);
+  },
+
+  async activeNotifications(): Promise<ActiveNotice[]> {
+    const items = await invoke<unknown>("notify_active").catch(() => []);
+    return parseActiveNotices(items);
+  },
+
+  async configureBackgroundService(config: BackgroundServiceConfig): Promise<BackgroundServiceStatus | null> {
+    const status = await invoke<unknown>("background_service_configure", { config });
+    return parseBackgroundStatus(status);
+  },
+
+  async backgroundServiceStatus(): Promise<BackgroundServiceStatus | null> {
+    return parseBackgroundStatus(await invoke<unknown>("background_service_status").catch(() => null));
+  },
+
+  async requestBatteryExemption(): Promise<BackgroundServiceStatus | null> {
+    return parseBackgroundStatus(await invoke<unknown>("background_service_battery").catch(() => null));
+  },
+
+  async openSyncNotificationSettings(): Promise<void> {
+    await invoke("background_service_notification_settings").catch(() => undefined);
   },
 
   async releaseKeptReplies(requestIds: readonly string[]): Promise<void> {

@@ -5575,6 +5575,7 @@ dependencies = [
  "keyring",
  "keyring-core",
  "notify-rust",
+ "objc2",
  "parking_lot",
  "reqwest",
  "rustls",
@@ -5596,6 +5597,8 @@ dependencies = [
  "tiny_http",
  "tokio",
  "url",
+ "windows",
+ "zbus",
 ]
 
 [[package]]

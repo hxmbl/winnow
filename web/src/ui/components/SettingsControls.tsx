@@ -9,6 +9,7 @@ import { CircleHelp } from "lucide-react";
 import { SETTINGS, type SettingId } from "../settingsCatalog";
 import { SettingsExplain } from "../settingsExplainContext";
 import { placePopover, type PopoverPlacement } from "../settingsView";
+import { rowTapSwitch } from "../settingsRowTap";
 import { Icon } from "./Icon";
 
 export function Section({ title, children }: { title?: string; children: React.ReactNode }) {
@@ -43,7 +44,15 @@ export function SettingBlock({
       data-explained={explained ? "" : undefined}
       onPointerEnter={() => point(setting)}
       onFocus={() => point(setting)}
-      className={`-mx-3 rounded-pane px-3 py-2.5 transition-colors ${explained ? "bg-surface-hover" : ""} ${className}`}
+      // A tap on the row's name or padding presses its switch (`settingsRowTap.ts`). Not
+      // a second tab stop: the switch is the one control, and Space/Enter on it toggle.
+      onClick={(event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const selected = typeof window.getSelection === "function" ? String(window.getSelection() ?? "") : "";
+        const row = event.currentTarget;
+        rowTapSwitch(target, { querySelectorAll: (selector) => row.querySelectorAll<HTMLButtonElement>(selector) }, selected)?.click();
+      }}
+      className={`-mx-3 rounded-pane px-3 py-2.5 transition-colors has-[[role=switch]]:cursor-pointer ${explained ? "bg-surface-hover" : ""} ${className}`}
     >
       {children}
     </div>
@@ -148,7 +157,7 @@ export function InfoButton({ setting }: { setting: SettingId }) {
         onFocus={() => dispatchInfo({ type: "focus", setting })}
         onBlur={() => dispatchInfo({ type: "blur", setting })}
         onClick={() => dispatchInfo({ type: "press", setting })}
-        className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-2.5 after:content-['']"
+        className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-3 after:content-['']"
       >
         <Icon icon={CircleHelp} size={16} />
       </button>
@@ -319,7 +328,16 @@ export function RadioCards<T extends string>({
   );
 }
 
-/** A switch. A real checkbox, visually restyled — not a `div` with a click handler. */
+/**
+ * A switch: a real `button role="switch"` with `aria-checked`, so Space and Enter toggle
+ * it and a screen reader names its state.
+ *
+ * Drawn 36×20, pressed through a 48×48 box (44×44 with a fine pointer): an invisible
+ * `::before` centred on the track, so the look and the layout are unchanged and the
+ * whole box hit-tests as the button (STRM-426). The off state is drawn from its own
+ * tokens (`switchTrackOff`, `switchKnobOff`): on OLED the old off track and knob were
+ * the pressed grey and the black surface, a dark pill on a black page.
+ */
 export function Toggle({
   checked,
   onChange,
@@ -339,15 +357,16 @@ export function Toggle({
       aria-checked={checked}
       aria-label={label}
       aria-describedby={describedBy}
+      data-toggle=""
       onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
-        checked ? "bg-accent" : "bg-surface-active"
+      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring before:absolute before:left-1/2 before:top-1/2 before:h-12 before:w-12 before:-translate-x-1/2 before:-translate-y-1/2 before:rounded-full before:content-[''] pointer-fine:before:h-11 pointer-fine:before:w-11 ${
+        checked ? "bg-accent" : "bg-switch-track-off"
       }`}
     >
       <span
         aria-hidden="true"
-        className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-surface transition-transform ${
-          checked ? "translate-x-4.5" : "translate-x-0.5"
+        className={`pointer-events-none absolute left-0 top-0.5 h-4 w-4 rounded-full transition-transform ${
+          checked ? "translate-x-4.5 bg-surface" : "translate-x-0.5 bg-switch-knob-off"
         }`}
       />
     </button>

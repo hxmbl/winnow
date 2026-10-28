@@ -69,6 +69,12 @@ export type NotificationBatch = {
   messages: MessageNotice[];
   actions: NotificationActions;
   hidePreview: boolean;
+  /**
+   * Gmail ids counted in `total` that have no notification of their own (past
+   * `MAX_MESSAGE_NOTIFICATIONS`), so the summary's count can follow them as they are
+   * read or moved (`withdrawNotifications`).
+   */
+  restIds?: string[];
 };
 
 /**
@@ -132,6 +138,47 @@ export function buildNotificationBatch(
     })),
     actions: { ...settings.notificationActions },
     hidePreview: settings.notificationHidePreview,
+    restIds: emails.slice(MAX_MESSAGE_NOTIFICATIONS).map((email) => email.gmailId),
+  };
+}
+
+// ── Dismissing themselves ──────────────────────────────────────────────────
+
+/**
+ * Does this message still need the attention its notification asks for? No once it is
+ * read, out of the Inbox (archived, in Trash or Spam, snoozed, moved), wherever that
+ * happened: here, or on Gmail anywhere, which the next sync brings in.
+ */
+export function stillNeedsAttention(email: Pick<Email, "unread" | "mailbox">): boolean {
+  return email.unread && email.mailbox === "inbox";
+}
+
+/**
+ * Of the messages whose notifications may be up (`watched`, Gmail ids), the ones the
+ * mailbox now shows need no attention. A message the mailbox does not hold is left
+ * alone: not being loaded is not evidence (deletions are handled by `forgetGone`).
+ */
+export function staleNotices(watched: Iterable<string>, emails: readonly Pick<Email, "gmailId" | "unread" | "mailbox">[]): string[] {
+  const wanted = new Set(watched);
+  if (wanted.size === 0) return [];
+  const stale: string[] = [];
+  for (const email of emails) {
+    if (wanted.has(email.gmailId) && !stillNeedsAttention(email)) stale.push(email.gmailId);
+  }
+  return stale;
+}
+
+/**
+ * A summary's words after some of what it counted was handled: the new count, and how
+ * many of those have no notification of their own; or `null` when none of those is
+ * left, and the summary should go (the remaining notifications speak for themselves).
+ * The same rule as the native summaries (`shown.rs`, `NoticeLedger.kt`).
+ */
+export function summaryAfterWithdraw(counted: number, rest: number): { title: string; body: string } | null {
+  if (counted <= 0 || rest <= 0) return null;
+  return {
+    title: counted === 1 ? "1 new message" : `${counted} new messages`,
+    body: rest === 1 ? "1 more in Winnow" : `${rest} more in Winnow`,
   };
 }
 

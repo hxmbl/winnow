@@ -121,6 +121,44 @@ pub fn withdraw(
         .map_err(|e| format!("could not withdraw notifications: {e}"))
 }
 
+pub fn clear_account(app: &AppHandle, account: Option<String>) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Clear {
+        account: Option<String>,
+    }
+    native(app)?
+        .run_mobile_plugin::<()>("clearAccount", Clear { account })
+        .map_err(|e| format!("could not clear notifications: {e}"))
+}
+
+pub fn active(app: &AppHandle) -> Result<Vec<super::ActiveNotice>, String> {
+    #[derive(serde::Deserialize)]
+    struct Item {
+        #[serde(default)]
+        account: Option<String>,
+        #[serde(rename = "gmailId")]
+        gmail_id: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Active {
+        #[serde(default)]
+        items: Vec<Item>,
+    }
+    native(app)?
+        .run_mobile_plugin::<Active>("active", ())
+        .map(|active| {
+            active
+                .items
+                .into_iter()
+                .map(|item| super::ActiveNotice {
+                    account: item.account,
+                    gmail_id: item.gmail_id,
+                })
+                .collect()
+        })
+        .map_err(|e| format!("could not list notifications: {e}"))
+}
+
 fn run(app: &AppHandle, handle: &PluginHandle<Wry>, request: ActionRequest) {
     // The notification's own account (1.4.0): its tokens, never another account's.
     let tokens = plan::tokens_secret_for(request.account.as_deref())

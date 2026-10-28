@@ -86,6 +86,24 @@ tauri-plugin-fs = "2"
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 notify-rust = "4.11"
 
+# Notifications that take themselves down (`notify_actions/shown.rs`). Each is already in
+# the tree at this version through notify-rust or tauri-plugin-notification, so none
+# adds a crate to the build:
+# - Linux: `CloseNotification` over the session bus (`zbus`, notify-rust's own D-Bus stack).
+[target.'cfg(target_os = "linux")'.dependencies.zbus]
+version = "5"
+default-features = false
+features = ["async-io", "blocking-api"]
+
+# - Windows: clearing Winnow's Action Center entries (`ToastNotificationHistory`).
+[target.'cfg(target_os = "windows")'.dependencies.windows]
+version = "0.62"
+features = ["UI_Notifications"]
+
+# - macOS: removing a delivered notification from Notification Centre (`NSUserNotificationCenter`).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
 # Downloads a release `.deb` for a package install (`updater.rs`). Both already in the
 # tree through `tauri-plugin-updater`, with the same versions and features (rustls with
 # the ring provider), so this adds no second HTTP client or TLS stack.

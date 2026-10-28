@@ -249,7 +249,19 @@ export const SETTINGS = {
     category: "sync",
     label: "Keep syncing while closed",
     explanation:
-      "Winnow stays in the system tray after you close the window and keeps checking for mail on a timer, so notifications still arrive. Off, it only syncs while a window is open, which uses less battery and fewer requests to Google.",
+      "Keeps Winnow checking for new mail after you close it, so notifications still arrive. On a computer it stays in the system tray and checks on a timer. On Android it keeps a small, silent notification and checks Gmail about once a minute, even after you swipe it away or restart the phone; it needs notifications on, since that is all it does with the app closed. Off, Winnow only syncs while it is open, which uses less battery and fewer requests to Google.",
+  },
+  batteryUnrestricted: {
+    category: "sync",
+    label: "Run in the background",
+    explanation:
+      "Android pauses apps' network access when the phone sits idle (Doze) and some phones close background apps to save battery. Letting Winnow run without battery restrictions keeps background sync on time; without it, new mail can arrive late while the phone is idle. Android asks you to confirm, and you can change it later in system settings.",
+  },
+  syncNotification: {
+    category: "sync",
+    label: "Background sync notification",
+    explanation:
+      "Android requires a notification while an app keeps working with its window closed. Winnow's is silent and sits at the bottom of the shade. You can hide it in Android's settings for that one notification; background sync carries on, and new-mail notifications are not affected.",
   },
   syncInterval: {
     category: "sync",

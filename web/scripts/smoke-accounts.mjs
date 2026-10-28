@@ -15,6 +15,9 @@
  *      switches account, fetches it and opens it in the phone's full-screen reader; Back
  *      returns to that account's inbox; a summary's link opens the inbox; and a cold
  *      start from a tap (`deep_link_launch`) opens the message too.
+ *   5b. Background sync on Android (STRM-427): signed in with notifications on, the
+ *      background service is handed a config that runs it for both accounts, each
+ *      labelled by its address, with no token in it.
  *   6. The Accounts page (1.5), on the desktop and a phone: the switcher's Manage
  *      accounts opens it; an account's page sets its colour and notify switch; Escape
  *      steps back; Settings' Accounts row opens it and it links back to Settings →
@@ -208,6 +211,10 @@ function fakeAndroid({ secrets, launch }) {
           return null;
         case "notify_kept_replies":
           return [];
+        // The background service (MailSyncService.kt): what it is told, for part 5b.
+        case "background_service_configure":
+          (window.__smokeServiceConfigs ??= []).push(args.config);
+          return { enabled: args.config.enabled === true, running: args.config.enabled === true, batteryUnrestricted: true, notificationsAllowed: true };
         case "plugin:event|listen":
           listeners.set(String(args.handler), args.event);
           return args.handler;
@@ -520,6 +527,7 @@ try {
     await ctx.close();
   }
 
+  let androidContextWithNotifications = null;
   // ── 5. Notification deep links on the Android app ───────────────────────────
   console.log("\n── notification deep links (Android app) ──");
   {
@@ -560,6 +568,18 @@ try {
       return { ctx, page };
     };
     const link = `winnow://message/${hashId("bnew9")}?account=acctbob02&gmail=bnew9`;
+    // For 5b (below): the same, with notifications on, as the background service needs.
+    androidContextWithNotifications = async () => {
+      const made = await androidContext(null);
+      await made.ctx.addInitScript(() => {
+        const raw = localStorage.getItem("winnow.preferences.v1");
+        localStorage.setItem("winnow.preferences.v1", JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), notificationsEnabled: true }));
+      });
+      await made.page.close();
+      const page = await made.ctx.newPage();
+      page.on("pageerror", (error) => errors.push(String(error)));
+      return { ctx: made.ctx, page };
+    };
 
     {
       const { ctx, page } = await androidContext(null);
@@ -594,6 +614,27 @@ try {
       check("cold start from a notification's tap opens that message", subject === "Fresh from the notification", subject);
       await ctx.close();
     }
+  }
+
+  // ── 5b. Background sync on Android: signed in, the service is told to run ────
+  console.log("\n── background sync service (Android app, signed in) ──");
+  {
+    const { ctx, page } = await androidContextWithNotifications();
+    await page.goto(URL);
+    await page.waitForFunction(() => (document.body?.innerText ?? "").includes("Ada mail 1"), null, { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_200);
+    const configs = await page.evaluate(() => window.__smokeServiceConfigs ?? []);
+    const last = configs.at(-1) ?? null;
+    check(
+      "signed in with notifications on, the background service is told to run, for both accounts",
+      last?.enabled === true && last.activeAccount === "acctada01" && last.accounts.map((a) => a.id).join(",") === "acctada01,acctbob02",
+      JSON.stringify(last),
+    );
+    check(
+      "with two accounts each is labelled by its address, and nothing secret is in the config",
+      last?.accounts.every((a) => typeof a.label === "string" && a.label.includes("@")) && !JSON.stringify(configs).includes("tok-"),
+    );
+    await ctx.close();
   }
   check("no page errors or native dialogs", errors.length === 0, errors.slice(0, 3).join(" | "));
 } catch (error) {
