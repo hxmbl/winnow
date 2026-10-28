@@ -31,15 +31,41 @@ export const DOCK_TABS = ["inbox", "sent"] as const satisfies readonly Mailbox[]
 export const EXPAND_LABEL = "More mailboxes";
 
 /** What a tap on a tab does now. */
-export type TabAction = "select" | "scroll-top";
+export type TabAction = "select" | "clear-filters" | "scroll-top";
 
 /**
- * A tab that is already the current page takes the list back to its top (the inbox's
- * "home" gesture); any other tab switches to its mailbox. The menu has its own button
- * now, so no tab ever opens it.
+ * A tab that is already the current page is the mailbox's "home" gesture: with a smart
+ * filter on, the first tap clears it and the list goes back to All (the same as the All
+ * chip, Hxmbl, 2026-10-28); with none on, it takes the list back to its top. Any other
+ * tab switches to its mailbox, which drops the filters as switching always has. The menu
+ * has its own button now, so no tab ever opens it.
  */
-export function tabAction(current: boolean): TabAction {
-  return current ? "scroll-top" : "select";
+export function tabAction(current: boolean, filtering = false): TabAction {
+  if (!current) return "select";
+  return filtering ? "clear-filters" : "scroll-top";
+}
+
+/** What a tab tap can do, for `tapTab`: the dock's own handlers. */
+export type TabTapHandlers = {
+  onClearFilters: () => void;
+  scrollToTop: () => void;
+  onSelectMailbox: (mailbox: Mailbox) => void;
+};
+
+/**
+ * A tap on the tab for `mailbox`: does what `tabAction` says, through the dock's
+ * handlers. Pulled out of `PhoneDock` so the wiring is tested without a DOM.
+ */
+export function tapTab(
+  mailbox: Mailbox,
+  { current, filtering }: { current: boolean; filtering: boolean },
+  handlers: TabTapHandlers,
+): TabAction {
+  const action = tabAction(current, filtering);
+  if (action === "clear-filters") handlers.onClearFilters();
+  else if (action === "scroll-top") handlers.scrollToTop();
+  else handlers.onSelectMailbox(mailbox);
+  return action;
 }
 
 /** A tab's accessible name: the mailbox, and its unread count when it has one. */

@@ -11,11 +11,27 @@ describe("the phone dock", () => {
   it("switches mailbox on a tap, and scrolls to the top on a tap of the current tab", () => {
     expect(tabAction(false)).toBe("select");
     expect(tabAction(true)).toBe("scroll-top");
+    expect(tabAction(true, false)).toBe("scroll-top");
+  });
+
+  it("clears an active smart filter on a tap of the current tab, back to All", () => {
+    // Inbox narrowed to Important: the Inbox tab undoes the filter rather than scrolling.
+    expect(tabAction(true, true)).toBe("clear-filters");
+  });
+
+  it("switches mailbox from another tab whether or not a filter is on", () => {
+    // Coming from Sent (or anywhere else), Inbox is a plain switch; the mailbox switch
+    // keeps doing what it does with filters today.
+    expect(tabAction(false, true)).toBe("select");
+    expect(tabAction(false, false)).toBe("select");
   });
 
   it("never opens the menu from a tab", () => {
-    expect(["select", "scroll-top"]).toContain(tabAction(true));
-    expect(["select", "scroll-top"]).toContain(tabAction(false));
+    for (const current of [true, false]) {
+      for (const filtering of [true, false]) {
+        expect(["select", "clear-filters", "scroll-top"]).toContain(tabAction(current, filtering));
+      }
+    }
   });
 
   it("names a tab by its mailbox, with the unread count when there is one", () => {
