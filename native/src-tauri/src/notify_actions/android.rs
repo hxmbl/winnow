@@ -105,6 +105,20 @@ pub fn release_kept(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("could not release kept replies: {e}"))
 }
 
+/// The `winnow://` link a notification's tap opened the app with, at most once
+/// (`LaunchLinks.kt`): what [`crate::deep_link::deep_link_launch`] answers on Android.
+pub fn launch_links(app: &AppHandle) -> Result<Vec<String>, String> {
+    #[derive(serde::Deserialize)]
+    struct Links {
+        #[serde(default)]
+        items: Vec<String>,
+    }
+    native(app)?
+        .run_mobile_plugin::<Links>("launchLinks", ())
+        .map(|links| links.items)
+        .map_err(|e| format!("could not read the launch link: {e}"))
+}
+
 pub fn withdraw(
     app: &AppHandle,
     gmail_ids: Vec<String>,

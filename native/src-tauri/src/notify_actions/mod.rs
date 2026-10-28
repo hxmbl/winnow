@@ -421,6 +421,13 @@ pub fn notify_kept_replies(app: AppHandle) -> Result<Vec<serde_json::Value>> {
     }
 }
 
+/// The `winnow://` link a notification's tap opened the Android app with, taken once
+/// (`LaunchLinks.kt`); empty when there is none or the plugin cannot be asked.
+#[cfg(target_os = "android")]
+pub fn take_launch_links(app: &AppHandle) -> Vec<String> {
+    android::launch_links(app).unwrap_or_default()
+}
+
 /// Forget kept replies that are now safely in Gmail's Drafts.
 #[tauri::command]
 pub fn notify_release_kept(app: AppHandle, ids: Vec<String>) -> Result<()> {

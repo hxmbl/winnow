@@ -19,7 +19,15 @@
         "schemes": [
           "winnow"
         ]
-      }
+      },
+      "mobile": [
+        {
+          "scheme": [
+            "winnow"
+          ],
+          "appLink": false
+        }
+      ]
     }
   },
   "app": {

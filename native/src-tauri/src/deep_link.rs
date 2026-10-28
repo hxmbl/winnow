@@ -76,13 +76,16 @@ pub fn register(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // If the OS cold-launched us for this link, the URL is waiting here.
+    // If the OS cold-launched us for this link, the URL is waiting here. Not on
+    // Android, where the plugin's "current" link can be a tap from long ago (see
+    // `deep_link_launch`).
     //
     // Emitted from `setup`, which runs *before* the webview has finished loading —
     // so this event very often arrives at a listener that does not exist yet. The
     // webview re-reads the launch arguments on mount for exactly this reason
     // (`main.tsx`), which is why the code here stays a best-effort emit rather
     // than becoming the only path by which a link can arrive.
+    #[cfg(not(target_os = "android"))]
     if let Ok(Some(urls)) = app.deep_link().get_current() {
         for url in urls {
             let _ = app.emit(OPEN_URL_EVENT, url.to_string());
@@ -98,6 +101,21 @@ pub fn register(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 /// otherwise open the app and not the message.
 #[tauri::command]
 pub fn deep_link_launch(app: AppHandle) -> Vec<String> {
+    launch_links(&app)
+}
+
+/// Android: the link the activity itself kept (`LaunchLinks.kt`), taken once. The
+/// plugin's own "current" link is read only when the plugin first loads, and the
+/// background sync service keeps the process (and the plugin) alive across activities,
+/// so a tap that starts a new activity is never seen by it, and what it reports is the
+/// last link from an earlier activity: an old message reopened instead of the new one.
+#[cfg(target_os = "android")]
+fn launch_links(app: &AppHandle) -> Vec<String> {
+    crate::notify_actions::take_launch_links(app)
+}
+
+#[cfg(not(target_os = "android"))]
+fn launch_links(app: &AppHandle) -> Vec<String> {
     app.deep_link()
         .get_current()
         .ok()
@@ -131,6 +149,34 @@ mod tests {
         // registering a scheme for it would be dead registration that looks like
         // it works.
         assert!(!SCHEMES.contains(&"winnow-oauth"));
+    }
+
+    #[test]
+    fn android_accepts_winnow_links() {
+        // The deep-link plugin's Android half drops every link that matches no
+        // `plugins.deep-link.mobile` entry, and with none at all it drops them all: a
+        // notification's tap opened Winnow but never the message (STRM-439). The
+        // `desktop` schemes only count in an Android dev build.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let mobile = config["plugins"]["deep-link"]["mobile"]
+            .as_array()
+            .expect("plugins.deep-link.mobile is a list");
+        let winnow = mobile
+            .iter()
+            .find(|domain| {
+                domain["scheme"]
+                    .as_array()
+                    .is_some_and(|schemes| schemes.iter().any(|s| s == "winnow"))
+            })
+            .expect("a mobile entry for the winnow scheme");
+        // Any host and path: winnow://message/<id>, winnow://open, winnow://signed-in.
+        assert!(winnow.get("host").is_none());
+        for key in ["path", "pathPrefix", "pathPattern", "pathSuffix"] {
+            assert!(winnow.get(key).is_none(), "{key} would drop some links");
+        }
+        // Not an App Link (those need https and a verified host).
+        assert_eq!(winnow["appLink"], serde_json::Value::Bool(false));
     }
 
     #[test]
