@@ -186,6 +186,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Focused(focused) = event {
                 crate::dlog!("app", "window-focus", focused = focused);
+                // The tray click reads this to tell "hide" from "show".
+                #[cfg(desktop)]
+                tray::note_focus(*focused);
             }
             // Closing the window hides to the tray rather than quitting: an
             // inbox client that syncs in the background should keep syncing.

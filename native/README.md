@@ -12,7 +12,7 @@ browser cannot do. Nothing here decides anything about mail.
 | `scheduler.rs` | A background thread that ticks while the window is hidden |
 | `files.rs` | A real save dialog, and a path sanitiser |
 | `deep_link.rs` | `winnow://` links, registered with the OS |
-| `tray.rs` | The tray icon, which is also the only way back once the window hides |
+| `tray.rs` | The tray icon: a left click shows and hides the window, and it is the only way back once the window hides |
 | `updater.rs` | How this copy runs (macOS, AppImage, `.deb`, Android) and installing a newer release |
 | `commands.rs` | The command surface. Thin: validate, delegate, stringify errors |
 
