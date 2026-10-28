@@ -14,6 +14,7 @@ import { MAILBOX_LABEL } from "../../core/model/email";
 import { archiveLabel, moveTargets } from "../menus";
 import { Menu } from "./Menu";
 import { anchorFromElement, type MenuAnchor } from "../menuPlacement";
+import { Icon, type IconSize } from "./Icon";
 
 type Props = {
   count: number;
@@ -52,9 +53,9 @@ export function SelectionBar({
   const [moveAnchor, setMoveAnchor] = useState<MenuAnchor | null>(null);
 
   const button = phone
-    ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
-    : "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
-  const iconSize = phone ? 19 : 14;
+    ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+    : "flex h-8 shrink-0 items-center gap-1.5 rounded-ctl px-2.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  const iconSize: IconSize = phone ? 20 : 16;
   const label = (text: string) => (phone ? <span className="sr-only">{text}</span> : <span>{text}</span>);
 
   return (
@@ -67,11 +68,11 @@ export function SelectionBar({
           ? "relative z-30 flex shrink-0 items-center gap-1 px-2 pb-1.5 pt-[max(0.5rem,env(safe-area-inset-top))]"
           : // The desktop's, floating in the list's header in the chips' place: the
             // same glass as the bar above it.
-            "wn-glass wn-glass-bar wn-glass-behind pointer-events-auto flex h-10 min-w-0 flex-1 items-center gap-1 rounded-full px-1.5"
+            "wn-glass wn-glass-bar wn-glass-behind pointer-events-auto flex h-10 min-w-0 flex-1 items-center gap-1 rounded-ctl px-1.5"
       }
     >
       <button type="button" onClick={onClear} aria-label="Clear selection" title="Clear selection (Esc)" className={phone ? button : `${button} px-2`}>
-        <X size={iconSize} strokeWidth={2} aria-hidden="true" />
+        <Icon icon={X} size={iconSize} />
       </button>
       <span
         aria-live="polite"
@@ -84,11 +85,11 @@ export function SelectionBar({
       {archive && (
         <button type="button" onClick={onArchive} aria-label={phone ? archive.label : undefined} className={button}>
           {mailbox === "snoozed" ? (
-            <AlarmClockOff size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+            <Icon icon={AlarmClockOff} size={iconSize} />
           ) : archive.restore ? (
-            <ArchiveRestore size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+            <Icon icon={ArchiveRestore} size={iconSize} />
           ) : (
-            <Archive size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+            <Icon icon={Archive} size={iconSize} />
           )}
           {label(archive.label)}
         </button>
@@ -103,7 +104,7 @@ export function SelectionBar({
           title="Snooze (b)"
           className={button}
         >
-          <AlarmClock size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+          <Icon icon={AlarmClock} size={iconSize} />
           {label("Snooze")}
         </button>
       )}
@@ -114,7 +115,7 @@ export function SelectionBar({
         data-destructive={mailbox === "trash" ? "" : undefined}
         className={`${button} ${mailbox === "trash" ? "text-danger!" : ""}`}
       >
-        {scheduled ? <AlarmClockOff size={iconSize} strokeWidth={1.9} aria-hidden="true" /> : <Trash2 size={iconSize} strokeWidth={1.9} aria-hidden="true" />}
+        {scheduled ? <Icon icon={AlarmClockOff} size={iconSize} /> : <Icon icon={Trash2} size={iconSize} />}
         {label(trashText)}
       </button>
       {!scheduled && (
@@ -124,7 +125,7 @@ export function SelectionBar({
         aria-label={phone ? (anyUnread ? "Mark read" : "Mark unread") : undefined}
         className={button}
       >
-        {anyUnread ? <MailOpen size={iconSize} strokeWidth={1.9} aria-hidden="true" /> : <MailMinus size={iconSize} strokeWidth={1.9} aria-hidden="true" />}
+        {anyUnread ? <Icon icon={MailOpen} size={iconSize} /> : <Icon icon={MailMinus} size={iconSize} />}
         {label(anyUnread ? "Mark read" : "Mark unread")}
       </button>
       )}
@@ -138,7 +139,7 @@ export function SelectionBar({
         onClick={(event) => setMoveAnchor(anchorFromElement(event.currentTarget))}
         className={button}
       >
-        <FolderInput size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+        <Icon icon={FolderInput} size={iconSize} />
         {label("Move to")}
       </button>
       )}
@@ -151,7 +152,7 @@ export function SelectionBar({
           title="Change smart filters…"
           className={button}
         >
-          <ListFilter size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+          <Icon icon={ListFilter} size={iconSize} />
           {label("Filters")}
         </button>
       )}

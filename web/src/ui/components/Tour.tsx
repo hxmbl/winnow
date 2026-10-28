@@ -28,6 +28,7 @@ import {
   type TourStep,
 } from "../tour";
 import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 export type TourEnd = "skip" | "done" | "connect";
 
@@ -290,7 +291,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
               className="-mr-1.5 flex min-h-8 items-center gap-1 rounded-ctl px-2 text-meta font-semibold text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
             >
               Skip tour
-              <X size={13} strokeWidth={2.2} aria-hidden="true" />
+              <Icon icon={X} size={12} />
             </button>
           )}
         </div>

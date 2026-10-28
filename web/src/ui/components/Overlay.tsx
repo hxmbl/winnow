@@ -113,7 +113,7 @@ export function Sheet({
   placement = "center",
   bottomInset,
   backdrop = "scrim",
-  className = "max-w-[520px]",
+  className = "max-w-sheet-md",
   children,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -300,7 +300,7 @@ export function ConfirmDialog({
       // answer to "did you mean to do that?" must never be a discard.
       dismissOnBackdrop={false}
       initialFocus={cancelRef}
-      className="w-full max-w-[380px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+      className="w-full max-w-sheet-sm rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <h2 className="text-read font-semibold text-ink">{title}</h2>
       <p className="mt-1.5 text-ui leading-relaxed text-ink-muted">{body}</p>
@@ -348,7 +348,7 @@ export function SheetHeader({
 }) {
   return (
     <div
-      className={`sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-hairline bg-chrome ${
+      className={`sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-hairline-soft bg-chrome ${
         touch ? "pb-1.5 pl-5 pr-3 pt-[max(0.375rem,env(safe-area-inset-top))]" : "px-5 py-3.5"
       }`}
     >
@@ -405,7 +405,7 @@ export function ActionSheet({
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const ITEM =
-    "flex min-h-[56px] w-full items-center justify-center px-4 text-read transition-colors active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring";
+    "flex min-h-14 w-full items-center justify-center px-4 text-read transition-colors active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring";
   return (
     <Sheet
       label={label}
@@ -416,11 +416,11 @@ export function ActionSheet({
       dismissOnBackdrop
       initialFocus={cancelRef}
       placement="bottom"
-      className="flex w-full max-w-[480px] flex-col gap-2"
+      className="flex w-full max-w-sheet-md flex-col gap-2"
     >
       <div data-action-sheet="" className="overflow-hidden rounded-pane bg-chrome shadow-lift">
         {message && (
-          <p className="border-b border-hairline px-4 py-3 text-center text-meta text-ink-subtle">{message}</p>
+          <p className="border-b border-hairline-soft px-4 py-3 text-center text-meta text-ink-subtle">{message}</p>
         )}
         {actions.map((action, index) => (
           <button
@@ -428,7 +428,7 @@ export function ActionSheet({
             type="button"
             data-action-sheet-item={action.id}
             onClick={action.onSelect}
-            className={`${ITEM} ${index > 0 ? "border-t border-hairline" : ""} ${
+            className={`${ITEM} ${index > 0 ? "border-t border-hairline-soft" : ""} ${
               action.destructive ? "text-danger" : "text-accent"
             }`}
           >

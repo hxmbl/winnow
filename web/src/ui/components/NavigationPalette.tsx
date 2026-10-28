@@ -21,6 +21,7 @@ import { FilePen, Inbox, Send, Settings, Trash2, TriangleAlert } from "lucide-re
 import { NAVIGATION_ITEMS, type NavigationItem } from "../../core/model/signals";
 import { MAILBOX_LABEL, type Mailbox } from "../../core/model/email";
 import { Sheet } from "./Overlay";
+import { Icon } from "./Icon";
 
 const ICONS: Record<NavigationItem, typeof Inbox> = {
   inbox: Inbox,
@@ -58,10 +59,10 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
       // Without this the palette is announced as a menu with a handful of items and no
       // position, which is the entire thing a menu is supposed to convey.
       activeDescendant={active ? `nav-row-${active.id}` : undefined}
-      className="animate-sheet w-full max-w-[280px] overflow-hidden rounded-pane border border-hairline bg-chrome p-1.5 shadow-lift"
+      className="animate-sheet w-full max-w-menu overflow-hidden rounded-pane border border-hairline bg-chrome p-1.5 shadow-lift"
     >
       {NAVIGATION_ITEMS.map((item, i) => {
-        const Icon = ICONS[item.id];
+        const Glyph = ICONS[item.id];
         const isActive = i === index;
         const label = labelFor(item);
         const count = item.mailbox ? (unread[item.mailbox] ?? 0) : 0;
@@ -81,7 +82,7 @@ export function NavigationPalette({ index, unread, onActivate, onClose }: Props)
               isActive ? "bg-surface-active text-ink" : "text-ink-body hover:bg-surface-hover"
             }`}
           >
-            <Icon size={15} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
+            <Icon icon={Glyph} size={16} className="shrink-0 text-ink-muted" />
             <span className="flex-1 font-medium">{label}</span>
             {count > 0 && (
               <span className="rounded-full bg-surface-sunken px-1.5 text-meta font-semibold tabular-nums text-ink-muted">

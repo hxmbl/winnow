@@ -55,7 +55,7 @@ export function WhenPicker({ title, note, initial, confirmLabel, onConfirm, onCa
       onEscape={onCancel}
       dismissOnBackdrop={false}
       initialFocus={dateRef}
-      className="w-full max-w-[380px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+      className="w-full max-w-sheet-sm rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <form
         data-when-picker=""
@@ -153,7 +153,7 @@ export function ScheduledSheet({
       onClose={onClose}
       onEscape={onClose}
       initialFocus={closeRef}
-      className="w-full max-w-[460px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+      className="w-full max-w-sheet-md rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <div data-scheduled-sheet="">
         <p className="text-meta font-medium text-ink-muted">{problem ? "Not sent" : `Sends ${when}`}</p>

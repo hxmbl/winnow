@@ -18,6 +18,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { copyText } from "../clipboard";
 import { isLongError } from "../textSelection";
+import { Icon } from "./Icon";
 
 type Props = {
   text: string;
@@ -55,12 +56,7 @@ export function ErrorText({ text, className = "", copyable = true }: Props): Rea
           onClick={() => setOpen((value) => !value)}
           className="mt-px shrink-0 rounded-ctl text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <ChevronDown
-            size={12}
-            strokeWidth={2}
-            className={`transition-transform ${open ? "rotate-180" : ""}`}
-            aria-hidden="true"
-          />
+          <Icon icon={ChevronDown} size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       )}
       <span
@@ -81,9 +77,9 @@ export function ErrorText({ text, className = "", copyable = true }: Props): Rea
           className="mt-px shrink-0 rounded-ctl p-0.5 text-ink-subtle transition-colors hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           {copied ? (
-            <Check size={12} strokeWidth={2.2} aria-hidden="true" />
+            <Icon icon={Check} size={12} />
           ) : (
-            <Copy size={12} strokeWidth={2} aria-hidden="true" />
+            <Icon icon={Copy} size={12} />
           )}
         </button>
       )}

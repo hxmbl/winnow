@@ -22,6 +22,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Changed
 
+- Icons are drawn at four sizes with one stroke weight throughout the app, so icons next to each other no longer differ by a pixel or two. Dialogs come in three widths, and spacing, dividers and section labels are more consistent. The inbox-clear messages are plainer.
 - Buttons are consistent across the app: every filled and outlined button now comes in the same three heights with the same padding and weight, so two buttons side by side no longer differ by a pixel or two.
 - The demo's Connect Gmail button is now a quieter secondary button, so Compose is the one filled button on screen. The unread count on the phone's Inbox tab is grey like every other count, and tooltip shortcut keys use the same text size as the tooltip.
 - Smart filters now have icons. Each chip on the filter rail shows its icon before the name, and an inbox row marks Unsafe, Urgent, Security or Important mail with that filter's icon next to the time (hover it to see the name). Important uses the marker you know from Gmail, and Urgent a warning triangle.

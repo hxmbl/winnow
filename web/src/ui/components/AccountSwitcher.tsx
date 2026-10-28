@@ -17,6 +17,7 @@ import { ADD_ACCOUNT_HELP, ACCOUNTS_FULL, accountColorHex, unreadLabel } from ".
 import { MAX_ACCOUNTS } from "../../core/session/accounts";
 import { accountStatusLine } from "../accountsPage";
 import type { ThemeName } from "../theme";
+import { Icon } from "./Icon";
 
 export type AccountSwitcherProps = {
   accounts: readonly AccountSummary[];
@@ -76,9 +77,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
       placement={props.phone ? "bottom" : "center"}
       // A solid panel like every other sheet: without its own surface the chips and the
       // dock showed straight through it on a phone.
-      className={`flex w-full max-w-[420px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift ${
-        props.phone ? "max-h-[85vh]" : "max-h-[80vh]"
-      }`}
+      className="flex max-h-(--wn-sheet-max-h) w-full max-w-sheet-sm flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
     >
       <div data-account-switcher="" className="thin-scroll min-h-0 flex-1 overflow-y-auto">
         <SheetHeader title="Accounts" onClose={props.onClose} touch={props.phone} />
@@ -114,13 +113,13 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
                       {label}
                     </span>
                   )}
-                  {account.active && <Check size={18} aria-hidden="true" className="shrink-0 text-accent" />}
+                  {account.active && <Icon icon={Check} size={20} className="shrink-0 text-accent" />}
                 </button>
               </li>
             );
           })}
         </ul>
-        <div className="border-t border-hairline p-2">
+        <div className="border-t border-hairline-soft p-2">
           <button
             type="button"
             data-account-add=""
@@ -131,7 +130,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
             }`}
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline">
-              <Plus size={17} aria-hidden="true" />
+              <Icon icon={Plus} size={16} />
             </span>
             {props.busy ? "Waiting for Google…" : demo ? "Connect Gmail" : "Add account"}
           </button>
@@ -149,7 +148,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
               onClick={props.onOpenDemo}
               className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover disabled:opacity-60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
-              <FlaskConical size={17} aria-hidden="true" className="ml-1.5 mr-1.5 shrink-0" />
+              <Icon icon={FlaskConical} size={16} className="ml-1.5 mr-1.5 shrink-0" />
               Open demo inbox
             </button>
           )}
@@ -159,7 +158,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
             onClick={props.onManage}
             className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-ctl px-2.5 text-left text-ui text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            <Settings size={17} aria-hidden="true" className="ml-1.5 mr-1.5 shrink-0" />
+            <Icon icon={Settings} size={16} className="ml-1.5 mr-1.5 shrink-0" />
             Manage accounts
           </button>
         </div>
@@ -192,7 +191,7 @@ export function AccountButton({
       aria-label={label}
       title={label}
       onClick={onOpen}
-      className={`pointer-events-auto relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${glass ? "wn-glass" : "hover:bg-surface-hover"}`}
+      className={`pointer-events-auto relative flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${glass ? "wn-glass" : "hover:bg-surface-hover"}`}
     >
       <span className="relative flex rounded-full">
         <Avatar lookup={false} name={active?.email ?? "You"} address={active?.email ?? "you@winnow.demo"} />

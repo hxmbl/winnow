@@ -691,6 +691,85 @@ describe("the design system stays small", () => {
     expect(pasted).toEqual([]);
   });
 
+  it("draws every lucide glyph through <Icon> (four sizes, one stroke)", () => {
+    // 17 sizes and 11 strokes, each picked on its own, before `components/Icon.tsx`.
+    const direct: string[] = [];
+    const raw: string[] = [];
+    for (const url of files) {
+      if (url.pathname.endsWith("/components/Icon.tsx")) continue;
+      const source = readFileSync(url, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+      const name = url.pathname.split("/").pop();
+      const glyphs = new Set<string>();
+      for (const match of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*"lucide-react"/g)) {
+        for (const part of match[1].split(",")) {
+          const id = part.trim();
+          if (id && !id.startsWith("type ")) glyphs.add(id.split(/\s+as\s+/).pop()!.trim());
+        }
+      }
+      for (const glyph of glyphs) if (new RegExp(`<${glyph}\\b`).test(source)) direct.push(`${name}: <${glyph}>`);
+      // Any element given a raw pixel size and a stroke is an icon picked by hand.
+      for (const match of source.matchAll(/<[A-Za-z]\w*\b[^<]*?\/>/g)) {
+        if (/\bsize=\{/.test(match[0]) && /\bstrokeWidth=/.test(match[0])) raw.push(`${name}: ${match[0].slice(0, 60)}`);
+      }
+    }
+    expect(direct).toEqual([]);
+    expect(raw).toEqual([]);
+  });
+
+  it("keeps state fills on the state tokens, not hand-mixed ink washes", () => {
+    // MailNav and the dock once had 8%, 9%, 10% and 14% washes beside sheen, surface-hover
+    // and surface-active: a 4th, 5th and 6th grey state.
+    expect(offenders(/color-mix\(in_srgb,var\(--wn-ink\)[^\]]*\]/g)).toEqual([]);
+  });
+
+  it("sizes sheets and dialogs from the sheet tokens", () => {
+    expect(offenders(/\b(?:max|min)-w-\[\d+px\]/g)).toEqual([]);
+    expect(offenders(/\bmax-h-\[(?:[89]\d)vh\]|\bmax-h-\[min\((?:700px|44rem)[^\]]*\]/g)).toEqual([]);
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    for (const token of ["--container-sheet-sm: 400px", "--container-sheet-md: 520px", "--container-sheet-lg: 640px", "--wn-sheet-max-h:"]) {
+      expect(css).toContain(token);
+    }
+  });
+
+  it("derives the rail's shadow room, the sender column and the composer indent from one variable each", () => {
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    expect(css).toMatch(/--wn-rail-bleed:\s*20px/);
+    expect(css).toMatch(/--wn-sender-col:\s*calc\(/);
+    expect(css).toMatch(/--wn-composer-label:/);
+    const read = (name: string) => readFileSync(new URL(`components/${name}`, import.meta.url), "utf8");
+    const strip = read("FilterStrip.tsx");
+    expect(strip).not.toMatch(/-?\[-?2\dpx\]/);
+    expect(strip.match(/--wn-rail-bleed/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    const list = read("MessageList.tsx");
+    expect(list).not.toMatch(/\bpl-\[\d+px\]/);
+    expect(list.match(/--wn-sender-col/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(read("Composer.tsx")).not.toMatch(/\b(?:pl-14|w-12)\b/);
+  });
+
+  it("has no per-element optical nudges or arbitrary sizes that are on the scale", () => {
+    // Centre against a shared box (`h-[1lh]`, the avatar's `h-8`, the row's `h-6`) instead.
+    expect(offenders(/\b-?m[trblxy]?-\[-?\d+(?:\.\d+)?px\]/g)).toEqual([]);
+    expect(offenders(/\b(?:h|min-h|w|min-w|p[trblxy]?)-\[(?:\d+)px\]/g)).toEqual([]);
+    expect(offenders(/\bleading-\[[\d.]+\]/g)).toEqual([]);
+    expect(offenders(/\btext-\[[\d.]+em\]/g)).toEqual([]);
+  });
+
+  it("uses the control radius for controls; `full` only for dots, switches, avatars and counts", () => {
+    // `rounded-ctl` and `rounded-full` render the same today (9999px), but a shape change
+    // would split the controls. A class string with `rounded-full` and a hover or focus
+    // state is a control, unless it is a switch track or an avatar button.
+    const strings = [...sources.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map((match) => match[1] ?? match[2] ?? "");
+    const controls = strings.filter(
+      (value) =>
+        /(?:^|\s)rounded-full(?=\s|$)/.test(value) &&
+        /(?:^|\s)(?:hover|focus-visible|active):/.test(value) &&
+        !/\bh-5 w-9\b/.test(value) && // a switch track
+        !/\bwn-color-well\b/.test(value) && // a colour swatch
+        !/^mt-0\.5 shrink-0 rounded-full\b/.test(value), // an avatar button
+    );
+    expect(controls).toEqual([]);
+  });
+
   it("uses only the two radii", () => {
     expect(offenders(/\brounded(?:-[trblse]{1,2})?-(?:sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g)).toEqual([]);
     // A bare `rounded` has no value in the overridden scale, so it renders square.

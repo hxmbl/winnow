@@ -20,6 +20,7 @@ import { AppMark } from "../AppMark";
 import { clearDetail, clearHeadline, quietLine, type EmptyKind } from "../inboxClear";
 import "./InboxClear.css";
 import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 type Action = { label: string; run: () => void };
 
@@ -40,14 +41,14 @@ export function InboxClear({
   line?: string;
 }) {
   if (kind.kind === "quiet") {
-    const Icon = kind.scope === "folder" ? FolderOpen : SearchX;
+    const Glyph = kind.scope === "folder" ? FolderOpen : SearchX;
     return (
       <div
         className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface px-6 text-center"
         data-empty-kind="quiet"
         data-empty-scope={kind.scope}
       >
-        <Icon size={22} strokeWidth={1.5} className="text-ink-subtle" aria-hidden="true" />
+        <Icon icon={Glyph} size={20} className="text-ink-subtle" />
         <p className="max-w-104 text-ui text-ink-muted">{quietLine(kind, line)}</p>
         {action && (
           <button

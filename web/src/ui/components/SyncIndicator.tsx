@@ -16,6 +16,7 @@
 import { CloudOff } from "lucide-react";
 import { BADGE_GAP, BADGE_SIZE, FADE_MS, type SyncBadge } from "../syncIndicator";
 import type { SyncIndicatorState } from "../useSyncIndicator";
+import { Icon } from "./Icon";
 
 /** The polite live region: always mounted, so a screen reader hears each change once. */
 export function SyncAnnouncer({ badge, leaving }: SyncIndicatorState) {
@@ -48,7 +49,7 @@ export function SyncDisc({ badge, leaving, placement }: { badge: SyncBadge; leav
       style={{ width: BADGE_SIZE, height: BADGE_SIZE, ...(placement === "beside" ? { marginLeft: BADGE_GAP } : {}) }}
     >
       <span
-        className={`wn-glass wn-liquid flex size-full items-center justify-center rounded-full ${leaving ? "animate-vanish" : "animate-appear"} ${
+        className={`wn-glass wn-liquid flex size-full items-center justify-center rounded-ctl ${leaving ? "animate-vanish" : "animate-appear"} ${
           badge.busy ? "text-accent" : "text-ink-muted"
         }`}
         style={leaving ? { animationDuration: `${FADE_MS}ms` } : undefined}
@@ -62,7 +63,7 @@ export function SyncDisc({ badge, leaving, placement }: { badge: SyncBadge; leav
             <span className="hidden size-1.5 rounded-full bg-current motion-reduce:block" data-sync-dot="" />
           </>
         ) : (
-          <CloudOff size={13} strokeWidth={2.2} className="shrink-0" />
+          <Icon icon={CloudOff} size={12} className="shrink-0" />
         )}
       </span>
     </span>

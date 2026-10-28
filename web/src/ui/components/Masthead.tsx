@@ -25,6 +25,7 @@ import { shortcutHint } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { FilterId } from "../../core/model/signals";
 import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 export type MastheadProps = {
   searchQuery: string;
@@ -134,7 +135,7 @@ export function Masthead({
     <header data-masthead="" data-floating="" className="pointer-events-none flex flex-col gap-1 px-2.5 pt-2.5">
       <div
         data-masthead-bar=""
-        className="wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-[52px] min-w-0 items-center gap-3 rounded-full pl-2 pr-2"
+        className="wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-13 min-w-0 items-center gap-3 rounded-ctl pl-2 pr-2"
       >
         {/*
           The sidebar's toggle, at the edge the sidebar slides in from: a panel icon now,
@@ -151,9 +152,9 @@ export function Masthead({
           aria-label="Open sidebar"
           title={shortcutHint("Sidebar", "toggleSidebar")}
           aria-keyshortcuts="["
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <PanelLeft size={17} strokeWidth={1.9} aria-hidden="true" />
+          <Icon icon={PanelLeft} size={16} />
         </button>
         {/*
           The mark is the version toggle (`logoVersion.ts`): a click swaps search for
@@ -166,7 +167,7 @@ export function Masthead({
           aria-label={VERSION_TOGGLE_LABEL}
           title={VERSION_TOGGLE_LABEL}
           onClick={onToggleLogo}
-          className="-ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="-ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-surface-hover active:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <AppMark size={30} />
         </button>
@@ -187,9 +188,9 @@ export function Masthead({
             */
             // Solid, inside the glass: typed text and the placeholder never sit over
             // moving mail.
-            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-edge bg-canvas px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline-solid focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-(--wn-focusRing)"
+            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-ctl border border-edge bg-canvas px-3.5 transition-colors focus-within:bg-surface-active focus-within:outline-solid focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-(--wn-focusRing)"
           >
-            <Search size={14} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
+            <Icon icon={Search} size={16} className="shrink-0 text-ink-placeholder" />
             <input
               id="winnow-search"
               ref={searchRef}
@@ -230,18 +231,18 @@ export function Masthead({
               onClick={onPrev}
               aria-label="Previous message"
               disabled={!canPrev}
-              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
-              <ChevronLeft size={17} />
+              <Icon icon={ChevronLeft} size={16} />
             </button>
             <button
               type="button"
               onClick={onNext}
               aria-label="Next message"
               disabled={!canNext}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="flex h-8 w-8 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
-              <ChevronRight size={17} />
+              <Icon icon={ChevronRight} size={16} />
             </button>
           </div>
         </div>
@@ -260,7 +261,7 @@ export function Masthead({
             title={shortcutHint("Compose", "compose")}
             className={buttonClass("primary", "md", "max-lg:w-9 max-lg:px-0")}
           >
-            <SquarePen size={16} strokeWidth={2} aria-hidden="true" />
+            <Icon icon={SquarePen} size={16} />
             <span className="hidden lg:inline">Compose</span>
           </button>
         )}

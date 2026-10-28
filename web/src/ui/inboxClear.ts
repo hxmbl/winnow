@@ -84,10 +84,10 @@ export function dayPart(hour: number): DayPart {
  * the list in front of you.
  */
 export const CLEAR_LINES: Record<DayPart, readonly string[]> = {
-  morning: ["A clear start to the day.", "Nothing waiting. Enjoy the morning.", "Inbox clear before the day gets going."],
-  afternoon: ["Clear for the afternoon.", "Nothing needs you right now.", "All quiet. Back to the real work."],
-  evening: ["Clear for the evening. Switch off.", "Nothing left for today.", "The inbox can wait until tomorrow."],
-  night: ["All clear. Get some rest.", "Nothing here that can't wait till morning.", "Quiet inbox, quiet night."],
+  morning: ["A clear start to the day.", "Nothing waiting.", "Inbox clear before the day gets going."],
+  afternoon: ["Clear for the afternoon.", "Nothing needs you right now.", "All quiet."],
+  evening: ["Clear for the evening.", "Nothing left for today.", "The inbox can wait until tomorrow."],
+  night: ["All clear.", "Nothing here that can't wait till morning.", "Quiet inbox."],
 };
 
 /** A day number in local time, so the line holds still all day and changes tomorrow. */

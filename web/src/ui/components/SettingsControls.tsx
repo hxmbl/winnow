@@ -9,6 +9,7 @@ import { CircleHelp } from "lucide-react";
 import { SETTINGS, type SettingId } from "../settingsCatalog";
 import { SettingsExplain } from "../settingsExplainContext";
 import { placePopover, type PopoverPlacement } from "../settingsView";
+import { Icon } from "./Icon";
 
 export function Section({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
@@ -147,9 +148,9 @@ export function InfoButton({ setting }: { setting: SettingId }) {
         onFocus={() => dispatchInfo({ type: "focus", setting })}
         onBlur={() => dispatchInfo({ type: "blur", setting })}
         onClick={() => dispatchInfo({ type: "press", setting })}
-        className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-2.5 after:content-['']"
+        className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle transition-colors hover:text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring aria-expanded:text-accent after:absolute after:-inset-2.5 after:content-['']"
       >
-        <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
+        <Icon icon={CircleHelp} size={16} />
       </button>
       {open &&
         createPortal(

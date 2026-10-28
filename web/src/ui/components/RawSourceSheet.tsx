@@ -26,9 +26,9 @@ export function RawSourceSheet({ state, phone, onClose }: { state: RawSourceStat
       onClose={onClose}
       dismissOnBackdrop
       placement={phone ? "fill" : "center"}
-      className={phone ? "" : "max-w-[960px]"}
+      className={phone ? "" : "max-w-sheet-wide"}
     >
-      <div data-raw-source="" data-raw-status={state.status} className="flex max-h-[85vh] min-h-0 flex-col">
+      <div data-raw-source="" data-raw-status={state.status} className="flex max-h-(--wn-sheet-max-h) min-h-0 flex-col">
         <SheetHeader title="View Original" onClose={onClose} touch={phone}>
           {state.status === "ready" && (
             <button

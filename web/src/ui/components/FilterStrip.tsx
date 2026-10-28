@@ -31,6 +31,7 @@ import { useRailMotion } from "./useRailMotion";
 import { filterIcon } from "../filterIcons";
 import { ensureIconInkStyles } from "../filterIconInk";
 import { NEUTRAL_FILTERS } from "../filterColors";
+import { Icon } from "./Icon";
 
 export type { PillItem } from "../rail";
 
@@ -251,15 +252,15 @@ export const FilterStrip = memo(function FilterStrip({
         // scroller, and the side padding matches the dock's insets.
         // Glass (touch and floating): each chip frosts what is behind its own box (the
         // frost is on the chip itself since 1.4), so the rail only needs room for the
-        // chips' soft shadow, which the scroller would otherwise clip: 20px more above
-        // and below, taken back with a negative margin, so it lays out exactly as before.
+        // chips' soft shadow, which the scroller would otherwise clip: `--wn-rail-bleed` more
+        // above and below, taken back with a negative margin, so it lays out exactly as before.
         // `--wn-rail-gap` is the gap between the chips. Their frost stops at each chip;
         // on the phone the gaps get only the rail's light haze (`.wn-rail-haze`).
         className={`wn-rail-scroller no-scrollbar relative flex items-center overflow-x-auto ${
           touch
-            ? "pointer-events-none my-[-20px] gap-(--wn-rail-gap) py-[28px] [--wn-rail-gap:0.5rem] pl-(--wn-dock-left) pr-(--wn-dock-right) scroll-px-(--wn-dock-inset) *:pointer-events-auto"
+            ? "pointer-events-none -my-(--wn-rail-bleed) gap-(--wn-rail-gap) py-[calc(var(--wn-rail-bleed)+0.5rem)] [--wn-rail-gap:0.5rem] pl-(--wn-dock-left) pr-(--wn-dock-right) scroll-px-(--wn-dock-inset) *:pointer-events-auto"
             : floating
-              ? "pointer-events-none my-[-20px] gap-(--wn-rail-gap) pl-0.5 pr-2 [--wn-rail-gap:0.375rem] py-[26px] *:pointer-events-auto"
+              ? "pointer-events-none -my-(--wn-rail-bleed) gap-(--wn-rail-gap) pl-0.5 pr-2 [--wn-rail-gap:0.375rem] py-[calc(var(--wn-rail-bleed)+0.375rem)] *:pointer-events-auto"
               : "gap-1"
         }`}
 
@@ -269,7 +270,7 @@ export const FilterStrip = memo(function FilterStrip({
           tall as the strip's own box, so a wheel, a swipe or a tap in a gap between two
           chips lands on the strip instead of falling through to the list under it (the
           scroller itself lets events through, for the shadow padding above and below the
-          chips: inset by exactly that padding, the `my-[-20px]` above). First in the rail so the chips paint over it and the CSS that finds the
+          chips: inset by exactly that padding, `--wn-rail-bleed`). First in the rail so the chips paint over it and the CSS that finds the
           first and last chip is undisturbed; sized in `update` above.
         */}
         {glass && (
@@ -277,7 +278,7 @@ export const FilterStrip = memo(function FilterStrip({
             ref={catcherRef}
             aria-hidden="true"
             data-rail-catcher=""
-            className="absolute left-0 top-[20px] bottom-[20px]"
+            className="absolute left-0 top-(--wn-rail-bleed) bottom-(--wn-rail-bleed)"
           />
         )}
 
@@ -302,7 +303,7 @@ export const FilterStrip = memo(function FilterStrip({
             type="button"
             data-rail-item=""
             onClick={onClear}
-            className={`${touch ? "wn-glass wn-liquid h-11 px-4" : floating ? "wn-glass wn-liquid h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-full text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring`}
+            className={`${touch ? "wn-glass wn-liquid h-11 px-4" : floating ? "wn-glass wn-liquid h-8 px-3" : "h-7 px-2.5 hover:bg-sheen"} shrink-0 rounded-ctl text-ui font-semibold text-ink-body transition-colors duration-150 hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring`}
           >
             <span>All</span>
           </button>
@@ -326,7 +327,7 @@ export const FilterStrip = memo(function FilterStrip({
             data-empty={count === 0 && !on ? "" : undefined}
             // The pill's identity only; the mode's recipe turns it into a fill.
             style={{ "--pill-h": hue.h, "--pill-s": hue.s } as React.CSSProperties}
-            className={`wn-pill relative flex shrink-0 items-center rounded-full ${glass ? "wn-chip-glass wn-liquid" : ""}`}
+            className={`wn-pill relative flex shrink-0 items-center rounded-ctl ${glass ? "wn-chip-glass wn-liquid" : ""}`}
           >
             <button
               type="button"
@@ -339,7 +340,7 @@ export const FilterStrip = memo(function FilterStrip({
               // Always set: a long label is truncated, and this is where it is whole.
               title={digit ? `${label} (${digit})` : label}
               aria-keyshortcuts={digit ?? undefined}
-              className={`relative flex ${tabHeight} items-center rounded-full text-ui whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              className={`relative flex ${tabHeight} items-center rounded-ctl text-ui whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                 touch ? "gap-2 px-4" : floating ? "gap-1.5 px-3.5" : "gap-1.5 px-2.5"
               }`}
             >
@@ -354,7 +355,7 @@ export const FilterStrip = memo(function FilterStrip({
                 label's ink.
               */}
               {id.kind === "builtin" && id.id !== "unread" && (() => {
-                const { Icon } = filterIcon(id.id);
+                const { Icon: Glyph } = filterIcon(id.id);
                 ensureIconInkStyles();
                 const neutral = NEUTRAL_FILTERS.has(id.id);
                 return (
@@ -365,7 +366,7 @@ export const FilterStrip = memo(function FilterStrip({
                     data-icon-neutral={neutral ? "" : undefined}
                     className={`${neutral ? "" : "wn-signal-ink "}-ml-0.5 ${touch ? "-mr-1" : "-mr-0.5"} inline-flex size-4 shrink-0 items-center justify-center`}
                   >
-                    <Icon size={16} strokeWidth={2} />
+                    <Icon icon={Glyph} size={16} />
                   </span>
                 );
               })()}
@@ -424,13 +425,13 @@ export const FilterStrip = memo(function FilterStrip({
             title="More filters"
             onClick={() => step(-1)}
             className={`pointer-events-auto relative flex h-7 items-center justify-center text-ink-icon transition-colors hover:text-ink ${
-              floating ? "wn-glass rounded-full" : "rounded-ctl hover:bg-surface-hover"
+              floating ? "wn-glass rounded-ctl" : "rounded-ctl hover:bg-surface-hover"
             }`}
             // Floating, nearly opaque: at the usual glass tint the chip passing under the
             // button read through it, its words cut by the chevron.
             style={{ width: STEP, ...(floating ? { "--wn-glass-text": "94%" } : {}) } as React.CSSProperties}
           >
-            <ChevronLeft size={16} strokeWidth={1.9} aria-hidden="true" />
+            <Icon icon={ChevronLeft} size={16} />
           </button>
         </div>
       )}
@@ -454,13 +455,13 @@ export const FilterStrip = memo(function FilterStrip({
             title="More filters"
             onClick={() => step(1)}
             className={`pointer-events-auto relative flex h-7 items-center justify-center text-ink-icon transition-colors hover:text-ink ${
-              floating ? "wn-glass rounded-full" : "rounded-ctl hover:bg-surface-hover"
+              floating ? "wn-glass rounded-ctl" : "rounded-ctl hover:bg-surface-hover"
             }`}
             // Floating, nearly opaque: at the usual glass tint the chip passing under the
             // button read through it, its words cut by the chevron.
             style={{ width: STEP, ...(floating ? { "--wn-glass-text": "94%" } : {}) } as React.CSSProperties}
           >
-            <ChevronRight size={16} strokeWidth={1.9} aria-hidden="true" />
+            <Icon icon={ChevronRight} size={16} />
           </button>
         </div>
       )}

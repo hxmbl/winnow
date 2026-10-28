@@ -70,6 +70,7 @@ import type { Mailbox } from "../../core/model/email";
 import { PILL_START, pillAfterScroll, pillOpened, pillOrder, type ReaderPillAction } from "../readerPill";
 import { PillSwipe, type StepDelta, type StepReach } from "../readerSwipe";
 import { AppMark } from "../AppMark";
+import { Icon, type IconSize } from "./Icon";
 
 /**
  * A smart filter that applies to the open message.
@@ -78,7 +79,7 @@ import { AppMark } from "../AppMark";
  * `ui/filterIcons`, so hovering says *why* Winnow thinks this.
  */
 function FilterTag({ id }: { id: BuiltinSmartFilter }) {
-  const { Icon, label, title } = filterIcon(id);
+  const { Icon: Glyph, label, title } = filterIcon(id);
   return (
     <span
       // `data-filter-tag` so tests can find these by what they *are*, not by `title`.
@@ -86,7 +87,7 @@ function FilterTag({ id }: { id: BuiltinSmartFilter }) {
       className="inline-flex items-center gap-1 text-meta font-medium text-ink-muted"
       title={title}
     >
-      <Icon size={12} strokeWidth={2} className="shrink-0 text-ink-subtle" aria-hidden="true" />
+      <Icon icon={Glyph} size={12} className="shrink-0 text-ink-subtle" />
       {label}
       <span className="sr-only"> — {title}</span>
     </span>
@@ -208,25 +209,24 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
     read: actions.onRead,
     star: actions.onStar,
   };
-  const ICON = { size: 16, strokeWidth: 1.9, "aria-hidden": true } as const;
   const icon = (action: ReaderAction) => {
     switch (action.id) {
       case "reply":
-        return <ReplyAll {...ICON} />;
+        return <Icon icon={ReplyAll} size={16} />;
       case "forward":
-        return <Forward {...ICON} />;
+        return <Icon icon={Forward} size={16} />;
       case "archive":
-        return mailbox === "inbox" ? <Archive {...ICON} /> : mailbox === "snoozed" ? <AlarmClockOff {...ICON} /> : <RotateCcw {...ICON} />;
+        return mailbox === "inbox" ? <Icon icon={Archive} size={16} /> : mailbox === "snoozed" ? <Icon icon={AlarmClockOff} size={16} /> : <Icon icon={RotateCcw} size={16} />;
       case "notSpam":
-        return <Undo2 {...ICON} />;
+        return <Icon icon={Undo2} size={16} />;
       case "snooze":
-        return <AlarmClock {...ICON} />;
+        return <Icon icon={AlarmClock} size={16} />;
       case "trash":
-        return <Trash2 {...ICON} />;
+        return <Icon icon={Trash2} size={16} />;
       case "read":
-        return unread ? <MailOpen {...ICON} /> : <Mail {...ICON} />;
+        return unread ? <Icon icon={MailOpen} size={16} /> : <Icon icon={Mail} size={16} />;
       case "star":
-        return <Star {...ICON} fill={starred ? "currentColor" : "none"} />;
+        return <Icon icon={Star} size={16} fill={starred ? "currentColor" : "none"} />;
     }
   };
   return (
@@ -238,7 +238,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
       // from the top (`Masthead`), so its centre line is 36px down. Matching its box
       // (10px top inset + 52px) puts these buttons on the same line instead of 12px
       // higher. Below lg the reader has the window to itself, so the plain 48px bar stays.
-      className="wn-reader-actions flex h-12 shrink-0 items-center gap-1 px-3 lg:box-content lg:h-[52px] lg:pt-2.5"
+      className="wn-reader-actions flex h-12 shrink-0 items-center gap-1 px-3 lg:box-content lg:h-13 lg:pt-2.5"
     >
       {onToggleSidebar && (
         <button
@@ -264,7 +264,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
         aria-keyshortcuts="Escape"
         className="wn-action relative flex h-8 w-8 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring lg:hidden"
       >
-        <X size={16} strokeWidth={2} aria-hidden="true" />
+        <Icon icon={X} size={16} />
         <span aria-hidden="true" className="wn-tip" data-tip="start">
           Back to the list<kbd className="wn-tip-key">Esc</kbd>
         </span>
@@ -290,7 +290,7 @@ function ActionBar({ starred, unread, mailbox, actions, view, onViewChange, hasH
           onUnsubscribe={actions.onUnsubscribe}
           onChangeFilters={actions.onChangeFilters}
           onViewOriginal={actions.onViewOriginal}
-          buttonClass="flex h-8 w-8 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          buttonClass="flex h-8 w-8 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         />
       </div>
     </div>
@@ -356,7 +356,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
   const ITEM = phone
     ? "flex min-h-11 w-full items-center gap-2.5 rounded-ctl px-3 text-left text-ui font-medium text-ink-body transition-colors active:bg-sheen focus-visible:bg-sheen focus-visible:outline-hidden"
     : "flex w-full items-center gap-2 rounded-ctl px-2.5 py-1.5 text-left text-meta font-medium text-ink-body transition-colors hover:bg-sheen focus-visible:bg-sheen focus-visible:outline-hidden";
-  const iconSize = phone ? 16 : 13;
+  const iconSize: IconSize = phone ? 20 : 16;
 
   return (
     <div ref={rootRef} className="relative">
@@ -370,7 +370,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
         onClick={() => setOpen((was) => !was)}
         className={buttonClass}
       >
-        {buttonContent ?? <MoreHorizontal size={15} strokeWidth={1.9} />}
+        {buttonContent ?? <Icon icon={MoreHorizontal} size={16} />}
       </button>
       {open && (
         <div
@@ -395,20 +395,14 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
                 onClick={() => choose(phone.onStar)}
                 className={ITEM}
               >
-                <Star
-                  size={iconSize}
-                  strokeWidth={1.9}
-                  aria-hidden="true"
-                  fill={phone.starred ? "currentColor" : "none"}
-                  className={phone.starred ? "text-(--wn-badge-starred)" : "text-ink-muted"}
-                />
+                <Icon icon={Star} size={iconSize} fill={phone.starred ? "currentColor" : "none"} className={phone.starred ? "text-(--wn-badge-starred)" : "text-ink-muted"} />
                 <span className="flex-1">{phone.starred ? "Unstar" : "Star"}</span>
               </button>
               <button type="button" role="menuitem" onClick={() => choose(phone.onRead)} className={ITEM}>
                 {phone.unread ? (
-                  <Mail size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+                  <Icon icon={Mail} size={iconSize} className="text-ink-muted" />
                 ) : (
-                  <MailOpen size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+                  <Icon icon={MailOpen} size={iconSize} className="text-ink-muted" />
                 )}
                 <span className="flex-1">{phone.unread ? "Mark read" : "Mark unread"}</span>
               </button>
@@ -418,7 +412,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
           <p className="px-2.5 pb-1 pt-1.5 text-meta font-semibold text-ink-subtle">
             Show as
           </p>
-          {bodyViewOptions(hasHtml).map(({ id, label, Icon }) => (
+          {bodyViewOptions(hasHtml).map(({ id, label, Icon: Glyph }) => (
             <button
               key={id}
               type="button"
@@ -427,27 +421,27 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
               onClick={() => choose(() => onViewChange(id))}
               className={ITEM}
             >
-              <Icon size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <Icon icon={Glyph} size={iconSize} className="text-ink-muted" />
               <span className="flex-1">{label}</span>
-              {view === id && <Check size={iconSize} strokeWidth={2.2} aria-hidden="true" />}
+              {view === id && <Icon icon={Check} size={iconSize} />}
             </button>
           ))}
           {onViewOriginal && (
             <button type="button" role="menuitem" data-reader-view-original="" onClick={() => choose(onViewOriginal)} className={ITEM}>
-              <FileCode2 size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <Icon icon={FileCode2} size={iconSize} className="text-ink-muted" />
               <span className="flex-1">View Original</span>
             </button>
           )}
           <div className="my-1 h-px bg-divider" aria-hidden="true" />
           {onChangeFilters && (
             <button type="button" role="menuitem" data-reader-change-filters="" onClick={() => choose(onChangeFilters)} className={ITEM}>
-              <ListFilter size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <Icon icon={ListFilter} size={iconSize} className="text-ink-muted" />
               <span className="flex-1">Change smart filters…</span>
             </button>
           )}
           {onUnsubscribe && (
             <button type="button" role="menuitem" data-reader-unsubscribe="" onClick={() => choose(onUnsubscribe)} className={ITEM}>
-              <MailMinus size={iconSize} strokeWidth={1.9} aria-hidden="true" className="text-ink-muted" />
+              <Icon icon={MailMinus} size={iconSize} className="text-ink-muted" />
               <span className="min-w-0 flex-1 truncate">Unsubscribe from {senderName}</span>
             </button>
           )}
@@ -458,7 +452,7 @@ function MoreMenu({ view, onViewChange, hasHtml, senderName, onBlockSender, onUn
             title="Everything from this sender disappears from every folder. Bring it back in Settings."
             className={`${ITEM} hover:bg-danger-wash hover:text-danger`}
           >
-            <Ban size={iconSize} strokeWidth={1.9} aria-hidden="true" />
+            <Icon icon={Ban} size={iconSize} />
             <span className="min-w-0 flex-1 truncate">Hide everything from {senderName}</span>
           </button>
         </div>
@@ -609,19 +603,18 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
   const trashLabel = mailbox === "trash" ? "Delete permanently" : "Move to trash";
 
   const BUTTON =
-    "flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-ink-body transition-colors active:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
-  const ICON = { size: 21, strokeWidth: 1.8, "aria-hidden": true } as const;
+    "flex h-12 w-12 shrink-0 items-center justify-center rounded-ctl text-ink-body transition-colors active:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
   const button = (id: ReaderPillAction) => {
     switch (id) {
       case "archive":
         return inSpam ? (
           <button key={id} type="button" onClick={actions.onNotSpam} aria-label="Not spam — move to inbox" title="Not spam" className={BUTTON}>
-            <Undo2 {...ICON} />
+            <Icon icon={Undo2} size={20} />
           </button>
         ) : (
           <button key={id} type="button" onClick={actions.onArchive} aria-label={archiveLabel} title={archiveLabel} className={BUTTON}>
-            {mailbox === "inbox" ? <Archive {...ICON} /> : <RotateCcw {...ICON} />}
+            {mailbox === "inbox" ? <Icon icon={Archive} size={20} /> : <Icon icon={RotateCcw} size={20} />}
           </button>
         );
       case "trash":
@@ -636,13 +629,13 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
             data-destructive={mailbox === "trash" ? "" : undefined}
             className={`${BUTTON} ${mailbox === "trash" ? "text-danger!" : ""}`}
           >
-            <Trash2 {...ICON} />
+            <Icon icon={Trash2} size={20} />
           </button>
         );
       case "reply":
         return (
           <button key={id} type="button" onClick={actions.onReply} aria-label="Reply to all" title="Reply" className={BUTTON}>
-            <CornerUpLeft {...ICON} />
+            <Icon icon={CornerUpLeft} size={20} />
           </button>
         );
       case "snooze":
@@ -658,13 +651,13 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
             title="Snooze"
             className={BUTTON}
           >
-            <AlarmClock {...ICON} />
+            <Icon icon={AlarmClock} size={20} />
           </button>
         );
       case "forward":
         return (
           <button key={id} type="button" onClick={actions.onForward} aria-label="Forward" title="Forward" className={BUTTON}>
-            <Forward {...ICON} />
+            <Icon icon={Forward} size={20} />
           </button>
         );
       case "more":
@@ -681,7 +674,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
             onViewOriginal={actions.onViewOriginal}
             buttonClass={BUTTON}
             phone={{ starred, unread, onStar: actions.onStar, onRead: actions.onRead, leftHanded }}
-            buttonContent={<MoreHorizontal {...ICON} />}
+            buttonContent={<Icon icon={MoreHorizontal} size={20} />}
           />
         );
     }
@@ -701,7 +694,7 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
         role="toolbar"
         aria-label="Message actions"
         data-reader-pill-swipe={onStep ? "" : undefined}
-        className="wn-glass wn-glass-behind wn-liquid wn-reader-pill pointer-events-auto relative h-(--wn-dock-h) rounded-full"
+        className="wn-glass wn-glass-behind wn-liquid wn-reader-pill pointer-events-auto relative h-(--wn-dock-h) rounded-ctl"
         style={{ "--wn-pill-count": snoozable ? 6 : 5 } as React.CSSProperties}
         {...swipe.handlers}
       >
@@ -720,11 +713,11 @@ function ReaderPill({ starred, unread, mailbox, actions, view, onViewChange, has
           tabIndex={collapsed ? undefined : -1}
           aria-hidden={collapsed ? undefined : true}
           onClick={() => setScroll(pillOpened)}
-          className={`wn-reader-pill-handle absolute inset-y-0 flex w-(--wn-dock-h) items-center justify-center rounded-full text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
+          className={`wn-reader-pill-handle absolute inset-y-0 flex w-(--wn-dock-h) items-center justify-center rounded-ctl text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
             leftHanded ? "left-0" : "right-0"
           }`}
         >
-          <MoreHorizontal size={22} strokeWidth={2} aria-hidden="true" />
+          <Icon icon={MoreHorizontal} size={20} />
         </button>
       </div>
     </div>
@@ -875,7 +868,7 @@ export function Reader({
   if (!email) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-        <MailOpen size={24} strokeWidth={1.5} className="text-ink-subtle" aria-hidden="true" />
+        <Icon icon={MailOpen} size={24} className="text-ink-subtle" />
         <p className="text-ui font-medium text-ink-body">Nothing selected</p>
         <p className="max-w-[24rem] text-meta text-ink-subtle">
           Pick something from the list, or press{" "}
@@ -943,9 +936,9 @@ export function Reader({
             data-reader-back=""
             onClick={onClose}
             aria-label="Back to the list"
-            className="-ml-3 flex h-11 w-9 shrink-0 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="-ml-3 flex h-11 w-9 shrink-0 items-center justify-center rounded-ctl text-accent transition-colors active:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            <ChevronLeft size={26} strokeWidth={2.1} aria-hidden="true" />
+            <Icon icon={ChevronLeft} size={20} />
           </button>
         )}
         <button
@@ -1026,7 +1019,7 @@ export function Reader({
           {offerImages && (
             <div className="mb-5 max-w-[68ch] rounded-pane bg-sheen px-4 py-3.5">
               <p className="flex items-center gap-2 text-ui font-semibold text-ink">
-                <ImageOff size={14} strokeWidth={1.9} className="text-ink-muted" aria-hidden="true" />
+                <Icon icon={ImageOff} size={16} className="text-ink-muted" />
                 Images are off
               </p>
               <p className="mt-1 text-meta leading-relaxed text-ink-muted">
@@ -1122,9 +1115,9 @@ export function Reader({
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <p className="flex items-center gap-2 text-meta font-medium text-ink-muted">
                 {imagesAllowed ? (
-                  <Eye size={13} strokeWidth={1.9} aria-hidden="true" />
+                  <Icon icon={Eye} size={12} />
                 ) : (
-                  <EyeOff size={13} strokeWidth={1.9} aria-hidden="true" />
+                  <Icon icon={EyeOff} size={12} />
                 )}
                 {blocked} remote {blocked === 1 ? "thing is" : "things are"}{" "}
                 {imagesAllowed ? "loading" : "withheld"} · scripts and links are blocked
@@ -1178,7 +1171,7 @@ export function Reader({
               {whyHere}
               {actions.onChangeFilters && (
                 <div className="flex items-center gap-2">
-                  <ListFilter size={13} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-ink-subtle" />
+                  <Icon icon={ListFilter} size={12} className="shrink-0 text-ink-subtle" />
                   <p className="text-meta text-ink-subtle">Not where it belongs?</p>
                   <button
                     type="button"

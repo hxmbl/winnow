@@ -20,6 +20,7 @@ import { isTauri } from "../platform";
 import { AppMark } from "./AppMark";
 import { ErrorText } from "./components/ErrorText";
 import { buttonClass } from "./button";
+import { Icon } from "./components/Icon";
 
 type Props = {
   /** Called to start sign-in. Resolves or throws; the throw is rendered below. */
@@ -53,7 +54,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
 
   return (
     <div className="flex h-dvh items-center justify-center bg-canvas px-5 py-10">
-      <div data-select-scope="" className="selectable w-full max-w-[400px]">
+      <div data-select-scope="" className="selectable w-full max-w-sheet-sm">
         <div className="flex flex-col items-center text-center">
           <AppMark size={48} />
           <h1 className="mt-4 text-title font-semibold text-ink">Winnow</h1>
@@ -75,7 +76,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
               disabled={busy}
               className={buttonClass("primary", "touch", "mt-8 w-full gap-2")}
             >
-              <LogIn size={15} strokeWidth={2} aria-hidden="true" />
+              <Icon icon={LogIn} size={16} />
               {busy ? "Waiting for Google…" : needsSetup ? "Set up Google sign-in" : "Continue with Google"}
             </button>
             {needsSetup && (
@@ -91,16 +92,11 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
                 className="mt-3 rounded-pane border border-hairline bg-danger-wash px-4 py-3 text-left"
               >
                 <div className="flex items-start gap-2 text-ui font-semibold text-ink">
-                  <AlertCircle
-                    size={15}
-                    strokeWidth={2}
-                    className="mt-px shrink-0 text-danger"
-                    aria-hidden="true"
-                  />
+                  <Icon icon={AlertCircle} size={16} className="mt-px shrink-0 text-danger" />
                   <ErrorText text={failure.message} />
                 </div>
                 {failure.hint && (
-                  <div className="mt-1 pl-[23px] text-meta text-ink-muted">
+                  <div className="mt-1 pl-6 text-meta text-ink-muted">
                     <ErrorText text={failure.hint} copyable={false} />
                   </div>
                 )}
@@ -140,7 +136,7 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
                   onClick={onTryDemo}
                   className={buttonClass("secondary", "touch", "w-full gap-2")}
                 >
-                  <Sparkles size={15} strokeWidth={1.9} aria-hidden="true" />
+                  <Icon icon={Sparkles} size={16} />
                   Look around the demo inbox
                 </button>
                 <p className="mt-2 text-center text-meta text-ink-subtle">

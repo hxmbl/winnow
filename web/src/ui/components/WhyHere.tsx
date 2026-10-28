@@ -6,6 +6,7 @@
 
 import type { FilterReason } from "../../core/learn/filterExplain";
 import { filterIcon } from "../filterIcons";
+import { Icon } from "./Icon";
 
 export function WhyHere({
   reasons,
@@ -21,10 +22,12 @@ export function WhyHere({
       <p className="text-meta font-semibold text-ink-muted">Why it&rsquo;s here</p>
       <ul className="flex flex-col gap-0.5">
         {reasons.map((reason) => {
-          const { Icon } = filterIcon(reason.filter);
+          const { Icon: Glyph } = filterIcon(reason.filter);
           return (
             <li key={reason.filter} data-why-line={reason.filter} className="flex items-start gap-1.5 text-meta text-ink-body">
-              <Icon size={12} strokeWidth={2} className="mt-[3px] shrink-0 text-ink-subtle" />
+              <span className="flex h-[1lh] shrink-0 items-center">
+                <Icon icon={Glyph} size={12} className="text-ink-subtle" />
+              </span>
               <span className="min-w-0">
                 In <span className="font-medium text-ink">{reason.label}</span> because: {reason.reasons.join(", ")}
                 {reason.scores && reason.scores.length > 0 && (

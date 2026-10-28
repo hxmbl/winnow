@@ -12,6 +12,7 @@ import { Check, X } from "lucide-react";
 import { DRIVE_CONSENT } from "../../core/gmail/drive";
 import { Sheet } from "./Overlay";
 import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 export function DriveConsent({
   files,
@@ -35,7 +36,7 @@ export function DriveConsent({
       onEscape={onCancel}
       dismissOnBackdrop={false}
       initialFocus={cancelRef}
-      className="w-full max-w-[420px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+      className="w-full max-w-sheet-sm rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <div data-drive-consent="">
         <h2 className="text-read font-semibold text-ink">{DRIVE_CONSENT.title}</h2>
@@ -49,7 +50,7 @@ export function DriveConsent({
         <ul className="mt-1 flex flex-col gap-1">
           {DRIVE_CONSENT.allows.map((line) => (
             <li key={line} className="flex items-start gap-2 text-ui text-ink-body">
-              <Check size={15} strokeWidth={2.2} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+              <Icon icon={Check} size={16} className="mt-0.5 shrink-0 text-accent" />
               {line}
             </li>
           ))}
@@ -58,7 +59,7 @@ export function DriveConsent({
         <ul className="mt-1 flex flex-col gap-1">
           {DRIVE_CONSENT.doesNot.map((line) => (
             <li key={line} className="flex items-start gap-2 text-ui text-ink-body">
-              <X size={15} strokeWidth={2.2} aria-hidden="true" className="mt-0.5 shrink-0 text-ink-icon" />
+              <Icon icon={X} size={16} className="mt-0.5 shrink-0 text-ink-icon" />
               {line}
             </li>
           ))}

@@ -10,6 +10,7 @@
 
 import { Check, Copy } from "lucide-react";
 import { formatCode } from "../../core/mail/otp";
+import { Icon } from "./Icon";
 
 /** Every event a row listens to for drag-select, long-press and its context menu. */
 const stop = (event: React.SyntheticEvent) => event.stopPropagation();
@@ -73,9 +74,9 @@ export function CodeChip({
       className={`absolute bottom-1 ${draft ? "right-3" : "right-11"} flex h-6 items-center gap-1 rounded-ctl border border-control-border bg-surface px-2 text-meta font-medium tabular-nums text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:none)]:bottom-0 [@media(hover:none)]:h-8`}
     >
       {copied ? (
-        <Check size={12} strokeWidth={2.4} aria-hidden="true" className="text-success" />
+        <Icon icon={Check} size={12} className="text-success" />
       ) : (
-        <Copy size={12} strokeWidth={2} aria-hidden="true" />
+        <Icon icon={Copy} size={12} />
       )}
       <span aria-hidden="true">{copied ? "Copied" : codeChipLabel(code)}</span>
     </button>
@@ -112,7 +113,7 @@ export function CodeBar({
           copied ? "bg-surface-active text-ink" : "bg-accent text-on-accent hover:opacity-90"
         }`}
       >
-        {copied ? <Check size={14} strokeWidth={2.4} aria-hidden="true" /> : <Copy size={14} strokeWidth={2} aria-hidden="true" />}
+        {copied ? <Icon icon={Check} size={16} /> : <Icon icon={Copy} size={16} />}
         <span aria-hidden="true">{copied ? "Copied" : "Copy"}</span>
       </button>
       <div data-code-value="" className="ml-auto min-w-0 text-right">

@@ -41,7 +41,7 @@ function Inlines({ nodes, onOpenLink }: { nodes: Inline[]; onOpenLink: (url: str
             return <span key={index}>{node.text}</span>;
           case "code":
             return (
-              <code key={index} className="rounded-ctl bg-surface-sunken px-1 py-0.5 font-mono text-[0.92em] text-ink-body">
+              <code key={index} className="rounded-ctl bg-surface-sunken px-1 py-0.5 font-mono text-ink-body">
                 {node.text}
               </code>
             );
@@ -130,7 +130,7 @@ function Blocks({ blocks, onOpenLink }: { blocks: Block[]; onOpenLink: (url: str
                   <thead>
                     <tr>
                       {block.header.map((cell, cellIndex) => (
-                        <th key={cellIndex} className="border-b border-hairline py-1 pr-3 font-semibold text-ink">
+                        <th key={cellIndex} className="border-b border-hairline-soft py-1 pr-3 font-semibold text-ink">
                           <Inlines nodes={cell} onOpenLink={onOpenLink} />
                         </th>
                       ))}
@@ -140,7 +140,7 @@ function Blocks({ blocks, onOpenLink }: { blocks: Block[]; onOpenLink: (url: str
                     {block.rows.map((row, rowIndex) => (
                       <tr key={rowIndex}>
                         {row.map((cell, cellIndex) => (
-                          <td key={cellIndex} className="border-b border-hairline py-1 pr-3 align-top">
+                          <td key={cellIndex} className="border-b border-hairline-soft py-1 pr-3 align-top">
                             <Inlines nodes={cell} onOpenLink={onOpenLink} />
                           </td>
                         ))}
@@ -168,8 +168,8 @@ export function WhatsNew(props: Props) {
       onClose={props.onClose}
       initialFocus={close}
       placement={props.phone ? "bottom" : "center"}
-      className={`flex w-full max-w-[620px] flex-col overflow-hidden border border-hairline bg-chrome shadow-lift ${
-        props.phone ? "max-h-[85vh] rounded-t-pane" : "max-h-[80vh] rounded-pane"
+      className={`flex max-h-(--wn-sheet-max-h) w-full max-w-sheet-lg flex-col overflow-hidden border border-hairline bg-chrome shadow-lift ${
+        props.phone ? "rounded-t-pane" : "rounded-pane"
       }`}
     >
       <div data-whats-new={state.status} className="flex min-h-0 flex-1 flex-col">
@@ -222,7 +222,7 @@ export function WhatsNew(props: Props) {
               </section>
             ))}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-hairline px-5 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-hairline-soft px-5 py-3">
           <button
             ref={close}
             type="button"

@@ -33,7 +33,7 @@ export function DriveGrantNeeded({
       onEscape={onCancel}
       dismissOnBackdrop={false}
       initialFocus={cancelRef}
-      className="w-full max-w-[420px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+      className="w-full max-w-sheet-sm rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <div data-drive-grant-needed="">
         <h2 className="text-read font-semibold text-ink">{DRIVE_GRANT_NEEDED.title}</h2>

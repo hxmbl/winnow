@@ -69,6 +69,7 @@ import {
   windowKey,
 } from "../windowing";
 import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 /**
  * One entry in the windowed list: a day header, or a message row.
@@ -307,10 +308,11 @@ const Row = memo(function Row({
         The unread mark, in a gutter of its own so read and unread rows line up. Outside
         every button, so it is never a click target of its own.
       */}
+      {/* The dot is centred in the avatar's own box (`mt-0.5 h-8`), not nudged onto it. */}
       <span
         aria-hidden="true"
-        className={`mt-[14px] h-2 w-2 shrink-0 rounded-full transition-colors duration-150 ${
-          unread ? "bg-accent" : "bg-transparent"
+        className={`mt-0.5 flex h-8 w-2 shrink-0 items-center before:h-2 before:w-2 before:rounded-full before:transition-colors before:duration-150 before:content-[''] ${
+          unread ? "before:bg-accent" : "before:bg-transparent"
         }`}
       />
 
@@ -366,7 +368,7 @@ const Row = memo(function Row({
             data-avatar="check"
             className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-on-accent"
           >
-            <Check size={16} strokeWidth={2.6} />
+            <Icon icon={Check} size={16} />
           </span>
         ) : selectMode ? (
           <span
@@ -404,7 +406,12 @@ const Row = memo(function Row({
         className="flex min-w-0 flex-1 items-start rounded-ctl text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <span className="min-w-0 flex-1">
-          <span className="flex items-baseline justify-between gap-3">
+          {/*
+            The first line is one 24px box (`h-6`), the same box as the star beside the row
+            button, so the name, the time and the star share a centre instead of the star
+            being nudged onto it.
+          */}
+          <span className="flex h-6 items-center justify-between gap-3">
             <span className="flex min-w-0 items-baseline gap-1.5">
               {/*
                 Weight means unread, and only unread. A read row is regular weight
@@ -472,9 +479,9 @@ const Row = memo(function Row({
         actually have a pointer, so a phone shows it outright and a mouse still gets a
         quiet list.
 
-        Its centre sits on the time's centre: `mt-[-0.5px]` for the 24px box, and on a
-        touch device the 44px target keeps that centre with `mt-[-10.5px]`. The code chip
-        does the same (`CodeCopy.tsx`).
+        Its 24px box is the first line's box (`h-6`), so it shares the time's centre with no
+        nudge; on a touch device the 44px target keeps that centre with `-mt-2.5` (half the
+        extra 20px).
       */}
       {/* A draft has no star: it is not mail yet. */}
       {!draft && (
@@ -483,7 +490,7 @@ const Row = memo(function Row({
         onClick={() => onToggleStar(email.id)}
         aria-label={email.starred ? "Unstar" : "Star"}
         aria-pressed={email.starred}
-        className="mt-[-0.5px] flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle [@media(hover:none)]:-mx-2.5 [@media(hover:none)]:-mb-2.5 [@media(hover:none)]:mt-[-10.5px] [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ctl text-ink-subtle [@media(hover:none)]:-mx-2.5 [@media(hover:none)]:-mb-2.5 [@media(hover:none)]:-mt-2.5 [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 transition-opacity hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:aria-pressed:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
       >
         {/*
           The star is a sprite rather than a lucide icon so the filled and outline states
@@ -494,12 +501,12 @@ const Row = memo(function Row({
         */}
         <svg
           viewBox="0 0 24 24"
-          width={14}
-          height={14}
+          width={16}
+          height={16}
           aria-hidden="true"
           fill={email.starred ? "currentColor" : "none"}
           stroke="currentColor"
-          strokeWidth={1.9}
+          strokeWidth={2}
           className={email.starred ? "text-(--wn-badge-starred)" : ""}
         >
           <path d="m12 3 2.6 5.6 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.4l6-.8Z" strokeLinejoin="round" />
@@ -517,7 +524,7 @@ const Row = memo(function Row({
  * already lists every judgement in words.)
  */
 function SignalIcon({ signal, filter }: { signal: RowSignal; filter: BuiltinSmartFilter }) {
-  const { Icon } = filterIcon(filter);
+  const { Icon: Glyph } = filterIcon(filter);
   ensureIconInkStyles();
   return (
     <span
@@ -528,24 +535,23 @@ function SignalIcon({ signal, filter }: { signal: RowSignal; filter: BuiltinSmar
       data-row-signal={filter}
       className={`inline-flex size-4 shrink-0 items-center justify-center self-center ${signal.danger ? "text-danger" : ""}`}
     >
-      <Icon size={16} strokeWidth={2} className="shrink-0" />
+      <Icon icon={Glyph} size={16} className="shrink-0" />
     </span>
   );
 }
 
 /** The icon for a swipe action, as the backdrop shows it. */
 function SwipeIcon({ action }: { action: SwipeAction }) {
-  const props = { size: 20, strokeWidth: 2.2, "aria-hidden": true } as const;
   switch (action) {
     case "trash":
     case "discard":
-      return <Trash2 {...props} />;
+      return <Icon icon={Trash2} size={20} />;
     case "restore":
-      return <ArchiveRestore {...props} />;
+      return <Icon icon={ArchiveRestore} size={20} />;
     case "markRead":
-      return <MailOpen {...props} />;
+      return <Icon icon={MailOpen} size={20} />;
     case "markUnread":
-      return <Mail {...props} />;
+      return <Icon icon={Mail} size={20} />;
   }
 }
 
@@ -628,7 +634,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   // the loudest thing in a list that is meant to be read quietly. Inset to the sender
   // column, so the label sits over the names rather than over the unread gutter.
   return (
-    <div className="flex items-baseline gap-2 pb-1 pl-[68px] pr-3 pt-4 text-meta">
+    <div className="flex items-baseline gap-2 pb-1 pl-(--wn-sender-col) pr-3 pt-4 text-meta">
       <span className="font-semibold text-ink-muted">{label}</span>
       <span className="tabular-nums text-ink-subtle">{count}</span>
     </div>
@@ -2090,10 +2096,11 @@ function MessageList({
           <div
             data-sticky-day=""
             data-floating=""
-            className="pointer-events-none absolute inset-x-0 z-10 px-1.5 pl-[56px] pt-1"
+            // The pill has its own px-3, so it starts that much before the column.
+            className="pointer-events-none absolute inset-x-0 z-10 px-1.5 pl-[calc(var(--wn-sender-col)-var(--wn-row-pad))] pt-1"
             style={{ top: topInset }}
           >
-            <span className="wn-glass inline-flex h-7 items-center gap-2 rounded-full px-3 text-meta">
+            <span className="wn-glass inline-flex h-7 items-center gap-2 rounded-ctl px-3 text-meta">
               <span className="font-semibold text-ink-muted">{stickyHeader.label}</span>
               <span className="tabular-nums text-ink-subtle">{stickyHeader.count}</span>
             </span>

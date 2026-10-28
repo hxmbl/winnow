@@ -43,6 +43,7 @@ import {
   scrimLayers,
   scrimMask,
 } from "../sidebarOverlay";
+import { Icon } from "./Icon";
 
 /**
  * Keyboard focus in the sidebar: a real `outline`, drawn 2px *inside* the button.
@@ -123,17 +124,17 @@ function NavSections({
   // On the phone's panel: 48px rows, an icon and a larger label, and the current one on
   // a pill, as in the reference (Linear's Android menu). The desktop's rows are as before.
   const row = touch
-    ? `flex min-h-12 items-center gap-3.5 rounded-full px-3.5 py-2 text-left text-read transition-colors ${SIDEBAR_FOCUS}`
+    ? `flex min-h-12 items-center gap-3.5 rounded-ctl px-3.5 py-2 text-left text-read transition-colors ${SIDEBAR_FOCUS}`
     : `px-2.5 py-1.5 flex items-center gap-2 rounded-ctl text-left text-ui transition-colors ${SIDEBAR_FOCUS}`;
   const idle = touch ? "text-ink-body active:bg-sheen" : "text-ink-body hover:bg-surface-hover";
   const on = touch
-    ? "bg-[color-mix(in_srgb,var(--wn-ink)_10%,transparent)] font-medium text-ink"
+    ? "bg-surface-active font-medium text-ink"
     : "bg-surface-active font-medium text-ink";
   const count = "ml-auto shrink-0 text-meta tabular-nums";
-  const icon = (id: Mailbox, current: boolean) => {
+  const icon = (id: Mailbox) => {
     if (!touch) return null;
-    const Icon = MAILBOX_ICON[id];
-    return <Icon size={20} strokeWidth={current ? 2.1 : 1.8} aria-hidden="true" className="shrink-0" />;
+    const Glyph = MAILBOX_ICON[id];
+    return <Icon icon={Glyph} size={20} className="shrink-0" />;
   };
 
   const inboxCurrent = mailbox === "inbox" && !filtering;
@@ -160,7 +161,7 @@ function NavSections({
             // Expand chevron sits there, on top of the panel, in the place it opened from.
             className={`${row} ${inboxCurrent ? on : idle} ${touch ? "w-2/3" : "w-full"}`}
           >
-            {icon("inbox", inboxCurrent)}
+            {icon("inbox")}
             <span className="min-w-0 flex-1 truncate">Inbox</span>
             <span className={`${count} ${inboxCurrent ? "text-accent" : "text-ink-subtle"}`}>{inboxCount}</span>
           </button>
@@ -192,7 +193,7 @@ function NavSections({
                     }}
                     className={`${row} ${current ? on : idle} w-full`}
                   >
-                    {icon(folder.id, current)}
+                    {icon(folder.id)}
                     <span className="min-w-0 flex-1 truncate">{folder.label}</span>
                     {folder.unread > 0 && (
                       <span className={`${count} ${current ? "text-accent" : "text-ink-subtle"}`}>{folder.unread}</span>
@@ -287,7 +288,7 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
           <span className="block truncate text-meta text-ink-subtle">{detail}</span>
         </span>
         {/* The account switcher's chevron, as in the reference: this row opens a menu. */}
-        {props.touch && <ChevronsUpDown size={16} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-ink-subtle" />}
+        {props.touch && <Icon icon={ChevronsUpDown} size={16} className="shrink-0 text-ink-subtle" />}
       </button>
       <button
         type="button"
@@ -301,11 +302,11 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
         data-nav-settings=""
         className={`flex shrink-0 items-center justify-center text-ink-icon transition-colors hover:text-ink ${SIDEBAR_FOCUS} ${
           props.touch
-            ? "h-12 w-12 justify-self-center rounded-full bg-[color-mix(in_srgb,var(--wn-ink)_8%,transparent)] active:bg-[color-mix(in_srgb,var(--wn-ink)_14%,transparent)]"
+            ? "h-12 w-12 justify-self-center rounded-ctl bg-sheen active:bg-surface-active"
             : "h-8 w-8 rounded-ctl hover:bg-surface-hover"
         }`}
       >
-        <Settings size={props.touch ? 20 : 17} strokeWidth={1.8} aria-hidden="true" />
+        <Icon icon={Settings} size={props.touch ? 20 : 16} />
       </button>
       {anchor && (
         <Menu
@@ -711,7 +712,7 @@ export function Sidebar({ open, onClose, touch, ...props }: SidebarProps) {
             ref={scrollRef}
             data-sidebar-scroll=""
             // On the phone the bottom padding puts the Inbox row's middle on the pill's.
-            className={`thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 ${touch ? "pb-[5px] pt-2" : "pb-2"}`}
+            className={`thin-scroll min-h-0 overflow-y-auto overscroll-contain px-1.5 ${touch ? "pb-1 pt-2" : "pb-2"}`}
           >
             <NavSections {...props} touch={touch} onNavigate={onClose} />
           </div>

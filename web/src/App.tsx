@@ -186,6 +186,7 @@ import { alreadyAddedMessage } from "./ui/accounts";
 import { exitRows } from "./ui/rowExit";
 import { isEditingElement } from "./ui/sidebarOverlay";
 import { buttonClass } from "./ui/button";
+import { Icon } from "./ui/components/Icon";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -4223,7 +4224,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 // control on the list side, and the accent means that one primary action.
                 className={buttonClass("secondary", "sm", "max-sm:min-h-11")}
               >
-                <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
+                <Icon icon={LogIn} size={12} />
                 {demoCta}
               </button>
             ) : (
@@ -4238,12 +4239,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 data-sync-button=""
                 className="flex shrink-0 items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-meta font-medium text-ink-body transition-colors hover:bg-sheen hover:text-ink disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
-                <RefreshCw
-                  size={12}
-                  strokeWidth={2.2}
-                  className={snapshot.syncing ? "animate-spin" : ""}
-                  aria-hidden="true"
-                />
+                <Icon icon={RefreshCw} size={12} className={snapshot.syncing ? "animate-spin" : ""} />
                 {sync.button}
               </button>
             )}
@@ -4270,7 +4266,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         data-demo-cta={resumable ? "resume" : "connect"}
         className={buttonClass("secondary", "touch")}
       >
-        <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
+        <Icon icon={LogIn} size={12} />
         {demoCta}
       </button>
     </div>

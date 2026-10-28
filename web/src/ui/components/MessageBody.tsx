@@ -44,6 +44,7 @@ import {
 import type { Email } from "../../core/model/email";
 import { fitScale, overflowAfterFit } from "../emailFit";
 import { scopeSenderCss, sheetScope } from "../../core/mail/scopedSheet";
+import { Icon } from "./Icon";
 
 /**
  * Which of the forms a message body is being shown in.
@@ -448,7 +449,7 @@ function Proxied({ email, document, fetched, blocked }: {
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <p className="flex items-center gap-2 text-meta font-medium text-ink-muted">
-          <Server size={13} strokeWidth={1.9} aria-hidden="true" />
+          <Icon icon={Server} size={12} />
           {fetched} {fetched === 1 ? "image" : "images"} fetched by Winnow&rsquo;s server,
           not by your browser
           {blocked > 0 && ` · ${blocked} withheld`}
@@ -504,9 +505,9 @@ function DarkToggle({ original, onToggle }: { original: boolean; onToggle: () =>
         aria-pressed={original}
         title={label}
         onClick={onToggle}
-        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-meta font-medium text-ink-muted transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="flex items-center gap-1.5 rounded-ctl px-2.5 py-1 text-meta font-medium text-ink-muted transition-colors hover:bg-sheen hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        {original ? <Moon size={13} strokeWidth={1.9} aria-hidden="true" /> : <Sun size={13} strokeWidth={1.9} aria-hidden="true" />}
+        {original ? <Icon icon={Moon} size={12} /> : <Icon icon={Sun} size={12} />}
         {label}
       </button>
     </div>
