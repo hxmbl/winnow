@@ -24,6 +24,7 @@ import { VERSION_TOGGLE_LABEL, logoPressed, versionText, type LogoView } from ".
 import { shortcutHint } from "../../core/mail/keybinds";
 import { FilterStrip, type PillItem } from "./FilterStrip";
 import type { FilterId } from "../../core/model/signals";
+import { buttonClass } from "../button";
 
 export type MastheadProps = {
   searchQuery: string;
@@ -257,7 +258,7 @@ export function Masthead({
             onClick={onCompose}
             aria-label="Compose"
             title={shortcutHint("Compose", "compose")}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring lg:px-3.5"
+            className={buttonClass("primary", "md", "max-lg:w-9 max-lg:px-0")}
           >
             <SquarePen size={16} strokeWidth={2} aria-hidden="true" />
             <span className="hidden lg:inline">Compose</span>

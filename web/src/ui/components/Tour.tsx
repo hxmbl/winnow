@@ -27,6 +27,7 @@ import {
   type CardPlacement,
   type TourStep,
 } from "../tour";
+import { buttonClass } from "../button";
 
 export type TourEnd = "skip" | "done" | "connect";
 
@@ -319,7 +320,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                     type="button"
                     data-tour-explore=""
                     onClick={() => end("done")}
-                    className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                    className={buttonClass("secondary", "md", "max-sm:min-h-11")}
                   >
                     {explore.secondary}
                   </button>
@@ -328,7 +329,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                   type="button"
                   data-tour-primary={connectLabel === null ? "done" : "connect"}
                   onClick={() => end(connectLabel === null ? "done" : "connect")}
-                  className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                  className={buttonClass("primary", "md", "max-sm:min-h-11")}
                 >
                   {explore.primary}
                 </button>
@@ -340,7 +341,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                     type="button"
                     data-tour-back=""
                     onClick={() => go("back")}
-                    className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                    className={buttonClass("secondary", "md", "max-sm:min-h-11")}
                   >
                     Back
                   </button>
@@ -349,7 +350,7 @@ export function Tour({ steps, connectLabel, onMenu, onConnect, onEnd }: TourProp
                   type="button"
                   data-tour-next=""
                   onClick={() => go("next")}
-                  className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+                  className={buttonClass("primary", "md", "max-sm:min-h-11")}
                 >
                   Next
                 </button>

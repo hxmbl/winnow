@@ -194,7 +194,7 @@ export function SelectMenu<T extends string | number>({
             openAt(selectedIndex);
           }
         }}
-        className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-control-border bg-surface pl-3 pr-2 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 aria-expanded:bg-surface-hover max-sm:h-10 max-sm:pl-3.5"
+        className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-ctl border border-control-border bg-surface pl-3 pr-2 text-meta font-medium text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 aria-expanded:bg-surface-hover max-sm:h-10 max-sm:pl-3.5"
       >
         {current?.swatch && <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: current.swatch }} />}
         <span className="truncate">{current?.label}</span>

@@ -31,6 +31,7 @@ import {
   type IncomingFile,
 } from "../../core/mail/attachments";
 import { formatBytes } from "../../core/gmail/mime";
+import { buttonClass } from "../button";
 
 export type AttachmentAdder = { add: (files: readonly File[]) => void };
 
@@ -233,7 +234,7 @@ export function ComposerAttachments({
               setError(null);
               drive.onSendAsLink(files);
             }}
-            className={`inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${chip}`}
+            className={buttonClass("secondary", "sm", chip)}
           >
             <Link2 size={14} strokeWidth={2} aria-hidden="true" />
             Send as a Drive link

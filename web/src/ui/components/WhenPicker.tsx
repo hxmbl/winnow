@@ -11,6 +11,7 @@
 import { useId, useRef, useState } from "react";
 import { Sheet } from "./Overlay";
 import { customTimeProblem, formatWhen, fromLocalInputs, toLocalInputs } from "../../core/mail/when";
+import { buttonClass } from "../button";
 
 type Props = {
   /** "Snooze until…", "Send later…". */
@@ -104,14 +105,14 @@ export function WhenPicker({ title, note, initial, confirmLabel, onConfirm, onCa
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary")}
           >
             Cancel
           </button>
           <button
             type="submit"
             data-when-confirm=""
-            className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary")}
           >
             {confirmLabel}
           </button>
@@ -145,7 +146,7 @@ export function ScheduledSheet({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const BUTTON =
-    "rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+    buttonClass("secondary");
   return (
     <Sheet
       label={`Scheduled: ${subject || "(no subject)"}`}
@@ -181,7 +182,7 @@ export function ScheduledSheet({
             type="button"
             data-scheduled-send=""
             onClick={onSendNow}
-            className="rounded-ctl bg-accent px-3.5 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary")}
           >
             Send now
           </button>

@@ -65,6 +65,7 @@ import type { AccountSummary } from "../../core/store/store";
 import { accountsSummary } from "../accountsPage";
 import type { UpdatesController } from "../useUpdates";
 import { operatorUpdate } from "../../core/updates/updates";
+import { buttonClass } from "../button";
 
 /** Where Winnow's code lives, linked from About. */
 export const SOURCE_URL = "https://github.com/hxmbl/winnow";
@@ -685,7 +686,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
                 type="button"
                 data-settings-open-scheduled=""
                 onClick={props.onOpenScheduled}
-                className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className={buttonClass("secondary")}
               >
                 Open Scheduled
               </button>
@@ -1210,7 +1211,7 @@ function InfoSlot({ setting }: { setting: SettingId }) {
 }
 
 const SECONDARY_BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "sm");
 
 function LearningHistory({ events }: { events: readonly FeedbackEvent[] }) {
   return (
@@ -1326,7 +1327,7 @@ function AccountsSettings({ props }: { props: SettingsProps }) {
           type="button"
           data-settings-manage-accounts=""
           onClick={props.onManageAccounts}
-          className="inline-flex items-center gap-1 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className={buttonClass("secondary", "sm", "gap-1")}
         >
           Manage
           <ChevronRight size={14} aria-hidden="true" />
@@ -1356,7 +1357,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
         <button
           type="button"
           onClick={props.onGoogleAccount}
-          className="rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className={buttonClass("secondary", "sm")}
         >
           {props.googleClient ? "Change" : "Set up"}
         </button>
@@ -1476,4 +1477,4 @@ function SenderSettings({ props }: { props: SettingsProps }) {
 }
 
 const SENDER_BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "sm");

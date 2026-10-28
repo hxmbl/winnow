@@ -678,6 +678,19 @@ describe("the design system stays small", () => {
     expect(bad).toEqual([]);
   });
 
+  it("draws every text button from the one recipe (`ui/button.ts`)", () => {
+    // The primary and secondary recipes were pasted ~14 times and drifted in height,
+    // padding and weight. A class string that restates either one is a new copy.
+    const strings = [...sources.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map((match) => match[1] ?? match[2] ?? "");
+    const pasted = strings.filter((value) => {
+      const has = (token: string) => new RegExp(`(?:^|\\s)${token.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}(?=\\s|$)`).test(value);
+      const primary = has("bg-accent") && has("text-on-accent") && has("font-semibold");
+      const secondary = has("border-control-border") && has("hover:bg-surface-hover") && has("font-semibold");
+      return primary || secondary;
+    });
+    expect(pasted).toEqual([]);
+  });
+
   it("uses only the two radii", () => {
     expect(offenders(/\brounded(?:-[trblse]{1,2})?-(?:sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g)).toEqual([]);
     // A bare `rounded` has no value in the overridden scale, so it renders square.

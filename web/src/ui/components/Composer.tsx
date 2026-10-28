@@ -15,6 +15,7 @@ import { RecipientField } from "./RecipientField";
 import { normaliseRecipients, recipientProblem } from "../../core/mail/compose";
 import { draftStatusLabel, type DraftSaveStatus } from "../../core/mail/drafts";
 import type { ContactIndex } from "../../core/contacts/index";
+import { buttonClass } from "../button";
 
 /** How long a press on the phone's Send circle is held before it opens Send later. */
 const SEND_LATER_PRESS_MS = 500;
@@ -609,7 +610,7 @@ export function Composer({
             // their recipients is wrong.
             disabled={!canSend}
             title={sendTitle}
-            className="inline-flex items-center gap-2 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary", "md", "gap-2")}
           >
             {sending ? "Sending…" : "Send"}
             {!sending && (
@@ -631,7 +632,7 @@ export function Composer({
               title="Send later…"
               disabled={!canSend}
               onClick={(event) => openLater(event.currentTarget)}
-              className="inline-flex items-center rounded-ctl bg-accent px-2 text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="inline-flex items-center rounded-ctl bg-accent px-2 text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
               <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
             </button>
@@ -640,7 +641,7 @@ export function Composer({
           <button
             type="button"
             onClick={onDiscard}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary")}
           >
             Discard
           </button>

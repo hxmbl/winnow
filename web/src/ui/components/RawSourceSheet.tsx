@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { copyText } from "../clipboard";
 import { rawSourceText } from "../../core/mail/rawSource";
+import { buttonClass } from "../button";
 
 export type RawSourceState =
   | { status: "loading"; subject: string }
@@ -36,7 +37,7 @@ export function RawSourceSheet({ state, phone, onClose }: { state: RawSourceStat
               onClick={() => {
                 void copyText(state.raw).then((ok) => setCopied(ok ? "copied" : "failed"));
               }}
-              className="ml-auto rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className={buttonClass("secondary", "sm", "ml-auto")}
             >
               {copied === "copied" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy"}
             </button>

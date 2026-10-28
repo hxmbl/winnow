@@ -14,6 +14,7 @@ import { clickInto, pickerRows, pickerTitle, type FilterCheck } from "../smartFi
 import type { LearnableFilter } from "../../core/learn/filterLearning";
 import type { FilterReason } from "../../core/learn/filterExplain";
 import { WhyHere } from "./WhyHere";
+import { buttonClass } from "../button";
 
 export function SmartFilterPicker({
   count,
@@ -91,7 +92,7 @@ export function SmartFilterPicker({
             type="button"
             data-filter-picker-done=""
             onClick={onClose}
-            className="shrink-0 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary")}
           >
             Done
           </button>

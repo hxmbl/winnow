@@ -11,6 +11,7 @@
 import { useRef } from "react";
 import { DRIVE_GRANT_NEEDED } from "../../core/gmail/drive";
 import { Sheet } from "./Overlay";
+import { buttonClass } from "../button";
 
 export function DriveGrantNeeded({
   web,
@@ -50,7 +51,7 @@ export function DriveGrantNeeded({
             ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary")}
           >
             Keep editing
           </button>
@@ -58,7 +59,7 @@ export function DriveGrantNeeded({
             type="button"
             data-drive-grant-send-anyway=""
             onClick={onSendAnyway}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary")}
           >
             Send anyway
           </button>
@@ -66,7 +67,7 @@ export function DriveGrantNeeded({
             type="button"
             data-drive-grant-allow=""
             onClick={onAllow}
-            className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary")}
           >
             Allow Google Drive
           </button>

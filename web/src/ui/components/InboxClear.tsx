@@ -19,6 +19,7 @@ import { FolderOpen, SearchX } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { clearDetail, clearHeadline, quietLine, type EmptyKind } from "../inboxClear";
 import "./InboxClear.css";
+import { buttonClass } from "../button";
 
 type Action = { label: string; run: () => void };
 
@@ -52,7 +53,7 @@ export function InboxClear({
           <button
             type="button"
             onClick={action.run}
-            className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:min-h-11"
+            className={buttonClass("secondary", "md", "max-sm:min-h-11")}
           >
             {action.label}
           </button>

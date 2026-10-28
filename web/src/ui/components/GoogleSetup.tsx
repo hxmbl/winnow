@@ -89,6 +89,7 @@ import {
 import { SetupFix, SetupTroubleshoot } from "./SetupTroubleshoot";
 import type { AppSigningInfo } from "../../platform/types";
 import { AndroidSignInStep } from "./AndroidSignInStep";
+import { buttonClass } from "../button";
 
 /** Where the setup guide lives. Opened in the system browser. */
 export const SETUP_GUIDE_URL = "https://github.com/hxmbl/winnow/blob/master/docs/google-setup.md";
@@ -124,11 +125,11 @@ type Imported = { type: ClientJsonType; projectId?: string; warnings: string[] }
 const FIELD =
   "w-full rounded-ctl border bg-surface px-4 py-1.5 font-mono text-ui text-ink outline-hidden placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
 const PRIMARY =
-  "rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("primary", "md", "max-sm:min-h-11");
 const LINK =
   "inline-flex w-fit items-center gap-1.5 rounded-ctl text-ui font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 const SECONDARY =
-  "rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "md", "max-sm:min-h-11");
 
 /** One numbered instruction inside a step. */
 function Item({ children }: { children: React.ReactNode }) {
@@ -519,7 +520,7 @@ export function GoogleSetup(props: Props) {
             type="button"
             onClick={() => fileRef.current?.click()}
             aria-describedby={`${ids}-import-hint`}
-            className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary", "md", "max-sm:min-h-11")}
           >
             <FileJson size={14} strokeWidth={2} aria-hidden="true" />
             Import JSON
@@ -754,7 +755,7 @@ export function GoogleSetup(props: Props) {
                   focusAfter.current = "keep";
                   setConfirmRemove(true);
                 }}
-                className="shrink-0 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className={buttonClass("secondary", "sm", "max-sm:min-h-11", { tone: "danger" })}
               >
                 Remove…
               </button>

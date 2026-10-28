@@ -185,6 +185,7 @@ import { notifiable } from "./core/notify/notifications";
 import { alreadyAddedMessage } from "./ui/accounts";
 import { exitRows } from "./ui/rowExit";
 import { isEditingElement } from "./ui/sidebarOverlay";
+import { buttonClass } from "./ui/button";
 
 /** Which popover menu is open, and what it acts on. */
 type OpenMenu = {
@@ -4025,14 +4026,14 @@ export function App({ store, existingInstall = true }: Props) {
               onClick={() => {
                 void store.retryConnection();
               }}
-              className="rounded-ctl bg-accent px-4 py-2 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className={buttonClass("primary")}
             >
               Try again
             </button>
             <button
               type="button"
               onClick={enterDemo}
-              className="rounded-ctl border border-control-border px-4 py-2 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className={buttonClass("secondary")}
             >
               Use the demo inbox
             </button>
@@ -4220,7 +4221,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 data-demo-cta={resumable ? "resume" : "connect"}
                 // Secondary, like the sync button it replaces: Compose is the one filled
                 // control on the list side, and the accent means that one primary action.
-                className="flex shrink-0 items-center gap-1.5 rounded-ctl bg-sheen px-3 py-1.5 text-meta font-semibold text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 max-sm:min-h-11 max-sm:px-3.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className={buttonClass("secondary", "sm", "max-sm:min-h-11")}
               >
                 <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
                 {demoCta}
@@ -4267,7 +4268,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         onClick={connectOrResume}
         disabled={signingIn || resuming}
         data-demo-cta={resumable ? "resume" : "connect"}
-        className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-ctl bg-sheen px-3.5 text-meta font-semibold text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className={buttonClass("secondary", "touch")}
       >
         <LogIn size={12} strokeWidth={2.2} aria-hidden="true" />
         {demoCta}

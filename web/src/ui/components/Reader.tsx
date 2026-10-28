@@ -161,7 +161,7 @@ function ActionButton({ action, onClick, children, tipStart = false }: { action:
       data-reader-action={action.id}
       className={`wn-action group/action relative flex h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-ctl text-ui font-medium transition-[background-color,color,transform] duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring active:scale-[0.96] motion-reduce:active:scale-100 ${
         action.primary
-          ? "bg-accent px-2.5 text-on-accent hover:opacity-90"
+          ? "bg-accent px-2.5 font-semibold text-on-accent hover:opacity-90"
           : action.text
             ? "px-2 text-ink-body hover:bg-surface-hover hover:text-ink"
             : "px-0 text-ink-icon hover:bg-surface-hover hover:text-ink"

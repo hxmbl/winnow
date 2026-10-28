@@ -14,9 +14,10 @@ import { filterIcon } from "../filterIcons";
 import { FILTER_LABELS } from "../../core/model/signals";
 import { LEARNABLE_FILTERS, type FilterLearning, type LearnableFilter, type SenderRule } from "../../core/learn/filterLearning";
 import { learntSummary, ruleText } from "../smartFilterSettings";
+import { buttonClass } from "../button";
 
 const SECONDARY =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "sm");
 const DANGER =
   "rounded-ctl bg-danger px-3 py-1.5 text-meta font-semibold text-surface transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 

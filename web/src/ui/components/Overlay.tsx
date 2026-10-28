@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef } from "react";
+import { buttonClass } from "../button";
 
 type Props = {
   /** Where focus goes when the sheet opens. Null focuses the sheet itself. */
@@ -307,18 +308,14 @@ export function ConfirmDialog({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className={buttonClass("secondary")}
         >
           {cancelLabel}
         </button>
         <button
           type="button"
           onClick={onConfirm}
-          className={`rounded-ctl px-4 py-1.5 text-ui font-semibold transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
-            destructive
-              ? "bg-danger text-(--wn-surface)"
-              : "bg-accent text-on-accent"
-          }`}
+          className={buttonClass(destructive ? "danger" : "primary")}
         >
           {confirmLabel}
         </button>

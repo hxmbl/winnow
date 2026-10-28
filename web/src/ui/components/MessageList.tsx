@@ -68,6 +68,7 @@ import {
   visibleRange,
   windowKey,
 } from "../windowing";
+import { buttonClass } from "../button";
 
 /**
  * One entry in the windowed list: a day header, or a message row.
@@ -726,7 +727,7 @@ function Empty({
             <button
               type="button"
               onClick={remedy.action.run}
-              className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className={buttonClass("secondary")}
             >
               {remedy.action.label}
             </button>

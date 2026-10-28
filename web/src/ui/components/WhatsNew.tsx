@@ -12,6 +12,7 @@ import { Sheet, SheetHeader } from "./Overlay";
 import { parseMarkdown, type Block, type Inline } from "../../core/updates/changelog";
 import type { ChangelogState } from "../useUpdates";
 import { operatorUpdate, type UpdateOffer } from "../../core/updates/updates";
+import { buttonClass } from "../button";
 
 type Props = {
   offer: UpdateOffer;
@@ -235,7 +236,7 @@ export function WhatsNew(props: Props) {
               type="button"
               data-whats-new-action=""
               onClick={props.onAction}
-              className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className={buttonClass("primary")}
             >
               {props.actionLabel}
             </button>
