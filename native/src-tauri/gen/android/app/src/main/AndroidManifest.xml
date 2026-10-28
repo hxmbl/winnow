@@ -32,6 +32,14 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!--
+      "Instant mail via the Gmail app" (sync/GmailNotificationListener.kt) checks whether
+      the Gmail app is installed; Android 11+ hides other packages unless they are named.
+    -->
+    <queries>
+        <package android:name="com.google.android.gm" />
+    </queries>
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
@@ -89,7 +97,8 @@
             android:exported="false" />
 
         <!--
-          Background sync: checks Gmail about once a minute while Winnow is closed and posts
+          Background sync: checks Gmail every 5 minutes (10 while the Gmail-app listener below
+          is connected) while Winnow is closed and posts
           new-mail notifications (sync/MailSyncService.kt). Runs only while Settings →
           Notifications &amp; sync → "Keep syncing while closed" and notifications are on.
         -->
@@ -100,6 +109,32 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps an email client checking the user's mailbox for new mail while the app is closed, so new-mail notifications arrive promptly (the user turns this on in Settings; the app has no push server)." />
+        </service>
+
+        <!--
+          "Instant mail via the Gmail app" (Settings, Notifications and sync; off by default):
+          when the Gmail app posts a notification, check straight away and take Gmail's copy
+          down once Winnow has posted its own. Android binds it only after the user grants
+          Notification access by hand; BIND_NOTIFICATION_LISTENER_SERVICE means only the
+          system can bind it. Android has no per-package filter an app can declare, so the
+          code drops every notification that is not com.google.android.gm before reading it;
+          the filter types below at least keep ongoing ones (music, calls, navigation) away
+          on Android 12+. See sync/GmailNotificationListener.kt.
+        -->
+        <service
+            android:name=".sync.GmailNotificationListener"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.notification.default_filter_types"
+                android:value="conversations|alerting|silent" />
+            <meta-data
+                android:name="android.service.notification.disabled_filter_types"
+                android:value="ongoing" />
         </service>
 
         <!-- Starts background sync again after a reboot or an update, if it was on. -->

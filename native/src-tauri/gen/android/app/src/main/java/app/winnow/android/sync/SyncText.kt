@@ -17,7 +17,7 @@ object SyncText {
    * again, which one (Google refused its refresh token, so its mail is not being checked).
    */
   fun persistent(needSignIn: List<String>): Pair<String, String> = when (needSignIn.size) {
-    0 -> "Checking for new mail" to "Winnow checks about once a minute while it's closed."
+    0 -> "Checking for new mail" to "Winnow checks for new mail while it's closed."
     1 -> "Sign in again to get new mail" to "Winnow can't check ${needSignIn[0]} until you sign in again."
     else -> "Sign in again to get new mail" to "Winnow can't check ${needSignIn.size} accounts until you sign in again."
   }

@@ -22,9 +22,12 @@ import app.tauri.plugin.Plugin
  *   Called by the web layer whenever the switch, notifications, accounts or muted
  *   senders change, while the app is in front (where starting a foreground service is
  *   allowed).
- * - `status`: running, battery optimisation, notification permission, for Settings.
+ * - `status`: running, battery optimisation, notification permission, and the Gmail-app
+ *   listener (access granted, connected, Gmail installed), for Settings.
  * - `requestBatteryExemption`: Android's own "Let Winnow run in the background?" dialog.
  * - `openSyncNotificationSettings`: the persistent notification's channel, to hide it.
+ * - `openNotificationAccess`: Android's Notification access screen, for "Instant mail via
+ *   the Gmail app" ([GmailNotificationListener]).
  *
  * Not granted to the webview directly: Rust calls these from its commands.
  */
@@ -43,6 +46,10 @@ class BackgroundSyncPlugin(private val activity: Activity) : Plugin(activity) {
       store.clearSignedOut()
       TokenMemory.clear()
       MailSyncService.apply(context)
+      // "Instant mail via the Gmail app": have Android bind the listener again (it unbinds
+      // itself while the setting is off), and let the poll pick its pace.
+      if (config.gmailListener) GmailNotificationListener.rebind(context)
+      MailSyncService.instance?.repace()
       invoke.resolve(currentStatus())
     } catch (e: Exception) {
       invoke.reject(e.message ?: "could not configure background sync")
@@ -85,6 +92,20 @@ class BackgroundSyncPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve()
   }
 
+  /** Android's Notification access screen, where the user lets Winnow see the Gmail app's notifications. */
+  @Command
+  fun openNotificationAccess(invoke: Invoke) {
+    try {
+      activity.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+    } catch (_: Exception) {
+      try {
+        activity.startActivity(Intent(Settings.ACTION_SETTINGS))
+      } catch (_: Exception) {
+      }
+    }
+    invoke.resolve(currentStatus())
+  }
+
   private fun currentStatus(): JSObject {
     val power = context.getSystemService(PowerManager::class.java)
     val out = JSObject()
@@ -93,6 +114,9 @@ class BackgroundSyncPlugin(private val activity: Activity) : Plugin(activity) {
     out.put("batteryUnrestricted", power?.isIgnoringBatteryOptimizations(context.packageName) ?: true)
     out.put("notificationsAllowed", MailSyncService.notificationsAllowed(context))
     out.put("sdk", Build.VERSION.SDK_INT)
+    out.put("listenerAccess", GmailNotificationListener.accessGranted(context))
+    out.put("listenerConnected", GmailNotificationListener.connected)
+    out.put("gmailInstalled", GmailNotificationListener.gmailInstalled(context))
     return out
   }
 }

@@ -11,6 +11,11 @@ data class SyncAccount(
   val label: String?,
   /** The account's own "New-mail notifications" switch (Accounts page). */
   val notify: Boolean,
+  /**
+   * The account's address, lowercased, always (unlike [label]): what the Gmail-listener
+   * matches a Gmail notification against. Never shown.
+   */
+  val address: String? = null,
 )
 
 /**
@@ -34,6 +39,12 @@ data class BackgroundConfig(
   val hidePreview: Boolean,
   /** Muted and hidden senders, lowercased: their mail never notifies. */
   val quietSenders: Set<String>,
+  /**
+   * "Instant mail via the Gmail app" is on: [GmailNotificationListener] syncs as soon as
+   * the Gmail app posts a notification, and the fallback poll slows to every 10 minutes
+   * while Android has the listener connected. Never on while [enabled] is off.
+   */
+  val gmailListener: Boolean = false,
 ) {
   /** Whether new mail in `account` may notify at all. */
   fun notifies(account: String): Boolean {
@@ -48,7 +59,7 @@ data class BackgroundConfig(
   fun toJson(): JSONObject {
     val list = JSONArray()
     for (a in accounts) {
-      list.put(JSONObject().put("id", a.id).put("label", a.label ?: JSONObject.NULL).put("notify", a.notify))
+      list.put(JSONObject().put("id", a.id).put("label", a.label ?: JSONObject.NULL).put("notify", a.notify).put("address", a.address ?: JSONObject.NULL))
     }
     return JSONObject()
       .put("enabled", enabled)
@@ -57,6 +68,7 @@ data class BackgroundConfig(
       .put("actions", actions)
       .put("hidePreview", hidePreview)
       .put("quietSenders", JSONArray(quietSenders.sorted()))
+      .put("gmailListener", gmailListener)
   }
 
   companion object {
@@ -81,7 +93,8 @@ data class BackgroundConfig(
           val id = item.optString("id")
           if (!ACCOUNT_ID.matches(id) || accounts.any { it.id == id }) continue
           val label = if (item.isNull("label")) null else item.optString("label").ifEmpty { null }
-          accounts.add(SyncAccount(id, label, item.optBoolean("notify", true)))
+          val address = if (item.isNull("address")) null else item.optString("address").trim().lowercase().takeIf { it.contains('@') && it.length <= 320 }
+          accounts.add(SyncAccount(id, label, item.optBoolean("notify", true), address))
           if (accounts.size == MAX_ACCOUNTS) break
         }
       }
@@ -94,13 +107,15 @@ data class BackgroundConfig(
           if (s.isNotEmpty()) quiet.add(s)
         }
       }
+      val enabled = json.optBoolean("enabled", false) && accounts.isNotEmpty()
       return BackgroundConfig(
-        enabled = json.optBoolean("enabled", false) && accounts.isNotEmpty(),
+        enabled = enabled,
         accounts = accounts,
         activeAccount = active,
         actions = json.optInt("actions", 7) and 7,
         hidePreview = json.optBoolean("hidePreview", false),
         quietSenders = quiet,
+        gmailListener = enabled && json.optBoolean("gmailListener", false),
       )
     }
   }

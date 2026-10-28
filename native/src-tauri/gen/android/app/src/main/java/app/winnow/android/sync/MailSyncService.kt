@@ -30,14 +30,19 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.winnow.android.R
-import app.winnow.android.notify.MailNotifier
 
 /**
  * Background sync on Android, the FairEmail way: a foreground service with a silent,
  * low-importance notification keeps Winnow's process alive after the app is closed or
- * swiped away, and checks every signed-in account for new mail about once a minute
- * ([GmailCheck], Gmail's `history.list`), posting the same new-mail notifications the app
- * posts and taking down the ones whose mail no longer needs attention.
+ * swiped away, and checks every signed-in account for new mail ([MailCheckRun], Gmail's
+ * `history.list`), posting the same new-mail notifications the app posts and taking down
+ * the ones whose mail no longer needs attention.
+ *
+ * **Pace (STRM-442).** With "Instant mail via the Gmail app" on, [GmailNotificationListener]
+ * asks for a check the moment the Gmail app posts a notification ([instant]), and this
+ * service's own poll is only the fallback: every 10 minutes while Android has the
+ * listener connected, every 5 minutes otherwise ([GmailListenerLogic.pollInterval]).
+ * It used to poll once a minute.
  *
  * **Why not the WebView.** Android pauses a backgrounded WebView and destroys it with the
  * activity, so the web layer cannot be the one checking. The service does the check
@@ -54,7 +59,7 @@ import app.winnow.android.notify.MailNotifier
  * it at 6 hours a day and refuses to start it from `BOOT_COMPLETED`; `specialUse` has
  * neither limit. Winnow is not on Google Play, so the Play declaration does not apply.
  *
- * **Idle phones.** A Handler does the minute-by-minute pacing while the phone is awake;
+ * **Idle phones.** A Handler does the pacing while the phone is awake;
  * an allow-while-idle alarm is the backstop in Doze, where Android spaces wake-ups out
  * (roughly every 9 minutes or more) whatever an app asks. The network coming back and
  * the screen turning on both check straight away. Exempting Winnow from battery
@@ -82,7 +87,7 @@ class MailSyncService : Service() {
   private val lifecycle = LifecycleEventObserver { _, event ->
     when (event) {
       Lifecycle.Event.ON_START -> appVisible = true
-      // Closed or sent to the background: catch up shortly, then every minute.
+      // Closed or sent to the background: catch up shortly, then at the fallback pace.
       Lifecycle.Event.ON_STOP -> {
         appVisible = false
         schedule(AFTER_APP_CLOSED_MS)
@@ -97,6 +102,7 @@ class MailSyncService : Service() {
     super.onCreate()
     thread = HandlerThread("winnow-sync").apply { start() }
     worker = Handler(thread.looper)
+    instance = this
     ensureChannel(this)
     ProcessLifecycleOwner.get().lifecycle.let {
       appVisible = it.currentState.isAtLeast(Lifecycle.State.STARTED)
@@ -142,6 +148,7 @@ class MailSyncService : Service() {
   }
 
   override fun onDestroy() {
+    if (instance === this) instance = null
     worker.removeCallbacksAndMessages(null)
     cancelAlarm()
     try {
@@ -163,92 +170,87 @@ class MailSyncService : Service() {
 
   // ── The loop ────────────────────────────────────────────────────────────
 
+  /** When the next poll is due (elapsed realtime), for [repace]. */
+  @Volatile private var nextAt = 0L
+
   private fun schedule(delayMs: Long) {
     if (!::worker.isInitialized) return
     worker.removeCallbacks(check)
     worker.postDelayed(check, delayMs)
+    nextAt = SystemClock.elapsedRealtime() + delayMs
     // The backstop: a Handler does not run while the phone sleeps.
-    setAlarm(maxOf(delayMs, GmailCheck.INTERVAL_MS) + ALARM_SLACK_MS)
+    setAlarm(maxOf(delayMs, pace()) + ALARM_SLACK_MS)
   }
 
-  @SuppressLint("WakelockTimeout")
+  /**
+   * The fallback poll's interval now: every 10 minutes while "Instant mail via the
+   * Gmail app" is on and Android has its listener connected, every 5 minutes otherwise.
+   */
+  private fun pace(): Long =
+    GmailListenerLogic.pollInterval(SyncStore(this).config().gmailListener, GmailNotificationListener.connected)
+
+  /** The listener came or went: bring the next poll forward if the slower pace no longer holds. */
+  fun repace() {
+    if (!::worker.isInitialized) return
+    worker.post {
+      val want = pace()
+      if (nextAt - SystemClock.elapsedRealtime() > want) schedule(want)
+    }
+  }
+
+  /**
+   * A check asked for by [GmailNotificationListener]: the Gmail app just posted a
+   * notification. Runs on the service's thread, between polls; `done` gets which
+   * accounts had new mail posted. Skipped, with no call to `done`, when the setting is
+   * off or the app is on screen (the web layer is syncing itself then).
+   */
+  fun instant(accounts: Set<String>?, done: (Set<String>) -> Unit) {
+    if (!::worker.isInitialized) return
+    worker.post {
+      val config = SyncStore(this).config()
+      if (!config.enabled || !config.gmailListener || appVisible) return@post
+      val outcome = runOnce(config, accounts)
+      done(outcome?.posted ?: emptySet())
+      // Every account was just checked: the next poll can wait a full interval.
+      if (accounts == null && outcome != null && !outcome.failed) schedule(GmailCheck.delayAfter(failures, pace()))
+    }
+  }
+
   private fun runCheck() {
-    val store = SyncStore(this)
-    val config = store.config()
+    val config = SyncStore(this).config()
     if (!config.enabled) {
       main.post { stop() }
       return
     }
     if (appVisible) {
-      schedule(GmailCheck.INTERVAL_MS)
+      schedule(pace())
       return
     }
+    runOnce(config, null)
+    schedule(GmailCheck.delayAfter(failures, pace()))
+  }
+
+  /** One [MailCheckRun] under a wake lock, keeping the backoff and the persistent notification current. */
+  @SuppressLint("WakelockTimeout")
+  private fun runOnce(config: BackgroundConfig, only: Set<String>?): MailCheckRun.Outcome? {
     val power = getSystemService(PowerManager::class.java)
     val lock = power?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "winnow:sync")?.apply { acquire(WAKE_MS) }
     try {
       lastCheck = SystemClock.elapsedRealtime()
-      val keyring = KeyringReader(this)
-      val client = keyring.get(KeyringFormat.CLIENT_NAME)
-      var failed = false
-      val signIn = ArrayList<String>()
-      for (account in config.accounts) {
-        if (store.signedOut(account.id)) {
-          signIn.add(account.label ?: account.id)
-          continue
-        }
-        val result = GmailCheck.run(
-          account = account.id,
-          tokensRaw = keyring.get(KeyringFormat.tokensName(account.id)),
-          clientRaw = client,
-          cursor = store.cursor(account.id),
-          cached = TokenMemory.get(account.id),
-          now = System.currentTimeMillis(),
-          transport = HttpsTransport,
-          cache = TokenMemory,
-          quietSenders = config.quietSenders,
-        )
-        when (result) {
-          is GmailCheck.Result.Seeded -> store.setCursor(account.id, result.cursor)
-          is GmailCheck.Result.Checked -> {
-            if (result.stale.isNotEmpty()) MailNotifier.dismiss(this, account.id, result.stale)
-            if (result.fresh.isNotEmpty() && config.notifies(account.id)) announce(config, account.id, result.fresh)
-            // The cursor moves only once what it covers has been announced.
-            store.setCursor(account.id, result.cursor)
-          }
-          GmailCheck.Result.SignedOut -> {
-            store.setSignedOut(account.id, true)
-            signIn.add(account.label ?: account.id)
-          }
-          GmailCheck.Result.Offline -> failed = true
-          is GmailCheck.Result.Failed -> failed = true
-        }
-      }
-      failures = if (failed) failures + 1 else 0
-      if (signIn != trouble) {
-        trouble = signIn
+      val outcome = MailCheckRun.run(this, config, only)
+      failures = if (outcome.failed) failures + 1 else 0
+      if (outcome.needSignIn != trouble) {
+        trouble = outcome.needSignIn
         main.post { goForeground() }
       }
+      return outcome
     } catch (e: Exception) {
       Log.w(TAG, "background check failed", e)
       failures += 1
+      return null
     } finally {
       if (lock?.isHeld == true) lock.release()
     }
-    schedule(GmailCheck.delayAfter(failures))
-  }
-
-  private fun announce(config: BackgroundConfig, account: String, fresh: List<GmailCheck.Message>) {
-    val notices = fresh.map {
-      MailNotifier.BackgroundNotice(
-        gmailId = it.gmailId,
-        threadId = it.threadId,
-        title = it.senderName,
-        subject = it.subject,
-        preview = it.snippet.take(140),
-        receivedAt = it.receivedAt,
-      )
-    }
-    MailNotifier.showFromBackground(this, account, config.labelFor(account), config.actions, config.hidePreview, notices)
   }
 
   // ── The persistent notification ─────────────────────────────────────────
@@ -330,6 +332,10 @@ class MailSyncService : Service() {
     private const val SCREEN_ON_GAP_MS = 30_000L
     private const val ALARM_SLACK_MS = 15_000L
     private const val WAKE_MS = 60_000L
+
+    /** The running service, for [GmailNotificationListener] (same process). `null` while it is not running. */
+    @Volatile var instance: MailSyncService? = null
+      private set
 
     /** Start or stop the service to match the saved config. Safe to call from anywhere it may start. */
     fun apply(context: Context) {

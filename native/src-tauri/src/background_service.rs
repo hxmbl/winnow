@@ -3,8 +3,10 @@
 //!
 //! All of the work is Kotlin (`gen/android/app/src/main/java/app/winnow/android/sync/`):
 //! `MailSyncService` (a `specialUse` foreground service with a silent, low-importance
-//! notification) polls each account's `history.list` about once a minute and posts the
-//! same new-mail notifications the app does. It runs in Kotlin rather than here because
+//! notification) polls each account's `history.list` (every 5 minutes, or every 10
+//! while the Gmail-app listener, `GmailNotificationListener`, is connected and checks
+//! the moment the Gmail app posts a notification) and posts the same new-mail
+//! notifications the app does. It runs in Kotlin rather than here because
 //! Android may start it with no activity at all (on boot, or after killing the app),
 //! when neither the webview nor this crate's Tauri runtime exists. It reads the tokens
 //! this crate's keychain wrote (`secrets.rs`, Android store) without writing them.
@@ -12,7 +14,8 @@
 //! What crosses from the web layer is a description, never a secret: which accounts are
 //! signed in (id, address, their notification switch), which buttons notifications
 //! offer, whether previews are hidden, which senders are muted or hidden, and whether
-//! "Keep syncing while closed" and notifications are on ([`Config`]). This module
+//! "Keep syncing while closed" and notifications are on, and whether "Instant mail via
+//! the Gmail app" is ([`Config`]). This module
 //! validates it and hands it to the Kotlin plugin, which saves it and starts or stops
 //! the service. The plugin's own commands are not granted to the webview.
 //!
@@ -37,6 +40,10 @@ pub struct ConfigAccount {
     pub label: Option<String>,
     #[serde(default = "yes")]
     pub notify: bool,
+    /// The account's address whatever the number of accounts (`label` is set only with
+    /// several): what the Gmail-app listener matches a Gmail notification against.
+    #[serde(default)]
+    pub address: Option<String>,
 }
 
 fn yes() -> bool {
@@ -59,6 +66,10 @@ pub struct Config {
     pub hide_preview: bool,
     #[serde(default)]
     pub quiet_senders: Vec<String>,
+    /// "Instant mail via the Gmail app" (STRM-442): check as soon as the Gmail app posts a
+    /// notification (`GmailNotificationListener.kt`). Never on while `enabled` is off.
+    #[serde(default)]
+    pub gmail_listener: bool,
 }
 
 fn all_actions() -> u8 {
@@ -85,6 +96,11 @@ impl Config {
                 .take()
                 .map(|l| l.trim().chars().take(320).collect::<String>())
                 .filter(|l| !l.is_empty());
+            account.address = account
+                .address
+                .take()
+                .map(|a| a.trim().to_lowercase())
+                .filter(|a| a.contains('@') && a.len() <= 320);
         }
         if let Some(active) = &self.active_account {
             if !self.accounts.iter().any(|a| &a.id == active) {
@@ -103,6 +119,7 @@ impl Config {
             self.quiet_senders.drain(..excess);
         }
         self.enabled = self.enabled && !self.accounts.is_empty();
+        self.gmail_listener = self.gmail_listener && self.enabled;
         self
     }
 }
@@ -159,6 +176,7 @@ mod tests {
             id: id.into(),
             label: Some(format!(" {id}@example.com ")),
             notify: true,
+            address: Some(format!(" {id}@Example.com ")),
         }
     }
 
@@ -189,6 +207,7 @@ mod tests {
             actions: 0xff,
             hide_preview: false,
             quiet_senders: vec!["  A@B.C ".into(), "".into()],
+            gmail_listener: true,
         }
         .sanitised();
         assert_eq!(config.accounts.len(), 1);
@@ -200,6 +219,11 @@ mod tests {
         assert_eq!(config.actions, 7);
         assert_eq!(config.quiet_senders, vec!["a@b.c".to_string()]);
         assert!(config.enabled);
+        assert!(config.gmail_listener);
+        assert_eq!(
+            config.accounts[0].address.as_deref(),
+            Some("abcd1234@example.com")
+        );
 
         let none = Config {
             enabled: true,
@@ -208,9 +232,26 @@ mod tests {
             actions: 7,
             hide_preview: false,
             quiet_senders: vec![],
+            gmail_listener: false,
         }
         .sanitised();
         assert!(!none.enabled);
+    }
+
+    #[test]
+    fn the_gmail_listener_is_never_on_without_background_sync() {
+        let config = serde_json::from_str::<Config>(
+            r#"{"enabled":false,"accounts":[{"id":"abcd1234","address":"not an address"}],"gmailListener":true}"#,
+        )
+        .unwrap()
+        .sanitised();
+        assert!(!config.gmail_listener);
+        assert_eq!(config.accounts[0].address, None);
+        let old: Config = serde_json::from_str(r#"{"enabled":true,"accounts":[]}"#).unwrap();
+        assert!(
+            !old.gmail_listener,
+            "an older web layer's config leaves it off"
+        );
     }
 
     #[test]
@@ -225,6 +266,7 @@ mod tests {
             actions: 7,
             hide_preview: false,
             quiet_senders: vec![],
+            gmail_listener: false,
         }
         .sanitised();
         assert_eq!(config.accounts.len(), MAX_ACCOUNTS);
@@ -239,6 +281,7 @@ mod tests {
             actions: 7,
             hide_preview: true,
             quiet_senders: vec![],
+            gmail_listener: false,
         };
         let json = serde_json::to_value(&config).unwrap();
         for key in [
@@ -248,6 +291,7 @@ mod tests {
             "actions",
             "hidePreview",
             "quietSenders",
+            "gmailListener",
         ] {
             assert!(json.get(key).is_some(), "missing {key}");
         }
