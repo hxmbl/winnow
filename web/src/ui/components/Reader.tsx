@@ -71,6 +71,7 @@ import type { Mailbox } from "../../core/model/email";
 import { PILL_START, pillAfterScroll, pillOpened, pillOrder, type ReaderPillAction } from "../readerPill";
 import { PillSwipe, type StepDelta, type StepReach } from "../readerSwipe";
 import { AppMark } from "../AppMark";
+import { KEY_SCROLL_STEP, smoothScrollBy, stopSmoothScroll } from "../keyScroll";
 import { Icon, type IconSize } from "./Icon";
 
 /**
@@ -875,13 +876,22 @@ export function Reader({
     if (emailId !== null && !hasHtml) onLoadBody();
   }, [emailId, hasHtml, onLoadBody]);
 
-  // The arrow keys scroll the reader rather than moving the list. A discrete
-  // step per keypress, applied as an effect, so holding the key down scrolls
-  // repeatedly — which is what a key repeat is *for*.
+  // The arrow keys scroll the reader rather than moving the list. `scrollStep` is a
+  // running count of presses (+1 down, -1 up), so each change is one step per press
+  // since the last render, glided rather than jumped (`keyScroll.ts`). Holding the key
+  // down adds steps to the glide in flight, which is what a key repeat is *for*.
+  const seenStep = useRef(scrollStep);
   useEffect(() => {
-    if (scrollStep === 0 || !bodyRef.current) return;
-    bodyRef.current.scrollBy({ top: scrollStep * 120, behavior: "auto" });
+    const presses = scrollStep - seenStep.current;
+    seenStep.current = scrollStep;
+    if (presses === 0 || !bodyRef.current) return;
+    smoothScrollBy(bodyRef.current, presses * KEY_SCROLL_STEP);
   }, [scrollStep]);
+  // A new message starts still, and an unmounted reader leaves no frame running.
+  useEffect(() => {
+    const body = bodyRef.current;
+    return () => stopSmoothScroll(body);
+  }, [emailId]);
 
   if (!email) {
     return (
