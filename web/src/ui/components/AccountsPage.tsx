@@ -32,6 +32,7 @@ import {
   type AccountsView,
 } from "../accountsPage";
 import type { ThemeName } from "../theme";
+import { Icon } from "./Icon";
 
 export type AccountsPageProps = {
   accounts: readonly AccountSummary[];
@@ -125,7 +126,7 @@ export function AccountsPage(props: AccountsPageProps) {
             props.phone ? "h-11 w-9" : "h-8 w-8"
           }`}
         >
-          {props.phone ? <ChevronLeft size={22} strokeWidth={2.4} aria-hidden="true" /> : <ArrowLeft size={16} aria-hidden="true" />}
+          {props.phone ? <Icon icon={ChevronLeft} size={20} /> : <Icon icon={ArrowLeft} size={16} />}
         </button>
       )}
       <h2
@@ -171,7 +172,7 @@ export function AccountsPage(props: AccountsPageProps) {
         className={
           props.phone
             ? "flex h-full w-full flex-col overscroll-none bg-chrome"
-            : "flex max-h-[min(44rem,calc(100vh-2rem))] w-full max-w-[520px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+            : "flex max-h-(--wn-sheet-max-h) w-full max-w-sheet-md flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
         }
       >
         <div
@@ -292,8 +293,8 @@ function AccountsListScreen({
                       {label}
                     </span>
                   )}
-                  {account.active && <Check size={18} aria-hidden="true" className="shrink-0 text-accent" />}
-                  <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-ink-subtle" />
+                  {account.active && <Icon icon={Check} size={20} className="shrink-0 text-accent" />}
+                  <Icon icon={ChevronRight} size={20} className="shrink-0 text-ink-subtle" />
                 </button>
               </li>
             );
@@ -301,13 +302,13 @@ function AccountsListScreen({
         </ul>
       )}
 
-      <div className="mt-2 border-t border-hairline pt-2">
+      <div className="mt-2 border-t border-hairline-soft pt-2">
         <ActionRow
           phone={props.phone}
           data={{ "data-accounts-add": "" }}
           icon={
             <span className="flex h-8 w-8 items-center justify-center rounded-full border border-hairline">
-              <Plus size={17} />
+              <Icon icon={Plus} size={16} />
             </span>
           }
           label={model.addLabel}
@@ -326,7 +327,7 @@ function AccountsListScreen({
           <ActionRow
             phone={props.phone}
             data={{ "data-accounts-demo": "" }}
-            icon={<FlaskConical size={17} />}
+            icon={<Icon icon={FlaskConical} size={16} />}
             label="Open demo inbox"
             hint="Your accounts stay signed in."
             disabled={props.busy}
@@ -339,7 +340,7 @@ function AccountsListScreen({
       <ActionRow
         phone={props.phone}
         data={{ "data-accounts-client": "" }}
-        icon={<KeyRound size={17} />}
+        icon={<Icon icon={KeyRound} size={16} />}
         label={props.googleClient ? "Change Google client" : "Set up Google client"}
         hint={
           props.googleClient
@@ -351,18 +352,18 @@ function AccountsListScreen({
       <ActionRow
         phone={props.phone}
         data={{ "data-accounts-google-settings": "" }}
-        icon={<SettingsIcon size={17} />}
+        icon={<Icon icon={SettingsIcon} size={16} />}
         label="Google account settings"
         hint="Contact photos and suggestions, and the client."
         onClick={props.onGoogleSettings}
       />
 
       {model.signOutAll && (
-        <div className="mt-2 border-t border-hairline pt-2">
+        <div className="mt-2 border-t border-hairline-soft pt-2">
           <ActionRow
             phone={props.phone}
             data={{ "data-accounts-sign-out-all": "" }}
-            icon={<LogOut size={17} />}
+            icon={<Icon icon={LogOut} size={16} />}
             label="Sign out of all"
             hint="Clears every account's mail from this device and revokes Winnow's access to each."
             danger
@@ -395,14 +396,14 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
 
       {account.active ? (
         <p className="mx-2.5 mb-2 flex items-center gap-2 rounded-ctl bg-surface-selected px-3 py-2 text-meta font-medium text-ink-body">
-          <Check size={15} aria-hidden="true" className="shrink-0 text-accent" />
+          <Icon icon={Check} size={16} className="shrink-0 text-accent" />
           This account is open now.
         </p>
       ) : (
         <ActionRow
           phone={props.phone}
           data={{ "data-accounts-switch": account.id }}
-          icon={<ArrowLeftRight size={17} />}
+          icon={<Icon icon={ArrowLeftRight} size={16} />}
           label="Switch to this account"
           hint="Opens its inbox. Nothing of the other accounts is cleared."
           disabled={!can.canSwitch}
@@ -411,7 +412,7 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
       )}
 
       {can.canEdit && (
-        <div className="mt-1 border-t border-hairline px-2.5 pt-1">
+        <div className="mt-1 border-t border-hairline-soft px-2.5 pt-1">
           <SettingBlock setting="accountColor" className="mx-0! px-0!">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <SettingLabel setting="accountColor" id={`winnow-account-colour-${account.id}`} />
@@ -433,7 +434,7 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
         </div>
       )}
 
-      <div className="mt-1 border-t border-hairline pt-2">
+      <div className="mt-1 border-t border-hairline-soft pt-2">
         {can.connectInstead ? (
           <>
             <p className="px-2.5 pb-1 text-meta text-ink-subtle">
@@ -444,7 +445,7 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
               data={{ "data-accounts-connect": "" }}
               icon={
                 <span className="flex h-8 w-8 items-center justify-center rounded-full border border-hairline">
-                  <Plus size={17} />
+                  <Icon icon={Plus} size={16} />
                 </span>
               }
               label={props.busy ? "Waiting for Google…" : "Connect Gmail"}
@@ -456,7 +457,7 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
           <ActionRow
             phone={props.phone}
             data={{ "data-accounts-sign-out": account.id }}
-            icon={<LogOut size={17} />}
+            icon={<Icon icon={LogOut} size={16} />}
             label="Sign out of this account"
             hint={
               account.active
@@ -533,7 +534,7 @@ function ColourPicker({
               event.preventDefault();
               choose(ACCOUNT_COLORS[next]);
             }}
-            className={`flex items-center justify-center rounded-full ${FOCUS} ${phone ? "h-11 w-11" : "h-8 w-8"}`}
+            className={`flex items-center justify-center rounded-ctl ${FOCUS} ${phone ? "h-11 w-11" : "h-8 w-8"}`}
           >
             <span
               aria-hidden="true"

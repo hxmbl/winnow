@@ -22,6 +22,7 @@ import { Check, Copy, ExternalLink, TriangleAlert } from "lucide-react";
 import { CLIENT_ID_SUFFIX, CLIENT_SECRET_PREFIX, type CredentialErrors } from "../../core/session/credentials";
 import type { AppSigningInfo } from "../../platform/types";
 import { CONSOLE_LINKS } from "../googleSetupSteps";
+import { Icon } from "./Icon";
 
 /** Where the self-build instructions live (native/README.md, "Android signing"). */
 export const SELF_BUILD_GUIDE_URL = "https://github.com/hxmbl/winnow/blob/master/native/README.md#android-signing";
@@ -71,7 +72,7 @@ export function AndroidSignInStep(props: Props) {
       className={LINK}
     >
       {label}
-      <ExternalLink size={12} strokeWidth={2} aria-hidden="true" />
+      <Icon icon={ExternalLink} size={12} />
     </a>
   );
 
@@ -91,7 +92,7 @@ export function AndroidSignInStep(props: Props) {
         aria-label={copied === key ? `${label} copied` : `Copy ${label}`}
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        {copied === key ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+        {copied === key ? <Icon icon={Check} size={16} /> : <Icon icon={Copy} size={16} />}
       </button>
     </div>
   );
@@ -106,7 +107,7 @@ export function AndroidSignInStep(props: Props) {
 
       {!signing.playServices && (
         <p className="flex items-start gap-1.5 text-meta text-ink-body" data-android-no-play="">
-          <TriangleAlert size={14} className="mt-px shrink-0 text-danger" aria-hidden="true" />
+          <Icon icon={TriangleAlert} size={16} className="mt-px shrink-0 text-danger" />
           <span>
             This phone doesn't have Google Play services, so Winnow will use the browser either way.
           </span>

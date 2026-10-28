@@ -23,6 +23,7 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import { anchorFromElement, placeMenu } from "../menuPlacement";
 import { nextEnabled, typeAhead } from "../selectMenu";
+import { Icon } from "./Icon";
 
 export type SelectOption<T extends string | number> = {
   value: T;
@@ -194,11 +195,11 @@ export function SelectMenu<T extends string | number>({
             openAt(selectedIndex);
           }
         }}
-        className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-control-border bg-surface pl-3 pr-2 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 aria-expanded:bg-surface-hover max-sm:h-10 max-sm:pl-3.5"
+        className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-ctl border border-control-border bg-surface pl-3 pr-2 text-meta font-medium text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 aria-expanded:bg-surface-hover max-sm:h-10 max-sm:pl-3.5"
       >
         {current?.swatch && <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: current.swatch }} />}
         <span className="truncate">{current?.label}</span>
-        <ChevronDown size={14} strokeWidth={2.2} aria-hidden="true" className={`shrink-0 text-ink-subtle transition-transform ${open ? "rotate-180" : ""}`} />
+        <Icon icon={ChevronDown} size={16} className={`shrink-0 text-ink-subtle transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open &&
         createPortal(
@@ -235,7 +236,7 @@ export function SelectMenu<T extends string | number>({
                   } ${selected ? "font-semibold text-ink" : ""}`}
                 >
                   <span className="flex w-4 shrink-0 justify-center text-accent">
-                    {selected && <Check size={15} strokeWidth={2.4} aria-hidden="true" />}
+                    {selected && <Icon icon={Check} size={16} />}
                   </span>
                   {option.swatch && <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.swatch }} />}
                   <span className="min-w-0 flex-1 truncate pr-2">{option.label}</span>

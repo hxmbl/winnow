@@ -1472,6 +1472,7 @@ export function inlineEmailDarkCss(palette: DarkPalette): string {
     `${scope} hr { border-top-color: rgba(255, 255, 255, 0.16); }`,
     `${scope} img[data-wn-blocked-src] { border-color: #5A5A5A; background: rgba(255, 255, 255, 0.06); }`,
     `${scope} [data-wn-copy-button] button { background: #333333; color: ${palette.ink}; }`,
+    `${scope} [data-wn-copy-button] button:hover { background: #454545; color: ${palette.ink}; }`,
   ].join("\n");
 }
 

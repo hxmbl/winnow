@@ -31,6 +31,7 @@ import {
 } from "../../core/contacts/suggest";
 import { isValidAddress, parseRecipients } from "../../core/contacts/addresses";
 import type { ContactIndex } from "../../core/contacts/index";
+import { Icon } from "./Icon";
 
 export type RecipientFieldProps = {
   /** The addresses on the message. A bare address is what the draft carries. */
@@ -219,7 +220,7 @@ export function RecipientField({
 
   return (
     <div className="flex items-start gap-2 text-meta">
-      <label htmlFor={id} className="w-12 shrink-0 pt-1.5 text-ink-subtle">
+      <label htmlFor={id} className="w-(--wn-composer-label) shrink-0 pt-1.5 text-ink-subtle">
         {label}
       </label>
 
@@ -228,7 +229,7 @@ export function RecipientField({
           // The border lives on the wrapper because the chips are inside it, so the field
           // is one box. `focus-within` rather than `focus-visible` on the input: the focus
           // ring should follow the field the user is in, not the last thing they clicked.
-          className={`flex min-h-[36px] flex-wrap items-center gap-1.5 rounded-field border bg-surface px-2.5 py-1 transition-colors ${
+          className={`flex min-h-9 flex-wrap items-center gap-1.5 rounded-field border bg-surface px-2.5 py-1 transition-colors ${
             invalid.length > 0 ? "border-(--wn-danger)" : "border-hairline"
           } focus-within:border-accent`}
         >
@@ -256,7 +257,7 @@ export function RecipientField({
                   onClick={() => removeAt(position)}
                   className={`flex ${CHIP_BUTTON} shrink-0 items-center justify-center rounded-ctl text-current opacity-60 transition-opacity hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring`}
                 >
-                  <X size={13} strokeWidth={2.2} aria-hidden="true" />
+                  <Icon icon={X} size={12} />
                 </button>
               </span>
             );

@@ -14,6 +14,8 @@ import { clickInto, pickerRows, pickerTitle, type FilterCheck } from "../smartFi
 import type { LearnableFilter } from "../../core/learn/filterLearning";
 import type { FilterReason } from "../../core/learn/filterExplain";
 import { WhyHere } from "./WhyHere";
+import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 export function SmartFilterPicker({
   count,
@@ -36,10 +38,10 @@ export function SmartFilterPicker({
   const doneRef = useRef<HTMLButtonElement>(null);
   const rows = pickerRows(membership);
   return (
-    <Sheet label={pickerTitle(count)} onClose={onClose} initialFocus={doneRef} dismissOnBackdrop className="flex w-full max-w-[400px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift">
-      <div data-filter-picker="" className="flex max-h-[min(700px,90vh)] flex-col">
+    <Sheet label={pickerTitle(count)} onClose={onClose} initialFocus={doneRef} dismissOnBackdrop className="flex w-full max-w-sheet-sm flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift">
+      <div data-filter-picker="" className="flex max-h-(--wn-sheet-max-h) flex-col">
         <SheetHeader title={pickerTitle(count)} onClose={onClose} />
-        <p className="border-b border-hairline px-5 py-3 text-meta text-ink-muted">
+        <p className="border-b border-hairline-soft px-5 py-3 text-meta text-ink-muted">
           Tick where {count === 1 ? "it belongs" : "they belong"}. Winnow learns from each change, on this device only.
         </p>
         {/*
@@ -50,7 +52,7 @@ export function SmartFilterPicker({
         <div data-filter-picker-scroll="" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div role="group" aria-label="Smart filters" className="py-1">
           {rows.map(({ filter, label, check }) => {
-            const { Icon } = filterIcon(filter);
+            const { Icon: Glyph } = filterIcon(filter);
             return (
               <button
                 key={filter}
@@ -67,22 +69,22 @@ export function SmartFilterPicker({
                     check === "none" ? "border-control-border" : "border-accent bg-accent text-on-accent"
                   }`}
                 >
-                  {check === "all" && <Check size={12} strokeWidth={3} />}
-                  {check === "some" && <Minus size={12} strokeWidth={3} />}
+                  {check === "all" && <Icon icon={Check} size={12} />}
+                  {check === "some" && <Icon icon={Minus} size={12} />}
                 </span>
-                <Icon size={14} strokeWidth={2} className="shrink-0 text-ink-icon" />
+                <Icon icon={Glyph} size={16} className="shrink-0 text-ink-icon" />
                 <span className="min-w-0 truncate">{label}</span>
               </button>
             );
           })}
         </div>
         {reasons.length > 0 && (
-          <div className="border-t border-hairline px-5 py-3">
+          <div className="border-t border-hairline-soft px-5 py-3">
             <WhyHere reasons={reasons} />
           </div>
         )}
         </div>
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-hairline px-5 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-hairline-soft px-5 py-3">
           <span role="status" aria-live="polite" data-filter-picker-status="" className="min-w-0 truncate text-meta text-ink-muted">
             {status}
           </span>
@@ -91,7 +93,7 @@ export function SmartFilterPicker({
             type="button"
             data-filter-picker-done=""
             onClick={onClose}
-            className="shrink-0 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary")}
           >
             Done
           </button>

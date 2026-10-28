@@ -31,6 +31,8 @@ import {
   type IncomingFile,
 } from "../../core/mail/attachments";
 import { formatBytes } from "../../core/gmail/mime";
+import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 export type AttachmentAdder = { add: (files: readonly File[]) => void };
 
@@ -130,7 +132,7 @@ export function ComposerAttachments({
           title="Attach files"
           className={`flex items-center gap-1.5 rounded-ctl px-2 text-meta font-medium text-ink-body transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${chip}`}
         >
-          <Paperclip size={15} strokeWidth={1.9} aria-hidden="true" />
+          <Icon icon={Paperclip} size={16} />
           Attach
         </button>
         <input
@@ -152,7 +154,7 @@ export function ComposerAttachments({
           <span
             key={attachment.id}
             data-attachment-chip={attachment.filename}
-            className={`inline-flex max-w-full items-center gap-1.5 rounded-full border border-hairline bg-sheen py-0.5 pl-2.5 pr-1 text-meta ${chip}`}
+            className={`inline-flex max-w-full items-center gap-1.5 rounded-ctl border border-hairline bg-sheen py-0.5 pl-2.5 pr-1 text-meta ${chip}`}
           >
             <span className="min-w-0 truncate font-medium text-ink" title={attachment.filename}>
               {attachment.filename}
@@ -167,11 +169,11 @@ export function ComposerAttachments({
                 setTooBig([]);
                 onChange(removeAttachment(latest.current, attachment.id));
               }}
-              className={`flex shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              className={`flex shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                 phone ? "h-9 w-9" : "h-6 w-6"
               }`}
             >
-              <X size={13} strokeWidth={2.2} aria-hidden="true" />
+              <Icon icon={X} size={12} />
             </button>
           </span>
         ))}
@@ -179,9 +181,9 @@ export function ComposerAttachments({
           <span
             key={file.id}
             data-drive-chip={file.name}
-            className={`inline-flex max-w-full items-center gap-1.5 rounded-full border border-hairline bg-sheen py-0.5 pl-2.5 pr-1 text-meta ${chip}`}
+            className={`inline-flex max-w-full items-center gap-1.5 rounded-ctl border border-hairline bg-sheen py-0.5 pl-2.5 pr-1 text-meta ${chip}`}
           >
-            <Link2 size={13} strokeWidth={2} aria-hidden="true" className="shrink-0 text-ink-icon" />
+            <Icon icon={Link2} size={12} className="shrink-0 text-ink-icon" />
             <span className="min-w-0 truncate font-medium text-ink" title={`${file.name} — Google Drive link`}>
               {file.name}
             </span>
@@ -192,11 +194,11 @@ export function ComposerAttachments({
                 aria-label={`Remove the Drive link to ${file.name}`}
                 data-drive-remove=""
                 onClick={() => onRemoveDriveFile(file.id)}
-                className={`flex shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                className={`flex shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                   phone ? "h-9 w-9" : "h-6 w-6"
                 }`}
               >
-                <X size={13} strokeWidth={2.2} aria-hidden="true" />
+                <Icon icon={X} size={12} />
               </button>
             )}
           </span>
@@ -233,9 +235,9 @@ export function ComposerAttachments({
               setError(null);
               drive.onSendAsLink(files);
             }}
-            className={`inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${chip}`}
+            className={buttonClass("secondary", "sm", chip)}
           >
-            <Link2 size={14} strokeWidth={2} aria-hidden="true" />
+            <Icon icon={Link2} size={16} />
             Send as a Drive link
           </button>
           <span className="text-meta text-ink-subtle">

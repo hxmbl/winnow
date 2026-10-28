@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Sheet, SheetHeader } from "./Overlay";
 import { copyText } from "../clipboard";
 import { rawSourceText } from "../../core/mail/rawSource";
+import { buttonClass } from "../button";
 
 export type RawSourceState =
   | { status: "loading"; subject: string }
@@ -25,9 +26,9 @@ export function RawSourceSheet({ state, phone, onClose }: { state: RawSourceStat
       onClose={onClose}
       dismissOnBackdrop
       placement={phone ? "fill" : "center"}
-      className={phone ? "" : "max-w-[960px]"}
+      className={phone ? "" : "max-w-sheet-wide"}
     >
-      <div data-raw-source="" data-raw-status={state.status} className="flex max-h-[85vh] min-h-0 flex-col">
+      <div data-raw-source="" data-raw-status={state.status} className="flex max-h-(--wn-sheet-max-h) min-h-0 flex-col">
         <SheetHeader title="View Original" onClose={onClose} touch={phone}>
           {state.status === "ready" && (
             <button
@@ -36,7 +37,7 @@ export function RawSourceSheet({ state, phone, onClose }: { state: RawSourceStat
               onClick={() => {
                 void copyText(state.raw).then((ok) => setCopied(ok ? "copied" : "failed"));
               }}
-              className="ml-auto rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className={buttonClass("secondary", "sm", "ml-auto")}
             >
               {copied === "copied" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy"}
             </button>

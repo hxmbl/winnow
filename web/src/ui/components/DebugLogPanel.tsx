@@ -21,9 +21,10 @@ import {
 } from "../../core/debug/debugLog";
 import { copyText } from "../clipboard";
 import { ConfirmDialog } from "./Overlay";
+import { buttonClass } from "../button";
 
 const BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
+  buttonClass("secondary", "sm");
 
 export function DebugLogPanel({ recording }: { recording: boolean }) {
   const lines = useSyncExternalStore(subscribeDebugLog, debugLogLines, debugLogLines);

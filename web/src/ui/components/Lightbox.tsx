@@ -13,6 +13,7 @@ import { useRef } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import { Sheet } from "./Overlay";
+import { Icon } from "./Icon";
 
 export type LightboxImage = { index: number; url: string; filename: string };
 
@@ -38,7 +39,7 @@ export function Lightbox({
     onChange(images[(at + by + images.length) % images.length]!.index);
   };
   const BUTTON =
-    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-11 max-sm:w-11";
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring max-sm:h-11 max-sm:w-11";
 
   // Portalled to the body: the reader pane animates in with a transform, and a fixed
   // overlay inside a transformed ancestor is positioned against that ancestor, not the
@@ -72,16 +73,16 @@ export function Lightbox({
             )}
           </p>
           <button type="button" onClick={() => onSave(image.index)} aria-label={`Save ${image.filename}`} className={BUTTON}>
-            <Download size={17} strokeWidth={1.9} aria-hidden="true" />
+            <Icon icon={Download} size={16} />
           </button>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Close picture" data-lightbox-close="" className={BUTTON}>
-            <X size={18} strokeWidth={2} aria-hidden="true" />
+            <Icon icon={X} size={20} />
           </button>
         </div>
         <div className="flex w-full items-center justify-center gap-2">
           {images.length > 1 && (
             <button type="button" onClick={() => step(-1)} aria-label="Previous picture" className={BUTTON}>
-              <ChevronLeft size={18} strokeWidth={2} aria-hidden="true" />
+              <Icon icon={ChevronLeft} size={20} />
             </button>
           )}
           <img
@@ -93,7 +94,7 @@ export function Lightbox({
           />
           {images.length > 1 && (
             <button type="button" onClick={() => step(1)} aria-label="Next picture" className={BUTTON}>
-              <ChevronRight size={18} strokeWidth={2} aria-hidden="true" />
+              <Icon icon={ChevronRight} size={20} />
             </button>
           )}
         </div>

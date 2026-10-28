@@ -65,6 +65,8 @@ import type { AccountSummary } from "../../core/store/store";
 import { accountsSummary } from "../accountsPage";
 import type { UpdatesController } from "../useUpdates";
 import { operatorUpdate } from "../../core/updates/updates";
+import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 /** Where Winnow's code lives, linked from About. */
 export const SOURCE_URL = "https://github.com/hxmbl/winnow";
@@ -433,7 +435,7 @@ export function Settings(props: SettingsProps) {
                           className="flex min-h-12 w-full items-center justify-between gap-3 rounded-ctl px-3 text-left text-read font-medium text-ink-body transition-colors active:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                         >
                           {categoryOf(id).label}
-                          <ChevronRight size={18} className="text-ink-subtle" aria-hidden="true" />
+                          <Icon icon={ChevronRight} size={20} className="text-ink-subtle" />
                         </button>
                       </li>
                     ))}
@@ -457,7 +459,7 @@ export function Settings(props: SettingsProps) {
                     // target stays; only the drawn glyph is small.
                     className="flex h-11 w-9 items-center justify-center rounded-ctl text-ink transition-colors active:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >
-                    <ChevronLeft size={22} strokeWidth={2.4} aria-hidden="true" />
+                    <Icon icon={ChevronLeft} size={20} />
                   </button>
                   <h2
                     ref={pageHeadingRef}
@@ -501,7 +503,7 @@ export function Settings(props: SettingsProps) {
           {/* Left: Back, then the categories. */}
           <div data-settings-column="nav" className="flex min-h-0 min-w-0 flex-col border-r border-hairline-soft px-2 py-4 min-[1400px]:px-3">
             <button type="button" data-settings-back="" onClick={props.onClose} className={`${BACK_BUTTON} self-start`}>
-              <ArrowLeft size={16} aria-hidden="true" />
+              <Icon icon={ArrowLeft} size={16} />
               Back
             </button>
             <div
@@ -556,7 +558,7 @@ export function Settings(props: SettingsProps) {
             className={`flex min-h-0 flex-col ${layout === "three" ? "border-r border-hairline-soft" : ""}`}
           >
             <div className="shrink-0 px-8 pb-4 pt-6">
-              <p className="text-meta font-semibold text-ink-subtle">Settings</p>
+              <p className="text-meta font-semibold text-ink-muted">Settings</p>
               <h2 data-settings-title="" className="mt-0.5 text-title font-semibold text-ink">
                 {category.label}
               </h2>
@@ -580,7 +582,7 @@ export function Settings(props: SettingsProps) {
               aria-label="About this setting"
               className="min-h-0 overflow-y-auto px-8 pt-19"
             >
-              <p className="text-meta font-semibold text-ink-subtle">
+              <p className="text-meta font-semibold text-ink-muted">
                 {explanation.kind === "intro" ? "About this section" : "About this setting"}
               </p>
               <h3 className="mt-1 text-read font-semibold text-ink">{explanation.title}</h3>
@@ -629,7 +631,7 @@ function VersionLabel({ version, unlocked, onUnlock }: { version: string; unlock
         role="status"
         aria-live="polite"
         data-dev-toast=""
-        className={`pointer-events-none fixed bottom-[calc(var(--wn-phone-tabs,env(safe-area-inset-bottom,0px))+1.5rem)] left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-meta font-medium text-surface shadow-pane transition-opacity ${
+        className={`pointer-events-none fixed bottom-[calc(var(--wn-phone-tabs,env(safe-area-inset-bottom,0px))+1.5rem)] left-1/2 z-50 -translate-x-1/2 rounded-ctl bg-ink px-4 py-2 text-meta font-medium text-surface shadow-pane transition-opacity ${
           toast ? "opacity-100" : "opacity-0"
         }`}
       >
@@ -685,7 +687,7 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
                 type="button"
                 data-settings-open-scheduled=""
                 onClick={props.onOpenScheduled}
-                className="rounded-ctl border border-control-border px-3.5 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className={buttonClass("secondary")}
               >
                 Open Scheduled
               </button>
@@ -1167,7 +1169,7 @@ function ReadingSettings({ props }: { props: SettingsProps }) {
             ) : (
               <>
                 <button type="button" onClick={() => setResetStep("confirm")} className={`inline-flex items-center gap-1.5 ${SECONDARY_BUTTON}`}>
-                  <RotateCcw size={13} strokeWidth={2} aria-hidden="true" />
+                  <Icon icon={RotateCcw} size={12} />
                   Reset sorting
                 </button>
                 {/* The (?) for Reset sorting, which has no label of its own beside the button. */}
@@ -1210,7 +1212,7 @@ function InfoSlot({ setting }: { setting: SettingId }) {
 }
 
 const SECONDARY_BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "sm");
 
 function LearningHistory({ events }: { events: readonly FeedbackEvent[] }) {
   return (
@@ -1326,10 +1328,10 @@ function AccountsSettings({ props }: { props: SettingsProps }) {
           type="button"
           data-settings-manage-accounts=""
           onClick={props.onManageAccounts}
-          className="inline-flex items-center gap-1 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className={buttonClass("secondary", "sm", "gap-1")}
         >
           Manage
-          <ChevronRight size={14} aria-hidden="true" />
+          <Icon icon={ChevronRight} size={16} />
         </button>
       </Row>
     </Section>
@@ -1356,7 +1358,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
         <button
           type="button"
           onClick={props.onGoogleAccount}
-          className="rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className={buttonClass("secondary", "sm")}
         >
           {props.googleClient ? "Change" : "Set up"}
         </button>
@@ -1380,7 +1382,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
           >
             {props.contactsAccess === "granted" ? (
               <span className="inline-flex items-center gap-1 text-meta font-semibold text-ink-muted">
-                <Check size={13} aria-hidden="true" /> Connected
+                <Icon icon={Check} size={12} /> Connected
               </span>
             ) : (
               <button
@@ -1441,7 +1443,7 @@ function SenderSettings({ props }: { props: SettingsProps }) {
               {props.blockedSenders.map((sender) => (
                 <Row key={sender} label={sender}>
                   <button type="button" onClick={() => props.onUnblock(sender)} className={`inline-flex items-center gap-1.5 ${SENDER_BUTTON}`}>
-                    <Check size={12} strokeWidth={2.4} aria-hidden="true" />
+                    <Icon icon={Check} size={12} />
                     Unhide
                   </button>
                 </Row>
@@ -1462,7 +1464,7 @@ function SenderSettings({ props }: { props: SettingsProps }) {
               {props.mutedSenders.map((sender) => (
                 <Row key={sender} label={sender}>
                   <button type="button" onClick={() => props.onUnmute(sender)} className={`inline-flex items-center gap-1.5 ${SENDER_BUTTON}`}>
-                    <Check size={12} strokeWidth={2.4} aria-hidden="true" />
+                    <Icon icon={Check} size={12} />
                     Unmute
                   </button>
                 </Row>
@@ -1476,4 +1478,4 @@ function SenderSettings({ props }: { props: SettingsProps }) {
 }
 
 const SENDER_BUTTON =
-  "rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "sm");

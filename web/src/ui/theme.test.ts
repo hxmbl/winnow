@@ -652,6 +652,135 @@ describe("the design system stays small", () => {
     expect(offenders(/\btext-(?:xs|sm|base|lg|[2-9]?xl)\b/g)).toEqual([]);
   });
 
+  it("keeps the stylesheets on the four type sizes too", () => {
+    // The class-name scan above cannot see CSS, which is where an 11px tooltip key and two
+    // hard-coded 12/14px sizes hid. Every `font-size` in a stylesheet names a scale step
+    // (or inherits one); `font:` shorthands are not used.
+    const cssFiles: URL[] = [];
+    const walkCss = (dir: URL): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const child = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dir);
+        if (entry.isDirectory()) walkCss(child);
+        else if (entry.name.endsWith(".css")) cssFiles.push(child);
+      }
+    };
+    walkCss(srcDir);
+    expect(cssFiles.map((url) => url.pathname)).toContainEqual(expect.stringMatching(/\/index\.css$/));
+    const bad: string[] = [];
+    for (const url of cssFiles) {
+      const css = readFileSync(url, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const match of css.matchAll(/font-size\s*:\s*([^;}]+)/g)) {
+        const value = match[1].trim();
+        if (!/^(?:var\(--text-(?:meta|ui|read|title)\)|inherit)$/.test(value)) bad.push(`${url.pathname.split("/").pop()}: ${value}`);
+      }
+      for (const match of css.matchAll(/(?<![-\w])font\s*:\s*(\d[^;}]*)/g)) bad.push(`${url.pathname.split("/").pop()}: font: ${match[1]}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("draws every text button from the one recipe (`ui/button.ts`)", () => {
+    // The primary and secondary recipes were pasted ~14 times and drifted in height,
+    // padding and weight. A class string that restates either one is a new copy.
+    const strings = [...sources.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map((match) => match[1] ?? match[2] ?? "");
+    const pasted = strings.filter((value) => {
+      const has = (token: string) => new RegExp(`(?:^|\\s)${token.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}(?=\\s|$)`).test(value);
+      const primary = has("bg-accent") && has("text-on-accent") && has("font-semibold");
+      const secondary = has("border-control-border") && has("hover:bg-surface-hover") && has("font-semibold");
+      return primary || secondary;
+    });
+    expect(pasted).toEqual([]);
+  });
+
+  it("draws every lucide glyph through <Icon> (four sizes, one stroke)", () => {
+    // 17 sizes and 11 strokes, each picked on its own, before `components/Icon.tsx`.
+    const direct: string[] = [];
+    const raw: string[] = [];
+    for (const url of files) {
+      if (url.pathname.endsWith("/components/Icon.tsx")) continue;
+      const source = readFileSync(url, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+      const name = url.pathname.split("/").pop();
+      const glyphs = new Set<string>();
+      for (const match of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*"lucide-react"/g)) {
+        for (const part of match[1].split(",")) {
+          const id = part.trim();
+          if (id && !id.startsWith("type ")) glyphs.add(id.split(/\s+as\s+/).pop()!.trim());
+        }
+      }
+      for (const glyph of glyphs) if (new RegExp(`<${glyph}\\b`).test(source)) direct.push(`${name}: <${glyph}>`);
+      // Any element given a raw pixel size and a stroke is an icon picked by hand.
+      for (const match of source.matchAll(/<[A-Za-z]\w*\b[^<]*?\/>/g)) {
+        if (/\bsize=\{/.test(match[0]) && /\bstrokeWidth=/.test(match[0])) raw.push(`${name}: ${match[0].slice(0, 60)}`);
+      }
+    }
+    expect(direct).toEqual([]);
+    expect(raw).toEqual([]);
+  });
+
+  it("keeps state fills on the state tokens, not hand-mixed ink washes", () => {
+    // MailNav and the dock once had 8%, 9%, 10% and 14% washes beside sheen, surface-hover
+    // and surface-active: a 4th, 5th and 6th grey state.
+    expect(offenders(/color-mix\(in_srgb,var\(--wn-ink\)[^\]]*\]/g)).toEqual([]);
+  });
+
+  it("sizes sheets and dialogs from the sheet tokens", () => {
+    expect(offenders(/\b(?:max|min)-w-\[\d+px\]/g)).toEqual([]);
+    expect(offenders(/\bmax-h-\[(?:[89]\d)vh\]|\bmax-h-\[min\((?:700px|44rem)[^\]]*\]/g)).toEqual([]);
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    for (const token of ["--container-sheet-sm: 400px", "--container-sheet-md: 520px", "--container-sheet-lg: 640px", "--wn-sheet-max-h:"]) {
+      expect(css).toContain(token);
+    }
+  });
+
+  it("derives the rail's shadow room, the sender column and the composer indent from one variable each", () => {
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    expect(css).toMatch(/--wn-rail-bleed:\s*20px/);
+    expect(css).toMatch(/--wn-sender-col:\s*calc\(/);
+    expect(css).toMatch(/--wn-composer-label:/);
+    const read = (name: string) => readFileSync(new URL(`components/${name}`, import.meta.url), "utf8");
+    const strip = read("FilterStrip.tsx");
+    expect(strip).not.toMatch(/-?\[-?2\dpx\]/);
+    expect(strip.match(/--wn-rail-bleed/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    const list = read("MessageList.tsx");
+    expect(list).not.toMatch(/\bpl-\[\d+px\]/);
+    expect(list.match(/--wn-sender-col/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(read("Composer.tsx")).not.toMatch(/\b(?:pl-14|w-12)\b/);
+  });
+
+  it("has no per-element optical nudges or arbitrary sizes that are on the scale", () => {
+    // Centre against a shared box (`h-[1lh]`, the avatar's `h-8`, the row's `h-6`) instead.
+    expect(offenders(/\b-?m[trblxy]?-\[-?\d+(?:\.\d+)?px\]/g)).toEqual([]);
+    expect(offenders(/\b(?:h|min-h|w|min-w|p[trblxy]?)-\[(?:\d+)px\]/g)).toEqual([]);
+    expect(offenders(/\bleading-\[[\d.]+\]/g)).toEqual([]);
+    expect(offenders(/\btext-\[[\d.]+em\]/g)).toEqual([]);
+  });
+
+  it("uses the control radius for controls; `full` only for dots, switches, avatars and counts", () => {
+    // `rounded-ctl` and `rounded-full` render the same today (9999px), but a shape change
+    // would split the controls. A class string with `rounded-full` and a hover or focus
+    // state is a control, unless it is a switch track or an avatar button.
+    const strings = [...sources.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map((match) => match[1] ?? match[2] ?? "");
+    const controls = strings.filter(
+      (value) =>
+        /(?:^|\s)rounded-full(?=\s|$)/.test(value) &&
+        /(?:^|\s)(?:hover|focus-visible|active):/.test(value) &&
+        !/\bh-5 w-9\b/.test(value) && // a switch track
+        !/\bwn-color-well\b/.test(value) && // a colour swatch
+        !/^mt-0\.5 shrink-0 rounded-full\b/.test(value), // an avatar button
+    );
+    expect(controls).toEqual([]);
+  });
+
+  it("lights nothing decoratively: no glow on an on chip, no halo on the open account", () => {
+    // The ring (and the chip's tint, the account's tick and aria-current) carry the state.
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/--pill-glow-a/);
+    const accounts = readFileSync(new URL("components/AccountSwitcher.tsx", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
+    expect(accounts).not.toMatch(/halo|0 0 \d+px \d+px/);
+    expect(accounts).toContain("boxShadow: ring");
+  });
+
   it("uses only the two radii", () => {
     expect(offenders(/\brounded(?:-[trblse]{1,2})?-(?:sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g)).toEqual([]);
     // A bare `rounded` has no value in the overridden scale, so it renders square.

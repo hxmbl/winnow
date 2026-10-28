@@ -89,6 +89,8 @@ import {
 import { SetupFix, SetupTroubleshoot } from "./SetupTroubleshoot";
 import type { AppSigningInfo } from "../../platform/types";
 import { AndroidSignInStep } from "./AndroidSignInStep";
+import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 /** Where the setup guide lives. Opened in the system browser. */
 export const SETUP_GUIDE_URL = "https://github.com/hxmbl/winnow/blob/master/docs/google-setup.md";
@@ -124,11 +126,11 @@ type Imported = { type: ClientJsonType; projectId?: string; warnings: string[] }
 const FIELD =
   "w-full rounded-ctl border bg-surface px-4 py-1.5 font-mono text-ui text-ink outline-hidden placeholder:text-ink-placeholder focus-visible:border-accent max-sm:min-h-11 max-sm:text-read";
 const PRIMARY =
-  "rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("primary", "md", "max-sm:min-h-11");
 const LINK =
   "inline-flex w-fit items-center gap-1.5 rounded-ctl text-ui font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 const SECONDARY =
-  "rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover aria-disabled:opacity-50 max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "md", "max-sm:min-h-11");
 
 /** One numbered instruction inside a step. */
 function Item({ children }: { children: React.ReactNode }) {
@@ -480,7 +482,7 @@ export function GoogleSetup(props: Props) {
       className={inline ? LINK.replace(" max-sm:min-h-11", "") : LINK}
     >
       {label}
-      <ExternalLink size={12} strokeWidth={2} aria-hidden="true" />
+      <Icon icon={ExternalLink} size={12} />
     </a>
   );
 
@@ -497,7 +499,7 @@ export function GoogleSetup(props: Props) {
         aria-label={done ? `${label} copied` : `Copy ${label}`}
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-ctl text-ink-icon transition-colors hover:bg-surface-hover max-sm:h-11 max-sm:w-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        {done ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+        {done ? <Icon icon={Check} size={16} /> : <Icon icon={Copy} size={16} />}
       </button>
     </div>
   );
@@ -519,9 +521,9 @@ export function GoogleSetup(props: Props) {
             type="button"
             onClick={() => fileRef.current?.click()}
             aria-describedby={`${ids}-import-hint`}
-            className="inline-flex items-center gap-1.5 rounded-ctl border border-control-border px-3 py-1 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary", "md", "max-sm:min-h-11")}
           >
-            <FileJson size={14} strokeWidth={2} aria-hidden="true" />
+            <Icon icon={FileJson} size={16} />
             Import JSON
           </button>
           <p id={`${ids}-import-hint`} className="min-w-0 flex-1 text-meta text-ink-subtle">
@@ -534,7 +536,7 @@ export function GoogleSetup(props: Props) {
           {imported && (
             <div className="flex flex-col gap-1.5 text-meta text-ink-body">
               <p className="flex items-start gap-1.5 font-medium text-success">
-                <Check size={14} className="mt-px shrink-0" aria-hidden="true" />
+                <Icon icon={Check} size={16} className="mt-px shrink-0" />
                 <span>
                   Imported the {imported.type === "installed" ? "Desktop app" : "Web application"} client
                   {imported.projectId ? (
@@ -550,7 +552,7 @@ export function GoogleSetup(props: Props) {
               </p>
               {imported.warnings.map((warning) => (
                 <p key={warning} className="flex items-start gap-1.5 text-ink-body" data-import-warning="">
-                  <TriangleAlert size={14} className="mt-px shrink-0 text-danger" aria-hidden="true" />
+                  <Icon icon={TriangleAlert} size={16} className="mt-px shrink-0 text-danger" />
                   <span className="selectable">{warning}</span>
                 </p>
               ))}
@@ -572,7 +574,7 @@ export function GoogleSetup(props: Props) {
                         className="inline-flex items-center gap-0.5 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                       >
                         {api.name}
-                        <ExternalLink size={11} aria-hidden="true" />
+                        <Icon icon={ExternalLink} size={12} />
                       </a>
                       {api.required ? "" : ` (${api.purpose}, optional)`}
                     </span>
@@ -680,7 +682,7 @@ export function GoogleSetup(props: Props) {
       <div role="status" aria-live="polite" className="min-h-0 text-ui">
         {test?.ok && (
           <p className="flex items-start gap-1.5 font-medium text-success">
-            <Check size={14} className="mt-px shrink-0" aria-hidden="true" />
+            <Icon icon={Check} size={16} className="mt-px shrink-0" />
             {test.message}
           </p>
         )}
@@ -754,7 +756,7 @@ export function GoogleSetup(props: Props) {
                   focusAfter.current = "keep";
                   setConfirmRemove(true);
                 }}
-                className="shrink-0 rounded-ctl border border-control-border px-3 py-1 text-meta font-semibold text-danger transition-colors hover:bg-surface-hover max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className={buttonClass("secondary", "sm", "max-sm:min-h-11", { tone: "danger" })}
               >
                 Remove…
               </button>
@@ -948,7 +950,7 @@ export function GoogleSetup(props: Props) {
       className={
         phone
           ? "flex h-[calc(100dvh-var(--wn-keyboard,0px))] w-full flex-col overflow-hidden bg-chrome"
-          : "flex max-h-[85vh] w-full max-w-[560px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome"
+          : "flex max-h-(--wn-sheet-max-h) w-full max-w-sheet-md flex-col overflow-hidden rounded-pane border border-hairline bg-chrome"
       }
     >
       <SheetHeader title="Google account" onClose={props.onClose} touch={phone} />
@@ -1028,7 +1030,7 @@ export function GoogleSetup(props: Props) {
                     aria-hidden="true"
                     className={`flex min-w-0 items-center gap-1 text-meta max-sm:hidden ${index === step ? "font-semibold text-ink-body" : "text-ink-subtle"}`}
                   >
-                    {done.includes(item.id) && <Check size={11} strokeWidth={2.5} className="shrink-0 text-accent" />}
+                    {done.includes(item.id) && <Icon icon={Check} size={12} className="shrink-0 text-accent" />}
                     <span className="truncate">{item.short}</span>
                   </span>
                 </button>
@@ -1064,7 +1066,7 @@ export function GoogleSetup(props: Props) {
                   onClick={startOver}
                   className="inline-flex shrink-0 items-center gap-1 rounded-ctl font-semibold text-ink-body underline underline-offset-2 hover:text-ink max-sm:min-h-11 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
-                  <RotateCcw size={12} aria-hidden="true" />
+                  <Icon icon={RotateCcw} size={12} />
                   Start over
                 </button>
               </div>
@@ -1096,13 +1098,13 @@ export function GoogleSetup(props: Props) {
               onClick={() => go(step - 1)}
               className={`${SECONDARY} inline-flex items-center gap-1.5 ${last ? "max-sm:min-w-11 max-sm:justify-center max-sm:px-0" : ""}`}
             >
-              <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
+              <Icon icon={ArrowLeft} size={16} />
               {/* Icon-only on a phone's last step, so Test and Save fit on one row. */}
               <span className={last ? "max-sm:sr-only" : undefined}>Back</span>
             </button>
           ) : (
             <button type="button" onClick={props.onOpenGuide} className={`${LINK} text-meta`}>
-              <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
+              <Icon icon={BookOpen} size={16} />
               Open the setup guide
             </button>
           )}
@@ -1129,7 +1131,7 @@ export function GoogleSetup(props: Props) {
                 data-setup-next=""
               >
                 Next
-                <ArrowRight size={14} strokeWidth={2} aria-hidden="true" />
+                <Icon icon={ArrowRight} size={16} />
               </button>
             )}
           </div>

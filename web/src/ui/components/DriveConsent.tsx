@@ -11,6 +11,8 @@ import { useRef } from "react";
 import { Check, X } from "lucide-react";
 import { DRIVE_CONSENT } from "../../core/gmail/drive";
 import { Sheet } from "./Overlay";
+import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 export function DriveConsent({
   files,
@@ -34,7 +36,7 @@ export function DriveConsent({
       onEscape={onCancel}
       dismissOnBackdrop={false}
       initialFocus={cancelRef}
-      className="w-full max-w-[420px] rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+      className="w-full max-w-sheet-sm rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <div data-drive-consent="">
         <h2 className="text-read font-semibold text-ink">{DRIVE_CONSENT.title}</h2>
@@ -48,7 +50,7 @@ export function DriveConsent({
         <ul className="mt-1 flex flex-col gap-1">
           {DRIVE_CONSENT.allows.map((line) => (
             <li key={line} className="flex items-start gap-2 text-ui text-ink-body">
-              <Check size={15} strokeWidth={2.2} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+              <Icon icon={Check} size={16} className="mt-0.5 shrink-0 text-accent" />
               {line}
             </li>
           ))}
@@ -57,7 +59,7 @@ export function DriveConsent({
         <ul className="mt-1 flex flex-col gap-1">
           {DRIVE_CONSENT.doesNot.map((line) => (
             <li key={line} className="flex items-start gap-2 text-ui text-ink-body">
-              <X size={15} strokeWidth={2.2} aria-hidden="true" className="mt-0.5 shrink-0 text-ink-icon" />
+              <Icon icon={X} size={16} className="mt-0.5 shrink-0 text-ink-icon" />
               {line}
             </li>
           ))}
@@ -73,7 +75,7 @@ export function DriveConsent({
             ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary")}
           >
             Not now
           </button>
@@ -81,7 +83,7 @@ export function DriveConsent({
             type="button"
             data-drive-consent-continue=""
             onClick={onContinue}
-            className="rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary")}
           >
             Continue to Google
           </button>

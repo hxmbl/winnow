@@ -35,6 +35,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { anchorFromElement, placeMenu, type MenuAnchor, type MenuEntry } from "../menuPlacement";
+import { Icon } from "./Icon";
 
 export type { MenuAnchor, MenuEntry };
 
@@ -228,7 +229,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
         visibility: position ? "visible" : "hidden",
       }}
       data-menu-animate={position ? "" : undefined}
-      className={`${position ? "animate-menu" : ""} z-70 flex min-w-[220px] max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body [@media(hover:none)]:min-w-[240px]`}
+      className={`${position ? "animate-menu" : ""} z-70 flex min-w-menu max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body `}
     >
       {header && (
         <>
@@ -242,7 +243,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
         if (entry.kind === "divider") {
           return <div key={entry.id} role="separator" className="my-1 h-px bg-hairline" />;
         }
-        const Icon = entry.icon;
+        const Glyph = entry.icon;
         return (
           <button
             key={entry.id}
@@ -266,14 +267,14 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
             className={`${ITEM} ${entry.danger ? "text-danger" : ""}`}
           >
             <span className="flex w-4 shrink-0 justify-center text-ink-icon">
-              {Icon && <Icon size={15} strokeWidth={1.9} aria-hidden="true" />}
+              {Glyph && <Icon icon={Glyph} size={16} />}
             </span>
             <span className="min-w-0 flex-1 truncate">{entry.label}</span>
             {entry.hint && (
               <kbd className="shrink-0 font-sans text-meta text-ink-subtle">{entry.hint}</kbd>
             )}
             {entry.submenu && (
-              <ChevronRight size={14} strokeWidth={1.9} className="shrink-0 text-ink-subtle" aria-hidden="true" />
+              <Icon icon={ChevronRight} size={16} className="shrink-0 text-ink-subtle" />
             )}
           </button>
         );

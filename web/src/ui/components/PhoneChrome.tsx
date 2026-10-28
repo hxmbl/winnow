@@ -44,6 +44,7 @@ import {
   tabAction,
   tabLabel,
 } from "../phoneDock";
+import { Icon } from "./Icon";
 
 /** The canvas-toned sheet the reader's bottom bar sits on. */
 export const DOCK_SURFACE =
@@ -136,21 +137,21 @@ export function PhoneTopBar({
             if (tick) navigator.vibrate?.(tick);
             onToggleLogo();
           }}
-          className="wn-glass pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="wn-glass pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <AppMark size={28} />
         </button>
         <div
           data-phone-search=""
           data-logo-view={logoView}
-          className="wn-glass wn-glass-bar wn-logo-swap pointer-events-auto h-11 min-w-0 flex-1 rounded-full focus-within:outline-solid focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-(--wn-focusRing)"
+          className="wn-glass wn-glass-bar wn-logo-swap pointer-events-auto h-11 min-w-0 flex-1 rounded-ctl focus-within:outline-solid focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-(--wn-focusRing)"
         >
           <label
             htmlFor="winnow-search"
             data-shown={showVersion ? undefined : ""}
             className="flex h-11 min-w-0 items-center gap-2.5 px-3.5"
           >
-            <Search size={17} className="shrink-0 text-ink-placeholder" aria-hidden="true" />
+            <Icon icon={Search} size={16} className="shrink-0 text-ink-placeholder" />
             <input
               id="winnow-search"
               ref={searchRef}
@@ -194,7 +195,8 @@ const TAB_ICON: Record<(typeof DOCK_TABS)[number], { label: string; Icon: Lucide
 };
 
 /** The soft circle under the current tab, and under Expand while the panel is open. */
-const HIGHLIGHT = "bg-[color-mix(in_srgb,var(--wn-ink)_9%,transparent)]";
+/** The current tab's fill: the selection state token, like the drawer's current row. */
+const HIGHLIGHT = "bg-surface-active";
 
 export type PhoneDockProps = {
   pills: PillItem[];
@@ -364,9 +366,9 @@ export function PhoneDock({
           title={BACK_TO_TOP_LABEL}
           tabIndex={showTop ? undefined : -1}
           onClick={scrollToTop}
-          className="wn-glass wn-back-to-top flex h-9 items-center gap-1.5 rounded-full pl-3 pr-3.5 text-ui font-semibold text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="wn-glass wn-back-to-top flex h-9 items-center gap-1.5 rounded-ctl pl-3 pr-3.5 text-ui font-semibold text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <ArrowUp size={16} strokeWidth={2.2} aria-hidden="true" />
+          <Icon icon={ArrowUp} size={16} />
           <span aria-hidden="true">Top</span>
         </button>
       </div>
@@ -397,12 +399,12 @@ export function PhoneDock({
           // Open, the pill is see-through and sits above the panel (z 55 over 50), on the
           // panel's Inbox row: it must not take that row's taps. Only Expand, which keeps
           // its own `pointer-events-auto`, stays live on it.
-          className={`wn-glass wn-liquid grid h-(--wn-dock-h) min-w-0 flex-1 grid-cols-3 items-stretch rounded-full px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
+          className={`wn-glass wn-liquid grid h-(--wn-dock-h) min-w-0 flex-1 grid-cols-3 items-stretch rounded-ctl px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
             menuOpen ? "pointer-events-none" : "pointer-events-auto"
           }`}
         >
           {DOCK_TABS.map((id) => {
-            const { label, Icon } = TAB_ICON[id];
+            const { label, Icon: Glyph } = TAB_ICON[id];
             const current = !settingsOpen && mailbox === id;
             const count = unread[id] ?? 0;
             const badge = badgeText(count);
@@ -419,21 +421,23 @@ export function PhoneDock({
                 aria-label={tabLabel(label, count)}
                 tabIndex={menuOpen ? -1 : undefined}
                 onClick={onClick}
-                className={`group flex min-h-12 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                className={`group flex min-h-12 items-center justify-center rounded-ctl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
                   menuOpen ? "invisible" : ""
                 }`}
               >
                 <span
-                  className={`relative flex h-12 w-16 items-center justify-center rounded-full transition-colors ${
+                  className={`relative flex h-12 w-16 items-center justify-center rounded-ctl transition-colors ${
                     current ? `${HIGHLIGHT} text-ink` : "text-ink-muted group-active:bg-sheen"
                   }`}
                 >
-                  <Icon size={22} strokeWidth={current ? 2.2 : 1.9} aria-hidden="true" />
+                  <Icon icon={Glyph} size={24} />
                   {badge && (
                     <span
                       aria-hidden="true"
                       data-dock-badge=""
-                      className="absolute right-1.5 top-1 min-w-[1.15rem] rounded-full bg-accent px-1 text-center text-meta font-semibold leading-[1.15rem] tabular-nums text-on-accent"
+                      // A muted count, like the rail, the account switcher and the palette: colour
+                      // is not how a count says "unread" anywhere else.
+                      className="absolute right-1.5 top-1 min-w-5 rounded-full bg-surface-active px-1 text-center text-meta font-semibold leading-5 tabular-nums text-ink"
                     >
                       {badge}
                     </span>
@@ -452,17 +456,17 @@ export function PhoneDock({
             aria-expanded={menuOpen}
             aria-controls="winnow-sidebar"
             onClick={menuOpen ? onCloseMenu : onOpenMenu}
-            className="group pointer-events-auto flex min-h-12 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="group pointer-events-auto flex min-h-12 items-center justify-center rounded-ctl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <span
-              className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${
+              className={`flex h-12 w-12 items-center justify-center rounded-ctl transition-colors ${
                 menuOpen ? `${HIGHLIGHT} text-ink` : "text-ink-muted group-active:bg-sheen"
               }`}
             >
               {menuOpen ? (
-                <ChevronsDownUp size={22} strokeWidth={1.9} aria-hidden="true" />
+                <Icon icon={ChevronsDownUp} size={24} />
               ) : (
-                <ChevronsUpDown size={22} strokeWidth={1.9} aria-hidden="true" />
+                <Icon icon={ChevronsUpDown} size={24} />
               )}
             </span>
           </button>

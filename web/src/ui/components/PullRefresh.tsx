@@ -30,6 +30,7 @@ import {
   type PullIntent,
   type PullPhase,
 } from "../pullRefresh";
+import { Icon } from "./Icon";
 
 /** Where the indicator rests while it spins and shows the result, px below the top. */
 const HOLD = 56;
@@ -172,16 +173,10 @@ export function PullRefresh({ containerRef, context, syncing, onRefresh, result,
       }}
     >
       <div
-        className="wn-glass wn-glass-bar flex h-10 w-10 items-center justify-center rounded-full text-ink-body"
+        className="wn-glass wn-glass-bar flex h-10 w-10 items-center justify-center rounded-ctl text-ink-body"
         data-dragging={dragging ? "" : undefined}
       >
-        <RefreshCw
-          size={18}
-          strokeWidth={2.2}
-          aria-hidden="true"
-          className={`shrink-0 ${phase === "syncing" ? "animate-spin" : ""} ${phase === "armed" ? "text-accent" : ""}`}
-          style={phase === "syncing" ? undefined : { transform: `rotate(${pullRotation(distance)}deg)` }}
-        />
+        <Icon icon={RefreshCw} size={20} className={`shrink-0 ${phase === "syncing" ? "animate-spin" : ""} ${phase === "armed" ? "text-accent" : ""}`} style={phase === "syncing" ? undefined : { transform: `rotate(${pullRotation(distance)}deg)` }} />
       </div>
     </div>
   );

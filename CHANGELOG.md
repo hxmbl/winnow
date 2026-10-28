@@ -16,10 +16,16 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Fixed
 
+- The Copy button on code blocks inside emails is readable in the dark themes again. It was a light grey icon on a white button, and turned dark when you hovered it.
+- A row with a one-time code no longer pushes its time out of line: the Copy chip now sits on the preview line, so every row's time stays in the same column on phone and desktop.
 - Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.
 
 ### Changed
 
+- Icons are drawn at four sizes with one stroke weight throughout the app, so icons next to each other no longer differ by a pixel or two. Dialogs come in three widths, and spacing, dividers and section labels are more consistent. The inbox-clear messages are plainer.
+- Buttons are consistent across the app: every filled and outlined button now comes in the same three heights with the same padding and weight, so two buttons side by side no longer differ by a pixel or two.
+- A smart filter chip that's switched on no longer glows, and the open account's avatar no longer has a halo: the coloured ring, the tint and the tick already show which is on.
+- The demo's Connect Gmail button is now a quieter secondary button, so Compose is the one filled button on screen. The unread count on the phone's Inbox tab is grey like every other count, and tooltip shortcut keys use the same text size as the tooltip.
 - Smart filters now have icons. Each chip on the filter rail shows its icon before the name, and an inbox row marks Unsafe, Urgent, Security or Important mail with that filter's icon next to the time (hover it to see the name). Important uses the marker you know from Gmail, and Urgent a warning triangle.
 - Smart filter colours now mean something: warm colours for mail that needs attention, blue for trust (Security, Top contacts, New contacts), green for money (Promos, Receipts), brown for deliveries. Quieter filters such as Unread, Files, Newsletters and Read later are plain grey.
 - Dev Options → Debug log keeps up to 10,000 lines and records far more: every step of signing in, sync stages, network errors, and the app going to the background and back, including the app's own native side on Android and desktop. Copying a full log no longer freezes the screen.

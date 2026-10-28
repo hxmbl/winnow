@@ -165,10 +165,13 @@ describe("wiring", () => {
 
   it("the chip's strengths are registered, so its gradient tint can ease", () => {
     const css = read("../index.css");
-    for (const name of ["--pill-a", "--pill-ring-a", "--pill-glow-a", "--wn-chip-plate"]) {
+    for (const name of ["--pill-a", "--pill-ring-a", "--wn-chip-plate"]) {
       expect(css).toMatch(new RegExp(`@property ${name} \\{`));
       expect(css).toMatch(new RegExp(`transition:[^;]*${name} var\\(--wn-chip-motion\\)`));
     }
+    // No glow around an on chip (removed with the halo on the open account): the ring and
+    // tint carry the state.
+    expect(css).not.toMatch(/--pill-glow-a/);
     expect(css).toMatch(/--wn-chip-motion: 190ms;/);
     expect(css).toMatch(/--wn-chip-ease: cubic-bezier\(0\.2, 0, 0, 1\);/);
     // No state of a glass chip paints its tint from the recipe directly any more.

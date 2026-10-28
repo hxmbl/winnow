@@ -14,7 +14,7 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
     <Sheet
       label="Keyboard shortcuts"
       onClose={onClose}
-      className="thin-scroll max-h-[85vh] w-full max-w-[380px] overflow-y-auto rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
+      className="thin-scroll max-h-(--wn-sheet-max-h) w-full max-w-sheet-sm overflow-y-auto rounded-pane border border-hairline bg-chrome p-5 shadow-lift"
     >
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-read font-semibold text-ink">Keyboard shortcuts</h2>

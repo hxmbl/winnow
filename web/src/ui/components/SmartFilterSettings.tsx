@@ -14,9 +14,11 @@ import { filterIcon } from "../filterIcons";
 import { FILTER_LABELS } from "../../core/model/signals";
 import { LEARNABLE_FILTERS, type FilterLearning, type LearnableFilter, type SenderRule } from "../../core/learn/filterLearning";
 import { learntSummary, ruleText } from "../smartFilterSettings";
+import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 const SECONDARY =
-  "rounded-ctl border border-control-border px-3 py-1.5 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
+  buttonClass("secondary", "sm");
 const DANGER =
   "rounded-ctl bg-danger px-3 py-1.5 text-meta font-semibold text-surface transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring";
 
@@ -111,7 +113,7 @@ export function SmartFilterSettings({
                 onClick={() => setConfirming("all")}
                 className={`inline-flex items-center gap-1.5 ${SECONDARY} disabled:cursor-not-allowed disabled:opacity-50`}
               >
-                <RotateCcw size={13} strokeWidth={2} aria-hidden="true" />
+                <Icon icon={RotateCcw} size={12} />
                 Reset what&rsquo;s learnt
               </button>
               <SettingLabelHint />
@@ -149,12 +151,12 @@ function FilterLearnt({
   onAskReset: () => void;
   onRemoveRule: (filter: LearnableFilter, key: string) => void;
 }) {
-  const { Icon, label } = filterIcon(filter);
+  const { Icon: Glyph, label } = filterIcon(filter);
   return (
     <li data-filter-learnt-row={filter} className="flex flex-col gap-2 px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-2 text-ui font-medium text-ink-body">
-          <Icon size={14} strokeWidth={2} className="shrink-0 text-ink-icon" />
+          <Icon icon={Glyph} size={16} className="shrink-0 text-ink-icon" />
           <span className="truncate">{label}</span>
           <span className="shrink-0 text-meta font-normal text-ink-subtle">
             {corrections} correction{corrections === 1 ? "" : "s"}
@@ -180,7 +182,7 @@ function FilterLearnt({
                 onClick={() => onRemoveRule(filter, rule.key)}
                 className="inline-flex shrink-0 items-center gap-1 rounded-ctl px-2 py-1 font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
-                <X size={12} strokeWidth={2.2} aria-hidden="true" />
+                <Icon icon={X} size={12} />
                 Remove
               </button>
             </li>

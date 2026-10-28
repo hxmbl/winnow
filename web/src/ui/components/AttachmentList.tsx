@@ -36,6 +36,7 @@ import {
 import { formatBytes } from "../../core/gmail/mime";
 import type { Attachment } from "../../core/model/email";
 import { Lightbox, type LightboxImage } from "./Lightbox";
+import { Icon } from "./Icon";
 
 const KIND_ICON: Record<AttachmentKind, LucideIcon> = {
   image: FileImage,
@@ -147,7 +148,7 @@ export function AttachmentList({
       <ul className="mt-2 flex flex-col gap-1">
         {attachments.map((attachment, index) => {
           const kind = attachmentKind(attachment.mimeType, attachment.filename);
-          const Icon = KIND_ICON[kind];
+          const Glyph = KIND_ICON[kind];
           const pdf = isPdf(attachment.mimeType, attachment.filename);
           const previewable = urls.has(index);
           return (
@@ -157,7 +158,7 @@ export function AttachmentList({
               data-attachment-kind={kind}
               className="flex items-center gap-2 rounded-ctl px-2 py-1 hover:bg-sheen"
             >
-              <Icon size={16} strokeWidth={1.8} className="shrink-0 text-ink-muted" aria-hidden="true" />
+              <Icon icon={Glyph} size={16} className="shrink-0 text-ink-muted" />
               <span className="min-w-0 flex-1">
                 <span className="selectable block truncate text-ui font-medium text-ink" title={attachment.filename}>
                   {attachment.filename}
@@ -172,7 +173,7 @@ export function AttachmentList({
                   aria-label={`Open ${attachment.filename}`}
                   className={ACTION}
                 >
-                  <ExternalLink size={14} strokeWidth={1.9} aria-hidden="true" />
+                  <Icon icon={ExternalLink} size={16} />
                   <span className="max-sm:sr-only">Open</span>
                 </button>
               )}
@@ -184,7 +185,7 @@ export function AttachmentList({
                   aria-label={`Preview ${attachment.filename}`}
                   className={ACTION}
                 >
-                  <FileImage size={14} strokeWidth={1.9} aria-hidden="true" />
+                  <Icon icon={FileImage} size={16} />
                   <span className="max-sm:sr-only">Preview</span>
                 </button>
               )}
@@ -195,7 +196,7 @@ export function AttachmentList({
                 aria-label={`Save ${attachment.filename}`}
                 className={ACTION}
               >
-                <Download size={14} strokeWidth={1.9} aria-hidden="true" />
+                <Icon icon={Download} size={16} />
                 <span className="max-sm:sr-only">Save</span>
               </button>
             </li>

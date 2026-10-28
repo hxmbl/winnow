@@ -15,6 +15,8 @@ import { RecipientField } from "./RecipientField";
 import { normaliseRecipients, recipientProblem } from "../../core/mail/compose";
 import { draftStatusLabel, type DraftSaveStatus } from "../../core/mail/drafts";
 import type { ContactIndex } from "../../core/contacts/index";
+import { buttonClass } from "../button";
+import { Icon } from "./Icon";
 
 /** How long a press on the phone's Send circle is held before it opens Send later. */
 const SEND_LATER_PRESS_MS = 500;
@@ -474,7 +476,7 @@ export function Composer({
         */}
         {fromOptions.length > 1 && onFromChange ? (
           <div className="flex items-center gap-2 text-meta">
-            <label htmlFor="winnow-composer-from" className="w-12 shrink-0 text-ink-subtle">
+            <label htmlFor="winnow-composer-from" className="w-(--wn-composer-label) shrink-0 text-ink-subtle">
               From
             </label>
             <select
@@ -493,7 +495,7 @@ export function Composer({
           </div>
         ) : mode === "new" && from && (
           <div className="flex items-center gap-2 text-meta">
-            <span className="w-12 shrink-0 text-ink-subtle">From</span>
+            <span className="w-(--wn-composer-label) shrink-0 text-ink-subtle">From</span>
             <span data-composer-from="" className="selectable min-w-0 truncate px-1 text-ui text-ink-body">
               {from}
             </span>
@@ -537,13 +539,13 @@ export function Composer({
         )}
 
         {attempted && problem === "none" && (
-          <p id="winnow-composer-recipients-error" role="alert" className="-mt-1 pl-14 text-meta font-medium text-danger">
+          <p id="winnow-composer-recipients-error" role="alert" className="-mt-1 pl-[calc(var(--wn-composer-label)+0.5rem)] text-meta font-medium text-danger">
             Add at least one recipient.
           </p>
         )}
 
         {improveSuggestions && (
-          <div className="-mt-1 flex flex-col gap-1 pl-14 text-meta">
+          <div className="-mt-1 flex flex-col gap-1 pl-[calc(var(--wn-composer-label)+0.5rem)] text-meta">
             <button
               type="button"
               onClick={improveSuggestions.onClick}
@@ -563,7 +565,7 @@ export function Composer({
         )}
 
         <div className="flex items-center gap-2 text-meta">
-          <span className="w-12 shrink-0 text-ink-subtle">Subject</span>
+          <span className="w-(--wn-composer-label) shrink-0 text-ink-subtle">Subject</span>
           <input
             type="text"
             aria-label="Subject"
@@ -582,7 +584,7 @@ export function Composer({
           // Send stays inside the sheet on a 900px window rather than below its fold.
           rows={phone ? 8 : docked ? 6 : mode === "new" ? 12 : 16}
           spellCheck
-          className={`selectable thin-scroll w-full rounded-pane border border-hairline bg-surface p-3 leading-[1.7] text-ink-body outline-hidden focus-visible:border-accent ${
+          className={`selectable thin-scroll w-full rounded-pane border border-hairline bg-surface p-3 text-ink-body outline-hidden focus-visible:border-accent ${
             // 16px on a phone: iOS zooms into any focused field smaller than that.
             phone ? "min-h-40 flex-1 resize-none text-read" : "resize-y text-ui"
           }`}
@@ -609,7 +611,7 @@ export function Composer({
             // their recipients is wrong.
             disabled={!canSend}
             title={sendTitle}
-            className="inline-flex items-center gap-2 rounded-ctl bg-accent px-4 py-1.5 text-ui font-semibold text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("primary", "md", "gap-2")}
           >
             {sending ? "Sending…" : "Send"}
             {!sending && (
@@ -631,16 +633,16 @@ export function Composer({
               title="Send later…"
               disabled={!canSend}
               onClick={(event) => openLater(event.currentTarget)}
-              className="inline-flex items-center rounded-ctl bg-accent px-2 text-on-accent transition-opacity disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="inline-flex items-center rounded-ctl bg-accent px-2 text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
             >
-              <ChevronDown size={16} strokeWidth={2.2} aria-hidden="true" />
+              <Icon icon={ChevronDown} size={16} />
             </button>
           )}
           </span>
           <button
             type="button"
             onClick={onDiscard}
-            className="rounded-ctl border border-control-border px-4 py-1.5 text-ui font-semibold text-ink-body transition-colors hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className={buttonClass("secondary")}
           >
             Discard
           </button>
@@ -693,7 +695,7 @@ export function Composer({
           }
         }}
       >
-        <div className="flex shrink-0 items-center gap-3 border-b border-hairline px-4 py-2">
+        <div className="flex shrink-0 items-center gap-3 border-b border-hairline-soft px-4 py-2">
           <h2 className="shrink-0 text-ui font-semibold text-ink">{title}</h2>
           <div className="flex min-w-0 flex-1 items-center gap-2">{headerControls}</div>
           <button
@@ -726,7 +728,7 @@ export function Composer({
       className={
         phone
           ? "flex h-[calc(100dvh-var(--wn-keyboard,0px))] w-full flex-col overflow-hidden bg-chrome"
-          : "flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
+          : "flex max-h-(--wn-sheet-max-h) w-full max-w-sheet-lg flex-col overflow-hidden rounded-pane border border-hairline bg-chrome shadow-lift"
       }
     >
       {phone ? (
@@ -818,9 +820,9 @@ function PhoneComposerBar({
           title="Send later (or hold Send)"
           disabled={!canSend}
           onClick={(event) => onSendLater(event.currentTarget)}
-          className="flex h-11 w-11 items-center justify-center rounded-full text-accent transition-colors active:bg-sheen disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="flex h-11 w-11 items-center justify-center rounded-ctl text-accent transition-colors active:bg-sheen disabled:opacity-40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <Clock size={20} strokeWidth={2} aria-hidden="true" />
+          <Icon icon={Clock} size={20} />
         </button>
       )}
       <button
@@ -833,15 +835,15 @@ function PhoneComposerBar({
         onPointerUp={sendPress?.onPointerUp}
         onPointerLeave={sendPress?.onPointerLeave}
         onContextMenu={sendPress?.onContextMenu}
-        className="group flex h-11 w-11 items-center justify-center rounded-full [-webkit-touch-callout:none] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="group flex h-11 w-11 items-center justify-center rounded-ctl [-webkit-touch-callout:none] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <span
           aria-hidden="true"
-          className={`flex h-8 w-8 items-center justify-center rounded-full bg-accent text-on-accent transition-opacity group-disabled:opacity-40 ${
+          className={`flex h-8 w-8 items-center justify-center rounded-ctl bg-accent text-on-accent transition-opacity group-disabled:opacity-40 ${
             sending ? "animate-pulse" : ""
           }`}
         >
-          <ArrowUp size={18} strokeWidth={2.4} />
+          <Icon icon={ArrowUp} size={20} />
         </span>
         <span className="sr-only">{sending ? "Sending…" : "Send"}</span>
       </button>

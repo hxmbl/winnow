@@ -179,8 +179,12 @@ describe("one lean glass: the frost on the element itself (1.4)", () => {
 
   it("pads the chip rail only for the chips' shadow, and its gap catcher by exactly as much", () => {
     // Touch and floating both take back what they pad with a negative margin.
-    expect(strip.match(/pointer-events-none my-\[-20px\]/g)?.length).toBe(2);
-    expect(strip).toContain('className="absolute left-0 top-[20px] bottom-[20px]"');
+    // One allowance, `--wn-rail-bleed` (20px, index.css), read by the margin, the padding
+    // and the catcher's inset, rather than the same 20px written five times.
+    expect(strip.match(/pointer-events-none -my-\(--wn-rail-bleed\)/g)?.length).toBe(2);
+    expect(strip.match(/py-\[calc\(var\(--wn-rail-bleed\)\+/g)?.length).toBe(2);
+    expect(strip).toContain('className="absolute left-0 top-(--wn-rail-bleed) bottom-(--wn-rail-bleed)"');
+    expect(css).toMatch(/\.wn-rail\s*\{\s*--wn-rail-bleed:\s*20px;/);
   });
 
   it("no longer clips the floating chrome sideways: that only held the reach layer in", () => {

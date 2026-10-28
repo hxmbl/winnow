@@ -41,6 +41,7 @@ import {
   returnsToSync,
   type PillNotice,
 } from "../statusPill";
+import { Icon } from "./Icon";
 
 type Props = {
   /** The send in its undo window, if any. */
@@ -232,7 +233,7 @@ export function StatusPill(props: Props) {
             <div
               key={ghost ? "leaving" : noticeKey(pill)}
               {...(pill.kind === "sending" && !ghost ? { "data-send-pending": "" } : {})}
-              className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full ${ghost ? "animate-vanish" : "animate-appear"} items-center gap-1 rounded-full pl-4 text-meta font-semibold ${
+              className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full ${ghost ? "animate-vanish" : "animate-appear"} items-center gap-1 rounded-ctl pl-4 text-meta font-semibold ${
                 pill.kind === "sync" ? "pr-4" : "pr-1"
               } ${pill.kind === "sync" && !pill.ok ? "text-danger" : "text-ink-body"}`}
             >
@@ -250,7 +251,7 @@ export function StatusPill(props: Props) {
                     Undo
                   </PillButton>
                   <PillButton onClick={props.onDismissUndo} label="Dismiss" data="data-pill-dismiss">
-                    <X size={14} strokeWidth={2.2} aria-hidden="true" />
+                    <Icon icon={X} size={16} />
                   </PillButton>
                 </>
               )}
@@ -277,13 +278,13 @@ export function StatusPill(props: Props) {
                     </PillButton>
                   )}
                   <PillButton onClick={props.onDismissUpdate ?? (() => undefined)} label="Dismiss" data="data-pill-dismiss">
-                    <X size={14} strokeWidth={2.2} aria-hidden="true" />
+                    <Icon icon={X} size={16} />
                   </PillButton>
                 </>
               )}
               {pill.kind === "flash" && (
                 <PillButton onClick={props.onDismissFlash} label="Dismiss" data="data-pill-dismiss">
-                  <X size={14} strokeWidth={2.2} aria-hidden="true" />
+                  <Icon icon={X} size={16} />
                 </PillButton>
               )}
             </div>
@@ -315,7 +316,7 @@ function PillButton({
       aria-label={label}
       title={label}
       {...{ [data]: "" }}
-      className={`flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full px-2.5 font-semibold transition-colors hover:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
+      className={`flex h-8 min-w-8 shrink-0 items-center justify-center rounded-ctl px-2.5 font-semibold transition-colors hover:bg-sheen focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${
         primary ? "text-accent" : "text-ink-subtle hover:text-ink"
       } ${label ? "px-0" : ""}`}
     >
