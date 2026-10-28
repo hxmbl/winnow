@@ -23,10 +23,12 @@
  *   4. Settings switches (STRM-426), phone in OLED: at every switch's centre, and 23px
  *      out each way (its 48×48 press box), the switch is what `elementFromPoint` finds;
  *      a tap on a row's name presses its switch and a tap on (?) does not; Space and
- *      Enter toggle; the off knob is not black on black. The Android app offers no
- *      "Keep syncing while closed" switch (it has no background sync, and the switch it
- *      used to show was drawn from that capability, so it never moved); the desktop
- *      app's switch turns off and back on.
+ *      Enter toggle; the off knob is not black on black. The Android app offers
+ *      "Keep syncing while closed" (STRM-427) with no interval: it is on by default and
+ *      the background service is told to run for the stored account
+ *      (`background_service_configure`); the battery Allow row asks Android and goes
+ *      once restrictions are off; Hide it opens the sync notification's settings; and a
+ *      tap on the name turns it off (the service's rows go) and on again. The desktop app's switch turns off and back on.
  *
  * Separate from `smoke.mjs` so it can run alone (`node scripts/smoke-android.mjs`);
  * `npm run smoke` runs both. Same environment: WINNOW_PORT, WINNOW_CHROMIUM.
@@ -73,6 +75,7 @@ function fakeAndroid({ packageName, sha1 }) {
   const secrets = new Map();
   let nextId = 1;
   window.__smokeCalls = calls;
+  const service = { enabled: false, running: false, batteryUnrestricted: false, notificationsAllowed: true };
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
     transformCallback(callback) {
@@ -96,7 +99,7 @@ function fakeAndroid({ packageName, sha1 }) {
             kind: "desktop",
             nativeOAuth: true,
             nativeSecrets: true,
-            backgroundSync: false,
+            backgroundSync: true,
             saveFiles: true,
           };
         case "secrets_get":
@@ -120,6 +123,19 @@ function fakeAndroid({ packageName, sha1 }) {
         case "oauth_begin":
           // Stop the loopback flow where it starts: reaching it is the point.
           throw new Error("smoke: no loopback listener");
+        // The background service (MailSyncService.kt), as the Kotlin plugin answers:
+        // on exactly when the config says so; battery restricted until allowed.
+        case "background_service_configure":
+          service.enabled = args?.config?.enabled === true;
+          service.running = service.enabled;
+          return { ...service };
+        case "background_service_status":
+          return { ...service };
+        case "background_service_battery":
+          service.batteryUnrestricted = true;
+          return { ...service };
+        case "background_service_notification_settings":
+          return null;
         case "plugin:event|listen":
           return nextId++;
         default:
@@ -535,7 +551,12 @@ try {
   const oled = () => {
     if (window.top !== window) return;
     const raw = localStorage.getItem("winnow.preferences.v1");
-    localStorage.setItem("winnow.preferences.v1", JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), appearance: "oled" }));
+    localStorage.setItem("winnow.preferences.v1", JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), appearance: "oled", notificationsEnabled: true }));
+    // One stored account, so the background service has something to sync (its tokens
+    // would be in the keychain; the service reads them itself, never the web layer).
+    if (!localStorage.getItem("winnow.accounts.v1")) {
+      localStorage.setItem("winnow.accounts.v1", JSON.stringify({ version: 1, active: "smoke1234", accounts: [{ id: "smoke1234", email: "smoke@example.com", color: "space", notify: true, addedAt: 1 }] }));
+    }
   };
   const openSyncSettings = async (page) => {
     await page.goto(URL, { waitUntil: "networkidle" });
@@ -587,11 +608,57 @@ try {
       check(`"${row.label}" is the hit target at its centre`, row.centre);
       check(`"${row.label}" presses through a 48x48 box`, row.misses.length === 0, `drawn ${row.size}, misses at ${JSON.stringify(row.misses)}`);
     }
+    // Android has background sync now (STRM-427): the switch is there, shows the
+    // preference, and every change is handed to the background service.
+    const keep = dialog.locator('[role="switch"][aria-label="Keep syncing while closed"]');
     check(
-      "the Android app offers no background-sync switch, and says why",
-      (await dialog.locator('[role="switch"][aria-label="Keep syncing while closed"]').count()) === 0 &&
-        (await dialog.locator('[data-background-sync-note="native-note"]').count()) === 1,
+      "the Android app offers the background-sync switch, with no interval and no note",
+      (await keep.count()) === 1 &&
+        (await dialog.locator('[data-background-sync="service"]').count()) === 1 &&
+        (await dialog.locator("#sync-interval").count()) === 0 &&
+        (await dialog.locator("[data-background-sync-note]").count()) === 0,
     );
+    const configures = () =>
+      page.evaluate(() => window.__smokeCalls.filter((call) => call.cmd === "background_service_configure").map((call) => call.args?.config ?? null));
+    const told = await configures();
+    check(
+      "it is on by default, and the background service is handed a config with the stored account",
+      (await keep.getAttribute("aria-checked")) === "true" && told.length >= 1 && told.at(-1)?.accounts?.some((a) => a.id === "smoke1234"),
+      JSON.stringify(told.at(-1)),
+    );
+    // An account is stored (its session is on the device), so the service is told to run
+    // even while the demo is on screen: it syncs that account, not the demo. The signed-in
+    // case is smoke-accounts.mjs part 5b.
+    check("with an account stored, the service is told to run", told.at(-1)?.enabled === true, JSON.stringify(told.at(-1)));
+    const allow = dialog.locator("[data-background-battery]");
+    check(
+      "with battery restrictions on, an Allow row and a Hide it row show",
+      (await allow.count()) === 1 && (await dialog.locator("[data-background-hide-notification]").count()) === 1,
+    );
+    if ((await allow.count()) === 1) {
+      await allow.tap();
+      await page.waitForTimeout(400);
+      check(
+        "Allow asks Android, and the row goes once restrictions are off",
+        (await page.evaluate(() => window.__smokeCalls.some((call) => call.cmd === "background_service_battery"))) &&
+          (await allow.count()) === 0,
+      );
+    }
+    await dialog.locator("[data-background-hide-notification]").tap();
+    await page.waitForTimeout(200);
+    check(
+      "Hide it opens the sync notification's system settings",
+      await page.evaluate(() => window.__smokeCalls.some((call) => call.cmd === "background_service_notification_settings")),
+    );
+    await dialog.locator('[data-setting="backgroundSync"]').getByText("Keep syncing while closed", { exact: true }).tap();
+    await page.waitForTimeout(500);
+    check(
+      "a tap on its name turns it off, and the service's rows go with it",
+      (await keep.getAttribute("aria-checked")) === "false" && (await dialog.locator("[data-background-hide-notification]").count()) === 0,
+    );
+    await keep.tap();
+    await page.waitForTimeout(500);
+    check("and a tap on the switch turns it back on", (await keep.getAttribute("aria-checked")) === "true");
 
     const badge = dialog.locator('[role="switch"][aria-label="Unread count on the app icon"]');
     const badgeRow = dialog.locator('[data-setting="unreadBadge"]');

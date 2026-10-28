@@ -164,13 +164,22 @@ describe("the light sync of an account that is not open", () => {
     const storage = memory();
     const first = client(["a", "b"]);
     const light = new LightSync(first.c, storage);
-    expect(await light.check()).toEqual({ unread: 2, fresh: [] });
+    expect(await light.check()).toEqual({ unread: 2, fresh: [], left: [] });
     expect(first.reads).toEqual([]);
     const second = client(["c", "a", "b"]);
     const result = await new LightSync(second.c, storage).check();
     expect(result.unread).toBe(3);
     expect(result.fresh.map((m) => m.gmailId)).toEqual(["c"]);
     expect(second.reads).toEqual(["c"]);
+    expect(result.left).toEqual([]);
+  });
+
+  it("says which ids are no longer unread in the Inbox, so their notifications can go", async () => {
+    const storage = memory();
+    await new LightSync(client(["a", "b", "c"]).c, storage).check();
+    const result = await new LightSync(client(["c"]).c, storage).check();
+    expect(result.unread).toBe(1);
+    expect([...result.left].sort()).toEqual(["a", "b"]);
   });
 
   /** A client whose metadata reads fail for `failing` ids (with `status`) while they are listed there. */

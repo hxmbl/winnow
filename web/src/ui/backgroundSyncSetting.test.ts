@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import { BACKGROUND_SYNC_NOTE, backgroundSyncOffer } from "./backgroundSyncSetting";
 
 describe("backgroundSyncOffer", () => {
-  it("offers the switch only where the build can sync with the window closed", () => {
-    expect(backgroundSyncOffer({ isNative: true, available: true })).toBe("switch");
+  it("the desktop app gets the switch and its interval", () => {
+    expect(backgroundSyncOffer({ isNative: true, available: true, android: false })).toBe("switch");
   });
 
-  it("the Android app (native, no background sync) gets a note, not a switch that can't move", () => {
-    expect(backgroundSyncOffer({ isNative: true, available: false })).toBe("native-note");
-    expect(BACKGROUND_SYNC_NOTE["native-note"]).toMatch(/Android/);
+  it("the Android app gets the switch too, which starts and stops the background service", () => {
+    expect(backgroundSyncOffer({ isNative: true, available: true, android: true })).toBe("service");
   });
 
   it("a browser tab, or a platform that has not answered, gets the web note", () => {
-    expect(backgroundSyncOffer({ isNative: false, available: null })).toBe("web-note");
-    expect(backgroundSyncOffer({ isNative: false, available: true })).toBe("web-note");
-    expect(backgroundSyncOffer({ isNative: true, available: null })).toBe("web-note");
+    expect(backgroundSyncOffer({ isNative: false, available: null, android: false })).toBe("web-note");
+    expect(backgroundSyncOffer({ isNative: false, available: true, android: false })).toBe("web-note");
+    expect(backgroundSyncOffer({ isNative: true, available: null, android: true })).toBe("web-note");
+    expect(BACKGROUND_SYNC_NOTE["web-note"]).toMatch(/tab is open/);
   });
 });

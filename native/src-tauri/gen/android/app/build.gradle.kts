@@ -129,6 +129,8 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:22.0.0")
     implementation("androidx.browser:browser:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    // The real org.json for JVM unit tests: android.jar's copy is stubs that throw.
+    testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }
