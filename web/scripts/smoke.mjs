@@ -7387,19 +7387,40 @@ try {
           const r = row.getBoundingClientRect();
           return { top: Math.round(r.top), bottom: Math.round(r.bottom), clear: Math.round(Math.max(chrome, day)), end: Math.round(box.bottom) };
         });
+      // The list glides to the row (keyScroll's 160 ms ease-out, then the floating-chrome
+      // settle check), so the row is judged where it comes to rest, not mid-glide.
+      const GLIDE_SETTLE_MS = 280;
       for (let i = 0; i < 24; i += 1) {
         await d.keyboard.press("j");
-        await d.waitForTimeout(60);
+        await d.waitForTimeout(GLIDE_SETTLE_MS);
         const at = await covered();
         if (at.missing || at.top < at.clear - 1 || at.bottom > at.end + 1) hidden.push({ key: "j", i, ...at });
       }
       for (let i = 0; i < 24; i += 1) {
         await d.keyboard.press("k");
-        await d.waitForTimeout(60);
+        await d.waitForTimeout(GLIDE_SETTLE_MS);
         const at = await covered();
         if (at.missing || at.top < at.clear - 1 || at.bottom > at.end + 1) hidden.push({ key: "k", i, ...at });
       }
       check("j and k never leave the open row under the floating header or the pinned day", hidden.length === 0, JSON.stringify(hidden.slice(0, 4)));
+      // A burst of j faster than the glide retargets it each press, and still comes to
+      // rest with the open row clear (the glide aims from its destination, not mid-way).
+      for (let i = 0; i < 8; i += 1) {
+        await d.keyboard.press("j");
+        await d.waitForTimeout(30);
+      }
+      await d.waitForTimeout(GLIDE_SETTLE_MS);
+      const burst = await covered();
+      check(
+        "a fast burst of j comes to rest with the open row clear",
+        !burst.missing && burst.top >= burst.clear - 1 && burst.bottom <= burst.end + 1,
+        JSON.stringify(burst),
+      );
+      for (let i = 0; i < 8; i += 1) {
+        await d.keyboard.press("k");
+        await d.waitForTimeout(30);
+      }
+      await d.waitForTimeout(GLIDE_SETTLE_MS);
       const pad = await geometry();
       check(
         "and the scroller's scroll-padding-top covers the header and the pinned day, for focus scrolling",
