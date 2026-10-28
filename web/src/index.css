@@ -1033,6 +1033,18 @@
   }
 
   /*
+   * Menus on a phone (STRM-440): the reader's More and every popover menu (`Menu.tsx`)
+   * opened from the dock, its panel, the reader pill or a row. The same glass as the pill
+   * under them, its tint raised to `--wn-glass-menu`: these carry words, a small heading
+   * and danger rows over a message, where a photo can be solid black or white (`menu` in
+   * `glass.ts`). Blur, rim, fallback, reduced transparency and forced colours (opaque)
+   * are `.wn-glass`'s own.
+   */
+  .wn-glass.wn-glass-menu {
+    --wn-glass-text: var(--wn-glass-menu, 88%);
+  }
+
+  /*
    * Liquid Glass (1.4), on the small floating chrome: the dock pill, the compose circle,
    * the filter chips, the reader pill, the desktop's floating top bar and the status
    * pill. Always alongside `.wn-glass` or `.wn-chip-glass` (or, for compose, the accent),

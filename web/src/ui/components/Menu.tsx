@@ -27,6 +27,12 @@
  *     menu while it is open, so assistive technology that hides everything outside an
  *     `aria-modal` dialog still finds it there.
  *
+ * On a phone (STRM-440) the menu is the floating glass rather than a flat sheet: the same
+ * translucent frost as the dock and the reader pill it opens from, its tint raised for
+ * words (`.wn-glass-menu`, `menu` in `glass.ts`), with `.wn-glass-behind` so the frost sits
+ * on a `::before` and the menu is never the containing block of its own fixed submenu.
+ * Reduced transparency and forced colours make it opaque, as they do every glass.
+ *
  * Every key the menu handles stops there: the app's global shortcut handler must not see
  * `j` or `e` while a menu is open (App also checks `menuOpen` before routing).
  */
@@ -36,6 +42,7 @@ import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { anchorFromElement, placeMenu, type MenuAnchor, type MenuEntry } from "../menuPlacement";
 import { Icon } from "./Icon";
+import { usePhoneLayout } from "../usePhoneLayout";
 
 export type { MenuAnchor, MenuEntry };
 
@@ -65,6 +72,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
   const [openSub, setOpenSub] = useState<{ id: string; anchor: MenuAnchor } | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const isRoot = onBack === undefined;
+  const phone = usePhoneLayout();
   const hasHeader = header !== undefined;
   const id = useId();
 
@@ -229,7 +237,9 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
         visibility: position ? "visible" : "hidden",
       }}
       data-menu-animate={position ? "" : undefined}
-      className={`${position ? "animate-menu" : ""} z-70 flex min-w-menu max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane border border-hairline bg-chrome p-1 text-ink-body `}
+      className={`${position ? "animate-menu" : ""} z-70 flex min-w-menu max-w-[min(320px,calc(100vw-16px))] flex-col gap-px rounded-pane p-1 text-ink-body ${
+        phone ? "wn-glass wn-glass-behind wn-glass-menu" : "border border-hairline bg-chrome"
+      }`}
     >
       {header && (
         <>
