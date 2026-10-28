@@ -62,14 +62,15 @@ import {
   ESTIMATED_HEADER_HEIGHT,
   ESTIMATED_ROW_HEIGHT,
   computeOffsets,
-  revealScrollTop,
-  scrollTopForIndex,
+  revealTarget,
+  rowClearance,
   stickyIndex,
   visibleRange,
   windowKey,
 } from "../windowing";
 import { buttonClass } from "../button";
 import { Icon } from "./Icon";
+import { smoothScrollTarget, smoothScrollTo, stopSmoothScroll } from "../keyScroll";
 
 /**
  * One entry in the windowed list: a day header, or a message row.
@@ -1020,6 +1021,7 @@ function MessageList({
     const readViewport = (): void => {
       const height = scroller.clientHeight;
       if (height > 0 && !shown && kept > 0 && Math.abs(scroller.scrollTop - kept) > 1) {
+        stopSmoothScroll(scroller);
         scroller.scrollTop = kept;
         setScrollTop(scroller.scrollTop);
       }
@@ -1050,6 +1052,8 @@ function MessageList({
     return () => {
       scroller.removeEventListener("scroll", onScroll);
       observer?.disconnect();
+      // An unmounted (or replaced) scroller leaves no frame running.
+      stopSmoothScroll(scroller);
     };
   }, [scroller]);
 
@@ -1124,6 +1128,7 @@ function MessageList({
   useLayoutEffect(() => {
     if (shownView.current === listView) return;
     shownView.current = listView;
+    stopSmoothScroll(scroller);
     if (scroller && scroller.scrollTop !== 0) {
       scroller.scrollTop = 0;
       setScrollTop(0);
@@ -1179,6 +1184,7 @@ function MessageList({
     const element = scroller;
     if (!element) return;
     let rowIndex: number | null;
+    let fromPending = false;
     const revealAt = revealIndex ?? cursorIndex;
     if (revealedSeq.current !== revealSeq && revealAt >= 0) {
       revealedSeq.current = revealSeq;
@@ -1194,6 +1200,7 @@ function MessageList({
     } else if (pendingReveal.current !== null && element.clientHeight > 0) {
       const pending = pendingReveal.current;
       pendingReveal.current = null;
+      fromPending = true;
       const index = items.findIndex((item) => item.key === pending);
       rowIndex = index < 0 ? null : index;
     } else {
@@ -1201,13 +1208,32 @@ function MessageList({
     }
     if (rowIndex === null) return;
 
+    // A navigation glides the list (`keyScroll.ts`): the cursor and the reader have
+    // already moved, only the scroll eases, and a press mid-glide retargets it. A reveal
+    // waiting on the list coming back lands at once: nothing was watching it move.
+    const glide = !fromPending;
+    // Judge "in view" where the list is headed, not where a glide has it this frame.
+    const base = (glide ? smoothScrollTarget(element) : null) ?? element.scrollTop;
+    if (!glide) stopSmoothScroll(element);
+    // A late correction from the last reveal must not fight this one.
+    if (settleFrame.current !== null) {
+      cancelAnimationFrame(settleFrame.current);
+      settleFrame.current = null;
+    }
+    const scrollTo = (top: number, after?: () => void): void => {
+      if (glide && smoothScrollTo(element, top, after)) return;
+      if (!glide) {
+        element.scrollTop = top;
+        after?.();
+      }
+      // Jumped (instantly, or too far to glide): draw the rows it landed on now.
+      setScrollTop(element.scrollTop);
+    };
+
     // The first message goes to the very top of the list: its day, the briefing and the
     // breathing gap all show, and nothing can leave it under the chrome.
     if (items.findIndex((item) => item.kind === "row") === rowIndex) {
-      if (element.scrollTop !== 0) {
-        element.scrollTop = 0;
-        setScrollTop(0);
-      }
+      if (base !== 0) scrollTo(0);
       return;
     }
 
@@ -1216,59 +1242,55 @@ function MessageList({
     // one brought into view lands just below it.
     // Under floating chrome a mounted row is judged by where it really is: the offsets
     // of rows above it may still be estimates, and a few pixels off is under the glass.
+    // Its box is shifted by what the glide in flight still has to go.
     const key = items[rowIndex]?.key;
-    const clearance = (top: number, bottom: number): number =>
-      top < coveredTop ? top - coveredTop : bottom > element.clientHeight ? Math.min(bottom - element.clientHeight, top - coveredTop) : 0;
     if (contentTop > 0 && key) {
       const mounted = element.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(key)}"]`);
       if (mounted) {
         const box = element.getBoundingClientRect();
         const rect = mounted.getBoundingClientRect();
-        const delta = clearance(rect.top - box.top, rect.bottom - box.top);
+        const ahead = base - element.scrollTop;
+        const delta = rowClearance(rect.top - box.top - ahead, rect.bottom - box.top - ahead, coveredTop, element.clientHeight);
+        if (Math.abs(delta) >= 1) scrollTo(base + delta);
+        return;
+      }
+    }
+    const target = revealTarget(offsets, rowIndex, base, {
+      contentTop,
+      coveredTop,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    });
+    if (target === null) return;
+
+    // Under floating chrome, check where the row really landed once it is mounted: rows
+    // above it that were only estimated can put it a little off, and here "a little"
+    // is under the glass. Corrected against the DOM, a frame after the list arrives.
+    // Not cancelled by this effect's cleanup: the offsets change (and re-run the effect)
+    // in exactly the frames this is waiting on.
+    const settleLater = (): void => {
+      let frames = 0;
+      settleFrame.current = requestAnimationFrame(function settle() {
+        settleFrame.current = null;
+        // A newer navigation took over the scroll; it does its own settling.
+        if (smoothScrollTarget(element) !== null) return;
+        frames += 1;
+        const row = key ? element.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(key)}"]`) : null;
+        if (!row) {
+          if (frames < 4) settleFrame.current = requestAnimationFrame(settle);
+          return;
+        }
+        const box = element.getBoundingClientRect();
+        const rect = row.getBoundingClientRect();
+        const delta = rowClearance(rect.top - box.top, rect.bottom - box.top, coveredTop, element.clientHeight);
         if (Math.abs(delta) >= 1) {
           element.scrollTop += delta;
           setScrollTop(element.scrollTop);
         }
-        return;
-      }
-    }
-    const rowTop = contentTop + (offsets[rowIndex] ?? 0);
-    const rowBottom = contentTop + (offsets[rowIndex + 1] ?? 0);
-    const viewTop = element.scrollTop + coveredTop;
-    const viewBottom = element.scrollTop + element.clientHeight;
-    if (rowTop >= viewTop && rowBottom <= viewBottom) return;
-
-    const target =
-      contentTop > 0
-        ? revealScrollTop(rowTop, coveredTop, element.scrollHeight, element.clientHeight)
-        : scrollTopForIndex(offsets, rowIndex, element.clientHeight);
-    element.scrollTop = target;
-    setScrollTop(target);
-    if (contentTop === 0) return;
-    // Under floating chrome, check where the row really landed once it is mounted: rows
-    // above it that were only estimated can put it a little off, and here "a little"
-    // is under the glass. Corrected against the DOM, a frame later.
-    let frames = 0;
-    if (settleFrame.current !== null) cancelAnimationFrame(settleFrame.current);
-    // Not cancelled by this effect's cleanup: the offsets change (and re-run the effect)
-    // in exactly the frames this is waiting on.
-    settleFrame.current = requestAnimationFrame(function settle() {
-      settleFrame.current = null;
-      frames += 1;
-      const row = key ? element.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(key)}"]`) : null;
-      if (!row) {
-        if (frames < 4) settleFrame.current = requestAnimationFrame(settle);
-        return;
-      }
-      const box = element.getBoundingClientRect();
-      const rect = row.getBoundingClientRect();
-      const delta = clearance(rect.top - box.top, rect.bottom - box.top);
-      if (Math.abs(delta) >= 1) {
-        element.scrollTop += delta;
-        setScrollTop(element.scrollTop);
-      }
-      if (frames < 3) settleFrame.current = requestAnimationFrame(settle);
-    });
+        if (frames < 3) settleFrame.current = requestAnimationFrame(settle);
+      });
+    };
+    scrollTo(target, contentTop > 0 ? settleLater : undefined);
   }, [revealSeq, cursorIndex, revealIndex, items, offsets, scroller, viewportHeight, contentTop, coveredTop]);
 
   /**

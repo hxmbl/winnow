@@ -117,6 +117,42 @@ export function revealScrollTop(rowTop: number, covered: number, scrollHeight: n
 }
 
 /**
+ * How far the scroller must move for a row to be seen, given where the row sits relative
+ * to the viewport's top (`top` / `bottom`, in px): negative scrolls up so it clears the
+ * `covered` band under floating chrome, positive scrolls down so its bottom is on
+ * screen (but never so far its top goes under the band), 0 when it is already in view.
+ */
+export function rowClearance(top: number, bottom: number, covered: number, clientHeight: number): number {
+  if (top < covered) return top - covered;
+  if (bottom > clientHeight) return Math.min(bottom - clientHeight, top - covered);
+  return 0;
+}
+
+/**
+ * The scroll top that brings row `rowIndex` into view, or null when it already is.
+ *
+ * `base` is where the list is judged from: the destination of a glide in flight, or the
+ * scroll top when still. Judging from the destination is what lets `j` pressed mid-glide
+ * aim for the next row instead of re-revealing the one already on its way.
+ * `block: "nearest"` semantics for the in-view test; an off-screen row goes to the top,
+ * below the covered band when there is floating chrome (`contentTop > 0`).
+ */
+export function revealTarget(
+  offsets: Float64Array,
+  rowIndex: number,
+  base: number,
+  view: { contentTop: number; coveredTop: number; clientHeight: number; scrollHeight: number },
+): number | null {
+  const { contentTop, coveredTop, clientHeight, scrollHeight } = view;
+  const rowTop = contentTop + (offsets[rowIndex] ?? 0);
+  const rowBottom = contentTop + (offsets[rowIndex + 1] ?? 0);
+  if (rowTop >= base + coveredTop && rowBottom <= base + clientHeight) return null;
+  return contentTop > 0
+    ? revealScrollTop(rowTop, coveredTop, scrollHeight, clientHeight)
+    : scrollTopForIndex(offsets, rowIndex, clientHeight);
+}
+
+/**
  * The index of the day header to pin at `line` (a y in content coordinates): the last
  * header at or above it, or -1 when none is. Shared by the pinned header and
  * `windowKey`, so the two cannot disagree about which header is showing.
