@@ -72,6 +72,12 @@ object MailNotifier {
   /** Presses Rust is working on, by request id: the original message, for restore and the watchdog. */
   private val inFlight = HashMap<String, Bundle>()
 
+  /** Notifications showing an action's progress or its Undo: [dismiss] leaves these alone. */
+  private val busy = HashSet<Int>()
+  private fun setBusy(id: Int, on: Boolean) {
+    synchronized(busy) { if (on) busy.add(id) else busy.remove(id) }
+  }
+
   /** One notification per message per account: the same Gmail id in two accounts is two messages. */
   fun idFor(gmailId: String, account: String? = null): Int {
     val id = (if (account == null) "winnow:$gmailId" else "winnow:$account:$gmailId").hashCode()
@@ -116,52 +122,212 @@ object MailNotifier {
     val account = validAccount(accountJson?.optString("id"))
     val label = if (account != null && accountJson?.isNull("label") == false) accountJson.optString("label").ifEmpty { null } else null
 
-    val lines = ArrayList<String>()
-    for (i in 0 until messages.length()) {
-      val m = messages.getJSONObject(i)
-      val gmailId = m.optString("gmailId")
-      if (gmailId.isEmpty()) continue
-      val extras = Bundle().apply {
-        putInt(EXTRA_NOTIFICATION_ID, idFor(gmailId, account))
-        if (account != null) putString(EXTRA_ACCOUNT, account)
-        if (label != null) putString(EXTRA_ACCOUNT_LABEL, label)
-        putLong(EXTRA_MESSAGE_ID, m.optLong("messageId"))
-        putString(EXTRA_GMAIL_ID, gmailId)
-        putString(EXTRA_THREAD_ID, if (m.isNull("threadId")) null else m.optString("threadId"))
-        putString(EXTRA_TITLE, m.optString("title"))
-        putString(EXTRA_SUBJECT, m.optString("subject"))
-        putString(EXTRA_PREVIEW, m.optString("preview"))
-        putLong(EXTRA_RECEIVED_AT, m.optLong("receivedAt"))
-        putString(EXTRA_REPLY_HEAD, if (m.isNull("replyHead")) null else m.optString("replyHead"))
-        putInt(EXTRA_ACTIONS, flags)
-        putBoolean(EXTRA_HIDE, hide)
-        // Bytes as a data URL (Rust has already dropped anything else); never with a hidden preview.
-        if (!hide && !m.isNull("picture")) putString(EXTRA_PICTURE, m.optString("picture"))
+    synchronized(ledgerLock) {
+      val ledger = ledger(context)
+      val recorded = ArrayList<NoticeLedger.Entry>()
+      for (i in 0 until messages.length()) {
+        val m = messages.getJSONObject(i)
+        val gmailId = m.optString("gmailId")
+        if (gmailId.isEmpty()) continue
+        // Announced already, by the background service or an earlier sync, and maybe
+        // swiped away since: not again. The test notification can be sent any number of times.
+        if (gmailId != TEST_GMAIL_ID && ledger.wasSeen(account, gmailId)) continue
+        val extras = Bundle().apply {
+          putInt(EXTRA_NOTIFICATION_ID, idFor(gmailId, account))
+          if (account != null) putString(EXTRA_ACCOUNT, account)
+          if (label != null) putString(EXTRA_ACCOUNT_LABEL, label)
+          putLong(EXTRA_MESSAGE_ID, m.optLong("messageId"))
+          putString(EXTRA_GMAIL_ID, gmailId)
+          putString(EXTRA_THREAD_ID, if (m.isNull("threadId")) null else m.optString("threadId"))
+          putString(EXTRA_TITLE, m.optString("title"))
+          putString(EXTRA_SUBJECT, m.optString("subject"))
+          putString(EXTRA_PREVIEW, m.optString("preview"))
+          putLong(EXTRA_RECEIVED_AT, m.optLong("receivedAt"))
+          putString(EXTRA_REPLY_HEAD, if (m.isNull("replyHead")) null else m.optString("replyHead"))
+          putInt(EXTRA_ACTIONS, flags)
+          putBoolean(EXTRA_HIDE, hide)
+          // Bytes as a data URL (Rust has already dropped anything else); never with a hidden preview.
+          if (!hide && !m.isNull("picture")) putString(EXTRA_PICTURE, m.optString("picture"))
+        }
+        post(context, extras.getInt(EXTRA_NOTIFICATION_ID), message(context, extras))
+        val at = m.optLong("receivedAt").takeIf { it > 0 } ?: System.currentTimeMillis()
+        recorded.add(NoticeLedger.Entry(gmailId, m.optString("title"), m.optString("subject"), true, at))
       }
-      post(context, extras.getInt(EXTRA_NOTIFICATION_ID), message(context, extras))
-      lines.add("${m.optString("title")}  ${m.optString("subject")}")
+      // Counted in the summary without a notification of their own (past the five).
+      val rest = batch.optJSONArray("restIds")
+      if (rest != null) {
+        for (i in 0 until rest.length()) {
+          val gmailId = rest.optString(i)
+          if (gmailId.isEmpty() || ledger.wasSeen(account, gmailId)) continue
+          recorded.add(NoticeLedger.Entry(gmailId, "", "", false, 0))
+        }
+      }
+      if (recorded.isEmpty()) return
+      ledger.record(account, recorded)
+      saveSummaryLook(context, account, hide, label)
+      val fresh = recorded.filter { it.shown }.map { idFor(it.gmailId, account) }.toSet()
+      refreshSummary(context, ledger, account, allowNew = true, fresh = fresh)
+      save(context, ledger)
     }
+  }
 
-    val total = batch.optInt("total", lines.size)
-    if (total >= 2) {
-      val title = batch.optString("summaryTitle").ifEmpty { "$total new messages" }
-      val style = NotificationCompat.InboxStyle().setSummaryText(if (total > lines.size) "+${total - lines.size} more" else null)
-      lines.forEach { style.addLine(it) }
-      val summary = NotificationCompat.Builder(context, CHANNEL)
-        .setSmallIcon(R.drawable.ic_stat_winnow)
-        .setContentTitle(title)
-        .setContentText(if (hide) null else batch.optString("summaryBody"))
-        .setStyle(if (hide) null else style)
-        .setGroup(groupFor(account))
-        .setGroupSummary(true)
-        .setCategory(NotificationCompat.CATEGORY_EMAIL)
-        .setAutoCancel(true)
-        .setOnlyAlertOnce(true)
-        .setContentIntent(open(context, summaryIdFor(account), inboxUri(account)))
-      if (label != null) summary.setSubText(label)
-      if (hide) summary.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicVersion(context, title))
-      post(context, summaryIdFor(account), summary.build())
+  /**
+   * New mail found by the background service (`sync/MailSyncService.kt`) while the app is
+   * closed: the same notification the web layer would post, built from Gmail's metadata.
+   *
+   * No inline Reply: its header block is the composer's (`rawFor` → `buildMime` in the web
+   * layer), which only exists while the app runs, and a reply built anywhere else could
+   * drift from it. Delete and Mark read work as ever; tapping opens the message.
+   */
+  fun showFromBackground(context: Context, account: String, label: String?, actions: Int, hide: Boolean, messages: List<BackgroundNotice>) {
+    val list = org.json.JSONArray()
+    for (m in messages.take(MAX_MESSAGES)) {
+      list.put(
+        JSONObject()
+          .put("messageId", 0)
+          .put("gmailId", m.gmailId)
+          .put("threadId", m.threadId ?: JSONObject.NULL)
+          .put("title", m.title)
+          .put("subject", m.subject)
+          .put("preview", m.preview)
+          .put("receivedAt", m.receivedAt)
+          .put("replyHead", JSONObject.NULL)
+          .put("picture", JSONObject.NULL),
+      )
     }
+    val rest = org.json.JSONArray()
+    messages.drop(MAX_MESSAGES).forEach { rest.put(it.gmailId) }
+    val batch = JSONObject()
+      .put("account", JSONObject().put("id", account).put("label", label ?: JSONObject.NULL))
+      .put("total", messages.size)
+      .put("messages", list)
+      .put("restIds", rest)
+      .put("actions", JSONObject().put("reply", false).put("trash", actions and 2 != 0).put("read", actions and 4 != 0))
+      .put("hidePreview", hide)
+    show(context, batch)
+  }
+
+  data class BackgroundNotice(val gmailId: String, val threadId: String?, val title: String, val subject: String, val preview: String, val receivedAt: Long)
+
+  const val MAX_MESSAGES = 5
+
+  /** Dev Options → Send test notification's sample (`TEST_GMAIL_ID` in the web layer and `plan.rs`). */
+  const val TEST_GMAIL_ID = "winnowtestnotification"
+
+  // ── Dismissing itself ────────────────────────────────────────────────────
+
+  /**
+   * Messages that no longer need attention (read, archived, deleted, snoozed, moved; in
+   * Winnow or anywhere on Gmail): their notifications go, and the account's summary is
+   * rebuilt from what is left, or goes with the last of them.
+   */
+  fun dismiss(context: Context, account: String?, gmailIds: Collection<String>) {
+    if (gmailIds.isEmpty()) return
+    synchronized(ledgerLock) {
+      val ledger = ledger(context)
+      // A notification whose button is being answered ("Moving to Trash…", the Undo after
+      // it) is left to that flow: taking it down here would take the Undo with it.
+      val busyIds = synchronized(busy) { busy.toSet() }
+      val targets = gmailIds.filter { idFor(it, account) !in busyIds }
+      val ids = targets.map { idFor(it, account) }.toSet()
+      for (id in ids) NotificationManagerCompat.from(context).cancel(id)
+      ledger.dismiss(account, targets)
+      refreshSummary(context, ledger, account, allowNew = false, gone = ids)
+      save(context, ledger)
+    }
+  }
+
+  /** Signed out of `account` on this device: every notification of its mail goes. */
+  fun clearAccount(context: Context, account: String?) {
+    synchronized(ledgerLock) {
+      val ledger = ledger(context)
+      val manager = NotificationManagerCompat.from(context)
+      for (entry in ledger.entries(account)) manager.cancel(idFor(entry.gmailId, account))
+      // Anything of the account's group the ledger did not know about (older builds).
+      val system = context.getSystemService(NotificationManager::class.java)
+      system?.activeNotifications?.filter { it.notification.group == groupFor(account) }?.forEach { manager.cancel(it.id) }
+      manager.cancel(summaryIdFor(account))
+      ledger.clearAccount(account)
+      save(context, ledger)
+    }
+  }
+
+  /** The messages whose notifications are up, for the web layer to check against its mailbox. */
+  fun active(context: Context): List<Pair<String?, String>> = synchronized(ledgerLock) {
+    val ledger = ledger(context)
+    for (account in ledger.accounts()) reconcileWithSystem(context, ledger, account, emptySet())
+    save(context, ledger)
+    ledger.accounts().flatMap { account -> ledger.entries(account).map { account to it.gmailId } }
+  }
+
+  private val ledgerLock = Any()
+  private const val PREFS = "winnow.notifications"
+  private const val KEY_LEDGER = "ledger"
+
+  private fun ledger(context: Context) =
+    NoticeLedger(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LEDGER, null))
+
+  private fun save(context: Context, ledger: NoticeLedger) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_LEDGER, ledger.serialize()).apply()
+  }
+
+  /** How the account's summary looked last (hidden preview, address), for rebuilding it. */
+  private fun saveSummaryLook(context: Context, account: String?, hide: Boolean, label: String?) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+      .putBoolean("hide:${account ?: ""}", hide)
+      .putString("label:${account ?: ""}", label)
+      .apply()
+  }
+
+  /**
+   * Drop entries whose own notification Android no longer has up (swiped, tapped, timed
+   * out). `fresh`: posted a moment ago, which Android may not list yet; `gone`: cancelled
+   * a moment ago, which it may still list.
+   */
+  private fun reconcileWithSystem(context: Context, ledger: NoticeLedger, account: String?, gone: Set<Int>, fresh: Set<Int> = emptySet()): Boolean {
+    val system = context.getSystemService(NotificationManager::class.java) ?: return false
+    val up = system.activeNotifications.map { it.id }.toSet() - gone + fresh
+    val alive = ledger.entries(account).filter { idFor(it.gmailId, account) in up }.map { it.gmailId }.toSet()
+    return ledger.reconcile(account, alive)
+  }
+
+  /**
+   * Bring the account's summary in line with the ledger: rebuilt with the current count
+   * and lines, silently (the children did the alerting), or cancelled when nothing is
+   * left. A summary is only *added* for two or more messages (`allowNew`, a new batch).
+   */
+  private fun refreshSummary(context: Context, ledger: NoticeLedger, account: String?, allowNew: Boolean, gone: Set<Int> = emptySet(), fresh: Set<Int> = emptySet()) {
+    reconcileWithSystem(context, ledger, account, gone, fresh)
+    val summaryId = summaryIdFor(account)
+    val system = context.getSystemService(NotificationManager::class.java)
+    val summaryUp = system?.activeNotifications?.any { it.id == summaryId && it.id !in gone } == true
+    val summary = ledger.summary(account)
+    if (summary == null) {
+      NotificationManagerCompat.from(context).cancel(summaryId)
+      return
+    }
+    val count = ledger.entries(account).size
+    if (!summaryUp && !(allowNew && count >= 2)) return
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val hide = prefs.getBoolean("hide:${account ?: ""}", false)
+    val label = prefs.getString("label:${account ?: ""}", null)
+    val style = NotificationCompat.InboxStyle().setSummaryText(summary.more)
+    summary.lines.forEach { style.addLine(it) }
+    val builder = NotificationCompat.Builder(context, CHANNEL)
+      .setSmallIcon(R.drawable.ic_stat_winnow)
+      .setContentTitle(summary.title)
+      .setContentText(if (hide) null else summary.body)
+      .setStyle(if (hide || summary.lines.isEmpty()) null else style)
+      .setGroup(groupFor(account))
+      .setGroupSummary(true)
+      .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+      .setCategory(NotificationCompat.CATEGORY_EMAIL)
+      .setAutoCancel(true)
+      .setOnlyAlertOnce(true)
+      .setContentIntent(open(context, summaryId, inboxUri(account)))
+    if (label != null) builder.setSubText(label)
+    if (hide) builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicVersion(context, summary.title))
+    post(context, summaryId, builder.build())
   }
 
   /** The full notification for one message, from its extras. */
@@ -258,6 +424,7 @@ object MailNotifier {
   fun working(context: Context, requestId: String, extras: Bundle, label: String) {
     synchronized(inFlight) { inFlight[requestId] = extras }
     val id = extras.getInt(EXTRA_NOTIFICATION_ID)
+    setBusy(id, true)
     post(context, id, status(context, extras, label, null).setProgress(0, 0, true).setOngoing(true).build())
     main.postDelayed({
       val stale = synchronized(inFlight) { inFlight.remove(requestId) } ?: return@postDelayed
@@ -275,7 +442,9 @@ object MailNotifier {
     val id = finish.optInt("notificationId")
     val title = finish.optString("title")
     val text = finish.optString("text")
-    when (finish.optString("kind")) {
+    val kind = finish.optString("kind")
+    if (kind == "restore" || kind == "failed") setBusy(id, false)
+    when (kind) {
       "restore" -> if (extras != null) post(context, id, message(context, extras)) else cancel(context, id)
       "undo" -> {
         val base = extras ?: Bundle().apply { putInt(EXTRA_NOTIFICATION_ID, id) }
@@ -303,6 +472,7 @@ object MailNotifier {
   /** No Rust to ask (the process was restarted for this press), or it did not answer. */
   fun failed(context: Context, extras: Bundle, action: String, why: String) {
     val id = extras.getInt(EXTRA_NOTIFICATION_ID)
+    setBusy(id, false)
     val title = if (action == "reply") "Couldn't send. Open Winnow" else "Couldn't do that. Open Winnow"
     val text = if (action == "reply") "$why Your reply is kept on this phone until Winnow opens." else why
     post(context, id, failure(context, extras, id, title, text))
@@ -356,22 +526,33 @@ object MailNotifier {
 
   /** Cancel after `delay` (`setTimeoutAfter` is Android 8+; this covers 7). */
   private fun later(context: Context, id: Int, delay: Long) {
-    main.postDelayed({ cancel(context, id) }, delay)
+    main.postDelayed({
+      setBusy(id, false)
+      cancel(context, id)
+    }, delay)
   }
 
+  /**
+   * Take one notification down (an action finished, its Undo timed out) and keep its
+   * account's summary true: rebuilt from what is left, or gone with the last child.
+   */
   fun cancel(context: Context, id: Int) {
-    val manager = NotificationManagerCompat.from(context)
-    // The last child of its account's group gone: that group's summary goes too, or it
-    // lingers over nothing. The group is read before the child is cancelled.
-    val system = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) context.getSystemService(NotificationManager::class.java) else null
+    val system = context.getSystemService(NotificationManager::class.java)
     val group = system?.activeNotifications?.firstOrNull { it.id == id }?.notification?.group
-    manager.cancel(id)
+    NotificationManagerCompat.from(context).cancel(id)
+    synchronized(ledgerLock) {
+      val ledger = ledger(context)
+      val accounts = ledger.accounts().filter { group == null || groupFor(it) == group }
+      for (account in accounts) refreshSummary(context, ledger, account, allowNew = false, gone = setOf(id))
+      save(context, ledger)
+    }
+    // A group the ledger never knew (posted by an older build): the old rule, last child out takes the summary.
     if (system != null && group != null) {
       val active = system.activeNotifications
       val isSummary = { n: android.app.Notification -> (n.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0 }
       val summary = active.firstOrNull { it.notification.group == group && isSummary(it.notification) }
       val children = active.count { it.id != id && it.notification.group == group && !isSummary(it.notification) }
-      if (children == 0 && summary != null) manager.cancel(summary.id)
+      if (children == 0 && summary != null) NotificationManagerCompat.from(context).cancel(summary.id)
     }
   }
 

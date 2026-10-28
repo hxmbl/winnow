@@ -2,7 +2,7 @@
  * Browser platform.
  */
 
-import type { NotificationActionEvent } from "../core/notify/notifications";
+import { summaryAfterWithdraw, type NotificationActionEvent } from "../core/notify/notifications";
 import { reportedVersion } from "../core/updates/buildVersion";
 import type { TokenStore } from "../core/gmail/tokens";
 import { webTokenKey } from "../core/session/accounts";
@@ -10,6 +10,7 @@ import { localStorageCredentialStore, type CredentialStore } from "../core/sessi
 import { parseRedirect } from "../core/session/redirect";
 import {
   webTokenStore,
+  type ActiveNotice,
   type NewMailNotification,
   type OAuthRedirect,
   type Platform,
@@ -205,10 +206,19 @@ export const webPlatform: WebPlatform = {
       };
     }
     if (mail.total > mail.messages.length) {
+      const summaryTag = account ? `winnow-new-mail-${account}` : "winnow-new-mail";
       const summary = new NotificationCtor(mail.summaryTitle, {
         body: (mail.hidePreview ? "" : mail.summaryBody) + whose,
-        tag: account ? `winnow-new-mail-${account}` : "winnow-new-mail",
+        tag: summaryTag,
       });
+      // What the summary counts, so its number can follow the mail as it is read or moved.
+      const previous = shownSummaries.get(summaryTag);
+      const counted = new Set([...(previous?.counted ?? []), ...mail.messages.map((m) => m.gmailId), ...(mail.restIds ?? [])]);
+      const rest = new Set([...(previous?.rest ?? []), ...(mail.restIds ?? [])]);
+      shownSummaries.set(summaryTag, { notification: summary, counted, rest, whose, account: account ?? null });
+      summary.onclose = () => {
+        if (shownSummaries.get(summaryTag)?.notification === summary) shownSummaries.delete(summaryTag);
+      };
       // Several messages: the summary opens that account's inbox.
       summary.onclick = () => {
         summary.close();
@@ -224,6 +234,58 @@ export const webPlatform: WebPlatform = {
       shownNotifications.get(tag)?.close();
       shownNotifications.delete(tag);
     }
+    // The summary: a smaller number, replaced in place without a new alert (same tag,
+    // silent), or closed once none of the mail it was there for is left.
+    const summaryTag = account ? `winnow-new-mail-${account}` : "winnow-new-mail";
+    const summary = shownSummaries.get(summaryTag);
+    if (!summary) return;
+    const before = summary.counted.size;
+    for (const gmailId of gmailIds) {
+      summary.counted.delete(gmailId);
+      summary.rest.delete(gmailId);
+    }
+    if (summary.counted.size === before) return;
+    const next = summaryAfterWithdraw(summary.counted.size, summary.rest.size);
+    if (!next) {
+      summary.notification.close();
+      shownSummaries.delete(summaryTag);
+      return;
+    }
+    const NotificationCtor = globalThis.Notification;
+    if (!NotificationCtor || NotificationCtor.permission !== "granted") return;
+    const replacement = new NotificationCtor(next.title, { body: next.body + summary.whose, tag: summaryTag, silent: true });
+    const acct = summary.account;
+    replacement.onclick = () => {
+      replacement.close();
+      globalThis.focus?.();
+      emitNotificationAction({ action: "inbox", messageId: 0, gmailId: "", origin: "web", ...(acct ? { account: acct } : {}) });
+    };
+    replacement.onclose = () => {
+      if (shownSummaries.get(summaryTag)?.notification === replacement) shownSummaries.delete(summaryTag);
+    };
+    shownSummaries.set(summaryTag, { ...summary, notification: replacement });
+  },
+
+  async clearNotifications(account: string | null): Promise<void> {
+    const prefix = account ? `winnow-${account}-` : "winnow-";
+    for (const [tag, notification] of [...shownNotifications]) {
+      // Without an account only the account-less tags (`winnow-<hexid>`) are this account's.
+      if (!tag.startsWith(prefix) || (!account && /^winnow-[a-z0-9]{4,24}-/.test(tag))) continue;
+      notification.close();
+      shownNotifications.delete(tag);
+    }
+    const summaryTag = account ? `winnow-new-mail-${account}` : "winnow-new-mail";
+    shownSummaries.get(summaryTag)?.notification.close();
+    shownSummaries.delete(summaryTag);
+  },
+
+  async activeNotifications(): Promise<ActiveNotice[]> {
+    const out: ActiveNotice[] = [];
+    for (const tag of shownNotifications.keys()) {
+      const match = /^winnow-(?:([a-z0-9]{4,24})-)?([A-Za-z0-9]{1,64})$/.exec(tag);
+      if (match && !tag.startsWith("winnow-new-mail")) out.push({ account: match[1] ?? null, gmailId: match[2] });
+    }
+    return out;
   },
 
   onNotificationAction(handler: (event: NotificationActionEvent) => void): () => void {
@@ -303,6 +365,12 @@ const notificationHandlers = new Set<(event: NotificationActionEvent) => void>()
 
 /** The browser notifications this tab has up, by tag (`withdrawNotifications`). */
 const shownNotifications = new Map<string, Notification>();
+
+/** Each account's summary notification, and the mail it counts (`withdrawNotifications`). */
+const shownSummaries = new Map<
+  string,
+  { notification: Notification; counted: Set<string>; rest: Set<string>; whose: string; account: string | null }
+>();
 
 function emitNotificationAction(event: NotificationActionEvent): void {
   for (const handler of notificationHandlers) handler(event);

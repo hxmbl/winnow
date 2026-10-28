@@ -335,6 +335,8 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
       await deleteOfflineData(id);
       // And its kept sender pictures (`winnow-pictures@<id>`): who mails it, as images.
       await deletePictureBytes(id);
+      // And every notification of its mail (here, and Android's background service's).
+      await platform.clearNotifications?.(id)?.catch(() => undefined);
       // Its snoozes and scheduled sends live in the shared records, tagged with its
       // address (and, for a send going out from it, its id): they go with it too.
       store.forgetAccountRecords(record.email, id);
@@ -395,6 +397,9 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
           const result = await entry.light.check();
           unread.set(account.id, result.unread);
           if (result.fresh.length > 0 && account.notify) options.onInactiveMail?.(account, result.fresh);
+          // Mail of this account dealt with since (read on the phone, archived on the web):
+          // its notifications take themselves down.
+          if (result.left.length > 0) void platform.withdrawNotifications?.(result.left, account.id)?.catch(() => undefined);
         } catch {
           // A quiet account is better than an error about one that is not on screen;
           // its own sync says what is wrong once it is opened.

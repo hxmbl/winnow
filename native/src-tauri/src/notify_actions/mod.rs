@@ -15,6 +15,7 @@
 //! `MAP.md` §8.3 has the full matrix and why macOS is click-to-open.
 
 pub mod plan;
+pub mod shown;
 
 #[cfg(target_os = "android")]
 mod android;
@@ -31,6 +32,13 @@ pub const ACTION_EVENT: &str = "winnow://notification-action";
 
 /// Per-message notifications at most; the rest are counted in the summary.
 pub const MAX_CHILDREN: usize = 5;
+
+/// Ids of messages counted in a summary without their own notification, at most.
+pub const MAX_REST: usize = 500;
+
+/// The shown-notification books every desktop keeps (`shown.rs`).
+#[derive(Default)]
+pub struct Books(pub parking_lot::Mutex<shown::Ledger>);
 
 /// Display strings are cut here: a notification is not a reader.
 const MAX_TEXT: usize = 240;
@@ -131,6 +139,10 @@ pub struct NotificationBatch {
     /// Lock screen: show "New message" instead of sender and subject.
     #[serde(default)]
     pub hide_preview: bool,
+    /// Gmail ids counted in `total` that have no notification of their own (past the
+    /// five), so the summary's count can follow them as they are read or moved.
+    #[serde(default)]
+    pub rest_ids: Vec<String>,
 }
 
 impl NotificationBatch {
@@ -172,6 +184,8 @@ impl NotificationBatch {
         }
         self.summary_title = clip(&self.summary_title);
         self.summary_body = clip(&self.summary_body);
+        self.rest_ids.retain(|id| plan::valid_gmail_id(id));
+        self.rest_ids.truncate(MAX_REST);
         self.total = self.total.max(self.messages.len() as u32);
         self
     }
@@ -265,8 +279,20 @@ fn show(app: &AppHandle, batch: NotificationBatch) -> Result<()> {
 /// notification it always was, and a click reveals the window (`lib.rs`, `Reopen`).
 #[cfg(not(any(target_os = "android", target_os = "linux", target_os = "windows")))]
 fn show(app: &AppHandle, batch: NotificationBatch) -> Result<()> {
+    use tauri::Manager;
     use tauri_plugin_notification::NotificationExt;
     let (title, body) = summary_text(&batch);
+    if let Some(books) = app.try_state::<Books>() {
+        let mut ids: std::collections::HashSet<String> =
+            batch.messages.iter().map(|m| m.gmail_id.clone()).collect();
+        ids.extend(batch.rest_ids.iter().cloned());
+        books.0.lock().record_batch(shown::Batch {
+            account: batch.account.as_ref().map(|a| a.id.clone()),
+            title: title.clone(),
+            body: body.clone(),
+            ids,
+        });
+    }
     app.notification()
         .builder()
         .title(title)
@@ -274,6 +300,76 @@ fn show(app: &AppHandle, batch: NotificationBatch) -> Result<()> {
         .group("winnow.new-mail")
         .show()
         .map_err(|e| format!("could not show a notification: {e}"))
+}
+
+/// macOS: take delivered notifications down from Notification Centre, found by their
+/// title and text (what `tauri-plugin-notification` gives them; it sets no identifier).
+///
+/// `NSUserNotificationCenter` is the centre the plugin delivers through (`notify-rust`'s
+/// default macOS backend, `mac-notification-sys`), so its `deliveredNotifications` are
+/// Winnow's own. A batch's notification can only be removed, not edited: re-delivering
+/// it with a smaller count would alert again, so a partly handled batch stays until its
+/// last message is.
+#[cfg(target_os = "macos")]
+fn remove_delivered(app: &AppHandle, texts: Vec<(String, String)>) {
+    if texts.is_empty() {
+        return;
+    }
+    let _ = app.run_on_main_thread(move || {
+        // SAFETY: Foundation's NSUserNotificationCenter, on the main thread; every
+        // object is checked for nil before it is messaged, and none is retained past
+        // this closure.
+        unsafe { mac::remove(&texts) }
+    });
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    use std::ffi::{c_char, CStr};
+
+    pub unsafe fn remove(texts: &[(String, String)]) {
+        let Some(class) = AnyClass::get(c"NSUserNotificationCenter") else {
+            return;
+        };
+        let center: *mut AnyObject = msg_send![class, defaultUserNotificationCenter];
+        if center.is_null() {
+            return;
+        }
+        let delivered: *mut AnyObject = msg_send![center, deliveredNotifications];
+        if delivered.is_null() {
+            return;
+        }
+        let count: usize = msg_send![delivered, count];
+        let mut doomed = Vec::new();
+        for index in 0..count {
+            let notification: *mut AnyObject = msg_send![delivered, objectAtIndex: index];
+            if notification.is_null() {
+                continue;
+            }
+            let title = text(msg_send![notification, title]);
+            let body = text(msg_send![notification, informativeText]);
+            if texts.iter().any(|(t, b)| *t == title && *b == body) {
+                doomed.push(notification);
+            }
+        }
+        for notification in doomed {
+            let _: () = msg_send![center, removeDeliveredNotification: notification];
+        }
+    }
+
+    unsafe fn text(string: *mut AnyObject) -> String {
+        if string.is_null() {
+            return String::new();
+        }
+        let bytes: *const c_char = msg_send![string, UTF8String];
+        if bytes.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(bytes).to_string_lossy().into_owned()
+        }
+    }
 }
 
 /// The one-line form of a batch: a single message names its sender and subject.
@@ -344,6 +440,10 @@ pub fn notify_release_kept(app: AppHandle, ids: Vec<String>) -> Result<()> {
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::<tauri::Wry>::new(PLUGIN_NAME)
         .setup(|app, api| {
+            {
+                use tauri::Manager;
+                app.manage(Books::default());
+            }
             #[cfg(target_os = "android")]
             android::register(app, api)?;
             #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -359,24 +459,105 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .build()
 }
 
-/// Take down the notifications of messages that no longer exist (deleted on the server,
-/// found by sync or the daily reconciliation). Android only; elsewhere a desktop
-/// notification is left to time out on its own.
+/// Take down the notifications of messages that no longer need attention: deleted on
+/// the server, read, archived, snoozed or moved out of the Inbox, in Winnow or on Gmail
+/// anywhere (the web layer sees it in its next sync, or the user did it here).
+///
+/// | Host | What happens |
+/// | --- | --- |
+/// | Android | Each message's notification is cancelled and its account's summary rebuilt with the new count, or cancelled with the last one (`MailNotifier.dismiss`). |
+/// | Linux | `CloseNotification` over D-Bus for each; the summary is re-shown in place with the new count, or closed. |
+/// | macOS | The batch's one notification is removed from Notification Centre once every message in it is handled. |
+/// | Windows | Toasts carry no tag through `notify-rust`, so one cannot be picked out: Winnow's Action Center entries are cleared once none of them needs attention. |
 #[tauri::command]
 pub fn notify_withdraw(
     app: AppHandle,
     gmail_ids: Vec<String>,
     account: Option<String>,
 ) -> Result<()> {
+    let gmail_ids: Vec<String> = gmail_ids
+        .into_iter()
+        .filter(|id| plan::valid_gmail_id(id))
+        .collect();
+    let account = account.filter(|id| plan::valid_account_id(id));
     #[cfg(target_os = "android")]
     {
         android::withdraw(&app, gmail_ids, account)
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, gmail_ids, account);
+        use tauri::Manager;
+        let change = match app.try_state::<Books>() {
+            Some(books) => books.0.lock().dismiss(&account, &gmail_ids),
+            None => return Ok(()),
+        };
+        apply(&app, change, &account);
         Ok(())
     }
+}
+
+/// Signed out of `account` on this device: every notification of its mail goes.
+#[tauri::command]
+pub fn notify_clear_account(app: AppHandle, account: Option<String>) -> Result<()> {
+    let account = account.filter(|id| plan::valid_account_id(id));
+    #[cfg(target_os = "android")]
+    {
+        android::clear_account(&app, account)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri::Manager;
+        let change = match app.try_state::<Books>() {
+            Some(books) => books.0.lock().clear_account(&account),
+            None => return Ok(()),
+        };
+        apply(&app, change, &account);
+        Ok(())
+    }
+}
+
+/// One notification that is up, for the web layer to check against its mailbox.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveNotice {
+    pub account: Option<String>,
+    pub gmail_id: String,
+}
+
+/// The new-mail notifications that are up now, on any host: the web layer takes down
+/// the ones whose mail it already knows needs no attention (opened since, or read on
+/// another device while the app was closed).
+#[tauri::command]
+pub fn notify_active(app: AppHandle) -> Result<Vec<ActiveNotice>> {
+    #[cfg(target_os = "android")]
+    {
+        android::active(&app)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri::Manager;
+        Ok(app
+            .try_state::<Books>()
+            .map(|books| books.0.lock().active())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(account, gmail_id)| ActiveNotice { account, gmail_id })
+            .collect())
+    }
+}
+
+/// Do what a dismissal asks of this desktop.
+#[cfg(not(target_os = "android"))]
+fn apply(app: &AppHandle, change: shown::Change, account: &Option<String>) {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    desktop::apply(app, change, account);
+    #[cfg(target_os = "macos")]
+    {
+        let _ = account;
+        remove_delivered(app, change.remove_batches);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    let _ = (app, change, account);
 }
 
 #[cfg(test)]
@@ -447,6 +628,7 @@ mod tests {
             summary_body: String::new(),
             messages: vec![with(picture)],
             actions: ActionSet::default(),
+            rest_ids: Vec::new(),
             hide_preview,
         };
         assert_eq!(
@@ -499,6 +681,7 @@ mod tests {
             summary_body: String::new(),
             messages,
             actions: ActionSet::default(),
+            rest_ids: Vec::new(),
             hide_preview: false,
         }
         .sanitised();
@@ -522,6 +705,7 @@ mod tests {
             summary_body: "Ada".into(),
             messages: vec![notice("abc")],
             actions: ActionSet::default(),
+            rest_ids: Vec::new(),
             hide_preview: true,
         };
         let (title, body) = summary_text(&batch);

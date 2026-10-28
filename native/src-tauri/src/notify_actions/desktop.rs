@@ -14,7 +14,9 @@
 //! Each notification waits for its click on its own thread (`wait_for_action`
 //! blocks until the notification closes). There are at most [`MAX_CHILDREN`] + 1.
 
-use super::{summary_text, ActionEvent, ActionResult, NotificationBatch, ACTION_EVENT};
+use super::{
+    shown, summary_text, ActionEvent, ActionResult, Books, NotificationBatch, ACTION_EVENT,
+};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, Manager};
@@ -51,6 +53,7 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
         let app = app.clone();
         let hide = batch.hide_preview;
         let account = account.clone();
+        let ledger_account = account.clone();
         let whose = whose.clone();
         std::thread::spawn(move || {
             let mut n = base();
@@ -84,6 +87,20 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
             if let Some(shown) = app.try_state::<Shown>() {
                 shown.0.lock().insert(message.message_id, handle.id());
             }
+            // The books, so the notification can take itself down when its mail no longer
+            // needs attention (`notify_withdraw`). Windows has no id to close by; a number
+            // of our own stands in, for the books only.
+            #[cfg(target_os = "linux")]
+            let os_id = handle.id();
+            #[cfg(not(target_os = "linux"))]
+            let os_id = next_pseudo_id();
+            if let Some(books) = app.try_state::<Books>() {
+                books.0.lock().record_message(
+                    ledger_account.clone(),
+                    message.gmail_id.clone(),
+                    os_id,
+                );
+            }
             let id = message.message_id;
             let gmail = message.gmail_id.clone();
             handle.wait_for_action(|action| {
@@ -108,6 +125,10 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
             if let Some(shown) = app.try_state::<Shown>() {
                 shown.0.lock().remove(&id);
             }
+            // Closed: clicked, dismissed, expired, or taken down by `apply`.
+            if let Some(books) = app.try_state::<Books>() {
+                books.0.lock().closed(os_id);
+            }
             // The notification has closed; its picture is not needed any more.
             if let Some(path) = picture {
                 let _ = std::fs::remove_file(path);
@@ -120,12 +141,24 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
     if batch.total as usize > batch.messages.len() {
         let (title, body) = summary_text(&batch);
         let app = app.clone();
+        let shown_ids: Vec<String> = batch.messages.iter().map(|m| m.gmail_id.clone()).collect();
+        let rest_ids = batch.rest_ids.clone();
         std::thread::spawn(move || {
             let mut n = base();
             n.summary(&title)
                 .body(&format!("{body}{whose}"))
                 .action("default", "Open");
             if let Ok(handle) = n.show() {
+                #[cfg(target_os = "linux")]
+                let os_id = handle.id();
+                #[cfg(not(target_os = "linux"))]
+                let os_id = next_pseudo_id();
+                if let Some(books) = app.try_state::<Books>() {
+                    books
+                        .0
+                        .lock()
+                        .record_summary(account.clone(), os_id, &shown_ids, &rest_ids);
+                }
                 handle.wait_for_action(|action| {
                     if action_name(action) == Some("open") {
                         crate::tray::reveal(&app);
@@ -142,10 +175,102 @@ pub fn show(app: &AppHandle, batch: NotificationBatch) -> Result<(), String> {
                         );
                     }
                 });
+                if let Some(books) = app.try_state::<Books>() {
+                    books.0.lock().closed(os_id);
+                }
             }
         });
     }
     Ok(())
+}
+
+/// Stand-in ids for the books where the desktop gives none (Windows), never 0.
+#[cfg(not(target_os = "linux"))]
+fn next_pseudo_id() -> u32 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Take notifications down as a dismissal asks (`notify_withdraw`, `notify_clear_account`).
+///
+/// - **Linux**: `CloseNotification` for each over the session bus (the spec's own call,
+///   which every server implements); the summary is re-shown under its id with the new
+///   count (servers replace it in place) or closed. Off the calling thread: a D-Bus
+///   round trip should not hold up the webview's command.
+/// - **Windows**: `notify-rust` builds toasts with no tag or group, and those are what
+///   `ToastNotificationHistory` removes single toasts by, so one cannot be picked out.
+///   Once none of Winnow's toasts needs attention, its Action Center entries are cleared
+///   (`ClearWithId`). Until then they stay.
+pub fn apply(app: &AppHandle, change: shown::Change, account: &Option<String>) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (app, account);
+        let shown::Change {
+            close,
+            close_summary,
+            update_summary,
+            ..
+        } = change;
+        if close.is_empty() && close_summary.is_none() && update_summary.is_none() {
+            return;
+        }
+        std::thread::spawn(move || {
+            let Ok(bus) = zbus::blocking::Connection::session() else {
+                return;
+            };
+            for id in close.into_iter().chain(close_summary) {
+                let _ = bus.call_method(
+                    Some("org.freedesktop.Notifications"),
+                    "/org/freedesktop/Notifications",
+                    Some("org.freedesktop.Notifications"),
+                    "CloseNotification",
+                    &id,
+                );
+            }
+            if let Some((id, counted, rest)) = update_summary {
+                let (title, body) = shown::summary_text(counted, rest);
+                let mut n = base();
+                n.summary(&title)
+                    .body(&body)
+                    .action("default", "Open")
+                    .id(id);
+                // No new sound or banner for a smaller number: it replaces what is there.
+                n.hint(notify_rust::Hint::SuppressSound(true));
+                n.hint(notify_rust::Hint::Transient(false));
+                let _ = n.show();
+            }
+        });
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = account;
+        if change.nothing_left {
+            clear_windows(app);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn clear_windows(app: &AppHandle) {
+    let _ = app;
+    // Only the installed app has this AppUserModelID; a dev build under `target/` posts
+    // as PowerShell (see `base`), whose history is not Winnow's to clear.
+    let installed = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.display().to_string()))
+        .map(|dir| {
+            let sep = std::path::MAIN_SEPARATOR;
+            !(dir.ends_with(&format!("{sep}target{sep}debug"))
+                || dir.ends_with(&format!("{sep}target{sep}release")))
+        })
+        .unwrap_or(false);
+    if !installed {
+        return;
+    }
+    if let Ok(history) = windows::UI::Notifications::ToastNotificationManager::History() {
+        let _ = history.ClearWithId(&windows::core::HSTRING::from("app.winnow.desktop"));
+    }
 }
 
 /// Linux: replace the notification with a short confirmation that expires. Windows:

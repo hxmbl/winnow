@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- New-mail notifications take themselves down once the email no longer needs you: read, archived, deleted, snoozed or moved, in Winnow or in Gmail anywhere else. On Android and Linux each one goes by itself and the "12 new messages" summary counts down with them; in the browser each one closes; on macOS a batch goes once all of it is dealt with. Signing out of an account takes its notifications with it.
+
 ### Fixed
 
 - Settings switches are easier to press: tap anywhere on a setting's name to flip its switch, and the switch itself answers a 48×48 area (the (?) button keeps its own job). In the dark and OLED themes an off switch is now a visible grey instead of nearly black on black. "Keep syncing while closed" now shows your setting: on the desktop it can be turned back on after you turn it off, and the Android app, which can't sync in the background yet, says so instead of showing a switch that never moved.

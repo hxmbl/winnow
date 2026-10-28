@@ -86,6 +86,7 @@ import {
   DEFAULT_NOTIFICATION_ACTIONS,
   draftForKeptReply,
   notifiable,
+  staleNotices,
   type KeptReply,
   type NotificationActions,
 } from "../notify/notifications";
@@ -839,8 +840,19 @@ export type SyncOutcome = {
  */
 export interface PlatformBridge {
   notifyNewMail(emails: readonly Email[]): Promise<void>;
-  /** Take down notifications of messages that no longer exist (deleted on the server). Optional. */
+  /**
+   * Take down the open account's notifications of messages that no longer need
+   * attention: deleted on the server, read, archived, snoozed or moved out of the Inbox,
+   * here or on Gmail anywhere. Optional.
+   */
   withdrawNotifications?(gmailIds: readonly string[]): Promise<void>;
+  /**
+   * The notifications that are up now, by account, including ones Android's background
+   * service posted while the app was closed. Optional.
+   */
+  activeNotifications?(): Promise<{ account: string | null; gmailId: string }[]>;
+  /** Signed out of `account`: all of its notifications go. Optional. */
+  clearNotifications?(account: string | null): Promise<void>;
   /** What stops the offline download right now (offline, hidden on a phone, metered, battery), or `null`. Optional. */
   downloadConditions?(): DownloadBlock | null;
   setUnreadBadge(count: number): Promise<void>;
@@ -956,6 +968,13 @@ export class WinnowStore {
 
   private backend: MailBackend | undefined;
   private platform: PlatformBridge | undefined;
+  /**
+   * Messages whose new-mail notifications may be up, by account (`""` for none): the ones
+   * this app announced, and the ones the platform says are up (`adoptNotifications`).
+   * Every change to the mailbox checks them (`reconcileNotices`), so a notification goes
+   * the moment its mail is read, archived, deleted, snoozed or moved, here or elsewhere.
+   */
+  private noticeWatch = new Map<string, Set<string>>();
   /** The demo's address book, restored whenever the demo is. */
   private readonly seedContacts: readonly GoogleContact[];
 
@@ -1594,9 +1613,54 @@ export class WinnowStore {
     if (patch.all !== undefined || patch.snoozes !== undefined || patch.account !== undefined) {
       const all = this.overlaid(this.state.all);
       if (all !== this.state.all) this.state = { ...this.state, all };
+      this.reconcileNotices();
     }
     this.notify();
     if (persist) this.onPersist?.(persist);
+  }
+
+  // ── Notifications that dismiss themselves ─────────────────────────────────
+
+  private watchKey(account: string | null = this.state.accountId): string {
+    return account ?? "";
+  }
+
+  /** Watch these messages' notifications in the open account. */
+  private watchNotices(gmailIds: Iterable<string>, account: string | null = this.state.accountId): void {
+    const key = this.watchKey(account);
+    const set = this.noticeWatch.get(key) ?? new Set<string>();
+    for (const id of gmailIds) set.add(id);
+    // Bounded: the oldest go first; a notification that old has long been dealt with.
+    while (set.size > 500) set.delete(set.values().next().value as string);
+    this.noticeWatch.set(key, set);
+  }
+
+  /**
+   * Take down the open account's notifications whose mail the mailbox now shows needs
+   * no attention (read, out of the Inbox, snoozed). Runs on every change to the mailbox:
+   * the user's own action (open, mark read, archive, delete, snooze, move) and a sync
+   * bringing in what happened on Gmail elsewhere.
+   */
+  private reconcileNotices(): void {
+    if (!this.backend || !this.platform?.withdrawNotifications) return;
+    const watched = this.noticeWatch.get(this.watchKey());
+    if (!watched || watched.size === 0) return;
+    const stale = staleNotices(watched, this.state.all);
+    if (stale.length === 0) return;
+    for (const id of stale) watched.delete(id);
+    debugLog("notify", "dismissed", { messages: stale.length });
+    void this.platform.withdrawNotifications(stale).catch(() => undefined);
+  }
+
+  /**
+   * Watch the notifications the platform says are up (Android's background service posts
+   * them while the app is closed), then dismiss any whose mail is already dealt with.
+   */
+  async adoptNotifications(): Promise<void> {
+    if (!this.platform?.activeNotifications) return;
+    const active = await this.platform.activeNotifications().catch(() => []);
+    for (const { account, gmailId } of active) this.watchNotices([gmailId], account);
+    this.reconcileNotices();
   }
 
   /**
@@ -2511,6 +2575,9 @@ export class WinnowStore {
         cacheUnpersisted: Boolean(result.cacheUnpersisted),
       });
       if (!initial) await this.notifyIfNew(recent);
+      // Notifications posted while the app was away (Android's background service) whose
+      // mail this sync shows dealt with go now.
+      void this.adoptNotifications();
       // Mail that was here and is gone (deleted on the server, found by history or the
       // daily reconciliation) takes its notification with it.
       const present = new Set(result.emails.map((email) => email.gmailId));
@@ -2762,6 +2829,7 @@ export class WinnowStore {
       this.state.preferences,
     );
     if (arrived.length === 0) return;
+    this.watchNotices(arrived.map((email) => email.gmailId));
     await this.platform.notifyNewMail(arrived).catch(() => undefined);
   }
 
@@ -4392,6 +4460,12 @@ export class WinnowStore {
    * Keeping the second group is why a user can sign back in and find the app tuned.
    */
   async signOut(device?: AccountState): Promise<void> {
+    // Every notification of the account's mail goes with it.
+    const leavingId = this.backend ? this.state.accountId : null;
+    if (this.backend) {
+      this.noticeWatch.delete(this.watchKey(leavingId));
+      void this.platform?.clearNotifications?.(leavingId).catch(() => undefined);
+    }
     // Snoozes and scheduled sends name this account's mail, so they go with it (the
     // snoozed mail stays archived under its label in Gmail; a scheduled message stays a
     // draft there). The demo's are the demo's and stay.

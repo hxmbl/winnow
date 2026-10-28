@@ -38,6 +38,12 @@ export type LightSyncResult = {
   unread: number;
   /** New unread inbox mail since the last check, newest first. */
   fresh: Email[];
+  /**
+   * Ids that were unread in the Inbox at the last check and are not now (read, archived,
+   * deleted or moved, here or elsewhere): their notifications can go. Only from a
+   * complete listing; past `LIGHT_SYNC_LIST` an id falling off the end says nothing.
+   */
+  left: string[];
 };
 
 export class LightSync {
@@ -87,7 +93,7 @@ export class LightSync {
    * check overlapping another would otherwise read, and notify, the same new mail again.
    */
   check(): Promise<LightSyncResult> {
-    if (this.running) return this.running.then((result) => ({ unread: result.unread, fresh: [] }));
+    if (this.running) return this.running.then((result) => ({ unread: result.unread, fresh: [], left: [] }));
     const run = this.run().finally(() => {
       if (this.running === run) this.running = null;
     });
@@ -102,9 +108,11 @@ export class LightSync {
     const before = this.seen();
     if (!before) {
       this.remember(ids);
-      return { unread, fresh: [] };
+      return { unread, fresh: [], left: [] };
     }
     const known = new Set(before.ids);
+    const now = new Set(ids);
+    const left = ids.length < LIGHT_SYNC_LIST ? before.ids.filter((id) => !now.has(id)) : [];
     const fresh: Email[] = [];
     /** New ids whose read failed and is to be tried again, with the attempts so far. */
     const retry: Record<string, number> = {};
@@ -126,6 +134,6 @@ export class LightSync {
       ids.filter((id) => retry[id] === undefined),
       retry,
     );
-    return { unread, fresh: fresh.sort((a, b) => b.receivedAt - a.receivedAt) };
+    return { unread, fresh: fresh.sort((a, b) => b.receivedAt - a.receivedAt), left };
   }
 }
