@@ -3984,6 +3984,22 @@ try {
     (await topBar.locator("button[aria-pressed]:not([data-version-toggle])").count()) === 0,
   );
 
+  // STRM-441: on a filtered Inbox, the Inbox tab undoes the filter (back to All) rather
+  // than scrolling; it is the dock's "home" gesture, the same as the All chip.
+  {
+    await dock.locator("[data-rail-key]:not([data-empty]) button[aria-pressed='false']").first().click();
+    await page.waitForTimeout(400);
+    const on = await dockChips.and(page.locator("[aria-pressed='true']")).count();
+    await tab("inbox").click();
+    await page.waitForTimeout(400);
+    const after = await dockChips.and(page.locator("[aria-pressed='true']")).count();
+    check(
+      "the Inbox tab on a filtered Inbox clears the smart filter and stays in Inbox",
+      on === 1 && after === 0 && (await tab("inbox").getAttribute("aria-current")) === "page",
+      JSON.stringify({ on, after }),
+    );
+  }
+
   // The list scrolls under the floating chrome, and its end clears all of it.
   const underneath = await page.evaluate(async () => {
     const scroller = document.querySelector("[data-row-count]");

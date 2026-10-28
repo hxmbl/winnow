@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Changed
+
+- On a phone, tapping the Inbox button in the bottom bar while a smart filter (like Important) is on now turns the filter off and shows all your mail, the same as tapping All. With no filter on, it still takes you back to the top of the list, and from another mailbox it still just opens Inbox.
+
 ## [1.7.0] - 2026-10-28
 
 ### Added
