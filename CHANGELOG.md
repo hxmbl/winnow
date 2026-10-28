@@ -22,6 +22,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Changed
 
+- Clicking Winnow's menu bar (tray) icon now shows and hides the window. If the window is in front of you, the click hides it; if it's hidden, minimised or behind another app, the click brings it back.
 - Icons are drawn at four sizes with one stroke weight throughout the app, so icons next to each other no longer differ by a pixel or two. Dialogs come in three widths, and spacing, dividers and section labels are more consistent. The inbox-clear messages are plainer.
 - Buttons are consistent across the app: every filled and outlined button now comes in the same three heights with the same padding and weight, so two buttons side by side no longer differ by a pixel or two.
 - A smart filter chip that's switched on no longer glows, and the open account's avatar no longer has a halo: the coloured ring, the tint and the tick already show which is on.
