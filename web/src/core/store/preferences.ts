@@ -109,6 +109,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.backgroundSyncInterval === "number" && source.backgroundSyncInterval > 0) {
     out.backgroundSyncInterval = source.backgroundSyncInterval;
   }
+  if (typeof source.gmailListener === "boolean") out.gmailListener = source.gmailListener;
   // Addresses are matched case-insensitively everywhere they are read, so the
   // comparison is on the lowercased form — but the *stored* form is kept, because it
   // is what the settings panel shows and it is the address the user recognised.

@@ -702,7 +702,7 @@ export function App({ store, existingInstall = true }: Props) {
       clearTimeout(timer);
       globalThis.document?.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isAndroid, settingsShown, preferences.backgroundSync, preferences.notificationsEnabled]);
+  }, [isAndroid, settingsShown, preferences.backgroundSync, preferences.notificationsEnabled, preferences.gmailListener]);
 
   // ── Updates ──────────────────────────────────────────────────────────────
   // Checks GitHub on launch and every few hours; installs the way this copy runs
@@ -5094,6 +5094,15 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                   status: backgroundStatus,
                   onAllowBackground: () => void platform.requestBatteryExemption?.().then(setBackgroundStatus),
                   onHideNotification: () => void platform.openSyncNotificationSettings?.(),
+                  gmailListener: preferences.gmailListener,
+                  onGmailListener: (gmailListener: boolean) => {
+                    store.setPreferences({ gmailListener });
+                    // Turning it on with no access yet: straight to Android's screen for it.
+                    if (gmailListener && backgroundStatus && !backgroundStatus.listenerAccess) {
+                      void platform.openNotificationAccess?.().then(setBackgroundStatus);
+                    }
+                  },
+                  onNotificationAccess: () => void platform.openNotificationAccess?.().then(setBackgroundStatus),
                 }
               : null
           }

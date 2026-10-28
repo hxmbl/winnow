@@ -273,6 +273,10 @@ export const desktopPlatform: Platform = {
     await invoke("background_service_notification_settings").catch(() => undefined);
   },
 
+  async openNotificationAccess(): Promise<BackgroundServiceStatus | null> {
+    return parseBackgroundStatus(await invoke<unknown>("background_service_listener_settings").catch(() => null));
+  },
+
   async releaseKeptReplies(requestIds: readonly string[]): Promise<void> {
     await invoke("notify_release_kept", { ids: [...requestIds] });
   },
