@@ -16,6 +16,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Fixed
 
+- Settings switches are easier to press: tap anywhere on a setting's name to flip its switch, and the switch itself answers a 48×48 area (the (?) button keeps its own job). In the dark and OLED themes an off switch is now a visible grey instead of nearly black on black. "Keep syncing while closed" now shows your setting: on the desktop it can be turned back on after you turn it off, and the Android app, which can't sync in the background yet, says so instead of showing a switch that never moved.
 - The Copy button on code blocks inside emails is readable in the dark themes again. It was a light grey icon on a white button, and turned dark when you hovered it.
 - A row with a one-time code no longer pushes its time out of line: the Copy chip now sits on the preview line, so every row's time stays in the same column on phone and desktop.
 - Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.

@@ -81,6 +81,8 @@
   --color-surface-sunken: var(--wn-surfaceSunken);
   --color-surface-hover: var(--wn-surfaceHover);
   --color-surface-active: var(--wn-surfaceActive);
+  --color-switch-track-off: var(--wn-switchTrackOff);
+  --color-switch-knob-off: var(--wn-switchKnobOff);
   --color-chrome: var(--wn-chrome);
   --color-ink: var(--wn-ink);
   --color-ink-body: var(--wn-inkBody);

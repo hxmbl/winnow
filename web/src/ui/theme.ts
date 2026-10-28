@@ -119,6 +119,13 @@ const LIGHT: Palette = {
     /** Pressed and focused fills. */
     surfaceActive: "#E6E6EA",
     /**
+     * A switch that is off: its track and knob (`Toggle`). Light keeps the look it has
+     * always had, the pressed grey with a white knob. The dark modes draw their own
+     * (STRM-426), because the pressed grey and a surface-coloured knob vanish there.
+     */
+    switchTrackOff: "#E6E6EA",
+    switchKnobOff: "#FDFDFE",
+    /**
      * The selected list row (and the current item in a picker): a neutral step between
      * hover and pressed, the same for every accent. It used to be the accent washed into
      * `surface`; since 1.4.0 the accent is for what you act on, not for large fills.
@@ -249,6 +256,9 @@ const DARK: Palette = {
     surfaceSunken: "#1F1F1F",
     surfaceHover: "#2C2C2C",
     surfaceActive: "#373737",
+    /** Off switch: a lifted grey track and a light knob, each a visible step from the pane. */
+    switchTrackOff: "#4A4A4A",
+    switchKnobOff: "#B4B4B4",
     surfaceSelected: "#323232",
     chrome: "#202020",
 
@@ -353,6 +363,13 @@ const OLED: Palette = {
     chrome: "#000000",
     surfaceHover: "#1A1A1A",
     surfaceActive: "#2A2A2A",
+    /**
+     * Off switch on black. It was the pressed grey with a black knob, a near-black pill
+     * on a black page that read as missing (STRM-426): now a grey track a clear step
+     * off black and a light knob, so off reads as "a switch, off".
+     */
+    switchTrackOff: "#3A3A3A",
+    switchKnobOff: "#B4B4B4",
     surfaceSelected: "#242424",
 
     onAccent: "#000000",
