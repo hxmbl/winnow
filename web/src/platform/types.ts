@@ -5,6 +5,7 @@
 import type { TokenStore } from "../core/gmail/tokens";
 import type { CredentialStore } from "../core/session/credentials";
 import type { NotificationActionEvent, NotificationBatch } from "../core/notify/notifications";
+import type { BackgroundServiceConfig, BackgroundServiceStatus } from "../core/notify/backgroundService";
 import type { UpdateOffer, UpdateRuntime } from "../core/updates/updates";
 
 /** What this build can do. Reported to the UI so it can hide what is absent. */
@@ -25,6 +26,11 @@ export type PlatformInfo = {
  * five) with the buttons the user allowed, and a summary. See `core/notify/notifications.ts`.
  */
 export type NewMailNotification = NotificationBatch;
+
+/** A notification that is up: its account (`null` for none) and Gmail id. */
+export type ActiveNotice = { account: string | null; gmailId: string };
+
+export type { BackgroundServiceConfig, BackgroundServiceStatus } from "../core/notify/backgroundService";
 
 /** An OAuth attempt that the platform delivered back to us. */
 export type OAuthRedirect =
@@ -164,11 +170,34 @@ export interface Platform {
   onNotificationAction(handler: (event: NotificationActionEvent) => void): () => void;
 
   /**
-   * Take down the notifications of messages deleted on the server, by Gmail id, in
-   * `account`'s group. Optional; browsers close their own, Android cancels them, the
-   * desktop leaves them to time out.
+   * Take down the notifications of messages that no longer need attention (read,
+   * archived, deleted, snoozed, moved out of the Inbox; here or on Gmail anywhere), by
+   * Gmail id, in `account`'s group, and bring that account's summary count in line.
+   * Optional. Every host does what it can: see `notify_withdraw` in Rust.
    */
   withdrawNotifications?(gmailIds: readonly string[], account?: string | null): Promise<void>;
+
+  /** Signed out of `account` on this device: all of its notifications go. Optional. */
+  clearNotifications?(account: string | null): Promise<void>;
+
+  /**
+   * The new-mail notifications that are up, including ones the Android background
+   * service posted while the app was closed, so the store can take down any whose mail
+   * it knows needs no attention. Optional.
+   */
+  activeNotifications?(): Promise<ActiveNotice[]>;
+
+  /**
+   * Android: hand the background service (checks Gmail with the app closed) what it
+   * needs, and start or stop it to match. Answers its status. Optional; elsewhere absent
+   * or `null`.
+   */
+  configureBackgroundService?(config: BackgroundServiceConfig): Promise<BackgroundServiceStatus | null>;
+  backgroundServiceStatus?(): Promise<BackgroundServiceStatus | null>;
+  /** Android's own "Let Winnow run in the background?" dialog. */
+  requestBatteryExemption?(): Promise<BackgroundServiceStatus | null>;
+  /** The persistent sync notification's system settings, to hide it. */
+  openSyncNotificationSettings?(): Promise<void>;
 
   /** Desktop: say on the notification what the app did with a press. Optional. */
   confirmNotificationAction?(messageId: number, title: string, text: string, failed: boolean): Promise<void>;

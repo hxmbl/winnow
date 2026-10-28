@@ -13,6 +13,7 @@
 //! | Native notifications, dock badge, tray | [`lib`] |
 //! | Notification actions: Reply, Delete, Mark read | [`notify_actions`] |
 //! | Background sync ticks while the window is hidden | [`scheduler`] |
+//! | Background sync with the app closed (Android foreground service) | [`background_service`] |
 //! | Writing attachments to disk | [`files`] |
 //! | Deep links, autostart, window state | plugins, [`deep_link`] |
 //! | Native Google sign-in and the sign-in Custom Tab (Android) | [`google_signin`] |
@@ -25,6 +26,7 @@
 //! Nothing here re-implements product behaviour. If a command could be written
 //! in TypeScript, it belongs in `web/`.
 
+pub mod background_service;
 pub mod commands;
 pub mod debug_log;
 pub mod deep_link;
@@ -104,6 +106,11 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder.plugin(google_signin::init());
 
+    // Android only: background sync, a foreground service in Kotlin that checks Gmail
+    // with the app closed. Reached through the `background_service_*` commands.
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(background_service::init());
+
     builder
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
@@ -123,6 +130,10 @@ pub fn run() {
             commands::open_attachment,
             commands::set_unread_badge,
             commands::set_background_sync,
+            commands::background_service_configure,
+            commands::background_service_status,
+            commands::background_service_battery,
+            commands::background_service_notification_settings,
             commands::request_notification_permission,
             commands::update_runtime,
             commands::update_install,
@@ -133,6 +144,8 @@ pub fn run() {
             notify_actions::notify_kept_replies,
             notify_actions::notify_release_kept,
             notify_actions::notify_withdraw,
+            notify_actions::notify_clear_account,
+            notify_actions::notify_active,
             deep_link::deep_link_launch,
         ])
         .on_page_load(|window, payload| {

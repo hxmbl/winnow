@@ -15,6 +15,22 @@
       listener can answer the redirect. shortService needs no type-specific permission.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+      Background sync (sync/MailSyncService.kt): a foreground service with a silent,
+      low-importance notification keeps Winnow checking Gmail with the app closed.
+      specialUse rather than dataSync: Android 15 caps dataSync at 6 hours a day and will
+      not start it on boot. New-mail notifications need POST_NOTIFICATIONS (Android 13+);
+      the network callback needs ACCESS_NETWORK_STATE; a check holds a short wake lock;
+      BOOT_COMPLETED starts it again after a restart; and Settings can offer Android's own
+      "let it run in the background" dialog. Winnow is not on Google Play, so the Play
+      policy on that dialog does not apply.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -71,6 +87,30 @@
         <receiver
             android:name=".notify.NotifyActionReceiver"
             android:exported="false" />
+
+        <!--
+          Background sync: checks Gmail about once a minute while Winnow is closed and posts
+          new-mail notifications (sync/MailSyncService.kt). Runs only while Settings →
+          Notifications &amp; sync → "Keep syncing while closed" and notifications are on.
+        -->
+        <service
+            android:name=".sync.MailSyncService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps an email client checking the user's mailbox for new mail while the app is closed, so new-mail notifications arrive promptly (the user turns this on in Settings; the app has no push server)." />
+        </service>
+
+        <!-- Starts background sync again after a reboot or an update, if it was on. -->
+        <receiver
+            android:name=".sync.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <provider
           android:name="androidx.core.content.FileProvider"

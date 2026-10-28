@@ -33,6 +33,8 @@ import { accountRouter, announce, routeNotificationAction, saveKeptReplies, wire
 import { loadAccountState, persistAccountState } from "./core/store/accountState";
 import { deviceStorage } from "./core/store/storage";
 import { parseDeepLink } from "./core/notify/notifications";
+import { backgroundServiceConfig } from "./core/notify/backgroundService";
+import { loadAccounts } from "./core/session/accounts";
 import { watchPhysicalKeyboard } from "./ui/physicalKeyboard";
 import { isExistingInstall } from "./ui/tour";
 import { installLifecycleDebugLog } from "./core/debug/lifecycle";
@@ -171,9 +173,12 @@ const platformBridge = {
   // One notification per message with its buttons, plus a summary; what qualifies and
   // what it says are in `core/notify/notifications.ts`.
   notifyNewMail: (emails: readonly Email[]) => announce(store, platform, emails),
-  // A message deleted on the server takes its notification with it (the open account's).
+  // Mail that no longer needs attention (deleted, read, archived, snoozed, moved; here or
+  // on Gmail anywhere) takes its notification with it (the open account's).
   withdrawNotifications: (gmailIds: readonly string[]) =>
     platform.withdrawNotifications?.(gmailIds, store.currentAccountId()) ?? Promise.resolve(),
+  activeNotifications: () => platform.activeNotifications?.() ?? Promise.resolve([]),
+  clearNotifications: (account: string | null) => platform.clearNotifications?.(account) ?? Promise.resolve(),
   // When the offline download waits: offline, hidden on a phone, metered, low battery.
   downloadConditions: hostDownloadConditions(
     () =>
@@ -269,7 +274,42 @@ void platform
     });
 
     wireDesktopEvents();
+    if (androidHost) wireBackgroundService();
+    // Notifications that are up from before this launch (Android's background service
+    // posts them with the app closed): any whose mail is already dealt with go.
+    void store.adoptNotifications();
   });
+
+/**
+ * Android: keep the background service (`MailSyncService.kt`, checks Gmail with the app
+ * closed) told what it needs: the switch, notifications, accounts, muted senders and the
+ * open account. Pushed whenever any of it changes, after a short pause so a burst of
+ * store updates is one push; the native side starts or stops the service to match.
+ */
+function wireBackgroundService(): void {
+  if (!platform.configureBackgroundService) return;
+  const storage = deviceStorage();
+  let last = "";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const push = () => {
+    timer = null;
+    const snapshot = store.getSnapshot();
+    const accounts = loadAccounts(storage).accounts;
+    const config = backgroundServiceConfig(snapshot.preferences, accounts, store.currentAccountId(), snapshot.status !== "signed_out");
+    const key = JSON.stringify(config);
+    if (key === last) return;
+    last = key;
+    void platform.configureBackgroundService?.(config).catch((error: unknown) => {
+      // Told again on the next change rather than never.
+      last = "";
+      console.warn("winnow: could not configure background sync:", error);
+    });
+  };
+  store.subscribe(() => {
+    if (timer === null) timer = setTimeout(push, 400);
+  });
+  push();
+}
 
 /**
  * The desktop-only event subscriptions.

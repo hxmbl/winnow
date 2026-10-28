@@ -68,13 +68,13 @@ pub fn app_info(app: AppHandle) -> AppInfo {
         // The web layer reads them to decide what to show, so a `false` here is a
         // statement about the build rather than a default.
         //
-        // On Android `background_sync` is false: the ticker only wakes the
-        // webview, and Android pauses a backgrounded webview, so the ticks would
-        // land nowhere. (Saving still works there: `files.rs` writes to the
-        // `content://` URI the system save picker returns.)
+        // On Android background sync is a foreground service that checks Gmail
+        // itself (`background_service.rs`), not the ticker: Android pauses a
+        // backgrounded webview, so ticks would land nowhere. (Saving works there
+        // too: `files.rs` writes to the `content://` URI the save picker returns.)
         native_oauth: true,
         native_secrets: true,
-        background_sync: cfg!(desktop),
+        background_sync: true,
         save_files: true,
     }
 }
@@ -603,8 +603,94 @@ pub fn set_unread_badge(app: AppHandle, count: i64) -> Result<()> {
 /// focused (its own timer is enough) or when the user signs out.
 #[tauri::command]
 pub fn set_background_sync(app: AppHandle, interval_secs: Option<u64>) -> Result<()> {
+    // Android: the ticker would only poke a paused webview. The service is configured
+    // with `background_service_configure` instead.
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, interval_secs);
+    }
+    #[cfg(not(target_os = "android"))]
     crate::scheduler::set_interval(&app, interval_secs);
     Ok(())
+}
+
+/// Hand the Android background service its config (`background_service.rs`) and start
+/// or stop it to match. Answers its status; `None` off Android, where there is no service.
+#[tauri::command]
+pub async fn background_service_configure(
+    app: AppHandle,
+    config: crate::background_service::Config,
+) -> Result<Option<serde_json::Value>> {
+    let config = config.sanitised();
+    crate::dlog!(
+        "bgsync",
+        "configure",
+        enabled = config.enabled,
+        accounts = config.accounts.len()
+    );
+    #[cfg(target_os = "android")]
+    {
+        let payload = serde_json::json!({ "config": config });
+        crate::background_service::call(&app, "configure", payload)
+            .await
+            .map(Some)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, config);
+        Ok(None)
+    }
+}
+
+/// The background service's status for Settings: running, battery optimisation and
+/// notification permission. `None` off Android.
+#[tauri::command]
+pub async fn background_service_status(app: AppHandle) -> Option<serde_json::Value> {
+    #[cfg(target_os = "android")]
+    {
+        crate::background_service::call(&app, "status", serde_json::json!({}))
+            .await
+            .ok()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
+/// Android's "Let Winnow run in the background?" dialog (battery optimisation off for
+/// Winnow), so Doze does not cut background sync off the network. Answers the status.
+#[tauri::command]
+pub async fn background_service_battery(app: AppHandle) -> Option<serde_json::Value> {
+    #[cfg(target_os = "android")]
+    {
+        crate::background_service::call(&app, "requestBatteryExemption", serde_json::json!({}))
+            .await
+            .ok()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
+/// The persistent "Checking for new mail" notification's system settings, where the
+/// user can hide it while sync carries on.
+#[tauri::command]
+pub async fn background_service_notification_settings(app: AppHandle) -> Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        crate::background_service::call(&app, "openSyncNotificationSettings", serde_json::json!({}))
+            .await
+            .map(|_| ())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
