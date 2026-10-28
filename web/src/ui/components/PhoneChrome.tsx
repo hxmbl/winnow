@@ -41,8 +41,8 @@ import {
   PHONE_TABS_VAR,
   backToTopVisible,
   badgeText,
-  tabAction,
   tabLabel,
+  tapTab,
 } from "../phoneDock";
 import { Icon } from "./Icon";
 
@@ -409,8 +409,7 @@ export function PhoneDock({
             const count = unread[id] ?? 0;
             const badge = badgeText(count);
             const onClick = () => {
-              if (tabAction(current) === "scroll-top") scrollToTop();
-              else onSelectMailbox(id);
+              tapTab(id, { current, filtering: activeFilters.length > 0 }, { onClearFilters, scrollToTop, onSelectMailbox });
             };
             return (
               <button
