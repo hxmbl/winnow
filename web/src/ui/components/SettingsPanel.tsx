@@ -17,6 +17,7 @@ import { BINDINGS } from "../../core/mail/keybinds";
 import type { NotificationActions } from "../../core/notify/notifications";
 import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
 import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
+import { BACKGROUND_SYNC_NOTE, backgroundSyncOffer } from "../backgroundSyncSetting";
 import { devUnlockTap } from "../devOptions";
 import { DebugLogPanel } from "./DebugLogPanel";
 import type { TestNotificationResult } from "../notificationActions";
@@ -212,8 +213,14 @@ export type SettingsProps = {
   unreadBadge: boolean;
   onUnreadBadge: (value: boolean) => void;
   onNotificationSettings: (patch: { notificationActions?: NotificationActions; notificationHidePreview?: boolean }) => void;
-  /** Null on the web, where there is no background thread to hand. */
-  backgroundSync: boolean | null;
+  /**
+   * Whether this build can keep syncing with the window closed (`info.backgroundSync`):
+   * true in the desktop app, false in the Android app, null on the web or before the
+   * platform has answered. Only decides whether the switch is offered.
+   */
+  backgroundSyncAvailable: boolean | null;
+  /** The user's choice (`preferences.backgroundSync`): what the switch shows. */
+  backgroundSync: boolean;
   onBackgroundSync: (value: boolean) => void;
   backgroundSyncInterval: number;
   onBackgroundSyncInterval: (value: number) => void;
@@ -833,28 +840,40 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
             <Toggle checked={props.unreadBadge} onChange={props.onUnreadBadge} label="Unread count on the app icon" />
           </Row>
           <OfflineMailRows props={props} />
-          {props.isDesktop && props.backgroundSync !== null ? (
-            <>
-              <Row setting="backgroundSync">
-                <Toggle checked={props.backgroundSync} onChange={props.onBackgroundSync} label="Keep syncing while closed" />
-              </Row>
-              {props.backgroundSync && (
-                <Row setting="syncInterval">
-                  <SelectMenu
-                    id="sync-interval"
-                    label="Check for new mail every"
-                    options={SYNC_INTERVALS}
-                    value={props.backgroundSyncInterval}
-                    onChange={props.onBackgroundSyncInterval}
-                  />
-                </Row>
-              )}
-            </>
-          ) : (
-            <p data-settings-empty="" className="pt-2 text-meta text-ink-subtle">
-              Background sync is only in the desktop app. Here, Winnow syncs while this tab is open.
-            </p>
-          )}
+          {(() => {
+            /*
+              The switch shows the preference, never the capability. It used to read
+              `info.backgroundSync`, so in the Android app (which reports false) it sat at
+              Off whatever was tapped, and on the desktop it sat at On, so turning it off
+              paused automatic sync where nobody could see it and it never came back on.
+            */
+            const offer = backgroundSyncOffer({ isNative: props.isDesktop, available: props.backgroundSyncAvailable });
+            if (offer === "switch") {
+              return (
+                <>
+                  <Row setting="backgroundSync">
+                    <Toggle checked={props.backgroundSync} onChange={props.onBackgroundSync} label="Keep syncing while closed" />
+                  </Row>
+                  {props.backgroundSync && (
+                    <Row setting="syncInterval">
+                      <SelectMenu
+                        id="sync-interval"
+                        label="Check for new mail every"
+                        options={SYNC_INTERVALS}
+                        value={props.backgroundSyncInterval}
+                        onChange={props.onBackgroundSyncInterval}
+                      />
+                    </Row>
+                  )}
+                </>
+              );
+            }
+            return (
+              <p data-settings-empty="" data-background-sync-note={offer} className="pt-2 text-meta text-ink-subtle">
+                {BACKGROUND_SYNC_NOTE[offer]}
+              </p>
+            );
+          })()}
         </Section>
       );
     case "google":
