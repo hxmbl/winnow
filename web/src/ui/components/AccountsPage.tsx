@@ -281,8 +281,8 @@ function AccountsListScreen({
                   } ${account.active ? "bg-surface-selected" : ""}`}
                 >
                   <span className="relative shrink-0">
-                    <Avatar lookup={false} name={account.email} address={account.email} />
-                    <AccountGlow color={account.color} scheme={props.scheme} active={account.active} />
+                    <Avatar lookup={false} name={account.email} address={account.email} photo={account.picture} />
+                    <AccountGlow color={account.color} scheme={props.scheme} active={account.active} pictureColor={account.pictureColor} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ui font-medium text-ink">{account.email || "Your account"}</span>
@@ -383,8 +383,8 @@ function AccountDetailScreen({ account, props }: { account: AccountSummary; prop
     <div data-accounts-detail={account.id}>
       <div className="flex items-center gap-3 px-2.5 pb-3 pt-2">
         <span className="relative shrink-0">
-          <Avatar lookup={false} name={account.email} address={account.email} />
-          <AccountGlow color={account.color} scheme={props.scheme} active={account.active} />
+          <Avatar lookup={false} name={account.email} address={account.email} photo={account.picture} />
+          <AccountGlow color={account.color} scheme={props.scheme} active={account.active} pictureColor={account.pictureColor} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="selectable block truncate text-ui font-medium text-ink">{email}</span>

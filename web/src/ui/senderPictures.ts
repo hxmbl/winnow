@@ -2,8 +2,8 @@
  * Where an avatar finds a sender's picture.
  *
  * Three sources, in order: the user's own Google contacts (a person's photo, only after
- * they opted in to contacts); when "Gravatar photos" is on, the sender's Gravatar; and,
- * when "Show brand logos" is on, the sender domain's BIMI logo. A personal photo beats a
+ * they opted in to contacts); when "Sender pictures" is on, the sender's Gravatar; and,
+ * under the same switch, the sender domain's BIMI logo. A personal photo beats a
  * brand logo. Anything else — or a picture that fails to load — is the monogram, which
  * is also what renders first: nothing here blocks a row.
  *
@@ -90,7 +90,7 @@ export function senderPictureSources(input: {
 /**
  * The bytes cache as avatars may use it: a kept copy is only handed out, and a new one
  * only captured, for a source that is on right now. So with Remote images = Never, or
- * "Gravatar photos" / "Show brand logos" off, a Gravatar or logo still on disk (its
+ * "Sender pictures" off, a Gravatar or logo still on disk (its
  * clear may not have landed yet) is never drawn — not even for a URL some other path
  * still holds. Contact photos are the user's own synced contacts and follow the contacts
  * grant, which clears them (`App`).
@@ -201,7 +201,7 @@ export function pictureTries(candidates: readonly PictureCandidate[], bytes: Pic
  * Which sources a sender's picture may come from under the current settings: the one
  * decision both the avatar (`useSenderPictures`) and a notification's picture
  * (`resolveSenderPicture`) make, so they can never disagree. Gravatar only when
- * "Gravatar photos" is on, the brand logo only when "Show brand logos" is on (each is
+ * "Sender pictures" is on, the brand logo likewise (each is
  * `null` in `sources` when off), neither when there is a contact photo or the sender was
  * relayed ("Ana via Book Club").
  */

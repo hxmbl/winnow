@@ -302,21 +302,24 @@ export type Preferences = {
    */
   imagePolicy: ImagePolicy;
   /**
-   * Brand logos (BIMI) in sender avatars.
+   * Sender pictures: a sender's Gravatar when they are not in the user's contacts, and a
+   * company's brand logo (BIMI). One switch since "Show brand logos" and "Gravatar
+   * photos" were merged. Off by default.
    *
-   * Its own switch, off by default, rather than riding on `imagePolicy`: that policy is
-   * about one message's content and defaults to *asking*, which an avatar in a list has
-   * no way to do. A logo lookup also leaks something remote images do not — every sender
-   * domain in the list goes to a DNS resolver, opened or not — so it is a separate,
-   * explicit yes.
+   * Its own switch rather than riding on `imagePolicy`: that policy is about one
+   * message's content and defaults to *asking*, which an avatar in a list has no way to
+   * do. Both lookups also leak something remote images do not, for every sender in the
+   * list, opened or not: a hash of the address goes to Gravatar, and the sender's domain
+   * to a DNS-over-HTTPS resolver. Paused while `imagePolicy` is `never`
+   * (`ui/senderPictures.ts`). Contact photos and initials never depend on it.
    */
-  brandLogos: boolean;
+  senderPictures: boolean;
   /**
-   * Gravatar photos in sender avatars, for people who are not in the user's contacts.
-   * Off by default, for the same reason as `brandLogos`: it sends a hash of every sender
-   * address in the list to Gravatar, opened or not.
+   * The inbox's "Sender pictures are off" notice was answered ("Keep off", "Turn on",
+   * or the switch changed in Settings), so it does not come back. See
+   * `ui/pictureNotice.ts`.
    */
-  gravatars: boolean;
+  pictureNoticeDismissed: boolean;
   /**
    * Mark a message read when it is opened in the reader, as Gmail does. On by default.
    * Off restores the old behaviour, where mail stays unread until the user says so.
@@ -406,8 +409,8 @@ export type Preferences = {
 export const DEFAULT_PREFERENCES: Preferences = {
   sortBy: DEFAULT_SORT,
   imagePolicy: "ask",
-  brandLogos: false,
-  gravatars: false,
+  senderPictures: false,
+  pictureNoticeDismissed: false,
   markReadOnOpen: true,
   swipeActions: true,
   leftHanded: false,
@@ -925,6 +928,16 @@ export type AccountSummary = {
   active: boolean;
   /** A demo account: the switcher shows it, nothing is signed in. */
   demo?: boolean;
+  /**
+   * The account's own Google profile picture (STRM-461): a kept `data:` copy or the URL
+   * on Google's image host. Absent: the monogram.
+   */
+  picture?: string;
+  /**
+   * The picture's most dominant colour (`#RRGGBB`, raw), for the halo around the avatar
+   * (`ui/ringColor.ts` adjusts it per theme). Absent: the account colour.
+   */
+  pictureColor?: string;
 };
 
 /** What one account (or the demo, with no account) persisted: see `core/store/accountState.ts`. */

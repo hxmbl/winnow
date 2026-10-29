@@ -17,6 +17,7 @@
 
 import { MAX_PICTURE_SOURCE_PX, isPictureData, type CapturePicture } from "../core/avatars/pictureBytes";
 import { drawPicture } from "./notificationActions";
+import { dominantColor } from "./ringColor";
 
 /** How long one background capture may take before it is given up, ms. */
 export const PICTURE_CAPTURE_MS = 8000;
@@ -62,4 +63,69 @@ export function canvasCapture(timeoutMs = PICTURE_CAPTURE_MS): CapturePicture {
       };
       img.src = url;
     });
+}
+
+/** How many pixels a side the halo colour is sampled at: plenty for one colour. */
+export const PICTURE_COLOR_PX = 32;
+
+/**
+ * The most dominant colour of an account's own profile picture (`ui/ringColor.ts`
+ * `dominantColor`), for its halo. Read from the kept `data:` copy when there is one (a
+ * `data:` image never taints the canvas, so no network and no CORS at all), else from
+ * the URL with the same anonymous, no-referrer load as `canvasCapture` (Google's lh3
+ * host sends `Access-Control-Allow-Origin`). Any failure, a tainted canvas included, is
+ * `null`: the halo then keeps the account colour.
+ */
+export function canvasPictureColor(timeoutMs = PICTURE_CAPTURE_MS): (src: string) => Promise<string | null> {
+  return (src) =>
+    new Promise<string | null>((resolve) => {
+      if (typeof Image === "undefined" || typeof document === "undefined") return resolve(null);
+      const img = new Image();
+      const timer = setTimeout(() => done(null), timeoutMs);
+      let settled = false;
+      function done(value: string | null) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        img.onload = null;
+        img.onerror = null;
+        resolve(value);
+      }
+      if (!src.startsWith("data:")) {
+        img.crossOrigin = "anonymous";
+        img.referrerPolicy = "no-referrer";
+      }
+      img.decoding = "async";
+      img.onerror = () => done(null);
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = PICTURE_COLOR_PX;
+          canvas.height = PICTURE_COLOR_PX;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (!context) return done(null);
+          if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_PICTURE_SOURCE_PX) return done(null);
+          if (!drawPicture(context, img, { width: img.naturalWidth, height: img.naturalHeight }, PICTURE_COLOR_PX, null)) return done(null);
+          // Only what the round avatar shows: the corners outside its circle are left out.
+          done(dominantColor(circleOnly(context.getImageData(0, 0, PICTURE_COLOR_PX, PICTURE_COLOR_PX).data, PICTURE_COLOR_PX)));
+        } catch {
+          // A tainted canvas (no CORS header) throws on `getImageData`.
+          done(null);
+        }
+      };
+      img.src = src;
+    });
+}
+
+/** RGBA pixels of a `size`×`size` square with everything outside its inscribed circle made see-through. */
+export function circleOnly(rgba: Uint8ClampedArray, size: number): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(rgba);
+  const c = (size - 1) / 2;
+  const r2 = (size / 2) ** 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if ((x - c) ** 2 + (y - c) ** 2 > r2) out[(y * size + x) * 4 + 3] = 0;
+    }
+  }
+  return out;
 }

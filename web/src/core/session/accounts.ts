@@ -18,6 +18,8 @@
  * describe the person, not an account), the setup guide's progress and the reader split.
  */
 
+import { ownPictureUrl } from "../gmail/userinfo";
+import { isPictureData } from "../avatars/pictureBytes";
 
 /** Owner decision: at most five accounts on one device. */
 export const MAX_ACCOUNTS = 5;
@@ -47,7 +49,88 @@ export type AccountRecord = {
   /** New-mail notifications while this account is not the open one (owner: on by default). */
   notify: boolean;
   addedAt: number;
+  /** The account's own Google profile (STRM-461), once it has been read. */
+  profile?: AccountProfile;
 };
+
+/**
+ * What the userinfo read found for an account's own picture (STRM-461), kept in the
+ * registry so the row draws at once and offline, and goes with the account at sign-out.
+ *
+ *   - `access: "granted"` — read; `picture` is the avatar-sized URL on Google's image
+ *     host, or `null` when the account has none. `pictureData` is a small kept copy
+ *     (a `data:` URL, as the sender-picture bytes cache keeps them), when one could be made.
+ *   - `access: "not_granted"` — the grant has no profile scope (an account signed in
+ *     before Winnow asked for it): the row keeps its monogram until the grant has it.
+ *     Every trip to Google (the next sign-in, any opt-in) asks for it, with no screen
+ *     or choice of its own.
+ */
+export type AccountProfile = {
+  access: "granted" | "not_granted";
+  picture: string | null;
+  pictureData?: string;
+  /**
+   * The picture's most dominant colour (`ui/ringColor.ts` `dominantColor`, `#RRGGBB`),
+   * kept raw: each theme adjusts it for contrast when the halo is drawn. `null`: looked
+   * at and too grey or unreadable, so the halo keeps the account colour. Absent: not
+   * looked at yet.
+   */
+  color?: string | null;
+  /** When it was read: a granted profile is read again after `PROFILE_REFRESH_MS`. */
+  checkedAt: number;
+};
+
+/** How long a read profile is trusted before it is read again: a day. */
+export const PROFILE_REFRESH_MS = 24 * 60 * 60 * 1000;
+
+/** A stored profile, checked field by field; anything unusable is `undefined`. */
+export function reviveAccountProfile(raw: unknown): AccountProfile | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const p = raw as Record<string, unknown>;
+  if (p.access !== "granted" && p.access !== "not_granted") return undefined;
+  const checkedAt = typeof p.checkedAt === "number" && Number.isFinite(p.checkedAt) ? p.checkedAt : 0;
+  if (p.access === "not_granted") return { access: "not_granted", picture: null, checkedAt };
+  const picture = ownPictureUrl(p.picture);
+  const profile: AccountProfile = { access: "granted", picture, checkedAt };
+  if (picture && isPictureData(p.pictureData)) profile.pictureData = p.pictureData;
+  if (picture && (p.color === null || isHexColor(p.color))) profile.color = p.color;
+  return profile;
+}
+
+/**
+ * Whether an account's own profile should be read now: never read, read over a day
+ * ago, or known to lack the grant while the token now says it has it (the re-consent
+ * just happened, on this device or a Google screen opened elsewhere).
+ */
+export function profileReadDue(
+  profile: AccountProfile | undefined,
+  now: number,
+  tokenGrant: "granted" | "not_granted" | "unknown",
+): boolean {
+  if (!profile) return true;
+  if (profile.access === "not_granted") return tokenGrant === "granted" || now - profile.checkedAt >= PROFILE_REFRESH_MS;
+  return now - profile.checkedAt >= PROFILE_REFRESH_MS || now < profile.checkedAt;
+}
+
+/**
+ * The picture an account row draws: the kept copy first, then the URL, else nothing
+ * (the monogram). Only ever from a granted read.
+ */
+export function accountPicture(profile: AccountProfile | undefined): string | undefined {
+  if (!profile || profile.access !== "granted" || !profile.picture) return undefined;
+  return profile.pictureData ?? profile.picture;
+}
+
+/** A stored halo colour: a plain `#RRGGBB`. */
+function isHexColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+}
+
+/** The picture's colour for the halo, when the account has a picture with one; else the account colour is used. */
+export function accountPictureColor(profile: AccountProfile | undefined): string | undefined {
+  if (!accountPicture(profile)) return undefined;
+  return profile?.color ?? undefined;
+}
 
 export type AccountsSnapshot = {
   version: 1;
@@ -166,6 +249,7 @@ export function reviveAccounts(raw: unknown): AccountsSnapshot {
       color: isAccountColor(e.color) ? e.color : nextColor(accounts),
       notify: e.notify !== false,
       addedAt: typeof e.addedAt === "number" ? e.addedAt : 0,
+      ...(reviveAccountProfile(e.profile) ? { profile: reviveAccountProfile(e.profile) } : {}),
     });
     if (accounts.length === MAX_ACCOUNTS) break;
   }
@@ -303,6 +387,16 @@ export class AccountRegistry {
     }
     const next = { ...current, ...patch };
     if (patch.color !== undefined && !isAccountColor(patch.color)) next.color = current.color;
+    this.commit({ ...this.value, accounts: this.value.accounts.map((a) => (a.id === id ? next : a)) });
+  }
+
+  /** Record (or, with `undefined`, forget) what the userinfo read found for an account. */
+  setProfile(id: string, profile: AccountProfile | undefined): void {
+    const current = this.get(id);
+    if (!current) return;
+    const next: AccountRecord = { ...current };
+    if (profile) next.profile = profile;
+    else delete next.profile;
     this.commit({ ...this.value, accounts: this.value.accounts.map((a) => (a.id === id ? next : a)) });
   }
 

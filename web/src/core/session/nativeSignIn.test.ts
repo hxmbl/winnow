@@ -22,7 +22,7 @@ import {
   validateNativeClient,
   type OAuthClientCredentials,
 } from "./credentials";
-import { GMAIL_SCOPE, GOOGLE_TOKEN_URL, GmailError, type TokenSet } from "../gmail/dto";
+import { GMAIL_SCOPE, GOOGLE_TOKEN_URL, GmailError, PROFILE_SCOPE, type TokenSet } from "../gmail/dto";
 import type { CursorStore, MailboxCache } from "../gmail/sync";
 import type { TokenStore } from "../gmail/tokens";
 import type {
@@ -212,7 +212,9 @@ describe("GmailSession with native sign-in", () => {
 
     await expect(session.signIn()).resolves.toEqual({ email: "me@example.com" });
 
-    expect(h.nativeCalls).toEqual([{ serverClientId: WEB_ID, scopes: [GMAIL_SCOPE] }]);
+    // Play services' AuthorizationClient gets the same sign-in scopes as the browser:
+    // Gmail and the basic profile (STRM-461), as full URLs the native layers accept.
+    expect(h.nativeCalls).toEqual([{ serverClientId: WEB_ID, scopes: [GMAIL_SCOPE, PROFILE_SCOPE] }]);
     expect(h.browserCalls).toHaveLength(0);
     const exchange = tokenBodies[0]!;
     expect(exchange.get("client_id")).toBe(WEB_ID);

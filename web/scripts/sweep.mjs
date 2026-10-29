@@ -119,8 +119,7 @@ function plan() {
     extra("sort-score", "light", "light", device, ["inbox"], { prefs: { sortBy: "score" } });
     extra("images-always", "light", "light", device, ["reader"], { prefs: { imagePolicy: "always" } });
     extra("images-never", "light", "light", device, ["reader"], { prefs: { imagePolicy: "never" } });
-    extra("brand-logos", "light", "light", device, ["inbox", "reader"], { prefs: { brandLogos: true } });
-    extra("gravatars", "light", "light", device, ["inbox"], { prefs: { gravatars: true } });
+    extra("sender-pictures", "light", "light", device, ["inbox", "reader"], { prefs: { senderPictures: true } });
     extra("reduced-transparency-light", "light", "light", device, ["inbox", "drawer", "pill-undo"], { media: { reducedTransparency: true } });
     extra("reduced-transparency-oled", "oled", "dark", device, ["inbox", "drawer", "pill-undo"], { media: { reducedTransparency: true } });
     extra("forced-colors", "light", "light", device, ["inbox", "reader", "drawer", "settings-top", "compose"], { media: { forcedColors: true } });
@@ -146,7 +145,7 @@ function plan() {
   for (const device of ["phone", "desktop"]) {
     extra("drive-light", "light", "light", device, ["drive-consent", "drive-compose", "drive-warning"]);
     extra("drive-dark", "dark", "dark", device, ["drive-consent", "drive-compose", "drive-warning"]);
-    extra("privacy-never-light", "light", "light", device, ["privacy"], { prefs: { imagePolicy: "never", brandLogos: true, gravatars: true } });
+    extra("privacy-never-light", "light", "light", device, ["privacy"], { prefs: { imagePolicy: "never", senderPictures: true } });
   }
   extra("small-phone-dark", "dark", "dark", "phone-small", ["inbox", "drawer", "settings-end", "compose", "pill-undo"]);
   extra("tablet-light", "light", "light", "tablet", ["inbox", "reader", "drawer"]);

@@ -620,10 +620,11 @@ try {
     const loopbackAt = calls.findIndex((call) => call.cmd === "oauth_begin");
     const nativeArgs = calls[nativeAt]?.args;
     check(
-      "sign-in asks for native sign-in first, with the Web client and the Gmail scope",
+      "sign-in asks for native sign-in first, with the Web client, the Gmail scope and the basic profile",
       nativeAt >= 0 &&
         nativeArgs?.serverClientId === WEB_ID &&
-        JSON.stringify(nativeArgs?.scopes) === JSON.stringify(["https://www.googleapis.com/auth/gmail.modify"]),
+        JSON.stringify(nativeArgs?.scopes) ===
+          JSON.stringify(["https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/userinfo.profile"]),
       JSON.stringify(nativeArgs),
     );
     check("DEVELOPER_ERROR falls back to the loopback flow", loopbackAt > nativeAt && nativeAt >= 0, `native ${nativeAt}, loopback ${loopbackAt}`);

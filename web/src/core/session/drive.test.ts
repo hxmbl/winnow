@@ -135,7 +135,8 @@ describe("the Drive grant", () => {
     const { session, opened } = sessionWith();
     expect(await session.grantDrive()).toBe("granted");
     const query = new URL(opened[0]!).searchParams;
-    expect(query.get("scope")).toBe(DRIVE_FILE_SCOPE);
+    // A grant from before the basic profile also asks for it on the same trip (STRM-461).
+    expect(query.get("scope")).toBe(`${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.profile`);
     expect(query.get("include_granted_scopes")).toBe("true");
     expect(query.get("login_hint")).toBe("me@example.com");
   });

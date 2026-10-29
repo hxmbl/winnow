@@ -69,8 +69,24 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   } else if (typeof source.loadRemoteContent === "boolean") {
     out.imagePolicy = source.loadRemoteContent ? "always" : "never";
   }
-  if (typeof source.brandLogos === "boolean") out.brandLogos = source.brandLogos;
-  if (typeof source.gravatars === "boolean") out.gravatars = source.gravatars;
+  /*
+   * Sender pictures: one switch since "Show brand logos" and "Gravatar photos" were
+   * merged. A blob from before the merge is read as a migration: either old switch on
+   * means the new one is on, because that user had already said yes to a remote picture
+   * lookup and turning their pictures off on upgrade would look like a bug. Both old
+   * switches off (stored as booleans) stays off. Only booleans count, so a hand-edited
+   * `"yes"` is ignored rather than read as consent.
+   */
+  if (typeof source.senderPictures === "boolean") {
+    out.senderPictures = source.senderPictures;
+  } else if (source.brandLogos === true || source.gravatars === true) {
+    out.senderPictures = true;
+  } else if (typeof source.brandLogos === "boolean" || typeof source.gravatars === "boolean") {
+    out.senderPictures = false;
+  }
+  // The inbox notice's answer: only `true` sticks. Anything else (missing, a newer
+  // build's value) reads as unanswered, and the notice's own rules decide if it shows.
+  if (source.pictureNoticeDismissed === true) out.pictureNoticeDismissed = true;
   if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
   if (typeof source.swipeActions === "boolean") out.swipeActions = source.swipeActions;
   if (typeof source.leftHanded === "boolean") out.leftHanded = source.leftHanded;

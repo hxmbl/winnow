@@ -32,7 +32,7 @@
  *   - **Connections:** Gmail, Google's token and revoke endpoint, the People API (the
  *     optional contacts grant), Drive v3 on www.googleapis.com (the optional
  *     `drive.file` grant: large files as links, upload and sharing), Cloudflare's DNS-over-HTTPS resolver (only used when
- *     Show brand logos is on), and the render proxy when the build was given one.
+ *     Sender pictures is on), and the render proxy when the build was given one.
  *   - **Frames:** `'self'` — the reader's frames are `srcdoc`. **Objects:** none.
  *     **Base:** none — nothing sets a `<base>`, and the sanitiser strips a sender's.
  *     **Forms:** none — nothing in Winnow posts a form (the setup and compose forms are

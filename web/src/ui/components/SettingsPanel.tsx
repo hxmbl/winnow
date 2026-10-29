@@ -203,12 +203,9 @@ export type SettingsProps = {
   snoozedCount?: number;
   /** Open the Scheduled list (closing Settings). */
   onOpenScheduled?: () => void;
-  /** Brand logos from BIMI in avatars. Off by default; see `Preferences.brandLogos`. */
-  brandLogos: boolean;
-  onBrandLogos: (value: boolean) => void;
-  /** Gravatar photos in avatars. Off by default; see `Preferences.gravatars`. */
-  gravatars: boolean;
-  onGravatars: (value: boolean) => void;
+  /** Gravatar photos and brand logos in avatars. Off by default; see `Preferences.senderPictures`. */
+  senderPictures: boolean;
+  onSenderPictures: (value: boolean) => void;
   notificationsEnabled: boolean;
   onNotifications: (value: boolean) => void;
   /** Which buttons a notification offers, and the lock-screen privacy switch. */
@@ -808,11 +805,8 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               onChange={props.onImagePolicy}
             />
           </Row>
-          <Row setting="brandLogos" hint={remotePicturesPaused(props.imagePolicy) && props.brandLogos ? REMOTE_PAUSED_HINT : undefined}>
-            <Toggle checked={props.brandLogos} onChange={props.onBrandLogos} label="Show brand logos" />
-          </Row>
-          <Row setting="gravatars" hint={remotePicturesPaused(props.imagePolicy) && props.gravatars ? REMOTE_PAUSED_HINT : undefined}>
-            <Toggle checked={props.gravatars} onChange={props.onGravatars} label="Gravatar photos" />
+          <Row setting="senderPictures" hint={remotePicturesPaused(props.imagePolicy) && props.senderPictures ? REMOTE_PAUSED_HINT : undefined}>
+            <Toggle checked={props.senderPictures} onChange={props.onSenderPictures} label={SETTINGS.senderPictures.label} />
           </Row>
           <DriveLinksRow props={props} />
         </Section>

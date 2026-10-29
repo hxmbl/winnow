@@ -42,8 +42,7 @@ export const EXPORTED_PREFERENCE_KEYS = [
   "undoSendSeconds",
   "driveLinks",
   "imagePolicy",
-  "brandLogos",
-  "gravatars",
+  "senderPictures",
   "censorLevel",
   "notificationsEnabled",
   "notificationActions",
@@ -63,6 +62,7 @@ export const NOT_EXPORTED_PREFERENCE_KEYS = {
   blockedSenders: "email addresses of people who write to you",
   mutedSenders: "email addresses of people who write to you",
   tourDone: "whether this device has seen the tour",
+  pictureNoticeDismissed: "whether this device has answered the inbox's Sender pictures notice",
 } as const satisfies Partial<Record<keyof Preferences, string>>;
 
 /** Dev Options in the file: whether the category is shown, and each switch. */
@@ -147,7 +147,18 @@ export function validateSettings(raw: unknown): { settings: ExportedSettings; ig
   const settings: Record<string, unknown> = {};
   const ignored: string[] = [];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { settings, ignored };
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+  const source = raw as Record<string, unknown>;
+  for (const [key, value] of Object.entries(source)) {
+    // A file from before "Show brand logos" and "Gravatar photos" became one switch:
+    // read the way stored preferences are (either on means Sender pictures on), unless
+    // the file names the new switch itself.
+    if (key === "brandLogos" || key === "gravatars") {
+      if ("senderPictures" in source) continue;
+      const migrated = revivePreferences({ brandLogos: source.brandLogos, gravatars: source.gravatars })?.senderPictures;
+      if (migrated === undefined) ignored.push(key);
+      else settings.senderPictures = migrated;
+      continue;
+    }
     const valid = validValue(key, value);
     if (valid === undefined) ignored.push(key);
     else settings[key] = valid;
@@ -278,10 +289,8 @@ export function settingLabel(key: ExportedKey): string {
       return SETTINGS.driveLinks.label;
     case "imagePolicy":
       return SETTINGS.remoteImages.label;
-    case "brandLogos":
-      return SETTINGS.brandLogos.label;
-    case "gravatars":
-      return SETTINGS.gravatars.label;
+    case "senderPictures":
+      return SETTINGS.senderPictures.label;
     case "censorLevel":
       return SETTINGS.censorLevel.label;
     case "notificationsEnabled":

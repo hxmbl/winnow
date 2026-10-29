@@ -79,7 +79,9 @@ and choose **Get started** if it asks.
    | `https://www.googleapis.com/auth/contacts.other.readonly` | only if you opt in, later | "other contacts" (people you've written to), in recipient suggestions |
    | `https://www.googleapis.com/auth/drive.file` | only if you opt in, later | only the files you send as Drive links (over 25 MB); nothing else in your Drive |
 
-   Sign-in asks for `gmail.modify` and nothing else. The two contact scopes are only
+   Sign-in asks for `gmail.modify`, plus your basic profile for your own profile
+   picture (requested at runtime, so there is nothing to add for it here), and nothing
+   else. The two contact scopes are only
    requested when you choose **Improve suggestions from Google contacts** in Settings,
    and `drive.file` only the first time you choose **Send as a Drive link** for a file
    over 25 MB, after Winnow has said what it allows. **Settings → Privacy → Big files

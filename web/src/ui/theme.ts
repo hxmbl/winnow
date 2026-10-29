@@ -398,7 +398,7 @@ export const PALETTES = { light: LIGHT, dark: DARK, oled: OLED } as const;
 export type ThemeName = keyof typeof PALETTES;
 
 /** Every opaque plane text can land on (the accent included); `theme.test.ts` keeps its own copy. */
-const SURFACE_TOKENS = ["canvas", "surface", "surfaceSunken", "surfaceHover", "surfaceActive", "surfaceSelected", "chrome"] as const;
+export const SURFACE_TOKENS = ["canvas", "surface", "surfaceSunken", "surfaceHover", "surfaceActive", "surfaceSelected", "chrome"] as const;
 
 /** The modes, in the order tests and the picker walk them. */
 export const MODES = Object.keys(PALETTES) as ThemeName[];
