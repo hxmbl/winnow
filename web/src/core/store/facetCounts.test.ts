@@ -21,9 +21,9 @@ function demoStore(filters: readonly FilterId[] = [], mailbox?: "trash", search 
   return store;
 }
 
-/** Messages the list shows for a set of toggles (and a search, if given). */
+/** Rows (conversations) the list shows for a set of toggles (and a search, if given). */
 function listed(filters: readonly FilterId[], mailbox?: "trash", search = ""): number {
-  return demoStore(filters, mailbox, search).view.emails.length;
+  return demoStore(filters, mailbox, search).view.threads.length;
 }
 
 function pillsOf(store: WinnowStore) {
@@ -53,7 +53,7 @@ describe("faceted rail counts", () => {
     const name = combo.map(filterKey).join(" + ");
     it(`${name}: every pill's number is what tapping it lists`, () => {
       const store = demoStore(combo);
-      const result = store.view.emails.length;
+      const result = store.view.threads.length;
       expect(store.view.railFacets?.total).toBe(result);
       const pills = pillsOf(store);
       expect(pills.length).toBeGreaterThan(0);
@@ -78,7 +78,7 @@ describe("faceted rail counts", () => {
     // Active sender: the result.
     const bySender = demoStore([senderFilter(sender)]);
     const own = pillsOf(bySender).find((p) => p.id.kind === "sender" && p.id.sender === sender)!;
-    expect(own.count).toBe(bySender.view.emails.length);
+    expect(own.count).toBe(bySender.view.threads.length);
   });
 
   it("an off Unsafe pill counts Unsafe alone, since turning it on replaces the set", () => {
@@ -99,7 +99,7 @@ describe("faceted rail counts", () => {
     for (const email of seeded.view.emails.filter((_, i) => i % 2 === 0)) seeded.trash(email.id);
     seeded.setMailbox("trash");
     seeded.toggleFilter(builtinFilter("unread"));
-    const result = seeded.view.emails.length;
+    const result = seeded.view.threads.length;
     for (const pill of pillsOf(seeded)) {
       if (pill.id.kind === "builtin" && pill.id.id === "unread") expect(pill.count).toBe(result);
     }
@@ -126,7 +126,7 @@ describe("faceted rail counts", () => {
         const name = `"${search}" + ${combo.map(filterKey).join(" + ") || "nothing"}`;
         it(`${name}: every chip's number is what tapping it lists under the search`, () => {
           const store = demoStore(combo, undefined, search);
-          const result = store.view.emails.length;
+          const result = store.view.threads.length;
           if (combo.length > 0) expect(store.view.railFacets?.total).toBe(result);
           const pills = pillsOf(store);
           expect(pills.length).toBeGreaterThan(0);
@@ -195,14 +195,14 @@ describe("faceted rail counts", () => {
       for (const email of seeded.view.emails.filter((_, i) => i % 2 === 0)) seeded.trash(email.id);
       seeded.setMailbox("trash");
       seeded.setSearchQuery("the");
-      const result = seeded.view.emails.length;
+      const result = seeded.view.threads.length;
       expect(result).toBeGreaterThan(0);
       for (const pill of pillsOf(seeded)) {
         seeded.toggleFilter(pill.id);
-        expect(pill.count, filterKey(pill.id)).toBe(seeded.view.emails.length);
+        expect(pill.count, filterKey(pill.id)).toBe(seeded.view.threads.length);
         seeded.toggleFilter(pill.id);
       }
-      expect(seeded.view.emails.length).toBe(result);
+      expect(seeded.view.threads.length).toBe(result);
     });
   });
 });

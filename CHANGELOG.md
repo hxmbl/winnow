@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Fixed
+
+- The numbers on smart filter chips now count conversations, the same rows the list shows, so they match the count at the top of the screen. Before, a chip counted every message in a thread: in the demo, Action needed read 13 on its chip while the list beside it held 11 conversations.
+
 ## [1.7.0] - 2026-10-29
 
 ### Added

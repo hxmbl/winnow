@@ -9,6 +9,7 @@ import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 import { BUILTIN_FILTERS, builtinFilter, type BuiltinSmartFilter } from "../model/signals";
 import { buildPills } from "../../ui/rail";
 import type { Mailbox } from "../model/email";
+import { threadKey } from "../model/ids";
 
 function demoStore() {
   const store = new WinnowStore({ seed: [...DEMO_EMAILS], seedTrash: DEMO_TRASH });
@@ -50,7 +51,8 @@ describe("smart filters in the open mailbox", () => {
       expect(count).toBeLessThanOrEqual(inTrash);
       store.toggleFilter(builtinFilter(id));
       // The list a filter gives is the count on its pill (plus any junk), all from the bin.
-      expect(store.view.emails.filter((email) => !unsafe.has(email.id)).length).toBe(count);
+      // The pill counts conversations, the list's rows, so count the result's threads.
+      expect(new Set(store.view.emails.filter((email) => !unsafe.has(email.id)).map(threadKey)).size).toBe(count);
       for (const email of store.view.emails) expect(email.mailbox).toBe("trash");
       store.toggleFilter(builtinFilter(id));
     }

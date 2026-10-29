@@ -22,6 +22,25 @@ import {
   NEUTRAL_SIGNALS,
 } from "../model/signals";
 import type { UserProfile } from "../model/profile";
+import { threadKey } from "../model/ids";
+
+/**
+ * Counts conversations, not messages: the key is `threadKey`, the same one
+ * `groupThreads` folds the list into rows with, so a bucket holding three replies in one
+ * thread counts 1, exactly as the list shows one row for it. Counting messages here is
+ * how the rail once read "Action needed 13" over a list (and a masthead) of 11.
+ */
+function addTo<K>(counts: Map<K, Set<string>>, id: K, key: string): void {
+  const seen = counts.get(id);
+  if (seen) seen.add(key);
+  else counts.set(id, new Set([key]));
+}
+
+function sizes<K>(counts: ReadonlyMap<K, ReadonlySet<string>>): Map<K, number> {
+  const out = new Map<K, number>();
+  for (const [id, keys] of counts) out.set(id, keys.size);
+  return out;
+}
 
 /**
  * The importance score at or below which a message is skippable: the classifier's
@@ -134,7 +153,8 @@ export function matchesFilter(
 }
 
 /**
- * How many messages in the inbox land in each bucket.
+ * How many messages (or, with `unit: "conversations"`, conversations: the rows the list
+ * would show, `addTo`) in the inbox land in each bucket.
  *
  * `unsafe` is the exception: every other bucket is guarded with `safe && …`, and
  * the `unsafe` bucket *is* the junk, so counting it the same way would leave the
@@ -154,17 +174,29 @@ export function countAllFilters(
    * on (message, signals, profile), so a pass after one message changed recounts one.
    */
   memo?: WeakMap<Email, { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }>,
+  /**
+   * What one unit is. `"messages"` for the ranking (`rankFilters`: how busy a bucket
+   * is), `"conversations"` for a number shown on a pill, which must match the rows the
+   * list folds the bucket into (`addTo`).
+   */
+  unit: "messages" | "conversations" = "messages",
 ): Map<BuiltinSmartFilter, number> {
   const counts = new Map<BuiltinSmartFilter, number>();
+  const threads = new Map<BuiltinSmartFilter, Set<string>>();
   for (const email of inbox) {
     const signal = signals.get(email.id);
     if (!signal) continue;
     const hit = memo?.get(email);
     const ids = hit && hit.signal === signal && hit.profile === profile ? hit.ids : filtersFor(email, signal, profile);
     if (memo && ids !== hit?.ids) memo.set(email, { signal, profile, ids });
-    for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    if (unit === "messages") {
+      for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    } else if (ids.length > 0) {
+      const key = threadKey(email);
+      for (const id of ids) addTo(threads, id, key);
+    }
   }
-  return counts;
+  return unit === "messages" ? counts : sizes(threads);
 }
 
 /** Every built-in filter one message is in. An unsafe message is in Unsafe only. */
@@ -213,7 +245,7 @@ export function listedFiltersFor(email: Email, signal: EmailSignals, profile: Us
  * counts (`countAllFilters`), unchanged.
  */
 export type FacetCounts = {
-  /** Messages the active set admits: the current result (searched, while searching). */
+  /** Conversations the active set admits: the current result's rows (searched, while searching). */
   total: number;
   builtin: ReadonlyMap<BuiltinSmartFilter, number>;
   /** By lowercased sender, as sender filters match (`matchesFilter`). */
@@ -239,25 +271,29 @@ export function countFacets(
   const senderActive = active.flatMap((filter) => (filter.kind === "sender" ? [filter.sender.toLowerCase()] : []));
   const unsafeOn = builtinActive.includes("unsafe");
 
-  const builtin = new Map<BuiltinSmartFilter, number>();
-  const senders = new Map<string, number>();
-  let total = 0;
-  let unsafeAlone = 0;
+  // Sets of conversation keys (`addTo`), so every number is rows of the list, which
+  // `groupThreads` folds by the same key after filtering.
+  const builtin = new Map<BuiltinSmartFilter, Set<string>>();
+  const senders = new Map<string, Set<string>>();
+  const total = new Set<string>();
+  const unsafeAlone = new Set<string>();
   for (const email of emails) {
     const signal = signals.get(email.id) ?? NEUTRAL_SIGNALS;
     const hit = memo?.get(email);
     const ids = hit && hit.signal === signal && hit.profile === profile ? hit.ids : listedFiltersFor(email, signal, profile);
     if (memo && ids !== hit?.ids) memo.set(email, { signal, profile, ids });
-    if (ids.includes("unsafe")) unsafeAlone += 1;
+    const key = threadKey(email);
+    if (ids.includes("unsafe")) unsafeAlone.add(key);
     const sender = email.sender.toLowerCase();
     if (!senderActive.every((s) => s === sender)) continue;
     if (!builtinActive.every((id) => ids.includes(id))) continue;
-    total += 1;
-    for (const id of ids) builtin.set(id, (builtin.get(id) ?? 0) + 1);
-    senders.set(sender, (senders.get(sender) ?? 0) + 1);
+    total.add(key);
+    for (const id of ids) addTo(builtin, id, key);
+    addTo(senders, sender, key);
   }
-  if (!unsafeOn) builtin.set("unsafe", unsafeAlone);
-  return { total, builtin, senders };
+  const builtinCounts = sizes(builtin);
+  if (!unsafeOn) builtinCounts.set("unsafe", unsafeAlone.size);
+  return { total: total.size, builtin: builtinCounts, senders: sizes(senders) };
 }
 
 /**

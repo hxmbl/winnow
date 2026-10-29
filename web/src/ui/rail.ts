@@ -30,7 +30,7 @@ export type PillItem = {
   /**
    * The number on the pill: what tapping it would list.
    *
-   * With nothing on and no search, how many messages in the open mailbox the bucket
+   * With nothing on and no search, how many conversations (list rows) in the open mailbox the bucket
    * holds. With a filter on or a search running (1.4.0) it is faceted: an off pill
    * counts the current (searched) result it also matches (what the list becomes with it
    * added, since filters AND with each other and with the search), an on pill the

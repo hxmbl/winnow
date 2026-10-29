@@ -35,7 +35,7 @@ import {
   type LoadedBody,
   type Mailbox,
 } from "../model/email";
-import { hashId } from "../model/ids";
+import { hashId, threadKey } from "../model/ids";
 import {
   catalogIndex,
   FILTER_LABELS,
@@ -1479,20 +1479,26 @@ export class WinnowStore {
     const threads = groupThreads(result.emails);
 
     // The rail is ranked and counted over the *open mailbox* (1.3.3), before search and
-    // filters (the numbers shown facet on both, `railFacets` below): a pill's number is how many messages in this mailbox it would show, so
+    // filters (the numbers shown facet on both, `railFacets` below): a pill's number is how many conversations (list rows) in this mailbox it would show, so
     // the count, the list a filter gives and "Why it's here" all agree. The permanent
     // pair stays pinned wherever you are.
     const railEmails = state.mailbox === "drafts" || state.mailbox === "scheduled" ? [] : mailboxEmails;
     const rail = rankFilters(railEmails, signals, profile);
     const railWithActive = this.orderedRail(rail);
+    // Conversations, like the list's rows and the masthead's readout (`threads`).
     const railCounts =
       state.mailbox === "inbox"
-        ? countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits)
-        : countAllFilters(railEmails, signals, profile, this.filterHits);
-    const railSenderCounts = new Map<string, number>();
+        ? countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits, "conversations")
+        : countAllFilters(railEmails, signals, profile, this.filterHits, "conversations");
+    // Conversations, like every other pill number (`countAllFilters`).
+    const railSenderThreads = new Map<string, Set<string>>();
     for (const email of railEmails) {
-      railSenderCounts.set(email.sender, (railSenderCounts.get(email.sender) ?? 0) + 1);
+      const seen = railSenderThreads.get(email.sender);
+      if (seen) seen.add(threadKey(email));
+      else railSenderThreads.set(email.sender, new Set([threadKey(email)]));
     }
+    const railSenderCounts = new Map<string, number>();
+    for (const [sender, keys] of railSenderThreads) railSenderCounts.set(sender, keys.size);
     // Faceted on the active filters and, while a search runs (1.4.0), on the search: a
     // chip's number is then what tapping it lists under that query. Which chips stay is
     // still `rail` / `railCounts` (the plain mailbox ranking), so typing never reshuffles
@@ -1501,7 +1507,7 @@ export class WinnowStore {
 
     // Over the inbox whatever is open: the drawer's and the triage line's claims.
     const inboxCounts =
-      state.mailbox === "inbox" ? railCounts : countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits);
+      state.mailbox === "inbox" ? railCounts : countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits, "conversations");
 
     const attention = summarizeAttention(inboxForProfile, inboxSignals, state.now);
 
@@ -4779,7 +4785,7 @@ export function syncNotice(result: { truncated: boolean; cacheUnpersisted?: bool
 
 /** A message's conversation key, the same one `groupThreads` files it under. */
 function threadKeyOf(email: Email): string {
-  return email.threadId ?? `single-${email.gmailId}`;
+  return threadKey(email);
 }
 
 /**

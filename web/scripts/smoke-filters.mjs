@@ -383,15 +383,18 @@ try {
         }
         return out;
       }, railSel);
-    // Messages the list shows: each row is a conversation, its aria-label names "N messages"
-    // when it holds more than one. The search keeps the list short enough to be all mounted.
+    // Rows the list shows: one per conversation, which is what a chip counts (a thread of
+    // three replies is one row and 1 on its chip). The search keeps the list short enough
+    // to be all mounted.
     const listed = () =>
-      s.evaluate(() =>
-        [...document.querySelectorAll("[data-row-count] button[data-message-id]")].reduce((sum, row) => {
-          const m = /, (\d+) messages,/.exec(row.getAttribute("aria-label") ?? "");
-          return sum + (m ? Number(m[1]) : 1);
-        }, 0),
-      );
+      s.evaluate(() => document.querySelectorAll("[data-row-count] button[data-message-id]").length);
+    // The masthead's readout ("11", or "3 of 11"): the same rows, so it must agree with an on chip.
+    const readout = () =>
+      s.evaluate(() => {
+        const el = [...document.querySelectorAll("[data-position]")].find((e) => e.getClientRects().length > 0);
+        const m = /(\d+)\s*$/.exec(el?.textContent ?? "");
+        return m ? Number(m[1]) : null;
+      });
     const tap = async (key) => {
       await s.locator(`${railSel}[data-rail-key="${key}"]:visible button`).first().click();
       await s.waitForTimeout(350);
@@ -427,8 +430,12 @@ try {
       check(
         `${kind}: "order" + ${chip.key}: the chip's ${chip.count} is what tapping it lists`,
         shown === chip.count && self?.on && self.count === chip.count,
-        `${shown} message(s) listed, chip now ${self?.count}`,
+        `${shown} row(s) listed, chip now ${self?.count}`,
       );
+      if (!phoneKind) {
+        const total = await readout();
+        check(`${kind}: "order" + ${chip.key}: the masthead counts what the chip does`, total === self?.count, `masthead ${total}, chip ${self?.count}`);
+      }
       await tap(chip.key);
       tried += 1;
     }
