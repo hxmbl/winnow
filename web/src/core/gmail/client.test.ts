@@ -193,6 +193,14 @@ describe("GmailClient — the queries the sync engine relies on", () => {
     );
   });
 
+  it("asks for history in Gmail's largest pages", async () => {
+    // The default page is 100 records; 500 makes catching up after a day offline one
+    // round trip instead of five (STRM-451).
+    const { fetchImpl, calls } = stubFetch([{ status: 200 }]);
+    await client(fetchImpl).history("1234");
+    expect(new URLSearchParams(calls[0].url.split("?")[1]).get("maxResults")).toBe("500");
+  });
+
   it("uses Gmail's singular request enum, not the plural response field names", async () => {
     // `labelsAdded` / `messagesDeleted` are response fields; as `historyTypes` values
     // Gmail rejects them with 400 "Invalid value at 'history_types'".

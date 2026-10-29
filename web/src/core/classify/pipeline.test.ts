@@ -117,6 +117,20 @@ describe("buildSearchBags", () => {
     expect(hay).toContain("invoice");
     expect(hay).not.toContain("INVOICE");
   });
+
+  it("builds each message object's bag once, and a changed message gets a new one", () => {
+    // Memoised per message object (STRM-451), so a derive while a search runs does not
+    // lowercase the whole mailbox again. Messages are replaced, never mutated, when they
+    // change, so a new object must get its own bag rather than a stale one.
+    const [first] = mailbox([{ subject: "Invoice 441" }]);
+    const again = buildSearchBags([first]).get(first.id)!;
+    expect(buildSearchBags([first]).get(first.id)).toBe(again);
+    const renamed = { ...first, subject: "Receipt 442" };
+    const hay = buildSearchBags([renamed]).get(renamed.id)!;
+    expect(hay).toContain("receipt 442");
+    expect(hay).not.toContain("invoice 441");
+    expect(hay).toBe(inboxSearchBag(renamed));
+  });
 });
 
 describe("runInboxQuery — search", () => {

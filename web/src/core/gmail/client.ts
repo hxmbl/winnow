@@ -44,6 +44,8 @@ export const MAX_PAGE_SIZE = 200;
 
 /** Page size of the id-only listing the reconciliation walks (Gmail's maximum). */
 export const LIST_ALL_PAGE_SIZE = 500;
+/** `history.list`'s maximum page size (its default is 100). */
+export const HISTORY_PAGE_SIZE = 500;
 
 /**
  * Gmail's per-user quota is 6,000 units/minute. The bucket refills at 4,800/min
@@ -503,6 +505,10 @@ export class GmailClient {
     // enum, so a single comma-joined value is one unknown enum and the call fails
     // with 400 "Invalid value at 'history_types'", which stalls every incremental sync.
     for (const type of HISTORY_TYPES) params.append("historyTypes", type);
+    // Gmail's largest page. The default is 100 records, so catching up after a day
+    // offline in a busy mailbox took five round trips (2 quota units each) where one
+    // does; the records and the cursor are the same either way.
+    params.set("maxResults", String(HISTORY_PAGE_SIZE));
     if (pageToken) params.set("pageToken", pageToken);
     return this.request<GmailHistoryResponse>(`/users/me/history?${params}`);
   }
