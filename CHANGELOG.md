@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Changed
+
+- Building Winnow yourself is documented in BUILDING.md: what to install (with the exact packages for Debian and Ubuntu, Arch and Fedora), the web app, the desktop app on Linux and macOS, and the Android app. The README keeps a short version.
+
 ## [1.7.0] - 2026-10-29
 
 ### Added

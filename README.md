@@ -85,23 +85,16 @@ Turn off the automatic check in **Settings → About**; **Check now** is there t
 
 ## Running from source
 
+[BUILDING.md](BUILDING.md) has the full instructions: prerequisites, Linux packages for Debian, Arch and Fedora, desktop bundles and Android. The common commands, from `web/`:
+
 ```sh
-cd web
 npm install
 npm run dev            # http://localhost:5173, demo mailbox, no account needed
 npm run check          # typecheck + lint + tests
-npm run smoke          # Playwright pass over the production build
+npm run tauri:dev      # the desktop app (needs Rust and tauri-cli ^2)
 ```
 
-Desktop (needs Rust toolchain and `cargo install tauri-cli --version "^2"`):
-
-```sh
-npm run tauri:dev      # runs `cargo tauri dev` in native/
-npm run tauri:build    # a bundle in native/src-tauri/target/release/bundle
-npm run tauri:build -- app   # just the .app, no create-dmg needed
-```
-
-On Linux you also need WebKitGTK plus `libayatana-appindicator3` and `librsvg2` — copy them from the CI file. On macOS the `.dmg` needs `brew install create-dmg`; the `.app` doesn't. `native/README.md` explains why the build is a script and not a bare `cargo tauri build`. [MAP.md](MAP.md) is an annotated map of the tree if you're here to read the code.
+[MAP.md](MAP.md) is an annotated map of the tree if you're here to read the code.
 
 ## Docker
 
