@@ -62,7 +62,8 @@ export type AccountRecord = {
  *     (a `data:` URL, as the sender-picture bytes cache keeps them), when one could be made.
  *   - `access: "not_granted"` — the grant has no profile scope (an account signed in
  *     before Winnow asked for it): the row keeps its monogram until the grant has it.
- *     Every trip to Google asks for it, and the Inbox offers one prompt (`prompted`).
+ *     Every trip to Google (the next sign-in, any opt-in) asks for it, with no screen
+ *     or choice of its own.
  */
 export type AccountProfile = {
   access: "granted" | "not_granted";
@@ -75,12 +76,6 @@ export type AccountProfile = {
    * looked at yet.
    */
   color?: string | null;
-  /**
-   * `not_granted` only: the one-time "show your Google picture" prompt has been answered
-   * (either way). It never comes back for this account; the profile is still asked for on
-   * the next trip to Google (any sign-in or opt-in).
-   */
-  prompted?: boolean;
   /** When it was read: a granted profile is read again after `PROFILE_REFRESH_MS`. */
   checkedAt: number;
 };
@@ -94,9 +89,7 @@ export function reviveAccountProfile(raw: unknown): AccountProfile | undefined {
   const p = raw as Record<string, unknown>;
   if (p.access !== "granted" && p.access !== "not_granted") return undefined;
   const checkedAt = typeof p.checkedAt === "number" && Number.isFinite(p.checkedAt) ? p.checkedAt : 0;
-  if (p.access === "not_granted") {
-    return { access: "not_granted", picture: null, checkedAt, ...(p.prompted === true ? { prompted: true } : {}) };
-  }
+  if (p.access === "not_granted") return { access: "not_granted", picture: null, checkedAt };
   const picture = ownPictureUrl(p.picture);
   const profile: AccountProfile = { access: "granted", picture, checkedAt };
   if (picture && isPictureData(p.pictureData)) profile.pictureData = p.pictureData;
@@ -137,14 +130,6 @@ function isHexColor(value: unknown): value is string {
 export function accountPictureColor(profile: AccountProfile | undefined): string | undefined {
   if (!accountPicture(profile)) return undefined;
   return profile?.color ?? undefined;
-}
-
-/**
- * Whether an account still needs the basic profile granted, and has not had its one
- * prompt yet: a session signed in before Winnow asked for it (STRM-461).
- */
-export function profilePromptDue(profile: AccountProfile | undefined): boolean {
-  return profile?.access === "not_granted" && !profile.prompted;
 }
 
 export type AccountsSnapshot = {

@@ -55,11 +55,8 @@ describe("the Sender pictures notice", () => {
     expect(PICTURE_NOTICE_COPY.off.act).toBe("Turn on");
     expect(PICTURE_NOTICE_COPY.paused.body).toMatch(/Remote images is set to Never/);
     expect(PICTURE_NOTICE_COPY.paused.act).not.toMatch(/turn on|allow|images/i);
-    // The profile prompt (STRM-461) only puts itself aside: no "keep off" choice to make.
-    expect(PICTURE_NOTICE_COPY.profile.keep).toBe("Not now");
-    expect(PICTURE_NOTICE_COPY.profile.act).toBe("Continue");
     for (const copy of Object.values(PICTURE_NOTICE_COPY)) {
-      if (copy !== PICTURE_NOTICE_COPY.profile) expect(copy.keep).toBe("Keep off");
+      expect(copy.keep).toBe("Keep off");
       // One short line: a notice heading a list, not the Settings explanation.
       expect(copy.body.split(/(?<=\.)\s+/).length).toBe(1);
       expect(copy.body.length).toBeLessThanOrEqual(110);

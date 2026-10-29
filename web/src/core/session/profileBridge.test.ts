@@ -1,6 +1,6 @@
 /**
  * The account's own Google picture through the bridge (STRM-461): a session from before
- * sign-in asked for the basic profile gets the one-time prompt and nothing else, and a
+ * sign-in asked for the basic profile keeps its monogram with no prompt or choice, and a
  * picture's halo colour is worked out once and kept with the account.
  */
 
@@ -73,23 +73,21 @@ async function seed(scope: string): Promise<void> {
 }
 
 describe("an account signed in before Winnow asked for the basic profile", () => {
-  it("keeps its monogram, gets the one-time prompt, and never asks Google by itself", async () => {
+  it("keeps its monogram with no prompt or choice, and never asks Google by itself", async () => {
     await seed(GMAIL_SCOPE);
     const store = new WinnowStore();
     const bridge = createSessionBridge(platform(), store, { storage: globalThis.localStorage, pictureColor: async () => "#1E5AC8" });
     await bridge.prepare();
     await bridge.accounts.openActive();
 
-    await vi.waitFor(() => expect(store.getSnapshot().accounts.find((a) => a.active)?.profilePrompt).toBe(true));
+    await vi.waitFor(() => expect(loadAccounts(globalThis.localStorage).accounts[0]?.profile).toMatchObject({ access: "not_granted" }));
     const summary = store.getSnapshot().accounts.find((a) => a.active)!;
     expect(summary.picture).toBeUndefined();
     expect(summary.pictureColor).toBeUndefined();
+    // Nothing to answer: no prompt, no Allow, no setting. The next trip to Google upgrades it.
+    expect(Object.keys(summary)).not.toContain("profilePrompt");
+    expect("grantProfile" in bridge).toBe(false);
     expect(userinfoCalls).toBe(0);
-
-    // "Not now": gone for good for this account, with no setting anywhere.
-    bridge.dismissProfilePrompt();
-    await vi.waitFor(() => expect(store.getSnapshot().accounts.find((a) => a.active)?.profilePrompt).toBeUndefined());
-    expect(loadAccounts(globalThis.localStorage).accounts[0]?.profile).toMatchObject({ access: "not_granted", prompted: true });
   });
 });
 
@@ -104,7 +102,6 @@ describe("the halo colour", () => {
 
     await vi.waitFor(() => expect(store.getSnapshot().accounts.find((a) => a.active)?.pictureColor).toBe("#1E5AC8"));
     expect(store.getSnapshot().accounts.find((a) => a.active)?.picture).toBe(PICTURE);
-    expect(store.getSnapshot().accounts.find((a) => a.active)?.profilePrompt).toBeUndefined();
     expect(loadAccounts(globalThis.localStorage).accounts[0]?.profile).toMatchObject({ access: "granted", picture: PICTURE, color: "#1E5AC8" });
     expect(sampler).toHaveBeenCalledTimes(1);
 

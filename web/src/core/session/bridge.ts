@@ -14,7 +14,6 @@ import {
   type CompletedWebRedirect,
   type ContactsAccess,
   type DraftsAccess,
-  type ProfileAccess,
 } from "./session";
 import type { Platform } from "../../platform/types";
 import type { AccountState, AccountSummary, MailBackend, WinnowStore } from "../store/store";
@@ -32,7 +31,6 @@ import {
   scopedStorage,
   accountPicture,
   accountPictureColor,
-  profilePromptDue,
   profileReadDue,
   type AccountColor,
   type AccountProfile,
@@ -136,15 +134,6 @@ export type SessionBridge = {
   driveAccess(): Promise<DriveAccess>;
   grantDrive(): Promise<DriveAccess>;
   drive(): DriveApi;
-  /**
-   * The one re-consent for the account's own Google profile picture (STRM-461), for a
-   * session signed in before sign-in asked for the basic profile: the one-time inbox
-   * prompt's Continue. The picture is read straight after; a "no" leaves everything as it
-   * was. Either way the prompt does not come back for this account.
-   */
-  grantProfile(): Promise<ProfileAccess>;
-  /** The one-time prompt was put aside: it does not come back for the open account. */
-  dismissProfilePrompt(): void;
   /** Read the open account's own profile again now (after the web redirect's re-consent). */
   refreshOwnProfile(): Promise<void>;
   cachedContacts(): Promise<GoogleContact[]>;
@@ -261,7 +250,6 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
         active: account.id === activeId,
         ...(picture ? { picture } : {}),
         ...(pictureColor ? { pictureColor } : {}),
-        ...(profilePromptDue(account.profile) ? { profilePrompt: true } : {}),
       };
     });
     store.setAccounts(summaries);
@@ -288,7 +276,8 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
   /**
    * Read an account's own Google profile (STRM-461) when it is due (`profileReadDue`), or
    * now with `force`, and keep what it found in the registry: the picture URL and a small
-   * copy, or that the grant lacks the profile scope (the Inbox then offers its one-time prompt, and every trip to Google asks for it).
+   * copy, or that the grant lacks the profile scope (the monogram stays, and the next trip
+   * to Google asks for it: `GmailSession.authorize`).
    * Never throws and never blocks: offline or a Google error leaves the last answer, and
    * the row keeps whatever it drew (the monogram at worst).
    */
@@ -296,12 +285,6 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
   const pictureColorOf = async (src: string): Promise<string | null> => {
     if (!options.pictureColor) return null;
     return (await options.pictureColor(src).catch(() => null)) ?? null;
-  };
-
-  /** Mark the one-time profile prompt as answered for an account still without the grant. */
-  const markProfilePrompted = (id: string): void => {
-    const profile = registry.get(id)?.profile;
-    if (profile?.access === "not_granted" && !profile.prompted) registry.setProfile(id, { ...profile, prompted: true });
   };
 
   /** After an opt-in's grant: the open account's profile, which the same trip may have granted. */
@@ -335,8 +318,7 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
       const result = await session.ownProfile().catch(() => null);
       if (!result) return;
       if (result.kind === "not_granted") {
-        const prompted = registry.get(id)?.profile?.prompted === true;
-        registry.setProfile(id, { access: "not_granted", picture: null, checkedAt: now(), ...(prompted ? { prompted: true } : {}) });
+        registry.setProfile(id, { access: "not_granted", picture: null, checkedAt: now() });
         return;
       }
       const previous = registry.get(id)?.profile;
@@ -655,20 +637,6 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
     driveAccess: () => session().driveAccess(),
     grantDrive: () => afterGrant(session().grantDrive()),
     drive: () => session().drive(),
-    async grantProfile() {
-      const id = registry.snapshot().active;
-      // Marked first: on the web the page leaves for Google and may not come back here.
-      if (id) markProfilePrompted(id);
-      try {
-        return await session().grantProfile();
-      } finally {
-        if (id) await refreshProfile(id, true);
-      }
-    },
-    dismissProfilePrompt() {
-      const id = registry.snapshot().active;
-      if (id) markProfilePrompted(id);
-    },
     async refreshOwnProfile() {
       const id = registry.snapshot().active;
       if (id) await refreshProfile(id, true);

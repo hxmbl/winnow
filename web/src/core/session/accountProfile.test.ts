@@ -5,7 +5,6 @@ import {
   accountPicture,
   accountPictureColor,
   loadAccounts,
-  profilePromptDue,
   profileReadDue,
   reviveAccountProfile,
   reviveAccounts,
@@ -109,16 +108,4 @@ describe("the account's own picture", () => {
     expect(accountPictureColor(undefined)).toBeUndefined();
   });
 
-  it("prompts once for a session from before the basic profile, and never again", () => {
-    expect(profilePromptDue({ access: "not_granted", picture: null, checkedAt: 1 })).toBe(true);
-    expect(profilePromptDue({ access: "not_granted", picture: null, checkedAt: 1, prompted: true })).toBe(false);
-    expect(profilePromptDue({ access: "granted", picture: PICTURE, checkedAt: 1 })).toBe(false);
-    expect(profilePromptDue(undefined)).toBe(false);
-    expect(reviveAccountProfile({ access: "not_granted", picture: null, checkedAt: 3, prompted: true })).toEqual({
-      access: "not_granted",
-      picture: null,
-      checkedAt: 3,
-      prompted: true,
-    });
-  });
 });
