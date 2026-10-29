@@ -249,12 +249,54 @@ jobs:
           xcode-select -p
 
       - name: Install cargo-binstall
+        if: runner.os != 'macOS'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-binstall
 
+      # macOS installs cargo-binstall itself. From macos-26-arm64 20261021, cargo is
+      # Homebrew's rustup (/opt/homebrew/opt/rustup/bin), so install-action puts tools in
+      # ~/.install-action/bin, finds a stale cargo-binstall there, tries to upgrade it and
+      # fails with "No such file or directory" (release run #50). Here the pinned release
+      # zip is checked against its SHA-256 and unpacked into $CARGO_HOME/bin, where cargo
+      # looks for subcommands on either image. Bump the version and hash together.
+      - name: Install cargo-binstall (macOS)
+        if: runner.os == 'macOS'
+        env:
+          BINSTALL_VERSION: "1.26.1"
+          BINSTALL_SHA256: "816084019d6242a3f41bdfea9760e9a1e8beaa1b1025e1121ffb696bd6e5a12e"
+        run: |
+          set -euo pipefail
+          echo "cargo: $(command -v cargo)  rustup: $(command -v rustup)"
+          BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
+          mkdir -p "$BIN"
+          # Whatever an earlier install-action left behind, possibly a dangling link.
+          rm -f "$HOME/.install-action/bin/cargo-binstall" "$BIN/cargo-binstall"
+          ZIP="$RUNNER_TEMP/cargo-binstall.zip"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            --retry 5 --retry-connrefused -o "$ZIP" \
+            "https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-universal-apple-darwin.zip"
+          echo "$BINSTALL_SHA256  $ZIP" | shasum -a 256 -c -
+          unzip -o -q "$ZIP" cargo-binstall -d "$BIN"
+          chmod +x "$BIN/cargo-binstall"
+          echo "$BIN" >> "$GITHUB_PATH"
+          "$BIN/cargo-binstall" -V
+
+      # The universal build needs both Apple targets on whichever rustup the image has
+      # (Homebrew's from 20261021). dtolnay/rust-toolchain adds them; this makes sure.
+      - name: Check Rust targets (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup target list --installed
+          rustc -vV
+
       - name: Install Tauri CLI
         run: cargo binstall tauri-cli --version "^2" --no-confirm
+
+      - name: Check Tauri CLI
+        run: cargo tauri --version
 
       - name: Install dependencies
         working-directory: web
