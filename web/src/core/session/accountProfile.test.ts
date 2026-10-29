@@ -3,7 +3,9 @@ import {
   AccountRegistry,
   PROFILE_REFRESH_MS,
   accountPicture,
+  accountPictureColor,
   loadAccounts,
+  profilePromptDue,
   profileReadDue,
   reviveAccountProfile,
   reviveAccounts,
@@ -88,5 +90,35 @@ describe("the account's own picture", () => {
   it("leaves a registry from before it exactly as it was", () => {
     const old = { version: 1, active: "acct1", accounts: [{ id: "acct1", email: "a@example.com", color: "space", notify: true, addedAt: 3 }] };
     expect(reviveAccounts(old)).toEqual(old);
+  });
+
+  it("keeps the picture's halo colour with it, and only with a picture", () => {
+    expect(reviveAccountProfile({ access: "granted", picture: PICTURE, color: "#1E5AC8", checkedAt: 5 })).toEqual({
+      access: "granted",
+      picture: PICTURE,
+      color: "#1E5AC8",
+      checkedAt: 5,
+    });
+    // Looked at and too grey: kept as null so it is not looked at again.
+    expect(reviveAccountProfile({ access: "granted", picture: PICTURE, color: null, checkedAt: 5 })?.color).toBeNull();
+    expect(reviveAccountProfile({ access: "granted", picture: PICTURE, color: "red", checkedAt: 5 })?.color).toBeUndefined();
+    expect(reviveAccountProfile({ access: "granted", picture: null, color: "#1E5AC8", checkedAt: 5 })?.color).toBeUndefined();
+    expect(accountPictureColor({ access: "granted", picture: PICTURE, color: "#1E5AC8", checkedAt: 1 })).toBe("#1E5AC8");
+    expect(accountPictureColor({ access: "granted", picture: PICTURE, color: null, checkedAt: 1 })).toBeUndefined();
+    expect(accountPictureColor({ access: "granted", picture: null, checkedAt: 1 })).toBeUndefined();
+    expect(accountPictureColor(undefined)).toBeUndefined();
+  });
+
+  it("prompts once for a session from before the basic profile, and never again", () => {
+    expect(profilePromptDue({ access: "not_granted", picture: null, checkedAt: 1 })).toBe(true);
+    expect(profilePromptDue({ access: "not_granted", picture: null, checkedAt: 1, prompted: true })).toBe(false);
+    expect(profilePromptDue({ access: "granted", picture: PICTURE, checkedAt: 1 })).toBe(false);
+    expect(profilePromptDue(undefined)).toBe(false);
+    expect(reviveAccountProfile({ access: "not_granted", picture: null, checkedAt: 3, prompted: true })).toEqual({
+      access: "not_granted",
+      picture: null,
+      checkedAt: 3,
+      prompted: true,
+    });
   });
 });

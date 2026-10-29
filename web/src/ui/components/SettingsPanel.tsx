@@ -65,8 +65,6 @@ import { useShortcutsAvailable } from "../physicalKeyboard";
 import { remotePicturesPaused } from "../senderPictures";
 import type { AccountSummary } from "../../core/store/store";
 import { accountsSummary } from "../accountsPage";
-import { ownProfileRow } from "../ownProfile";
-import { Avatar } from "./Avatar";
 import type { UpdatesController } from "../useUpdates";
 import { operatorUpdate } from "../../core/updates/updates";
 import { installing, percent, stageButtonLabel, stageText } from "../../core/updates/stages";
@@ -272,14 +270,6 @@ export type SettingsProps = {
   accounts?: readonly AccountSummary[];
   /** Open the Accounts page (1.5), where each account's controls live. */
   onManageAccounts?: () => void;
-  /**
-   * The open account, for its own Google profile picture (STRM-461): the row shows it,
-   * or offers the one re-consent. `null` or absent: no row (signed out, the demo).
-   */
-  ownAccount?: AccountSummary | null;
-  profileBusy?: boolean;
-  profileError?: string | null;
-  onAllowProfile?: () => void;
   /** Where Google contacts stand. The row only shows for a signed-in account. */
   contactsAccess: ContactsAccessState;
   contactsBusy: boolean;
@@ -1612,52 +1602,10 @@ function AccountsSettings({ props }: { props: SettingsProps }) {
   );
 }
 
-/**
- * The open account's own Google profile picture (STRM-461), or the one re-consent an
- * account signed in before Winnow asked for the basic profile needs. Never in the way:
- * without the picture the account shows its initial, as it always did.
- */
-function OwnProfileSettings({ props }: { props: SettingsProps }) {
-  const account = props.ownAccount ?? null;
-  const row = ownProfileRow(account);
-  if (!account || !row) return null;
-  return (
-    <>
-      <Row setting="profilePicture" hint={row.hint} hintId="winnow-profile-picture-hint">
-        <span data-settings-profile-picture={account.picture ? "photo" : "monogram"} className="flex items-center gap-3">
-          <Avatar lookup={false} name={account.email} address={account.email} photo={account.picture} />
-          {row.action === "allow" && props.onAllowProfile && (
-            <button
-              type="button"
-              data-settings-allow-profile=""
-              onClick={props.onAllowProfile}
-              disabled={props.profileBusy}
-              aria-describedby="winnow-profile-picture-hint"
-              className={buttonClass("secondary", "sm")}
-            >
-              {props.profileBusy ? "Waiting for Google…" : "Allow"}
-            </button>
-          )}
-        </span>
-      </Row>
-      {props.profileError && (
-        <p role="alert" className="text-meta font-medium text-danger">
-          {props.profileError}
-        </p>
-      )}
-    </>
-  );
-}
-
 function GoogleSettings({ props }: { props: SettingsProps }) {
   return (
     <>
     <AccountsSettings props={props} />
-    {props.ownAccount && (
-      <Section>
-        <OwnProfileSettings props={props} />
-      </Section>
-    )}
     <Section>
       {/*
         The client first: Winnow ships no Google client, so until one is set up this is
@@ -1682,7 +1630,7 @@ function GoogleSettings({ props }: { props: SettingsProps }) {
 
       {/*
         Google contacts, as an opt-in rather than a sign-in permission: Winnow asks for
-        mail and the basic profile at sign-in and nothing else, and this is where the user can choose to add
+        mail at sign-in and nothing else, and this is where the user can choose to add
         their address book later. Shown only once there is an account to ask for, and not
         in the demo (whose address book is seeded).
 

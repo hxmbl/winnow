@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { GMAIL_SCOPE, PROFILE_SCOPE, SIGN_IN_SCOPE, SIGN_IN_SCOPES, profileGrant } from "./dto";
+import { GMAIL_SCOPE, PROFILE_SCOPE, SIGN_IN_SCOPE, SIGN_IN_SCOPES, keepsGmail, profileGrant, withProfileScope } from "./dto";
 import { USERINFO_URL, fetchOwnProfile, isProfileScopeMissing, ownPictureUrl, parseUserinfo } from "./userinfo";
 import type { FetchLike } from "./client";
 
@@ -23,6 +23,26 @@ describe("the sign-in scopes", () => {
     expect(profileGrant(undefined)).toBe("unknown");
     expect(profileGrant(null)).toBe("unknown");
     expect(profileGrant("  ")).toBe("unknown");
+  });
+});
+
+describe("upgrading a session from before the basic profile", () => {
+  const DRIVE = "https://www.googleapis.com/auth/drive.file";
+  it("adds the profile to any trip to Google whose grant lacks it", () => {
+    expect(withProfileScope(DRIVE, GMAIL_SCOPE)).toBe(`${DRIVE} ${PROFILE_SCOPE}`);
+    expect(withProfileScope(DRIVE, undefined)).toBe(`${DRIVE} ${PROFILE_SCOPE}`);
+  });
+
+  it("leaves a trip alone when the grant has it, or the trip already asks for it", () => {
+    expect(withProfileScope(DRIVE, SIGN_IN_SCOPE)).toBe(DRIVE);
+    expect(withProfileScope(PROFILE_SCOPE, GMAIL_SCOPE)).toBe(PROFILE_SCOPE);
+    expect(withProfileScope(SIGN_IN_SCOPE, GMAIL_SCOPE)).toBe(SIGN_IN_SCOPE);
+  });
+
+  it("knows when a new grant would have dropped Gmail", () => {
+    expect(keepsGmail(SIGN_IN_SCOPE)).toBe(true);
+    expect(keepsGmail(undefined)).toBe(true);
+    expect(keepsGmail(PROFILE_SCOPE)).toBe(false);
   });
 });
 

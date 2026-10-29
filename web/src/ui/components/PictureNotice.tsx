@@ -26,9 +26,9 @@ export function PictureNotice({
   onAct,
 }: {
   kind: PictureNoticeKind;
-  /** "Keep off": answer for good, change nothing. */
+  /** "Keep off" (or the profile prompt's "Not now"): answer for good, change nothing. */
   onKeepOff: () => void;
-  /** "Turn on" (`off`), or open Settings › Privacy (`paused`). */
+  /** "Turn on" (`off`), open Settings › Privacy (`paused`), or ask Google once (`profile`). */
   onAct: () => void;
 }) {
   const id = useId();

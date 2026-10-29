@@ -933,8 +933,17 @@ export type AccountSummary = {
    * on Google's image host. Absent: the monogram.
    */
   picture?: string;
-  /** The grant lacks the basic profile (signed in before Winnow asked): offer the re-consent. */
-  profileConsent?: boolean;
+  /**
+   * The picture's most dominant colour (`#RRGGBB`, raw), for the halo around the avatar
+   * (`ui/ringColor.ts` adjusts it per theme). Absent: the account colour.
+   */
+  pictureColor?: string;
+  /**
+   * The grant lacks the basic profile (signed in before Winnow asked for it) and the
+   * one-time inbox prompt has not been answered: show it. No setting: the profile is
+   * asked for again on the next trip to Google whatever the answer.
+   */
+  profilePrompt?: boolean;
 };
 
 /** What one account (or the demo, with no account) persisted: see `core/store/accountState.ts`. */

@@ -31,6 +31,8 @@ import {
   newAccountId,
   scopedStorage,
   accountPicture,
+  accountPictureColor,
+  profilePromptDue,
   profileReadDue,
   type AccountColor,
   type AccountProfile,
@@ -136,10 +138,13 @@ export type SessionBridge = {
   drive(): DriveApi;
   /**
    * The one re-consent for the account's own Google profile picture (STRM-461), for a
-   * session signed in before sign-in asked for the basic profile. The picture is read
-   * straight after; a "no" leaves everything as it was.
+   * session signed in before sign-in asked for the basic profile: the one-time inbox
+   * prompt's Continue. The picture is read straight after; a "no" leaves everything as it
+   * was. Either way the prompt does not come back for this account.
    */
   grantProfile(): Promise<ProfileAccess>;
+  /** The one-time prompt was put aside: it does not come back for the open account. */
+  dismissProfilePrompt(): void;
   /** Read the open account's own profile again now (after the web redirect's re-consent). */
   refreshOwnProfile(): Promise<void>;
   cachedContacts(): Promise<GoogleContact[]>;
@@ -170,6 +175,12 @@ export type BridgeOptions = {
    * the account row draws it at once and offline. Absent (tests): the URL alone.
    */
   capturePicture?: CapturePicture;
+  /**
+   * The most dominant colour of an account's own picture (`ui/pictureCapture.ts`
+   * `canvasPictureColor`), kept per account for its halo. Absent (tests): no colour, so
+   * the halo keeps the account colour.
+   */
+  pictureColor?: (src: string) => Promise<string | null>;
   now?: () => number;
 };
 
@@ -240,6 +251,7 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
     const activeId = registry.snapshot().active;
     const summaries: AccountSummary[] = registry.list().map((account) => {
       const picture = accountPicture(account.profile);
+      const pictureColor = accountPictureColor(account.profile);
       return {
         id: account.id,
         email: account.email,
@@ -248,7 +260,8 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
         unread: account.id === activeId ? null : (unread.get(account.id) ?? null),
         active: account.id === activeId,
         ...(picture ? { picture } : {}),
-        ...(account.profile?.access === "not_granted" ? { profileConsent: true } : {}),
+        ...(pictureColor ? { pictureColor } : {}),
+        ...(profilePromptDue(account.profile) ? { profilePrompt: true } : {}),
       };
     });
     store.setAccounts(summaries);
@@ -275,10 +288,30 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
   /**
    * Read an account's own Google profile (STRM-461) when it is due (`profileReadDue`), or
    * now with `force`, and keep what it found in the registry: the picture URL and a small
-   * copy, or that the grant lacks the profile scope (Settings then offers the re-consent).
+   * copy, or that the grant lacks the profile scope (the Inbox then offers its one-time prompt, and every trip to Google asks for it).
    * Never throws and never blocks: offline or a Google error leaves the last answer, and
    * the row keeps whatever it drew (the monogram at worst).
    */
+  /** A picture's halo colour, or `null` (none, or no sampler). Never throws. */
+  const pictureColorOf = async (src: string): Promise<string | null> => {
+    if (!options.pictureColor) return null;
+    return (await options.pictureColor(src).catch(() => null)) ?? null;
+  };
+
+  /** Mark the one-time profile prompt as answered for an account still without the grant. */
+  const markProfilePrompted = (id: string): void => {
+    const profile = registry.get(id)?.profile;
+    if (profile?.access === "not_granted" && !profile.prompted) registry.setProfile(id, { ...profile, prompted: true });
+  };
+
+  /** After an opt-in's grant: the open account's profile, which the same trip may have granted. */
+  const afterGrant = async <T>(grant: Promise<T>): Promise<T> => {
+    const result = await grant;
+    const id = registry.snapshot().active;
+    if (id) void refreshProfile(id);
+    return result;
+  };
+
   const refreshProfile = (id: string, force = false): Promise<void> => {
     const running = profileReads.get(id);
     if (running) return running;
@@ -288,12 +321,22 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
       const session = entryFor(id).session;
       const grant = await session.profileAccess().catch(() => "unavailable" as const);
       if (grant === "unavailable") return;
-      if (!force && !profileReadDue(record.profile, now(), grant)) return;
+      if (!force && !profileReadDue(record.profile, now(), grant)) {
+        // Not due, but a picture kept before its halo colour was: look at the kept copy.
+        const kept = record.profile;
+        if (kept?.access === "granted" && kept.picture && kept.color === undefined) {
+          const color = await pictureColorOf(kept.pictureData ?? kept.picture);
+          const latest = registry.get(id)?.profile;
+          if (latest?.access === "granted" && latest.picture === kept.picture) registry.setProfile(id, { ...latest, color });
+        }
+        return;
+      }
       if (!force && !isOnline() && grant !== "not_granted") return;
       const result = await session.ownProfile().catch(() => null);
       if (!result) return;
       if (result.kind === "not_granted") {
-        registry.setProfile(id, { access: "not_granted", picture: null, checkedAt: now() });
+        const prompted = registry.get(id)?.profile?.prompted === true;
+        registry.setProfile(id, { access: "not_granted", picture: null, checkedAt: now(), ...(prompted ? { prompted: true } : {}) });
         return;
       }
       const previous = registry.get(id)?.profile;
@@ -302,9 +345,14 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
         pictureData = (await options.capturePicture(result.picture, PICTURE_BYTES_PX).catch(() => null)) ?? undefined;
       }
       // A capture that failed this time keeps the copy of the same picture from before.
-      if (!pictureData && result.picture && previous?.picture === result.picture) pictureData = previous.pictureData;
+      const samePicture = Boolean(result.picture) && previous?.access === "granted" && previous.picture === result.picture;
+      if (!pictureData && samePicture) pictureData = previous?.pictureData;
       const profile: AccountProfile = { access: "granted", picture: result.picture, checkedAt: now() };
       if (result.picture && pictureData) profile.pictureData = pictureData;
+      if (result.picture) {
+        // The halo's colour, once per picture: the same picture keeps the colour it had.
+        profile.color = samePicture && previous?.color !== undefined ? previous.color : await pictureColorOf(pictureData ?? result.picture);
+      }
       // Signed out while the read was out: `setProfile` ignores an id that is gone.
       registry.setProfile(id, profile);
     })().finally(() => profileReads.delete(id));
@@ -574,7 +622,10 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
       const id = namespace && registry.get(namespace) ? namespace : registry.snapshot().active;
       if (!id) return null;
       if (id !== registry.snapshot().active) registry.setActive(id);
-      return entryFor(id).session.completeWebRedirect();
+      const completed = await entryFor(id).session.completeWebRedirect();
+      // Any trip back from Google may have brought the basic profile with it.
+      if (completed) void refreshProfile(id);
+      return completed;
     },
 
     backend() {
@@ -596,17 +647,27 @@ export function createSessionBridge(platform: Platform, store: WinnowStore, opti
     },
 
     contactsAccess: () => session().contactsAccess(),
-    grantContacts: () => session().grantContacts(),
+    // Every trip to Google also asks for the basic profile when the grant lacks it
+    // (`GmailSession.authorize`), so each opt-in is followed by a profile read.
+    grantContacts: () => afterGrant(session().grantContacts()),
     draftsAccess: () => session().draftsAccess(),
-    grantDrafts: () => session().grantDrafts(),
+    grantDrafts: () => afterGrant(session().grantDrafts()),
     driveAccess: () => session().driveAccess(),
-    grantDrive: () => session().grantDrive(),
+    grantDrive: () => afterGrant(session().grantDrive()),
     drive: () => session().drive(),
     async grantProfile() {
-      const access = await session().grantProfile();
       const id = registry.snapshot().active;
-      if (id) await refreshProfile(id, true);
-      return access;
+      // Marked first: on the web the page leaves for Google and may not come back here.
+      if (id) markProfilePrompted(id);
+      try {
+        return await session().grantProfile();
+      } finally {
+        if (id) await refreshProfile(id, true);
+      }
+    },
+    dismissProfilePrompt() {
+      const id = registry.snapshot().active;
+      if (id) markProfilePrompted(id);
     },
     async refreshOwnProfile() {
       const id = registry.snapshot().active;

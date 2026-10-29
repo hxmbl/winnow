@@ -54,7 +54,9 @@ import {
   SIGN_IN_SCOPE,
   hasDraftScopes,
   isInsufficientScope,
+  keepsGmail,
   profileGrant,
+  withProfileScope,
 } from "../gmail/dto";
 import { fetchOwnProfile, type OwnProfileResult } from "../gmail/userinfo";
 import { buildAuthorizeUrl, createPkcePair, describeAuthError, stateMatches } from "../gmail/pkce";
@@ -843,7 +845,21 @@ export class GmailSession {
       await this.tokens.adopt(before);
       throw new GmailError(wrongAccountMessage(actual, expected, "Your profile picture was"), 0, "declined");
     }
+    if (await this.restoreIfGmailLost(before)) return "not_granted";
     return this.profileAccess();
+  }
+
+  /**
+   * Gmail access is never traded for the picture: if the new grant's scope list leaves
+   * out `gmail.modify` while the one before had it (it should not, with
+   * `include_granted_scopes`), the tokens from before are put back. True when it did.
+   */
+  private async restoreIfGmailLost(before: NonNullable<Awaited<ReturnType<TokenManager["current"]>>>): Promise<boolean> {
+    const after = await this.tokens.current().catch(() => null);
+    if (!after || keepsGmail(after.scope) || !keepsGmail(before.scope)) return false;
+    debugLog("auth", "profile-grant-dropped-gmail");
+    await this.tokens.adopt(before);
+    return true;
   }
 
   /** A Drive client on this session's tokens (the same one-refresh-after-401 rule). */
@@ -1020,6 +1036,10 @@ export class GmailSession {
 
     const before = await this.tokens.current().catch(() => null);
     const incremental = Boolean(intent.purpose);
+    // The basic profile rides along on every incremental trip whose grant lacks it (a
+    // session from before sign-in asked for it, STRM-461), so the first opt-in after the
+    // update upgrades it with no screen of its own. Sign-in already asks for it.
+    if (incremental) scope = withProfileScope(scope, before?.scope);
     debugLog("auth", "authorize-start", {
       purpose: intent.purpose ?? "sign-in",
       incremental,
@@ -1372,6 +1392,9 @@ export class GmailSession {
           profile: "declined",
           profileMessage: wrongAccountMessage(profile.emailAddress, expectedEmail, "Your profile picture was"),
         };
+      }
+      if (before && (await this.restoreIfGmailLost(before))) {
+        return { email: profile.emailAddress, view: shared, profile: "not_granted" };
       }
       return { email: profile.emailAddress, view: shared, profile: await this.profileAccess() };
     }

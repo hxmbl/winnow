@@ -61,7 +61,6 @@ describe("the Google setup walkthrough", () => {
   it("lists the exact scopes Winnow asks for, Gmail's required, the contacts' and Drive's optional", () => {
     expect(SETUP_SCOPES.map((item) => [item.scope, item.required])).toEqual([
       ["https://www.googleapis.com/auth/gmail.modify", true],
-      ["https://www.googleapis.com/auth/userinfo.profile", true],
       ["https://www.googleapis.com/auth/contacts.readonly", false],
       ["https://www.googleapis.com/auth/contacts.other.readonly", false],
       ["https://www.googleapis.com/auth/drive.file", false],

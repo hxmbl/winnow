@@ -147,7 +147,7 @@ import { imageProbe, publishSenderPictures, senderPictureSources, SenderPictures
 import { GRAVATAR_STORAGE_KEY, GravatarCache } from "./core/avatars/gravatar";
 import { contactPhotoMap } from "./core/avatars/photos";
 import { defaultPictureBytesStorage, memoryPictureBytesStorage, PictureBytesCache } from "./core/avatars/pictureBytes";
-import { canvasCapture } from "./ui/pictureCapture";
+import { canvasCapture, canvasPictureColor } from "./ui/pictureCapture";
 import { BrandLogoCache, LOGO_STORAGE_KEY, localLogoStorage } from "./core/avatars/logoCache";
 import { keyFor } from "./core/store/accountState";
 import { dohResolver } from "./core/avatars/bimi";
@@ -874,27 +874,24 @@ export function App({ store, existingInstall = true }: Props) {
   const onImproveSuggestions = useCallback(() => void improveSuggestions(), [improveSuggestions]);
 
   /**
-   * The one re-consent for the open account's own Google profile picture (STRM-461),
-   * from Settings → Google account. A "no" (or another account chosen) is said inline and
-   * changes nothing else; on the web the page leaves and the redirect finishes it.
+   * The one-time inbox prompt for an account signed in before Winnow asked for the basic
+   * profile (STRM-461): Continue asks Google once for it (incremental, the account
+   * pre-selected); a "no" or another account chosen is said in the notice strip and
+   * changes nothing else. On the web the page leaves and the redirect finishes it.
    */
-  const [profileBusy, setProfileBusy] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const onAllowProfile = useCallback(() => {
+  const onContinueProfile = useCallback(() => {
     const bridge = sessionRef.current;
     if (!bridge) return;
-    setProfileError(null);
-    setProfileBusy(true);
     void bridge
       .grantProfile()
       .then((access) => {
-        if (access === "not_granted") setProfileError("Google didn't include your profile, so your account keeps its initial.");
+        if (access === "not_granted") store.setNotice("Google didn't include your profile, so your account keeps its initial for now.");
       })
       .catch((error: unknown) => {
-        setProfileError(error instanceof Error ? error.message : "Your profile picture was not allowed.");
-      })
-      .finally(() => setProfileBusy(false));
-  }, []);
+        store.setNotice(error instanceof Error ? error.message : "Your profile picture was not allowed.");
+      });
+  }, [store]);
+  const onDismissProfile = useCallback(() => sessionRef.current?.dismissProfilePrompt(), []);
   const onConnectContactPhotos = useCallback(() => void improveSuggestions(true), [improveSuggestions]);
 
   const [restoringSession, setRestoringSession] = useState(false);
@@ -1164,6 +1161,8 @@ export function App({ store, existingInstall = true }: Props) {
         const bridge = createSessionBridge(platform, store, {
           // The account's own profile picture is kept as a small copy, like sender pictures.
           capturePicture: canvasCapture(),
+          // …and its most dominant colour, for the halo around the account's avatar.
+          pictureColor: canvasPictureColor(),
           // New mail in an account that is not open: its own notification, tagged with
           // the account, under the same settings (on, not muted or hidden) as the open one's.
           onInactiveMail: (account, emails) => {
@@ -4360,7 +4359,20 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
     mailbox: snapshot.mailbox,
     rowCount: view.threads.length,
   });
-  const pictureNoticeEl = pictureNoticeKind ? (
+  /**
+   * Shown only when no sender-pictures notice is: one notice at a time. The open
+   * account's own Google picture (STRM-461) needs one confirmation at Google for a
+   * session from before Winnow asked for it.
+   */
+  const profilePromptShown =
+    !pictureNoticeKind &&
+    !isDemo &&
+    snapshot.mailbox === "inbox" &&
+    view.threads.length > 0 &&
+    snapshot.accounts.some((account) => account.active && account.profilePrompt);
+  const pictureNoticeEl = profilePromptShown ? (
+    <PictureNotice kind="profile" onKeepOff={onDismissProfile} onAct={onContinueProfile} />
+  ) : pictureNoticeKind ? (
     <PictureNotice
       kind={pictureNoticeKind}
       onKeepOff={() => store.setPreferences({ pictureNoticeDismissed: true })}
@@ -5209,10 +5221,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             store.setOverlay("none");
             setSetupOpen(true);
           }}
-          ownAccount={isDemo ? null : (snapshot.accounts.find((account) => account.active) ?? null)}
-          profileBusy={profileBusy}
-          profileError={profileError}
-          onAllowProfile={onAllowProfile}
           contactsAccess={snapshot.contactsAccess}
           contactsBusy={contactsBusy}
           contactsError={contactsError}

@@ -75,15 +75,13 @@ and choose **Get started** if it asks.
    | Scope | When Winnow asks | What for |
    | --- | --- | --- |
    | `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, archive and send your mail |
-   | `https://www.googleapis.com/auth/userinfo.profile` | at sign-in | your name and profile picture, so your account shows your own Google photo (non-sensitive: no verification) |
    | `https://www.googleapis.com/auth/contacts.readonly` | only if you opt in, later | your saved contacts, in recipient suggestions (and their photos in sender avatars) |
    | `https://www.googleapis.com/auth/contacts.other.readonly` | only if you opt in, later | "other contacts" (people you've written to), in recipient suggestions |
    | `https://www.googleapis.com/auth/drive.file` | only if you opt in, later | only the files you send as Drive links (over 25 MB); nothing else in your Drive |
 
-   Sign-in asks for `gmail.modify` and your basic profile (`userinfo.profile`, which
-   Google also calls `profile`), and nothing else. If you signed in before Winnow asked
-   for the basic profile, your account shows its initial until you choose **Allow** in
-   **Settings → Google account → Profile picture**. The two contact scopes are only
+   Sign-in asks for `gmail.modify`, plus your basic profile for your own profile
+   picture (requested at runtime, so there is nothing to add for it here), and nothing
+   else. The two contact scopes are only
    requested when you choose **Improve suggestions from Google contacts** in Settings,
    and `drive.file` only the first time you choose **Send as a Drive link** for a file
    over 25 MB, after Winnow has said what it allows. **Settings → Privacy → Big files

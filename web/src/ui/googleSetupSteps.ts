@@ -18,7 +18,7 @@
  */
 
 import { apiLibraryUrl } from "../core/session/clientJson";
-import { GMAIL_SCOPE, PROFILE_SCOPE } from "../core/gmail/dto";
+import { GMAIL_SCOPE } from "../core/gmail/dto";
 import { CONTACTS_SCOPE, OTHER_CONTACTS_SCOPE } from "../core/gmail/people";
 import { DRIVE_FILE_SCOPE } from "../core/gmail/drive";
 import type { ClientKind } from "../core/session/credentials";
@@ -132,14 +132,12 @@ export function stepIndexOf(id: SetupStepId, steps: readonly SetupStep[] = SETUP
 
 /**
  * The scopes to add under Data access, exactly as Winnow asks for them. Gmail's one
- * scope covers reading, labels, drafts and sending; the basic profile (non-sensitive,
- * nothing to verify) is the account's own picture, also asked for at sign-in; the two contact scopes are asked for
+ * scope covers reading, labels, drafts and sending; the two contact scopes are asked for
  * only when Google contacts is switched on in Settings, and `drive.file` only the first
  * time a file over 25 MB is sent as a Drive link.
  */
 export const SETUP_SCOPES: readonly { scope: string; purpose: string; required: boolean }[] = [
   { scope: GMAIL_SCOPE, purpose: "Read, sort, draft and send your mail", required: true },
-  { scope: PROFILE_SCOPE, purpose: "Your name and profile picture, for your account", required: true },
   { scope: CONTACTS_SCOPE, purpose: "Your contacts, for suggestions and photos", required: false },
   { scope: OTHER_CONTACTS_SCOPE, purpose: "People you've emailed, for suggestions", required: false },
   { scope: DRIVE_FILE_SCOPE, purpose: "Only the files you send as Drive links", required: false },

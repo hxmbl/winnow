@@ -23,7 +23,14 @@
 
 import type { ImagePolicy } from "../core/store/store";
 
-export type PictureNoticeKind = "off" | "paused";
+/**
+ * `profile` is not about sender pictures: it is the one-time prompt for the open
+ * account's own Google picture (STRM-461) when its session is from before Winnow asked
+ * for the basic profile. It shares the slot (one notice at a time, the sender-pictures
+ * ones first) and the look. Its first button only puts it aside, for good: there is no
+ * setting, and the profile is still asked for on the next trip to Google.
+ */
+export type PictureNoticeKind = "off" | "paused" | "profile";
 
 export type PictureNoticeInput = {
   senderPictures: boolean;
@@ -64,5 +71,11 @@ export const PICTURE_NOTICE_COPY: Record<PictureNoticeKind, { title: string; bod
     body: "Remote images is set to Never, which pauses Gravatar photos and brand logos too.",
     keep: "Keep off",
     act: "Open Privacy settings",
+  },
+  profile: {
+    title: "Show your Google profile picture",
+    body: "Google needs you to confirm it once; your mail and settings stay as they are.",
+    keep: "Not now",
+    act: "Continue",
   },
 };

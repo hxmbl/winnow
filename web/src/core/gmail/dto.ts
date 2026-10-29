@@ -104,6 +104,26 @@ export function profileGrant(scope: string | undefined | null): "granted" | "not
 }
 
 /**
+ * `scope` with the basic profile added when `grantedScope` (the current token's) lacks
+ * it: every incremental trip to Google (contacts, drafts, Drive, the profile prompt)
+ * carries it, so a session signed in before Winnow asked for the profile is upgraded
+ * by whichever trip comes first, with no screen of its own. A grant that has it, or a
+ * scope that already names it, is left alone.
+ */
+export function withProfileScope(scope: string, grantedScope: string | undefined | null): string {
+  if (profileGrant(grantedScope) === "granted") return scope;
+  const asked = scope.split(/\s+/).filter(Boolean);
+  if (asked.includes(PROFILE_SCOPE) || asked.includes("profile")) return scope;
+  return [...asked, PROFILE_SCOPE].join(" ");
+}
+
+/** Whether a recorded scope list carries Gmail (`gmail.modify`). No list: `true` (nothing says otherwise). */
+export function keepsGmail(scope: string | undefined | null): boolean {
+  if (scope === undefined || scope === null || scope.trim() === "") return true;
+  return scope.split(/\s+/).includes(GMAIL_SCOPE);
+}
+
+/**
  * The narrowest scope that allows drafts (`users.drafts.*`): what the drafts opt-in asks
  * for when a grant lacks every scope in `DRAFT_SCOPES`.
  */

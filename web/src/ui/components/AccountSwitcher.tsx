@@ -18,6 +18,7 @@ import { MAX_ACCOUNTS } from "../../core/session/accounts";
 import { accountStatusLine } from "../accountsPage";
 import type { ThemeName } from "../theme";
 import { Icon } from "./Icon";
+import { ringColor } from "../ringColor";
 
 export type AccountSwitcherProps = {
   accounts: readonly AccountSummary[];
@@ -40,23 +41,39 @@ export type AccountSwitcherProps = {
 };
 
 /**
- * The account's colour as a thin ring around its avatar (it was a dot badge until 1.6.3,
- * and the open account also had a soft halo until the UI refinement pass): the ring tells
- * accounts apart. Colour is never the only cue: the open account's row carries
- * `aria-current` and a tick, and the trigger's label names the account. Under forced
- * colours the browser drops the shadow, and those cues remain. `data-account-glow-active`
- * still marks the open account for tests and styling.
+ * The account's halo: a thin ring around its avatar (it was a dot badge until 1.6.3,
+ * and the open account also had a soft halo until the UI refinement pass). The ring
+ * tells accounts apart. With the account's own Google picture it takes that picture's
+ * most dominant colour (`pictureColor`, adjusted per theme by `ui/ringColor.ts` to 3:1
+ * against every plane); without a picture, or with one too grey to pick from, it is the
+ * account's colour as before. Colour is never the only cue: the open account's row
+ * carries `aria-current` and a tick, and the trigger's label names the account. Under
+ * forced colours the browser drops the shadow, and those cues remain.
+ * `data-account-glow-active` still marks the open account for tests and styling, and
+ * `data-account-glow-source` says where the colour came from.
  *
  * Place it inside the `relative` wrapper that holds the avatar; it covers the avatar exactly.
  */
-export function AccountGlow({ color, scheme, active }: { color: string; scheme: ThemeName; active: boolean }) {
-  const hex = accountColorHex(color, scheme);
+export function AccountGlow({
+  color,
+  scheme,
+  active,
+  pictureColor,
+}: {
+  color: string;
+  scheme: ThemeName;
+  active: boolean;
+  pictureColor?: string;
+}) {
+  const fromPicture = ringColor(pictureColor, scheme);
+  const hex = fromPicture ?? accountColorHex(color, scheme);
   const ring = `0 0 0 1.5px ${hex}`;
   return (
     <span
       aria-hidden="true"
       data-account-glow={color}
       data-account-glow-active={active ? "" : undefined}
+      data-account-glow-source={fromPicture ? "picture" : "account"}
       className="pointer-events-none absolute inset-0 rounded-full"
       style={{ boxShadow: ring }}
     />
@@ -100,7 +117,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
                 >
                   <span className="relative shrink-0">
                     <Avatar lookup={false} name={account.email} address={account.email} photo={account.picture} />
-                    <AccountGlow color={account.color} scheme={props.scheme} active={account.active} />
+                    <AccountGlow color={account.color} scheme={props.scheme} active={account.active} pictureColor={account.pictureColor} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ui font-medium text-ink">{account.email || "Your account"}</span>
@@ -193,7 +210,7 @@ export function AccountButton({
     >
       <span className="relative flex rounded-full">
         <Avatar lookup={false} name={active?.email ?? "You"} address={active?.email ?? "you@winnow.demo"} photo={active?.picture} />
-        {active && <AccountGlow color={active.color} scheme={scheme} active />}
+        {active && <AccountGlow color={active.color} scheme={scheme} active pictureColor={active.pictureColor} />}
       </span>
       {others > 0 && (
         <span data-account-others="" aria-hidden="true" className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-accent" />

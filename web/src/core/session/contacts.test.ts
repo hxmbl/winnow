@@ -218,7 +218,9 @@ describe("grantContacts — desktop", () => {
     expect(await session.grantContacts()).toBe("granted");
 
     const query = new URL(opened[0]).searchParams;
-    expect(query.get("scope")?.split(" ").sort()).toEqual([CONTACTS_SCOPE, OTHER_CONTACTS_SCOPE].sort());
+    // The session is from before sign-in asked for the basic profile, so the same trip
+    // asks for it too (STRM-461): the upgrade rides along with no screen of its own.
+    expect(query.get("scope")?.split(" ").sort()).toEqual([CONTACTS_SCOPE, OTHER_CONTACTS_SCOPE, PROFILE_SCOPE].sort());
     expect(query.get("include_granted_scopes")).toBe("true");
     expect(query.get("login_hint")).toBe("me@example.com");
     expect(query.get("code_challenge_method")).toBe("S256");
@@ -458,6 +460,27 @@ describe("the account's own profile picture (STRM-461)", () => {
 
     expect((error as GmailError).kind).toBe("declined");
     expect((error as GmailError).message).toMatch(/profile picture was not allowed/i);
+    expect(tokens.current()).toEqual(before);
+  });
+
+  it("asks for an opt-in's scope alone once the grant already has the profile", async () => {
+    google.grantedScope = `${SIGN_IN_SCOPE} ${CONTACTS_SCOPE} ${OTHER_CONTACTS_SCOPE}`;
+    const tokens = memoryTokens(signedIn(SIGN_IN_SCOPE));
+    const { session, opened } = sessionFor("desktop", tokens.store);
+
+    await session.grantContacts();
+
+    const query = new URL(opened[0]).searchParams;
+    expect(query.get("scope")?.split(" ").sort()).toEqual([CONTACTS_SCOPE, OTHER_CONTACTS_SCOPE].sort());
+  });
+
+  it("never trades Gmail access for the picture: a grant without Gmail puts the old tokens back", async () => {
+    google.grantedScope = PROFILE_SCOPE;
+    const before = signedIn();
+    const tokens = memoryTokens(before);
+    const session = sessionFor("desktop", tokens.store).session;
+
+    expect(await session.grantProfile()).toBe("not_granted");
     expect(tokens.current()).toEqual(before);
   });
 });

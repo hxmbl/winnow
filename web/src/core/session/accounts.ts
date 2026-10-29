@@ -61,13 +61,26 @@ export type AccountRecord = {
  *     host, or `null` when the account has none. `pictureData` is a small kept copy
  *     (a `data:` URL, as the sender-picture bytes cache keeps them), when one could be made.
  *   - `access: "not_granted"` — the grant has no profile scope (an account signed in
- *     before Winnow asked for it): the row keeps its monogram and Settings offers the
- *     one re-consent.
+ *     before Winnow asked for it): the row keeps its monogram until the grant has it.
+ *     Every trip to Google asks for it, and the Inbox offers one prompt (`prompted`).
  */
 export type AccountProfile = {
   access: "granted" | "not_granted";
   picture: string | null;
   pictureData?: string;
+  /**
+   * The picture's most dominant colour (`ui/ringColor.ts` `dominantColor`, `#RRGGBB`),
+   * kept raw: each theme adjusts it for contrast when the halo is drawn. `null`: looked
+   * at and too grey or unreadable, so the halo keeps the account colour. Absent: not
+   * looked at yet.
+   */
+  color?: string | null;
+  /**
+   * `not_granted` only: the one-time "show your Google picture" prompt has been answered
+   * (either way). It never comes back for this account; the profile is still asked for on
+   * the next trip to Google (any sign-in or opt-in).
+   */
+  prompted?: boolean;
   /** When it was read: a granted profile is read again after `PROFILE_REFRESH_MS`. */
   checkedAt: number;
 };
@@ -81,10 +94,13 @@ export function reviveAccountProfile(raw: unknown): AccountProfile | undefined {
   const p = raw as Record<string, unknown>;
   if (p.access !== "granted" && p.access !== "not_granted") return undefined;
   const checkedAt = typeof p.checkedAt === "number" && Number.isFinite(p.checkedAt) ? p.checkedAt : 0;
-  if (p.access === "not_granted") return { access: "not_granted", picture: null, checkedAt };
+  if (p.access === "not_granted") {
+    return { access: "not_granted", picture: null, checkedAt, ...(p.prompted === true ? { prompted: true } : {}) };
+  }
   const picture = ownPictureUrl(p.picture);
   const profile: AccountProfile = { access: "granted", picture, checkedAt };
   if (picture && isPictureData(p.pictureData)) profile.pictureData = p.pictureData;
+  if (picture && (p.color === null || isHexColor(p.color))) profile.color = p.color;
   return profile;
 }
 
@@ -110,6 +126,25 @@ export function profileReadDue(
 export function accountPicture(profile: AccountProfile | undefined): string | undefined {
   if (!profile || profile.access !== "granted" || !profile.picture) return undefined;
   return profile.pictureData ?? profile.picture;
+}
+
+/** A stored halo colour: a plain `#RRGGBB`. */
+function isHexColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+}
+
+/** The picture's colour for the halo, when the account has a picture with one; else the account colour is used. */
+export function accountPictureColor(profile: AccountProfile | undefined): string | undefined {
+  if (!accountPicture(profile)) return undefined;
+  return profile?.color ?? undefined;
+}
+
+/**
+ * Whether an account still needs the basic profile granted, and has not had its one
+ * prompt yet: a session signed in before Winnow asked for it (STRM-461).
+ */
+export function profilePromptDue(profile: AccountProfile | undefined): boolean {
+  return profile?.access === "not_granted" && !profile.prompted;
 }
 
 export type AccountsSnapshot = {
