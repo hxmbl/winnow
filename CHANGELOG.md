@@ -16,6 +16,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Changed
 
+- Updating Winnow now shows what it's actually doing at each step instead of just "Updating…": downloading (with how far it's got), verifying the download, then installing or opening the installer. The Update button beside the version, the status pill and Settings → About all show the same step, and About has a progress bar while it downloads. If an update fails, it says why in plain words, for example that the download didn't match the release's checksum or that the connection dropped. This works in the desktop apps and on Android.
 - On a phone, tapping Inbox also scrolls the smart filters back to the start, so the first one is in view again.
 
 ## [1.7.0] - 2026-10-29

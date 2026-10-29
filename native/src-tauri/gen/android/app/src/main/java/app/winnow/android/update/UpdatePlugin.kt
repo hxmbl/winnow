@@ -10,6 +10,7 @@ import androidx.core.content.FileProvider
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -24,6 +25,12 @@ class InstallApkArgs {
   var name: String = ""
   /** The offer came from Dev Options → Beta updates: a pre-release's APK is allowed. */
   var beta: Boolean = false
+  /**
+   * Where each stage is reported as it begins (`updater::UpdateProgress` in Rust, read by
+   * `parseProgress` in the web layer): `downloading` with bytes so far and the size when
+   * the server gives one, `verifying`, `installing`. Absent from an older web layer.
+   */
+  var onProgress: Channel? = null
 }
 
 /**
@@ -37,6 +44,9 @@ class InstallApkArgs {
  *
  * Before the installer opens, the APK is checked against the release's `SHA256SUMS`:
  * a release without one, or a download that doesn't match it, is refused and deleted.
+ *
+ * Each stage is reported on `onProgress` as it begins, so the app can say what it is
+ * doing: downloading (with progress), verifying, opening the installer.
  *
  * Android 8+ asks the user once to allow "Install unknown apps" for Winnow. When that
  * is off, the command opens that settings page and resolves `needs-permission`; the
@@ -86,6 +96,7 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
 
+    val progress = args.onProgress
     Thread {
       try {
         val dir = File(activity.cacheDir, "updates")
@@ -93,8 +104,16 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
         // One update at a time: old downloads are only clutter.
         dir.listFiles()?.forEach { it.delete() }
         val file = File(dir, args.name)
-        download(args.url, file, UpdateLogic.MAX_APK_BYTES)
+        report(progress, "downloading", 0L, null)
+        var lastReported = -1L
+        download(args.url, file, UpdateLogic.MAX_APK_BYTES) { received, length ->
+          if (UpdateLogic.worthReporting(lastReported, received, length)) {
+            lastReported = received
+            report(progress, "downloading", received, length)
+          }
+        }
         // Checked before anything opens it: the release's own list of checksums.
+        report(progress, "verifying")
         val sumsFile = File(dir, UpdateLogic.SUMS_NAME)
         try {
           download(UpdateLogic.sumsUrl(args.url), sumsFile, UpdateLogic.MAX_SUMS_BYTES)
@@ -113,6 +132,7 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
         val intent = Intent(Intent.ACTION_VIEW)
           .setDataAndType(uri, "application/vnd.android.package-archive")
           .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        report(progress, "installing")
         activity.runOnUiThread {
           try {
             activity.startActivity(intent)
@@ -133,6 +153,20 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
     }.start()
   }
 
+  /** One stage report on the web layer's channel; a report that can't be sent is dropped. */
+  private fun report(channel: Channel?, stage: String, received: Long? = null, total: Long? = null) {
+    if (channel == null) return
+    try {
+      val message = JSObject()
+      message.put("stage", stage)
+      if (received != null) message.put("received", received)
+      if (total != null && total > 0) message.put("total", total)
+      channel.send(message)
+    } catch (e: Exception) {
+      // The webview went away: the install goes on without its reports.
+    }
+  }
+
   private fun sha256(file: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
     file.inputStream().use { input ->
@@ -146,7 +180,8 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
     return digest.digest().joinToString("") { "%02x".format(it) }
   }
 
-  private fun download(from: String, to: File, maxBytes: Long) {
+  /** `onChunk(received, total)` after each read; `total` is null when the server gives no size. */
+  private fun download(from: String, to: File, maxBytes: Long, onChunk: (Long, Long?) -> Unit = { _, _ -> }) {
     var url = URL(from)
     // GitHub answers a release download with a redirect to its file host; follow a few,
     // https only (HttpURLConnection already refuses to cross from https to http).
@@ -177,6 +212,7 @@ class UpdatePlugin(private val activity: Activity) : Plugin(activity) {
               total += read
               if (total > maxBytes) throw IllegalStateException("the file is too large")
               output.write(buffer, 0, read)
+              onChunk(total, if (length > 0) length else null)
             }
           }
         }

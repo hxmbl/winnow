@@ -7,8 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import type { UpdatesController } from "../useUpdates";
 import {
   NOTICE_MS,
-  UPDATE_BUTTON_LABEL,
   noticeAfterCheck,
+  updateButtonLabel,
   updateButtonPress,
   updateButtonShown,
   updateButtonView,
@@ -35,14 +35,15 @@ export function UpdateButton({ updates, phone }: { updates: UpdatesController | 
   }, [notice]);
 
   if (!updates || !updateButtonShown(updates.runtime)) return null;
-  const view = updateButtonView(status, hasOffer, notice);
+  const view = updateButtonView(status, hasOffer, notice, updates.stage);
   const press = updateButtonPress(view);
 
   return (
     <button
       type="button"
       data-update-shortcut={view}
-      aria-live="polite"
+      // The pill says each stage once; a ticking percentage here would be read at every step.
+      aria-live={view === "downloading" ? "off" : "polite"}
       disabled={press === null}
       onClick={() => {
         if (press === "check") {
@@ -57,7 +58,7 @@ export function UpdateButton({ updates, phone }: { updates: UpdatesController | 
         phone ? "mr-1 h-9 px-3.5 text-meta" : "h-7 px-3 text-meta"
       } ${view === "update" ? "bg-accent text-on-accent" : "bg-sheen text-ink-body hover:text-ink"}`}
     >
-      {UPDATE_BUTTON_LABEL[view]}
+      <span className="tabular-nums">{updateButtonLabel(view, updates.stage)}</span>
     </button>
   );
 }
