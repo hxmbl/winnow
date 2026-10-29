@@ -50,11 +50,18 @@ export type TabTapHandlers = {
   onClearFilters: () => void;
   scrollToTop: () => void;
   onSelectMailbox: (mailbox: Mailbox) => void;
+  /**
+   * Take the smart-filter rail back to its first pill. Every Inbox tap does this as well
+   * as its own action (STRM-452), so the rail starts at All again. Optional: other tabs
+   * never call it.
+   */
+  scrollRailToStart?: () => void;
 };
 
 /**
  * A tap on the tab for `mailbox`: does what `tabAction` says, through the dock's
- * handlers. Pulled out of `PhoneDock` so the wiring is tested without a DOM.
+ * handlers. Pulled out of `PhoneDock` so the wiring is tested without a DOM. The Inbox
+ * tab also takes the smart-filter rail back to its first pill, whatever else it does.
  */
 export function tapTab(
   mailbox: Mailbox,
@@ -65,6 +72,7 @@ export function tapTab(
   if (action === "clear-filters") handlers.onClearFilters();
   else if (action === "scroll-top") handlers.scrollToTop();
   else handlers.onSelectMailbox(mailbox);
+  if (mailbox === "inbox") handlers.scrollRailToStart?.();
   return action;
 }
 

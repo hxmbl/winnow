@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Changed
+
+- On a phone, tapping Inbox also scrolls the smart filters back to the start, so the first one is in view again.
+
 ## [1.7.0] - 2026-10-29
 
 ### Added
