@@ -165,15 +165,16 @@ Google shows most setup errors on its own pages. Paste what it said under **Goog
 | Desktop | **Desktop app** | none to register, Winnow uses a loopback port | optional; sent if you paste it (not confidential for an installed app) | OS keychain, entry `google.oauth-client` |
 | Web | **Web application** | the page's own address, shown on the setup screen | required | `localStorage`, key `winnow.google.oauthClient`, this origin only |
 
-**Scopes.** Add all three to the OAuth consent screen (Google Auth Platform → Data access):
+**Scopes.** Add these to the OAuth consent screen (Google Auth Platform → Data access):
 
 | Scope | Asked for | Why |
 | --- | --- | --- |
 | `https://www.googleapis.com/auth/gmail.modify` | at sign-in | read, label, send, drafts |
+| `https://www.googleapis.com/auth/userinfo.profile` | at sign-in | your basic profile: your own Google profile picture beside your account |
 | `https://www.googleapis.com/auth/contacts.readonly` | later, opt-in | saved contacts in recipient suggestions, and their photos in avatars |
 | `https://www.googleapis.com/auth/contacts.other.readonly` | later, opt-in | "other contacts" (people you've written to) |
 
-Sign-in only ever asks for `gmail.modify`, which also covers saving drafts, so autosave needs nothing more. (A grant without it — narrowed outside Winnow — makes the composer say "Drafts need permission" and offer to ask for `gmail.compose` the same incremental way; until then the draft stays on the device.) The two contact scopes are requested through incremental consent (`include_granted_scopes=true`) when someone chooses **Settings → Google contacts → Contact photos and suggestions → Connect**, or **Show contact photos** in a sender's menu, on both builds, and under the composer's To field on the desktop (the web build would have to navigate away from the draft to ask). The People API has to be enabled for the project too, next to the Gmail API; if it is off, Settings says so and links to the switch. Both contact scopes are *sensitive*, not restricted: fine for a test-mode app with listed test users.
+Sign-in asks for `gmail.modify`, which also covers saving drafts, so autosave needs nothing more, and for your basic profile (`userinfo.profile`, Google's `profile`), so your account shows your own Google profile picture instead of an initial. The basic profile is *non-sensitive*: a bring-your-own client only needs it added under Data access, with no verification. An account signed in before Winnow asked for it keeps working as before with its initial; **Settings → Google account → Profile picture → Allow** asks Google for it once. (A grant without it — narrowed outside Winnow — makes the composer say "Drafts need permission" and offer to ask for `gmail.compose` the same incremental way; until then the draft stays on the device.) The two contact scopes are requested through incremental consent (`include_granted_scopes=true`) when someone chooses **Settings → Google contacts → Contact photos and suggestions → Connect**, or **Show contact photos** in a sender's menu, on both builds, and under the composer's To field on the desktop (the web build would have to navigate away from the draft to ask). The People API has to be enabled for the project too, next to the Gmail API; if it is off, Settings says so and links to the switch. Both contact scopes are *sensitive*, not restricted: fine for a test-mode app with listed test users.
 
 ## The buckets
 
@@ -268,7 +269,7 @@ In Docker the proxy is named at run time instead, so the published image works w
 
 ## Privacy
 
-The developer runs no servers and collects nothing (no telemetry, analytics or crash reports; the update check is one anonymous request to GitHub's releases API every few hours, and can be turned off); your mail, tokens and OAuth client stay on your device and go only to Google (if you turn on **Show brand logos**, sender domains also go to Cloudflare's DNS resolver and logos load from the senders' own sites; with **Gravatar photos** on, a SHA-256 hash of each sender's address goes to Gravatar); and you can cut Winnow off at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+The developer runs no servers and collects nothing (no telemetry, analytics or crash reports; the update check is one anonymous request to GitHub's releases API every few hours, and can be turned off); your mail, tokens and OAuth client stay on your device and go only to Google (if you turn on **Sender pictures**, sender domains also go to Cloudflare's DNS resolver, logos load from the senders' own sites, and a SHA-256 hash of each sender's address goes to Gravatar); and you can cut Winnow off at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 Sharing your screen or taking a screenshot? **Settings → Privacy → Blur sensitive info** hides what you choose, step by step: email addresses; then passwords given in mail; then postal addresses; then the names of people Winnow knows. Each thing hidden becomes the same number of random letters and is blurred, everywhere Winnow shows it (list, reader, composer, accounts, Settings, notifications, message bodies). It's best effort, so check before you share, and it only changes what's on screen: your replies still go to the real addresses.
 

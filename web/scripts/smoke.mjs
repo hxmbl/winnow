@@ -1136,10 +1136,11 @@ try {
   );
   check(
     "and lists the exact scopes to add, each with a copy button, linked to Data access",
-    (await setup.locator('[data-copy-value="scope-required"]').textContent())?.trim() === "https://www.googleapis.com/auth/gmail.modify" &&
+    (await setup.locator('[data-copy-value="scope-required"]').allTextContents()).map((t) => t.trim()).join(" ") ===
+      "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.profile" &&
       (await setup.locator('[data-copy-value="scope-optional"]').allTextContents()).map((t) => t.trim()).join(" ") ===
         "https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/drive.file" &&
-      (await setup.locator("[data-setup-scopes] button[aria-label^='Copy scope']").count()) === 4 &&
+      (await setup.locator("[data-setup-scopes] button[aria-label^='Copy scope']").count()) === 5 &&
       (await consoleHref("scopes")) === "https://console.cloud.google.com/auth/scopes",
   );
   await setup.getByRole("button", { name: "Back" }).click();

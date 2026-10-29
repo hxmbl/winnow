@@ -21,8 +21,9 @@ pub const PLUGIN_NAME: &str = "google-signin";
 /// The only host a sign-in tab may open: Google's consent page.
 const SIGN_IN_HOST: &str = "accounts.google.com";
 
-/// Every scope a native sign-in may ask for. Winnow asks for Gmail and, opted in,
-/// contacts; a request for anything else did not come from the web layer as written.
+/// Every scope a native sign-in may ask for. Winnow asks for Gmail and the basic profile
+/// (`userinfo.profile`, the account's own picture) and, opted in, contacts; a request for
+/// anything else did not come from the web layer as written.
 const SCOPE_PREFIX: &str = "https://www.googleapis.com/auth/";
 const MAX_SCOPES: usize = 12;
 
@@ -163,6 +164,16 @@ mod tests {
             request.payload(),
             json!({ "serverClientId": ID, "scopes": [GMAIL, "https://www.googleapis.com/auth/contacts.readonly"] })
         );
+    }
+
+    #[test]
+    fn the_sign_in_scopes_are_accepted() {
+        // Gmail and the basic profile, as the web layer's SIGN_IN_SCOPES sends them: the
+        // full URL form, since the short `profile` would be refused like `openid`.
+        let profile = "https://www.googleapis.com/auth/userinfo.profile";
+        let request = AuthorizeRequest::new(ID, &scopes(&[GMAIL, profile])).unwrap();
+        assert_eq!(request.scopes, scopes(&[GMAIL, profile]));
+        assert!(AuthorizeRequest::new(ID, &scopes(&["profile"])).is_err());
     }
 
     #[test]

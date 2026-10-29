@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertCircle, LogIn, Sparkles } from "lucide-react";
-import { GMAIL_SCOPE } from "../core/gmail/dto";
+import { SIGN_IN_SCOPES } from "../core/gmail/dto";
 import { describeFailure, type AuthFailure } from "../core/session/errors";
 import { isTauri } from "../platform";
 import { AppMark } from "./AppMark";
@@ -104,7 +104,8 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
             )}
 
             <p className="mt-4 text-meta leading-relaxed text-ink-subtle">
-              Winnow asks for read, send and label access to Gmail, and nothing else. It
+              Winnow asks for read, send and label access to Gmail, and your basic profile
+              (your name and picture), and nothing else. It
               never reads or stores a password — sign-in happens in Google's own window.
               {isTauri() ? (
                 <>
@@ -152,11 +153,16 @@ export function SignInScreen({ onSignIn, onTryDemo, restoring, hasDemo, needsSet
             What exactly does Winnow ask for?
           </summary>
           <div className="mt-2 rounded-pane border border-hairline bg-surface p-3">
-            <p className="font-mono text-meta break-all">{GMAIL_SCOPE}</p>
+            {SIGN_IN_SCOPES.map((scope) => (
+              <p key={scope} className="font-mono text-meta break-all">
+                {scope}
+              </p>
+            ))}
             <p className="mt-2">
-              One scope, covering reading your mail, labelling it, and sending on your behalf.
-              It is a single permission on purpose — asking for three would produce three
-              warnings and tell you less, not more.
+              One scope for your mail, covering reading it, labelling it, and sending on your
+              behalf — a single permission on purpose, since asking for three would produce
+              three warnings and tell you less, not more. The second is your basic profile
+              (your name and picture), so your account shows your own Google photo.
             </p>
           </div>
         </details>

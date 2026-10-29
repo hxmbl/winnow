@@ -47,13 +47,16 @@ import {
   COMPOSE_SCOPE,
   DraftsScopeMissing,
   GOOGLE_AUTH_URL,
-  GMAIL_SCOPE,
   GmailError,
   GmailHttpError,
   LABEL,
+  PROFILE_SCOPE,
+  SIGN_IN_SCOPE,
   hasDraftScopes,
   isInsufficientScope,
+  profileGrant,
 } from "../gmail/dto";
+import { fetchOwnProfile, type OwnProfileResult } from "../gmail/userinfo";
 import { buildAuthorizeUrl, createPkcePair, describeAuthError, stateMatches } from "../gmail/pkce";
 import type { NativeSignInResult, PlatformInfo } from "../../platform/types";
 import { NO_CLIENT_MESSAGE, TokenManager, type TokenStore } from "../gmail/tokens";
@@ -426,6 +429,16 @@ export type ContactsAccess = "unavailable" | "not_granted" | "granted";
 /** Whether the grant allows Gmail drafts. Same three states as contacts. */
 export type DraftsAccess = "unavailable" | "not_granted" | "granted";
 
+/**
+ * Whether the grant carries the basic profile (the account's own picture, STRM-461).
+ * Contacts' three states, plus `unknown`: a token with no scope list recorded, where the
+ * userinfo read itself decides.
+ */
+export type ProfileAccess = "unavailable" | "not_granted" | "granted" | "unknown";
+
+/** Why a trip to Google was made, when it was not a sign-in. */
+type AuthPurpose = "contacts" | "drafts" | "drive" | "profile";
+
 /** A finished web redirect, with what it was for when it was not a plain sign-in. */
 export type CompletedWebRedirect = {
   email: string;
@@ -445,6 +458,9 @@ export type CompletedWebRedirect = {
   /** Set when the redirect was the Drive opt-in (large files as links), the same way. */
   drive?: DriveAccess | "declined";
   driveMessage?: string;
+  /** Set when the redirect was the profile re-consent (the account's own picture). */
+  profile?: ProfileAccess | "declined";
+  profileMessage?: string;
 };
 
 /** The refusal for a contacts consent approved for a different Google account. */
@@ -453,7 +469,10 @@ function wrongAccountMessage(actual: string, expected: string, what = "Google co
 }
 
 /** Google's refusal, worded for what was being asked. */
-function describeOAuthError(error: string, purpose?: "contacts" | "drafts" | "drive"): string {
+function describeOAuthError(error: string, purpose?: AuthPurpose): string {
+  if (purpose === "profile" && error === "access_denied") {
+    return "Your Google profile picture was not allowed, so your account keeps its initial. Everything else works as before.";
+  }
   if (purpose === "drive" && error === "access_denied") {
     return "Google Drive was not allowed, so the file was not sent as a link. Nothing was uploaded.";
   }
@@ -777,6 +796,56 @@ export class GmailSession {
     return this.driveAccess();
   }
 
+  /**
+   * Whether the stored grant carries the basic profile. Read from the token, not asked:
+   * every sign-in asks for it now, so `not_granted` is a session from before it did (or
+   * one where the box was unticked), which needs one re-consent (`grantProfile`).
+   */
+  async profileAccess(): Promise<ProfileAccess> {
+    const current = await this.tokens.current().catch(() => null);
+    if (!current) return "unavailable";
+    return profileGrant(current.scope);
+  }
+
+  /**
+   * The account's own name and Google profile picture, from the OpenID userinfo endpoint
+   * (`core/gmail/userinfo.ts`). A grant known to lack the profile scope is answered
+   * `not_granted` without asking Google; a token with no scope recorded is asked, and a
+   * refusal comes back `not_granted` too. Never a sign-in failure.
+   */
+  async ownProfile(): Promise<OwnProfileResult> {
+    if ((await this.profileAccess()) === "not_granted") return { kind: "not_granted" };
+    return fetchOwnProfile(() => this.tokens.validAccessToken(), {
+      onUnauthorized: () => this.tokens.forceRefresh(),
+    });
+  }
+
+  /**
+   * The one re-consent a session from before the profile scope needs: ask for the basic
+   * profile on top of the existing grant, the Drive opt-in's way (incremental, with
+   * `login_hint` and the wrong-account refusal). A "no" keeps the session exactly as it
+   * was; the account keeps its monogram. On the web the page navigates away and
+   * `completeWebRedirect` finishes it.
+   */
+  async grantProfile(): Promise<ProfileAccess> {
+    const before = await this.tokens.current();
+    if (!before) {
+      throw new GmailError("Sign in to Gmail before showing your profile picture.", 401, "reauth_required");
+    }
+    const expected = (await this.client.profile()).emailAddress;
+    await this.authorize(
+      PROFILE_SCOPE,
+      { include_granted_scopes: "true", login_hint: expected },
+      { purpose: "profile", expectEmail: expected },
+    );
+    const actual = (await this.profileAfterAuthorize()).emailAddress;
+    if (actual.toLowerCase() !== expected.toLowerCase()) {
+      await this.tokens.adopt(before);
+      throw new GmailError(wrongAccountMessage(actual, expected, "Your profile picture was"), 0, "declined");
+    }
+    return this.profileAccess();
+  }
+
   /** A Drive client on this session's tokens (the same one-refresh-after-401 rule). */
   drive(): DriveApi {
     return new DriveClient(() => this.tokens.validAccessToken(), {
@@ -884,7 +953,9 @@ export class GmailSession {
     const started = Date.now();
     debugLog("auth", "sign-in-start", { chooseAccount: Boolean(options.chooseAccount) });
     try {
-      await this.authorize(GMAIL_SCOPE, options.chooseAccount ? { prompt: "select_account consent" } : {});
+      // Gmail and the basic profile (`SIGN_IN_SCOPE`), on every path: this one call is
+      // the web redirect, the desktop loopback, the Android Custom Tab and Play services.
+      await this.authorize(SIGN_IN_SCOPE, options.chooseAccount ? { prompt: "select_account consent" } : {});
       const profile = await this.profileAfterAuthorize();
       debugLog("auth", "sign-in-done", { ms: Date.now() - started });
       return { email: profile.emailAddress };
@@ -932,7 +1003,7 @@ export class GmailSession {
   /**
    * One authorize round trip, ending in an adopted token set.
    *
-   * Shared by the sign-in (`GMAIL_SCOPE`) and the contacts opt-in (the contact scopes,
+   * Shared by the sign-in (`SIGN_IN_SCOPE`) and the contacts opt-in (the contact scopes,
    * with `include_granted_scopes`), because everything about the trip is the same: PKCE,
    * the platform's redirect delivery, the state check before any exchange. On the web
    * this never returns — the page navigates to Google — and the code is exchanged by
@@ -941,7 +1012,7 @@ export class GmailSession {
   private async authorize(
     scope: string,
     extra: Record<string, string> = {},
-    intent: { purpose?: "contacts" | "drafts" | "drive"; expectEmail?: string } = {},
+    intent: { purpose?: AuthPurpose; expectEmail?: string } = {},
   ): Promise<void> {
     const stored = await this.storedCredentials();
     const clientId = stored?.clientId;
@@ -1201,6 +1272,17 @@ export class GmailSession {
           draftsMessage: describeOAuthError(redirect.error, "drafts"),
         };
       }
+      if (declined?.purpose === "profile" && (await this.tokens.hasSession())) {
+        // Saying no to the picture is not a failed sign-in: the session is untouched.
+        this.scrubAddressBar();
+        const profile = await this.client.profile();
+        return {
+          email: profile.emailAddress,
+          view: shared,
+          profile: "declined",
+          profileMessage: describeOAuthError(redirect.error, "profile"),
+        };
+      }
       if (declined?.purpose === "drive" && (await this.tokens.hasSession())) {
         this.scrubAddressBar();
         const profile = await this.client.profile();
@@ -1279,6 +1361,19 @@ export class GmailSession {
         };
       }
       return { email: profile.emailAddress, view: shared, drafts: await this.draftsAccess() };
+    }
+    if (pending.purpose === "profile") {
+      const expectedEmail = pending.expectEmail;
+      if (expectedEmail && before && profile.emailAddress.toLowerCase() !== expectedEmail.toLowerCase()) {
+        await this.tokens.adopt(before);
+        return {
+          email: expectedEmail,
+          view: shared,
+          profile: "declined",
+          profileMessage: wrongAccountMessage(profile.emailAddress, expectedEmail, "Your profile picture was"),
+        };
+      }
+      return { email: profile.emailAddress, view: shared, profile: await this.profileAccess() };
     }
     if (pending.purpose === "drive") {
       const expectedEmail = pending.expectEmail;

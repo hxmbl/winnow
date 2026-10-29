@@ -99,7 +99,7 @@ export function AccountSwitcher(props: AccountSwitcherProps) {
                   } ${account.active ? "bg-surface-selected" : ""}`}
                 >
                   <span className="relative shrink-0">
-                    <Avatar lookup={false} name={account.email} address={account.email} />
+                    <Avatar lookup={false} name={account.email} address={account.email} photo={account.picture} />
                     <AccountGlow color={account.color} scheme={props.scheme} active={account.active} />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -192,7 +192,7 @@ export function AccountButton({
       className={`pointer-events-auto relative flex h-11 w-11 shrink-0 items-center justify-center rounded-ctl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring ${glass ? "wn-glass" : "hover:bg-surface-hover"}`}
     >
       <span className="relative flex rounded-full">
-        <Avatar lookup={false} name={active?.email ?? "You"} address={active?.email ?? "you@winnow.demo"} />
+        <Avatar lookup={false} name={active?.email ?? "You"} address={active?.email ?? "you@winnow.demo"} photo={active?.picture} />
         {active && <AccountGlow color={active.color} scheme={scheme} active />}
       </span>
       {others > 0 && (

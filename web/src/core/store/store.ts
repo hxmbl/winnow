@@ -315,7 +315,7 @@ export type Preferences = {
    */
   senderPictures: boolean;
   /**
-   * The inbox's "Profile pictures are off" notice was answered ("Keep off", "Turn on",
+   * The inbox's "Sender pictures are off" notice was answered ("Keep off", "Turn on",
    * or the switch changed in Settings), so it does not come back. See
    * `ui/pictureNotice.ts`.
    */
@@ -928,6 +928,13 @@ export type AccountSummary = {
   active: boolean;
   /** A demo account: the switcher shows it, nothing is signed in. */
   demo?: boolean;
+  /**
+   * The account's own Google profile picture (STRM-461): a kept `data:` copy or the URL
+   * on Google's image host. Absent: the monogram.
+   */
+  picture?: string;
+  /** The grant lacks the basic profile (signed in before Winnow asked): offer the re-consent. */
+  profileConsent?: boolean;
 };
 
 /** What one account (or the demo, with no account) persisted: see `core/store/accountState.ts`. */

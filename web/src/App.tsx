@@ -872,6 +872,29 @@ export function App({ store, existingInstall = true }: Props) {
     }
   }, [store, syncGoogleContacts]);
   const onImproveSuggestions = useCallback(() => void improveSuggestions(), [improveSuggestions]);
+
+  /**
+   * The one re-consent for the open account's own Google profile picture (STRM-461),
+   * from Settings → Google account. A "no" (or another account chosen) is said inline and
+   * changes nothing else; on the web the page leaves and the redirect finishes it.
+   */
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const onAllowProfile = useCallback(() => {
+    const bridge = sessionRef.current;
+    if (!bridge) return;
+    setProfileError(null);
+    setProfileBusy(true);
+    void bridge
+      .grantProfile()
+      .then((access) => {
+        if (access === "not_granted") setProfileError("Google didn't include your profile, so your account keeps its initial.");
+      })
+      .catch((error: unknown) => {
+        setProfileError(error instanceof Error ? error.message : "Your profile picture was not allowed.");
+      })
+      .finally(() => setProfileBusy(false));
+  }, []);
   const onConnectContactPhotos = useCallback(() => void improveSuggestions(true), [improveSuggestions]);
 
   const [restoringSession, setRestoringSession] = useState(false);
@@ -1139,6 +1162,8 @@ export function App({ store, existingInstall = true }: Props) {
     void (async () => {
       try {
         const bridge = createSessionBridge(platform, store, {
+          // The account's own profile picture is kept as a small copy, like sender pictures.
+          capturePicture: canvasCapture(),
           // New mail in an account that is not open: its own notification, tagged with
           // the account, under the same settings (on, not muted or hidden) as the open one's.
           onInactiveMail: (account, emails) => {
@@ -1197,6 +1222,12 @@ export function App({ store, existingInstall = true }: Props) {
           }
           // Back from the Drive opt-in: the web page had to leave, and a file that big
           // is not kept on the device, so it is attached again by hand.
+          // Back from the profile re-consent: read the picture now rather than tomorrow.
+          if (completed.profile === "declined") {
+            store.setNotice(completed.profileMessage ?? "Your profile picture was not allowed.");
+          } else if (completed.profile === "granted" || completed.profile === "unknown") {
+            void bridge.refreshOwnProfile();
+          }
           if (completed.drive === "declined") {
             store.setNotice(completed.driveMessage ?? "Google Drive was not allowed.");
           } else if (completed.drive === "granted") {
@@ -1368,6 +1399,7 @@ export function App({ store, existingInstall = true }: Props) {
       store.setMailbox(mailbox);
     },
     accountEmail: snapshot.account?.email ?? null,
+    accountPicture: snapshot.account ? snapshot.accounts.find((account) => account.active)?.picture : undefined,
     signingIn,
     connectLabel: demoCta,
     connectBusy: signingIn || resuming,
@@ -5177,6 +5209,10 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             store.setOverlay("none");
             setSetupOpen(true);
           }}
+          ownAccount={isDemo ? null : (snapshot.accounts.find((account) => account.active) ?? null)}
+          profileBusy={profileBusy}
+          profileError={profileError}
+          onAllowProfile={onAllowProfile}
           contactsAccess={snapshot.contactsAccess}
           contactsBusy={contactsBusy}
           contactsError={contactsError}

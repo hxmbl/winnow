@@ -17,6 +17,7 @@ adds. See `native/README.md`, "Cutting a release".
 ### Added
 
 - The Inbox now says when sender pictures are off, with Keep off and Turn on, and what turning them on sends. If Remote images is set to Never it says that is what pauses them, and opens Privacy settings rather than changing anything. Keep off hides it for good.
+- Your own Google profile picture now shows beside your account: in the sidebar, the account switcher, the Accounts page and Settings › Google account, with your initial as before when there isn't one. To read it, signing in now also asks Google for your basic profile (your name and picture). If you signed in before this, nothing changes until you choose Allow in Settings › Google account › Profile picture, which asks Google once. If you use your own Google Cloud client, add the `userinfo.profile` scope to its consent screen (it's non-sensitive, so there's nothing to verify).
 
 ### Changed
 

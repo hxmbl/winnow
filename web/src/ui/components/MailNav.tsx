@@ -72,6 +72,8 @@ export type NavProps = {
   onSelectMailbox: (mailbox: Mailbox) => void;
   /** Signed-in address, or null in the demo. */
   accountEmail: string | null;
+  /** The account's own Google profile picture (STRM-461); absent, the monogram. */
+  accountPicture?: string;
   signingIn: boolean;
   /**
    * What the demo's connect item says: "Connect Gmail", or "Back to your inbox" when
@@ -282,7 +284,12 @@ function AccountFooter(props: NavProps & { touch: boolean; onNavigate?: () => vo
           props.touch ? "col-span-2 ml-1.5 min-h-12 py-1" : "py-1"
         }`}
       >
-        <Avatar lookup={false} name={props.accountEmail ? name : "You"} address={props.accountEmail ?? "you@winnow.demo"} />
+        <Avatar
+          lookup={false}
+          name={props.accountEmail ? name : "You"}
+          address={props.accountEmail ?? "you@winnow.demo"}
+          photo={props.accountEmail ? props.accountPicture : undefined}
+        />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-ui font-medium text-ink">{name}</span>
           <span className="block truncate text-meta text-ink-subtle">{detail}</span>

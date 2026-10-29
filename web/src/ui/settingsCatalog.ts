@@ -311,6 +311,12 @@ export const SETTINGS = {
     explanation:
       "Whether new mail in this account notifies you while you are reading another one. Winnow checks the accounts you are not viewing lightly, for their unread count and new mail only, on the same schedule as background sync. The open account always follows Notify about new mail.",
   },
+  profilePicture: {
+    category: "google",
+    label: "Profile picture",
+    explanation:
+      "Your own Google profile picture, beside your account in the sidebar, the switcher and the Accounts page. Winnow reads it with the basic profile permission it asks for at sign-in (your name and picture, nothing else), keeps a small copy on this device so it shows offline, and reads it again about once a day. If you signed in before Winnow asked for it, Allow asks Google once; until then, or if you say no, your account shows its initial.",
+  },
   googleContacts: {
     category: "google",
     label: "Contact photos and suggestions",

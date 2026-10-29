@@ -67,6 +67,43 @@ export function base64UrlDecode(text: string): Uint8Array | null {
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 
 /**
+ * The basic profile: the account's own name and Google profile picture, read from the
+ * OpenID userinfo endpoint (`core/gmail/userinfo.ts`). Non-sensitive, so a bring-your-own
+ * client's consent screen lists it without verification.
+ *
+ * The full URL form, not the short `profile`: Google treats them as the same scope, but
+ * the native Android sign-in (Rust `google_signin.rs`, Kotlin `SignInLogic.cleanScopes`)
+ * only lets `https://www.googleapis.com/auth/…` scopes through, and Google reports the
+ * grant back in this form either way.
+ */
+export const PROFILE_SCOPE = "https://www.googleapis.com/auth/userinfo.profile";
+
+/**
+ * What every sign-in asks for, on every path (web redirect, desktop loopback, the
+ * Android Custom Tab and Play services' AuthorizationClient): Gmail, and the basic
+ * profile for the account's own picture (STRM-461). Everything else is asked for later,
+ * when it is first needed (contacts, drafts, Drive).
+ */
+export const SIGN_IN_SCOPES: readonly string[] = [GMAIL_SCOPE, PROFILE_SCOPE];
+
+/** `SIGN_IN_SCOPES` as the space-separated `scope` parameter OAuth takes. */
+export const SIGN_IN_SCOPE = SIGN_IN_SCOPES.join(" ");
+
+/**
+ * Whether a token's `scope` string carries the basic profile.
+ *
+ * Three answers, because a session signed in before Winnow asked for it has only `gmail.modify`:
+ * `granted`, `not_granted` (the scope list is recorded and lacks it: that session needs
+ * one re-consent before the picture can be read), or `unknown` (no scope recorded, so
+ * the userinfo read itself decides). The short alias `profile` counts too.
+ */
+export function profileGrant(scope: string | undefined | null): "granted" | "not_granted" | "unknown" {
+  if (scope === undefined || scope === null || scope.trim() === "") return "unknown";
+  const granted = new Set(scope.split(/\s+/).filter(Boolean));
+  return granted.has(PROFILE_SCOPE) || granted.has("profile") ? "granted" : "not_granted";
+}
+
+/**
  * The narrowest scope that allows drafts (`users.drafts.*`): what the drafts opt-in asks
  * for when a grant lacks every scope in `DRAFT_SCOPES`.
  */
