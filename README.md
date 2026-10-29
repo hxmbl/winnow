@@ -11,7 +11,7 @@ Gmail, but it sorts the noise out for you and shows its working.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.webp">
-  <img src="docs/images/hero-light.webp" width="1600" alt="Winnow's demo inbox on the desktop: smart filter pills (Important, Deliveries, New contacts, Action needed) above a one-line summary of what's waiting, the message list with a copy-code chip and Urgent tags, and an open message whose &quot;Why it's here&quot; section explains each filter it landed in">
+  <img src="docs/images/hero-light.webp" width="1600" alt="Winnow's demo inbox on the desktop: smart filter pills with their icons (Important, Deliveries, New contacts, Action needed) above a one-line summary of what's waiting, the message list with a copy-code chip and urgent warning icons, and an open message whose &quot;Why it's here&quot; section explains each filter it landed in">
 </picture>
 
 I made this because Gmail kept burying mail I actually needed. Not spam, not
@@ -59,7 +59,7 @@ xattr -dr com.apple.quarantine /Applications/Winnow.app
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/phone-dark.webp">
-    <img src="docs/images/phone-light.webp" width="300" alt="Winnow's demo inbox on a phone: search at the top, the message list, smart filter pills floating above a glass dock with Inbox, Sent and a compose button">
+    <img src="docs/images/phone-light.webp" width="300" alt="Winnow's demo inbox on a phone: search at the top, the message list with a copy-code chip, and smart filter pills floating above a glass dock with Inbox, Sent, More mailboxes and a compose button">
   </picture>
 </p>
 
