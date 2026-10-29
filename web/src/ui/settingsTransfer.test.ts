@@ -48,8 +48,7 @@ describe("the export allowlist", () => {
       "undoSendSeconds",
       "driveLinks",
       "imagePolicy",
-      "brandLogos",
-      "gravatars",
+      "senderPictures",
       "censorLevel",
       "notificationsEnabled",
       "notificationActions",
@@ -190,14 +189,27 @@ describe("validateSettings", () => {
   });
 });
 
+describe("a settings file from before Sender pictures was one switch", () => {
+  it("reads brandLogos / gravatars as Sender pictures, either on meaning on", () => {
+    expect(validateSettings({ brandLogos: true, gravatars: false })).toEqual({ settings: { senderPictures: true }, ignored: [] });
+    expect(validateSettings({ gravatars: true })).toEqual({ settings: { senderPictures: true }, ignored: [] });
+    expect(validateSettings({ brandLogos: false, gravatars: false })).toEqual({ settings: { senderPictures: false }, ignored: [] });
+  });
+
+  it("lets the new switch win, and ignores old values that are not booleans", () => {
+    expect(validateSettings({ senderPictures: false, brandLogos: true }).settings).toEqual({ senderPictures: false });
+    expect(validateSettings({ brandLogos: "yes" })).toEqual({ settings: {}, ignored: ["brandLogos"] });
+  });
+});
+
 describe("diffSettings", () => {
   it("lists only what changes, in words", () => {
     const current = collectSettings(sources());
-    const incoming = { ...current, appearance: "oled" as const, undoSendSeconds: 0 as const, gravatars: true, readerFraction: 0.5 };
+    const incoming = { ...current, appearance: "oled" as const, undoSendSeconds: 0 as const, senderPictures: true, readerFraction: 0.5 };
     expect(diffSettings(current, incoming)).toEqual([
       { key: "appearance", label: "Mode", from: "System", to: "Very dark" },
       { key: "undoSendSeconds", label: "Undo send window", from: "10 seconds", to: "Off" },
-      { key: "gravatars", label: "Gravatar photos", from: "Off", to: "On" },
+      { key: "senderPictures", label: "Sender pictures", from: "Off", to: "On" },
       { key: "readerFraction", label: "Reader width", from: "38%", to: "50%" },
     ]);
   });

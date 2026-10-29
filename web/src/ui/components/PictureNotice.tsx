@@ -2,6 +2,7 @@ import { useId } from "react";
 import { CircleUserRound } from "lucide-react";
 import { PICTURE_NOTICE_COPY, type PictureNoticeKind } from "../pictureNotice";
 import { QUIET_BUTTON } from "../quietButton";
+import { Icon } from "./Icon";
 
 /**
  * The reader's quiet button, kept small so the notice stays slim, with its touch target
@@ -40,7 +41,7 @@ export function PictureNotice({
     >
       <div className="min-w-0 flex-[1_1_18rem]">
         <p id={`${id}-title`} className="flex items-center gap-2 text-ui font-semibold text-ink">
-          <CircleUserRound size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" aria-hidden="true" />
+          <Icon icon={CircleUserRound} size={16} className="shrink-0 text-ink-muted" />
           {copy.title}
         </p>
         <p id={`${id}-body`} className="mt-0.5 text-meta leading-snug text-ink-muted">

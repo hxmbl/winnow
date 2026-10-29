@@ -442,7 +442,7 @@ describe("Android: the sender's monogram when there is no picture (1.5.5)", () =
     expect(logos.asked).toEqual([]);
   });
 
-  it("a brand logo is only a source when Show brand logos is on (its source is null when off)", async () => {
+  it("a brand logo is only a source when Sender pictures is on (its source is null when off)", async () => {
     const logos = source({ [ADA]: LOGO });
     publishSenderPictures(sources({ logos }));
     try {
