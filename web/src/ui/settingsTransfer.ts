@@ -296,6 +296,8 @@ export function settingLabel(key: ExportedKey): string {
       return SETTINGS.backgroundSync.label;
     case "backgroundSyncInterval":
       return `Background sync: ${SETTINGS.syncInterval.label.toLowerCase()}`;
+    case "gmailListener":
+      return SETTINGS.gmailListener.label;
     case "autoCheckUpdates":
       return "Check for updates automatically";
     case "readerFraction":
