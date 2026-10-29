@@ -18,6 +18,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 - Updating Winnow now shows what it's actually doing at each step instead of just "Updating…": downloading (with how far it's got), verifying the download, then installing or opening the installer. The Update button beside the version, the status pill and Settings → About all show the same step, and About has a progress bar while it downloads. If an update fails, it says why in plain words, for example that the download didn't match the release's checksum or that the connection dropped. This works in the desktop apps and on Android.
 - On a phone, tapping Inbox also scrolls the smart filters back to the start, so the first one is in view again.
+- A large mailbox feels quicker. Typing in search, selecting a message and turning a smart filter on or off do less repeated work, so each update takes roughly a quarter to a half less time with 5,000 messages (search keystrokes about twice as fast). Catching up after time offline asks Gmail for changes in pages five times larger, so it takes fewer round trips. On the desktop app, background sync no longer wakes the computer four times a second between checks.
 
 ### Fixed
 

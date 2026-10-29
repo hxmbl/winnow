@@ -1483,7 +1483,7 @@ export class WinnowStore {
     // the count, the list a filter gives and "Why it's here" all agree. The permanent
     // pair stays pinned wherever you are.
     const railEmails = state.mailbox === "drafts" || state.mailbox === "scheduled" ? [] : mailboxEmails;
-    const rail = rankFilters(railEmails, signals, profile);
+    const rail = rankFilters(railEmails, signals, profile, this.filterHits);
     const railWithActive = this.orderedRail(rail);
     // Conversations, like the list's rows and the masthead's readout (`threads`).
     const railCounts =

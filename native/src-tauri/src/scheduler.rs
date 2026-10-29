@@ -9,10 +9,9 @@
 //! The interval is chosen by the web layer because it knows about rate limits
 //! and quiet hours; `None` means "stop ticking".
 
-use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use parking_lot::{Condvar, Mutex};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// The event the webview listens for. Keeping the name in one place stops the
@@ -24,14 +23,31 @@ pub const SYNC_TICK_EVENT: &str = "winnow://sync-tick";
 const MIN_INTERVAL_SECS: u64 = 30;
 const MAX_INTERVAL_SECS: u64 = 3600;
 
-/// How long a sleeping thread waits between checks of the stop flag. Small
-/// enough that quitting feels instant, large enough not to spin a core.
-const STOP_CHECK: Duration = Duration::from_millis(250);
+/// A ticker's stop request: a flag the sleeping thread waits on.
+///
+/// It used to be an `AtomicBool` the thread polled every 250 ms, which woke the
+/// process four times a second for as long as background sync was on (about
+/// 345,000 wake-ups a day on an idle laptop, for a tick every few minutes). The
+/// thread now sleeps the whole interval on a condition variable, and a stop
+/// request wakes it at once.
+#[derive(Default)]
+struct Stop {
+    stopped: Mutex<bool>,
+    wake: Condvar,
+}
+
+impl Stop {
+    /// Ask the ticker to stop, waking it if it is asleep.
+    fn request(&self) {
+        *self.stopped.lock() = true;
+        self.wake.notify_all();
+    }
+}
 
 /// The live ticker: the stop flag, and the thread running it.
 ///
 /// The handle is here so `stop` can *join* rather than merely signal. Signalling
-/// alone left the old thread running for up to one `STOP_CHECK` after a retune, so
+/// alone left the old thread running until it next looked at the flag, so
 /// changing the interval in the settings panel started a second ticker while the
 /// first was still winding down — and the two overlapped, which meant a tick could
 /// fire twice and the webview ran two syncs where the user asked for one. Joining
@@ -40,7 +56,7 @@ const STOP_CHECK: Duration = Duration::from_millis(250);
 pub struct Scheduler(Mutex<Option<Running>>);
 
 struct Running {
-    stop: Arc<AtomicBool>,
+    stop: Arc<Stop>,
     handle: std::thread::JoinHandle<()>,
 }
 
@@ -58,7 +74,7 @@ impl Scheduler {
     fn retire(&self) {
         let running = self.0.lock().take();
         if let Some(running) = running {
-            running.stop.store(true, Ordering::SeqCst);
+            running.stop.request();
             let _ = running.handle.join();
         }
     }
@@ -74,7 +90,7 @@ impl Scheduler {
         // substitutive, which is the bug above.
         self.retire();
 
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(Stop::default());
         let interval =
             Duration::from_secs(interval_secs.clamp(MIN_INTERVAL_SECS, MAX_INTERVAL_SECS));
 
@@ -106,20 +122,19 @@ impl Scheduler {
     }
 }
 
-/// Sleep for `total`, waking often enough to notice `stop`.
+/// Sleep for `total`, or until `stop` is requested, whichever comes first.
 ///
-/// Returns `true` if the thread was asked to stop while waiting.
-fn sleep_until(stop: &AtomicBool, total: Duration) -> bool {
-    let mut waited = Duration::ZERO;
-    while waited < total {
-        if stop.load(Ordering::SeqCst) {
-            return true;
+/// Returns `true` if the thread was asked to stop while waiting. Spurious
+/// wake-ups go back to sleep until the same deadline.
+fn sleep_until(stop: &Stop, total: Duration) -> bool {
+    let deadline = Instant::now() + total;
+    let mut stopped = stop.stopped.lock();
+    while !*stopped {
+        if stop.wake.wait_until(&mut stopped, deadline).timed_out() {
+            break;
         }
-        let chunk = STOP_CHECK.min(total - waited);
-        std::thread::sleep(chunk);
-        waited += chunk;
     }
-    stop.load(Ordering::SeqCst)
+    *stopped
 }
 
 /// Register the scheduler with the app. State is managed here so the command
@@ -163,12 +178,12 @@ mod tests {
         // A 30s interval that is cut short after 120ms is the whole point: if
         // `sleep_until` only checked the flag between intervals, quitting the
         // app would hang for half a minute.
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(Stop::default());
         let signal = Arc::clone(&stop);
 
         let waker = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(120));
-            signal.store(true, Ordering::SeqCst);
+            signal.request();
         });
 
         let started = std::time::Instant::now();
@@ -188,7 +203,8 @@ mod tests {
 
     #[test]
     fn sleeping_returns_early_once_stopped() {
-        let stop = AtomicBool::new(true);
+        let stop = Stop::default();
+        stop.request();
         let started = std::time::Instant::now();
         assert!(sleep_until(&stop, Duration::from_secs(30)));
         assert!(
@@ -199,8 +215,7 @@ mod tests {
 
     #[test]
     fn the_first_ticker_is_finished_before_the_second_one_starts() {
-        // The retune bug, as a test. `sleep_until` wakes every 250 ms to check its
-        // stop flag, so a thread that was only *signalled* could still be inside
+        // The retune bug, as a test. A thread that was only *signalled* could still be inside
         // its loop when a new ticker began — and the two overlapped, double-firing
         // ticks. `retire` joins, so the assertion that matters is that the old
         // thread is observably gone by the time the new one exists.
@@ -209,7 +224,7 @@ mod tests {
         // `AppHandle` (which `start` needs and this test cannot build): signal,
         // join, and only then let the replacement run.
         let scheduler = Scheduler::new();
-        let first_stop = Arc::new(AtomicBool::new(false));
+        let first_stop = Arc::new(Stop::default());
         let flag = Arc::clone(&first_stop);
 
         let first = std::thread::spawn(move || {
@@ -220,12 +235,36 @@ mod tests {
         });
 
         // Retiring is what `start` does first, and it must wait.
-        first_stop.store(true, Ordering::SeqCst);
+        first_stop.request();
         assert_eq!(first.join().unwrap(), "first");
 
         // And a scheduler with nothing registered is genuinely idle, not merely
         // signalled.
         assert!(scheduler.0.lock().is_none());
         scheduler.stop();
+    }
+
+    #[test]
+    fn sleeping_runs_the_full_interval_when_nobody_stops_it() {
+        // The other half: with no stop request the wait is the interval itself, not
+        // cut short by a wake-up, so ticks keep their cadence.
+        let stop = Stop::default();
+        let started = Instant::now();
+        assert!(!sleep_until(&stop, Duration::from_millis(150)));
+        assert!(started.elapsed() >= Duration::from_millis(150));
+    }
+
+    #[test]
+    fn a_stop_request_wakes_a_long_sleep_at_once() {
+        // No polling any more: the request itself wakes the thread, so an hour-long
+        // interval still stops within moments.
+        let stop = Arc::new(Stop::default());
+        let signal = Arc::clone(&stop);
+        let sleeper = std::thread::spawn(move || sleep_until(&signal, Duration::from_secs(3600)));
+        std::thread::sleep(Duration::from_millis(50));
+        let asked = Instant::now();
+        stop.request();
+        assert!(sleeper.join().unwrap());
+        assert!(asked.elapsed() < Duration::from_secs(2));
     }
 }

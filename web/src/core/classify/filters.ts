@@ -312,8 +312,14 @@ export function rankFilters(
   inbox: readonly Email[],
   signals: ReadonlyMap<number, EmailSignals>,
   profile: UserProfile,
+  /**
+   * The store's per-message memo, the one `countAllFilters` takes. Without it every
+   * derive (a selection, a body loading, a clock tick) re-ran every filter predicate
+   * over the whole mailbox just to rank the rail: about half of a 5,000-message derive.
+   */
+  memo?: Parameters<typeof countAllFilters>[3],
 ): BuiltinSmartFilter[] {
-  const counts = countAllFilters(inbox, signals, profile);
+  const counts = countAllFilters(inbox, signals, profile, memo);
 
   const pinned = [...PERMANENT_FILTERS];
 

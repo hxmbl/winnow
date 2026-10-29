@@ -766,6 +766,19 @@ describe("countAllFilters", () => {
 });
 
 describe("rankFilters", () => {
+  it("ranks the same with the store's memo as without it, and reads the memo", () => {
+    // The store hands its per-message memo in (STRM-451) so a derive that changed nothing
+    // does not re-run every filter over the mailbox. Same answer either way...
+    const memo: Parameters<typeof rankFilters>[3] = new WeakMap();
+    expect(rankFilters(inbox, signals, profile, memo)).toEqual(rankFilters(inbox, signals, profile));
+    // ...and the second pass really is served from it: an entry planted for one message
+    // (same signal and profile, so valid) is what gets counted.
+    const one = inbox[0]!;
+    memo!.set(one, { signal: signals.get(one.id)!, profile, ids: ["travel"] });
+    const solo = rankFilters([one], signals, profile, memo);
+    expect(solo).toContain("travel");
+  });
+
   it("pins the permanent buckets first, even when empty", () => {
     // Important and Deliveries are the two a user reaches for on a bad day. A
     // pill that disappears exactly when it is needed is worse than no pill.

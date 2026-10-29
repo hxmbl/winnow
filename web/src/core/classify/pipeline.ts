@@ -27,9 +27,27 @@ import { calculateWinnowScore, recencyWindow, type SortBy } from "./scoring";
 /** Lowercased haystacks, keyed by email id. Pass to avoid rebuilding them. */
 export type SearchBags = ReadonlyMap<number, string>;
 
+/**
+ * Each message object's bag, built once. Messages are never mutated in place (a change
+ * is a new object, which is what the store's other per-message memos rely on too), so
+ * the bag of an object cannot go stale. Without it every derive while a search was
+ * running lowercased the sender, subject and body of every message in the mailbox
+ * again, keystroke or not.
+ */
+const bagMemo = new WeakMap<Email, string>();
+
+function bagOf(email: Email): string {
+  let bag = bagMemo.get(email);
+  if (bag === undefined) {
+    bag = inboxSearchBag(email);
+    bagMemo.set(email, bag);
+  }
+  return bag;
+}
+
 export function buildSearchBags(emails: readonly Email[]): SearchBags {
   const bags = new Map<number, string>();
-  for (const email of emails) bags.set(email.id, inboxSearchBag(email));
+  for (const email of emails) bags.set(email.id, bagOf(email));
   return bags;
 }
 
@@ -45,7 +63,7 @@ export function searchTokens(searchQuery: string): string[] {
 /** The list's search test: every token is in the message's bag (AND across tokens). */
 export function matchesSearch(email: Email, tokens: readonly string[], bags?: SearchBags): boolean {
   if (tokens.length === 0) return true;
-  const hay = bags?.get(email.id) ?? inboxSearchBag(email);
+  const hay = bags?.get(email.id) ?? bagOf(email);
   return tokens.every((token) => hay.includes(token));
 }
 
