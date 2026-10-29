@@ -67,6 +67,7 @@ import type { AccountSummary } from "../../core/store/store";
 import { accountsSummary } from "../accountsPage";
 import type { UpdatesController } from "../useUpdates";
 import { operatorUpdate } from "../../core/updates/updates";
+import { installing, percent, stageButtonLabel, stageText } from "../../core/updates/stages";
 import { buttonClass } from "../button";
 import { Icon } from "./Icon";
 import { diffSettings, parseSettingsFile, type ExportedSettings, type SettingChange } from "../settingsTransfer";
@@ -1152,9 +1153,14 @@ function DevCheckNowRow({ updates }: { updates: UpdatesController }) {
  * for a web copy, a restart for the Docker image).
  */
 function UpdateSettings({ updates }: { updates: UpdatesController }) {
-  const { offer, status } = updates;
+  const { offer, status, stage } = updates;
   const busy = status === "checking" || status === "installing";
-  const line = offer
+  // While an install runs, the line says its stage ("Verifying the download…").
+  const running = offer && installing(stage) ? stageText(stage, offer.version) : null;
+  const share = stage.stage === "downloading" ? percent(stage.received, stage.total) : null;
+  const line = running
+    ? running
+    : offer
     ? `Winnow ${offer.version} is available (you have ${offer.current}).`
     : status === "checking"
       ? "Checking…"
@@ -1171,7 +1177,27 @@ function UpdateSettings({ updates }: { updates: UpdatesController }) {
       <Row setting="updates" hint={line ?? undefined}>
         <Toggle checked={updates.auto} onChange={updates.setAuto} label="Check for updates automatically" />
       </Row>
-      <div data-settings-updates={offer ? offer.action.kind : status} className="flex flex-col gap-2 pb-1">
+      <div
+        data-settings-updates={offer ? offer.action.kind : status}
+        data-update-stage={stage.stage}
+        className="flex flex-col gap-2 pb-1"
+      >
+        {stage.stage === "downloading" && (
+          <div
+            role="progressbar"
+            aria-label="Download progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            {...(share !== null ? { "aria-valuenow": share } : {})}
+            data-update-progress=""
+            className="h-1 w-full overflow-hidden rounded-full bg-sheen"
+          >
+            <div
+              className={`h-full rounded-full bg-accent transition-[width] duration-200 ${share === null ? "w-1/3 animate-pulse" : ""}`}
+              style={share !== null ? { width: `${share}%` } : undefined}
+            />
+          </div>
+        )}
         {operator && (
           <p className="text-meta text-ink-muted">
             {operator.before}{" "}
@@ -1187,7 +1213,7 @@ function UpdateSettings({ updates }: { updates: UpdatesController }) {
             onClick={button.onClick}
             className={`${SECONDARY_BUTTON} disabled:opacity-60`}
           >
-            {status === "installing" ? "Updating…" : button.label}
+            {status === "installing" ? (stageButtonLabel(stage) ?? "Updating…") : button.label}
           </button>
           {offer && (
             <button type="button" data-update-whats-new="" onClick={updates.openWhatsNew} className={SECONDARY_BUTTON}>

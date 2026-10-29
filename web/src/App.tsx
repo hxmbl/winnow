@@ -4493,6 +4493,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         onSendNow={sendWaitingNow}
         onDismissFlash={store.dismissFlash.bind(store)}
         update={updates.announcement}
+        updating={updates.progress}
         onUpdate={updates.install}
         onDismissUpdate={updates.dismissAnnouncement}
         onWhatsNew={updates.openWhatsNew}

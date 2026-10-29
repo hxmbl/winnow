@@ -29,7 +29,7 @@ import { PositionReadout } from "./Masthead";
 import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 import { ComposeButton } from "./ComposeFab";
-import { listScroller, scrollListToTop } from "../listScroll";
+import { listScroller, scrollListToTop, scrollRailToStart } from "../listScroll";
 import { UpdateButton } from "./UpdateButton";
 import type { UpdatesController } from "../useUpdates";
 import { VERSION_TOGGLE_LABEL, logoHaptic, logoPressed, versionText, type LogoView } from "../logoVersion";
@@ -409,7 +409,11 @@ export function PhoneDock({
             const count = unread[id] ?? 0;
             const badge = badgeText(count);
             const onClick = () => {
-              tapTab(id, { current, filtering: activeFilters.length > 0 }, { onClearFilters, scrollToTop, onSelectMailbox });
+              tapTab(
+                id,
+                { current, filtering: activeFilters.length > 0 },
+                { onClearFilters, scrollToTop, onSelectMailbox, scrollRailToStart: () => scrollRailToStart() },
+              );
             };
             return (
               <button

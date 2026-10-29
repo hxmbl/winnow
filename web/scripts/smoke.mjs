@@ -4000,6 +4000,28 @@ try {
     );
   }
 
+  // STRM-452: the Inbox tab also takes the smart-filter rail back to its first pill.
+  {
+    const railScroller = dock.locator("[data-phone-chips] [data-rail-scroller]");
+    const scrolled = await railScroller.evaluate(async (element) => {
+      element.scrollLeft = element.scrollWidth;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return element.scrollLeft;
+    });
+    await tab("inbox").click();
+    let reset = -1;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await page.waitForTimeout(100);
+      reset = await railScroller.evaluate((element) => element.scrollLeft);
+      if (reset === 0) break;
+    }
+    check(
+      "the Inbox tab scrolls the smart-filter rail back to its first pill",
+      scrolled > 0 && reset === 0 && (await tab("inbox").getAttribute("aria-current")) === "page",
+      JSON.stringify({ scrolled, reset }),
+    );
+  }
+
   // The list scrolls under the floating chrome, and its end clears all of it.
   const underneath = await page.evaluate(async () => {
     const scroller = document.querySelector("[data-row-count]");

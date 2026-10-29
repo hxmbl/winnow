@@ -2,7 +2,7 @@
  * Tauri platform.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { reportedVersion } from "../core/updates/buildVersion";
 import { listen } from "@tauri-apps/api/event";
 import { exit, onBackButtonPress } from "@tauri-apps/api/app";
@@ -30,6 +30,7 @@ import { waitUntilVisible } from "./visibility";
 import { debugLog, setNativeDebugBridge, syncNativeDebugLog } from "../core/debug/debugLog";
 import { parseNotificationAction, type NotificationActionEvent } from "../core/notify/notifications";
 import { parseChannel, type UpdateOffer, type UpdateRuntime } from "../core/updates/updates";
+import { parseProgress, type UpdateProgress } from "../core/updates/stages";
 import type { ActiveNotice, BackgroundServiceConfig, BackgroundServiceStatus, InstallOutcome } from "./types";
 import { parseActiveNotices, parseBackgroundStatus } from "../core/notify/backgroundService";
 
@@ -351,8 +352,15 @@ export const desktopPlatform: Platform = {
     }
   },
 
-  async installUpdate(offer: UpdateOffer): Promise<InstallOutcome> {
-    return installUpdateWith(offer, invoke);
+  async installUpdate(offer: UpdateOffer, onProgress?: (progress: UpdateProgress) => void): Promise<InstallOutcome> {
+    // The shell reports each stage on this channel (`updater::UpdateProgress`); it is
+    // always passed, since the commands expect one.
+    const channel = new Channel<unknown>();
+    channel.onmessage = (message) => {
+      const progress = parseProgress(message);
+      if (progress) onProgress?.(progress);
+    };
+    return installUpdateWith(offer, invoke, channel);
   },
 
   async focusWindow(): Promise<void> {
@@ -513,12 +521,15 @@ export type OpenedSignInPage = {
 
 /**
  * Install an offer through the shell (`updater.rs`). Exported with its `invoke` as a
- * parameter, for tests.
+ * parameter, for tests. `progress`: the `Channel` the shell reports each stage on,
+ * passed to the command as `onProgress`.
  */
 export async function installUpdateWith(
   offer: UpdateOffer,
   call: <T>(command: string, args?: Record<string, unknown>) => Promise<T>,
+  progress?: unknown,
 ): Promise<InstallOutcome> {
+  const reporting = progress === undefined ? {} : { onProgress: progress };
   const outcome = (wire: unknown): InstallOutcome => {
     const kind = (wire as { kind?: unknown } | null)?.kind;
     const path = (wire as { path?: unknown } | null)?.path;
@@ -531,14 +542,31 @@ export async function installUpdateWith(
       // `beta`: the shell refuses a pre-release's files (a tag with a "-") unless the
       // offer came from the Beta channel. `manifest`: that channel's own latest.json.
       case "self":
-        return outcome(await call("update_install", offer.action.manifest ? { manifest: offer.action.manifest } : undefined));
+        return outcome(
+          await call(
+            "update_install",
+            offer.action.manifest || progress !== undefined
+              ? { ...(offer.action.manifest ? { manifest: offer.action.manifest } : {}), ...reporting }
+              : undefined,
+          ),
+        );
       case "deb":
         return outcome(
-          await call("update_download_deb", { url: offer.action.asset.url, name: offer.action.asset.name, beta: offer.beta === true }),
+          await call("update_download_deb", {
+            url: offer.action.asset.url,
+            name: offer.action.asset.name,
+            beta: offer.beta === true,
+            ...reporting,
+          }),
         );
       case "apk":
         return outcome(
-          await call("update_install_apk", { url: offer.action.asset.url, name: offer.action.asset.name, beta: offer.beta === true }),
+          await call("update_install_apk", {
+            url: offer.action.asset.url,
+            name: offer.action.asset.name,
+            beta: offer.beta === true,
+            ...reporting,
+          }),
         );
       default:
         return { kind: "none" };

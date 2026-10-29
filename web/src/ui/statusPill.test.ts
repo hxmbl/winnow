@@ -154,3 +154,34 @@ describe("keeping off the demo strip", () => {
     expect(pillTop(rest, { top: 80, bottom: 80 })).toBe(rest);
   });
 });
+
+describe("an install under way", () => {
+  const updating = (at: number, text: string, announcement = "Downloading Winnow 1.7.0."): PillNotice => ({
+    kind: "updating",
+    at,
+    text,
+    announcement,
+  });
+
+  it("is one notice whose words follow the stage", () => {
+    const a = updating(5, "Downloading Winnow 1.7.0… 10%");
+    const b = updating(5, "Downloading Winnow 1.7.0… 60%");
+    // Same key: the pill changes its words in place rather than entering again.
+    expect(noticeKey(a)).toBe(noticeKey(b));
+    expect(pillText(b, 0)).toBe("Downloading Winnow 1.7.0… 60%");
+    // A screen reader hears the stage, not every percent.
+    expect(pillAnnouncement(a)).toBe(pillAnnouncement(b));
+    expect(pillAnnouncement(updating(5, "Verifying the download…", "Verifying the download…"))).toBe("Verifying the download…");
+  });
+
+  it("outranks the update notice and a flash at the same moment, and a newer flash covers it", () => {
+    const flash: PillNotice = { kind: "flash", at: 5, text: "Archived." };
+    const update: PillNotice = { kind: "update", at: 5, text: "Winnow 1.7.0 is available.", button: "Update" };
+    expect(currentNotice([flash, update, updating(5, "Verifying the download…")])?.kind).toBe("updating");
+    const undo: PillNotice = { kind: "undo", at: 5, label: "Moved to Trash." };
+    expect(currentNotice([updating(5, "x"), undo])?.kind).toBe("undo");
+    // The install's result arrives as a newer flash and takes over.
+    expect(currentNotice([updating(5, "x"), { kind: "flash", at: 9, text: "Android's installer is open." }])?.kind).toBe("flash");
+    expect(isAction(updating(5, "x"))).toBe(true);
+  });
+});
