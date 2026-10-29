@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-10-29
+
 ### Added
 
 - The Inbox now says when sender pictures are off, with Keep off and Turn on, and what turning them on sends. If Remote images is set to Never it says that is what pauses them, and opens Privacy settings rather than changing anything. Keep off hides it for good.
@@ -483,7 +485,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/hxmbl/winnow/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/hxmbl/winnow/compare/v1.6.4...v1.7.0
 [1.6.4]: https://github.com/hxmbl/winnow/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/hxmbl/winnow/compare/v1.6.2...v1.6.3
