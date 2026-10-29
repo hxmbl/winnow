@@ -381,6 +381,12 @@ export type Preferences = {
   backgroundSync: boolean;
   /** How often, in seconds. */
   backgroundSyncInterval: number;
+  /**
+   * Android: "Instant mail via the Gmail app" (STRM-442). Check the moment the Gmail
+   * app posts a notification, with Notification access granted by the user. Off by
+   * default: it needs a sensitive permission.
+   */
+  gmailListener: boolean;
   blockedSenders: string[];
   /**
    * Senders whose mail still arrives and is still listed, but never notifies and is not
@@ -418,6 +424,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   emailDarkMode: true,
   backgroundSync: true,
   backgroundSyncInterval: 300,
+  gmailListener: false,
   blockedSenders: [],
   mutedSenders: [],
   tourDone: false,

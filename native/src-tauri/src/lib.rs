@@ -134,6 +134,7 @@ pub fn run() {
             commands::background_service_status,
             commands::background_service_battery,
             commands::background_service_notification_settings,
+            commands::background_service_listener_settings,
             commands::request_notification_permission,
             commands::update_runtime,
             commands::update_install,

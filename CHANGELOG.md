@@ -16,12 +16,14 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Added
 
+- Instant mail on Android through the Gmail app. Turn on "Instant mail via the Gmail app" in Settings → Notifications & sync and allow Notification access for Winnow when Android asks. When the Gmail app gets new mail, Winnow checks straight away, even with the app closed, and shows its own notification in place of Gmail's (Gmail's is only taken down once Winnow's is showing). It needs the Gmail app installed and signed in to the same accounts, with its notifications allowed. Winnow looks only at the Gmail app's notifications and ignores every other app's.
 - Export and import settings. Settings → About → Export settings saves how Winnow is set up to a small file: appearance, reading and compose choices, privacy switches, notifications and sync, the update switch, the reader's width and Dev Options. It never includes your sign-in, Google client, accounts, mail, contacts, hidden or muted senders, or anything Winnow has learnt from you. In the browser the file downloads, on a computer a save dialog asks where, and on Android the system's save screen opens so you can put it in Downloads or anywhere else. Import settings… reads that file on another device, shows exactly what it would change, and changes nothing until you press Apply; anything it doesn't recognise is ignored, and a file from a newer Winnow is refused.
 
 ### Changed
 
 - On a phone, the reader's ••• menu (Star, Mark unread, Show as, View Original, Unsubscribe and the rest) is now the same frosted glass as the action pill it opens from, instead of a solid black sheet. The other menus you open on a phone, such as Snooze from the pill, the account menu and the menu behind a sender's picture, match it. The frost is a little thicker than the pill's so every word stays readable over a busy email or a photo. With "reduce transparency" or high-contrast colours turned on in your phone's settings, menus stay solid.
 - On a phone, tapping the Inbox button in the bottom bar while a smart filter (like Important) is on now turns the filter off and shows all your mail, the same as tapping All. With no filter on, it still takes you back to the top of the list, and from another mailbox it still just opens Inbox.
+- Background sync on Android checks for new mail every 5 minutes instead of every minute, which uses less battery. With "Instant mail via the Gmail app" on, it checks every 10 minutes as a backup, since the Gmail app's notifications bring new mail sooner.
 - Scrolling an open email with the ↓ and ↑ keys now glides instead of jumping, and holding a key down scrolls smoothly. Moving to the next or previous message with j and k (or the reader's next and previous buttons) glides the message list along too, instead of snapping it, while the message itself opens straight away. With reduced motion turned on in your system settings both still move in one go.
 
 ### Fixed

@@ -198,6 +198,8 @@ export interface Platform {
   requestBatteryExemption?(): Promise<BackgroundServiceStatus | null>;
   /** The persistent sync notification's system settings, to hide it. */
   openSyncNotificationSettings?(): Promise<void>;
+  /** Android's Notification access screen, for "Instant mail via the Gmail app". Answers the status. */
+  openNotificationAccess?(): Promise<BackgroundServiceStatus | null>;
 
   /** Desktop: say on the notification what the app did with a press. Optional. */
   confirmNotificationAction?(messageId: number, title: string, text: string, failed: boolean): Promise<void>;

@@ -626,7 +626,8 @@ pub async fn background_service_configure(
         "bgsync",
         "configure",
         enabled = config.enabled,
-        accounts = config.accounts.len()
+        accounts = config.accounts.len(),
+        gmail_listener = config.gmail_listener
     );
     #[cfg(target_os = "android")]
     {
@@ -690,6 +691,23 @@ pub async fn background_service_notification_settings(app: AppHandle) -> Result<
     {
         let _ = app;
         Ok(())
+    }
+}
+
+/// Android's Notification access screen, for "Instant mail via the Gmail app": the user
+/// grants Winnow access there (`GmailNotificationListener.kt`). Answers the status.
+#[tauri::command]
+pub async fn background_service_listener_settings(app: AppHandle) -> Option<serde_json::Value> {
+    #[cfg(target_os = "android")]
+    {
+        crate::background_service::call(&app, "openNotificationAccess", serde_json::json!({}))
+            .await
+            .ok()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        None
     }
 }
 

@@ -18,7 +18,7 @@ import type { NotificationActions } from "../../core/notify/notifications";
 import { driveLinksStatus, type DriveAccess } from "../../core/gmail/drive";
 import { SETTINGS, categoryOf, type CategoryId, type SettingId } from "../settingsCatalog";
 import { BACKGROUND_SYNC_NOTE, backgroundSyncOffer } from "../backgroundSyncSetting";
-import { backgroundServiceHint, type BackgroundServiceStatus } from "../../core/notify/backgroundService";
+import { backgroundServiceHint, gmailListenerHint, type BackgroundServiceStatus } from "../../core/notify/backgroundService";
 import { devUnlockTap } from "../devOptions";
 import { DebugLogPanel } from "./DebugLogPanel";
 import type { TestNotificationResult } from "../notificationActions";
@@ -234,6 +234,11 @@ export type SettingsProps = {
     status: BackgroundServiceStatus | null;
     onAllowBackground: () => void;
     onHideNotification: () => void;
+    /** "Instant mail via the Gmail app" (STRM-442): the preference and its switch. */
+    gmailListener: boolean;
+    onGmailListener: (value: boolean) => void;
+    /** Android's Notification access screen. */
+    onNotificationAccess: () => void;
   } | null;
   onBackgroundSync: (value: boolean) => void;
   backgroundSyncInterval: number;
@@ -872,11 +877,13 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
               // Android: the switch starts and stops the background service (STRM-427).
               const service = props.backgroundService ?? null;
               const status = service?.status ?? null;
+              const instant = service?.gmailListener === true;
               const hint = backgroundServiceHint(
-                { backgroundSync: props.backgroundSync, notificationsEnabled: props.notificationsEnabled },
+                { backgroundSync: props.backgroundSync, notificationsEnabled: props.notificationsEnabled, gmailListener: instant },
                 status,
               );
               const working = props.backgroundSync && props.notificationsEnabled;
+              const instantHint = gmailListenerHint(instant, status);
               return (
                 <>
                   <Row setting="backgroundSync" hint={hint ?? undefined} hintId="winnow-background-sync-hint">
@@ -893,6 +900,25 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
                         className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
                       >
                         Allow
+                      </button>
+                    </Row>
+                  )}
+                  {working && service && (
+                    <Row setting="gmailListener" hint={instantHint ?? undefined} hintId="winnow-gmail-listener-hint">
+                      <span data-gmail-listener={instant ? "on" : "off"} data-gmail-listener-connected={status?.listenerConnected ? "" : undefined} className="contents">
+                        <Toggle checked={instant} onChange={service.onGmailListener} label="Instant mail via the Gmail app" describedBy={instantHint ? "winnow-gmail-listener-hint" : undefined} />
+                      </span>
+                    </Row>
+                  )}
+                  {working && service && instant && (
+                    <Row setting="gmailListenerAccess" hint={status?.listenerAccess ? "Allowed. Change it in Android's settings." : "Not allowed yet."}>
+                      <button
+                        type="button"
+                        data-gmail-listener-access={status?.listenerAccess ? "granted" : "missing"}
+                        onClick={service.onNotificationAccess}
+                        className="rounded-ctl border border-hairline px-3 py-1 text-meta font-semibold text-ink-body transition-colors hover:bg-surface-active focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      >
+                        {status?.listenerAccess ? "Open" : "Allow"}
                       </button>
                     </Row>
                   )}

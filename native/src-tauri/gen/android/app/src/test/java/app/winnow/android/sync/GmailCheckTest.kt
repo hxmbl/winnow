@@ -255,9 +255,14 @@ class GmailCheckTest {
   }
 
   @Test
-  fun `failures back off to fifteen minutes and success returns to a minute`() {
-    assertEquals(60_000L, GmailCheck.delayAfter(0))
-    assertEquals(120_000L, GmailCheck.delayAfter(1))
+  fun `failures back off to fifteen minutes and success returns to the fallback pace`() {
+    assertEquals(5 * 60_000L, GmailCheck.delayAfter(0))
+    assertEquals(10 * 60_000L, GmailCheck.delayAfter(1))
     assertEquals(GmailCheck.MAX_BACKOFF_MS, GmailCheck.delayAfter(20))
+    // With the Gmail-app listener connected the pace is 10 minutes, and backoff starts there.
+    assertEquals(10 * 60_000L, GmailCheck.delayAfter(0, GmailListenerLogic.POLL_WITH_LISTENER_MS))
+    assertEquals(GmailCheck.MAX_BACKOFF_MS, GmailCheck.delayAfter(1, GmailListenerLogic.POLL_WITH_LISTENER_MS))
+    // A pace longer than the cap is never cut short by it.
+    assertEquals(20 * 60_000L, GmailCheck.delayAfter(3, 20 * 60_000L))
   }
 }

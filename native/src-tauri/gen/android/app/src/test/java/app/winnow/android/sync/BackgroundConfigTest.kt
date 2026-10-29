@@ -65,4 +65,21 @@ class BackgroundConfigTest {
     val config = BackgroundConfig.fromJson(JSONObject().put("enabled", false).put("accounts", JSONArray().put(account("abcd1234", "a@x"))))
     assertFalse(config.enabled)
   }
+
+  @Test
+  fun `the address and the Gmail-listener switch survive, and the switch is off without sync`() {
+    val acc = account("abcd1234", null).put("address", " Me@Example.com ")
+    val on = BackgroundConfig.fromJson(JSONObject().put("enabled", true).put("gmailListener", true).put("accounts", JSONArray().put(acc)))
+    assertTrue(on.gmailListener)
+    assertEquals("me@example.com", on.accounts[0].address)
+    assertEquals(on, BackgroundConfig.fromJson(on.toJson()))
+    val off = BackgroundConfig.fromJson(JSONObject().put("enabled", false).put("gmailListener", true).put("accounts", JSONArray().put(acc)))
+    assertFalse(off.gmailListener)
+    // An older web layer sends neither: no address, switch off.
+    val old = BackgroundConfig.fromJson(JSONObject().put("enabled", true).put("accounts", JSONArray().put(account("abcd1234", "a@x"))))
+    assertFalse(old.gmailListener)
+    assertNull(old.accounts[0].address)
+    val bad = BackgroundConfig.fromJson(JSONObject().put("enabled", true).put("accounts", JSONArray().put(account("abcd1234", null).put("address", "nope"))))
+    assertNull(bad.accounts[0].address)
+  }
 }

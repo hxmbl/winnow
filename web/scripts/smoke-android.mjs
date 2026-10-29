@@ -75,7 +75,16 @@ function fakeAndroid({ packageName, sha1 }) {
   const secrets = new Map();
   let nextId = 1;
   window.__smokeCalls = calls;
-  const service = { enabled: false, running: false, batteryUnrestricted: false, notificationsAllowed: true };
+  const service = {
+    enabled: false,
+    running: false,
+    batteryUnrestricted: false,
+    notificationsAllowed: true,
+    // "Instant mail via the Gmail app" (STRM-442): no Notification access until it is opened.
+    listenerAccess: false,
+    listenerConnected: false,
+    gmailInstalled: true,
+  };
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
     transformCallback(callback) {
@@ -136,6 +145,11 @@ function fakeAndroid({ packageName, sha1 }) {
           return { ...service };
         case "background_service_notification_settings":
           return null;
+        // Android's Notification access screen: the user allows it and comes back.
+        case "background_service_listener_settings":
+          service.listenerAccess = true;
+          service.listenerConnected = true;
+          return { ...service };
         case "plugin:event|listen":
           return nextId++;
         default:
@@ -650,6 +664,30 @@ try {
       "Hide it opens the sync notification's system settings",
       await page.evaluate(() => window.__smokeCalls.some((call) => call.cmd === "background_service_notification_settings")),
     );
+    // "Instant mail via the Gmail app" (STRM-442): off by default; on, it is handed to the
+    // service and opens Android's Notification access screen, and the row says it's on.
+    const instant = dialog.locator('[role="switch"][aria-label="Instant mail via the Gmail app"]');
+    check(
+      "Instant mail via the Gmail app is offered, off by default, with no access row yet",
+      (await instant.count()) === 1 && (await instant.getAttribute("aria-checked")) === "false" && (await dialog.locator("[data-gmail-listener-access]").count()) === 0,
+    );
+    if ((await instant.count()) === 1) {
+      await instant.tap();
+      await page.waitForTimeout(900);
+      const last = (await configures()).at(-1);
+      check("turning it on hands it to the service", last?.gmailListener === true && last?.accounts?.every((a) => "address" in a), JSON.stringify(last));
+      check(
+        "and opens Android's Notification access screen",
+        await page.evaluate(() => window.__smokeCalls.some((call) => call.cmd === "background_service_listener_settings")),
+      );
+      check(
+        "the access row shows, and says access is allowed once it is",
+        (await dialog.locator('[data-gmail-listener-access="granted"]').count()) === 1,
+      );
+      await instant.tap();
+      await page.waitForTimeout(900);
+      check("and off again, the service is told", (await configures()).at(-1)?.gmailListener === false && (await dialog.locator("[data-gmail-listener-access]").count()) === 0);
+    }
     await dialog.locator('[data-setting="backgroundSync"]').getByText("Keep syncing while closed", { exact: true }).tap();
     await page.waitForTimeout(500);
     check(

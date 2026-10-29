@@ -13,7 +13,7 @@ import org.json.JSONObject
  *
  * **Why history.list.** It is the cheapest way Gmail says "something changed": 2 quota
  * units a call, against 5 for the light sync's `messages.list` and 20 for a full read.
- * A call a minute per account is ~2,900 units a day, far under the per-user limit
+ * Even a call a minute per account would be ~2,900 units a day, far under the per-user limit
  * (15,000 a *minute*). IMAP IDLE would push instead of poll, but needs the restricted
  * `https://mail.google.com/` scope; see the Research issue in Linear.
  *
@@ -458,16 +458,18 @@ object GmailCheck {
 
   // ── Pacing ────────────────────────────────────────────────────────────────
 
-  /** Between checks while things work: about a minute (the owner chose near-instant). */
-  const val INTERVAL_MS = 60_000L
-  /** The longest the service waits after failures in a row. */
+  /** The longest the service waits after failures in a row (or the normal pace, if that is longer). */
   const val MAX_BACKOFF_MS = 15 * 60_000L
 
-  /** How long to wait after `failures` failed checks in a row (0: the normal interval). */
-  fun delayAfter(failures: Int): Long {
-    if (failures <= 0) return INTERVAL_MS
-    var delay = INTERVAL_MS
+  /**
+   * How long to wait after `failures` failed checks in a row: `base` (the fallback
+   * poll's pace, [GmailListenerLogic.pollInterval]) while things work, doubling with
+   * each failure up to [MAX_BACKOFF_MS].
+   */
+  fun delayAfter(failures: Int, base: Long = GmailListenerLogic.POLL_WITHOUT_LISTENER_MS): Long {
+    if (failures <= 0) return base
+    var delay = base
     repeat(minOf(failures, 8)) { delay *= 2 }
-    return minOf(delay, MAX_BACKOFF_MS)
+    return minOf(delay, maxOf(MAX_BACKOFF_MS, base))
   }
 }

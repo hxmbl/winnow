@@ -123,7 +123,7 @@ What differs from desktop:
 | Tray, autostart, single-instance, window state, hide-on-close | Compiled out with `#[cfg(desktop)]` (and target-gated in `Cargo.toml`) |
 | Secrets (`secrets.rs`) | `keyring` has no Android backend. [`android-native-keyring-store`](https://crates.io/crates/android-native-keyring-store), from the keyring project: AES-GCM with a key held in the Android Keystore, ciphertext in the app's private SharedPreferences. Same `secrets_set` / `secrets_get` / `secrets_delete` commands. It finds the app through `ndk-context`, which Tauri's runtime (tao) initialises, so there's no Kotlin glue |
 | Sign-in (`oauth.rs`) | Unchanged: the loopback listener binds `127.0.0.1` inside the app and the system browser opens through `opener`. Needs a **Desktop app** OAuth client, the same as desktop |
-| Background sync | Off (`backgroundSync: false`): Android pauses a backgrounded webview, so ticks would land nowhere. Sync runs while the app is open |
+| Background sync | Not the desktop ticker (`backgroundSync: false`: Android pauses a backgrounded webview). A Kotlin foreground service, `sync/MailSyncService.kt`, checks Gmail with the app closed: every 5 minutes, or every 10 while "Instant mail via the Gmail app" is on and connected (see [Instant mail via the Gmail app](#instant-mail-via-the-gmail-app)) |
 | Saving attachments | The system save picker returns a `content://` URI; `files.rs` writes it through `tauri-plugin-fs` (Android only) |
 | Unread badge | No-op |
 | Back button | The webview takes Back over (`onBackButtonPress`, in `desktopPlatformExtras.onBackButton`) only while something is open, and closes the topmost layer: a popover or menu, a sheet, the composer (parked as a draft), the sidebar, Settings, the open message. At the bare list it hands Back to Android, which leaves the app as usual; `capabilities/android.json` grants `exit` for a press that lands as the last layer closes. The order is `web/src/ui/backLayers.ts` |
@@ -141,6 +141,50 @@ cargo tauri android build --apk    # gen/android/app/build/outputs/apk/universal
 A type check needs none of that: `cargo check --target aarch64-linux-android`
 in `src-tauri` links nothing, so it runs without the NDK (CI does this on PRs that
 touch `native/`).
+
+### Instant mail via the Gmail app
+
+Winnow has no push server, so with the app closed it learns about new mail by polling
+(`sync/MailSyncService.kt`, Gmail's `history.list`). The Gmail app does get Google's push.
+With Settings → Notifications & sync → "Instant mail via the Gmail app" on (off by
+default), `sync/GmailNotificationListener.kt`, a `NotificationListenerService`, watches
+for the Gmail app's notifications (`com.google.android.gm`) and checks straight away:
+
+- **Which account.** Matched by the address on Gmail's notification (sub-text or
+  summary) against each account's `address` in the background config; no match means
+  every account is checked. A burst of Gmail notifications within 2 seconds is one check.
+- **Gmail's copy.** Taken down with `cancelNotification(key)` only once Winnow has posted
+  its own for that account, only for keys that are still the Gmail app's, and only when
+  the address matched a Winnow account. If the check finds nothing yet it tries once more
+  20 seconds later; after that, or after a failed check, Gmail's notification stays.
+  Another app's notification is never read, logged or touched: the package is checked
+  before anything else.
+- **Closed app.** Android binds a granted listener itself. It asks the running service
+  for the check (`MailSyncService.instant`) or, when the service isn't running, runs the
+  same check (`sync/MailCheckRun.kt`) on its own thread. The two never run at once.
+  While Winnow is on screen the service skips the check (the app syncs itself) and
+  Gmail's notification is left alone.
+- **Fallback poll.** Every 10 minutes while the setting is on and the listener is
+  connected, every 5 minutes otherwise (it was every minute in 1.7.0). Failures back
+  off to 15 minutes, and Doze still spaces alarms out. The pure rules are
+  `sync/GmailListenerLogic.kt`, tested in `GmailListenerLogicTest`.
+
+The catches, also in the setting's (?) help:
+
+- The Gmail app must be installed, signed in to the same accounts, and its notifications
+  must not be blocked at app level (a blocked app posts nothing for Winnow to see).
+  Settings says when Gmail isn't installed.
+- Notification access is a sensitive permission: the user grants it by hand on Android's
+  Notification access screen (`ACTION_NOTIFICATION_LISTENER_SETTINGS`), which the
+  setting opens. Android has no manifest filter that limits a listener to one package;
+  the manifest only keeps ongoing notifications away (`disabled_filter_types`,
+  Android 12+), and the code does the rest.
+- Not Play-friendly: Google Play restricts notification-listener use. Fine for the
+  GitHub APK, which is how Winnow ships.
+- Gmail's own notifications are Gmail's. Winnow reads them but never hides or changes
+  them, so mail from a sender muted or blocked in Winnow can still show a Gmail
+  notification. Turning that off is done in the Gmail app's notification settings; this
+  is by design (decided on STRM-442).
 
 ### Android signing
 

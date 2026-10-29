@@ -14,7 +14,17 @@
 import type { NotificationActions } from "./notifications";
 import { isAccountId, type AccountRecord } from "../session/accounts";
 
-export type BackgroundServiceAccount = { id: string; label: string | null; notify: boolean };
+export type BackgroundServiceAccount = {
+  id: string;
+  /** The address shown on a notification: only with more than one account. */
+  label: string | null;
+  notify: boolean;
+  /**
+   * The address, lowercased, whatever the number of accounts: what the Gmail-app
+   * listener matches the account line of a Gmail notification against. Never shown.
+   */
+  address: string | null;
+};
 
 export type BackgroundServiceConfig = {
   enabled: boolean;
@@ -24,6 +34,11 @@ export type BackgroundServiceConfig = {
   actions: number;
   hidePreview: boolean;
   quietSenders: string[];
+  /**
+   * "Instant mail via the Gmail app" (STRM-442): check as soon as the Gmail app posts a
+   * notification (`GmailNotificationListener.kt`). Never on while `enabled` is off.
+   */
+  gmailListener: boolean;
 };
 
 export type BackgroundServiceStatus = {
@@ -31,6 +46,12 @@ export type BackgroundServiceStatus = {
   running: boolean;
   batteryUnrestricted: boolean;
   notificationsAllowed: boolean;
+  /** The user has given Winnow Notification access in Android's settings. */
+  listenerAccess: boolean;
+  /** Android has the Gmail-app listener bound and the setting is on. */
+  listenerConnected: boolean;
+  /** The Gmail app is installed (and not disabled). */
+  gmailInstalled: boolean;
 };
 
 /** The slice of preferences the service depends on. */
@@ -41,6 +62,8 @@ export type BackgroundServicePrefs = {
   notificationHidePreview: boolean;
   mutedSenders: readonly string[];
   blockedSenders: readonly string[];
+  /** "Instant mail via the Gmail app". Absent reads as off. */
+  gmailListener?: boolean;
 };
 
 /** The native flags for the buttons a notification offers. */
@@ -63,17 +86,20 @@ export function backgroundServiceConfig(
   const valid = accounts.filter((account) => isAccountId(account.id));
   const several = valid.length > 1;
   const quiet = [...new Set([...prefs.mutedSenders, ...prefs.blockedSenders].map((s) => s.trim().toLowerCase()).filter(Boolean))].sort();
+  const enabled = prefs.backgroundSync && prefs.notificationsEnabled && signedIn && valid.length > 0;
   return {
-    enabled: prefs.backgroundSync && prefs.notificationsEnabled && signedIn && valid.length > 0,
+    enabled,
     accounts: valid.map((account) => ({
       id: account.id,
       label: several && account.email ? account.email : null,
       notify: account.notify !== false,
+      address: account.email && account.email.includes("@") ? account.email.trim().toLowerCase() : null,
     })),
     activeAccount: activeAccount && valid.some((account) => account.id === activeAccount) ? activeAccount : null,
     actions: actionFlags(prefs.notificationActions),
     hidePreview: prefs.notificationHidePreview,
     quietSenders: quiet,
+    gmailListener: enabled && prefs.gmailListener === true,
   };
 }
 
@@ -87,6 +113,10 @@ export function parseBackgroundStatus(raw: unknown): BackgroundServiceStatus | n
     running: s.running,
     batteryUnrestricted: s.batteryUnrestricted !== false,
     notificationsAllowed: s.notificationsAllowed !== false,
+    // Only a definite yes counts: an older native side that says nothing has no listener.
+    listenerAccess: s.listenerAccess === true,
+    listenerConnected: s.listenerConnected === true,
+    gmailInstalled: s.gmailInstalled === true,
   };
 }
 
@@ -108,13 +138,34 @@ export function parseActiveNotices(raw: unknown): { account: string | null; gmai
  * The one thing the user can act on comes first.
  */
 export function backgroundServiceHint(
-  prefs: Pick<BackgroundServicePrefs, "backgroundSync" | "notificationsEnabled">,
+  prefs: Pick<BackgroundServicePrefs, "backgroundSync" | "notificationsEnabled" | "gmailListener">,
   status: BackgroundServiceStatus | null,
 ): string | null {
   if (!prefs.backgroundSync) return null;
   if (!prefs.notificationsEnabled) return "Turn on notifications to get new mail while Winnow is closed.";
   if (!status) return null;
   if (!status.notificationsAllowed) return "Android isn't letting Winnow show notifications. Allow them in system settings.";
-  if (status.running) return "Checks about once a minute while Winnow is closed.";
-  return null;
+  if (!status.running) return null;
+  if (prefs.gmailListener && status.listenerConnected) {
+    return "Checks as soon as the Gmail app gets new mail, and every 10 minutes as a backup.";
+  }
+  return "Checks every 5 minutes while Winnow is closed.";
+}
+
+/** The fallback poll's pace, in minutes, as `GmailListenerLogic.pollInterval` picks it. */
+export function fallbackPollMinutes(gmailListener: boolean, listenerConnected: boolean): number {
+  return gmailListener && listenerConnected ? 10 : 5;
+}
+
+/**
+ * What Settings says under "Instant mail via the Gmail app", or `null` for nothing: the
+ * one thing in the way first (no Gmail app, no notification access), then whether
+ * Android has connected it.
+ */
+export function gmailListenerHint(on: boolean, status: BackgroundServiceStatus | null): string | null {
+  if (!on || !status) return null;
+  if (!status.gmailInstalled) return "The Gmail app isn't installed, so there's nothing to listen to. Winnow checks every 5 minutes.";
+  if (!status.listenerAccess) return "Needs Notification access: allow it for Winnow in Android's settings.";
+  if (status.listenerConnected) return "On. The Gmail app must stay signed in with its notifications allowed.";
+  return "Waiting for Android to connect it. Until then Winnow checks every 5 minutes.";
 }

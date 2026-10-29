@@ -249,7 +249,19 @@ export const SETTINGS = {
     category: "sync",
     label: "Keep syncing while closed",
     explanation:
-      "Keeps Winnow checking for new mail after you close it, so notifications still arrive. On a computer it stays in the system tray and checks on a timer. On Android it keeps a small, silent notification and checks Gmail about once a minute, even after you swipe it away or restart the phone; it needs notifications on, since that is all it does with the app closed. Off, Winnow only syncs while it is open, which uses less battery and fewer requests to Google.",
+      "Keeps Winnow checking for new mail after you close it, so notifications still arrive. On a computer it stays in the system tray and checks on a timer. On Android it keeps a small, silent notification and checks Gmail every 5 minutes (sooner with \"Instant mail via the Gmail app\"), even after you swipe it away or restart the phone; it needs notifications on, since that is all it does with the app closed. Off, Winnow only syncs while it is open, which uses less battery and fewer requests to Google.",
+  },
+  gmailListener: {
+    category: "sync",
+    label: "Instant mail via the Gmail app",
+    explanation:
+      "Google tells the Gmail app about new mail the moment it arrives; with this on, Winnow notices the Gmail app's notification, checks for new mail straight away and shows its own notification in place of Gmail's. It only works with the Gmail app installed and signed in to the same accounts, with the Gmail app's notifications allowed, and Gmail's notification is only taken down once Winnow's is showing. Winnow looks only at the Gmail app's notifications, reads just the account they are for, and keeps nothing. Winnow also checks every 10 minutes as a backup, or every 5 without this.",
+  },
+  gmailListenerAccess: {
+    category: "sync",
+    label: "Notification access",
+    explanation:
+      "Android lets an app see notifications only after you allow Notification access for it, because that access could read any app's notifications. Winnow uses it for the Gmail app's notifications only and ignores every other app's. Google Play is strict about this kind of access, which is fine for Winnow because it is installed from GitHub rather than Google Play. You can take access away at any time in Android's settings, and instant mail stops.",
   },
   batteryUnrestricted: {
     category: "sync",
