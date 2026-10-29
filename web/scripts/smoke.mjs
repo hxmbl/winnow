@@ -321,8 +321,21 @@ try {
   const overflowMenu = () => page.locator('[data-sidebar][role="dialog"][aria-label="Menu"]');
   const sidebarToggle = () => page.locator("[data-sidebar-toggle]:visible").first();
   const sidebarOpen = async () => (await page.locator("[data-sidebar][data-open]").count()) > 0;
-  const waitSidebarClosed = () =>
-    page.locator("[data-sidebar]").waitFor({ state: "hidden", timeout: 5_000 });
+  // Closed means the panel *and* the scrim are gone. The panel's visibility flips at
+  // 160ms but the scrim's only at 180ms, after its fade (`.wn-scrim` in index.css), so
+  // waiting on the panel alone left a ~20ms window where a check read the scrim as
+  // still visible (CI run #402, "Escape closes it").
+  const waitSidebarClosed = async () => {
+    await page.locator("[data-sidebar]").waitFor({ state: "hidden", timeout: 5_000 });
+    await page.waitForFunction(
+      () => {
+        const scrim = document.querySelector("[data-sidebar-scrim]");
+        return !scrim || getComputedStyle(scrim).visibility === "hidden";
+      },
+      null,
+      { timeout: 5_000 },
+    );
+  };
   const openDrawer = async () => {
     if (await sidebarOpen()) return;
     await page
