@@ -19,6 +19,10 @@ adds. See `native/README.md`, "Cutting a release".
 - Updating Winnow now shows what it's actually doing at each step instead of just "Updating…": downloading (with how far it's got), verifying the download, then installing or opening the installer. The Update button beside the version, the status pill and Settings → About all show the same step, and About has a progress bar while it downloads. If an update fails, it says why in plain words, for example that the download didn't match the release's checksum or that the connection dropped. This works in the desktop apps and on Android.
 - On a phone, tapping Inbox also scrolls the smart filters back to the start, so the first one is in view again.
 
+### Fixed
+
+- The numbers on smart filter chips now count conversations, the same rows the list shows, so they match the count at the top of the screen. Before, a chip counted every message in a thread: in the demo, Action needed read 13 on its chip while the list beside it held 11 conversations.
+
 ## [1.7.0] - 2026-10-29
 
 ### Added

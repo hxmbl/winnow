@@ -19,6 +19,7 @@ import {
   type FilterId,
 } from "../model/signals";
 import type { UserProfile } from "../model/profile";
+import { threadKey } from "../model/ids";
 import { matchesFilter } from "./filters";
 import { inboxSearchBag } from "./classify";
 import { calculateWinnowScore, recencyWindow, type SortBy } from "./scoring";
@@ -205,7 +206,8 @@ export function groupThreads(emails: readonly Email[]): ThreadRow[] {
   const grouped = new Map<string, Email[]>();
 
   for (const email of emails) {
-    const key = email.threadId ?? `single-${email.gmailId}`;
+    // The rail counts by the same key (`countFacets`), so a pill's number is this list's row count.
+    const key = threadKey(email);
     const existing = grouped.get(key);
     if (existing) existing.push(email);
     else {
