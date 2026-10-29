@@ -14,16 +14,6 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
-### Changed
-
-- Updating Winnow now shows what it's actually doing at each step instead of just "Updating…": downloading (with how far it's got), verifying the download, then installing or opening the installer. The Update button beside the version, the status pill and Settings → About all show the same step, and About has a progress bar while it downloads. If an update fails, it says why in plain words, for example that the download didn't match the release's checksum or that the connection dropped. This works in the desktop apps and on Android.
-- On a phone, tapping Inbox also scrolls the smart filters back to the start, so the first one is in view again.
-- A large mailbox feels quicker. Typing in search, selecting a message and turning a smart filter on or off do less repeated work, so each update takes roughly a quarter to a half less time with 5,000 messages (search keystrokes about twice as fast). Catching up after time offline asks Gmail for changes in pages five times larger, so it takes fewer round trips. On the desktop app, background sync no longer wakes the computer four times a second between checks.
-
-### Fixed
-
-- The numbers on smart filter chips now count conversations, the same rows the list shows, so they match the count at the top of the screen. Before, a chip counted every message in a thread: in the demo, Action needed read 13 on its chip while the list beside it held 11 conversations.
-
 ## [1.7.0] - 2026-10-29
 
 ### Added
@@ -50,6 +40,9 @@ adds. See `native/README.md`, "Cutting a release".
 - On a phone, tapping the Inbox button in the bottom bar while a smart filter (like Important) is on now turns the filter off and shows all your mail, the same as tapping All. With no filter on, it still takes you back to the top of the list, and from another mailbox it still just opens Inbox.
 - Background sync on Android checks for new mail every 5 minutes instead of every minute, which uses less battery. With "Instant mail via the Gmail app" on, it checks every 10 minutes as a backup, since the Gmail app's notifications bring new mail sooner.
 - Scrolling an open email with the ↓ and ↑ keys now glides instead of jumping, and holding a key down scrolls smoothly. Moving to the next or previous message with j and k (or the reader's next and previous buttons) glides the message list along too, instead of snapping it, while the message itself opens straight away. With reduced motion turned on in your system settings both still move in one go.
+- Updating Winnow now shows what it's actually doing at each step instead of just "Updating…": downloading (with how far it's got), verifying the download, then installing or opening the installer. The Update button beside the version, the status pill and Settings → About all show the same step, and About has a progress bar while it downloads. If an update fails, it says why in plain words, for example that the download didn't match the release's checksum or that the connection dropped. This works in the desktop apps and on Android.
+- On a phone, tapping Inbox also scrolls the smart filters back to the start, so the first one is in view again.
+- A large mailbox feels quicker. Typing in search, selecting a message and turning a smart filter on or off do less repeated work, so each update takes roughly a quarter to a half less time with 5,000 messages (search keystrokes about twice as fast). Catching up after time offline asks Gmail for changes in pages five times larger, so it takes fewer round trips. On the desktop app, background sync no longer wakes the computer four times a second between checks.
 
 ### Fixed
 
@@ -58,6 +51,7 @@ adds. See `native/README.md`, "Cutting a release".
 - A row with a one-time code no longer pushes its time out of line: the Copy chip now sits on the preview line, so every row's time stays in the same column on phone and desktop.
 - Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.
 - Tapping a new-mail notification on Android now opens that email, in the right account, instead of just opening Winnow. It works whether Winnow was open in the background or fully closed (including notifications from background sync), and if the email hasn't reached the app yet, Winnow fetches it first. Tapping a "new messages" summary opens that account's inbox.
+- The numbers on smart filter chips now count conversations, the same rows the list shows, so they match the count at the top of the screen. Before, a chip counted every message in a thread: in the demo, Action needed read 13 on its chip while the list beside it held 11 conversations.
 
 ### Security
 
