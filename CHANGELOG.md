@@ -14,35 +14,14 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
-### Added
-
-- Instant mail on Android through the Gmail app. Turn on "Instant mail via the Gmail app" in Settings → Notifications & sync and allow Notification access for Winnow when Android asks. When the Gmail app gets new mail, Winnow checks straight away, even with the app closed, and shows its own notification in place of Gmail's (Gmail's is only taken down once Winnow's is showing). It needs the Gmail app installed and signed in to the same accounts, with its notifications allowed. Winnow looks only at the Gmail app's notifications and ignores every other app's.
-- Export and import settings. Settings → About → Export settings saves how Winnow is set up to a small file: appearance, reading and compose choices, privacy switches, notifications and sync, the update switch, the reader's width and Dev Options. It never includes your sign-in, Google client, accounts, mail, contacts, hidden or muted senders, or anything Winnow has learnt from you. In the browser the file downloads, on a computer a save dialog asks where, and on Android the system's save screen opens so you can put it in Downloads or anywhere else. Import settings… reads that file on another device, shows exactly what it would change, and changes nothing until you press Apply; anything it doesn't recognise is ignored, and a file from a newer Winnow is refused.
-
-### Changed
-
-- On a phone, the reader's ••• menu (Star, Mark unread, Show as, View Original, Unsubscribe and the rest) is now the same frosted glass as the action pill it opens from, instead of a solid black sheet. The other menus you open on a phone, such as Snooze from the pill, the account menu and the menu behind a sender's picture, match it. The frost is a little thicker than the pill's so every word stays readable over a busy email or a photo. With "reduce transparency" or high-contrast colours turned on in your phone's settings, menus stay solid.
-- On a phone, tapping the Inbox button in the bottom bar while a smart filter (like Important) is on now turns the filter off and shows all your mail, the same as tapping All. With no filter on, it still takes you back to the top of the list, and from another mailbox it still just opens Inbox.
-- Background sync on Android checks for new mail every 5 minutes instead of every minute, which uses less battery. With "Instant mail via the Gmail app" on, it checks every 10 minutes as a backup, since the Gmail app's notifications bring new mail sooner.
-- Scrolling an open email with the ↓ and ↑ keys now glides instead of jumping, and holding a key down scrolls smoothly. Moving to the next or previous message with j and k (or the reader's next and previous buttons) glides the message list along too, instead of snapping it, while the message itself opens straight away. With reduced motion turned on in your system settings both still move in one go.
-
-### Fixed
-
-- Tapping a new-mail notification on Android now opens that email, in the right account, instead of just opening Winnow. It works whether Winnow was open in the background or fully closed (including notifications from background sync), and if the email hasn't reached the app yet, Winnow fetches it first. Tapping a "new messages" summary opens that account's inbox.
-
-## [1.7.0] - 2026-10-28
+## [1.7.0] - 2026-10-29
 
 ### Added
 
 - Background sync on Android. With "Keep syncing while closed" on (Settings → Notifications & sync, on by default) and notifications on, Winnow checks Gmail about once a minute even when the app is closed, and tells you about new mail as it does while it's open. Delete and Mark read work from the notification with the app closed; a reply typed there waits until you next open Winnow. While it runs Android shows a silent "Checking for new mail" notification, as it does for any app that keeps working in the background: Hide it opens its settings, and hiding it doesn't stop syncing. If Android is restricting Winnow's battery use, an Allow button asks it to stop, so new mail isn't held back while the phone is idle. Syncing starts again after the phone restarts or Winnow updates.
 - New-mail notifications take themselves down once the email no longer needs you: read, archived, deleted, snoozed or moved, in Winnow or in Gmail anywhere else. On Android and Linux each one goes by itself and the "12 new messages" summary counts down with them; in the browser each one closes; on macOS a batch goes once all of it is dealt with. Signing out of an account takes its notifications with it.
-
-### Fixed
-
-- Settings switches are easier to press: tap anywhere on a setting's name to flip its switch, and the switch itself answers a 48×48 area (the (?) button keeps its own job). In the dark and OLED themes an off switch is now a visible grey instead of nearly black on black. "Keep syncing while closed" now shows your setting: on the desktop it can be turned back on after you turn it off.
-- The Copy button on code blocks inside emails is readable in the dark themes again. It was a light grey icon on a white button, and turned dark when you hovered it.
-- A row with a one-time code no longer pushes its time out of line: the Copy chip now sits on the preview line, so every row's time stays in the same column on phone and desktop.
-- Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.
+- Instant mail on Android through the Gmail app. Turn on "Instant mail via the Gmail app" in Settings → Notifications & sync and allow Notification access for Winnow when Android asks. When the Gmail app gets new mail, Winnow checks straight away, even with the app closed, and shows its own notification in place of Gmail's (Gmail's is only taken down once Winnow's is showing). It needs the Gmail app installed and signed in to the same accounts, with its notifications allowed. Winnow looks only at the Gmail app's notifications and ignores every other app's.
+- Export and import settings. Settings → About → Export settings saves how Winnow is set up to a small file: appearance, reading and compose choices, privacy switches, notifications and sync, the update switch, the reader's width and Dev Options. It never includes your sign-in, Google client, accounts, mail, contacts, hidden or muted senders, or anything Winnow has learnt from you. In the browser the file downloads, on a computer a save dialog asks where, and on Android the system's save screen opens so you can put it in Downloads or anywhere else. Import settings… reads that file on another device, shows exactly what it would change, and changes nothing until you press Apply; anything it doesn't recognise is ignored, and a file from a newer Winnow is refused.
 
 ### Changed
 
@@ -57,6 +36,18 @@ adds. See `native/README.md`, "Cutting a release".
 - Dev Options → Debug log keeps up to 10,000 lines and records far more: every step of signing in, sync stages, network errors, and the app going to the background and back, including the app's own native side on Android and desktop. Copying a full log no longer freezes the screen.
 - Clearing the debug log now asks first, so one tap can't throw away a log you haven't copied yet.
 - Smart filter icons are all the same size now. Each one fills the same square, so the Important marker no longer looks bigger than the Deliveries box, on the filter rail, in inbox rows and in the reader. Inbox row icons also line up in one column next to the time.
+- On a phone, the reader's ••• menu (Star, Mark unread, Show as, View Original, Unsubscribe and the rest) is now the same frosted glass as the action pill it opens from, instead of a solid black sheet. The other menus you open on a phone, such as Snooze from the pill, the account menu and the menu behind a sender's picture, match it. The frost is a little thicker than the pill's so every word stays readable over a busy email or a photo. With "reduce transparency" or high-contrast colours turned on in your phone's settings, menus stay solid.
+- On a phone, tapping the Inbox button in the bottom bar while a smart filter (like Important) is on now turns the filter off and shows all your mail, the same as tapping All. With no filter on, it still takes you back to the top of the list, and from another mailbox it still just opens Inbox.
+- Background sync on Android checks for new mail every 5 minutes instead of every minute, which uses less battery. With "Instant mail via the Gmail app" on, it checks every 10 minutes as a backup, since the Gmail app's notifications bring new mail sooner.
+- Scrolling an open email with the ↓ and ↑ keys now glides instead of jumping, and holding a key down scrolls smoothly. Moving to the next or previous message with j and k (or the reader's next and previous buttons) glides the message list along too, instead of snapping it, while the message itself opens straight away. With reduced motion turned on in your system settings both still move in one go.
+
+### Fixed
+
+- Settings switches are easier to press: tap anywhere on a setting's name to flip its switch, and the switch itself answers a 48×48 area (the (?) button keeps its own job). In the dark and OLED themes an off switch is now a visible grey instead of nearly black on black. "Keep syncing while closed" now shows your setting: on the desktop it can be turned back on after you turn it off.
+- The Copy button on code blocks inside emails is readable in the dark themes again. It was a light grey icon on a white button, and turned dark when you hovered it.
+- A row with a one-time code no longer pushes its time out of line: the Copy chip now sits on the preview line, so every row's time stays in the same column on phone and desktop.
+- Signing in on Android 15 no longer stops at "127.0.0.1 took too long to respond" after you pick your account. Android was pausing Winnow while Google's page was open, so Winnow couldn't catch Google's answer. Winnow now stays running until you're back, with a small "Signing in to Winnow" notification while it waits.
+- Tapping a new-mail notification on Android now opens that email, in the right account, instead of just opening Winnow. It works whether Winnow was open in the background or fully closed (including notifications from background sync), and if the email hasn't reached the app yet, Winnow fetches it first. Tapping a "new messages" summary opens that account's inbox.
 
 ### Security
 
