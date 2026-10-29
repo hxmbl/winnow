@@ -7,6 +7,7 @@ import type { CredentialStore } from "../core/session/credentials";
 import type { NotificationActionEvent, NotificationBatch } from "../core/notify/notifications";
 import type { BackgroundServiceConfig, BackgroundServiceStatus } from "../core/notify/backgroundService";
 import type { UpdateOffer, UpdateRuntime } from "../core/updates/updates";
+import type { UpdateProgress } from "../core/updates/stages";
 
 /** What this build can do. Reported to the UI so it can hide what is absent. */
 export type PlatformInfo = {
@@ -239,8 +240,12 @@ export interface Platform {
    * Install `offer` the way this host can: Tauri's updater for `self`, the downloaded
    * package for `deb` / `apk`. Throws with a readable reason when it cannot. Optional:
    * the web build has nothing to install (it says `git pull`, or to restart the Docker container).
+   *
+   * `onProgress` hears each stage as the host reaches it (`core/updates/stages.ts`):
+   * the download's progress, then verifying, then installing. A host that cannot tell
+   * says nothing, and the app shows the download until the outcome.
    */
-  installUpdate?(offer: UpdateOffer): Promise<InstallOutcome>;
+  installUpdate?(offer: UpdateOffer, onProgress?: (progress: UpdateProgress) => void): Promise<InstallOutcome>;
 }
 
 export const PLATFORM_KEYS = [

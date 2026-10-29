@@ -30,6 +30,14 @@
 //! this is the backstop if one is ever marked latest by mistake. A Beta self-update reads
 //! the offered release's own `latest.json` (`manifest_url`), never `releases/latest`.
 //!
+//! **Stages.** Every install reports what it is doing over a `Channel` the web layer
+//! passes in (`UpdateProgress`): `downloading` with bytes so far (and the size, when the
+//! server says), then `verifying` while the download is checked (the updater's signature,
+//! or `SHA256SUMS`), then `installing` while the app is swapped in or the installer opens.
+//! The web layer turns those into the words on the Update button, the status pill and
+//! Settings › About (`web/src/core/updates/stages.ts`). A report that can't be delivered
+//! (the webview went away) is ignored; the install goes on.
+//!
 //! A `.deb` install is never replaced in place: the package manager owns `/usr/bin`,
 //! and swapping files under it would leave dpkg's records wrong. It gets the package.
 
@@ -203,6 +211,72 @@ pub enum InstallOutcome {
     Opened { path: String },
 }
 
+/// What an install is doing, for the web layer (`parseProgress` in `stages.ts`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "stage")]
+pub enum UpdateProgress {
+    /// `received` bytes so far, of `total` when the server gave a size.
+    Downloading { received: u64, total: Option<u64> },
+    /// The download is being checked before anything opens it.
+    Verifying,
+    /// The app is being swapped in, or the checked file handed to the installer.
+    Installing,
+}
+
+/// Download reports are spaced so a fast connection doesn't flood the webview: one per
+/// whole percent when the size is known, one per `UNSIZED_STEP` bytes when it isn't,
+/// and always the first and the last.
+const UNSIZED_STEP: u64 = 512 * 1024;
+
+/// Whether a download that has reached `received` (of `total`) is worth reporting, given
+/// the last report was at `last` (None before the first).
+pub fn worth_reporting(last: Option<u64>, received: u64, total: Option<u64>) -> bool {
+    let Some(last) = last else {
+        return true;
+    };
+    if received <= last {
+        return false;
+    }
+    match total.filter(|t| *t > 0) {
+        Some(total) => received >= total || received * 100 / total > last * 100 / total,
+        None => received - last >= UNSIZED_STEP,
+    }
+}
+
+/// Sends download reports through `send`, spaced by `worth_reporting`.
+pub struct DownloadReporter<F: FnMut(UpdateProgress)> {
+    send: F,
+    received: u64,
+    last: Option<u64>,
+}
+
+impl<F: FnMut(UpdateProgress)> DownloadReporter<F> {
+    pub fn new(send: F) -> Self {
+        Self {
+            send,
+            received: 0,
+            last: None,
+        }
+    }
+
+    /// `chunk` more bytes have arrived, of `total`.
+    pub fn chunk(&mut self, chunk: u64, total: Option<u64>) {
+        self.received = self.received.saturating_add(chunk);
+        if worth_reporting(self.last, self.received, total) {
+            self.last = Some(self.received);
+            (self.send)(UpdateProgress::Downloading {
+                received: self.received,
+                total,
+            });
+        }
+    }
+
+    /// Any other stage, as it begins.
+    pub fn stage(&mut self, progress: UpdateProgress) {
+        (self.send)(progress);
+    }
+}
+
 // ── Android ──────────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "android")]
@@ -237,6 +311,7 @@ pub async fn install_apk(
     url: &str,
     name: &str,
     beta: bool,
+    on_progress: tauri::ipc::Channel<UpdateProgress>,
 ) -> Result<serde_json::Value, String> {
     use tauri::Manager;
     release_download(url, name, ".apk", beta)?;
@@ -247,7 +322,14 @@ pub async fn install_apk(
         .0
         .run_mobile_plugin_async::<serde_json::Value>(
             "installApk",
-            serde_json::json!({ "url": url, "name": name, "beta": beta }),
+            // The channel goes on to the Kotlin plugin, which reports each stage on it
+            // (`UpdatePlugin.installApk`), in the same shape as `UpdateProgress`.
+            serde_json::json!({
+                "url": url,
+                "name": name,
+                "beta": beta,
+                "onProgress": on_progress,
+            }),
         )
         .await
         .map_err(|e| e.to_string())
@@ -265,6 +347,7 @@ pub async fn install_apk(
 pub async fn install_self(
     app: &tauri::AppHandle,
     manifest: Option<String>,
+    on_progress: tauri::ipc::Channel<UpdateProgress>,
 ) -> Result<InstallOutcome, String> {
     use tauri_plugin_updater::UpdaterExt;
     if !self_updates(channel()) {
@@ -288,10 +371,28 @@ pub async fn install_self(
     if !self_update_allowed(&update.version, update.download_url.as_str(), beta) {
         return Err(PRERELEASE_REFUSED.into());
     }
-    update
-        .download_and_install(|_, _| {}, || {})
+    let channel = on_progress.clone();
+    let mut reporter = DownloadReporter::new(move |progress| {
+        let _ = channel.send(progress);
+    });
+    reporter.stage(UpdateProgress::Downloading {
+        received: 0,
+        total: None,
+    });
+    // `download` checks the updater's signature once the last byte is in, before it
+    // hands the package back: that is the verifying stage.
+    let verifying = on_progress.clone();
+    let bytes = update
+        .download(
+            |chunk, total| reporter.chunk(chunk as u64, total),
+            move || {
+                let _ = verifying.send(UpdateProgress::Verifying);
+            },
+        )
         .await
         .map_err(|e| e.to_string())?;
+    let _ = on_progress.send(UpdateProgress::Installing);
+    update.install(bytes).map_err(|e| e.to_string())?;
     app.restart();
 }
 
@@ -317,6 +418,7 @@ pub async fn download_deb(
     url: &str,
     name: &str,
     beta: bool,
+    on_progress: tauri::ipc::Channel<UpdateProgress>,
 ) -> Result<InstallOutcome, String> {
     use tauri_plugin_opener::OpenerExt;
     let parsed = release_download(url, name, ".deb", beta)?;
@@ -333,23 +435,39 @@ pub async fn download_deb(
         .https_only(true)
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client
+    let channel = on_progress.clone();
+    let mut reporter = DownloadReporter::new(move |progress| {
+        let _ = channel.send(progress);
+    });
+    reporter.stage(UpdateProgress::Downloading {
+        received: 0,
+        total: None,
+    });
+    let mut response = client
         .get(parsed.clone())
         .send()
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("the download failed: {e}"))?;
-    if response.content_length().unwrap_or(0) > MAX_DOWNLOAD_BYTES {
+    let total = response.content_length().filter(|len| *len > 0);
+    if total.unwrap_or(0) > MAX_DOWNLOAD_BYTES {
         return Err("the file is too large".into());
     }
-    let bytes = response
-        .bytes()
+    // Read in chunks, so the web layer can show how far the download has got.
+    let mut bytes: Vec<u8> = Vec::with_capacity(total.unwrap_or(0) as usize);
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| format!("the download failed: {e}"))?;
-    if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
-        return Err("the file is too large".into());
+        .map_err(|e| format!("the download failed: {e}"))?
+    {
+        if (bytes.len() + chunk.len()) as u64 > MAX_DOWNLOAD_BYTES {
+            return Err("the file is too large".into());
+        }
+        bytes.extend_from_slice(&chunk);
+        reporter.chunk(chunk.len() as u64, total);
     }
     // Checked before it is saved under its real name or opened: the release's own list.
+    reporter.stage(UpdateProgress::Verifying);
     let sums = client
         .get(sums_url(&parsed))
         .send()
@@ -374,6 +492,7 @@ pub async fn download_deb(
             "the download doesn't match the release's checksum, so it wasn't installed".into(),
         );
     }
+    reporter.stage(UpdateProgress::Installing);
     std::fs::write(&partial, &bytes).map_err(|e| format!("could not save the download: {e}"))?;
     std::fs::rename(&partial, &target).map_err(|e| format!("could not save the download: {e}"))?;
 
@@ -558,6 +677,91 @@ mod tests {
             None
         );
         assert_eq!(expected_sha256(&format!("{a}  x{deb}"), deb), None);
+    }
+
+    #[test]
+    fn progress_serialises_as_the_web_layer_reads() {
+        assert_eq!(
+            serde_json::to_value(UpdateProgress::Downloading {
+                received: 10,
+                total: Some(100)
+            })
+            .unwrap(),
+            serde_json::json!({ "stage": "downloading", "received": 10, "total": 100 })
+        );
+        assert_eq!(
+            serde_json::to_value(UpdateProgress::Downloading {
+                received: 0,
+                total: None
+            })
+            .unwrap(),
+            serde_json::json!({ "stage": "downloading", "received": 0, "total": null })
+        );
+        assert_eq!(
+            serde_json::to_value(UpdateProgress::Verifying).unwrap(),
+            serde_json::json!({ "stage": "verifying" })
+        );
+        assert_eq!(
+            serde_json::to_value(UpdateProgress::Installing).unwrap(),
+            serde_json::json!({ "stage": "installing" })
+        );
+    }
+
+    #[test]
+    fn download_reports_are_spaced_out() {
+        // The first is always sent; then one per whole percent with a size.
+        assert!(worth_reporting(None, 0, Some(1000)));
+        assert!(!worth_reporting(Some(0), 5, Some(1000)));
+        assert!(worth_reporting(Some(0), 10, Some(1000)));
+        assert!(!worth_reporting(Some(10), 19, Some(1000)));
+        assert!(worth_reporting(Some(19), 20, Some(1000)));
+        // The last byte is always reported, and nothing goes backwards.
+        assert!(worth_reporting(Some(995), 1000, Some(1000)));
+        assert!(!worth_reporting(Some(1000), 1000, Some(1000)));
+        assert!(!worth_reporting(Some(500), 400, Some(1000)));
+        // Without a size: every half megabyte.
+        assert!(!worth_reporting(Some(0), UNSIZED_STEP - 1, None));
+        assert!(worth_reporting(Some(0), UNSIZED_STEP, None));
+        assert!(!worth_reporting(Some(0), 10, Some(0)));
+
+        let mut sent = Vec::new();
+        {
+            let mut reporter = DownloadReporter::new(|p| sent.push(p));
+            reporter.stage(UpdateProgress::Downloading {
+                received: 0,
+                total: None,
+            });
+            for _ in 0..200 {
+                reporter.chunk(5, Some(1000));
+            }
+            reporter.stage(UpdateProgress::Verifying);
+            reporter.stage(UpdateProgress::Installing);
+        }
+        // The opening report, the first chunk, a report per percent, then the two stages.
+        assert_eq!(sent.len(), 1 + 1 + 100 + 2);
+        assert_eq!(
+            sent[1],
+            UpdateProgress::Downloading {
+                received: 5,
+                total: Some(1000)
+            }
+        );
+        assert_eq!(
+            sent[2],
+            UpdateProgress::Downloading {
+                received: 10,
+                total: Some(1000)
+            }
+        );
+        assert_eq!(
+            sent[101],
+            UpdateProgress::Downloading {
+                received: 1000,
+                total: Some(1000)
+            }
+        );
+        assert_eq!(sent[102], UpdateProgress::Verifying);
+        assert_eq!(sent[103], UpdateProgress::Installing);
     }
 
     #[test]
