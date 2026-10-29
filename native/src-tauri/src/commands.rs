@@ -96,17 +96,19 @@ pub fn update_runtime(app: AppHandle) -> crate::updater::UpdateRuntime {
 /// `{ kind: "none" }` when the release has no updater manifest for this platform.
 #[tauri::command]
 /// `manifest`: the Beta channel's own `latest.json` (Dev Options → Beta updates).
+/// `on_progress`: each stage as it begins (`updater::UpdateProgress`).
 pub async fn update_install(
     app: AppHandle,
     manifest: Option<String>,
+    on_progress: tauri::ipc::Channel<crate::updater::UpdateProgress>,
 ) -> Result<crate::updater::InstallOutcome> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        crate::updater::install_self(&app, manifest).await
+        crate::updater::install_self(&app, manifest, on_progress).await
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        let _ = (app, manifest);
+        let _ = (app, manifest, on_progress);
         Err("this platform does not update itself".into())
     }
 }
@@ -119,14 +121,15 @@ pub async fn update_download_deb(
     url: String,
     name: String,
     beta: Option<bool>,
+    on_progress: tauri::ipc::Channel<crate::updater::UpdateProgress>,
 ) -> Result<crate::updater::InstallOutcome> {
     #[cfg(target_os = "linux")]
     {
-        crate::updater::download_deb(&app, &url, &name, beta.unwrap_or(false)).await
+        crate::updater::download_deb(&app, &url, &name, beta.unwrap_or(false), on_progress).await
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (app, url, name, beta);
+        let _ = (app, url, name, beta, on_progress);
         Err("a .deb installs on Linux only".into())
     }
 }
@@ -140,14 +143,15 @@ pub async fn update_install_apk(
     url: String,
     name: String,
     beta: Option<bool>,
+    on_progress: tauri::ipc::Channel<crate::updater::UpdateProgress>,
 ) -> Result<serde_json::Value> {
     #[cfg(target_os = "android")]
     {
-        crate::updater::install_apk(&app, &url, &name, beta.unwrap_or(false)).await
+        crate::updater::install_apk(&app, &url, &name, beta.unwrap_or(false), on_progress).await
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, url, name, beta);
+        let _ = (app, url, name, beta, on_progress);
         Err("an APK installs on Android only".into())
     }
 }

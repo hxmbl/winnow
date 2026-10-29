@@ -11,7 +11,8 @@
  *   - newest wins: of everything that could be shown, the most recent is; an older one
  *     still on offer (a Trash Undo under a "Draft saved." flash) comes back when the
  *     newer one goes, and a tie goes to the one that matters more (a message waiting to
- *     send, then an undo, then an update notice, then a flash, then the sync line);
+ *     send, then an undo, then an install under way, then an update notice, then a
+ *     flash, then the sync line);
  *   - an Undo acts on its own action: each kind carries its own handler (the store's
  *     single undo offer, or the waiting send), never "whatever was last";
  *   - when an action notice ends — it expired, was undone, was dismissed — the pill
@@ -27,6 +28,12 @@ export type PillNotice =
   | { kind: "undo"; at: number; label: string }
   /** A newer Winnow, announced once (`useUpdates.ts`), with its Update button when there is one. */
   | { kind: "update"; at: number; text: string; button: string | null }
+  /**
+   * An install under way (`useUpdates().progress`): one notice from the press to the
+   * outcome, its words following the stage ("Downloading Winnow 1.7.0… 42%", "Verifying
+   * the download…"). `announcement` is the stage without the running percentage.
+   */
+  | { kind: "updating"; at: number; text: string; announcement: string }
   /** A short word about the last action, gone by itself. */
   | { kind: "flash"; at: number; text: string }
   /** The sync status: a pull's result, or the beat after a notice. */
@@ -35,7 +42,7 @@ export type PillNotice =
 /** How long the pill shows the sync status after a notice ends: as long as a pull's result. */
 export const SYNC_RETURN_MS = PULL_RESULT_MS;
 
-const RANK: Record<PillNotice["kind"], number> = { sending: 4, undo: 3, update: 2, flash: 1, sync: 0 };
+const RANK: Record<PillNotice["kind"], number> = { sending: 5, undo: 4, updating: 3, update: 2, flash: 1, sync: 0 };
 
 /** What the pill shows now: the newest candidate, a tie going to the higher rank. */
 export function currentNotice(candidates: readonly (PillNotice | null | undefined)[]): PillNotice | null {
@@ -94,6 +101,7 @@ export function pillText(notice: PillNotice, now: number): string {
     case "undo":
       return notice.label;
     case "update":
+    case "updating":
     case "flash":
     case "sync":
       return notice.text;
@@ -113,6 +121,9 @@ export function pillAnnouncement(notice: PillNotice | null): string {
       return `${notice.label} Undo is available.`;
     case "update":
       return notice.button ? `${notice.text} Button: ${notice.button}.` : notice.text;
+    case "updating":
+      // Once per stage, not at every tick of the download.
+      return notice.announcement;
     case "flash":
     case "sync":
       return notice.text;

@@ -68,4 +68,20 @@ class UpdateLogicTest {
     assertNull(UpdateLogic.expectedSha256("${"a".repeat(63)}  $name", name))
     assertNull(UpdateLogic.expectedSha256("$hash  x$name", name))
   }
+
+  @Test
+  fun spacesOutDownloadReports() {
+    // The first always; then once per whole percent with a size.
+    assertTrue(UpdateLogic.worthReporting(-1, 0, 1000))
+    assertFalse(UpdateLogic.worthReporting(0, 5, 1000))
+    assertTrue(UpdateLogic.worthReporting(0, 10, 1000))
+    assertFalse(UpdateLogic.worthReporting(10, 19, 1000))
+    // The last byte always, and never backwards.
+    assertTrue(UpdateLogic.worthReporting(995, 1000, 1000))
+    assertFalse(UpdateLogic.worthReporting(1000, 1000, 1000))
+    assertFalse(UpdateLogic.worthReporting(500, 400, 1000))
+    // Without a size: every half megabyte.
+    assertFalse(UpdateLogic.worthReporting(0, UpdateLogic.UNSIZED_STEP - 1, null))
+    assertTrue(UpdateLogic.worthReporting(0, UpdateLogic.UNSIZED_STEP, null))
+  }
 }

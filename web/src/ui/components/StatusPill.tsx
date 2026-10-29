@@ -52,6 +52,8 @@ type Props = {
   flash: { text: string; at: number } | null;
   /** A newer Winnow, while its announcement shows (`useUpdates.ts`). */
   update?: { text: string; button: string | null; at: number } | null;
+  /** An install under way, its words following the stage (`useUpdates().progress`). */
+  updating?: { text: string; announcement: string; at: number } | null;
   onUpdate?: () => void;
   onDismissUpdate?: () => void;
   /** Open the release notes for the update ("What's new"). */
@@ -133,12 +135,13 @@ function useAnchor(element: HTMLElement | null, inset: number, avoid: string | u
 }
 
 export function StatusPill(props: Props) {
-  const { sending, undo, flash, pull, update } = props;
+  const { sending, undo, flash, pull, update, updating } = props;
   const candidates: (PillNotice | null | undefined)[] = [
     sending && { kind: "sending", at: sending.at, deadline: sending.deadline },
     undo && { kind: "undo", at: undo.at, label: undo.label },
     flash && { kind: "flash", at: flash.at, text: flash.text },
     update && { kind: "update", at: update.at, text: update.text, button: update.button },
+    updating && { kind: "updating", at: updating.at, text: updating.text, announcement: updating.announcement },
     pull && { kind: "sync", at: pull.at, text: pull.text, ok: pull.ok },
   ];
   const live = currentNotice(candidates);
@@ -234,7 +237,7 @@ export function StatusPill(props: Props) {
               key={ghost ? "leaving" : noticeKey(pill)}
               {...(pill.kind === "sending" && !ghost ? { "data-send-pending": "" } : {})}
               className={`wn-glass wn-glass-bar wn-liquid pointer-events-auto flex h-10 max-w-full ${ghost ? "animate-vanish" : "animate-appear"} items-center gap-1 rounded-ctl pl-4 text-meta font-semibold ${
-                pill.kind === "sync" ? "pr-4" : "pr-1"
+                pill.kind === "sync" || pill.kind === "updating" ? "pr-4" : "pr-1"
               } ${pill.kind === "sync" && !pill.ok ? "text-danger" : "text-ink-body"}`}
             >
               <span

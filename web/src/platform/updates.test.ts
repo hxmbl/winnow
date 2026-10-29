@@ -73,6 +73,26 @@ describe("installing through the shell", () => {
     expect(s.calls).toEqual([["update_install_apk", { url: `${DL}Winnow_1.5.0_android-universal.apk`, name: "Winnow_1.5.0_android-universal.apk", beta: false }]]);
   });
 
+  it("hands the shell the channel it reports each stage on", async () => {
+    const channel = { id: 7 };
+    const self = recorder({ kind: "restarting" });
+    await installUpdateWith({ ...base, action: { kind: "self" } }, self.call, channel);
+    expect(self.calls).toEqual([["update_install", { onProgress: channel }]]);
+
+    const beta = recorder({ kind: "none" });
+    const manifest = "https://github.com/hxmbl/winnow/releases/download/v1.6.0-beta.1/latest.json";
+    await installUpdateWith({ ...base, beta: true, action: { kind: "self", manifest } }, beta.call, channel);
+    expect(beta.calls).toEqual([["update_install", { manifest, onProgress: channel }]]);
+
+    const d = recorder({ kind: "opened", path: "/tmp/W.deb" });
+    await installUpdateWith(deb, d.call, channel);
+    expect(d.calls[0][1]).toMatchObject({ name: "Winnow_1.5.0_amd64.deb", onProgress: channel });
+
+    const a = recorder({ kind: "opened" });
+    await installUpdateWith(apk, a.call, channel);
+    expect(a.calls[0][1]).toMatchObject({ name: "Winnow_1.5.0_android-universal.apk", beta: false, onProgress: channel });
+  });
+
   it("installs nothing for the page or a git pull", async () => {
     const none = recorder({ kind: "opened" });
     expect(await installUpdateWith({ ...base, action: { kind: "page" } }, none.call)).toEqual({ kind: "none" });

@@ -12,6 +12,10 @@
  *   announced again; a newer release is. Settings › About keeps offering it.
  * - On a native build, every tenth load of the app also runs the background check
  *   (`loadCheck.ts`); any check resets that count, "Check for updates" included.
+ * - An install says its real stage wherever it shows (`core/updates/stages.ts`):
+ *   downloading with progress, verifying the download, installing or opening the
+ *   installer, then the outcome, or why it failed. The pill carries it as one notice
+ *   whose words change in place; the result replaces it as a flash.
  * - "What's new" (from the pill or Settings) shows the notes of every release between
  *   the installed version and the newest, newest first (`core/updates/changelog.ts`).
  */
@@ -34,6 +38,17 @@ import {
   type UpdateState,
 } from "../core/updates/updates";
 import { fetchChangelog, type ChangelogEntry } from "../core/updates/changelog";
+import {
+  IDLE,
+  advance,
+  doneText,
+  installTarget,
+  installing,
+  stageAnnouncement,
+  stageText,
+  type StageEvent,
+  type UpdateStage,
+} from "../core/updates/stages";
 import type { Platform } from "../platform/types";
 import { LOAD_COUNT_KEY, countLoad, countsLoads, loadCheckDue, parseLoadCount } from "./loadCheck";
 
@@ -65,6 +80,16 @@ export type UpdatesController = {
   message: string | null;
   /** The pill's announcement, while it shows. */
   announcement: { at: number; text: string; button: string | null } | null;
+  /**
+   * What the update is doing, step by step (`core/updates/stages.ts`): checking, then
+   * for an install downloading → verifying → installing → done or failed.
+   */
+  stage: UpdateStage;
+  /**
+   * The pill's notice while an install runs: one notice from the press to the outcome
+   * (`at` is when it started), its words following the stage.
+   */
+  progress: { at: number; text: string; announcement: string } | null;
   checkNow: () => void;
   install: () => void;
   dismissAnnouncement: () => void;
@@ -147,6 +172,10 @@ export function useUpdates(
   const [announcement, setAnnouncement] = useState<UpdatesController["announcement"]>(null);
   const [online, setOnline] = useState(isOnline);
   const [whatsNew, setWhatsNew] = useState<ChangelogState | null>(null);
+  const [stage, setStage] = useState<UpdateStage>(IDLE);
+  /** When the install under way started, and for which version: the pill's notice. */
+  const [installRun, setInstallRun] = useState<{ at: number; version: string } | null>(null);
+  const step = useCallback((event: StageEvent) => setStage((current) => advance(current, event)), []);
   /** The notes once fetched, by `current→latest`, so reopening is instant. */
   const changelogCache = useRef<{ key: string; entries: ChangelogEntry[] } | null>(null);
 
@@ -218,11 +247,13 @@ export function useUpdates(
       if (!runtime || checking.current) return;
       checking.current = true;
       setStatus("checking");
+      step({ type: "check" });
       if (manual) setMessage(null);
       const started = Date.now();
       debugLog("updates", "check", { manual, channel: runtime.channel });
       const result = await checkForUpdate(runtime, (url, init) => globalThis.fetch(url, init));
       checking.current = false;
+      step({ type: "checked" });
       debugLog("updates", "result", {
         kind: result.kind,
         ms: Date.now() - started,
@@ -251,7 +282,7 @@ export function useUpdates(
         if (manual) setMessage(`Couldn't check for updates: ${result.reason}.`);
       }
     },
-    [runtime, setState, resetLoadCount],
+    [runtime, setState, resetLoadCount, step],
   );
 
   // The automatic schedule: due now, or a timer for when it will be.
@@ -305,51 +336,48 @@ export function useUpdates(
   );
 
   const install = useCallback(() => {
-    if (!offer || status === "installing") return;
+    if (!offer || status === "installing" || installing(stage)) return;
     setAnnouncement(null);
     setState((current) => dismiss(current, offer.version));
     const openPage = () => void platform.openExternal(offer.pageUrl).catch(() => undefined);
     const action = offer.action;
     if (action.kind === "git-pull" || action.kind === "docker") return;
-    if (action.kind === "page" || !platform.installUpdate) {
+    const target = installTarget(action);
+    if (target === null || !platform.installUpdate) {
       openPage();
       return;
     }
+    const version = offer.version;
     setStatus("installing");
     setMessage(null);
-    flash(`Downloading Winnow ${offer.version}…`, 120_000);
+    setInstallRun({ at: Date.now(), version });
+    step({ type: "install", target });
+    debugLog("updates", "install-start", { version, target });
     platform
-      .installUpdate(offer)
+      .installUpdate(offer, (progress) => step({ type: "progress", progress }))
       .then((outcome) => {
-        debugLog("updates", "install", { version: offer.version, outcome: outcome.kind });
+        debugLog("updates", "install", { version, outcome: outcome.kind });
         setStatus("idle");
-        switch (outcome.kind) {
-          case "restarting":
-            say(`Restarting into Winnow ${offer.version}…`);
-            break;
-          case "opened":
-            if (outcome.path) {
-              say(`Saved to ${outcome.path}. If no installer opened, run: sudo apt install ${outcome.path}`);
-            } else {
-              say("Android's installer is open. Confirm there to update.");
-            }
-            break;
-          case "needs-permission":
-            say("Allow Winnow to install apps in the page that opened, then press Update again.");
-            break;
-          case "none":
-            openPage();
-            say(`Opened the Winnow ${offer.version} release page to download it.`);
-            break;
-        }
+        setInstallRun(null);
+        const path = outcome.kind === "opened" ? outcome.path : undefined;
+        step({ type: "finished", outcome: outcome.kind, ...(path ? { path } : {}) });
+        if (outcome.kind === "none") openPage();
+        say(doneText({ stage: "done", target, outcome: outcome.kind, ...(path ? { path } : {}) }, version));
       })
       .catch((error: unknown) => {
         setStatus("failed");
+        setInstallRun(null);
         const reason = error instanceof Error ? error.message : String(error);
-        debugLog("updates", "install-failed", { version: offer.version, reason });
-        say(`Couldn't update: ${reason}`);
+        const failed = advance({ stage: "downloading", target, received: 0, total: null }, { type: "failed", detail: reason });
+        debugLog("updates", "install-failed", {
+          version,
+          reason,
+          kind: failed.stage === "failed" ? failed.reason : undefined,
+        });
+        step({ type: "failed", detail: reason });
+        say(stageText(failed, version) ?? `Couldn't update: ${reason}`);
       });
-  }, [offer, status, platform, flash, say, setState]);
+  }, [offer, status, stage, platform, say, setState, step]);
 
   const setAuto = useCallback(
     (value: boolean) => setState((current) => ({ ...current, auto: value })),
@@ -387,6 +415,15 @@ export function useUpdates(
 
   const closeWhatsNew = useCallback(() => setWhatsNew(null), []);
 
+  const progress = useMemo(() => {
+    if (!installRun || !installing(stage)) return null;
+    return {
+      at: installRun.at,
+      text: stageText(stage, installRun.version) ?? "",
+      announcement: stageAnnouncement(stage, installRun.version),
+    };
+  }, [installRun, stage]);
+
   return {
     runtime,
     auto: state.auto,
@@ -396,6 +433,8 @@ export function useUpdates(
     status,
     message,
     announcement,
+    stage,
+    progress,
     checkNow,
     install,
     dismissAnnouncement,

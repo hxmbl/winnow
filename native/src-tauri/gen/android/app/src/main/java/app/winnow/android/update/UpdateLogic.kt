@@ -66,4 +66,23 @@ object UpdateLogic {
       .toList()
     return found.singleOrNull()
   }
+
+  /** Without a size, a download is reported once per this many bytes. */
+  const val UNSIZED_STEP = 512L * 1024
+
+  /**
+   * Whether a download that has reached `received` bytes (of `total`, null when the
+   * server gave no size) is worth reporting, when the last report was at `last` (-1
+   * before the first): once per whole percent with a size, once per `UNSIZED_STEP`
+   * without, always the first and the last, never backwards. Same rule as
+   * `worth_reporting` in `updater.rs`.
+   */
+  fun worthReporting(last: Long, received: Long, total: Long?): Boolean {
+    if (last < 0) return true
+    if (received <= last) return false
+    if (total != null && total > 0) {
+      return received >= total || received * 100 / total > last * 100 / total
+    }
+    return received - last >= UNSIZED_STEP
+  }
 }

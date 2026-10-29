@@ -13,7 +13,10 @@
  *      when the stand-in answers DEVELOPER_ERROR — goes on to the loopback flow.
  *   1b. The update button beside the version shortcut (1.5.5): absent on the web build;
  *      in the Android app Check for updates → Checking… → No updates available → back,
- *      and with a newer release Update, which runs the app's APK updater.
+ *      and with a newer release Update, which runs the app's APK updater. While it runs,
+ *      the button and the status pill say each stage the plugin reports (STRM-438):
+ *      downloading with progress, verifying, opening the installer, then the outcome;
+ *      a download that fails its checksum says so.
  *   1c. Every tenth load (a reload counts) checks in the background: the newer release
  *      puts the button in Update, nothing installs, and the count starts again.
  *   1d. Dev Options → Send test notification: posts the sample through `notify_messages`
@@ -125,8 +128,32 @@ function fakeAndroid({ packageName, sha1 }) {
           return { kind: "unavailable", reason: "developer_error", detail: "status 10" };
         case "update_runtime":
           return { channel: "android", version: "1.5.4", arch: "aarch64" };
-        case "update_install_apk":
+        case "update_install_apk": {
+          // As the Kotlin plugin reports (UpdatePlugin.installApk): each stage on the
+          // channel, in order, then the outcome. `__smokeInstallFails` makes the checksum
+          // check refuse the download, as a tampered or broken release would.
+          const channel = args?.onProgress;
+          const fails = window.__smokeInstallFails === true;
+          let index = 0;
+          const send = (message) => {
+            const callback = channel && window[`_${channel.id}`];
+            if (callback) callback({ index: index++, message });
+          };
+          const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const total = 40 * 1024 * 1024;
+          send({ stage: "downloading", received: 0 });
+          await wait(300);
+          send({ stage: "downloading", received: total / 4, total });
+          await wait(400);
+          send({ stage: "downloading", received: (total * 3) / 4, total });
+          await wait(400);
+          send({ stage: "verifying" });
+          await wait(500);
+          if (fails) throw "the download doesn't match the release's checksum, so it wasn't installed";
+          send({ stage: "installing" });
+          await wait(500);
           return { kind: "opened" };
+        }
         case "request_notification_permission":
           return true;
         case "oauth_begin":
@@ -267,6 +294,21 @@ try {
     await button.tap();
     await page.waitForFunction(() => document.querySelector("[data-update-shortcut]")?.textContent?.trim() === "Update", null, { timeout: 5_000 }).catch(() => undefined);
     check("a newer release: Update", (await label()) === "Update", await label());
+    // Every word the button and the pill say while it installs (STRM-438), in order.
+    await page.evaluate(() => {
+      const seen = { button: [], pill: [] };
+      window.__updateSeen = seen;
+      const note = (list, text) => {
+        const value = (text ?? "").trim();
+        if (value && list[list.length - 1] !== value) list.push(value);
+      };
+      const read = () => {
+        note(seen.button, document.querySelector("[data-phone-topbar] [data-update-shortcut]")?.textContent);
+        note(seen.pill, document.querySelector("[data-status-pill] [data-pill-text]")?.textContent);
+      };
+      new MutationObserver(read).observe(document.body, { subtree: true, childList: true, characterData: true });
+      read();
+    });
     await button.tap();
     await page.waitForFunction(() => window.__smokeCalls.some((call) => call.cmd === "update_install_apk"), null, { timeout: 5_000 }).catch(() => undefined);
     const install = (await page.evaluate(() => window.__smokeCalls)).find((call) => call.cmd === "update_install_apk");
@@ -274,6 +316,51 @@ try {
       "Update runs the app's APK updater with the release's universal APK",
       install?.args?.name === "Winnow_99.0.0_android-universal.apk" && /releases\/download\/v99\.0\.0\//.test(install?.args?.url ?? ""),
       JSON.stringify(install),
+    );
+    check("and hands it a channel to report each stage on", typeof install?.args?.onProgress?.id === "number", JSON.stringify(install?.args?.onProgress));
+    await page.waitForFunction(() => window.__updateSeen.pill.some((text) => text.startsWith("Android's installer is open")), null, { timeout: 8_000 }).catch(() => undefined);
+    const seen = await page.evaluate(() => window.__updateSeen);
+    const inOrder = (list, wanted) => {
+      let at = -1;
+      for (const text of wanted) {
+        const next = list.findIndex((item, i) => i > at && item === text);
+        if (next < 0) return false;
+        at = next;
+      }
+      return true;
+    };
+    check(
+      "the button walks Downloading… → Downloading 25% → 75% → Verifying… → Opening installer…",
+      inOrder(seen.button, ["Update", "Downloading…", "Downloading 25%", "Downloading 75%", "Verifying…", "Opening installer…"]),
+      seen.button.join(" | "),
+    );
+    check(
+      "the pill says each stage, then the outcome",
+      inOrder(seen.pill, [
+        "Downloading Winnow 99.0.0…",
+        "Downloading Winnow 99.0.0… 25%",
+        "Downloading Winnow 99.0.0… 75%",
+        "Verifying the download…",
+        "Opening Android's installer…",
+        "Android's installer is open. Confirm there to update.",
+      ]),
+      seen.pill.join(" | "),
+    );
+    await page.waitForFunction(() => document.querySelector("[data-update-shortcut]")?.textContent?.trim() === "Update", null, { timeout: 5_000 }).catch(() => undefined);
+    check("once the installer is open, the button offers Update again", (await label()) === "Update", await label());
+
+    // A download that fails its checksum says so, in plain words.
+    await page.evaluate(() => {
+      window.__smokeInstallFails = true;
+      window.__updateSeen.pill.length = 0;
+    });
+    await button.tap();
+    await page.waitForFunction(() => window.__updateSeen.pill.some((text) => text.startsWith("Couldn't update")), null, { timeout: 8_000 }).catch(() => undefined);
+    const failed = await page.evaluate(() => window.__updateSeen.pill);
+    check(
+      "a checksum mismatch: Verifying the download… → Couldn't update, and why",
+      inOrder(failed, ["Verifying the download…", "Couldn't update: the download didn't match the release's checksum, so it wasn't installed."]),
+      failed.join(" | "),
     );
     check("no page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
     await context.close();
