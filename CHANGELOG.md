@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-11-02
+
 ### Security
 
 - Remediated minimatch advisory by overriding to ^11.0.4. The vulnerable path requires optimizationLevel >= 2, which no caller in this build sets.
@@ -494,7 +496,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/hxmbl/winnow/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/hxmbl/winnow/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/hxmbl/winnow/compare/v1.6.4...v1.7.0
 [1.6.4]: https://github.com/hxmbl/winnow/compare/v1.6.3...v1.6.4
