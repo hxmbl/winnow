@@ -99,7 +99,7 @@ export async function fetchOwnProfile(tokenProvider: TokenProvider, options: Opt
   // profile scope, however Google worded it.
   if (answer.status === 401 || answer.status === 403) return { kind: "not_granted" };
   if (!answer.ok) throw new GmailError(`Google returned ${answer.status} for the profile.`, answer.status, "unknown");
-  let body: unknown = {};
+  let body: unknown;
   try {
     body = answer.text ? JSON.parse(answer.text) : {};
   } catch {

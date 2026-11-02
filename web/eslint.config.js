@@ -12,9 +12,27 @@ export default defineConfig([
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactHooks.configs['recommended-latest'],
       reactRefresh.configs.vite,
     ],
+    plugins: {
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      // The plugin's v7 presets also enable the React Compiler rules. Keep the
+      // hook rules this project already used instead of adopting them here.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      // These exports sit beside their components and were accepted by the
+      // previous plugin release; name them rather than relaxing the whole rule.
+      'react-refresh/only-export-components': [
+        'error',
+        {
+          allowConstantExport: true,
+          allowCompoundComponents: true,
+          allowExportNames: ['ICON_SIZES', 'FILTER_EXPLANATIONS', 'filterIcon'],
+        },
+      ],
+    },
     languageOptions: {
       globals: globals.browser,
     },

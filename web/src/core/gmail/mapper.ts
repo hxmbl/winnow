@@ -203,7 +203,7 @@ export function toEmail(
   const plain = plainTextPart(payload);
   const html = htmlPart(payload);
 
-  let body = "";
+  let body: string;
   let bodySource: BodySource = "snippet";
   // A metadata response has no leaves to read, so its body is the snippet — which
   // Gmail HTML-escapes (`&#39;`), unlike a decoded part.

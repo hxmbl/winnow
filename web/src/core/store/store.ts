@@ -2689,7 +2689,7 @@ export class WinnowStore {
     if (this.state.storagePrompt === "saving") return;
     const backend = this.backend;
     this.set({ storagePrompt: "saving" });
-    let saved = false;
+    let saved: boolean;
     try {
       saved = (await backend?.persistCache?.()) ?? false;
     } catch {
@@ -4453,7 +4453,7 @@ export class WinnowStore {
     if (cached) return cached;
     const backend = this.backend;
     if (!backend?.fetchMessage || !gmailId) return null;
-    let fetched: Email | null = null;
+    let fetched: Email | null;
     try {
       fetched = await backend.fetchMessage(gmailId);
     } catch (error) {

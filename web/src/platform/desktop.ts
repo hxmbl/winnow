@@ -572,7 +572,7 @@ export async function installUpdateWith(
         return { kind: "none" };
     }
   } catch (error) {
-    throw new Error(describeIpcError(error, "the update could not be installed"));
+    throw new Error(describeIpcError(error, "the update could not be installed"), { cause: error });
   }
 }
 
