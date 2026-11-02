@@ -8523,17 +8523,24 @@ try {
     // The frost on, then off (and the pills' tint off in both, so only the blur differs).
     const NO_TINT = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important} .wn-liquid::after{display:none!important} .wn-glass *,.wn-chip-glass *{visibility:hidden!important}";
     const NO_FROST = ".wn-glass,.wn-chip-glass,.wn-glass-behind::before{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}";
-    const frostRatio = async (p, ctx, rect) => {
+    const NO_RAIL_HAZE = ".wn-rail-haze::before{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}";
+    const frostRatio = async (p, ctx, rect, { disableRailHaze = false } = {}) => {
       const tint = await p.addStyleTag({ content: NO_TINT });
-      await p.waitForTimeout(250);
-      const frosted = await detail(ctx, await p.screenshot(), rect, 1);
-      const off = await p.addStyleTag({ content: NO_FROST });
-      await p.waitForTimeout(250);
-      const plain = await detail(ctx, await p.screenshot(), rect, 1);
-      await off.evaluate((el) => el.remove());
-      await tint.evaluate((el) => el.remove());
-      await p.waitForTimeout(250);
-      return { frosted: Math.round(frosted * 100) / 100, plain: Math.round(plain * 100) / 100, ratio: plain > 0 ? frosted / plain : 1 };
+      const haze = disableRailHaze ? await p.addStyleTag({ content: NO_RAIL_HAZE }) : null;
+      let off;
+      try {
+        await p.waitForTimeout(250);
+        const frosted = await detail(ctx, await p.screenshot(), rect, 1);
+        off = await p.addStyleTag({ content: NO_FROST });
+        await p.waitForTimeout(250);
+        const plain = await detail(ctx, await p.screenshot(), rect, 1);
+        return { frosted: Math.round(frosted * 100) / 100, plain: Math.round(plain * 100) / 100, ratio: plain > 0 ? frosted / plain : 1 };
+      } finally {
+        if (off) await off.evaluate((el) => el.remove());
+        if (haze) await haze.evaluate((el) => el.remove());
+        await tint.evaluate((el) => el.remove());
+        await p.waitForTimeout(250);
+      }
     };
     // Nothing between a pill and the page may cut its frost off from the list (1.4: the
     // frost is on the pill itself, so only a filter there would).
@@ -8705,15 +8712,16 @@ try {
         // The demo list decides what sits under a pill at a given scroll; where the region
         // happens to fall between two rows' lines there is no text to blur, so step the
         // list on until some is (the pills themselves stay put), then go back.
-        let r = await frostRatio(g, ctx, region);
+        const isEndsAndGap = region.name.startsWith("the ends and gap");
+        let r = await frostRatio(g, ctx, region, { disableRailHaze: !isEndsAndGap });
         for (let step = 1; r.plain <= 0.5 && step <= 6; step += 1) {
           await g.evaluate((by) => (document.querySelector("[data-row-count]").scrollTop = 600 + by), step * 14);
           await g.waitForTimeout(300);
-          r = await frostRatio(g, ctx, region);
+          r = await frostRatio(g, ctx, region, { disableRailHaze: !isEndsAndGap });
         }
         await g.evaluate(() => (document.querySelector("[data-row-count]").scrollTop = 600));
         await g.waitForTimeout(300);
-        if (region.name.startsWith("the ends and gap")) {
+        if (isEndsAndGap) {
           // The phone rail's haze: softened, yet not the band of frost it used to be.
           check(
             `${kind}: row text across ${region.name} is softened by the haze, not frosted into a band (detail ${r.frosted} hazed vs ${r.plain} bare)`,

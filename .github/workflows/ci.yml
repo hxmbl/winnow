@@ -150,7 +150,7 @@ jobs:
     # skips the download and the apt step. Its tag must match the locked `playwright`
     # version (1.63.0) or the browser build will not be the one the library expects.
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
     defaults:
       run:
         working-directory: web
