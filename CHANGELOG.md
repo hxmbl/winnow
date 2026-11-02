@@ -14,6 +14,15 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Security
+
+- Remediated minimatch advisory by overriding to ^11.0.4. The vulnerable path requires optimizationLevel >= 2, which no caller in this build sets.
+
+### Changed
+
+- Upgraded the ESLint stack to ESLint 10 with supported linting rules. Fixed lint findings exposed by the newer @eslint/js recommended rules.
+- The Android notification bar icon now shows the Winnow relay mark (two paper planes) instead of a simple envelope, matching the app's branding.
+
 ## [1.7.1] - 2026-10-29
 
 ### Added
