@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status-bar icon for mail notifications: Android draws it as a white silhouette, so
-     it is one flat shape (an envelope), not the launcher artwork. -->
+<!-- Status-bar icon for notifications: Android draws it as a white silhouette, so use
+     the dark relay mark's two paper planes without its background or cut-out colour. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -8,5 +8,8 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M4,4h16c1.1,0 2,0.9 2,2v12c0,1.1 -0.9,2 -2,2H4c-1.1,0 -2,-0.9 -2,-2V6c0,-1.1 0.9,-2 2,-2zM12,11L4,6v2l8,5 8,-5V6l-8,5z" />
+        android:pathData="M13.24,6.83L9.4,14.36 6.73,12.4 5.99,13.52 5.84,11.75 3.74,9.82z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.61,17.49l3.84,-7.57 2.77,2.02 0.54,-0.39 0.37,1.04 2.23,2.01z" />
 </vector>
