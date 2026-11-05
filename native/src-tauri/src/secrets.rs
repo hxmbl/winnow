@@ -26,6 +26,21 @@ use std::sync::Arc;
 /// id, and the desktop keychain items must keep the name they were written under.
 const SERVICE: &str = "app.winnow.desktop";
 
+/// Names exposed to the webview. Account-scoped token names are validated here,
+/// at the IPC boundary, rather than trusting TypeScript callers.
+pub fn valid_name(name: &str) -> bool {
+    if name == "gmail.tokens" || name == "google.oauth-client" {
+        return true;
+    }
+    let Some(account) = name.strip_prefix("gmail.tokens@") else {
+        return false;
+    };
+    (4..=24).contains(&account.len())
+        && account
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
 /// Failures are returned to the webview as strings — the TypeScript side turns
 /// them into a message, and the distinction that matters to the user is
 /// "keychain locked" versus "no secret stored".
@@ -120,16 +135,25 @@ mod backend {
 
 /// Store (or replace) a secret.
 pub fn set(name: &str, value: &str) -> Result<()> {
+    if !valid_name(name) {
+        return Err("invalid secret name".into());
+    }
     backend::set(name, value)
 }
 
 /// Read a secret, or `None` when nothing is stored under that name.
 pub fn get(name: &str) -> Result<Option<String>> {
+    if !valid_name(name) {
+        return Err("invalid secret name".into());
+    }
     backend::get(name)
 }
 
 /// Remove a secret. Deleting something that was never stored is a success.
 pub fn delete(name: &str) -> Result<()> {
+    if !valid_name(name) {
+        return Err("invalid secret name".into());
+    }
     backend::delete(name)
 }
 
@@ -138,4 +162,29 @@ pub type Keychain = Arc<Mutex<()>>;
 
 pub fn new_handle() -> Keychain {
     Arc::new(Mutex::new(()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_name;
+
+    #[test]
+    fn accepts_only_winnow_secret_names() {
+        for name in ["gmail.tokens", "google.oauth-client", "gmail.tokens@acct1"] {
+            assert!(valid_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn rejects_arbitrary_or_malformed_names() {
+        for name in [
+            "other-secret",
+            "gmail.tokens@../other",
+            "gmail.tokens@ABC1",
+            "gmail.tokens@abc",
+            "gmail.tokens@account_with_underscore",
+        ] {
+            assert!(!valid_name(name), "{name}");
+        }
+    }
 }

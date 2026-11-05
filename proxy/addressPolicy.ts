@@ -194,7 +194,8 @@ function embeddedIPv4(bytes: readonly number[]): string | null {
     bytes.slice(4, 12).every((byte) => byte === 0);
   const isSixToFour = bytes[0] === 0x20 && bytes[1] === 0x02;
 
-  return isMapped || isNat64 || isSixToFour ? bytes.slice(12).join(".") : null;
+  if (isSixToFour) return bytes.slice(2, 6).join(".");
+  return isMapped || isNat64 ? bytes.slice(12).join(".") : null;
 }
 
 /**
