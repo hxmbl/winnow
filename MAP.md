@@ -8,15 +8,15 @@ rather than running the app.
 
 | | Files | Lines |
 | --- | --- | --- |
-| `web/src/core` — product logic | 100 | 33,426 |
-| `web/src/ui` — the screen | 46 | 11,537 |
-| `web/src/platform` — the browser/desktop boundary | 8 | 1,893 |
-| `web/src/App.tsx` + `main.tsx` + `index.css` | 3 | 3,067 |
-| `native/src-tauri/src` — Rust | 9 | 2,076 |
-| `proxy` — optional render service | 6 | 1,526 |
-| **total** | **172** | **53,525** |
+| `web/src/core` — product logic | 104 | 34,333 |
+| `web/src/ui` — the screen | 132 | 28,004 |
+| `web/src/platform` — the browser/desktop boundary | 10 | 1,877 |
+| `web/src/App.tsx` + `main.tsx` + `index.css` | 3 | 7,986 |
+| `native/src-tauri/src` — Rust | 18 | 7,811 |
+| `proxy` — optional render service | 4 | 1,045 |
+| **total** | **271** | **81,056** |
 
-Of that, 61 test files and 20,287 lines — roughly two-fifths of the source, and
+Of that, 195 test files and 44,042 lines — roughly one-third of the source, and
 none of it needs a DOM.
 
 ---
@@ -72,7 +72,7 @@ Six files, in this order, and you will have the shape of the product:
 
 | Read | Because |
 | --- | --- |
-| `web/src/core/store/store.ts` | The only file that knows about all the state. It owns one derived pass (§5.1) and everything else reads its snapshot. |
+| `web/src/core/store/store.ts` | The only file that knows about all the state. It owns one derived pass (§5.1) and everything else reads its snapshot. 4,852 lines. |
 | `web/src/core/classify/classify.ts` | What a message *is*. Pure, synchronous, and the oldest code in the project. |
 | `web/src/core/gmail/sync.ts` | How the mailbox gets here at all: full vs incremental, cursor, caps. |
 | `web/src/platform/types.ts` | The fourteen methods that are allowed to differ between browser and desktop. |
@@ -818,7 +818,7 @@ explicit `#[serde(rename)]` on all four capability flags (serde would emit
 
 ## 7. `web/src/ui` — the screen
 
-`App.tsx` is 2,327 lines and is the only file that knows about the store, the
+`App.tsx` is 5,763 lines and is the only file that knows about the store, the
 platform and React at once. It owns exactly three things: **the keyboard** (one
 `keydown` listener on `window`, registered once with an empty dependency array,
 reading current values through refs), **the theme** (resolved from preference
@@ -935,6 +935,9 @@ could be written in TypeScript, it belongs in `web/`.
 | `debug_log.rs` | The native half of Dev Options → Debug log: `dlog!(area, event, key = value…)` records a redacted line only while the switch is on (`debug_log_set_enabled`), at most 10,000 waiting; `debug_log_drain` hands them to the web layer, nudged by `winnow://debug-log`. Values with a token, key or address shape are replaced whole; `code`/`token`/… fields keep only their length. |
 | `google_signin.rs` | Android only at run time: the `google-signin` mobile plugin, registered from this crate with its Kotlin in `gen/android/app/src/main/java/app/winnow/android/signin/` (Play services' `AuthorizationClient` with offline access, the signing certificate, a Custom Tab). Validates the commands' arguments (a client id, Google API scopes, an `accounts.google.com` URL) and passes the plugin's JSON through. The plugin has no permission of its own, so the page reaches it only through the three commands below; off Android they answer "unsupported". |
 | `deep_link.rs` | The `winnow://` scheme only. The old OAuth callback scheme was removed: a private-use redirect URI is not something Google hands a desktop client an authorization code for. |
+| `background_service.rs` | Android background service integration. |
+| `updater.rs` | Native update handling (downloading, verifying, installing updates). |
+| `notify_actions/` | Notification action handling: `mod.rs` (module interface), `plan.rs` (action planning), `shown.rs` (what actions to show), `desktop.rs` (desktop notification actions), `android.rs` (Android notification actions). |
 
 ### 8.1 The command surface
 
