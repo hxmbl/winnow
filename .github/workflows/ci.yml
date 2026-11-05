@@ -151,6 +151,9 @@ jobs:
     # version (1.64.1) or the browser build will not be the one the library expects.
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
+      # Chromium's sandbox blocks the default root user in this container. Run the
+      # smoke job as Playwright's non-root user so `chromiumSandbox: true` works.
+      options: --user pwuser
     defaults:
       run:
         working-directory: web
