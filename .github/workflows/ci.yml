@@ -156,12 +156,12 @@ jobs:
           persist-credentials: false
 
       # Use the image's matching Node/browser versions and the profile from
-      # microsoft/playwright v1.64.1/utils/docker/seccomp_profile.json. The Docker
+      # microsoft/playwright v1.65.0/utils/docker/seccomp_profile.json. The Docker
       # daemon needs the checked-out profile on the host, so this cannot be a
       # job-level container.
       - name: Prepare checkout for pwuser
         run: |
-          PWUSER_UID="$(docker run --rm --entrypoint id mcr.microsoft.com/playwright:v1.64.1-noble -u pwuser)"
+          PWUSER_UID="$(docker run --rm --entrypoint id mcr.microsoft.com/playwright:v1.65.0-noble -u pwuser)"
           sudo chown -R "$PWUSER_UID" "$GITHUB_WORKSPACE"
 
       - name: Install, build, and run smoke shard
@@ -175,7 +175,7 @@ jobs:
             --security-opt "seccomp=$GITHUB_WORKSPACE/.github/playwright-seccomp.json" \
             --volume "$GITHUB_WORKSPACE:/workspace" \
             --workdir /workspace/web \
-            mcr.microsoft.com/playwright:v1.64.1-noble \
+            mcr.microsoft.com/playwright:v1.65.0-noble \
             bash -euo pipefail -c '
               npm ci
               npx vite build --logLevel warn
