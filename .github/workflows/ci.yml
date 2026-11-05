@@ -148,7 +148,7 @@ jobs:
         shard: [core, contexts-a, contexts-b, modules-a, modules-b, modules-c]
     # Playwright's own image ships the browsers and their system libraries, so the job
     # skips the download and the apt step. Its tag must match the locked `playwright`
-    # version (1.63.0) or the browser build will not be the one the library expects.
+    # version (1.64.1) or the browser build will not be the one the library expects.
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
     defaults:
