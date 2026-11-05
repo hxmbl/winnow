@@ -31,7 +31,12 @@ function check(label, ok, detail = "") {
 }
 
 const server = await preview({ root: ROOT, logLevel: "warn", preview: { port: PORT, strictPort: true, open: false } });
-const browser = await chromium.launch(process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM } : {});
+const browser = await chromium.launch({
+  chromiumSandbox: true,
+  ...(process.env.WINNOW_CHROMIUM
+    ? { executablePath: process.env.WINNOW_CHROMIUM }
+    : {}),
+});
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await context.grantPermissions(["notifications"], { origin: URL.replace(/\/$/, "") });

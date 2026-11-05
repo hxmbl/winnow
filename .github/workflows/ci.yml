@@ -146,11 +146,6 @@ jobs:
       fail-fast: false
       matrix:
         shard: [core, contexts-a, contexts-b, modules-a, modules-b, modules-c]
-    # Playwright's own image ships the browsers and their system libraries, so the job
-    # skips the download and the apt step. Its tag must match the locked `playwright`
-    # version (1.64.1) or the browser build will not be the one the library expects.
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
     defaults:
       run:
         working-directory: web
@@ -160,24 +155,32 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+      # Use the image's matching Node/browser versions and the profile from
+      # microsoft/playwright v1.64.1/utils/docker/seccomp_profile.json. The Docker
+      # daemon needs the checked-out profile on the host, so this cannot be a
+      # job-level container.
+      - name: Prepare checkout for pwuser
+        run: |
+          PWUSER_UID="$(docker run --rm --entrypoint id mcr.microsoft.com/playwright:v1.64.1-noble -u pwuser)"
+          sudo chown -R "$PWUSER_UID" "$GITHUB_WORKSPACE"
 
-      - name: Install dependencies
-        run: npm ci
-
-      # The production bundle, built per shard: ~15s here in parallel, against a separate
-      # build-and-upload job every shard would have to wait for. `vite build` alone, as
-      # `npm run build`'s `tsc -b` (noEmit) is the typecheck `npm-checks` already runs.
-      - name: Build the production bundle
-        run: npx vite build --logLevel warn
-
-      - name: Smoke test (${{ matrix.shard }})
-        run: node scripts/smoke-shards.mjs "${{ matrix.shard }}"
+      - name: Install, build, and run smoke shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          docker run --rm --init \
+            --user pwuser \
+            --env HOME=/home/pwuser \
+            --env SHARD \
+            --security-opt "seccomp=$GITHUB_WORKSPACE/.github/playwright-seccomp.json" \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace/web \
+            mcr.microsoft.com/playwright:v1.64.1-noble \
+            bash -euo pipefail -c '
+              npm ci
+              npx vite build --logLevel warn
+              node scripts/smoke-shards.mjs "$SHARD"
+            '
 
   # The one check that stands for the whole smoke run (the name branch protection and
   # `trigger-release` rely on): green only when every shard passed.

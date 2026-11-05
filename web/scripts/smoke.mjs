@@ -160,9 +160,12 @@ async function openServer() {
 const stopServer = await openServer();
 // `WINNOW_CHROMIUM` points at a system Chromium, for machines where Playwright's own
 // download is not available (linux-arm64 sandboxes, for one). CI uses the bundled one.
-const browser = await chromium.launch(
-  process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM } : {},
-);
+const browser = await chromium.launch({
+  chromiumSandbox: true,
+  ...(process.env.WINNOW_CHROMIUM
+    ? { executablePath: process.env.WINNOW_CHROMIUM }
+    : {}),
+});
 let failed = false;
 
 /**

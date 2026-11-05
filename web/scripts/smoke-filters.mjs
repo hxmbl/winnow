@@ -39,7 +39,12 @@ const section = (title) => console.log(`\n── ${title} ${"─".repeat(Math.ma
 
 if (!existsSync(path.join(ROOT, "dist", "index.html"))) await build({ root: ROOT, logLevel: "warn" });
 const server = await preview({ root: ROOT, logLevel: "warn", preview: { port: PORT, strictPort: true, open: false } });
-const browser = await chromium.launch(process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM } : {});
+const browser = await chromium.launch({
+  chromiumSandbox: true,
+  ...(process.env.WINNOW_CHROMIUM
+    ? { executablePath: process.env.WINNOW_CHROMIUM }
+    : {}),
+});
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
 const MISSED = "Your Evri delivery is coming today";
