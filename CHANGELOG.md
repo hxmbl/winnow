@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-11-05
+
 ### Security
 
 - Added validation to secret name functions to ensure only valid Winnow secret names are accepted at the IPC boundary. Secret names must be `gmail.tokens`, `google.oauth-client`, or `gmail.tokens@{account}` where the account is 4-24 lowercase alphanumeric characters.
@@ -501,7 +503,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/hxmbl/winnow/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/hxmbl/winnow/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/hxmbl/winnow/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/hxmbl/winnow/compare/v1.6.4...v1.7.0
