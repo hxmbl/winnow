@@ -14,6 +14,11 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Security
+
+- Added validation to secret name functions to ensure only valid Winnow secret names are accepted at the IPC boundary. Secret names must be `gmail.tokens`, `google.oauth-client`, or `gmail.tokens@{account}` where the account is 4-24 lowercase alphanumeric characters.
+- Fixed embedded IPv4 address extraction for 6to4 addresses in the proxy.
+
 ## [1.7.2] - 2026-11-02
 
 ### Security
