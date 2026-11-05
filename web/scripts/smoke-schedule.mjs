@@ -425,9 +425,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   const port = Number(process.env.WINNOW_PORT ?? 4351);
   const server = await preview({ root, logLevel: "warn", preview: { port, strictPort: true, open: false } });
-  const browser = await chromium.launch(
-    process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM, args: ["--no-sandbox"] } : {},
-  );
+  const browser = await chromium.launch({
+    chromiumSandbox: true,
+    ...(process.env.WINNOW_CHROMIUM
+      ? { executablePath: process.env.WINNOW_CHROMIUM }
+      : {}),
+  });
   let passed = 0;
   const failures = [];
   const errors = [];

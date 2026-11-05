@@ -385,7 +385,12 @@ async function accountsPageChecks(page, { label, openSwitcher, registry: read })
 
 await ensureBuilt();
 const server = await preview({ root: ROOT, logLevel: "warn", preview: { port: PORT, strictPort: true, open: false } });
-const browser = await chromium.launch(process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM } : {});
+const browser = await chromium.launch({
+  chromiumSandbox: true,
+  ...(process.env.WINNOW_CHROMIUM
+    ? { executablePath: process.env.WINNOW_CHROMIUM }
+    : {}),
+});
 const errors = [];
 try {
   // ── 1–4. The web build ─────────────────────────────────────────────────────

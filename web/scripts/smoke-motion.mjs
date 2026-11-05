@@ -628,9 +628,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   const port = Number(process.env.WINNOW_PORT ?? 4323);
   const server = await preview({ root, logLevel: "warn", preview: { port, strictPort: true, open: false } });
-  const browser = await chromium.launch(
-    process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM, args: ["--no-sandbox"] } : {},
-  );
+  const browser = await chromium.launch({
+    chromiumSandbox: true,
+    ...(process.env.WINNOW_CHROMIUM
+      ? { executablePath: process.env.WINNOW_CHROMIUM }
+      : {}),
+  });
   // WINNOW_CPU_THROTTLE=4 slows every page's CPU that many times (as a busy CI runner).
   const throttle = Number(process.env.WINNOW_CPU_THROTTLE ?? 1);
   if (throttle > 1) {

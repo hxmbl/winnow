@@ -194,9 +194,12 @@ async function ensureBuilt() {
 await ensureBuilt();
 const server = await preview({ root: ROOT, logLevel: "warn", preview: { port: PORT, strictPort: true, open: false } });
 console.log(`· vite preview on ${URL}`);
-const browser = await chromium.launch(
-  process.env.WINNOW_CHROMIUM ? { executablePath: process.env.WINNOW_CHROMIUM } : {},
-);
+const browser = await chromium.launch({
+  chromiumSandbox: true,
+  ...(process.env.WINNOW_CHROMIUM
+    ? { executablePath: process.env.WINNOW_CHROMIUM }
+    : {}),
+});
 
 const setupOf = (page) => page.locator('[role="dialog"][aria-label="Google account"]');
 const stepIds = (setup) => setup.locator("[data-setup-step-button]").evaluateAll((els) => els.map((el) => el.getAttribute("data-setup-step-button")));
