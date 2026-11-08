@@ -5143,7 +5143,7 @@ try {
     const nextId = await rowButton(readIndex + 1).getAttribute("data-message-id");
     await rowButton(readIndex).click();
     await d.waitForTimeout(100);
-    await d.keyboard.press("u");
+    await d.keyboard.press("m");
     await d.waitForTimeout(200);
     const openNow = await d.locator('[data-row-count] button[aria-current="true"]').getAttribute("data-message-id");
     const nowUnread = /, unread,/.test(await d.locator(`[data-row-count] button[data-message-id="${readId}"]`).getAttribute("aria-label"));
@@ -6704,10 +6704,10 @@ try {
 
     // Mark unread moves on and does not bounce back to read; a later open reads it again.
     await openRow(first);
-    await r.keyboard.press("u");
+    await r.keyboard.press("m");
     await r.waitForTimeout(250);
-    const openAfterU = await r.locator('[data-row-count] button[aria-current="true"]').getAttribute("data-message-id").catch(() => null);
-    check("marking the open message unread moves on", openAfterU !== first, `${openAfterU}`);
+    const openAfterM = await r.locator('[data-row-count] button[aria-current="true"]').getAttribute("data-message-id").catch(() => null);
+    check("marking the open message unread moves on", openAfterM !== first, `${openAfterM}`);
     await r.waitForTimeout(300);
     check("and it stays unread", isUnreadPainted(await rowState(first)), JSON.stringify(await rowState(first)));
     await openRow(first);

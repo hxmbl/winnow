@@ -51,7 +51,8 @@ export type Command =
   | { type: "toggleShortcutsOverlay" }
   | { type: "openSettings" }
   | { type: "toggleSidebar" }
-  | { type: "undo" };
+  | { type: "undo" }
+  | { type: "redo" };
 
 /** The modifiers as the router sees them, plus the key itself. */
 export type KeyModifiers = {
@@ -118,10 +119,15 @@ export type KeyContext = {
   /** How many pills are in the rail, so `1`–`9` can be bounds-checked. */
   railCount: number;
   /**
-   * The status pill is offering an Undo, so `z` (and Ctrl+Z / ⌘Z) can take it. Optional
-   * so a caller with no undo need not say so; unset means none is on offer.
+   * The status pill is offering an Undo, so `u` (and `z`, Ctrl+Z / ⌘Z) can take it.
+   * Optional so a caller with no undo need not say so; unset means none is on offer.
    */
   undoAvailable?: boolean;
+  /**
+   * An action was just undone, so `Shift+U` can put it back. Optional for the same
+   * reason as `undoAvailable`; unset means there is nothing to redo.
+   */
+  redoAvailable?: boolean;
 };
 
 export const DEFAULT_CONTEXT: KeyContext = {
@@ -341,19 +347,34 @@ export const BINDINGS: readonly Binding[] = [
     command: { type: "trash" },
   },
   {
-    // Gmail's `z`. Only with an Undo on offer in the status pill, and it takes that one
-    // (the newest) and nothing older. Ctrl+Z / ⌘Z do the same outside a text field;
-    // see `commandForKey`, which lets that one modifier through for it.
+    // The action verbs' undo/redo pair. `u` takes the pill's newest offer, `⇧U` puts
+    // back what it took; a new action clears the redo, so the pair always describes one
+    // action and its inverse. `z` stays as Gmail's Undo, and Ctrl+Z / ⌘Z do the same
+    // outside a text field (see `commandForKey`).
+    keys: "u",
+    help: "Undo the last action (also z, Ctrl+Z / ⌘Z)",
+    matches: { keys: ["u"] },
+    when: ({ event, context }) => event.shiftKey !== true && context.undoAvailable === true,
+    command: { type: "undo" },
+  },
+  {
+    keys: "⇧U",
+    help: "Redo the action you undid",
+    matches: { keys: ["U"], shift: true },
+    when: ({ context }) => context.redoAvailable === true,
+    command: { type: "redo" },
+  },
+  {
     keys: "z",
-    help: "Undo the last move (also Ctrl+Z / ⌘Z)",
+    help: "Undo the last action",
     matches: { keys: ["z"] },
     when: ({ event, context }) => event.shiftKey !== true && context.undoAvailable === true,
     command: { type: "undo" },
   },
   {
-    keys: "u / m",
+    keys: "m",
     help: "Mark read or unread",
-    matches: { keys: ["u", "m"] },
+    matches: { keys: ["m"] },
     when: ({ context }) => context.hasActionTarget,
     command: { type: "toggleRead" },
   },
@@ -593,6 +614,7 @@ const PROBE: readonly KeyContext[] = [
   { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true, railCount: 9 },
   { ...DEFAULT_CONTEXT, viewerOpen: true, hasActionTarget: true, codeAvailable: true },
   { ...DEFAULT_CONTEXT, overlayVisible: true, filtersActive: true },
+  { ...DEFAULT_CONTEXT, hasActionTarget: true, undoAvailable: true, redoAvailable: true },
 ];
 
 function resolveType(

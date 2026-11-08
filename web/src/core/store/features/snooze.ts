@@ -146,10 +146,21 @@ export function snooze(
   const backend = store.backend;
   const keys = [...records.keys()];
   if (!undo) return records.size;
-  store.offerUndo(`Snoozed until ${formatWhen(wakeAt, now)}.`, () => {
+  const restore = () => {
     if (store.backend !== backend) return;
     releaseSnoozes(store, keys, { restore: new Map(moved.map((m) => [m.email.gmailId, m])) });
-  });
+  };
+  // Redo snoozes the restored messages again, to the same time, without offering a
+  // second Undo of its own: the entry's original Undo is already the way back.
+  const redo = () => {
+    if (store.backend !== backend) return;
+    const targets = moved
+      .map(({ email }) => store.state.all.find((candidate) => candidate.gmailId === email.gmailId))
+      .filter((email) => email !== undefined)
+      .map((email) => email.id);
+    if (targets.length > 0) snooze(store, targets, wakeAt, { undo: false });
+  };
+  store.offerUndo(`Snoozed until ${formatWhen(wakeAt, now)}.`, restore, { redo });
   return records.size;
 }
 
@@ -292,15 +303,23 @@ export function unsnooze(store: WinnowStore, ids: Iterable<number>): number {
   }
   if (records.size === 0) return 0;
   const taken = [...records.values()];
-  releaseSnoozes(store, [...records.keys()]);
+  const keys = [...records.keys()];
+  releaseSnoozes(store, keys);
   const backend = store.backend;
-  store.offerUndo(taken.length === 1 ? "Unsnoozed." : `Unsnoozed ${taken.length}.`, () => {
+  const undo = () => {
     if (store.backend !== backend) return;
     for (const record of taken) {
       const targets = store.state.all.filter((email) => record.gmailIds.includes(email.gmailId)).map((e) => e.id);
       snooze(store, targets, record.wakeAt, { undo: false });
     }
-  });
+  };
+  // Redo releases the same snoozes again, without a nested offer: the restored Undo
+  // above is the way back.
+  const redo = () => {
+    if (store.backend !== backend) return;
+    releaseSnoozes(store, keys);
+  };
+  store.offerUndo(taken.length === 1 ? "Unsnoozed." : `Unsnoozed ${taken.length}.`, undo, { redo });
   return records.size;
 }
 

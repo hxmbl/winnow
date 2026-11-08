@@ -351,6 +351,13 @@ export type StoreState = {
    */
   undo: { label: string; at: number } | null;
   /**
+   * The action just undone, ready to go back with `Shift+U`. A new action, a mailbox
+   * change, sign-out or the demo drops it: redoing something into a mailbox the user
+   * has left would be a surprise. The status pill does not show it; only the undo offer
+   * has a button.
+   */
+  redo: { label: string; at: number } | null;
+  /**
    * What the sync is doing, for the status line. `null` when not syncing.
    *
    * Nullable rather than an enum with an `idle` member: "is a sync running" and "which

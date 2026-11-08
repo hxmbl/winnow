@@ -98,6 +98,7 @@ const REACHABLE_CONTEXTS: readonly KeyContext[] = [
   context({ textEditing: true, searchEditing: true, searchActive: true }),
   context({ textEditing: true, composerOpen: true }),
   context({ hasActionTarget: true, undoAvailable: true }),
+  context({ hasActionTarget: true, undoAvailable: true, redoAvailable: true }),
 ];
 
 describe("commandForKey — not ready", () => {
@@ -284,7 +285,7 @@ describe("commandForKey — the canvas", () => {
 
   it("gates every action on having a target", () => {
     // No target means no message for these to act on.
-    for (const key of ["s", "e", "m", "u", "#"]) {
+    for (const key of ["s", "e", "m", "#"]) {
       expect(commandForKey(key, DEFAULT_CONTEXT), key).toBeNull();
     }
   });
@@ -303,10 +304,11 @@ describe("commandForKey — the canvas", () => {
 
   it("has no key that marks the whole mailbox read", () => {
     // Mark all read was removed: opening a message marks it read, and mass-marking lets
-    // mail look read that never was. `u` still toggles the one message.
-    expect(commandForKey("u", context({ hasActionTarget: true }))).toEqual({
+    // mail look read that never was. `m` toggles the one message; `u` is Undo now.
+    expect(commandForKey("m", context({ hasActionTarget: true }))).toEqual({
       type: "toggleRead",
     });
+    expect(commandForKey("u", context({ hasActionTarget: true }))).toBeNull();
     expect(commandForKey("U", context({ hasActionTarget: true }))).toBeNull();
     expect(commandForKey("U", context({ hasActionTarget: true }), { shiftKey: true })).toBeNull();
     expect(BINDINGS.some((binding) => /read/i.test(binding.help) && /mailbox|all|everything/i.test(binding.help))).toBe(false);
@@ -473,7 +475,9 @@ describe("the cheat sheet", () => {
       "1": context({ railCount: 9, hasActionTarget: true }),
       // Snooze needs something to act on.
       b: context({ viewerOpen: true, hasActionTarget: true }),
-      // Undo needs an offer in the status pill.
+      // Undo needs an offer in the status pill, and redo needs one just taken back.
+      u: context({ hasActionTarget: true, undoAvailable: true }),
+      U: context({ hasActionTarget: true, redoAvailable: true }),
       z: context({ hasActionTarget: true, undoAvailable: true }),
     };
 
@@ -525,6 +529,7 @@ describe("the cheat sheet", () => {
       "openSettings",
       "toggleSidebar",
       "undo",
+      "redo",
     ];
 
     for (const type of expected) {
@@ -670,8 +675,20 @@ describe("the sidebar shortcut on other layouts", () => {
   });
 });
 
-describe("the undo key", () => {
+describe("the undo and redo keys", () => {
   const offer = { ...DEFAULT_CONTEXT, undoAvailable: true };
+  const undone = { ...DEFAULT_CONTEXT, redoAvailable: true };
+  it("u takes the pill's Undo, only while one is on offer", () => {
+    expect(commandForKey("u", offer)).toEqual({ type: "undo" });
+    expect(commandForKey("u", DEFAULT_CONTEXT)).toBeNull();
+    expect(commandForKey("u", offer, { shiftKey: true })).toBeNull();
+  });
+  it("Shift+U redoes only after an undo, and never doubles as Undo", () => {
+    expect(commandForKey("U", undone, { shiftKey: true })).toEqual({ type: "redo" });
+    expect(commandForKey("U", DEFAULT_CONTEXT, { shiftKey: true })).toBeNull();
+    expect(commandForKey("U", offer, { shiftKey: true })).toBeNull();
+    expect(commandForKey("U", offer)).toBeNull();
+  });
   it("z takes the pill's Undo, only while one is on offer", () => {
     expect(commandForKey("z", offer)).toEqual({ type: "undo" });
     expect(commandForKey("z", DEFAULT_CONTEXT)).toBeNull();
@@ -693,6 +710,14 @@ describe("the undo key", () => {
     expect(commandForKey("z", offer, { ctrlKey: true, altKey: true })).toBeNull();
     expect(commandForKey("z", DEFAULT_CONTEXT, { ctrlKey: true })).toBeNull();
   });
+  it("keeps undo and redo quiet while typing, composing, or in a modal", () => {
+    expect(commandForKey("u", { ...offer, textEditing: true })).toBeNull();
+    expect(commandForKey("u", { ...offer, composerOpen: true })).toBeNull();
+    expect(commandForKey("U", { ...undone, textEditing: true }, { shiftKey: true })).toBeNull();
+    expect(commandForKey("U", { ...undone, composerOpen: true }, { shiftKey: true })).toBeNull();
+    expect(commandForKey("u", { ...offer, overlayVisible: true })).toBeNull();
+    expect(commandForKey("U", { ...undone, navigationVisible: true }, { shiftKey: true })).toBeNull();
+  });
   it("routes b to snooze, only with something to snooze", () => {
     expect(commandForKey("b", { ...offer, hasActionTarget: true })).toEqual({ type: "snooze" });
     expect(commandForKey("b", { ...offer, hasActionTarget: false })).toBeNull();
@@ -700,6 +725,8 @@ describe("the undo key", () => {
   });
 
   it("is on the cheat sheet, and other system chords still pass through", () => {
+    expect(BINDINGS.some((binding) => binding.keys === "u" && /undo/i.test(binding.help))).toBe(true);
+    expect(BINDINGS.some((binding) => binding.keys === "⇧U" && /redo/i.test(binding.help))).toBe(true);
     expect(BINDINGS.some((binding) => binding.keys === "z" && /undo/i.test(binding.help))).toBe(true);
     expect(commandForKey("e", { ...offer, hasActionTarget: true }, { ctrlKey: true })).toBeNull();
   });
