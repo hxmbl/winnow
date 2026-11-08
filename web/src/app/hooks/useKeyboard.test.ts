@@ -23,6 +23,7 @@ function makeStore() {
     activateNavigation: vi.fn(),
     toggleFilter: vi.fn(),
     clearFilters: vi.fn(),
+    setSearchQuery: vi.fn(),
     undoLast: vi.fn(),
     archiveWithUndo: vi.fn(),
     trashWithUndo: vi.fn(),
@@ -36,6 +37,7 @@ function makeSnapshot(over: Record<string, unknown> = {}): Snapshot {
     status: "ready",
     overlay: "none",
     activeFilters: [],
+    searchQuery: "",
     view: { selected: null, threads: [] },
     cursorIndex: -1,
     all: [],
@@ -151,6 +153,37 @@ describe("useKeyboard", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(setSelection).toHaveBeenCalledWith(EMPTY_SELECTION);
     expect(store.setOverlay).not.toHaveBeenCalled();
+  });
+
+  it("Escape clears the search when no filters are active", () => {
+    const { store } = setup(makeSnapshot({ searchQuery: "migration" }));
+    const event = press({ key: "Escape" });
+    expect(event.defaultPrevented).toBe(true);
+    expect(store.setSearchQuery).toHaveBeenCalledWith("");
+  });
+
+  it("Escape clears the filters before the search", () => {
+    // One press, one thing: the filter is the more specific narrowing.
+    const { store } = setup(
+      makeSnapshot({
+        searchQuery: "migration",
+        activeFilters: [builtinFilter("important")],
+      }),
+    );
+    press({ key: "Escape" });
+    expect(store.clearFilters).toHaveBeenCalledOnce();
+    expect(store.setSearchQuery).not.toHaveBeenCalled();
+  });
+
+  it("Escape clears a focused search box rather than only blurring it", () => {
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    const { store } = setup(makeSnapshot({ searchQuery: "migration" }), makeStore(), {
+      searchRef: { current: input },
+    });
+    press({ key: "Escape" }, input);
+    expect(store.setSearchQuery).toHaveBeenCalledWith("");
+    input.remove();
   });
 
   it("a modal composer owns the keyboard; the hook routes nothing", () => {

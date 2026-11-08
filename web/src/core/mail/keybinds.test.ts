@@ -89,10 +89,13 @@ const REACHABLE_CONTEXTS: readonly KeyContext[] = [
   context({ viewerOpen: true, hasActionTarget: true, codeAvailable: true }),
   context({ railCount: 9, hasActionTarget: true }),
   context({ filtersActive: true, hasActionTarget: true, railCount: 9 }),
+  context({ searchActive: true, hasActionTarget: true, railCount: 9 }),
+  context({ filtersActive: true, searchActive: true, hasActionTarget: true, railCount: 9 }),
   context({ overlayVisible: true, hasActionTarget: true, railCount: 9 }),
   context({ navigationVisible: true, hasActionTarget: true, railCount: 9 }),
   context({ composerOpen: true, hasActionTarget: true, railCount: 9, viewerOpen: true }),
   context({ textEditing: true }),
+  context({ textEditing: true, searchEditing: true, searchActive: true }),
   context({ textEditing: true, composerOpen: true }),
   context({ hasActionTarget: true, undoAvailable: true }),
 ];
@@ -137,6 +140,19 @@ describe("commandForKey — text editing", () => {
   it("still lets Escape out, to blur the field", () => {
     expect(commandForKey("Escape", context({ textEditing: true }))).toEqual({ type: "blurText" });
   });
+
+  it("clears a focused search before letting the field go", () => {
+    const searching = context({ textEditing: true, searchEditing: true, searchActive: true });
+    expect(commandForKey("Escape", searching)).toEqual({ type: "clearSearch" });
+    // With the query gone, the next Escape is the plain field's: it blurs.
+    expect(commandForKey("Escape", { ...searching, searchActive: false })).toEqual({
+      type: "blurText",
+    });
+    // A filter still has the first claim on Escape, even from inside the search box.
+    expect(commandForKey("Escape", { ...searching, filtersActive: true })).toEqual({
+      type: "blurText",
+    });
+  });
 });
 
 describe("commandForKey — Escape precedence", () => {
@@ -146,19 +162,20 @@ describe("commandForKey — Escape precedence", () => {
       navigationVisible: true,
       viewerOpen: true,
       filtersActive: true,
+      searchActive: true,
     });
     expect(commandForKey("Escape", all)).toEqual({ type: "dismissOverlay" });
-    expect(commandForKey("Escape", context({ navigationVisible: true, viewerOpen: true, filtersActive: true }))).toEqual({
+    expect(commandForKey("Escape", context({ navigationVisible: true, viewerOpen: true, filtersActive: true, searchActive: true }))).toEqual({
       type: "dismissNavigation",
     });
-    expect(commandForKey("Escape", context({ viewerOpen: true, filtersActive: true }))).toEqual({
+    expect(commandForKey("Escape", context({ viewerOpen: true, filtersActive: true, searchActive: true }))).toEqual({
       type: "closeViewer",
     });
-    expect(commandForKey("Escape", context({ filtersActive: true }))).toEqual({ type: "clearFilters" });
+    expect(commandForKey("Escape", context({ filtersActive: true, searchActive: true }))).toEqual({ type: "clearFilters" });
+    expect(commandForKey("Escape", context({ searchActive: true }))).toEqual({ type: "clearSearch" });
   });
 
   it("does nothing when there is nothing to close", () => {
-    // Returning a no-op here would clear a search box the user is not in.
     expect(commandForKey("Escape", DEFAULT_CONTEXT)).toBeNull();
   });
 });
@@ -499,6 +516,7 @@ describe("the cheat sheet", () => {
       "focusSearch",
       "toggleFilter",
       "clearFilters",
+      "clearSearch",
       "toggleNavigation",
       "moveNavigation",
       "activateNavigation",

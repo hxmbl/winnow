@@ -16,6 +16,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Added
 
+- Escape clears the search when no filters are active, including from inside the search field; a second Escape lets the field go.
 - Shift+K selects the first message in the list, and Shift+J selects the last.
 
 ### Changed
