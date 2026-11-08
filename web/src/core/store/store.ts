@@ -3069,10 +3069,14 @@ export class WinnowStore {
     const open = this.state.selectedId !== null ? this.view.selectedIndex : -1;
     if (open >= 0) return clampIndex(open + delta, length);
 
-    // With no cursor, "next" starts at the top and "previous" at the bottom, which is
-    // what `j` or `k` on a fresh list expects.
+    // A single j/k on a fresh list starts at the corresponding end. Large moves
+    // are boundary jumps, so they land on the boundary they cross toward.
     const cursor = this.state.cursorIndex;
-    if (cursor === NO_CURSOR) return delta > 0 ? 0 : length - 1;
+    if (cursor === NO_CURSOR) {
+      if (delta > 0) return delta >= length ? length - 1 : 0;
+      if (delta < 0) return -delta >= length ? 0 : length - 1;
+      return null;
+    }
     const base = Math.min(cursor, length - 1);
 
     // The open message is not a row any more (opening it read it, under the Unread
