@@ -9,9 +9,10 @@ import { EMPTY_BACKGROUND, type ClueBackground } from "../learn/filterLearning";
 import { DEMO_EMAILS, DEMO_TRASH } from "../data/demo";
 
 function background(store: WinnowStore): ClueBackground | undefined {
-  // Reading the derived view runs the inbox analysis; the cache is private.
+  // Reading the derived view runs the inbox analysis; the cache lives in the selector.
   void store.getSnapshot().view;
-  return (store as unknown as { inboxCache: { background: ClueBackground } | null }).inboxCache?.background;
+  return (store as unknown as { selectors: { inboxCache: { background: ClueBackground } | null } }).selectors
+    .inboxCache?.background;
 }
 
 describe("the clue background", () => {

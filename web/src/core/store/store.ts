@@ -19,11 +19,9 @@
  */
 
 import { debugLog } from "../debug/debugLog";
-import type { CensorLevel } from "../mail/censor";
-import { OfflineDownloader, type DownloadBlock, type DownloadProgress } from "../offline/downloader";
-import { OFFLINE_UNAVAILABLE, offlineNextStep, type OfflineBackend, type OfflineView } from "../offline/offlineSave";
+import { OfflineDownloader, type DownloadProgress } from "../offline/downloader";
+import { OFFLINE_UNAVAILABLE, offlineNextStep, type OfflineBackend } from "../offline/offlineSave";
 import { demoRawSource } from "../mail/rawSource";
-import { summarizeAttention, type AttentionSummary } from "../classify/attention";
 import {
   MAILBOX_LABEL,
   isBodyLoaded,
@@ -35,86 +33,44 @@ import {
   type LoadedBody,
   type Mailbox,
 } from "../model/email";
-import { hashId, threadKey } from "../model/ids";
+import { hashId } from "../model/ids";
 import {
-  catalogIndex,
   FILTER_LABELS,
   filterKey,
   parseFilterKey,
   senderFilter,
-  PERMANENT_FILTERS,
   NAVIGATION_ITEMS,
-  NEUTRAL_SIGNALS,
   navigationIndexFor,
   clampIndex,
   isUnsafe,
-  type BuiltinSmartFilter,
   type EmailSignals,
   type FilterId,
   type NavigationItem,
 } from "../model/signals";
-import {
-  profileFromStats,
-  profileStats,
-  sameProfile,
-  sendersReclassifiedBy,
-  updateProfileStats,
-  type ProfileStats,
-  type TrashRecord,
-  type UserProfile,
-} from "../model/profile";
-import { classifyAll, classifyEmail, type SignalMap } from "../classify/classify";
-import { countAllFilters, countFacets, matchesBuiltin, rankFilters, type FacetCounts } from "../classify/filters";
-import {
-  buildSearchBags,
-  conversationFor,
-  groupThreads,
-  runInboxQuery,
-  searchTokens,
-  matchesSearch,
-  type InboxResult,
-  type SearchBags,
-  type ThreadRow,
-} from "../classify/pipeline";
-import { DEFAULT_SORT, type SortBy } from "../classify/scoring";
-import { DEFAULT_UNDO_SEND_SECONDS, type UndoSendSeconds } from "../mail/undoSend";
+import { type TrashRecord } from "../model/profile";
+import { classifyEmail } from "../classify/classify";
+import { matchesBuiltin } from "../classify/filters";
+import { type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
-import { buildContactIndex, type ContactIndex } from "../contacts/index";
 import type { GoogleContact } from "../contacts/google";
 import type { DraftsApi } from "../mail/drafts";
 import {
-  DEFAULT_NOTIFICATION_ACTIONS,
   draftForKeptReply,
   notifiable,
   staleNotices,
   type KeptReply,
-  type NotificationActions,
 } from "../notify/notifications";
-import type { SignalWeights } from "../classify/weights";
 import {
   FilterLearning,
-  applyFilterLearning,
   builtInSays,
-  clueBackground,
-  EMPTY_BACKGROUND,
   LEARNABLE_FILTERS,
-  type ClueBackground,
-  type FilterLearningSnapshot,
   type LearnableFilter,
 } from "../learn/filterLearning";
 import { workDomainsFromSent } from "../learn/workDomains";
 import { explainFilters, type FilterReason } from "../learn/filterExplain";
 import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
-import type { SyncProgress, SyncStage } from "../gmail/sync";
-import {
-  DEFAULT_ACCENT_CUSTOM,
-  DEFAULT_ACCENT_THEME,
-  DEFAULT_APPEARANCE,
-  type AccentPreference,
-  type Appearance,
-} from "../model/appearance";
 import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
-import { keyedStorage, type KeyValueBacking, type KeyedStorage } from "./keyedStorage";
+import { keyedStorage, type KeyedStorage } from "./keyedStorage";
 import {
   getEmailNicknames,
   type EmailNicknames,
@@ -153,36 +109,38 @@ import {
 } from "../mail/scheduledSend";
 import { formatWhen } from "../mail/when";
 
-/**
- * Which half of a sync is running, for the status line.
- *
- * Named here rather than reusing `SyncProgress["phase"]`, whose union also contains
- * `idle` and `sending`: a completed phase is `null` here, which makes "not syncing"
- * answerable without a second boolean.
- */
-export type SyncPhase = "full" | "incremental";
+import {
+  CLAIM_HOLD_MS,
+  DEFAULT_PREFERENCES,
+  DRAFT_DISCARD_UNDO_MS,
+  LATE_WAKE_MS,
+  NO_CURSOR,
+  PREFETCH_NEIGHBOURS,
+  PREFETCH_UNREAD_TOP_N,
+  UNDO_OFFER_MS,
+  WAKE_FLASH_MS,
+  type ContactsAccessState,
+  type MailboxView,
+  type Preferences,
+  type Snapshot,
+  type StoreState,
+} from "./state";
+import type {
+  AccountState,
+  AccountSummary,
+  MailBackend,
+  PersistPatch,
+  PlatformBridge,
+  StoreOptions,
+} from "./types";
+import { partitionBodies } from "./helpers/bodies";
+import { MailboxSelectors } from "./selectors/mailbox";
+import { SearchFacets } from "./selectors/search";
+import { readoutIndex, rowIndexOf } from "./selectors/threads";
 
-/** `cursorIndex` meaning "the user has not touched the list yet". */
-export const NO_CURSOR = -1;
-
-/**
- * How long a draft discarded with Undo waits before Gmail's copy is deleted, when the
- * offer is neither taken nor let go sooner.
- */
-export const DRAFT_DISCARD_UNDO_MS = 10_000;
-/**
- * How long an Undo offer (delete, archive, move, discard…) stays on the pill before it
- * goes by itself, taking its commit with it. Six seconds, not five: Hxmbl's call (1.4.x).
- * An offer with a shorter commit window of its own settles at that instead.
- */
-export const UNDO_OFFER_MS = 6_000;
-
-/** How long the pill says a snooze woke. */
-export const WAKE_FLASH_MS = 6_000;
-/** A wake later than this after its time happened because the app was closed then. */
-export const LATE_WAKE_MS = 2 * 60 * 1000;
-/** How long a window's claim on a due scheduled send holds (`claimScheduled`). */
-export const CLAIM_HOLD_MS = 2 * 60 * 1000;
+export * from "./state";
+export * from "./types";
+export { readoutIndex, rowIndexOf };
 
 /**
  * How often the list's reference clock is refreshed.
@@ -191,31 +149,6 @@ export const CLAIM_HOLD_MS = 2 * 60 * 1000;
  * ticks faster than its own display resolution pays for nothing.
  */
 const CLOCK_INTERVAL_MS = 60_000;
-
-/**
- * How many messages keep their HTML body resident.
- *
- * A bound on *this field* rather than on the number of messages. On a representative
- * HTML email the body is 67% of the bytes, and it is read in exactly two places —
- * `Reader` and `reply`, both for the message being opened — so retaining it for every
- * message is the whole of the waste: 5,000 messages cost 12.1MB rather than 3.9MB.
- *
- * The plain-text `body` is kept unconditionally, which is load-bearing: `contentBag`
- * is `subject + body`, so every keyword the classifier matches is still there.
- * Bounding `bodyHtml` costs one request when an old message is opened and costs the
- * classifier nothing. 500 keeps ordinary reading fetch-free, at ~1.2MB resident.
- */
-const BODY_RETENTION = 500;
-
-/**
- * Background body prefetch: how many of the newest inbox messages are scanned for
- * unread mail whose body has not been loaded yet. Unread mail is what gets opened
- * next, and its body is also what the classifier reads best.
- */
-export const PREFETCH_UNREAD_TOP_N = 50;
-
-/** How many rows either side of an opened message have their body prefetched. */
-export const PREFETCH_NEIGHBOURS = 2;
 
 /**
  * Bodies in flight at once. Small on purpose: prefetch shares the quota bucket with
@@ -229,655 +162,11 @@ const PROGRESS_NOTIFY_MS = 500;
 /** How long background-loaded bodies wait to be applied together, so a burst reclassifies once. */
 const BODY_APPLY_DELAY_MS = 400;
 
-/** The question asked when the offline cache could not be written. Wording is the owner's. */
-export const STORAGE_PROMPT =
-  "This is a large mailbox, Winnow requires them to be saved, are you sure you would like to save this?";
-
-/** Shown when "Save" was tried and the cache still would not write. */
-export const STORAGE_SAVE_FAILED =
-  "Still couldn't save this mailbox offline. It will re-download next launch.";
-
-/**
- * Where the offline-storage question stands.
- *
- * `ask` — the last sync could not persist the cache and the user has not answered.
- * `saving` — "Save" is in progress. `failed` — it was tried and did not work.
- */
-export type StoragePrompt = "ask" | "saving" | "failed";
-
-/**
- * Split a synced mailbox into its messages and its resident HTML bodies.
- *
- * The bodies are held *beside* `state.all` rather than inside it: attaching one to a
- * message rebuilds the array, which changes `state.all`'s identity, invalidates the
- * memo in `inboxAnalysis` and reclassifies the whole inbox — a 271ms stall at 5,000
- * messages. A side-map leaves `state.all` alone, so the body arrives for the price of
- * a re-render, and `state.all` is uniformly body-free, so nothing has to ask whether a
- * message is inside the window.
- */
-function partitionBodies(emails: readonly Email[]): {
-  emails: Email[];
-  bodies: Map<number, string>;
-  /** Messages whose body question is settled — resident, or known to have no HTML. */
-  checked: Set<number>;
-} {
-  const byRecency = [...emails].sort((a, b) => b.receivedAt - a.receivedAt);
-  const bodies = new Map<number, string>();
-  const checked = new Set<number>();
-  let changed = false;
-
-  for (const email of byRecency.slice(0, BODY_RETENTION)) {
-    // Every loaded message in the window counts as settled, not just the ones with
-    // HTML: recording that stops the reader asking again for a plain-text message it
-    // opens. A metadata-only row is not settled — its body has never been fetched.
-    if (!isBodyLoaded(email)) continue;
-    checked.add(email.id);
-    if (email.bodyHtml !== undefined) bodies.set(email.id, email.bodyHtml);
-  }
-
-  const stripped = emails.map((email) => {
-    // Rows cached before codes existed are looked at once, on the way in.
-    const coded = withCode(email);
-    if (coded !== email) changed = true;
-    if (coded.bodyHtml === undefined) return coded;
-    changed = true;
-    return { ...coded, bodyHtml: undefined };
-  });
-
-  // The same array when nothing had a body, so the demo seed keeps the identity
-  // `inboxAnalysis` is keyed on.
-  return { emails: changed ? stripped : (emails as Email[]), bodies, checked };
-}
-
-/**
- * What Winnow does about remote images in a message.
- *
- * Three states, where a boolean could only say "never" or "always". "Stop asking" is
- * not "never" — a user who has said it three times wants their mail to look like
- * mail. `ask` is the default, and the only state in which the offer appears.
- */
-export type ImagePolicy = "ask" | "always" | "never";
-
-/** What the user can change about how Winnow behaves. */
-export type Preferences = {
-  sortBy: SortBy;
-  /**
-   * Remote images and tracking pixels. See `ImagePolicy`.
-   *
-   * `never` is the honest default: loading a remote image tells the sender the message
-   * was opened and roughly where, and a pixel does it without showing anything.
-   */
-  imagePolicy: ImagePolicy;
-  /**
-   * Sender pictures: a sender's Gravatar when they are not in the user's contacts, and a
-   * company's brand logo (BIMI). One switch since "Show brand logos" and "Gravatar
-   * photos" were merged. Off by default.
-   *
-   * Its own switch rather than riding on `imagePolicy`: that policy is about one
-   * message's content and defaults to *asking*, which an avatar in a list has no way to
-   * do. Both lookups also leak something remote images do not, for every sender in the
-   * list, opened or not: a hash of the address goes to Gravatar, and the sender's domain
-   * to a DNS-over-HTTPS resolver. Paused while `imagePolicy` is `never`
-   * (`ui/senderPictures.ts`). Contact photos and initials never depend on it.
-   */
-  senderPictures: boolean;
-  /**
-   * The inbox's "Sender pictures are off" notice was answered ("Keep off", "Turn on",
-   * or the switch changed in Settings), so it does not come back. See
-   * `ui/pictureNotice.ts`.
-   */
-  pictureNoticeDismissed: boolean;
-  /**
-   * Mark a message read when it is opened in the reader, as Gmail does. On by default.
-   * Off restores the old behaviour, where mail stays unread until the user says so.
-   */
-  markReadOnOpen: boolean;
-  /**
-   * Swipe a row on a phone: left to Trash (with Undo), right to toggle read. On by
-   * default. The same actions stay in the selection bar and the reader, so turning it
-   * off loses nothing but the gesture.
-   */
-  swipeActions: boolean;
-  /**
-   * Left-handed: on a phone the thumb-anchored floating controls (the reader's action
-   * pill, the dock's compose button and pill order) are mirrored to the left edge. Off
-   * (right-handed) by default.
-   */
-  leftHanded: boolean;
-  /**
-   * Blur sensitive info (Settings → Privacy): what on screen is replaced by random
-   * letters and blurred, for screenshots and screen sharing. Off by default; each step
-   * adds to the last (emails, passwords, postal addresses, names). Display only: what is
-   * sent to Gmail never changes. See `core/mail/censor.ts` and `ui/censorDom.ts`.
-   */
-  censorLevel: CensorLevel;
-  /**
-   * Offer "Send as a Drive link" for a file over Gmail's 25 MB. On by default, but it does
-   * nothing until the user allows `drive.file` (asked the first time, never at sign-in).
-   * Settings → Privacy → Stop turns it off on this device; the grant itself goes with a
-   * sign-out, or at Google's account page. See `core/gmail/drive`.
-   */
-  driveLinks: boolean;
-  /**
-   * How long Send waits before the message goes out, so Undo can bring it back. `0` is
-   * Off. See `core/mail/undoSend`: closing the app in the wait keeps it as a draft.
-   */
-  undoSendSeconds: UndoSendSeconds;
-  notificationsEnabled: boolean;
-  /** Which buttons a new-mail notification offers (Reply, Delete, Mark read). */
-  notificationActions: NotificationActions;
-  /** Lock screen: "New message" instead of the sender and subject. */
-  notificationHidePreview: boolean;
-  /** The unread count on the app icon (dock badge, tray tooltip, tab title). Off shows none. */
-  unreadBadge: boolean;
-  /** Light, dark, true-black OLED, or whatever the OS says. See `core/model/appearance`. */
-  appearance: Appearance;
-  /** The accent theme, applied across every mode: a curated one, or `custom`. */
-  accent: AccentPreference;
-  /**
-   * The picked colour behind `custom`, as `#RRGGBB` (1.4.0). Kept when another accent is
-   * chosen, so going back to Custom brings the same colour back. Made safe per mode by
-   * `ui/customAccent.ts`; the stored value is always what the user picked.
-   */
-  accentCustom: string;
-  /**
-   * Email dark mode (1.4.0): in the dark and OLED modes, draw message bodies dark too
-   * (`core/mail/emailDark`) rather than as a white card. On by default; light mode is
-   * never affected, and the reader's sun/moon button shows one message's original
-   * colours without changing this.
-   */
-  emailDarkMode: boolean;
-  /** Keep syncing while the window is closed. Desktop only. */
-  backgroundSync: boolean;
-  /** How often, in seconds. */
-  backgroundSyncInterval: number;
-  /**
-   * Android: "Instant mail via the Gmail app" (STRM-442). Check the moment the Gmail
-   * app posts a notification, with Notification access granted by the user. Off by
-   * default: it needs a sensitive permission.
-   */
-  gmailListener: boolean;
-  blockedSenders: string[];
-  /**
-   * Senders whose mail still arrives and is still listed, but never notifies and is not
-   * counted in the unread badge. Gentler than `blockedSenders`, which hides the mail.
-   * Local to Winnow: Gmail's API has no per-sender mute without a filter, and filters
-   * need a settings scope Winnow does not ask for.
-   */
-  mutedSenders: string[];
-  /**
-   * The first-run tour (1.5) was finished or skipped on this device, so it does not open
-   * by itself again. Settings › About › "Show the tour again" replays it. See `ui/tour.ts`
-   * for when it opens at all: never for a device upgrading from an earlier version.
-   */
-  tourDone: boolean;
-};
-
-export const DEFAULT_PREFERENCES: Preferences = {
-  sortBy: DEFAULT_SORT,
-  imagePolicy: "ask",
-  senderPictures: false,
-  pictureNoticeDismissed: false,
-  markReadOnOpen: true,
-  swipeActions: true,
-  leftHanded: false,
-  censorLevel: "off",
-  driveLinks: true,
-  undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
-  notificationsEnabled: false,
-  notificationActions: DEFAULT_NOTIFICATION_ACTIONS,
-  notificationHidePreview: false,
-  unreadBadge: true,
-  appearance: DEFAULT_APPEARANCE,
-  accent: DEFAULT_ACCENT_THEME,
-  accentCustom: DEFAULT_ACCENT_CUSTOM,
-  emailDarkMode: true,
-  backgroundSync: true,
-  backgroundSyncInterval: 300,
-  gmailListener: false,
-  blockedSenders: [],
-  mutedSenders: [],
-  tourDone: false,
-};
-
-/** Where the app is in its lifecycle. Drives which screen is shown. */
-export type SessionStatus =
-  | "loading"
-  | "signed_out"
-  | "signing_in"
-  | "ready"
-  | "error";
-
-/**
- * Where Google contacts stand, for the opt-in.
- *
- *   - `demo` — the demo mailbox, whose address book is seeded and offline.
- *   - `unavailable` — signed out, or a host that cannot ask.
- *   - `not_granted` — signed in without the contact scopes; the opt-in is offered.
- *   - `granted` — the address book is part of the suggestions.
- */
-export type ContactsAccessState = "demo" | "unavailable" | "not_granted" | "granted";
-
-export type StoreState = {
-  status: SessionStatus;
-  /** Set when `status` is `error`, or when a background action failed. */
-  error: string | null;
-  /** A transient message: "3 messages failed to download". */
-  notice: string | null;
-  /**
-   * A short-lived word about something the user just did ("Draft saved.", "Message
-   * sent."), shown in the status pill and gone by itself after its time. `at` orders it
-   * against the other notices the pill could show: the newest wins.
-   */
-  flash: { text: string; at: number } | null;
-
-  account: { email: string } | null;
-
-  /**
-   * The account namespace that is open (1.4.0), or `null` in the demo and signed out.
-   * What the store persists (learning, active filters, the mailbox) is written under it.
-   */
-  accountId: string | null;
-  /**
-   * Every signed-in account, for the switcher: set by the session bridge, which owns the
-   * registry and the inactive accounts' light sync. The open one is `active`.
-   */
-  accounts: readonly AccountSummary[];
-
-  /**
-   * Google's address book, merged into the contact index. Empty until the user opts in.
-   *
-   * Replaced whole, never mutated, so the contact index can memoise on its identity.
-   */
-  googleContacts: readonly GoogleContact[];
-  contactsAccess: ContactsAccessState;
-
-  /** Every message the app knows about, across all mailboxes. */
-  all: Email[];
-  /**
-   * The user's Gmail drafts, the rows of the Drafts mailbox (each with `gmailDraft`).
-   *
-   * Kept apart from `all` because they are listed through the drafts API, not synced:
-   * a sync replaces `all` wholesale and would drop them, and nothing that reads `all`
-   * (the profile, the contact index, new-mail notices, the mutations) should ever see a
-   * draft as mail.
-   */
-  drafts: Email[];
-  /** A drafts listing is in flight. */
-  draftsLoading: boolean;
-  /**
-   * Snoozed conversations and the messages that woke, for every account this device has
-   * seen (each record names its own; see `core/mail/snooze.ts`). Mirrors
-   * `winnow.snooze.v1`.
-   */
-  snoozes: SnoozeState;
-  /** Messages waiting to be sent later (`core/mail/scheduledSend.ts`). Mirrors `winnow.scheduledSend.v1`. */
-  scheduled: readonly ScheduledSend[];
-  /** The messages in the current mailbox, newest first. */
-  mailbox: Mailbox;
-
-  activeFilters: FilterId[];
-  searchQuery: string;
-  /** The reader's message, or `null`. */
-  selectedId: number | null;
-  /**
-   * The list cursor, independent of what the reader has open.
-   *
-   * `-1` means "no cursor", distinct from "on the first row": `j` on a fresh list
-   * should start at the top and `k` at the bottom, which cannot be expressed if row 0
-   * is also "nothing selected yet".
-   */
-  cursorIndex: number;
-  /**
-   * Bumped whenever the cursor moved by *navigation* — `j`/`k`, the arrows, prev/next,
-   * a deep link, or the auto-advance after marking a message unread — and never by a
-   * click or a data change.
-   *
-   * The list scrolls a row into view only when this changes. Following the cursor index
-   * itself scrolled on every re-render that touched the list (a measured row height, a
-   * sync, a reclassify), which snapped a user who had scrolled away from the open message
-   * straight back to it.
-   */
-  revealSeq: number;
-
-  preferences: Preferences;
-  learning: LearningModel;
-  /**
-   * What "Change smart filters…" has taught, for this account only. See
-   * `learn/filterLearning.ts`; cleared on sign-out and when another account connects.
-   */
-  filterLearning: FilterLearning;
-
-  /** Which modal is up, if any. */
-  overlay: "none" | "shortcuts" | "navigation" | "settings" | "accounts";
-  navigationIndex: number;
-
-  syncing: boolean;
-  /**
-   * A single undo, offered by whatever can be taken back: a swipe's Trash or Restore, a
-   * draft discarded with a swipe. Shown in the status pill with its Undo button.
-   *
-   * `null` most of the time, and that is the point: an Undo that is always on screen is
-   * a banner, and a banner you cannot act on is noise. Only one action is offered at a
-   * time — a new offer lets the previous one go — so the pill's Undo always takes back
-   * the action it names. `at` orders it against the pill's other notices.
-   */
-  undo: { label: string; at: number } | null;
-  /**
-   * What the sync is doing, for the status line. `null` when not syncing.
-   *
-   * Nullable rather than an enum with an `idle` member: "is a sync running" and "which
-   * kind is it" are two questions, and only the first is asked most of the time.
-   * `syncing` answers the first for callers that need the *count*; this answers the
-   * second.
-   */
-  syncPhase: SyncPhase | null;
-  /** 0–1 while the total is known, else `null`. */
-  syncFraction: number | null;
-  /** Messages that arrived in the run in progress, or the last completed one. */
-  syncFetched: number;
-  /** Full sync only: the inbox, or the folders behind it. `null` otherwise. */
-  syncStage: SyncStage | null;
-  /** How many messages the running sync knows it has to fetch, when known. */
-  syncTotal: number | null;
-  /** The last sync threw, with this message; cleared when a sync starts or succeeds. */
-  syncError: string | null;
-  /**
-   * The last sync could not reach Gmail, and the mailbox on screen is the local copy.
-   * A dropped connection is not a broken account: the cached mail stays usable, changes
-   * wait in the offline queue, and a red bar says so. Cleared by the next sync that
-   * gets through. A real problem (a revoked sign-in, a rejected client) still stops.
-   */
-  connectionLost: boolean;
-  /** How many messages the last completed sync could not download. */
-  syncFailed: number;
-  lastSyncedAt: number | null;
-  /**
-   * True when a sync walked a mailbox to its cap, so the cache is a triage set rather
-   * than an export. Showing 500 archived messages as though they were all of it would
-   * be a lie about the user's own mail.
-   */
-  truncated: boolean;
-  /** Ids that arrived in the last sync, for the "new" marker. */
-  recentIds: ReadonlySet<number>;
-  /**
-   * The offline-cache question, or `null` when there is nothing to ask.
-   *
-   * A prompt rather than a passive notice, because the answer changes what happens:
-   * "Save" asks the platform for persistent storage and retries the write, "Not now"
-   * keeps the re-download-next-launch behaviour for the rest of the session.
-   */
-  storagePrompt: StoragePrompt | null;
-  /**
-   * Offline saving for the open account (`core/offline/offlineSave.ts`): the answer to
-   * the storage question, and how far the background download has got.
-   */
-  offline: OfflineView;
-  /**
-   * The reference instant the list's day sections are computed against.
-   *
-   * A property rather than a `Date.now()` at the point of use: the demo mailbox is
-   * seeded around a fixed date, and a real clock would put every one of its messages
-   * in "Earlier", making the day sections stop testing anything. Live mode uses the
-   * wall clock; demo mode uses the seed's.
-   */
-  now: number;
-};
-
-/** The messages a sync produced for the current mailbox. */
-export type MailboxView = {
-  emails: Email[];
-  signals: SignalMap;
-  profile: UserProfile;
-  /**
-   * Lowercased haystacks for the current mailbox — but only when a search is
-   * actually running.
-   *
-   * Empty otherwise, on purpose: building a bag concatenates sender + subject + body
-   * for every message and lowercases it, and the pipeline only reads one when
-   * `tokens.length > 0`. `runInboxQuery` builds a single bag on demand, so the empty
-   * map is a fast path rather than a missing feature.
-   */
-  searchBags: SearchBags;
-  result: InboxResult;
-  threads: ThreadRow[];
-  /** The rail, ranked over the open mailbox, with activated buckets kept on it. */
-  rail: BuiltinSmartFilter[];
-  /**
-   * How many messages in the *open mailbox* each bucket holds, before search and filters:
-   * the numbers on the pills (1.3.3; they were inbox-wide wherever you were). `unsafe`
-   * is counted even though the inbox hides those rows with no filter on.
-   */
-  railCounts: ReadonlyMap<BuiltinSmartFilter, number>;
-  /** Messages per sender in the open mailbox, for the sender pills. */
-  railSenderCounts: ReadonlyMap<string, number>;
-  /**
-   * The pills' numbers once a filter is on or a search is running (1.4.0), faceted on
-   * the active set and the search: an off pill counts what the list would show with it
-   * turned on too (search AND filters AND pill, see `countFacets`), an on pill the
-   * current result. `null` with nothing active and no search, when the pills show
-   * `railCounts` as before. `railCounts` still decides which pills the rail keeps, so
-   * narrowing the list dims a pill to 0 rather than pulling it off the rail.
-   */
-  railFacets: FacetCounts | null;
-  /**
-   * How many inbox messages land in each bucket.
-   *
-   * Over the *inbox*, not over `emails`, which is why it is a field: the rail is ranked
-   * against the inbox so opening the bin does not reshuffle it, and the counts must
-   * agree with that ranking. The number on a pill is a claim about your mail, not the
-   * current result set. `unsafe` is counted even though it is excluded from the list —
-   * its members *are* the hidden rows, and counting only what is on screen would report
-   * the one bucket you need to reach as permanently empty.
-   */
-  inboxCounts: ReadonlyMap<BuiltinSmartFilter, number>;
-  /** Messages per sender, over the inbox, for the sender pills. */
-  inboxSenderCounts: ReadonlyMap<string, number>;
-  /**
-   * Conversations the unfiltered inbox list shows, for the sidebar's Inbox count: the
-   * same rows (unsafe mail is held back from the list, so it is not counted here).
-   */
-  inboxThreadCount: number;
-  /**
-   * What in the inbox needs attention, for the triage line. Over the inbox for the same
-   * reason as `inboxCounts`: it is a claim about your mail, not about the current filter.
-   */
-  attention: AttentionSummary;
-  selected: Email | null;
-  /**
-   * The row of the open message's conversation in `threads`, or `-1`.
-   *
-   * Matched by thread, not only by representative: a message opened from inside a
-   * thread, or one whose thread gained a newer reply since it was opened, is still read
-   * on that row. `-1` when nothing is open or the open message's conversation is not a
-   * visible row (a filter or search is hiding it, or it has left the mailbox).
-   *
-   * This, not `cursorIndex`, is where the reader *is*; see `readoutIndex`.
-   */
-  selectedIndex: number;
-  conversation: Email[];
-  unreadCount: number;
-  totalCount: number;
-  /** Everything the app knows that is not in the current mailbox. */
-  otherMailboxCount: number;
-  /**
-   * Everyone the mail in the store says the user has corresponded with.
-   *
-   * Part of the one derived pass because it is derived from `state.all` like everything
-   * else, and like everything else it is memoised — see `contactCache`. Without that the
-   * 60-second clock tick would rebuild the index over a 5,000-message mailbox, which is
-   * the same mistake `inboxAnalysis` exists to avoid.
-   */
-  contacts: ContactIndex;
-};
-
-/** Everything the store owns. Read this in React; never mutate it. */
-export type Snapshot = StoreState & {
-  view: MailboxView;
-  key: string;
-};
-
-/** The server side. Absent in demo mode, which is why every call is optional. */
-export interface MailBackend {
-  /**
-   * Fetch everything changed since the last run.
-   *
-   * `onProgress` is a *request*, not a notification: the engine calls it as often as it
-   * likes and the store decides whether that is worth a re-render, because a first sync
-   * downloads thousands of messages and a callback that re-rendered per message would
-   * make the app unusable during the one operation it is least able to hide.
-   */
-  sync(options?: {
-    onProgress?: (progress: SyncProgress) => void;
-    /**
-     * The mailbox so far, while the sync is still running — the inbox first, as soon as
-     * it has a screenful. Optional: a backend that cannot publish early simply doesn't.
-     */
-    onPartial?: (emails: Email[]) => void;
-  }): Promise<SyncOutcome>;
-  toggleStar(id: number, starred: boolean): Promise<void>;
-  moveToMailbox(id: number, mailbox: Mailbox): Promise<void>;
-  setRead(id: number, read: boolean): Promise<void>;
-  deletePermanently(id: number): Promise<void>;
-  /**
-   * Snooze or wake one message in Gmail (`core/mail/snooze.ts`): snoozing puts the
-   * `Winnow/Snoozed` label on and takes `INBOX` off; waking takes the label off and puts
-   * `INBOX` back (unless `toInbox` is false: an Undo of a snooze from the Archive), with
-   * `UNREAD` when `unread`. By Gmail id, because a message being woken
-   * may not be in this device's cache. Optional: without it the store files the message
-   * with `moveToMailbox` instead, which is what a failure falls back to as well (the
-   * offline queue carries that one).
-   */
-  setSnoozed?(gmailId: string, snoozed: boolean, options?: { unread?: boolean; toInbox?: boolean }): Promise<void>;
-  /**
-   * Send a reply. With `draftId`, the composer's saved Gmail draft is what is sent
-   * (`drafts.send`), so nothing is left behind in Drafts.
-   */
-  sendReply(draft: unknown, inReplyTo: string, draftId?: string): Promise<void>;
-  /**
-   * Send a new message: no `In-Reply-To`, no `References`, no thread. Optional so a
-   * backend written before composing existed (and every test fake) still type-checks;
-   * the store reports a backend without it as unable to send.
-   */
-  sendNew?(draft: Draft, draftId?: string): Promise<void>;
-  /**
-   * The user's Gmail drafts as Drafts rows, newest first. `previous` is the last
-   * listing, so an unchanged draft is not fetched again. Optional like `sendNew`.
-   */
-  listDrafts?(previous: readonly Email[]): Promise<Email[]>;
-  /**
-   * Gmail drafts, for the composer's autosave. Optional for the same reason as
-   * `sendNew`; without it the composer keeps its draft on the device only.
-   */
-  drafts?: DraftsApi;
-  /**
-   * The header block a notification's inline reply is sent with, by Gmail id: the
-   * composer's own `rawFor` → `buildMime`, for `notificationReplyDraft` with an empty
-   * body. Optional like `drafts`; absent means notifications offer no inline reply.
-   */
-  replyHeads?(gmailIds: readonly string[]): Promise<Record<string, string>>;
-  /**
-   * Download one attachment's bytes.
-   *
-   * Separate from `sendReply` because it is the only operation that returns binary and
-   * the only one that is *not* a mutation — so the reader calls it directly rather than
-   * through the optimistic-update path.
-   */
-  fetchAttachment(
-    gmailId: string,
-    attachmentId: string,
-  ): Promise<{ bytes: Uint8Array; filename: string; mimeType: string }>;
-  /**
-   * The HTML body of one message, fetched on demand.
-   *
-   * The counterpart to `BODY_RETENTION`: the body is two thirds of a message's cost and
-   * is only read for the message on screen, so the store keeps a recent window and asks
-   * for anything older.
-   *
-   * `undefined` for a message with no HTML part is not an error — plain-text mail has
-   * none, and the reader falls back to the body it already has.
-   */
-  fetchBody(gmailId: string): Promise<string | undefined>;
-  /**
-   * The whole body of a metadata-only message — plain text, HTML and attachments —
-   * written into the offline cache as well as returned.
-   *
-   * Optional so a backend that only ever syncs whole messages (and the test doubles
-   * written before metadata-first sync) need not implement it; without it the store
-   * falls back to `fetchBody`.
-   */
-  loadMessage?(gmailId: string): Promise<LoadedBody>;
-  /**
-   * One whole message by Gmail id, fetched and written into the offline cache: what a
-   * notification opens when its message is not cached yet (a light sync announced it,
-   * or the cache was trimmed). `null` when Gmail no longer has it. Optional like
-   * `loadMessage`.
-   */
-  fetchMessage?(gmailId: string): Promise<Email | null>;
-  /**
-   * One message's raw source (`format=raw`, decoded), for Dev Options → View Original.
-   * Optional: the demo has none, and builds one from the message instead.
-   */
-  fetchRaw?(gmailId: string): Promise<string>;
-  /**
-   * Try again to write the offline cache, after asking the platform to keep it.
-   *
-   * On the web this requests persistent storage first (`navigator.storage.persist()`);
-   * on the desktop it just retries. `true` when the cache landed.
-   */
-  persistCache?(): Promise<boolean>;
-  /**
-   * Saving the whole mailbox offline: the account's durable store, the user's answer,
-   * and the requests the background download makes. Absent on a host with no durable
-   * store and in test doubles; Save then only retries the write, as it used to.
-   */
-  offline?: OfflineBackend;
-}
-
-/** What one sync produced. */
-export type SyncOutcome = {
-  emails: Email[];
-  failed: number;
-  /** A mailbox hit its cap, so the cache is a triage set rather than an export. */
-  truncated: boolean;
-  /**
-   * The mailbox could not be written to persistent storage.
-   *
-   * Distinct from `failed`, which counts messages that could not be fetched: the sync
-   * worked and the user has their mail, and what is missing is the offline copy.
-   */
-  cacheUnpersisted?: boolean;
-};
-
-/**
- * The OS surface the store drives.
- *
- * Exactly three things, each a *reflection of state the store already holds* — the
- * unread count for the badge, the cadence for the scheduler, the new arrivals for the
- * notification. Absent in demo mode, which is why every call on it is optional.
- */
-export interface PlatformBridge {
-  notifyNewMail(emails: readonly Email[]): Promise<void>;
-  /**
-   * Take down the open account's notifications of messages that no longer need
-   * attention: deleted on the server, read, archived, snoozed or moved out of the Inbox,
-   * here or on Gmail anywhere. Optional.
-   */
-  withdrawNotifications?(gmailIds: readonly string[]): Promise<void>;
-  /**
-   * The notifications that are up now, by account, including ones Android's background
-   * service posted while the app was closed. Optional.
-   */
-  activeNotifications?(): Promise<{ account: string | null; gmailId: string }[]>;
-  /** Signed out of `account`: all of its notifications go. Optional. */
-  clearNotifications?(account: string | null): Promise<void>;
-  /** What stops the offline download right now (offline, hidden on a phone, metered, battery), or `null`. Optional. */
-  downloadConditions?(): DownloadBlock | null;
-  setUnreadBadge(count: number): Promise<void>;
-  setBackgroundSync(intervalSeconds: number | null): Promise<void>;
-}
-
+/** A subscriber notified after any change. */
 type Listener = () => void;
+
+/** How a mutation can be undone. */
+type Undo = () => void;
 
 /**
  * What the pill says after a move that can be undone, in the swipe's words: "Moved to
@@ -893,80 +182,6 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
   return count === 1 ? `Moved to ${MAILBOX_LABEL[first]}.` : `Moved ${count} to ${MAILBOX_LABEL[first]}.`;
 }
 
-/** How a mutation can be undone. */
-type Undo = () => void;
-
-export type StoreOptions = {
-  /** Seed messages for demo mode. */
-  seed?: readonly Email[];
-  /** The demo's address book, so suggestions show the merge with no network. */
-  seedContacts?: readonly GoogleContact[];
-  seedTrash?: readonly TrashRecord[];
-  /** The demo's drafts, for the Drafts mailbox. */
-  seedDrafts?: readonly Email[];
-  /**
-   * Where snoozes and scheduled sends are kept. `globalThis.localStorage` by default;
-   * tests hand in a memory backing (or `() => null` for none).
-   */
-  storage?: () => KeyValueBacking | null;
-  backend?: MailBackend;
-  platform?: PlatformBridge;
-  preferences?: Partial<Preferences>;
-  /**
-   * The reference instant for the list's day sections. Injected rather than read: a
-   * demo seed is built around a fixed date, and a real clock would collapse it all.
-   */
-  now?: number;
-  /** Called whenever anything persists-worthy changes. */
-  onPersist?: (patch: PersistPatch) => void;
-  /** Called when the learning weights change, so the inbox can reclassify. */
-  onWeightsChanged?: (model: LearningModel) => void;
-};
-
-/** One account as the switcher shows it. */
-export type AccountSummary = {
-  id: string;
-  email: string;
-  color: string;
-  /** Notifications while this account is not the open one. */
-  notify: boolean;
-  /** Unread in its inbox; the open account's comes from its mail, the others' from their light sync. */
-  unread: number | null;
-  active: boolean;
-  /** A demo account: the switcher shows it, nothing is signed in. */
-  demo?: boolean;
-  /**
-   * The account's own Google profile picture (STRM-461): a kept `data:` copy or the URL
-   * on Google's image host. Absent: the monogram.
-   */
-  picture?: string;
-  /**
-   * The picture's most dominant colour (`#RRGGBB`, raw), for the halo around the avatar
-   * (`ui/ringColor.ts` adjusts it per theme). Absent: the account colour.
-   */
-  pictureColor?: string;
-};
-
-/** What one account (or the demo, with no account) persisted: see `core/store/accountState.ts`. */
-export type AccountState = {
-  learning?: ReturnType<LearningModel["toSnapshot"]> | null;
-  filterLearning?: unknown;
-  activeFilters?: readonly string[];
-  mailbox?: Mailbox | null;
-  /** Per-account email nicknames. */
-  emailNicknames?: Record<string, string>;
-};
-
-export type PersistPatch = {
-  preferences?: Partial<Preferences>;
-  learning?: ReturnType<LearningModel["toSnapshot"]>;
-  /** Local only, never synced: see `learn/filterLearning.ts`. */
-  filterLearning?: FilterLearningSnapshot;
-  activeFilters?: string[];
-  mailbox?: Mailbox;
-  emailNicknames?: Record<string, string>;
-};
-
 /**
  * The application store.
  *
@@ -975,7 +190,8 @@ export type PersistPatch = {
  * the tests.
  */
 export class WinnowStore {
-  private state: StoreState;
+  /** @internal Shared with the feature modules this class delegates to. */
+  state: StoreState;
   private listeners = new Set<Listener>();
   private version = 0;
   private key = "0";
@@ -1049,7 +265,8 @@ export class WinnowStore {
    * A trash row carries only a sender address, deliberately: the discard is the signal,
    * and retaining the body of something the user binned is a privacy problem.
    */
-  private trashSenders: string[] = [];
+  /** @internal Shared with the selectors that build the profile's inbox. */
+  trashSenders: string[] = [];
 
   /** Email nicknames for the current account. */
   private emailNicknames: EmailNicknames = {};
@@ -1196,137 +413,17 @@ export class WinnowStore {
   private deriveCached(): MailboxView {
     const cached = this.derived;
     if (cached && cached.version === this.version) return cached.view;
-    const view = this.derive();
+    const view = this.selectors.derive(this);
     this.derived = { version: this.version, view };
     return view;
   }
 
   /**
-   * Everything derived from the messages, in dependency order, so no consumer can see
-   * a half-updated world: profile → signals → search bags → visible list → rail.
+   * The derived view's memoised passes, kept in their own modules so this class reads
+   * as a coordinator rather than a thousand lines of selector logic.
    */
-  /**
-   * The user profile and the inbox's signals, memoised on the only inputs that can
-   * change them.
-   *
-   * `derive()` is memoised on `version`, the right granularity for "recompute the
-   * world" but the wrong one for the app's most expensive step: `state.now` is part of
-   * that state, so the 60-second clock tick reclassified every inbox message — 271ms
-   * for 5,000 messages. None of these four inputs move when the clock does, so a tick
-   * now costs one number.
-   */
-  private inboxCache: {
-    all: readonly Email[];
-    weights: SignalWeights;
-    trash: readonly string[];
-    blocked: readonly string[];
-    filterLearning: FilterLearning;
-    /** The inbox the profile was counted from, and those counts, for the incremental update. */
-    inbox: ReadonlySet<Email>;
-    stats: ProfileStats;
-    profile: UserProfile;
-    /**
-     * What the built-in rules said, before `filterLearning`: for "Why it's here" and for
-     * star learning, which must see the classifier's own output, never corrections.
-     */
-    baseSignals: SignalMap;
-    /** How common each clue is in this inbox; the decision and its explanation share it. */
-    background: ClueBackground;
-    signals: SignalMap;
-    /**
-     * The built-in answer per message *object*, for the incremental pass: a change to one
-     * message (opened and so read, archived, starred) replaces that object only, so when
-     * the profile comes out the same every other message keeps its classification.
-     */
-    byEmail: WeakMap<Email, EmailSignals>;
-  } | null = null;
-
-  /** Which filters each message object is in, so the rail's counts recount only what changed. */
-  private readonly filterHits = new WeakMap<
-    Email,
-    { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }
-  >();
-
-  /** The filters each message object *lists* under (no spam guard), for `railFacets`. */
-  private readonly listedHits = new WeakMap<
-    Email,
-    { signal: EmailSignals; profile: UserProfile; ids: readonly BuiltinSmartFilter[] }
-  >();
-
-  /**
-   * The last facet pass and what it was over, so a version bump that moved nothing the
-   * counts read (a clock tick, a selection, the reader loading a body) reuses it rather
-   * than rescanning the mailbox: same active set, profile and message objects, and the
-   * same signal object for each.
-   */
-  private facetCache: {
-    filters: readonly FilterId[];
-    /** The search's tokens, joined: a keystroke that changes them is one rescan. */
-    search: string;
-    profile: UserProfile;
-    emails: readonly Email[];
-    signals: readonly (EmailSignals | undefined)[];
-    facets: FacetCounts | null;
-  } | null = null;
-
-  private facetsFor(
-    emails: readonly Email[],
-    signals: ReadonlyMap<number, EmailSignals>,
-    profile: UserProfile,
-    searchBags: SearchBags,
-  ): FacetCounts | null {
-    const filters = this.state.activeFilters;
-    // The list's own tokens and test (`searchTokens` / `matchesSearch`), over the bags
-    // this pass already built for the list, so a chip searches exactly as the list does.
-    const tokens = searchTokens(this.state.searchQuery);
-    if (filters.length === 0 && tokens.length === 0) return null;
-    const search = tokens.join(" ");
-    const hit = this.facetCache;
-    if (
-      hit &&
-      hit.filters === filters &&
-      hit.search === search &&
-      hit.profile === profile &&
-      hit.emails.length === emails.length &&
-      emails.every((email, i) => hit.emails[i] === email && hit.signals[i] === signals.get(email.id))
-    ) {
-      return hit.facets;
-    }
-    const searched = tokens.length > 0 ? emails.filter((email) => matchesSearch(email, tokens, searchBags)) : emails;
-    const facets = countFacets(searched, signals, profile, filters, this.listedHits, tokens.length > 0);
-    this.facetCache = { filters, search, profile, emails, signals: emails.map((email) => signals.get(email.id)), facets };
-    return facets;
-  }
-
-  /**
-   * The contact index, memoised on the only two inputs that can change it.
-   *
-   * `all` is the whole story — the index is derived from the messages and is not itself
-   * persisted, so there is nothing to fall out of step with. The account address matters
-   * only as the authoritative answer to "which address is the user's own", which the
-   * signed-out demo does not have; signed in it is read from `state.account`.
-   *
-   * Keyed on identity rather than contents for the reason `inboxCache` is: a clock tick
-   * and a weight change both bump the version without touching a single message, and
-   * neither should cost a pass over the whole mailbox.
-   */
-  private contactCache: {
-    all: readonly Email[];
-    self: string | null;
-    google: readonly GoogleContact[];
-    index: ContactIndex;
-  } | null = null;
-
-  private contacts(): ContactIndex {
-    const all = this.state.all;
-    const self = this.state.account?.email ?? null;
-    const google = this.state.googleContacts;
-    const hit = this.contactCache;
-    if (hit && hit.all === all && hit.self === self && hit.google === google) return hit.index;
-    const index = buildContactIndex(all, { selfAddress: self, googleContacts: google });
-    this.contactCache = { all, self, google, index };
-    return index;
-  }
+  private readonly facets = new SearchFacets();
+  private readonly selectors = new MailboxSelectors(this.facets);
 
   /** Load email nicknames for the given account. */
   public loadEmailNicknames(accountId: string | null): void {
@@ -1370,304 +467,6 @@ export class WinnowStore {
     this.set({ googleContacts: contacts.slice(), contactsAccess: access });
   }
 
-  private inboxAnalysis(): { profile: UserProfile; signals: SignalMap } {
-    const state = this.state;
-    const { all, learning, preferences } = state;
-    const weights = learning.weights;
-    const trash = this.trashSenders;
-    const blocked = preferences.blockedSenders;
-
-    const hit = this.inboxCache;
-    if (
-      hit &&
-      hit.all === all &&
-      hit.weights === weights &&
-      hit.trash === trash &&
-      hit.blocked === blocked &&
-      hit.filterLearning === this.learningModel()
-    ) {
-      return { profile: hit.profile, signals: hit.signals };
-    }
-
-    // Blocked senders excluded here for the same reason as `visible`: their volume must
-    // not reach the engagement ranking.
-    const blockedLower = new Set(blocked.map((s) => s.toLowerCase()));
-    const inboxForProfile = all.filter(
-      (email) => email.mailbox === "inbox" && !blockedLower.has(email.sender.toLowerCase()),
-    );
-    const inboxSet = new Set(inboxForProfile);
-    // The incremental path: the weights and the blocked list are as they were, so only
-    // messages moved (read, starred, archived, binned, arrived). The profile's counts are
-    // updated for the messages that left the inbox and the ones that joined it, rather than
-    // recounted, and only the senders whose classification inputs actually changed (see
-    // `sendersReclassifiedBy`) are reclassified, along with any message object that is
-    // new. Archiving one message in a 3,000-message inbox used to reclassify all 3,000,
-    // because it moved that sender's count and so the profile.
-    const incremental = hit !== null && hit.weights === weights && hit.blocked === blocked;
-    /** The same message objects in the inbox as last time: the clue background still holds. */
-    let sameInbox = false;
-    let stats: ProfileStats;
-    let profile: UserProfile;
-    let baseSignals: SignalMap;
-    const byEmail = new WeakMap<Email, EmailSignals>();
-    if (incremental) {
-      const removed: Email[] = [];
-      for (const email of hit.inbox) if (!inboxSet.has(email)) removed.push(email);
-      const added = inboxForProfile.filter((email) => !hit.inbox.has(email));
-      sameInbox = removed.length === 0 && added.length === 0;
-      stats = updateProfileStats(hit.stats, removed, added, this.trashRecords());
-      const built = profileFromStats(stats);
-      const unchanged = sameProfile(hit.profile, built);
-      profile = unchanged ? hit.profile : built;
-      const affected = unchanged ? null : sendersReclassifiedBy(hit.profile, built);
-      const map = new Map<number, EmailSignals>();
-      for (const email of inboxForProfile) {
-        let signals = affected?.has(email.sender) ? undefined : hit.byEmail.get(email);
-        if (!signals) {
-          signals = classifyEmail(email, profile, weights);
-          // The same answer as before (a read flag flipped): keep the old object, so the
-          // per-message memos below it (the rail's counts) still hit.
-          const previous = hit.baseSignals.get(email.id);
-          if (previous && sameSignals(previous, signals)) signals = previous;
-        }
-        map.set(email.id, signals);
-        byEmail.set(email, signals);
-      }
-      baseSignals = map;
-    } else {
-      stats = profileStats(inboxForProfile, this.trashRecords());
-      profile = profileFromStats(stats);
-      baseSignals = classifyAll(inboxForProfile, profile, weights);
-      for (const email of inboxForProfile) byEmail.set(email, baseSignals.get(email.id)!);
-    }
-    const filterLearning = this.learningModel();
-    // The clue background is only read by learning, so with nothing learned it is not
-    // built at all; otherwise it is kept while the inbox holds the same message objects
-    // (a star, a weight-free re-derive), since `clueBackground`'s own memo is keyed on
-    // the array and `inboxForProfile` is a fresh one every pass.
-    const background = filterLearning.isEmpty
-      ? EMPTY_BACKGROUND
-      : sameInbox && hit !== null && hit.background !== EMPTY_BACKGROUND
-        ? hit.background
-        : clueBackground(inboxForProfile);
-    const signals = applyFilterLearning(inboxForProfile, baseSignals, filterLearning, background);
-    this.inboxCache = { all, weights, trash, blocked, filterLearning, inbox: inboxSet, stats, profile, baseSignals, background, signals, byEmail };
-    return { profile, signals };
-  }
-
-  /** Base classification per message object for non-inbox mailboxes; see `mailboxSignals`. */
-  private readonly mailboxBase = new WeakMap<Email, { profile: UserProfile; weights: StoreState["learning"]["weights"]; signal: EmailSignals }>();
-
-  /**
-   * A non-inbox mailbox, classified for smart filters with the inbox's profile and
-   * weights, then what has been learned applied over it. Memoised per message object
-   * and profile, so switching back and forth, or one message changing, reclassifies only
-   * what changed.
-   */
-  private mailboxSignals(emails: readonly Email[], profile: UserProfile): SignalMap {
-    const weights = this.state.learning.weights;
-    const base = new Map<number, EmailSignals>();
-    for (const email of emails) {
-      const hit = this.mailboxBase.get(email);
-      let signal = hit && hit.profile === profile && hit.weights === weights ? hit.signal : undefined;
-      if (!signal) {
-        signal = classifyEmail(email, profile, weights);
-        this.mailboxBase.set(email, { profile, weights, signal });
-      }
-      base.set(email.id, signal);
-    }
-    const learning = this.learningModel();
-    if (learning.isEmpty) return base;
-    const background = this.inboxCache?.background ?? EMPTY_BACKGROUND;
-    return applyFilterLearning(emails, base, learning, background);
-  }
-
-  private derive(): MailboxView {
-    const state = this.state;
-    const blocked = new Set(state.preferences.blockedSenders.map((s) => s.toLowerCase()));
-
-    // Blocked senders are hidden from every view, and before the profile is built, or
-    // their volume would still push them up the engagement ranking.
-    const visible = state.all.filter((email) => !blocked.has(email.sender.toLowerCase()));
-    // Drafts are their own list (see `StoreState.drafts`), never filtered by sender: the
-    // sender of every draft is the user.
-    const mailboxEmails = this.listedIn(visible);
-
-    // The profile is built from the *inbox*, not the current mailbox: learning "who you
-    // read" from an archive or a bin would teach it the wrong thing. Memoised; see
-    // `inboxAnalysis`.
-    const { profile, signals: inboxSignals } = this.inboxAnalysis();
-    const inboxForProfile = visible.filter((email) => email.mailbox === "inbox");
-
-    // Smart filters apply to whichever mailbox is open (1.3.3), classified with the
-    // inbox's profile and what has been learned: the inbox's signals are reused there,
-    // every other mailbox is classified on demand (`mailboxSignals`, memoised per
-    // message). Only the inbox holds back unsafe mail with no filter on (`hideUnsafe`
-    // below): applying that rule to the bin or the spam folder is how they once showed
-    // nothing. Drafts are the user's own and stay unclassified.
-    const signals =
-      state.mailbox === "inbox"
-        ? inboxSignals
-        : state.mailbox === "drafts" || state.mailbox === "scheduled"
-          ? neutralSignalsFor(mailboxEmails)
-          : this.mailboxSignals(mailboxEmails, profile);
-
-    // Only when a search is running. See `searchBags`: the pipeline builds a bag on
-    // demand, so the unsearched case is a fast path, not a different code path.
-    const searching = state.searchQuery.trim().length > 0;
-    const searchBags = searching ? buildSearchBags(mailboxEmails) : new Map<number, string>();
-
-    const queried = runInboxQuery({
-      emails: mailboxEmails,
-      profile,
-      signals,
-      filters: state.activeFilters,
-      searchQuery: state.searchQuery,
-      sortBy: state.preferences.sortBy,
-      searchBags,
-      hideUnsafe: state.mailbox === "inbox",
-    });
-    // Snoozed and Scheduled are lists of times: whatever comes back (or goes) soonest
-    // leads, whatever the sort setting says about mail.
-    const result =
-      state.mailbox === "snoozed" || state.mailbox === "scheduled"
-        ? { ...queried, emails: [...queried.emails].sort((a, b) => timedAt(a) - timedAt(b)) }
-        : queried;
-
-    const threads = groupThreads(result.emails);
-
-    // The rail is ranked and counted over the *open mailbox* (1.3.3), before search and
-    // filters (the numbers shown facet on both, `railFacets` below): a pill's number is how many conversations (list rows) in this mailbox it would show, so
-    // the count, the list a filter gives and "Why it's here" all agree. The permanent
-    // pair stays pinned wherever you are.
-    const railEmails = state.mailbox === "drafts" || state.mailbox === "scheduled" ? [] : mailboxEmails;
-    const rail = rankFilters(railEmails, signals, profile, this.filterHits);
-    const railWithActive = this.orderedRail(rail);
-    // Conversations, like the list's rows and the masthead's readout (`threads`).
-    const railCounts =
-      state.mailbox === "inbox"
-        ? countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits, "conversations")
-        : countAllFilters(railEmails, signals, profile, this.filterHits, "conversations");
-    // Conversations, like every other pill number (`countAllFilters`).
-    const railSenderThreads = new Map<string, Set<string>>();
-    for (const email of railEmails) {
-      const seen = railSenderThreads.get(email.sender);
-      if (seen) seen.add(threadKey(email));
-      else railSenderThreads.set(email.sender, new Set([threadKey(email)]));
-    }
-    const railSenderCounts = new Map<string, number>();
-    for (const [sender, keys] of railSenderThreads) railSenderCounts.set(sender, keys.size);
-    // Faceted on the active filters and, while a search runs (1.4.0), on the search: a
-    // chip's number is then what tapping it lists under that query. Which chips stay is
-    // still `rail` / `railCounts` (the plain mailbox ranking), so typing never reshuffles
-    // the rail; a chip the search empties dims in place. `inboxCounts` stay plain.
-    const railFacets = this.facetsFor(railEmails, signals, profile, searchBags);
-
-    // Over the inbox whatever is open: the drawer's and the triage line's claims.
-    const inboxCounts =
-      state.mailbox === "inbox" ? railCounts : countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits, "conversations");
-
-    const attention = summarizeAttention(inboxForProfile, inboxSignals, state.now);
-
-    const inboxThreadCount = new Set(
-      inboxForProfile
-        .filter((email) => {
-          const signal = inboxSignals.get(email.id);
-          return !signal || !isUnsafe(signal);
-        })
-        .map((email) => email.threadId ?? email.gmailId),
-    ).size;
-
-    const inboxSenderCounts = new Map<string, number>();
-    for (const email of inboxForProfile) {
-      inboxSenderCounts.set(email.sender, (inboxSenderCounts.get(email.sender) ?? 0) + 1);
-    }
-
-    /*
-     * The open message, resolved from the *result* first and from the mailbox second.
-     *
-     * Turning on a smart filter must not take away the message somebody is reading —
-     * it only says which rows to *show* — so the fallback deliberately looks in
-     * `mailboxEmails`, the same mailbox's messages *before* filters and search. A
-     * message a filter is hiding is still found; one that was archived, trashed,
-     * moved, blocked or removed by a sync is not there, so the reader still closes for
-     * every reason it should. Switching mailbox drops the selection outright, in
-     * `setMailbox`.
-     */
-    const selectedRow = threads.find((row) => row.representative.id === state.selectedId) ?? null;
-    const selectedIndex = rowIndexOf(threads, state.selectedId, mailboxEmails);
-    const selectedFallback =
-      selectedRow === null && state.selectedId !== null
-        ? (mailboxEmails.find((email) => email.id === state.selectedId) ?? null)
-        : null;
-    const selectedEmail = selectedRow?.representative ?? selectedFallback;
-    const selected = selectedEmail ? this.withBody(selectedEmail) : null;
-    // From `visible`, not `state.all`: finding a blocked sender's mail quoted in an open
-    // thread is not blocking them. Body-bearing copies, because this is where a message
-    // is actually *read*; everything above works on the body-free messages `state.all`
-    // holds.
-    const conversation = selected
-      ? conversationFor(visible, selected.threadId, selected.gmailId).map((m) => this.withBody(m))
-      : [];
-
-    return {
-      emails: result.emails,
-      signals,
-      profile,
-      searchBags,
-      result,
-      threads,
-      rail: railWithActive,
-      railCounts,
-      railSenderCounts,
-      railFacets,
-      inboxCounts,
-      inboxSenderCounts,
-      inboxThreadCount,
-      attention,
-      selected,
-      selectedIndex,
-      conversation,
-      unreadCount: mailboxEmails.filter((email) => email.unread).length,
-      totalCount: mailboxEmails.length,
-      otherMailboxCount:
-        state.mailbox === "drafts" || state.mailbox === "scheduled"
-          ? visible.length
-          : visible.length - mailboxEmails.length,
-      contacts: this.contacts(),
-    };
-  }
-
-  /**
-   * The rail's final order: the permanent pair leads, then activated buckets (in the
-   * order they were turned on, *whether or not they match anything* — an empty active
-   * bucket must keep its pill or a live filter is left with no control), then the
-   * ranking.
-   *
-   * Ported from `legacy/swift-native/Sources/winnow/Store/WinnowStore.swift`, which
-   * pins the permanent pair *before* hoisting actives; the order matters.
-   */
-  private orderedRail(ranked: BuiltinSmartFilter[]): BuiltinSmartFilter[] {
-    const activeBuiltins = this.state.activeFilters
-      .filter((filter): filter is Extract<FilterId, { kind: "builtin" }> => filter.kind === "builtin")
-      .map((filter) => filter.id);
-
-    const pinned = [...PERMANENT_FILTERS];
-
-    // An active bucket keeps its place in the rail rather than being hoisted to the
-    // front: a tab that jumped when clicked would move away from the pointer and
-    // repoint the digit shortcuts. (The rail scrolls a newly active tab into the clear
-    // itself.) Only an active bucket the ranking left out is added, after the ranked
-    // ones and in catalog order, so it can be turned off.
-    const placed = new Set([...pinned, ...ranked]);
-    const extra = activeBuiltins
-      .filter((id) => !placed.has(id))
-      .sort((a, b) => catalogIndex(a) - catalogIndex(b));
-    const rest = ranked.filter((id) => !pinned.includes(id));
-
-    return [...pinned, ...rest, ...extra];
-  }
-
   // ── Changing ──────────────────────────────────────────────────────────────
 
   /**
@@ -1677,7 +476,8 @@ export class WinnowStore {
    * object each time, so a monotonically increasing key answers "did it change?" without
    * a deep comparison.
    */
-  private set(patch: Partial<StoreState>, persist?: PersistPatch): void {
+  /** @internal */
+  set(patch: Partial<StoreState>, persist?: PersistPatch): void {
     this.state = { ...this.state, ...patch };
     // Every reading of the mailbox (a sync, a partial, an optimistic change, the demo)
     // has the snoozes laid over it here, the one door `all` comes in by, so a snoozed
@@ -1804,7 +604,8 @@ export class WinnowStore {
    * `max` also makes purging work: deleting a message for good removes it from
    * `state.all`, and without the witnessed log that discard would stop existing.
    */
-  private trashRecords(): TrashRecord[] {
+  /** @internal */
+  trashRecords(): TrashRecord[] {
     const witnessed = new Map<string, number>();
     for (const sender of this.trashSenders) {
       witnessed.set(sender, (witnessed.get(sender) ?? 0) + 1);
@@ -2995,7 +1796,8 @@ export class WinnowStore {
   }
 
   /** The messages the list draws from (before filters and search). */
-  private listedIn(visible: readonly Email[]): Email[] {
+  /** @internal */
+  listedIn(visible: readonly Email[]): Email[] {
     const state = this.state;
     if (state.mailbox === "drafts") return this.listedDrafts();
     if (state.mailbox === "scheduled") return this.scheduledRows();
@@ -3922,24 +2724,7 @@ export class WinnowStore {
    * filter the user corrected.
    */
   private rawSignalsFor(email: Email): EmailSignals {
-    if (email.mailbox === "inbox") {
-      this.inboxAnalysis();
-      const base = this.inboxCache?.baseSignals.get(email.id);
-      if (base) return base;
-    }
-    const { filterOverrides: _corrections, ...raw } = this.signalsFor(email);
-    void _corrections;
-    return raw;
-  }
-
-  /** Signals for a message, classifying it if the view has not yet. */
-  private signalsFor(email: Email): EmailSignals {
-    const cached = this.view.signals.get(email.id);
-    if (cached) return cached;
-    // Fall back to classifying against the current profile rather than `NEUTRAL`:
-    // learning from a neutral classification would teach the model nothing about why
-    // the user starred the message.
-    return classifyAll([email], this.view.profile, this.state.learning.weights).get(email.id)!;
+    return this.selectors.rawSignalsFor(this, email);
   }
 
   // ── Learning ──────────────────────────────────────────────────────────────
@@ -4302,7 +3087,8 @@ export class WinnowStore {
   }
 
   /** The body-bearing copy of a message, for the parts of the view that render one. */
-  private withBody(email: Email): Email {
+  /** @internal */
+  withBody(email: Email): Email {
     const bodyHtml = this.bodies.get(email.id);
     return bodyHtml === undefined ? email : { ...email, bodyHtml };
   }
@@ -4647,7 +3433,8 @@ export class WinnowStore {
    * share a domain rule even when the account is a personal one. Memoised on the
    * mailbox and the model, so it keeps its identity until either changes.
    */
-  private learningModel(): FilterLearning {
+  /** @internal */
+  learningModel(): FilterLearning {
     return this.state.filterLearning.withWorkDomains(workDomainsFromSent(this.state.all));
   }
 
@@ -4667,7 +3454,7 @@ export class WinnowStore {
    * now — what the picker opens with.
    */
   smartFilterMembership(ids: readonly number[]): Map<LearnableFilter, "all" | "some" | "none"> {
-    const { profile, signals } = this.inboxAnalysis();
+    const { profile, signals } = this.selectors.inboxAnalysis(this);
     const emails = ids.map((id) => this.inboxEmail(id)).filter((email): email is Email => email !== undefined);
     const out = new Map<LearnableFilter, "all" | "some" | "none">();
     for (const filter of LEARNABLE_FILTERS) {
@@ -4695,7 +3482,7 @@ export class WinnowStore {
     changes: readonly { filter: LearnableFilter; into: boolean }[],
   ): SmartFilterChange[] {
     if (changes.length === 0) return [];
-    const { profile, signals } = this.inboxAnalysis();
+    const { profile, signals } = this.selectors.inboxAnalysis(this);
     let model = this.state.filterLearning;
     if (model.owner === null) model = model.withOwner(this.state.account?.email.toLowerCase() ?? "demo");
     const at = this.now();
@@ -4734,14 +3521,11 @@ export class WinnowStore {
   explainSmartFilters(id: number, { scores = false }: { scores?: boolean } = {}): FilterReason[] {
     const email = this.inboxEmail(id);
     if (!email) return this.explainInMailbox(id, scores);
-    this.inboxAnalysis();
-    const cache = this.inboxCache;
-    const base = cache?.baseSignals.get(id);
-    const learned = cache?.signals.get(id);
-    if (!cache || !base || !learned) return [];
-    return explainFilters(email, base, learned, cache.profile, this.learningModel(), {
-      background: cache.background,
-      weights: cache.weights,
+    const explanation = this.selectors.explanationFor(this, email);
+    if (!explanation) return [];
+    return explainFilters(email, explanation.base, explanation.learned, explanation.profile, this.learningModel(), {
+      background: explanation.background,
+      weights: explanation.weights,
       scores,
     });
   }
@@ -4754,14 +3538,13 @@ export class WinnowStore {
   private explainInMailbox(id: number, scores: boolean): FilterReason[] {
     const email = this.state.all.find((candidate) => candidate.id === id);
     if (!email || email.mailbox === "inbox") return [];
-    const { profile } = this.inboxAnalysis();
-    const cache = this.inboxCache;
-    const weights = this.state.learning.weights;
+    const { profile } = this.selectors.inboxAnalysis(this);
+    const { background, weights } = this.selectors.background(this);
     const base = classifyEmail(email, profile, weights);
-    const learned = this.mailboxSignals([email], profile).get(id) ?? base;
+    const learned = this.selectors.mailboxSignals(this, [email], profile).get(id) ?? base;
     return explainFilters(email, base, learned, profile, this.learningModel(), {
-      background: cache?.background ?? EMPTY_BACKGROUND,
-      weights: cache?.weights ?? weights,
+      background,
+      weights,
       scores,
     });
   }
@@ -4769,8 +3552,7 @@ export class WinnowStore {
   /** Whether the built-in rules alone would put this message in a filter. For tests and Settings. */
   builtInFilter(id: number, filter: LearnableFilter): boolean {
     const email = this.inboxEmail(id);
-    this.inboxAnalysis();
-    const base = this.inboxCache?.baseSignals.get(id);
+    const base = this.selectors.baseSignal(this, id);
     return email && base ? builtInSays(filter, email, base) : false;
   }
 
@@ -4796,30 +3578,6 @@ export type SmartFilterChange = {
   already: number;
 };
 
-/**
- * A signal map for mail that is deliberately not classified.
- *
- * `NEUTRAL_SIGNALS` is frozen by convention, so it is handed out as-is rather than
- * copied per message: it has no mutable fields, and a map of a few thousand identical
- * references costs nothing next to a few thousand copies.
- */
-/** Field-by-field equality of two classifications. */
-function sameSignals(a: EmailSignals, b: EmailSignals): boolean {
-  const keys = Object.keys(a) as (keyof EmailSignals)[];
-  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
-}
-
-/** When a row of Snoozed or Scheduled happens: the list's order. */
-function timedAt(email: Email): number {
-  return email.snoozedUntil ?? email.scheduled?.sendAt ?? email.receivedAt;
-}
-
-function neutralSignalsFor(emails: readonly Email[]): SignalMap {
-  const map = new Map<number, EmailSignals>();
-  for (const email of emails) map.set(email.id, NEUTRAL_SIGNALS);
-  return map;
-}
-
 /** The message shown when a sync could not download everything. */
 export function syncFailureSummary(count: number): string {
   return `${count} message${count === 1 ? "" : "s"} failed to download this sync — refresh to retry.`;
@@ -4844,49 +3602,6 @@ export function syncNotice(result: { truncated: boolean; cacheUnpersisted?: bool
   // `cacheUnpersisted` is not a note any more: it is a question with two answers, and
   // lives in `storagePrompt` (see `STORAGE_PROMPT`).
   return notes.length > 0 ? notes.join(" ") : null;
-}
-
-/** A message's conversation key, the same one `groupThreads` files it under. */
-function threadKeyOf(email: Email): string {
-  return threadKey(email);
-}
-
-/**
- * The row in `threads` that shows message `id`, or `-1`.
- *
- * The row whose representative it is first, and otherwise the row of its conversation —
- * but only for a message of the mailbox on screen (`mailboxEmails`): a thread's sent
- * reply shares the inbox row's key, and is not read *on* that row.
- */
-export function rowIndexOf(
-  threads: readonly ThreadRow[],
-  id: number | null,
-  mailboxEmails: readonly Email[],
-): number {
-  if (id === null) return -1;
-  const direct = threads.findIndex((row) => row.representative.id === id);
-  if (direct >= 0) return direct;
-  const email = mailboxEmails.find((candidate) => candidate.id === id);
-  if (!email) return -1;
-  const key = threadKeyOf(email);
-  return threads.findIndex((row) => row.key === key);
-}
-
-/**
- * The 0-based row the position readout ("4 of 39") names, or `NO_CURSOR` for none.
- *
- * With a message open it is that message's row and nothing else — never the cursor,
- * which is a separate piece of state and has drifted from the reader before (a sync, an
- * archive above, an undo, a filter, a re-sort). An open message that is not a visible
- * row gets no number at all: the neutral readout is honest, a neighbour's number is not.
- * With nothing open it is the cursor, if that is on a row.
- */
-export function readoutIndex(
-  state: Pick<StoreState, "selectedId" | "cursorIndex">,
-  view: Pick<MailboxView, "threads" | "selectedIndex">,
-): number {
-  if (state.selectedId !== null) return view.selectedIndex >= 0 ? view.selectedIndex : NO_CURSOR;
-  return state.cursorIndex >= 0 && state.cursorIndex < view.threads.length ? state.cursorIndex : NO_CURSOR;
 }
 
 /**
