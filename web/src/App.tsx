@@ -27,7 +27,6 @@ import {
   NO_CURSOR,
   readoutIndex,
   WinnowStore,
-  type Snapshot,
 } from "./core/store/store";
 import {
   badgeFilters,
@@ -76,6 +75,9 @@ import { useSelection } from "./app/hooks/useSelection";
 import { useAndroidBack } from "./app/hooks/useAndroidBack";
 import { useDerivedView } from "./app/hooks/useDerivedView";
 import { useTheme } from "./app/hooks/useTheme";
+import { useSenderPictureCaches, useSenderPictures } from "./app/hooks/useSenderPictures";
+import { useGoogleContacts } from "./app/hooks/useGoogleContacts";
+import { useActions } from "./app/hooks/useActions";
 import { AppNotices } from "./app/components/AppNotices";
 import { scrollListToTop } from "./ui/listScroll";
 import { useSettingsTransfer } from "./ui/useSettingsTransfer";
@@ -98,7 +100,6 @@ import { viewKey } from "./ui/inboxClear";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
 import MessageList from "./ui/components/MessageList";
-import type { SwipeAction } from "./ui/swipe";
 import { Reader } from "./ui/components/Reader";
 import { ReaderSplitHandle } from "./ui/components/ReaderSplitHandle";
 import { ShortcutSheet } from "./ui/components/ShortcutSheet";
@@ -128,22 +129,14 @@ import { storageKey } from "./core/store/keyedStorage";
 import { SEND_LATER_NOTE } from "./ui/components/Composer";
 import {
   EMPTY_SELECTION,
-  orderedSelection,
   toggleId,
 } from "./ui/selection";
 import { mailtoAddress } from "./core/mail/unsubscribe";
 import { copyText } from "./ui/clipboard";
 import { CodeBar } from "./ui/components/CodeCopy";
 import { Avatar } from "./ui/components/Avatar";
-import { imageProbe, publishSenderPictures, senderPictureSources, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
-import { GRAVATAR_STORAGE_KEY, GravatarCache } from "./core/avatars/gravatar";
-import { contactPhotoMap } from "./core/avatars/photos";
-import { defaultPictureBytesStorage, memoryPictureBytesStorage, PictureBytesCache } from "./core/avatars/pictureBytes";
+import { SenderPicturesContext } from "./ui/senderPictures";
 import { canvasCapture, canvasPictureColor } from "./ui/pictureCapture";
-import { BrandLogoCache, LOGO_STORAGE_KEY, localLogoStorage } from "./core/avatars/logoCache";
-import { keyFor } from "./core/store/accountState";
-import { dohResolver } from "./core/avatars/bimi";
-import { contactsFailureNotice } from "./core/gmail/people";
 import { cleanFilename } from "./core/mail/attachments";
 import {
   DemoDriveClient,
@@ -165,7 +158,6 @@ import {
 } from "./core/gmail/driveSend";
 import { DriveConsent } from "./ui/components/DriveConsent";
 import { DriveGrantNeeded } from "./ui/components/DriveGrantNeeded";
-import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import { pictureNotice } from "./ui/pictureNotice";
 import { PictureNotice } from "./ui/components/PictureNotice";
 import type { OfflineQueue } from "./core/offline/queue";
@@ -181,7 +173,7 @@ import { buttonClass } from "./ui/button";
 import { Icon } from "./ui/components/Icon";
 import type { OpenMenu, Props, ComposerState, PendingSend, SendDriveAnswers, ComposerStart } from "./app/types";
 import { DriveSendHold } from "./app/types";
-import { deferred, CONTACTS_REFRESH_MS, HALF_GRANT_MESSAGE, DRAFT_NOTICE_MS, SENT_NOTICE_MS, SCHEDULED_SENT_NOTICE_MS, DUE_CHECK_MS, platformLabel, selfAddressOf, draftAccount, BLANK_INITIAL, isUntouchedDraft } from "./app/utils";
+import { deferred, HALF_GRANT_MESSAGE, DRAFT_NOTICE_MS, SENT_NOTICE_MS, SCHEDULED_SENT_NOTICE_MS, DUE_CHECK_MS, platformLabel, selfAddressOf, draftAccount, BLANK_INITIAL, isUntouchedDraft } from "./app/utils";
 
 /**
  * Whether the one-time session restore has already been started.
@@ -195,41 +187,7 @@ let sessionRestoreStarted = false;
 export function App({ store, existingInstall = true }: Props) {
   const snapshot = useStore(store);
   const { view, preferences } = snapshot;
-  /**
-   * Brand logos (BIMI) and Gravatar photos, both behind "Sender pictures". One pair per account (1.4.0): each is a list of who mails that account, so
-   * it is stored under the account's namespace and never read from another's. Cleared on
-   * sign-out and when the setting is turned off.
-   */
-  const cacheAccount = snapshot.accountId;
-  const logoCache = useMemo(
-    () =>
-      new BrandLogoCache({
-        resolve: dohResolver((input, init) => fetch(input, init)),
-        isOnline: () => globalThis.navigator?.onLine !== false,
-        storage: localLogoStorage(keyFor(LOGO_STORAGE_KEY, cacheAccount)),
-      }),
-    [cacheAccount],
-  );
-  const gravatarCache = useMemo(() => {
-    const isOnline = () => globalThis.navigator?.onLine !== false;
-    return new GravatarCache({ probe: imageProbe(isOnline), isOnline, storage: localLogoStorage(keyFor(GRAVATAR_STORAGE_KEY, cacheAccount)) });
-  }, [cacheAccount]);
-  /**
-   * The pictures themselves, as small copies on the device (`core/avatars/pictureBytes`):
-   * one IndexedDB database per account, like the offline mail, warmed into memory now so
-   * the first rows draw their senders' pictures at once. Cleared with the lookups above
-   * (sign-out, a switch going off) and with the contacts grant. No account yet (starting
-   * up, the demo, signed out): memory only, so no database is made for nobody.
-   */
-  const pictureBytes = useMemo(
-    () =>
-      new PictureBytesCache({
-        storage: cacheAccount ? defaultPictureBytesStorage(cacheAccount) : memoryPictureBytesStorage(),
-        capture: canvasCapture(),
-        isOnline: () => globalThis.navigator?.onLine !== false,
-      }),
-    [cacheAccount],
-  );
+  const { logoCache, gravatarCache, pictureBytes } = useSenderPictureCaches(snapshot.accountId);
 
   // ── Refs the keyboard handler reads ─────────────────────────────────────
   // The handler is registered once and reads through these, because
@@ -569,86 +527,14 @@ export function App({ store, existingInstall = true }: Props) {
 
   // ── Google contacts ──────────────────────────────────────────────────────
 
-  /**
-   * Bring the store's copy of Google's address book up to date.
-   *
-   * The stored copy is adopted first, so suggestions include it the moment a session
-   * connects, and the network refresh follows only when the last one is older than
-   * `CONTACTS_REFRESH_MS` (or `force` says so). A failed refresh keeps the stored copy:
-   * stale suggestions are still suggestions, and an error banner over the composer for a
-   * convenience feature would be out of proportion.
-   *
-   * With no grant the store is told so, which is what makes the opt-in appear.
-   */
-  /**
-   * Why contacts are connected but not arriving, when the user can fix it: today, the
-   * People API switched off in their Cloud project. Shown in Settings with a link.
-   */
-  const [contactsProblem, setContactsProblem] = useState<{ message: string; url: string | null } | null>(null);
-  const syncGoogleContacts = useCallback(async (force = false): Promise<{ message: string; url: string | null } | null> => {
-    const bridge = sessionRef.current;
-    if (!bridge || !store.getSnapshot().account) return null;
-    try {
-      const access = await bridge.contactsAccess();
-      if (access !== "granted") {
-        store.setGoogleContacts([], access);
-        return null;
-      }
-      store.setGoogleContacts(await bridge.cachedContacts(), "granted");
-      const last = await bridge.contactsSyncedAt();
-      if (!force && last !== null && Date.now() - last < CONTACTS_REFRESH_MS) return null;
-      const fresh = await bridge.refreshContacts();
-      if (fresh) store.setGoogleContacts(fresh, "granted");
-      else store.setGoogleContacts([], await bridge.contactsAccess());
-      setContactsProblem(null);
-      return null;
-    } catch (error) {
-      // A failure the user can fix is said where the switch is (Settings → Google
-      // contacts); anything else keeps the stored copy and tries again next time.
-      const notice = contactsFailureNotice(error);
-      if (notice) setContactsProblem(notice);
-      else console.warn("winnow: could not refresh Google contacts:", error);
-      return notice;
-    }
-  }, [store]);
-
-  /**
-   * The opt-in: "Improve suggestions from Google contacts".
-   *
-   * Incremental consent through the same platform flow as sign-in. On the desktop this
-   * resolves when the user comes back from the browser; on the web it navigates away and
-   * the outcome arrives through `completeWebRedirect` on reload.
-   */
-  const [contactsBusy, setContactsBusy] = useState(false);
-  const [contactsError, setContactsError] = useState<string | null>(null);
-  const improveSuggestions = useCallback(async (notify = false): Promise<void> => {
-    const bridge = sessionRef.current;
-    if (!bridge) return;
-    setContactsError(null);
-    setContactsBusy(true);
-    // From the sender menu there is no inline place for the outcome, so it is a notice.
-    const fail = (message: string) => {
-      setContactsError(message);
-      if (notify) store.setNotice(message);
-    };
-    try {
-      const access = await bridge.grantContacts();
-      if (access === "granted") {
-        const problem = await syncGoogleContacts(true);
-        if (problem && notify) store.setNotice(problem.message);
-      } else {
-        store.setGoogleContacts([], access);
-        fail(HALF_GRANT_MESSAGE);
-      }
-    } catch (error) {
-      fail(error instanceof Error ? error.message : "Google contacts were not connected.");
-    } finally {
-      setContactsBusy(false);
-    }
-  }, [store, syncGoogleContacts]);
-  const onImproveSuggestions = useCallback(() => void improveSuggestions(), [improveSuggestions]);
-
-  const onConnectContactPhotos = useCallback(() => void improveSuggestions(true), [improveSuggestions]);
+  const {
+    contactsProblem,
+    contactsBusy,
+    contactsError,
+    syncGoogleContacts,
+    onImproveSuggestions,
+    onConnectContactPhotos,
+  } = useGoogleContacts({ store, sessionRef });
 
   const [restoringSession, setRestoringSession] = useState(false);
   /** Set beside the drafts code below; `signOut` is declared before it. */
@@ -1173,160 +1059,18 @@ export function App({ store, existingInstall = true }: Props) {
         .join(" — ")
     : "";
 
-  /**
-   * Wrap a store mutation that needs the *current* snapshot.
-   *
-   * The handler closes over nothing and reads through `snapshotRef` when it runs, which
-   * keeps its identity stable — and every one of these is passed to a `memo`'d component,
-   * where a new function per render would defeat the memo.
-   */
-  const act = useCallback(
-    (fn: (store: WinnowStore, snapshot: Snapshot) => void) => () =>
-      fn(storeRef.current, snapshotRef.current),
-    [],
-  );
-
-  /**
-   * Open a message by click.
-   *
-   * A click both moves the cursor and opens; `j` only moves — the difference that makes
-   * keyboard navigation and clicking feel like different actions even though they select
-   * the same message.
-   */
-  /**
-   * Leave the open message.
-   *
-   * On a phone this is Back: the list returns with no current row (the cursor goes with
-   * the reader — see `listSelectedId`) and at the scroll position it was left at, which
-   * `MessageList` keeps across the reader covering it. Focus goes back to the row that
-   * was opened, so a screen reader resumes where it was rather than at the top of the
-   * document; `preventScroll` because the list is already where the user left it, and a
-   * focus after a tap draws no `focus-visible` ring, so nothing on screen marks the row.
-   */
-  /**
-   * The message a swipe on the phone reader's pill stepped to, and which way (STRM-324):
-   * its pane slides in from that side. Keyed on the id, so opening any other way (a
-   * row, a notification, Back) never replays it.
-   */
-  const [stepEnter, setStepEnter] = useState<{ id: number; dir: "next" | "prev" } | null>(null);
-  const stepFromPill = useCallback((step: 1 | -1) => {
-    const s = storeRef.current;
-    s.moveCursor(step);
-    const id = s.getSnapshot().view.selected?.id;
-    setStepEnter(id === undefined ? null : { id, dir: step === 1 ? "next" : "prev" });
-  }, []);
-
-  const closeReader = useCallback(() => {
-    const s = storeRef.current;
-    if (!phoneRef.current) {
-      s.closeReader();
-      return;
-    }
-    const openedId = snapshotRef.current.view.selected?.id;
-    s.closeReader({ dropCursor: true });
-    if (openedId === undefined) return;
-    requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>(`[data-row-count] button[data-message-id="${openedId}"]`)
-        ?.focus({ preventScroll: true });
-    });
-  }, []);
-
-  /**
-   * Read/unread for a message, with the exit that marking unread implies.
-   *
-   * Marking the *open* message unread moves on — the next row on the desktop, the list on
-   * a phone (see `store.markUnreadAndMoveOn`); on a phone focus goes back to the row, as
-   * Back does. Marking read, or toggling a message that is not open, is a plain toggle.
-   */
-  const toggleReadFor = useCallback((id: number) => {
-    const s = storeRef.current;
-    const email = s.getSnapshot().all.find((candidate) => candidate.id === id);
-    if (!email) return;
-    if (email.unread) {
-      s.setRead(id, true);
-      return;
-    }
-    const phoneNow = phoneRef.current;
-    const wasOpen = snapshotRef.current.view.selected?.id === id;
-    s.markUnreadAndMoveOn(id, { phone: phoneNow });
-    if (phoneNow && wasOpen) {
-      requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLElement>(`[data-row-count] button[data-message-id="${id}"]`)
-          ?.focus({ preventScroll: true });
-      });
-    }
-  }, []);
-  const toggleReadRef = useRef(toggleReadFor);
-  toggleReadRef.current = toggleReadFor;
-
   // ── Multi-select and the two menus ─────────────────────────────────────────
 
   // Menus are scoped to one mailbox; a menu for a row that just left the view closes.
   useEffect(() => setMenu(null), [snapshot.mailbox]);
 
-  /** Contact photos by lowercased address, from the user's Google contacts, avatar-sized. */
-  const photos = useMemo(() => contactPhotoMap(snapshot.googleContacts), [snapshot.googleContacts]);
-
-  // Signed out by any route (the button, an expired session): who mailed that account
-  // is the account's data. Turning the setting off forgets the lookups too.
-  useEffect(() => {
-    if (snapshot.status === "signed_out" || !preferences.senderPictures) {
-      logoCache.clear();
-      gravatarCache.clear();
-    }
-  }, [snapshot.status, preferences.senderPictures, logoCache, gravatarCache]);
-  // The kept picture copies follow the same switch, one source at a time; signed out,
-  // the account's whole picture database goes. Contact photos go when the contacts grant
-  // does ("not_granted": declined or revoked), not while it is still being checked.
-  useEffect(() => {
-    if (snapshot.status === "signed_out") void pictureBytes.clear();
-  }, [snapshot.status, pictureBytes]);
-  useEffect(() => {
-    if (preferences.senderPictures) return;
-    void pictureBytes.clearKind("logo");
-    void pictureBytes.clearKind("gravatar");
-  }, [preferences.senderPictures, pictureBytes]);
-  useEffect(() => {
-    if (snapshot.contactsAccess === "not_granted") void pictureBytes.clearKind("contact");
-  }, [snapshot.contactsAccess, pictureBytes]);
-
-  // Back online: logos that could not be looked up while offline are asked for again.
-  useEffect(() => {
-    const retry = () => {
-      logoCache.retryFailed();
-      gravatarCache.retryFailed();
-    };
-    window.addEventListener("online", retry);
-    return () => window.removeEventListener("online", retry);
-  }, [logoCache, gravatarCache]);
-
-  // The demo answers brand logos from bundled images and never touches the network.
-  // Gravatar is the real lookup even there, once switched on: the demo's addresses are
-  // fictional, so their hashes say nothing about anyone, and the switch is the thing to
-  // try out.
+  const { photos, senderPictures } = useSenderPictures({
+    snapshot,
+    caches: { logoCache, gravatarCache, pictureBytes },
+  });
+  // The demo answers brand logos from bundled images; the real Gravatar lookup remains
+  // available for its fictional addresses when Sender pictures is on.
   const isDemo = snapshot.contactsAccess === "demo";
-  // One switch, "Sender pictures", turns both remote sources on or off together.
-  const remotePictures = preferences.senderPictures;
-  // Remote images = Never pauses both remote lookups (`senderPictureSources`).
-  const imagePolicy = preferences.imagePolicy;
-  const senderPictures = useMemo<SenderPictures>(
-    () =>
-      senderPictureSources({
-        photos,
-        gravatars: remotePictures ? gravatarCache : null,
-        logos: remotePictures ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
-        imagePolicy,
-        // The demo's pictures are bundled; nothing of it is kept.
-        bytes: isDemo ? null : pictureBytes,
-      }),
-    [photos, remotePictures, gravatarCache, isDemo, logoCache, imagePolicy, pictureBytes],
-  );
-  // The same sources for a new-mail notification's sender picture (`announce`).
-  useEffect(() => {
-    publishSenderPictures(senderPictures);
-  }, [senderPictures]);
 
   /**
    * A phone's second chance before something that cannot be taken back: deleting from
@@ -1341,123 +1085,35 @@ export function App({ store, existingInstall = true }: Props) {
     action: string;
     run: () => void;
   } | null>(null);
-  /** Run `run`, or on a phone in the Trash ask first: it deletes `count` messages forever. */
-  const guardForever = useCallback((count: number, run: () => void) => {
-    if (!phoneRef.current || snapshotRef.current.mailbox !== "trash") {
-      run();
-      return;
-    }
-    const many = count > 1;
-    setPhoneConfirm({
-      label: many ? `Delete ${count} messages forever?` : "Delete this message forever?",
-      message: many
-        ? `These ${count} messages will be deleted permanently. This can't be undone.`
-        : "This message will be deleted permanently. This can't be undone.",
-      action: many ? `Delete ${count} Messages` : "Delete Message",
-      run,
-    });
-  }, []);
-
-  const runBatch = useCallback((fn: (s: WinnowStore, ids: number[]) => void, keep = false) => {
-    const ids = orderedSelection(
-      selectionRef.current,
-      snapshotRef.current.view.threads.map((row) => row.representative.id),
-    );
-    if (ids.length === 0) return;
-    fn(storeRef.current, ids);
-    if (!keep) setSelection(EMPTY_SELECTION);
-  }, [selectionRef, setSelection]);
-
-  /**
-   * One-time codes: copy from a row chip, the reader's bar, or `c`.
-   *
-   * `copiedCodeId` is the message just copied, so whichever surface shows its code says
-   * "Copied" for a moment, keyboard copies included; the sr-only line says it aloud.
-   */
-  const [copiedCodeId, setCopiedCodeId] = useState<number | null>(null);
-  const [codeAnnouncement, setCodeAnnouncement] = useState("");
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (copiedTimer.current) clearTimeout(copiedTimer.current);
-  }, []);
-  const copyCode = useCallback(
-    (id: number) => {
-      const code = store.getSnapshot().all.find((email) => email.id === id)?.code;
-      if (!code) return;
-      void copyText(code).then((ok) => {
-        if (!ok) {
-          store.setError("Couldn't reach the clipboard. Select the code in the message to copy it.");
-          return;
-        }
-        setCopiedCodeId(id);
-        setCodeAnnouncement(`Copied code ${code}`);
-        if (copiedTimer.current) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => {
-          setCopiedCodeId(null);
-          setCodeAnnouncement("");
-        }, 1_600);
-      });
-    },
-    [store],
-  );
-  const copyCodeRef = useRef(copyCode);
-  copyCodeRef.current = copyCode;
-
-  const openSenderMenu = useCallback((id: number, trigger: HTMLElement) => {
-    setMenu({ kind: "sender", id, ids: [id], anchor: anchorFromElement(trigger), trigger });
-  }, []);
-
-  const openRowMenu = useCallback((id: number, anchor: MenuAnchor, trigger: HTMLElement) => {
-    const batch = selectionRef.current;
-    const ids =
-      batch.has(id) && batch.size > 1
-        ? orderedSelection(batch, snapshotRef.current.view.threads.map((row) => row.representative.id))
-        : [id];
-    setMenu({ kind: "row", id, ids, anchor, trigger });
-  }, [selectionRef]);
-
-  const handleSelectRow = useCallback((messageId: number) => {
-    const s = storeRef.current;
-    const index = snapshotRef.current.view.threads.findIndex(
-      (row) => row.representative.id === messageId,
-    );
-    if (index < 0) return;
-    s.openRow(index);
-  }, []);
-
-  /**
-   * A row swiped past its commit line (phone only; see `ui/swipe.ts`). Trash and Restore
-   * offer Undo on the strip; a draft is discarded with Undo; read and unread are a plain
-   * toggle, which the row shows as it snaps back.
-   */
-  const handleSwipe = useCallback((id: number, action: SwipeAction) => {
-    const s = storeRef.current;
-    switch (action) {
-      case "trash":
-        s.moveWithUndo(id, "trash");
-        break;
-      case "restore":
-        s.moveWithUndo(id, "inbox");
-        break;
-      case "discard":
-        s.discardDraftWithUndo(id);
-        break;
-      case "markRead":
-        s.setRead(id, true);
-        break;
-      case "markUnread":
-        s.setRead(id, false);
-        break;
-    }
-  }, []);
-  const swipeConfig = useMemo(
-    () => ({ mailbox: snapshot.mailbox, onAction: handleSwipe }),
-    [snapshot.mailbox, handleSwipe],
-  );
-
-  const handleToggleStar = useCallback((messageId: number) => {
-    storeRef.current.toggleStar(messageId);
-  }, []);
+  const {
+    act,
+    stepEnter,
+    stepFromPill,
+    closeReader,
+    toggleReadFor,
+    toggleReadRef,
+    guardForever,
+    runBatch,
+    copiedCodeId,
+    codeAnnouncement,
+    copyCode,
+    copyCodeRef,
+    openSenderMenu,
+    openRowMenu,
+    handleSelectRow,
+    swipeConfig,
+    handleToggleStar,
+  } = useActions({
+    store,
+    storeRef,
+    snapshotRef,
+    mailbox: snapshot.mailbox,
+    phoneRef,
+    selectionRef,
+    setSelection,
+    setMenu,
+    setPhoneConfirm,
+  });
 
   /** The autosave for the open composer. One at a time, like the composer itself. */
   const saverRef = useRef<DraftAutosaver | null>(null);
