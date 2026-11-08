@@ -34,7 +34,6 @@ import {
   FILTER_LABELS,
 } from "./core/model/signals";
 import { displayName, isViewMailbox, MAILBOX_LABEL, type Email, type Mailbox } from "./core/model/email";
-import { MAILBOX_ORDER } from "./ui/mailboxNav";
 import { deviceStorage } from "./core/store/storage";
 import { hashId } from "./core/model/ids";
 import { buildForward, buildReply, stripQuote, withReplyAll } from "./core/mail/reply";
@@ -69,12 +68,13 @@ import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
 import { DelayedSend } from "./core/mail/undoSend";
-import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
+import { platform, type PlatformInfo } from "./platform";
 import type { AppSigningInfo, BackgroundServiceStatus } from "./platform/types";
-import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
 import { useKeyboard } from "./app/hooks/useKeyboard";
 import { useSelection } from "./app/hooks/useSelection";
+import { useAndroidBack } from "./app/hooks/useAndroidBack";
+import { useDerivedView } from "./app/hooks/useDerivedView";
 import { AppNotices } from "./app/components/AppNotices";
 import { scrollListToTop } from "./ui/listScroll";
 import { useSettingsTransfer } from "./ui/useSettingsTransfer";
@@ -98,7 +98,6 @@ import { PULL_RESULT_MS } from "./ui/pullRefresh";
 import { viewKey } from "./ui/inboxClear";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
-import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
 import type { SwipeAction } from "./ui/swipe";
 import { Reader } from "./ui/components/Reader";
@@ -1068,60 +1067,7 @@ export function App({ store, existingInstall = true }: Props) {
     })();
   }, [store, applySharedLink, syncGoogleContacts]);
 
-  // ── Derived view ─────────────────────────────────────────────────────────
-
-  /**
-   * The rail's data, from the store's counts over the open mailbox (1.3.3): a pill's
-   * number is how many messages in this mailbox it would show. With a filter on or a
-   * search running (1.4.0) the numbers are faceted on the active set and the search
-   * (`railFacets`): what the list would show with that pill also on. Computed in the store, the only place that
-   * knows which set the rail was ranked against; `railFacets` keeps its identity while
-   * nothing it reads changed, so this memo holds across renders.
-   */
-  const pills = useMemo(
-    () =>
-      buildPills(
-        view.rail,
-        view.railCounts,
-        view.profile.topSenders,
-        view.railSenderCounts,
-        snapshot.activeFilters,
-        view.railFacets,
-      ),
-    [view.rail, view.railCounts, view.profile.topSenders, view.railSenderCounts, snapshot.activeFilters, view.railFacets],
-  );
-
-  // What the list's empty state needs to tell a clear Inbox from an empty folder.
-  const emptyContext = useMemo(
-    () => ({ mailbox: snapshot.mailbox, filters: snapshot.activeFilters }),
-    [snapshot.mailbox, snapshot.activeFilters],
-  );
-
-  const unreadIds = useMemo(
-    () => new Set(view.emails.filter((email) => email.unread).map((email) => email.id)),
-    [view.emails],
-  );
-
-  // `MAILBOX_ORDER` rather than a second list of the same names: the drawer's rows were
-  // written out here, so a mailbox added to the model and to the `!` palette was
-  // invisible in the drawer — which is how "Sent" could have shipped with no way to open
-  // it on a phone, where the drawer *is* the navigation.
-  const mailboxes = useMemo(
-    () =>
-      MAILBOX_ORDER.map((id) => ({
-        id,
-        label: MAILBOX_LABEL[id],
-        // The two views count what they hold (snoozed conversations, messages waiting to
-        // go), not unread mail, as Gmail's Snoozed and Scheduled do.
-        unread:
-          id === "snoozed"
-            ? snapshot.snoozes.snoozed.filter((record) => record.account === store.accountKey()).length
-            : id === "scheduled"
-              ? snapshot.scheduled.filter((send) => send.account === store.accountKey()).length
-              : snapshot.all.filter((email) => email.mailbox === id && email.unread).length,
-      })),
-    [snapshot.all, snapshot.snoozes, snapshot.scheduled, store],
-  );
+  const { pills, emptyContext, unreadIds, mailboxes, paletteUnread } = useDerivedView({ snapshot, store });
 
   /**
    * Whether the sidebar is open.
@@ -1232,14 +1178,6 @@ export function App({ store, existingInstall = true }: Props) {
     },
     accountButton,
   };
-
-  const paletteUnread = useMemo(
-    () =>
-      Object.fromEntries(
-        mailboxes.map((mailbox) => [mailbox.id, mailbox.unread]),
-      ) as Partial<Record<Mailbox, number>>,
-    [mailboxes],
-  );
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -3407,80 +3345,7 @@ export function App({ store, existingInstall = true }: Props) {
     setLogoView,
   });
 
-  // ── Android Back ─────────────────────────────────────────────────────────
-
-  /**
-   * One press of Android's Back: close the topmost layer (`ui/backLayers.ts` has the
-   * order and the reasons). Popovers and sheets are found in the DOM and closed with
-   * the Escape they already answer, so a sheet added later is covered without being
-   * listed here; the composer, sidebar, Settings and the reader are this component's
-   * state and are closed directly. The composer is parked — kept as a draft, like a
-   * docked reply the selection leaves — never discarded and never asked about.
-   */
-  const backRef = useRef<() => void>(() => {});
-  backRef.current = () => {
-    const s = storeRef.current;
-    const snap = s.getSnapshot();
-    const popover = document.querySelector(POPOVER_SELECTOR);
-    const sheets = [...document.querySelectorAll('[aria-modal="true"]')].filter(isSheetElement);
-    const sheet = sheets[sheets.length - 1] ?? null;
-    const state: BackState = {
-      popover: menu !== null || popover !== null,
-      sheet: sheet !== null,
-      composer: composerRef.current !== null,
-      sidebar: sidebarOpen,
-      settings: snap.overlay === "settings",
-      message: snap.selectedId !== null,
-    };
-    /** Escape on the element (or what has focus inside it), where its own handler is. */
-    const escapeIn = (element: Element) => {
-      const active = document.activeElement;
-      const target = active && element.contains(active) ? active : element;
-      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-    };
-    switch (backTarget(state)) {
-      case "popover":
-        if (menu) setMenu(null);
-        else if (popover) escapeIn(popover);
-        return;
-      case "sheet":
-        if (sheet) escapeIn(sheet);
-        return;
-      case "composer": {
-        const current = composerRef.current;
-        if (!current || current.sending) return;
-        retireComposer(current, "park");
-        composerRef.current = null;
-        setComposer(null);
-        return;
-      }
-      case "sidebar":
-        setSidebarOpen(false);
-        return;
-      case "settings": {
-        // A phone's category page steps back to the category list first, like its arrow.
-        const back = document.querySelector<HTMLButtonElement>(
-          '[data-settings-page="category"] button[aria-label="Back to Settings"]',
-        );
-        if (back) back.click();
-        else s.setOverlay("none");
-        return;
-      }
-      case "message":
-        s.closeReader({ dropCursor: phoneRef.current });
-        return;
-      case "exit":
-        // Only reached when a press lands between the last layer closing and Back being
-        // handed back to Android below.
-        void desktopPlatformExtras.exitApp();
-    }
-  };
-
-  /**
-   * Whether anything is open that Back should close. At the bare list Back belongs to
-   * Android, which leaves the app the way every other app does (to the background,
-   * rather than killing it), so the handler is only registered while this is true.
-   */
+  // Only register Android Back while there is something for it to close.
   const backHasWork =
     menu !== null ||
     composer !== null ||
@@ -3499,10 +3364,19 @@ export function App({ store, existingInstall = true }: Props) {
     whenPicker !== null ||
     scheduledOpen !== null;
   const android = info?.os === "android";
-  useEffect(() => {
-    if (!android || !backHasWork) return;
-    return desktopPlatformExtras.onBackButton(() => backRef.current());
-  }, [android, backHasWork]);
+  useAndroidBack({
+    android,
+    hasWork: backHasWork,
+    storeRef,
+    composerRef,
+    phoneRef,
+    menuOpen: menu !== null,
+    sidebarOpen,
+    retireComposer,
+    setMenu,
+    setComposer,
+    setSidebarOpen,
+  });
 
   // ── Render ───────────────────────────────────────────────────────────────
 
