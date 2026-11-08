@@ -116,6 +116,13 @@ import {
 import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
 import { keyedStorage, type KeyValueBacking, type KeyedStorage } from "./keyedStorage";
 import {
+  getEmailNicknames,
+  type EmailNicknames,
+  normalizeAddress,
+  setNickname,
+  persistEmailNicknames,
+} from "./emailNicknames";
+import {
   SnoozeOverlay,
   abandonedSnoozes,
   addSnooze,
@@ -946,6 +953,8 @@ export type AccountState = {
   filterLearning?: unknown;
   activeFilters?: readonly string[];
   mailbox?: Mailbox | null;
+  /** Per-account email nicknames. */
+  emailNicknames?: Record<string, string>;
 };
 
 export type PersistPatch = {
@@ -955,6 +964,7 @@ export type PersistPatch = {
   filterLearning?: FilterLearningSnapshot;
   activeFilters?: string[];
   mailbox?: Mailbox;
+  emailNicknames?: Record<string, string>;
 };
 
 /**
@@ -1040,6 +1050,9 @@ export class WinnowStore {
    * and retaining the body of something the user binned is a privacy problem.
    */
   private trashSenders: string[] = [];
+
+  /** Email nicknames for the current account. */
+  private emailNicknames: EmailNicknames = {};
 
   /**
    * Undo handles for in-flight mutations, keyed by message id.
@@ -1313,6 +1326,40 @@ export class WinnowStore {
     const index = buildContactIndex(all, { selfAddress: self, googleContacts: google });
     this.contactCache = { all, self, google, index };
     return index;
+  }
+
+  /** Load email nicknames for the given account. */
+  public loadEmailNicknames(accountId: string | null): void {
+    this.emailNicknames = accountId ? getEmailNicknames(accountId) : {};
+  }
+
+  /** Get the current email nicknames for the open account. */
+  public getEmailNicknames(): EmailNicknames {
+    return { ...this.emailNicknames };
+  }
+
+  /** Get a nickname for a specific address, trying the current account first. */
+  public getNicknameForAddress(address: string): string | undefined {
+    // First try the current account's nicknames
+    const nickname = getEmailNicknames(this.state.accountId ?? null);
+    const normalized = nickname[normalizeAddress(address)] ?? nickname[address];
+
+    if (normalized) return normalized;
+
+    // Fall back to stored nicknames if the API key is not available
+    return this.emailNicknames[address] ?? this.emailNicknames[normalizeAddress(address)];
+  }
+
+  /** Set or update a nickname for an address in the current account's storage. */
+  public setNicknameForAddress(address: string, nickname: string | null): void {
+    const accountNicknames = getEmailNicknames(this.state.accountId ?? null);
+    const updated = setNickname(accountNicknames, address, nickname);
+    let storage = null;
+    try { storage = globalThis.localStorage; } catch { return; }
+    persistEmailNicknames(storage, this.state.accountId ?? null, updated);
+
+    // Also update the local cache
+    this.emailNicknames = updated;
   }
 
   /**
@@ -4382,6 +4429,7 @@ export class WinnowStore {
    * account's mail into another's view.
    */
   enterAccount(id: string | null, saved: AccountState, cached: readonly Email[] = []): void {
+    this.emailNicknames = getEmailNicknames(id);
     this.accountMail = cached.length > 0;
     this.backend = undefined;
     this.pendingConnect = null;
