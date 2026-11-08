@@ -1,7 +1,7 @@
 /** Undo offers, optimistic rollback and message actions that present Undo. */
 import { MAILBOX_LABEL, type Mailbox } from "../../model/email";
 import { DRAFT_DISCARD_UNDO_MS, UNDO_OFFER_MS } from "../state";
-import type { WinnowStore } from "../store";
+import type { UndoEntry, WinnowStore } from "../store";
 
 /**
  * What the pill says after a move that can be undone, in the swipe's words: "Moved to
@@ -17,36 +17,74 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
   return count === 1 ? `Moved to ${MAILBOX_LABEL[first]}.` : `Moved ${count} to ${MAILBOX_LABEL[first]}.`;
 }
 
+  /**
+   * Take back the offered action, keeping both directions so it can be put back.
+   * `z`, Ctrl+Z, ⌘Z and the pill's Undo all come through here.
+   */
   export function undoLast(store: WinnowStore): void {
     const action = store.undoAction;
     if (!action) return;
+    const label = store.state.undo?.label ?? "Action.";
+    const entry: UndoEntry = {
+      label,
+      undo: action,
+      redo: store.undoRedo ?? undefined,
+      commit: store.undoCommit ?? undefined,
+      commitAfterMs: store.undoCommitAfterMs,
+    };
     dropUndo(store);
-    store.set({ undo: null });
+    store.set({ undo: null, redo: entry.redo ? { label, at: Date.now() } : null });
     action();
+    store.redoEntry = entry.redo ? entry : null;
+  }
+
+  /** Put back the action just undone, and offer its Undo again for the other direction. */
+  export function redoLast(store: WinnowStore): void {
+    const entry = store.redoEntry;
+    if (!entry?.redo) return;
+    const redo = entry.redo;
+    dropUndo(store);
+    store.set({ undo: null, redo: null });
+    redo();
+    // The offer is the same action again: its Undo now takes back this redo, and its
+    // redo puts it back once more, so `u` and `⇧U` can be pressed in either order.
+    offerUndo(store, entry.label, entry.undo, {
+      redo,
+      commit: entry.commit,
+      commitAfterMs: entry.commitAfterMs,
+    });
   }
 
   /**
    * Offer one undo, letting the previous offer go (and running its commit). `commit`
-   * runs when this offer is let go, and at the latest after `commitAfterMs`.
+   * runs when this offer is let go, and at the latest after `commitAfterMs`. `redo`
+   * puts the action back after `undoLast`, and a new offer clears it: only the last
+   * action is ever reversible.
    */
   /** @internal Shared with undo and snooze feature modules. */
   export function offerUndo(store: WinnowStore,
     label: string,
     action: () => void,
-    { commit, commitAfterMs }: { commit?: () => void; commitAfterMs?: number } = {},
+    {
+      redo,
+      commit,
+      commitAfterMs,
+    }: { redo?: () => void; commit?: () => void; commitAfterMs?: number } = {},
   ): void {
     settleUndo(store);
     store.undoAction = action;
+    store.undoRedo = redo ?? null;
     store.undoCommit = commit ?? null;
+    store.undoCommitAfterMs = commitAfterMs;
     // Every offer goes by itself after `UNDO_OFFER_MS` (sooner when its commit window
     // is shorter); before, an offer with no commit stayed on the pill until dismissed.
     const expiresAfterMs = commit && commitAfterMs !== undefined ? Math.min(commitAfterMs, UNDO_OFFER_MS) : UNDO_OFFER_MS;
     store.undoCommitTimer = setTimeout(() => {
       if (store.undoAction !== action) return;
       settleUndo(store);
-      store.set({ undo: null });
+      store.set({ undo: null, redo: null });
     }, expiresAfterMs);
-    store.set({ undo: { label, at: Date.now() } });
+    store.set({ undo: { label, at: Date.now() }, redo: null });
   }
 
   /** Let the offered undo go: its commit (if any) runs. The strip is the caller's. */
@@ -56,12 +94,15 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
     commit?.();
   }
 
-  /** Forget the offered undo and its commit without running either. */
+  /** Forget the offered undo, its redo and its commit without running either. */
   export function dropUndo(store: WinnowStore): void {
     store.undoAction = null;
+    store.undoRedo = null;
     store.undoCommit = null;
+    store.undoCommitAfterMs = undefined;
     if (store.undoCommitTimer) clearTimeout(store.undoCommitTimer);
     store.undoCommitTimer = null;
+    store.redoEntry = null;
   }
 
   /**
@@ -147,7 +188,7 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
     }
     if (done.length === 0) return;
     const backend = store.backend;
-    store.offerUndo(undoLabel(done.map((move) => move.to)), () => {
+    const undo = () => {
       if (store.backend !== backend) return;
       if (markedSenders.size > 0) store.trashSenders = store.trashSenders.filter((sender) => !markedSenders.has(sender));
       for (const move of done) {
@@ -162,7 +203,19 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
           { previousMailbox: move.to, previousUnread: now.unread },
         );
       }
-    });
+    };
+    // Redo runs the move again through the ordinary `move`, which re-marks the sender
+    // for the Trash and marks the message read exactly as the first action did. A
+    // message that has moved on since the undo is left alone, as its undo would be.
+    const redo = () => {
+      if (store.backend !== backend) return;
+      for (const move of done) {
+        const now = store.state.all.find((candidate) => candidate.id === move.id);
+        if (!now || now.mailbox !== move.from) continue;
+        store.move(move.id, move.to);
+      }
+    };
+    store.offerUndo(undoLabel(done.map((move) => move.to)), undo, { redo });
   }
 
   /**
@@ -176,16 +229,20 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
     const draftId = row?.gmailDraft?.id;
     if (!row || !draftId) return;
     const generation = store.draftsGeneration;
-    store.pendingDiscards.add(draftId);
-    store.set({
-      drafts: store.state.drafts.filter((email) => email.id !== id),
-      ...(store.state.selectedId === id ? { selectedId: null } : {}),
-    });
+    const discard = () => {
+      if (generation !== store.draftsGeneration) return;
+      store.pendingDiscards.add(draftId);
+      store.set({
+        drafts: store.state.drafts.filter((email) => email.id !== id),
+        ...(store.state.selectedId === id ? { selectedId: null } : {}),
+      });
+    };
     const restore = () => {
       if (generation !== store.draftsGeneration) return;
       if (store.state.drafts.some((email) => email.gmailDraft?.id === draftId)) return;
       store.set({ drafts: [row, ...store.state.drafts].sort((a, b) => b.receivedAt - a.receivedAt) });
     };
+    discard();
     store.offerUndo(
       "Draft discarded.",
       () => {
@@ -193,6 +250,8 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
         restore();
       },
       {
+        // Redo discards the restored row again, with the same deferred Gmail delete.
+        redo: discard,
         commit: () => {
           if (generation !== store.draftsGeneration) {
             store.pendingDiscards.delete(draftId);
@@ -220,5 +279,5 @@ export function undoLabel(destinations: readonly Mailbox[]): string {
   export function dismissUndo(store: WinnowStore): void {
     if (!store.undoAction) return;
     settleUndo(store);
-    store.set({ undo: null });
+    store.set({ undo: null, redo: null });
   }

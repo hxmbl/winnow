@@ -94,7 +94,7 @@ describe("the row context menu", () => {
     };
     expect(hint("archive")).toBe("e");
     expect(hint("trash")).toBe("#");
-    expect(hint("mark-unread")).toBe("u");
+    expect(hint("mark-unread")).toBe("m");
     expect(hint("forward")).toBe("f");
     expect(hint("reply-all")).toBe(menuHint("focusReply"));
     expect(hint("reply")).toBeUndefined();

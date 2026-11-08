@@ -24,6 +24,7 @@ function makeStore() {
     toggleFilter: vi.fn(),
     clearFilters: vi.fn(),
     undoLast: vi.fn(),
+    redoLast: vi.fn(),
     archiveWithUndo: vi.fn(),
     trashWithUndo: vi.fn(),
     setReadMany: vi.fn(),
@@ -41,6 +42,7 @@ function makeSnapshot(over: Record<string, unknown> = {}): Snapshot {
     all: [],
     mailbox: "inbox",
     undo: null,
+    redo: null,
     navigationIndex: 0,
     ...over,
   } as unknown as Snapshot;
@@ -259,13 +261,23 @@ describe("useKeyboard", () => {
     input.remove();
   });
 
-  it("u marks the open message read or unread through the toggle ref", () => {
+  it("m marks the open message read or unread through the toggle ref", () => {
     const toggleRead = vi.fn();
     setup(makeSnapshot({ view: viewer(42) }), makeStore(), {
       toggleReadRef: { current: toggleRead },
     });
-    press({ key: "u" });
+    press({ key: "m" });
     expect(toggleRead).toHaveBeenCalledWith(42);
+  });
+
+  it("u takes the pill's undo, and Shift+U redoes what it took", () => {
+    const { store } = setup(makeSnapshot({ undo: { label: "Archived", at: 1 } }));
+    press({ key: "u" });
+    expect(store.undoLast).toHaveBeenCalledOnce();
+
+    const { store: afterUndo } = setup(makeSnapshot({ redo: { label: "Archived", at: 1 } }));
+    press({ key: "U", shiftKey: true });
+    expect(afterUndo.redoLast).toHaveBeenCalledOnce();
   });
 
   it("b opens the snooze menu for the open message", () => {

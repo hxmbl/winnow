@@ -220,6 +220,68 @@ describe("newest wins", () => {
   });
 });
 
+describe("redo", () => {
+  it("puts back an archived message, and its Undo takes it back again", async () => {
+    const { store, moves } = await live([mail(1, "inbox"), mail(2, "inbox")]);
+    store.archiveWithUndo([1]);
+    store.undoLast();
+    await flush();
+    expect(where(store, 1)?.mailbox).toBe("inbox");
+    expect(store.getSnapshot().redo).toMatchObject({ label: "Archived." });
+    expect(store.getSnapshot().undo).toBeNull();
+
+    store.redoLast();
+    await flush();
+    expect(where(store, 1)?.mailbox).toBe("archive");
+    expect(store.getSnapshot().redo).toBeNull();
+    expect(store.getSnapshot().undo).toMatchObject({ label: "Archived." });
+
+    store.undoLast();
+    await flush();
+    expect(where(store, 1)?.mailbox).toBe("inbox");
+    expect(moves).toEqual([
+      [1, "archive"],
+      [1, "inbox"],
+      [1, "archive"],
+      [1, "inbox"],
+    ]);
+  });
+
+  it("has nothing to redo before an undo, and a new action clears the redo", async () => {
+    const { store } = await live([mail(1, "inbox"), mail(2, "inbox")]);
+    store.redoLast();
+    expect(store.getSnapshot().redo).toBeNull();
+
+    store.archiveWithUndo([1]);
+    store.undoLast();
+    expect(store.getSnapshot().redo).not.toBeNull();
+    store.trashWithUndo([2]);
+    expect(store.getSnapshot().redo).toBeNull();
+    store.redoLast();
+    expect(where(store, 1)?.mailbox).toBe("inbox");
+    expect(where(store, 2)?.mailbox).toBe("trash");
+  });
+
+  it("leaves alone a message that moved on after the undo", async () => {
+    const { store } = await live([mail(1, "inbox"), mail(2, "inbox")]);
+    store.trashWithUndo([1, 2]);
+    store.undoLast();
+    store.move(2, "spam");
+    store.redoLast();
+    expect(where(store, 1)?.mailbox).toBe("trash");
+    expect(where(store, 2)?.mailbox).toBe("spam");
+  });
+
+  it("goes with the mailbox, like the undo offer", async () => {
+    const { store } = await live([mail(1, "inbox")]);
+    store.archiveWithUndo([1]);
+    store.undoLast();
+    expect(store.getSnapshot().redo).not.toBeNull();
+    store.setMailbox("archive");
+    expect(store.getSnapshot().redo).toBeNull();
+  });
+});
+
 describe("drafts", () => {
   it("one draft discarded from the keyboard or reader is the swipe's discard, with Undo", async () => {
     const fake = liveBackend([mail(1, "inbox")]);
@@ -247,6 +309,15 @@ describe("drafts", () => {
     store.setMailbox("drafts");
     await store.refreshDrafts();
     store.trashWithUndo([11]);
+    expect(store.getSnapshot().drafts.map((row) => row.id)).toEqual([12]);
+    expect(store.getSnapshot().undo).toMatchObject({ label: "Draft discarded." });
+    store.undoLast();
+    await flush();
+    expect(store.getSnapshot().drafts.map((row) => row.id).sort()).toEqual([11, 12]);
+    expect(deleted).toEqual([]);
+
+    store.redoLast();
+    await flush();
     expect(store.getSnapshot().drafts.map((row) => row.id)).toEqual([12]);
     expect(store.getSnapshot().undo).toMatchObject({ label: "Draft discarded." });
     store.undoLast();

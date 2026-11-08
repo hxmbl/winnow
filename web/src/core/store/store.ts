@@ -153,6 +153,19 @@ type Listener = () => void;
 type Undo = () => void;
 
 /**
+ * One undo offer, kept whole so it can be taken, put back and taken again. `redo` is
+ * what the pill's Undo runs in reverse; a caller that cannot be repeated omits it.
+ * @internal Shared with the undo feature.
+ */
+export type UndoEntry = {
+  label: string;
+  undo: () => void;
+  redo?: () => void;
+  commit?: () => void;
+  commitAfterMs?: number;
+};
+
+/**
  * The application store.
  *
  * Not a React store: it has no idea React exists, and `useSyncExternalStore` is the
@@ -273,6 +286,8 @@ export class WinnowStore {
    */
   /** @internal Current undo action managed by the undo feature. */
   undoAction: (() => void) | null = null;
+  /** @internal What puts back the current undo's action, when it can be repeated. */
+  undoRedo: (() => void) | null = null;
   /**
    * What happens when the offered undo is let go rather than taken, for an action that
    * waits for that before it reaches Gmail (discarding a draft). Run when the offer is
@@ -281,9 +296,17 @@ export class WinnowStore {
    */
   /** @internal Deferred commit managed by the undo feature. */
   undoCommit: (() => void) | null = null;
+  /** @internal How long the current offer's commit waits. */
+  undoCommitAfterMs: number | undefined;
   /** The commit's deadline, so a forgotten strip does not hold a draft back for ever. */
   /** @internal Expiry timer managed by the undo feature. */
   undoCommitTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The action just undone, kept with both directions so `Shift+U` can put it back and
+   * `u` can take it back again. A new offer, a mailbox change and sign-out drop it.
+   */
+  /** @internal Redo slot managed by the undo feature. */
+  redoEntry: UndoEntry | null = null;
   /** Drafts discarded with Undo still on offer: a listing landing meanwhile keeps them out. */
   /** @internal Drafts excluded from an in-flight listing until Undo settles. */
   pendingDiscards = new Set<string>();
@@ -343,6 +366,7 @@ export class WinnowStore {
       navigationIndex: 0,
       syncing: false,
       undo: null,
+      redo: null,
       syncPhase: null,
       syncFraction: null,
       syncFetched: 0,
@@ -1144,7 +1168,7 @@ export class WinnowStore {
     // The undo offer goes with them: its label names a mailbox, and it is about to stop
     // being true. Letting it go is what a draft discard waits for, so that runs now.
     this.settleUndo();
-    this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [], undo: null }, {
+    this.set({ mailbox, selectedId: null, cursorIndex: NO_CURSOR, activeFilters: [], undo: null, redo: null }, {
       mailbox,
       activeFilters: [],
     });
@@ -1729,10 +1753,15 @@ export class WinnowStore {
     undoFeature.undoLast(this);
   }
 
+  /** Put back the action last undone, if there is one. */
+  redoLast(): void {
+    undoFeature.redoLast(this);
+  }
+
   offerUndo(
     label: string,
     action: () => void,
-    options: { commit?: () => void; commitAfterMs?: number } = {},
+    options: { redo?: () => void; commit?: () => void; commitAfterMs?: number } = {},
   ): void {
     undoFeature.offerUndo(this, label, action, options);
   }
@@ -2176,6 +2205,7 @@ export class WinnowStore {
       overlay: "none",
       syncing: false,
       undo: null,
+      redo: null,
       flash: null,
       syncPhase: null,
       syncFraction: null,
@@ -2252,6 +2282,7 @@ export class WinnowStore {
       overlay: "none",
       syncing: false,
       undo: null,
+      redo: null,
       flash: null,
       syncPhase: null,
       syncFraction: null,
@@ -2395,6 +2426,7 @@ export class WinnowStore {
       overlay: "none",
       syncing: false,
       undo: null,
+      redo: null,
       flash: null,
       syncPhase: null,
       syncFraction: null,

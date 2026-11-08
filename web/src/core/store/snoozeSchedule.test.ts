@@ -112,13 +112,20 @@ describe("snoozing", () => {
     expect(stored.snoozed[0]).toMatchObject({ key: "t-1", account: "demo", gmailIds: ["g-1", "g-2"], wakeAt: T + 3 * HOUR });
   });
 
-  it("is taken back by Undo, exactly", () => {
+  it("is taken back by Undo, exactly, and Redo snoozes it again", () => {
     const { store } = demo();
     store.setRead(1, false);
     store.snooze([1], T + HOUR);
     store.undoLast();
     expect(where(store, 1)).toMatchObject({ mailbox: "inbox", unread: true });
     expect(where(store, 2)?.mailbox).toBe("inbox");
+    expect(store.getSnapshot().snoozes.snoozed).toEqual([]);
+
+    store.redoLast();
+    expect(where(store, 1)?.mailbox).toBe("archive");
+    expect(store.getSnapshot().snoozes.snoozed.find((r) => r.key === "t-1")?.wakeAt).toBe(T + HOUR);
+    store.undoLast();
+    expect(where(store, 1)).toMatchObject({ mailbox: "inbox", unread: true });
     expect(store.getSnapshot().snoozes.snoozed).toEqual([]);
   });
 
@@ -193,6 +200,10 @@ describe("unsnoozing and moving", () => {
     store.undoLast();
     expect(where(store, 3)?.mailbox).toBe("archive");
     expect(store.getSnapshot().snoozes.snoozed[0]?.wakeAt).toBe(T + 9 * HOUR);
+
+    store.redoLast();
+    expect(where(store, 3)).toMatchObject({ mailbox: "inbox", unread: false });
+    expect(store.getSnapshot().snoozes.snoozed).toEqual([]);
   });
 
   it("moving snoozed mail anywhere ends the snooze", () => {

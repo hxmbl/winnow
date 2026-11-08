@@ -197,7 +197,7 @@ The public surface is ~80 methods, grouped:
 | Backend passthrough | `sync` via `MailBackend`; `toggleStar`, `moveToMailbox`, `setRead`, `deletePermanently`, `sendReply`, `fetchAttachment`, `fetchBody` |
 | Navigation | `setMailbox`, `select`, `openCursor`, `closeReader`, `moveCursor`, `openRow`, `focusMessage`, `searchSubject`, `listTitle`, `setOverlay`, `moveNavigation`, `activateNavigation` |
 | Filters | `toggleFilter`, `clearFilters`, `setFilters` (private) |
-| Mutations | `archive`, `move`, `trash`, `toggleRead`, `markUnreadAndMoveOn`, the `*Many` batch variants, `moveWithUndo` / `discardDraftWithUndo` (the phone's swipes), `archiveWithUndo` / `trashWithUndo` / `moveManyWithUndo` (every other move the user makes), `undoLast`, `dismissUndo` |
+| Mutations | `archive`, `move`, `trash`, `toggleRead`, `markUnreadAndMoveOn`, the `*Many` batch variants, `moveWithUndo` / `discardDraftWithUndo` (the phone's swipes), `archiveWithUndo` / `trashWithUndo` / `moveManyWithUndo` (every other move the user makes), `undoLast`, `redoLast`, `dismissUndo` |
 | Senders | `blockSender`, `unblockSender`, `muteSender`, `unmuteSender`, `showSender`, `isSenderMuted` |
 | Bodies | `loadBody`, `prefetchBodies`, `hasLoadedBody`, `scheduleReclassify` |
 | Offline storage | `saveMailboxOffline`, `declineMailboxStorage`, `dismissStoragePrompt` |
@@ -215,8 +215,10 @@ Two behaviours worth knowing before touching it:
   selection bars, the row menu and the reader's Archive/Trash/Not spam
   (`archiveWithUndo`, `trashWithUndo`, `moveManyWithUndo`), all on one private
   `movesWithUndo` so a batch is one notice ("Moved 3 to Trash.", `undoLabel`) and one
-  Undo; plus `discardDraftWithUndo`. `z`, Ctrl+Z and ⌘Z take the offer back
-  (`keybinds.ts`, only while one is on offer and never in a text field). A short word about the last action ("Draft saved.",
+  Undo; plus `discardDraftWithUndo`. `u`, `z`, Ctrl+Z and ⌘Z take the offer back
+  (`keybinds.ts`, only while one is on offer and never in a text field), and `⇧U` puts
+  back the action just undone (`state.redo`, `redoLast`; every action's offer carries
+  its own inverse, and a new action or a mailbox change drops the redo). A short word about the last action ("Draft saved.",
   "Message sent.") is `flash(text, ms)` (`state.flash`), gone by itself; the persistent
   `notice` strip stays for what is not about an action (a capped mailbox, a failure). A draft discard only reaches Gmail when the offer is *let
   go* — dismissed, replaced by a newer offer, left by a mailbox change, or after

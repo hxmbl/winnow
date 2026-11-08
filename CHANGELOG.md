@@ -20,6 +20,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Changed
 
+- `u` now undoes the last action and `⇧U` redoes it; marking read or unread is `m` only. `z`, `Ctrl+Z` and `⌘Z` still undo.
 - Refactor of app internals into smaller, feature-focused modules without changing user-facing behavior.
 
 ## [1.7.3] - 2026-11-05

@@ -200,6 +200,7 @@ export function useKeyboard(context: KeyboardContext): void {
         // that is not there.
         railCount: rail.length,
         undoAvailable: snap.undo !== null,
+        redoAvailable: snap.redo != null,
       };
 
       const command = commandForKey(event.key, keyContext, {
@@ -354,6 +355,10 @@ export function useKeyboard(context: KeyboardContext): void {
         case "undo":
           // The pill's newest offer, exactly as its Undo button takes it.
           s.undoLast();
+          break;
+        case "redo":
+          // Put back what the last undo took away, as ⇧U.
+          s.redoLast();
           break;
         case "openSettings":
           s.setOverlay(snap.overlay === "settings" ? "none" : "settings");

@@ -224,7 +224,9 @@ It's a keyboard application first; the mouse is the fallback. `?` opens this lis
 | `c` | Compose a new message (copies the code when the open message has one) |
 | `e` | Archive, unarchive, or restore — whichever this mailbox implies |
 | `#` or `⌫` | Move to trash, or delete permanently from Trash |
-| `u` / `m` | Mark read or unread |
+| `u` | Undo the last action (also `z`, `⌘Z` / `Ctrl+Z`) |
+| `⇧U` | Redo the action you undid |
+| `m` | Mark read or unread |
 | `r` / `f` | Reply / forward the open message |
 | `/` | Search |
 | `1`–`9` | Toggle the filter pill in that position |
