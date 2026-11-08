@@ -3776,6 +3776,16 @@ export function App({ store, existingInstall = true }: Props) {
         case "listTop":
           scrollListToTop();
           break;
+        case "selectFirst":
+          if (snap.view.threads.length > 0) {
+            s.moveCursor(snap.cursorIndex === NO_CURSOR ? snap.view.threads.length : -snap.view.threads.length);
+          }
+          break;
+        case "selectLast":
+          if (snap.view.threads.length > 0) {
+            s.moveCursor(snap.cursorIndex === NO_CURSOR ? -snap.view.threads.length : snap.view.threads.length);
+          }
+          break;
         case "closeViewer":
           // On a phone, leaving the message leaves the list with no current row.
           s.closeReader({ dropCursor: phoneRef.current });

@@ -26,6 +26,8 @@ function reachableCommandTypes(): Set<string> {
     "ArrowUp",
     "ArrowDown",
     "Home",
+    "J",
+    "K",
     "Backspace",
     "Delete",
     "U",
@@ -239,6 +241,13 @@ describe("commandForKey — the canvas", () => {
   it("takes the list back to its top with Home, with or without a message open", () => {
     expect(commandForKey("Home", DEFAULT_CONTEXT)).toEqual({ type: "listTop" });
     expect(commandForKey("Home", context({ viewerOpen: true }))).toEqual({ type: "listTop" });
+  });
+
+  it("scrolls to the list boundaries with Shift+J/K", () => {
+    expect(commandForKey("K", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "selectFirst" });
+    expect(commandForKey("J", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "selectLast" });
+    expect(commandForKey("j", DEFAULT_CONTEXT)).toEqual({ type: "moveSelection", delta: 1 });
+    expect(commandForKey("k", DEFAULT_CONTEXT)).toEqual({ type: "moveSelection", delta: -1 });
   });
 
   it("opens with o, and stops doing so once something is open", () => {
@@ -472,6 +481,8 @@ describe("the cheat sheet", () => {
       "scrollReader",
       "openSelected",
       "listTop",
+      "selectFirst",
+      "selectLast",
       "closeViewer",
       "closeComposer",
       "dismissOverlay",

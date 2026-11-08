@@ -25,6 +25,8 @@ export type Command =
   | { type: "scrollReader"; delta: number }
   | { type: "openSelected" }
   | { type: "listTop" }
+  | { type: "selectFirst" }
+  | { type: "selectLast" }
   | { type: "closeViewer" }
   | { type: "closeComposer" }
   | { type: "dismissOverlay" }
@@ -244,6 +246,18 @@ export const BINDINGS: readonly Binding[] = [
     help: "Back to the top of the list",
     matches: { keys: ["Home"] },
     command: { type: "listTop" },
+  },
+  {
+    keys: "⇧K",
+    help: "Select the first message",
+    matches: { keys: ["K"], shift: true },
+    command: { type: "selectFirst" },
+  },
+  {
+    keys: "⇧J",
+    help: "Select the last message",
+    matches: { keys: ["J"], shift: true },
+    command: { type: "selectLast" },
   },
   {
     keys: "o / ⏎",
