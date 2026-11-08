@@ -1543,13 +1543,11 @@ try {
     (await page.locator("text=Nothing matches that search").count()) > 0,
   );
 
-  // Cleared through the field rather than by pressing Escape, because Escape from a
-  // focused text field only blurs it — the query stays, so the list stays empty, and
-  // the next step would time out waiting for rows. That distinction is the point of
-  // the `textEditing` branch in the keybind router, so it is worth stating here.
-  await page.locator("#winnow-search").fill("");
+  // Escape clears the query even from inside the focused search field, where a plain
+  // text field would only be blurred. The list must come back on that one keypress.
+  await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
-  check("clearing the search brings the list back", (await rowTotal()) === rowCount);
+  check("Escape clears the search and brings the list back", (await rowTotal()) === rowCount);
 
   /**
    * The list is still scrollable after coming back from empty.
@@ -1945,9 +1943,8 @@ try {
     check("clicking one opens that message", after.stamp !== before.stamp, `${before.stamp} → ${after.stamp}`);
   }
 
-  // The search is cleared through the field, and Escape is pressed *afterwards* —
-  // the order matters, because Escape from a focused field only blurs it, and a
-  // still-active query would leave `focusMessage` clearing it on the next click.
+  // The search is cleared through the field. Not with Escape: the reader is open, and
+  // Escape closes the more specific thing first — the message, not the query.
   await page.locator("#winnow-search").fill("");
   await page.waitForTimeout(300);
 

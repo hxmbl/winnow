@@ -43,6 +43,7 @@ export type Command =
   | { type: "focusSearch" }
   | { type: "toggleFilter"; railIndex: number }
   | { type: "clearFilters" }
+  | { type: "clearSearch" }
   | { type: "toggleNavigation" }
   | { type: "moveNavigation"; delta: number }
   | { type: "activateNavigation" }
@@ -105,6 +106,13 @@ export type KeyContext = {
   overlayVisible: boolean;
   navigationVisible: boolean;
   filtersActive: boolean;
+  /**
+   * A search is running, so Escape has something to clear. Optional so a caller
+   * that never searches need not say so.
+   */
+  searchActive?: boolean;
+  /** The search field owns the keyboard, where Escape clears before it blurs. */
+  searchEditing?: boolean;
   /** Something is selected, or there is a cursor to act on. */
   hasActionTarget: boolean;
   /** How many pills are in the rail, so `1`–`9` can be bounds-checked. */
@@ -212,7 +220,7 @@ function digitIndex(key: string, shift: boolean): number | null {
 /**
  * The canvas bindings, in the order the sheet shows them and the router tries
  * them. Order is load-bearing: grouped by intent, most specific row first — which
- * is why Escape's four outcomes are one row that reads the context.
+ * is why Escape's five outcomes are one row that reads the context.
  */
 export const BINDINGS: readonly Binding[] = [
   {
@@ -269,18 +277,20 @@ export const BINDINGS: readonly Binding[] = [
   },
   {
     keys: "Esc",
-    help: "Close the message, a sheet, or the filters",
+    help: "Close the message, a sheet, the filters, or the search",
     matches: { keys: ["Escape"] },
     when: ({ context }) =>
       context.overlayVisible ||
       context.navigationVisible ||
       context.viewerOpen ||
-      context.filtersActive,
+      context.filtersActive ||
+      context.searchActive === true,
     command: ({ context }) => {
       if (context.overlayVisible) return { type: "dismissOverlay" };
       if (context.navigationVisible) return { type: "dismissNavigation" };
       if (context.viewerOpen) return { type: "closeViewer" };
-      return { type: "clearFilters" };
+      if (context.filtersActive) return { type: "clearFilters" };
+      return { type: "clearSearch" };
     },
   },
   {
@@ -521,6 +531,12 @@ export function commandForKey(
 
   if (context.textEditing) {
     if (key !== "Escape") return null;
+    // With no filter claiming the key, the search field clears on the first Escape
+    // and lets go on the next, so a typed query does not survive the key that means
+    // "never mind".
+    if (context.searchEditing && !context.filtersActive && context.searchActive) {
+      return { type: "clearSearch" };
+    }
     return { type: "blurText" };
   }
 

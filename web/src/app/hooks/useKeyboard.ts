@@ -193,6 +193,8 @@ export function useKeyboard(context: KeyboardContext): void {
         overlayVisible: snap.overlay === "shortcuts" || snap.overlay === "settings" || snap.overlay === "accounts",
         navigationVisible: snap.overlay === "navigation",
         filtersActive: snap.activeFilters.length > 0,
+        searchActive: snap.searchQuery.trim().length > 0,
+        searchEditing: target !== null && target === searchRef.current,
         hasActionTarget:
           snap.view.selected !== null || snap.cursorIndex !== NO_CURSOR || batch.size > 0,
         // The rail as the *pills* see it, not the store's ranked bucket list: sender
@@ -333,6 +335,9 @@ export function useKeyboard(context: KeyboardContext): void {
         }
         case "clearFilters":
           s.clearFilters();
+          break;
+        case "clearSearch":
+          s.setSearchQuery("");
           break;
         case "toggleNavigation":
           s.setOverlay(snap.overlay === "navigation" ? "none" : "navigation");
