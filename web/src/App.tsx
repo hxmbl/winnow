@@ -75,6 +75,7 @@ import { useKeyboard } from "./app/hooks/useKeyboard";
 import { useSelection } from "./app/hooks/useSelection";
 import { useAndroidBack } from "./app/hooks/useAndroidBack";
 import { useDerivedView } from "./app/hooks/useDerivedView";
+import { useTheme } from "./app/hooks/useTheme";
 import { AppNotices } from "./app/components/AppNotices";
 import { scrollListToTop } from "./ui/listScroll";
 import { useSettingsTransfer } from "./ui/useSettingsTransfer";
@@ -83,13 +84,11 @@ import { WhatsNew } from "./ui/components/WhatsNew";
 import { offerButton } from "./core/updates/updates";
 import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
-import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
-import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
+import { CUSTOM_ACCENT } from "./core/model/appearance";
 import { RawSourceSheet, type RawSourceState } from "./ui/components/RawSourceSheet";
 import { ErrorText } from "./ui/components/ErrorText";
 import { setDebugLogEnabled } from "./core/debug/debugLog";
 import { DEV_OPTIONS_KEY, hiddenDevOptions, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
-import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { logoViewAfter, type LogoView } from "./ui/logoVersion";
@@ -400,21 +399,7 @@ export function App({ store, existingInstall = true }: Props) {
   useKeyboardInset(phone && composer !== null);
 
   // ── Theme ────────────────────────────────────────────────────────────────
-  const [systemDark, setSystemDark] = useState(
-    () => globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
-  );
-
-  useEffect(() => {
-    const query = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!query) return;
-    // Subscribed rather than read once: a user who switches their system to dark
-    // at 6pm should not have to reload a mail client to see it.
-    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-
-  const themeMode = resolveScheme(preferences.appearance, systemDark);
+  const { themeMode, emailDarkPalette, accentChoices, accentCustom } = useTheme({ preferences });
 
   // Settings → Dev Options (`ui/devOptions.ts`): this device only, apart from the shared
   // preferences. Another window changing it is followed through the `storage` event.
@@ -454,36 +439,6 @@ export function App({ store, existingInstall = true }: Props) {
     globalThis.addEventListener?.("storage", onStorage);
     return () => globalThis.removeEventListener?.("storage", onStorage);
   }, []);
-  // Email dark mode: the palette a message body is drawn in, or null for its own light page.
-  const emailDarkPalette =
-    !preferences.emailDarkMode || themeMode === "light"
-      ? null
-      : themeMode === "oled"
-        ? OLED_EMAIL_PALETTE
-        : DARK_EMAIL_PALETTE;
-
-  useEffect(() => {
-    applyTheme(document.documentElement, themeMode, preferences.accent, preferences.accentCustom);
-  }, [themeMode, preferences.accent, preferences.accentCustom]);
-
-  /** The picker's swatches, drawn in the mode on screen so each one shows what it will look like. */
-  const accentChoices = useMemo(
-    () => [
-      ...ACCENT_THEMES.map((id) => ({
-        id,
-        label: ACCENTS[id].label,
-        swatch: paletteFor(themeMode, id).color.accent,
-      })),
-      { id: CUSTOM_ACCENT, label: CUSTOM_ACCENT_LABEL, swatch: customAccentFor(preferences.accentCustom).tones[themeMode].accent },
-    ],
-    [themeMode, preferences.accentCustom],
-  );
-  /** The custom colour as picked, and whether this mode had to move it for contrast. */
-  const accentCustom = useMemo(() => {
-    const derived = customAccentFor(preferences.accentCustom);
-    return { value: derived.input, adjusted: derived.adjusted[themeMode] };
-  }, [themeMode, preferences.accentCustom]);
-
   // ── What this build can do ───────────────────────────────────────────────
   // Read once from the OS. Null until it lands, and the UI treats null as "not
   // the desktop build" — the demo mailbox does not care whether there is a tray.
