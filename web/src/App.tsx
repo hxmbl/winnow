@@ -22,21 +22,16 @@
 import { untilFirstMail } from "./ui/firstMail";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { censorNameTerms, sessionScrambler, setCensorActive, startCensor } from "./ui/censorDom";
-import { flushSync } from "react-dom";
 import { LogIn, RefreshCw } from "lucide-react";
 import {
   NO_CURSOR,
   readoutIndex,
-  STORAGE_PROMPT,
-  STORAGE_SAVE_FAILED,
   WinnowStore,
   type Snapshot,
 } from "./core/store/store";
-import { commandForKey, shouldSwallow, type KeyContext } from "./core/mail/keybinds";
 import {
   badgeFilters,
   FILTER_LABELS,
-  NAVIGATION_ITEMS,
 } from "./core/model/signals";
 import { displayName, isViewMailbox, MAILBOX_LABEL, type Email, type Mailbox } from "./core/model/email";
 import { MAILBOX_ORDER } from "./ui/mailboxNav";
@@ -79,6 +74,10 @@ import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
 import type { AppSigningInfo, BackgroundServiceStatus } from "./platform/types";
 import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
+import { useKeyboard } from "./app/hooks/useKeyboard";
+import { useSelection } from "./app/hooks/useSelection";
+import { AppNotices } from "./app/components/AppNotices";
+import { scrollListToTop } from "./ui/listScroll";
 import { useSettingsTransfer } from "./ui/useSettingsTransfer";
 import { useUpdates } from "./ui/useUpdates";
 import { WhatsNew } from "./ui/components/WhatsNew";
@@ -88,6 +87,7 @@ import { syncStatus } from "./ui/syncStatus";
 import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
 import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
 import { RawSourceSheet, type RawSourceState } from "./ui/components/RawSourceSheet";
+import { ErrorText } from "./ui/components/ErrorText";
 import { setDebugLogEnabled } from "./core/debug/debugLog";
 import { DEV_OPTIONS_KEY, hiddenDevOptions, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
 import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
@@ -96,7 +96,6 @@ import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { logoViewAfter, type LogoView } from "./ui/logoVersion";
 import { PullRefresh } from "./ui/components/PullRefresh";
 import { PULL_RESULT_MS } from "./ui/pullRefresh";
-import { scrollListToTop } from "./ui/listScroll";
 import { viewKey } from "./ui/inboxClear";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
@@ -117,8 +116,6 @@ import { Settings } from "./ui/components/SettingsPanel";
 import { Tour } from "./ui/components/Tour";
 import { shouldStartTour, tourSteps } from "./ui/tour";
 import { ActionSheet, ConfirmDialog } from "./ui/components/Overlay";
-import { ErrorText } from "./ui/components/ErrorText";
-import { isSelectAll, selectAllScope } from "./ui/textSelection";
 import { SignInScreen } from "./ui/SignInScreen";
 import { GoogleSetup, SETUP_GUIDE_URL } from "./ui/components/GoogleSetup";
 import { describeFailure } from "./core/session/errors";
@@ -135,9 +132,7 @@ import { SEND_LATER_NOTE } from "./ui/components/Composer";
 import {
   EMPTY_SELECTION,
   orderedSelection,
-  pruneSelection,
   toggleId,
-  type Selection,
 } from "./ui/selection";
 import { mailtoAddress } from "./core/mail/unsubscribe";
 import { copyText } from "./ui/clipboard";
@@ -179,15 +174,13 @@ import { pictureNotice } from "./ui/pictureNotice";
 import { PictureNotice } from "./ui/components/PictureNotice";
 import type { OfflineQueue } from "./core/offline/queue";
 import { useSyncIndicator } from "./ui/useSyncIndicator";
-import { CONNECTION_LOST } from "./ui/offlineStatus";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
-import { announce, onReplyRequest, provideAccountRouter, sendTestNotification } from "./ui/notificationActions";
+import { announce, provideAccountRouter, sendTestNotification } from "./ui/notificationActions";
 import { updateButtonShown } from "./ui/updateButton";
 import { notifiable } from "./core/notify/notifications";
 import { alreadyAddedMessage } from "./ui/accounts";
 import { exitRows } from "./ui/rowExit";
-import { isEditingElement } from "./ui/sidebarOverlay";
 import { buttonClass } from "./ui/button";
 import { Icon } from "./ui/components/Icon";
 
@@ -469,7 +462,7 @@ export function App({ store, existingInstall = true }: Props) {
    * rather than in the store: it is a gesture's state, never persisted, and the store's
    * single `selectedId` keeps meaning "the open message".
    */
-  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  const { selection, setSelection, selectionRef, rowOrder } = useSelection(snapshot);
   /** The phone top bar's height, which the selection bar keeps while it stands in for it. */
   const [phoneBarHeight, setPhoneBarHeight] = useState(0);
   const phoneBarObserver = useRef<ResizeObserver | null>(null);
@@ -483,9 +476,6 @@ export function App({ store, existingInstall = true }: Props) {
     observer.observe(element);
     phoneBarObserver.current = observer;
   }, []);
-  const selectionRef = useRef(selection);
-  selectionRef.current = selection;
-
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const menuRef = useRef(menu);
   menuRef.current = menu;
@@ -1549,19 +1539,8 @@ export function App({ store, existingInstall = true }: Props) {
 
   // ── Multi-select and the two menus ─────────────────────────────────────────
 
-  /** Rows in list order, for ranges and for running a batch top to bottom. */
-  const rowOrder = useMemo(() => view.threads.map((row) => row.representative.id), [view.threads]);
-
-  // A row that leaves the list (filed, filtered out, synced away) leaves the selection.
-  useEffect(() => {
-    setSelection((current) => pruneSelection(current, rowOrder));
-  }, [rowOrder]);
-
-  // A selection belongs to one mailbox.
-  useEffect(() => {
-    setSelection(EMPTY_SELECTION);
-    setMenu(null);
-  }, [snapshot.mailbox]);
+  // Menus are scoped to one mailbox; a menu for a row that just left the view closes.
+  useEffect(() => setMenu(null), [snapshot.mailbox]);
 
   /** Contact photos by lowercased address, from the user's Google contacts, avatar-sized. */
   const photos = useMemo(() => contactPhotoMap(snapshot.googleContacts), [snapshot.googleContacts]);
@@ -1663,7 +1642,7 @@ export function App({ store, existingInstall = true }: Props) {
     if (ids.length === 0) return;
     fn(storeRef.current, ids);
     if (!keep) setSelection(EMPTY_SELECTION);
-  }, []);
+  }, [selectionRef, setSelection]);
 
   /**
    * One-time codes: copy from a row chip, the reader's bar, or `c`.
@@ -1711,7 +1690,7 @@ export function App({ store, existingInstall = true }: Props) {
         ? orderedSelection(batch, snapshotRef.current.view.threads.map((row) => row.representative.id))
         : [id];
     setMenu({ kind: "row", id, ids, anchor, trigger });
-  }, []);
+  }, [selectionRef]);
 
   const handleSelectRow = useCallback((messageId: number) => {
     const s = storeRef.current;
@@ -2671,7 +2650,7 @@ export function App({ store, existingInstall = true }: Props) {
     const s = storeRef.current;
     exitRows([...ids], () => s.snooze(ids, at));
     setSelection(EMPTY_SELECTION);
-  }, []);
+  }, [setSelection]);
 
   /** Open the snooze choices for `ids`, beside `trigger` (or mid-screen, for `b`). */
   const openSnoozeMenu = useCallback((ids: readonly number[], trigger: HTMLElement | null) => {
@@ -3572,330 +3551,30 @@ export function App({ store, existingInstall = true }: Props) {
     }
   }, [loadAttachment]);
 
-  // ── The keyboard ─────────────────────────────────────────────────────────
-
-  /*
-    Refs for everything the handler reads.
-
-    The handler is registered once and never re-registered, so it must not close over
-    render values: a closure over `composer` would be frozen at mount and Escape would
-    never see the composer. Each ref is written on every render and read at keypress time.
-    A stable listener, current values, no churn.
-
-    Declared here rather than beside the state they mirror, because `pills` and the
-    openers are computed below, and a `useRef` initialised from a not-yet-declared `const`
-    is a temporal-dead-zone error.
-  */
-  const pillsRef = useRef(pills);
-  pillsRef.current = pills;
-  const openReplyRef = useRef(openReply);
-  openReplyRef.current = openReply;
-  // A notification's Reply on the desktop: the message is already open, so the composer
-  // opens on it exactly as R would (`ui/notificationActions.ts`).
-  useEffect(() => onReplyRequest(() => openReplyRef.current()), []);
-  const openForwardRef = useRef(openForward);
-  openForwardRef.current = openForward;
-  const openComposeRef = useRef(openCompose);
-  openComposeRef.current = openCompose;
-  const closeComposerRef = useRef(closeComposer);
-  closeComposerRef.current = closeComposer;
-
-  /** The element last pressed, for ⌘A to find the region the user is working in. */
-  const lastPressRef = useRef<Element | null>(null);
-  useEffect(() => {
-    const onPress = (event: PointerEvent) => {
-      lastPressRef.current = event.target instanceof Element ? event.target : null;
-    };
-    window.addEventListener("pointerdown", onPress, true);
-    return () => window.removeEventListener("pointerdown", onPress, true);
-  }, []);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const s = storeRef.current;
-      const snap = snapshotRef.current;
-      const open = composerRef.current;
-      const rail = pillsRef.current;
-      const batch = selectionRef.current;
-
-      // An open menu owns the keyboard; its own handler has already acted. So do the
-      // snooze menu, the date and time picker and an opened scheduled send.
-      if (menuRef.current || scheduleModalRef.current) return;
-
-      /*
-        ⌘A / Ctrl+A outside a text field selects the region the user is in — the
-        reader, the Settings sheet — rather than the browser's whole document, which in
-        an app whose chrome is unselectable means every scrap of selectable text at
-        once: the banner, the status line and the open message run together. With no
-        region to answer (the list has focus), it does nothing. A field keeps the
-        platform's own select-all.
-      */
-      if (isSelectAll(event) && !isEditingTarget(event.target)) {
-        event.preventDefault();
-        selectRegion(
-          selectAllScope([
-            document.activeElement === document.body ? null : document.activeElement,
-            // Focus on a control beside the scope in the same sheet (Settings' category
-            // list): the sheet answers with the one scope it holds.
-            document.activeElement?.closest('[role="dialog"]') ?? null,
-            lastPressRef.current,
-            document.getSelection()?.anchorNode?.parentElement ?? null,
-          ]) as Element | null,
-        );
-        return;
-      }
-
-      // The open sidebar is modal: the app behind it is inert, so no shortcut reaches
-      // it. Escape from outside the sidebar (focus fell to the body) still closes it.
-      if (sidebarOpenRef.current) {
-        // `[` closes it as it opened it, unless someone is typing in the sidebar.
-        const sidebarToggleKey =
-          (event.key === "[" || event.code === "BracketLeft") && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey &&
-          !isEditingElement(event.target instanceof Element ? event.target : null);
-        if (event.key === "Escape" || sidebarToggleKey) {
-          event.preventDefault();
-          setSidebarOpen(false);
-        }
-        return;
-      }
-
-      // Enter or Space on a control that is not a row (an avatar, a star, a toolbar
-      // button) is that button's click, not "open the message at the cursor".
-      if (
-        (event.key === "Enter" || event.key === " ") &&
-        event.target instanceof HTMLButtonElement &&
-        !event.target.hasAttribute("data-message-id")
-      ) {
-        return;
-      }
-
-      // Escape ends a multi-selection before it means anything else.
-      if (
-        event.key === "Escape" &&
-        batch.size > 0 &&
-        open === null &&
-        snap.overlay === "none" &&
-        !event.ctrlKey && !event.metaKey && !event.altKey
-      ) {
-        event.preventDefault();
-        setSelection(EMPTY_SELECTION);
-        return;
-      }
-
-      /*
-        A `select` is not one of `INPUT`/`TEXTAREA`/`contentEditable`, so it falls through
-        as "not text editing" and the canvas handler eats its arrow keys. It gets its own
-        check.
-      */
-      const target = event.target as HTMLElement | null;
-      const inDock = target instanceof Element && target.closest("[data-composer-dock]") !== null;
-      const textEditing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT" ||
-        // `isContentEditable` is checked alongside the tag names because a
-        // `contenteditable` div is a text field with no `type` attribute.
-        target?.isContentEditable === true;
-
-      const keyContext: KeyContext = {
-        // Before sign-in there is nothing to route. `composerOpen` is separate from
-        // `ready` because the composer is a text field *and* a modal: its Escape closes
-        // the sheet, where a plain field's blurs, and the two need to be
-        // distinguishable for that to work.
-        // A docked reply is not modal: with focus outside it the reader's shortcuts work
-        // as usual; inside it, it owns the keyboard like the sheet does.
-        ready: snap.status === "ready" && (open === null || (dockedRef.current && !inDock)),
-        composerOpen: open !== null && (!dockedRef.current || inDock),
-        // `textEditing` deliberately excludes "the composer is open": it means *this
-        // keypress landed in a field*, while the composer's own state is `composerOpen`.
-        // With the composer open and focus on its body, both are true — and the router
-        // checks `composerOpen` first, so the composer's Escape wins.
-        textEditing,
-        viewerOpen: snap.view.selected !== null,
-        // `c` copies an open message's code and composes everywhere else.
-        codeAvailable: Boolean(snap.view.selected?.code),
-        overlayVisible: snap.overlay === "shortcuts" || snap.overlay === "settings" || snap.overlay === "accounts",
-        navigationVisible: snap.overlay === "navigation",
-        filtersActive: snap.activeFilters.length > 0,
-        hasActionTarget:
-          snap.view.selected !== null || snap.cursorIndex !== NO_CURSOR || batch.size > 0,
-        // The rail as the *pills* see it, not the store's ranked bucket list: sender
-        // pills take digits too. Counting the store's list would make `7` address a pill
-        // that is not there.
-        railCount: rail.length,
-        undoAvailable: snap.undo !== null,
-      };
-
-      const command = commandForKey(event.key, keyContext, {
-        shiftKey: event.shiftKey,
-        altKey: event.altKey,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        code: event.code,
-      });
-
-      if (!command) {
-        // An unbound key is swallowed outside a text field, so the OS does not
-        // beep. This app is keyboard-first and a beep reads as broken. `Tab` is
-        // exempt inside `shouldSwallow` and must stay exempt here: it is how focus
-        // reaches every control that draws a `focus-visible` ring.
-        if (shouldSwallow(keyContext, event)) event.preventDefault();
-        return;
-      }
-
-      event.preventDefault();
-      const selectedId = snap.view.selected?.id;
-
-      // With rows selected, the message verbs act on all of them.
-      if (batch.size > 0 && command.type === "snooze") {
-        if (canSnooze(snap.mailbox)) {
-          const bar = document.querySelector<HTMLElement>("[data-selection-snooze]");
-          openSnoozeMenuRef.current(orderedSelection(batch, snap.view.threads.map((row) => row.representative.id)), bar);
-        }
-        return;
-      }
-      if (batch.size > 0 && (command.type === "archive" || command.type === "trash" || command.type === "toggleRead")) {
-        const ids = orderedSelection(batch, snap.view.threads.map((row) => row.representative.id));
-        if (command.type === "archive") s.archiveWithUndo(ids);
-        else if (command.type === "trash") s.trashWithUndo(ids);
-        else s.setReadMany(ids, snap.all.some((email) => batch.has(email.id) && email.unread));
-        if (command.type !== "toggleRead") setSelection(EMPTY_SELECTION);
-        return;
-      }
-
-      switch (command.type) {
-        case "moveSelection":
-          s.moveCursor(command.delta);
-          break;
-        case "scrollReader":
-          setScrollStep((step) => step + command.delta);
-          break;
-        case "openSelected":
-          s.openCursor();
-          break;
-        case "listTop":
-          scrollListToTop();
-          break;
-        case "selectFirst":
-          if (snap.view.threads.length > 0) {
-            s.moveCursor(snap.cursorIndex === NO_CURSOR ? snap.view.threads.length : -snap.view.threads.length);
-          }
-          break;
-        case "selectLast":
-          if (snap.view.threads.length > 0) {
-            s.moveCursor(snap.cursorIndex === NO_CURSOR ? -snap.view.threads.length : snap.view.threads.length);
-          }
-          break;
-        case "closeViewer":
-          // On a phone, leaving the message leaves the list with no current row.
-          s.closeReader({ dropCursor: phoneRef.current });
-          break;
-        case "closeComposer":
-          // Escape, in a composer. Goes through `closeComposer` rather than straight
-          // to `setComposer(null)` so it asks before discarding a written draft — the
-          // same path the close button and the backdrop take.
-          closeComposerRef.current();
-          break;
-        case "dismissOverlay":
-          s.setOverlay("none");
-          break;
-        case "dismissNavigation":
-          s.setOverlay("none");
-          break;
-        case "toggleStar":
-          if (selectedId !== undefined) s.toggleStar(selectedId);
-          break;
-        case "copyCode":
-          if (snap.view.selected?.code) copyCodeRef.current(snap.view.selected.id);
-          break;
-        case "archive":
-          // Context-sensitive in the store, not here: the same key archives from the
-          // inbox, unarchives from the archive and restores from the bin, and doing
-          // that in one place is what keeps the optimistic update, the undo and the
-          // server call agreeing about what happened.
-          if (selectedId !== undefined) exitRows([selectedId], () => s.archiveWithUndo([selectedId]));
-          break;
-        case "trash":
-          if (selectedId !== undefined) exitRows([selectedId], () => s.trashWithUndo([selectedId]));
-          break;
-        case "snooze":
-          // Gmail's `b`: the open message's snooze choices, beside the reader's button.
-          if (selectedId !== undefined && canSnooze(snap.mailbox)) {
-            const button = document.querySelector<HTMLElement>(
-              '[data-reader-action="snooze"], [data-reader-pill-snooze]',
-            );
-            openSnoozeMenuRef.current([selectedId], button);
-          }
-          break;
-        case "toggleRead":
-          if (selectedId !== undefined) toggleReadRef.current(selectedId);
-          break;
-        case "focusReply":
-          openReplyRef.current();
-          break;
-        case "forward":
-          openForwardRef.current();
-          break;
-        case "compose":
-          openComposeRef.current();
-          break;
-        case "focusSearch":
-          // Search first, synchronously, if the logo had swapped it for the version: a
-          // hidden field cannot take focus.
-          flushSync(() => setLogoView((view) => logoViewAfter(view, "focusSearch")));
-          searchRef.current?.focus();
-          // `select()` as well as focus, so a second `/` re-selects an existing
-          // query rather than appending to it.
-          searchRef.current?.select();
-          break;
-        case "toggleFilter": {
-          // Addressed by *pill position*, not by the store's ranked bucket list: the pills
-          // interleave sender pills, so index `3` is a different bucket in each.
-          const pill = rail[command.railIndex];
-          if (pill) s.toggleFilter(pill.id);
-          break;
-        }
-        case "clearFilters":
-          s.clearFilters();
-          break;
-        case "toggleNavigation":
-          s.setOverlay(snap.overlay === "navigation" ? "none" : "navigation");
-          break;
-        case "moveNavigation":
-          s.moveNavigation(command.delta);
-          break;
-        case "activateNavigation":
-          // Through the store's own handler, so the keyboard and the mouse agree rather
-          // than duplicating the palette's item list here.
-          s.activateNavigation(NAVIGATION_ITEMS[snap.navigationIndex]?.id ?? "inbox");
-          break;
-        case "toggleShortcutsOverlay":
-          s.setOverlay(snap.overlay === "shortcuts" ? "none" : "shortcuts");
-          break;
-        case "toggleSidebar":
-          setSidebarOpen((open) => !open);
-          break;
-        case "undo":
-          // The pill's newest offer, exactly as its Undo button takes it.
-          s.undoLast();
-          break;
-        case "openSettings":
-          s.setOverlay(snap.overlay === "settings" ? "none" : "settings");
-          break;
-        case "blurText":
-          (event.target as HTMLElement | null)?.blur();
-          break;
-      }
-    }
-
-    // Registered once and never re-registered.
-    //
-    // Every value the handler needs is read through a ref — `snapshotRef`, `storeRef`,
-    // `pillsRef`, `composerRef` — so the dependency list is empty and the listener is
-    // installed for the life of the app.
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useKeyboard({
+    storeRef,
+    snapshotRef,
+    composerRef,
+    pills,
+    selectionRef,
+    menuRef,
+    scheduleModalRef,
+    sidebarOpenRef,
+    setSidebarOpen,
+    setSelection,
+    openReply,
+    openForward,
+    openCompose,
+    closeComposer,
+    searchRef,
+    setScrollStep,
+    phoneRef,
+    dockedRef,
+    openSnoozeMenuRef,
+    toggleReadRef,
+    copyCodeRef,
+    setLogoView,
+  });
 
   // ── Android Back ─────────────────────────────────────────────────────────
 
@@ -4057,7 +3736,7 @@ export function App({ store, existingInstall = true }: Props) {
     setSelection(EMPTY_SELECTION);
     if (store.getSnapshot().view.selected) closeReader();
     setTourOpen(true);
-  }, [store, closeReader]);
+  }, [store, closeReader, setSelection]);
 
   if (snapshot.status === "signed_out") {
     return (
@@ -4403,104 +4082,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         stays usable, changes wait in the offline queue, and the bar goes by itself on
         the first sync that gets through.
       */}
-      {snapshot.account !== null && (snapshot.connectionLost || !online) && (
-        <div
-          role="status"
-          data-connection-lost=""
-          className="flex items-center justify-center gap-2 bg-danger px-4 py-1.5 text-center text-meta font-semibold text-canvas"
-        >
-          <span className="min-w-0">{CONNECTION_LOST}</span>
-        </div>
-      )}
-
-      {snapshot.error && (
-        <div
-          role="alert"
-          data-error-banner=""
-          className="flex items-start justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-meta font-medium text-ink-body"
-        >
-          {/*
-            The whole error, selectable and with a Copy button: this is the text a user
-            pastes into a search or a bug report, and a truncated line cannot be copied
-            past its ellipsis.
-          */}
-          <ErrorText text={snapshot.error} className="min-w-0 flex-1" />
-          <button
-            type="button"
-            onClick={store.dismissError.bind(store)}
-            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/*
-        The notice strip.
-
-        For what a sync told the user without it being a failure — a mailbox that hit its
-        cap, so the view is a triage set rather than an export — which must not wear the
-        alarming, dismissible banner of an error.
-      */}
-      {snapshot.notice && (
-        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body">
-          <span data-notice-text="" className="selectable min-w-0 truncate">{snapshot.notice}</span>
-          <button
-            type="button"
-            onClick={store.dismissNotice.bind(store)}
-            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/*
-        The offline-storage question.
-
-        A prompt, not a notice: the last sync could not write the offline cache, and the
-        answer decides what happens — "Save" asks for persistent storage and retries the
-        write, "Not now" keeps re-downloading on launch for the rest of this session.
-      */}
-      {snapshot.storagePrompt !== null && (
-        <div
-          role={snapshot.storagePrompt === "failed" ? "status" : "alertdialog"}
-          aria-label="Save this mailbox offline"
-          className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body"
-        >
-          <span className="selectable min-w-0">
-            {snapshot.storagePrompt === "failed" ? STORAGE_SAVE_FAILED : STORAGE_PROMPT}
-          </span>
-          {snapshot.storagePrompt === "failed" ? (
-            <button
-              type="button"
-              onClick={store.dismissStoragePrompt.bind(store)}
-              className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
-            >
-              Dismiss
-            </button>
-          ) : (
-            <span className="flex shrink-0 items-center gap-3">
-              <button
-                type="button"
-                disabled={snapshot.storagePrompt === "saving"}
-                onClick={() => void store.saveMailboxOffline()}
-                className="font-semibold text-ink hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
-              >
-                {snapshot.storagePrompt === "saving" ? "Saving…" : "Save"}
-              </button>
-              <button
-                type="button"
-                disabled={snapshot.storagePrompt === "saving"}
-                onClick={store.declineMailboxStorage.bind(store)}
-                className="font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
-              >
-                Not now
-              </button>
-            </span>
-          )}
-        </div>
-      )}
+      <AppNotices snapshot={snapshot} online={online} store={store} />
 
       {filterPicker && (
         <SmartFilterPicker
@@ -5729,27 +5311,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
     )}
     </SenderPicturesContext.Provider>
   );
-}
-
-/** A keypress that landed in a text field, which owns its own select-all. */
-function isEditingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT" ||
-    target.isContentEditable
-  );
-}
-
-/** Select a region's text. With no region, the selection is left as it was. */
-function selectRegion(scope: Element | null): void {
-  const selection = document.getSelection();
-  if (!selection || !scope) return;
-  selection.removeAllRanges();
-  const range = document.createRange();
-  range.selectNodeContents(scope);
-  selection.addRange(range);
 }
 
 /**

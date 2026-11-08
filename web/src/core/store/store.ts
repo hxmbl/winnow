@@ -21,12 +21,9 @@
 import { debugLog } from "../debug/debugLog";
 import { OfflineDownloader, type DownloadProgress } from "../offline/downloader";
 import { OFFLINE_UNAVAILABLE, offlineNextStep, type OfflineBackend } from "../offline/offlineSave";
-import { demoRawSource } from "../mail/rawSource";
 import {
   MAILBOX_LABEL,
-  isBodyLoaded,
   isMailboxOrView,
-  withLoadedBody,
   withCode,
   type Draft,
   type Email,
@@ -51,19 +48,14 @@ import { type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
 import type { GoogleContact } from "../contacts/google";
 import type { DraftsApi } from "../mail/drafts";
-import {
-  draftForKeptReply,
-  notifiable,
-  staleNotices,
-  type KeptReply,
-} from "../notify/notifications";
+import type { KeptReply } from "../notify/notifications";
 import {
   FilterLearning,
   type LearnableFilter,
 } from "../learn/filterLearning";
 import { type FilterReason } from "../learn/filterExplain";
 import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
-import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
+import { TaskQueue, type Priority } from "../gmail/pool";
 import { keyedStorage, type KeyedStorage } from "./keyedStorage";
 import {
   getEmailNicknames,
@@ -74,45 +66,20 @@ import {
 } from "./emailNicknames";
 import {
   SnoozeOverlay,
-  abandonedSnoozes,
-  addSnooze,
-  dueSnoozes,
   forgetAccountSnoozes,
-  mergeSnoozes,
-  markWoke,
   parseSnoozes,
-  pruneWoke,
-  removeSnooze,
-  repliedSnoozes,
-  snoozeKeyFor,
-  snoozedById,
   type SnoozeRecord,
   type SnoozeState,
 } from "../mail/snooze";
 import {
-  addSchedule,
   forgetAccountSchedules,
-  mergeSchedules,
   parseSchedules,
-  removeSchedule,
-  scheduleVerdict,
-  scheduledRow,
-  serializeSchedules,
-  updateSchedule,
   type ScheduledSend,
 } from "../mail/scheduledSend";
-import { formatWhen } from "../mail/when";
 
 import {
-  CLAIM_HOLD_MS,
   DEFAULT_PREFERENCES,
-  DRAFT_DISCARD_UNDO_MS,
-  LATE_WAKE_MS,
   NO_CURSOR,
-  PREFETCH_NEIGHBOURS,
-  PREFETCH_UNREAD_TOP_N,
-  UNDO_OFFER_MS,
-  WAKE_FLASH_MS,
   type ContactsAccessState,
   type MailboxView,
   type Preferences,
@@ -127,7 +94,6 @@ import type {
   PlatformBridge,
   StoreOptions,
 } from "./types";
-import { partitionBodies } from "./helpers/bodies";
 import { MailboxSelectors } from "./selectors/mailbox";
 import { SearchFacets } from "./selectors/search";
 import { readoutIndex, rowIndexOf } from "./selectors/threads";
@@ -149,6 +115,13 @@ import {
   setPreferences,
   setSortBy,
 } from "./features/preferences";
+import * as snoozeFeature from "./features/snooze";
+import * as scheduledSendFeature from "./features/scheduled-send";
+import * as notificationsFeature from "./features/notifications";
+import * as draftsFeature from "./features/drafts";
+import * as syncFeature from "./features/sync";
+import * as bodiesFeature from "./features/bodies";
+import * as undoFeature from "./features/undo";
 
 export * from "./state";
 export * from "./types";
@@ -170,30 +143,14 @@ const CLOCK_INTERVAL_MS = 60_000;
 const BODY_CONCURRENCY = 2;
 
 /** At most how often sync progress re-renders. */
-const PROGRESS_NOTIFY_MS = 500;
 
 /** How long background-loaded bodies wait to be applied together, so a burst reclassifies once. */
-const BODY_APPLY_DELAY_MS = 400;
 
 /** A subscriber notified after any change. */
 type Listener = () => void;
 
 /** How a mutation can be undone. */
 type Undo = () => void;
-
-/**
- * What the pill says after a move that can be undone, in the swipe's words: "Moved to
- * Trash." / "Archived." for one message, "Moved 5 to Trash." / "Archived 5." for a
- * batch, and "Moved 5." when a batch went to more than one place.
- */
-export function undoLabel(destinations: readonly Mailbox[]): string {
-  const count = destinations.length;
-  const first = destinations[0];
-  const same = destinations.every((to) => to === first);
-  if (!same) return `Moved ${count}.`;
-  if (first === "archive") return count === 1 ? "Archived." : `Archived ${count}.`;
-  return count === 1 ? `Moved to ${MAILBOX_LABEL[first]}.` : `Moved ${count} to ${MAILBOX_LABEL[first]}.`;
-}
 
 /**
  * The application store.
@@ -228,15 +185,18 @@ export class WinnowStore {
    */
   private derived: { version: number; view: MailboxView } | null = null;
 
-  private backend: MailBackend | undefined;
-  private platform: PlatformBridge | undefined;
+  /** @internal Shared with feature modules that coordinate backend actions. */
+  backend: MailBackend | undefined;
+  /** @internal Shared with notification and account features. */
+  platform: PlatformBridge | undefined;
   /**
    * Messages whose new-mail notifications may be up, by account (`""` for none): the ones
    * this app announced, and the ones the platform says are up (`adoptNotifications`).
    * Every change to the mailbox checks them (`reconcileNotices`), so a notification goes
    * the moment its mail is read, archived, deleted, snoozed or moved, here or elsewhere.
    */
-  private noticeWatch = new Map<string, Set<string>>();
+  /** @internal Notifications currently owned by this app instance. */
+  noticeWatch = new Map<string, Set<string>>();
   /** The demo's address book, restored whenever the demo is. */
   private readonly seedContacts: readonly GoogleContact[];
 
@@ -245,7 +205,8 @@ export class WinnowStore {
    * from `state.all` so attaching one cannot change `all`'s identity — see
    * `partitionBodies`.
    */
-  private bodies = new Map<number, string>();
+  /** @internal Resident HTML bodies, managed by sync and body features. */
+  bodies = new Map<number, string>();
 
   /**
    * Messages whose body has been resolved either way.
@@ -254,22 +215,29 @@ export class WinnowStore {
    * mean `bodies.has(id) === false`, and only the second should hit the network —
    * otherwise plain-text mail is refetched on every render.
    */
-  private bodyChecked = new Set<number>();
+  /** @internal Body fetches settled without HTML. */
+  bodyChecked = new Set<number>();
 
   /** In-flight body fetches, so opening the same message twice asks once. */
-  private bodyInFlight = new Map<number, Promise<void>>();
+  /** @internal Coalesces duplicate body requests and lets offline storage await them. */
+  bodyInFlight = new Map<number, Promise<void>>();
   /** Bodies whose last fetch failed. Not an answer (opening again retries), but the reader stops saying "Loading". */
-  private bodyFailed = new Set<number>();
+  /** @internal Body fetches that may be retried on the next open. */
+  bodyFailed = new Set<number>();
 
   /** Body fetches, opened-message first. See `BODY_CONCURRENCY`. */
-  private bodyQueue = new TaskQueue(BODY_CONCURRENCY);
+  /** @internal Body downloads share a priority queue with offline storage. */
+  bodyQueue = new TaskQueue(BODY_CONCURRENCY);
 
   /** Background-loaded bodies waiting to be applied to `state.all` in one pass. */
-  private pendingBodies = new Map<number, LoadedBody>();
-  private bodyApplyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** @internal Background bodies waiting for a batched state update. */
+  pendingBodies = new Map<number, LoadedBody>();
+  /** @internal Batch timer for downloaded bodies. */
+  bodyApplyTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** "Not now" on the storage question, for the rest of this session. */
-  private storageDeclined = false;
+  /** @internal The user declined persistent offline storage for this session. */
+  storageDeclined = false;
 
   /** The background offline download of the open account, and the backend it is for. */
   private downloader: { backend: MailBackend; offline: OfflineBackend; run: OfflineDownloader } | null = null;
@@ -292,7 +260,8 @@ export class WinnowStore {
    * Keyed rather than a single stack, so a second star toggle supersedes the first
    * instead of rolling it back out of order.
    */
-  private pending = new Map<number, Undo>();
+  /** @internal Optimistic mutation rollback handles. */
+  pending = new Map<number, Undo>();
 
   /** Reclassify after a debounce, so a slider drag is not a reclassify per tick. */
   /** @internal */
@@ -302,30 +271,38 @@ export class WinnowStore {
    * The offered undo's handler. On the instance rather than in `StoreState`, because a
    * function in the public snapshot would make the whole state object unserialisable.
    */
-  private undoAction: (() => void) | null = null;
+  /** @internal Current undo action managed by the undo feature. */
+  undoAction: (() => void) | null = null;
   /**
    * What happens when the offered undo is let go rather than taken, for an action that
    * waits for that before it reaches Gmail (discarding a draft). Run when the offer is
    * dismissed, replaced, or left behind by a mailbox change; dropped, never run, by
    * sign-out and the demo, where keeping the draft is the safe side.
    */
-  private undoCommit: (() => void) | null = null;
+  /** @internal Deferred commit managed by the undo feature. */
+  undoCommit: (() => void) | null = null;
   /** The commit's deadline, so a forgotten strip does not hold a draft back for ever. */
-  private undoCommitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** @internal Expiry timer managed by the undo feature. */
+  undoCommitTimer: ReturnType<typeof setTimeout> | null = null;
   /** Drafts discarded with Undo still on offer: a listing landing meanwhile keeps them out. */
-  private pendingDiscards = new Set<string>();
+  /** @internal Drafts excluded from an in-flight listing until Undo settles. */
+  pendingDiscards = new Set<string>();
 
   /** `winnow.snooze.v1` and `winnow.scheduledSend.v1`. */
-  private readonly snoozeSlot: KeyedStorage;
-  private readonly scheduleSlot: KeyedStorage;
+  /** @internal Storage slots used by the extracted record features. */
+  readonly snoozeSlot: KeyedStorage;
+  /** @internal Storage slots used by the extracted record features. */
+  readonly scheduleSlot: KeyedStorage;
   /** Lays the snoozes over every reading of the mailbox; see `set`. */
   private readonly snoozeOverlay = new SnoozeOverlay();
   /**
    * The snoozes and sends as this window last read or wrote them: the `base` each save
    * merges against, so another window's entries written meanwhile are kept (STRM-290).
    */
-  private snoozeBase: SnoozeState;
-  private scheduleBase: readonly ScheduledSend[];
+  /** @internal Shared with snooze and scheduled-send features. */
+  snoozeBase: SnoozeState;
+  /** @internal Shared with snooze and scheduled-send features. */
+  scheduleBase: readonly ScheduledSend[];
 
   constructor(options: StoreOptions = {}) {
     this.snoozeSlot = keyedStorage("snooze", options.storage);
@@ -502,7 +479,7 @@ export class WinnowStore {
     if (patch.all !== undefined || patch.snoozes !== undefined || patch.account !== undefined) {
       const all = this.overlaid(this.state.all);
       if (all !== this.state.all) this.state = { ...this.state, all };
-      this.reconcileNotices();
+      notificationsFeature.reconcileNotices(this);
     }
     this.notify();
     if (persist) this.onPersist?.(persist);
@@ -514,42 +491,8 @@ export class WinnowStore {
     return account ?? "";
   }
 
-  /** Watch these messages' notifications in the open account. */
-  private watchNotices(gmailIds: Iterable<string>, account: string | null = this.state.accountId): void {
-    const key = this.watchKey(account);
-    const set = this.noticeWatch.get(key) ?? new Set<string>();
-    for (const id of gmailIds) set.add(id);
-    // Bounded: the oldest go first; a notification that old has long been dealt with.
-    while (set.size > 500) set.delete(set.values().next().value as string);
-    this.noticeWatch.set(key, set);
-  }
-
-  /**
-   * Take down the open account's notifications whose mail the mailbox now shows needs
-   * no attention (read, out of the Inbox, snoozed). Runs on every change to the mailbox:
-   * the user's own action (open, mark read, archive, delete, snooze, move) and a sync
-   * bringing in what happened on Gmail elsewhere.
-   */
-  private reconcileNotices(): void {
-    if (!this.backend || !this.platform?.withdrawNotifications) return;
-    const watched = this.noticeWatch.get(this.watchKey());
-    if (!watched || watched.size === 0) return;
-    const stale = staleNotices(watched, this.state.all);
-    if (stale.length === 0) return;
-    for (const id of stale) watched.delete(id);
-    debugLog("notify", "dismissed", { messages: stale.length });
-    void this.platform.withdrawNotifications(stale).catch(() => undefined);
-  }
-
-  /**
-   * Watch the notifications the platform says are up (Android's background service posts
-   * them while the app is closed), then dismiss any whose mail is already dealt with.
-   */
   async adoptNotifications(): Promise<void> {
-    if (!this.platform?.activeNotifications) return;
-    const active = await this.platform.activeNotifications().catch(() => []);
-    for (const { account, gmailId } of active) this.watchNotices([gmailId], account);
-    this.reconcileNotices();
+    return notificationsFeature.adoptNotifications(this);
   }
 
   /**
@@ -688,7 +631,8 @@ export class WinnowStore {
   // ── Session ───────────────────────────────────────────────────────────────
 
   /** The connection `connect` is establishing, so a failed one can be retried. */
-  private pendingConnect: { backend: MailBackend; account: { email: string } } | null = null;
+  /** @internal Connection retained for Retry. */
+  pendingConnect: { backend: MailBackend; account: { email: string } } | null = null;
 
   /**
    * Point the store at a backend and start the first sync.
@@ -757,52 +701,29 @@ export class WinnowStore {
     return this.snoozeOverlay.apply(all, this.state.snoozes, this.accountKey());
   }
 
-  private snoozedCache: { snoozes: SnoozeState; account: string; map: Map<string, SnoozeRecord> } | null = null;
+  /** @internal Cache owned by the snooze feature. */
+  snoozedCache: { snoozes: SnoozeState; account: string; map: Map<string, SnoozeRecord> } | null = null;
 
   /** This account's snoozes, by Gmail id. */
   private snoozedMap(): Map<string, SnoozeRecord> {
-    const account = this.accountKey();
-    const cached = this.snoozedCache;
-    if (cached && cached.snoozes === this.state.snoozes && cached.account === account) return cached.map;
-    const map = snoozedById(this.state.snoozes, account);
-    this.snoozedCache = { snoozes: this.state.snoozes, account, map };
-    return map;
+    return snoozeFeature.snoozedMap(this);
   }
 
   /** A Snoozed row's copy of each message, stable per message object. */
-  private readonly snoozedRowCache = new WeakMap<Email, Email>();
+  /** @internal Cache owned by the snooze feature. */
+  readonly snoozedRowCache = new WeakMap<Email, Email>();
 
   /** The Snoozed view: the archived messages this device is holding, each with its wake time. */
   private snoozedRows(visible: readonly Email[]): Email[] {
-    const map = this.snoozedMap();
-    if (map.size === 0) return [];
-    const rows: Email[] = [];
-    for (const email of visible) {
-      const record = email.mailbox === "archive" ? map.get(email.gmailId) : undefined;
-      if (!record) continue;
-      let row = this.snoozedRowCache.get(email);
-      if (!row || row.snoozedUntil !== record.wakeAt) {
-        row = { ...email, snoozedUntil: record.wakeAt };
-        this.snoozedRowCache.set(email, row);
-      }
-      rows.push(row);
-    }
-    return rows;
+    return snoozeFeature.snoozedRows(this, visible);
   }
 
-  private scheduledCache: { sends: readonly ScheduledSend[]; account: string; self: string; rows: Email[] } | null = null;
+  /** @internal Cache owned by the scheduled-send feature. */
+  scheduledCache: { sends: readonly ScheduledSend[]; account: string; self: string; rows: Email[] } | null = null;
 
   /** The Scheduled view's rows, one per send of this account. */
   private scheduledRows(): Email[] {
-    const account = this.accountKey();
-    const self = this.state.account?.email ?? DEMO_ACCOUNT.email;
-    const cached = this.scheduledCache;
-    if (cached && cached.sends === this.state.scheduled && cached.account === account && cached.self === self) return cached.rows;
-    const rows = this.state.scheduled
-      .filter((send) => send.account === account)
-      .map((send) => scheduledRow(send, { email: self, name: this.backend ? undefined : DEMO_ACCOUNT.name }));
-    this.scheduledCache = { sends: this.state.scheduled, account, self, rows };
-    return rows;
+    return scheduledSendFeature.scheduledRows(this);
   }
 
   /**
@@ -819,29 +740,15 @@ export class WinnowStore {
   }
 
   private saveSnoozes(snoozes: SnoozeState, extra: Partial<StoreState> = {}): void {
-    this.set({ snoozes: this.writeSnoozes(snoozes), ...extra });
+    snoozeFeature.saveSnoozes(this, snoozes, extra);
   }
 
-  /**
-   * Write snoozes, merged first with what storage holds now: another window of the app
-   * may have saved its own since this one read (STRM-290). Returns what was kept. The base
-   * moves only when the write took, so a change storage refused is still this window's
-   * own (added, not removed) at the next save.
-   */
   private writeSnoozes(snoozes: SnoozeState): SnoozeState {
-    const raw = this.snoozeSlot.read();
-    const merged = raw === null ? snoozes : mergeSnoozes(this.snoozeBase, snoozes, parseSnoozes(raw));
-    if (this.snoozeSlot.write(merged)) this.snoozeBase = merged;
-    return merged;
+    return snoozeFeature.writeSnoozes(this, snoozes);
   }
 
-  /** Sends, written the same way as `writeSnoozes`. */
   private writeSchedules(scheduled: readonly ScheduledSend[]): { kept: ScheduledSend[]; stored: boolean } {
-    const raw = this.scheduleSlot.read();
-    const kept = raw === null ? [...scheduled] : mergeSchedules(this.scheduleBase, scheduled, parseSchedules(raw));
-    const stored = this.scheduleSlot.write(serializeSchedules(kept));
-    if (stored) this.scheduleBase = parseSchedules(serializeSchedules(kept));
-    return { kept, stored };
+    return scheduledSendFeature.writeSchedules(this, scheduled);
   }
 
   /**
@@ -851,32 +758,18 @@ export class WinnowStore {
    * removed. Changes of this window's own that storage has not taken are kept.
    */
   syncDeviceRecords(): void {
-    const rawSnoozes = this.snoozeSlot.read();
-    if (rawSnoozes !== null) {
-      const theirs = parseSnoozes(rawSnoozes);
-      const snoozes = mergeSnoozes(this.snoozeBase, this.state.snoozes, theirs);
-      this.snoozeBase = theirs;
-      if (JSON.stringify(snoozes) !== JSON.stringify(this.state.snoozes)) this.set({ snoozes });
-    }
-    const rawSchedules = this.scheduleSlot.read();
-    if (rawSchedules !== null) {
-      const theirs = parseSchedules(rawSchedules);
-      const scheduled = mergeSchedules(this.scheduleBase, this.state.scheduled, theirs);
-      this.scheduleBase = theirs;
-      const same =
-        JSON.stringify(serializeSchedules(scheduled)) === JSON.stringify(serializeSchedules(this.state.scheduled));
-      if (!same) this.showSchedules(scheduled);
-    }
+    snoozeFeature.syncSnoozesFromStorage(this);
+    scheduledSendFeature.syncSchedulesFromStorage(this);
   }
 
   /** Whether a message is snoozed on this device for the current account. */
   isSnoozed(gmailId: string): boolean {
-    return this.snoozedMap().has(gmailId);
+    return snoozeFeature.isSnoozed(this, gmailId);
   }
 
   /** The snooze holding a message, for the reader's "Snoozed until …". */
   snoozeFor(gmailId: string): SnoozeRecord | null {
-    return this.snoozedMap().get(gmailId) ?? null;
+    return snoozeFeature.snoozeFor(this, gmailId);
   }
 
   /**
@@ -886,310 +779,48 @@ export class WinnowStore {
    * Undo for all of them, in the status pill. Returns how many conversations it snoozed.
    */
   snooze(ids: Iterable<number>, wakeAt: number, { undo = true }: { undo?: boolean } = {}): number {
-    const account = this.accountKey();
-    if (!account) return 0;
-    const now = this.now();
-    const map = this.snoozedMap();
-    const records = new Map<string, SnoozeRecord>();
-    const moved: { email: Email; from: Mailbox }[] = [];
-    for (const id of new Set(ids)) {
-      const email = this.state.all.find((candidate) => candidate.id === id);
-      if (!email || (email.mailbox !== "inbox" && email.mailbox !== "archive")) continue;
-      const key = snoozeKeyFor(email);
-      if (records.has(key)) continue;
-      const previous = map.get(email.gmailId);
-      const members = this.state.all.filter(
-        (other) =>
-          other.id === email.id ||
-          (email.threadId !== undefined && other.threadId === email.threadId && other.mailbox === "inbox") ||
-          (previous !== undefined && previous.gmailIds.includes(other.gmailId)),
-      );
-      const gmailIds = [...new Set([...members.map((m) => m.gmailId), ...(previous?.gmailIds ?? [])])];
-      records.set(key, {
-        key,
-        account,
-        gmailIds,
-        wakeAt,
-        snoozedAt: now,
-        from: previous?.from ?? email.mailbox,
-        subject: email.subject,
-      });
-      for (const member of members) moved.push({ email: member, from: previous ? previous.from : member.mailbox });
-    }
-    if (records.size === 0) return 0;
-    let snoozes = this.state.snoozes;
-    for (const record of records.values()) snoozes = addSnooze(snoozes, record);
-    this.saveSnoozes(snoozes);
-    for (const { email } of moved) this.snoozeInGmail(email);
-    const backend = this.backend;
-    const keys = [...records.keys()];
-    if (!undo) return records.size;
-    this.offerUndo(
-      `Snoozed until ${formatWhen(wakeAt, now)}.`,
-      () => {
-        if (this.backend !== backend) return;
-        this.releaseSnoozes(keys, { restore: new Map(moved.map((m) => [m.email.gmailId, m])) });
-      },
-    );
-    return records.size;
+    return snoozeFeature.snooze(this, ids, wakeAt, { undo });
   }
 
-  /** One message into its snooze: out of the Inbox now, labelled in Gmail. */
-  private snoozeInGmail(email: Email): void {
-    const backend = this.backend;
-    const label = async () => {
-      if (!backend) return;
-      if (backend.setSnoozed) {
-        try {
-          await backend.setSnoozed(email.gmailId, true);
-          return;
-        } catch {
-          // No label (offline, or Gmail refused it): archiving is the part that matters,
-          // and the offline queue carries that one.
-        }
-      }
-      if (email.mailbox === "inbox") await backend.moveToMailbox(email.id, "archive");
-    };
-    if (email.mailbox !== "inbox") {
-      void label().catch(() => undefined);
-      return;
-    }
-    this.mutate(
-      email.id,
-      () => ({ ...email, mailbox: "archive" }),
-      async () => {
-        try {
-          await label();
-        } catch (error) {
-          // Gmail refused even the archive: the snooze did not happen, so the record goes
-          // before the rollback puts the message back.
-          this.forgetSnoozed([email.gmailId]);
-          throw error;
-        }
-      },
-      { previousMailbox: "inbox", previousUnread: email.unread },
-    );
-  }
-
-  /** Drop messages from their snoozes, without moving anything. */
   private forgetSnoozed(gmailIds: readonly string[]): void {
-    const ids = new Set(gmailIds);
-    const account = this.accountKey();
-    let changed = false;
-    const snoozed = this.state.snoozes.snoozed
-      .map((record) => {
-        if (record.account !== account || !record.gmailIds.some((id) => ids.has(id))) return record;
-        changed = true;
-        return { ...record, gmailIds: record.gmailIds.filter((id) => !ids.has(id)) };
-      })
-      .filter((record) => record.gmailIds.length > 0);
-    if (changed) this.saveSnoozes({ ...this.state.snoozes, snoozed });
+    snoozeFeature.forgetSnoozed(this, gmailIds);
   }
 
-  /**
-   * Bring snoozed conversations back. Woken (`wake`): to the Inbox, unread, placed at
-   * `wokeAt`. Unsnoozed by hand: to the Inbox at the top, read state kept. Undone
-   * (`restore`): back where each message was, read state as it was, label off.
-   */
-  private releaseSnoozes(
-    keys: readonly string[],
-    how: { wake?: Map<string, number>; restore?: Map<string, { email: Email; from: Mailbox }> } = {},
-  ): string[] {
-    const account = this.accountKey();
-    const now = this.now();
-    const records = this.state.snoozes.snoozed.filter((r) => r.account === account && keys.includes(r.key));
-    if (records.length === 0) return [];
-    let snoozes = this.state.snoozes;
-    for (const record of records) snoozes = removeSnooze(snoozes, account, record.key);
-    const woken: string[] = [];
-    const placed = new Map<string, number>();
-    for (const record of records) {
-      for (const gmailId of record.gmailIds) {
-        const restore = how.restore?.get(gmailId);
-        if (restore && restore.from !== "inbox") continue;
-        woken.push(gmailId);
-        placed.set(gmailId, how.wake?.get(record.key) ?? now);
-      }
-    }
-    if (!how.restore) {
-      for (const [gmailId, at] of placed) snoozes = markWoke(snoozes, account, [gmailId], at);
-    }
-    const ids = new Set(records.flatMap((r) => r.gmailIds));
-    const recent = how.wake
-      ? new Set([...this.state.recentIds, ...this.state.all.filter((e) => ids.has(e.gmailId)).map((e) => e.id)])
-      : this.state.recentIds;
-    this.saveSnoozes(snoozes, { recentIds: recent });
-
-    const backend = this.backend;
-    for (const gmailId of ids) {
-      const restore = how.restore?.get(gmailId);
-      const toInbox = !restore || restore.from === "inbox";
-      const unread = how.wake ? true : restore ? restore.email.unread : undefined;
-      const email = this.state.all.find((candidate) => candidate.gmailId === gmailId);
-      const call = async () => {
-        if (!backend) return;
-        if (backend.setSnoozed) {
-          try {
-            await backend.setSnoozed(gmailId, false, { unread: unread === true, toInbox });
-            return;
-          } catch {
-            // Fall back to the plain move (queued when offline); the label may stay.
-          }
-        }
-        if (!email) return;
-        if (toInbox) await backend.moveToMailbox(email.id, "inbox");
-        if (unread === true) await backend.setRead(email.id, false);
-      };
-      if (!email) {
-        void call().catch(() => undefined);
-        continue;
-      }
-      if (!toInbox) {
-        void call().catch(() => undefined);
-        continue;
-      }
-      this.mutate(
-        email.id,
-        () => ({ ...email, mailbox: "inbox", unread: unread ?? email.unread }),
-        call,
-        { previousMailbox: email.mailbox, previousUnread: email.unread },
-      );
-    }
-    return woken;
-  }
-
-  /**
-   * Unsnooze by hand (the Snoozed view's Unsnooze): the conversations of `ids` go back to
-   * the Inbox now, at the top, with Undo (which snoozes them again until the same time).
-   */
   unsnooze(ids: Iterable<number>): number {
-    const map = this.snoozedMap();
-    const records = new Map<string, SnoozeRecord>();
-    for (const id of ids) {
-      const email = this.state.all.find((candidate) => candidate.id === id);
-      const record = email ? map.get(email.gmailId) : undefined;
-      if (record) records.set(record.key, record);
-    }
-    if (records.size === 0) return 0;
-    const taken = [...records.values()];
-    this.releaseSnoozes([...records.keys()]);
-    const backend = this.backend;
-    this.offerUndo(taken.length === 1 ? "Unsnoozed." : `Unsnoozed ${taken.length}.`, () => {
-      if (this.backend !== backend) return;
-      for (const record of taken) {
-        const targets = this.state.all.filter((email) => record.gmailIds.includes(email.gmailId)).map((e) => e.id);
-        this.snooze(targets, record.wakeAt, { undo: false });
-      }
-    });
-    return records.size;
+    return snoozeFeature.unsnooze(this, ids);
   }
 
-  /**
-   * Wake whatever is due: snoozes whose time has passed (late if the app was closed then)
-   * and conversations a new message has woken early; drop snoozes whose mail went to the
-   * Trash elsewhere, and woken places that no longer matter. Run on start, after every
-   * sync, on focus and on the app's timer. Returns how many conversations woke.
-   */
   wakeDue(): number {
-    const account = this.accountKey();
-    if (!account) return 0;
-    const now = this.now();
-    const all = this.state.all;
-    let snoozes = this.state.snoozes;
-    for (const record of abandonedSnoozes(snoozes, account, all)) snoozes = removeSnooze(snoozes, account, record.key);
-    snoozes = pruneWoke(snoozes, all, now);
-    const due = new Map<string, SnoozeRecord>();
-    for (const record of dueSnoozes(snoozes, account, now)) due.set(record.key, record);
-    const replied = repliedSnoozes(snoozes, account, all, now).filter((record) => !due.has(record.key));
-    if (snoozes !== this.state.snoozes) this.saveSnoozes(snoozes);
-    if (due.size === 0 && replied.length === 0) return 0;
-    // Placed at the moment it came back: the chosen time when Winnow was open then, the
-    // next open when it was closed (so a late wake still lands at the top, not below the
-    // mail that arrived while it was away).
-    const wake = new Map<string, number>();
-    for (const record of due.values()) wake.set(record.key, now);
-    for (const record of replied) wake.set(record.key, now);
-    this.releaseSnoozes([...wake.keys()], { wake });
-    const count = wake.size;
-    const late = [...due.values()].filter((record) => now - record.wakeAt > LATE_WAKE_MS);
-    const text =
-      count === 1 ? "A snoozed conversation is back in your Inbox." : `${count} snoozed conversations are back in your Inbox.`;
-    this.flash(
-      late.length > 0
-        ? `${text} It was due ${formatWhen(Math.min(...late.map((r) => r.wakeAt)), now)}, while Winnow was closed.`
-        : text,
-      WAKE_FLASH_MS,
-    );
-    return count;
+    return snoozeFeature.wakeDue(this);
   }
 
   /** This account's scheduled sends, soonest first. */
   scheduledSends(): ScheduledSend[] {
-    const account = this.accountKey();
-    return this.state.scheduled.filter((send) => send.account === account);
+    return scheduledSendFeature.scheduledSends(this);
   }
 
-  /** The scheduled send behind a Scheduled row (by row id), or by its own id. */
   scheduledSend(idOrRow: string | number): ScheduledSend | null {
-    if (typeof idOrRow === "string") return this.state.scheduled.find((send) => send.id === idOrRow) ?? null;
-    const row = this.scheduledRows().find((email) => email.id === idOrRow);
-    return row?.scheduled ? (this.state.scheduled.find((send) => send.id === row.scheduled!.id) ?? null) : null;
+    return scheduledSendFeature.scheduledSend(this, idOrRow);
   }
 
-  /** `false` when storage refused the write: the change then holds for this run only. */
   private saveSchedules(scheduled: ScheduledSend[]): boolean {
-    const { kept, stored } = this.writeSchedules(scheduled);
-    this.showSchedules(kept);
-    return stored;
+    return scheduledSendFeature.saveSchedules(this, scheduled);
   }
 
-  /** Put sends in state, letting go of an open Scheduled row whose send is gone. */
-  private showSchedules(scheduled: ScheduledSend[]): void {
-    const selectedGone =
-      this.state.mailbox === "scheduled" &&
-      this.state.selectedId !== null &&
-      !scheduled.some((send) => scheduledRow(send, { email: "" }).id === this.state.selectedId);
-    this.set({ scheduled, ...(selectedGone ? { selectedId: null } : {}) });
-  }
-
-  /**
-   * Record a message to send later (replacing an earlier time for the same draft).
-   * `false` when storage refused it: it is scheduled for this run only, so the caller
-   * keeps the draft's device copy rather than leave the message only in memory.
-   */
   scheduleSend(send: ScheduledSend): boolean {
-    return this.saveSchedules(addSchedule(this.state.scheduled, send));
+    return scheduledSendFeature.scheduleSend(this, send);
   }
 
-  /** Cancel a schedule; the draft stays a draft. Returns what was cancelled. */
   cancelSchedule(id: string): ScheduledSend | null {
-    const send = this.scheduledSend(id);
-    if (!send) return null;
-    this.saveSchedules(removeSchedule(this.state.scheduled, id));
-    return send;
+    return scheduledSendFeature.cancelSchedule(this, id);
   }
 
   updateScheduled(id: string, patch: Partial<Pick<ScheduledSend, "claimedAt" | "problem" | "sendAt" | "draftId">>): void {
-    if (!this.state.scheduled.some((send) => send.id === id)) return;
-    this.saveSchedules(updateSchedule(this.state.scheduled, id, patch));
+    scheduledSendFeature.updateScheduled(this, id, patch);
   }
 
-  /**
-   * The send `id`, if it may go out now, checked right before it is dispatched (the
-   * Send-later runner and Send now both ask): only a send listed under the open account,
-   * and only while every account it names is still signed in here. One whose account is
-   * gone is dropped here, never sent from another (`scheduleVerdict`).
-   */
   permitScheduled(id: string): ScheduledSend | null {
-    const send = this.state.scheduled.find((candidate) => candidate.id === id);
-    if (!send) return null;
-    const verdict = scheduleVerdict(send, {
-      account: this.accountKey(),
-      openId: this.state.accountId,
-      accounts: this.state.accounts.filter((account) => !account.demo),
-    });
-    if (verdict === "drop") this.saveSchedules(removeSchedule(this.state.scheduled, id));
-    return verdict === "send" ? send : null;
+    return scheduledSendFeature.permitScheduled(this, id);
   }
 
   /**
@@ -1237,24 +868,17 @@ export class WinnowStore {
    * and write the claim. `false` when someone else holds it.
    */
   claimScheduled(id: string, now: number = this.now()): boolean {
-    const raw = this.scheduleSlot.read();
-    const stored = raw === null ? undefined : parseSchedules(raw).find((send) => send.id === id);
-    // Stored once and gone now: another window sent or cancelled it since this one read.
-    if (raw !== null && !stored && this.scheduleBase.some((send) => send.id === id)) {
-      this.syncDeviceRecords();
-      return false;
-    }
-    if (stored?.claimedAt !== undefined && now - stored.claimedAt <= CLAIM_HOLD_MS) return false;
-    this.updateScheduled(id, { claimedAt: now });
-    return true;
+    return scheduledSendFeature.claimScheduled(this, id, now);
   }
 
   // ── Drafts ────────────────────────────────────────────────────────────────
 
   /** Drafts listings, one at a time; a second request while one runs waits for it. */
-  private draftsInFlight: Promise<void> | null = null;
+  /** @internal Shared with the drafts feature. */
+  draftsInFlight: Promise<void> | null = null;
   /** Bumped by sign-out and the demo, so a listing landing afterwards is dropped. */
-  private draftsGeneration = 0;
+  /** @internal Invalidates draft listings when the open account changes. */
+  draftsGeneration = 0;
 
   /**
    * List the user's Gmail drafts into the Drafts mailbox. A no-op in the demo, whose
@@ -1262,84 +886,23 @@ export class WinnowStore {
    * the rows already listed stay.
    */
   refreshDrafts(): Promise<void> {
-    const backend = this.backend;
-    if (!backend?.listDrafts) return Promise.resolve();
-    if (this.draftsInFlight) return this.draftsInFlight;
-    const generation = this.draftsGeneration;
-    this.set({ draftsLoading: true });
-    const run = (async () => {
-      try {
-        const listed = await backend.listDrafts!(this.state.drafts);
-        if (generation !== this.draftsGeneration || this.backend !== backend) return;
-        // A draft discarded with Undo still on offer is still in Gmail; keep it out.
-        const drafts = listed.filter((email) => !this.pendingDiscards.has(email.gmailDraft?.id ?? ""));
-        this.set({ drafts, draftsLoading: false });
-      } catch (error) {
-        if (generation !== this.draftsGeneration || this.backend !== backend) return;
-        this.set({
-          draftsLoading: false,
-          notice: error instanceof Error ? `Couldn't list drafts: ${error.message}` : "Couldn't list drafts.",
-        });
-      } finally {
-        this.draftsInFlight = null;
-      }
-    })();
-    this.draftsInFlight = run;
-    return run;
+    return draftsFeature.refreshDrafts(this);
   }
 
-  /** A Drafts row, by message id. */
   draftRow(id: number): Email | null {
-    return this.state.drafts.find((email) => email.id === id) ?? null;
+    return draftsFeature.draftRow(this, id);
   }
 
-  /**
-   * Show what the composer holds as its Drafts row now, ahead of the next listing (the
-   * demo's only listing). Replaces the row with the same Gmail draft id, or adds one.
-   */
   putDraftRow(row: Email): void {
-    const draftId = row.gmailDraft?.id;
-    if (!draftId) return;
-    const rest = this.state.drafts.filter((email) => email.gmailDraft?.id !== draftId);
-    this.set({ drafts: [row, ...rest].sort((a, b) => b.receivedAt - a.receivedAt) });
+    draftsFeature.putDraftRow(this, row);
   }
 
-  /** The draft was sent or discarded: its row goes at once. */
   removeDraftRow(draftId: string): void {
-    if (!this.state.drafts.some((email) => email.gmailDraft?.id === draftId)) return;
-    this.set({ drafts: this.state.drafts.filter((email) => email.gmailDraft?.id !== draftId) });
+    draftsFeature.removeDraftRow(this, draftId);
   }
 
-  /**
-   * Discard drafts from the Drafts mailbox: the rows go at once, and each Gmail draft is
-   * deleted (`drafts.delete`, which does not go through Trash). The demo just drops them.
-   */
-  async discardDrafts(ids: Iterable<number>): Promise<void> {
-    const targets = [...ids]
-      .map((id) => this.draftRow(id))
-      .filter((row): row is Email => row?.gmailDraft !== undefined);
-    if (targets.length === 0) return;
-    const gone = new Set(targets.map((row) => row.id));
-    this.set({
-      drafts: this.state.drafts.filter((email) => !gone.has(email.id)),
-      ...(this.state.selectedId !== null && gone.has(this.state.selectedId) ? { selectedId: null } : {}),
-    });
-    const api = this.backend?.drafts;
-    if (!api) return;
-    const failed: Email[] = [];
-    for (const row of targets) {
-      try {
-        await api.delete(row.gmailDraft!.id);
-      } catch {
-        failed.push(row);
-      }
-    }
-    if (failed.length > 0) {
-      this.set({
-        drafts: [...failed, ...this.state.drafts].sort((a, b) => b.receivedAt - a.receivedAt),
-        notice: failed.length === 1 ? "Couldn't discard that draft." : `Couldn't discard ${failed.length} drafts.`,
-      });
-    }
+  discardDrafts(ids: Iterable<number>): Promise<void> {
+    return draftsFeature.discardDrafts(this, ids);
   }
 
   /**
@@ -1354,193 +917,16 @@ export class WinnowStore {
    * The mailbox on screen is this account's own (its offline copy or a sync's result),
    * not the demo seed: only then can a sync that fails keep it on screen.
    */
-  private accountMail = false;
+  /** @internal Whether this account has an on-screen mailbox to keep after a transient sync failure. */
+  accountMail = false;
 
-  private async runSync({ initial }: { initial: boolean }): Promise<void> {
-    const backend = this.backend;
-    if (!backend) return;
-
-    this.set({
-      ...(initial ? { status: "loading" as const } : {}),
-      syncing: true,
-      error: null,
-      syncPhase: null,
-      syncFraction: null,
-      syncFetched: 0,
-      syncStage: null,
-      syncTotal: null,
-      syncError: null,
-    });
-    let lastProgressNotify = 0;
-    const started = Date.now();
-    debugLog("sync", "start", { initial, cached: this.state.all.length });
-
-    const known = new Set(this.state.all.map((email) => email.gmailId));
-
-    try {
-      const result = await backend.sync({
-        // 1.4.0: a sync of an account that has since been left paints nothing.
-        onPartial: (emails) => {
-          if (this.backend === backend) this.applyPartial(emails, initial);
-        },
-        onProgress: (progress) => {
-          if (this.backend !== backend) return;
-          // Progress arrives on the engine's schedule, so it is written to state
-          // *without* notifying: a first sync of two thousand messages would otherwise
-          // re-render two thousand times to move a percentage. A phase change is
-          // notified, being a visible transition rather than a per-message increment.
-          const phase = progress.phase === "idle" || progress.phase === "sending"
-            ? this.state.syncPhase
-            : progress.phase;
-          const stage = progress.stage ?? null;
-          const changed = this.state.syncPhase !== phase || this.state.syncStage !== stage;
-          if (changed) debugLog("sync", "phase", { phase, stage, fetched: progress.fetched, total: progress.total ?? null, ms: Date.now() - started });
-          this.state = {
-            ...this.state,
-            syncing: true,
-            syncPhase: phase,
-            syncStage: stage,
-            syncTotal: progress.total ?? null,
-            syncFraction: progress.fraction,
-            syncFetched: progress.fetched,
-          };
-          // The count on the status line ("Syncing inbox, 340 of 1,200") is worth a
-          // re-render twice a second, not once per message.
-          const now = Date.now();
-          if (changed || now - lastProgressNotify >= PROGRESS_NOTIFY_MS) {
-            lastProgressNotify = now;
-            this.notify();
-          }
-        },
-      });
-
-      // Another account opened (or the app signed out) while this ran: its answer is
-      // not this screen's.
-      if (this.backend !== backend) return;
-      const recent = new Set<number>();
-      if (!initial) {
-        for (const email of result.emails) {
-          if (!known.has(email.gmailId)) recent.add(email.id);
-        }
-      }
-
-      const { emails, bodies, checked } = partitionBodies(result.emails);
-      // Replaced wholesale rather than merged: a sync is a fresh reading, and a body
-      // resident for a message that has since left is memory nobody is using. Bodies
-      // loaded *during* the sync are in the cache, so they are in `result.emails` too.
-      this.bodies = bodies;
-      this.bodyChecked = checked;
-      this.bodyFailed = new Set();
-
-      this.set({
-        status: "ready",
-        all: emails,
-        syncing: false,
-        syncPhase: null,
-        syncStage: null,
-        syncTotal: null,
-        syncFraction: null,
-        syncError: null,
-        connectionLost: false,
-        syncFailed: result.failed,
-        lastSyncedAt: Date.now(),
-        recentIds: recent,
-        truncated: result.truncated,
-        notice: syncNotice(result),
-        storagePrompt: result.cacheUnpersisted
-          ? this.storageDeclined
-            ? null
-            : this.state.storagePrompt === "failed"
-              ? "failed"
-              : "ask"
-          : null,
-        error: result.failed > 0 ? syncFailureSummary(result.failed) : null,
-      });
-
-      this.accountMail = true;
-      debugLog("sync", "done", {
-        initial,
-        ms: Date.now() - started,
-        messages: result.emails.length,
-        new: recent.size,
-        failed: result.failed,
-        truncated: Boolean(result.truncated),
-        cacheUnpersisted: Boolean(result.cacheUnpersisted),
-      });
-      if (!initial) await this.notifyIfNew(recent);
-      // Notifications posted while the app was away (Android's background service) whose
-      // mail this sync shows dealt with go now.
-      void this.adoptNotifications();
-      // Mail that was here and is gone (deleted on the server, found by history or the
-      // daily reconciliation) takes its notification with it.
-      const present = new Set(result.emails.map((email) => email.gmailId));
-      const vanished = [...known].filter((gmailId) => !present.has(gmailId));
-      if (vanished.length > 0) {
-        debugLog("sync", "removed", { messages: vanished.length });
-        void this.platform?.withdrawNotifications?.(vanished).catch(() => undefined);
-      }
-      await this.applyPlatform();
-      this.prefetchInbox();
-      this.afterSyncOffline(backend, Boolean(result.cacheUnpersisted));
-    } catch (error) {
-      if (this.backend !== backend) return;
-      debugLog("sync", "failed", {
-        initial,
-        ms: Date.now() - started,
-        kind: error instanceof Error ? ((error as { kind?: unknown }).kind as string | undefined) ?? error.name : typeof error,
-        status: typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : undefined,
-        online: globalThis.navigator?.onLine,
-        reason: error instanceof Error ? error.message : "unknown",
-      });
-      const message = error instanceof Error ? error.message : "Could not reach Gmail.";
-      if (this.accountMail && this.state.all.length > 0 && !accountProblem(error)) {
-        // Mail is on screen and nothing is wrong with the account: keep the local copy
-        // usable instead of swapping the whole inbox for an error screen. The poll tries
-        // again on its own; the first sync that gets through clears the bar.
-        this.set({
-          status: "ready",
-          syncing: false,
-          syncPhase: null,
-          syncStage: null,
-          syncTotal: null,
-          syncError: message,
-          connectionLost: true,
-          error: null,
-        });
-        this.pendingConnect = null;
-        return;
-      }
-      this.set({
-        status: "error",
-        syncing: false,
-        syncPhase: null,
-        syncStage: null,
-        syncTotal: null,
-        syncError: message,
-        error: message,
-      });
-      throw error;
-    }
+  private runSync({ initial }: { initial: boolean }): Promise<void> {
+    return syncFeature.runSync(this, { initial });
   }
 
-  /**
-   * Show the mailbox a sync has so far, while it carries on.
-   *
-   * The inbox-first half of the sync: the engine publishes the inbox as soon as it has
-   * a screenful, and this puts it on screen — leaving `syncing` set so the status line
-   * still says the rest is coming. A first sign-in leaves `loading` here, which is the
-   * whole point. Bodies already resident are kept (a partial is a subset of the truth,
-   * not a replacement for it), and nothing is announced as new until the sync is done.
-   */
-  private applyPartial(emails: Email[], initial: boolean): void {
-    if (!this.backend || !this.state.syncing) return;
-    const partition = partitionBodies(emails);
-    for (const [id, html] of partition.bodies) this.bodies.set(id, html);
-    for (const id of partition.checked) this.bodyChecked.add(id);
-    this.set({
-      all: partition.emails,
-      ...(initial && this.state.status === "loading" ? { status: "ready" as const } : {}),
-    });
+  /** @internal Publishes the inbox-first partial result from a sync. */
+  applyPartial(emails: Email[], initial: boolean): void {
+    syncFeature.applyPartial(this, emails, initial);
   }
 
   // ── Offline storage ───────────────────────────────────────────────────────
@@ -1612,7 +998,8 @@ export class WinnowStore {
     this.set({ offline: { available: true, decision: offline.decision(), progress } });
   }
 
-  private stopOffline(): void {
+  /** @internal Stops offline body work when the account leaves. */
+  stopOffline(): void {
     this.downloader?.run.stop();
     this.downloader = null;
   }
@@ -1628,7 +1015,8 @@ export class WinnowStore {
   }
 
   /** After each sync: ask, save without asking (a small mailbox), or carry on as answered. */
-  private afterSyncOffline(backend: MailBackend, unpersisted: boolean): void {
+  /** @internal Applies the offline-cache policy after sync. */
+  afterSyncOffline(backend: MailBackend, unpersisted: boolean): void {
     const offline = backend.offline;
     if (!offline) {
       if (this.state.offline.available) this.set({ offline: OFFLINE_UNAVAILABLE });
@@ -1711,74 +1099,21 @@ export class WinnowStore {
   }
 
   /** Announce genuinely new mail, if the user asked for notifications. */
-  private async notifyIfNew(recent: ReadonlySet<number>): Promise<void> {
-    if (!this.state.preferences.notificationsEnabled || !this.platform) return;
-    if (recent.size === 0) return;
-    // A muted or hidden sender's mail arrives silently: that is what muting them means.
-    // Mail already read (on another device, before this sync saw it) is not news, and
-    // nor is mail a filter filed out of the inbox.
-    const arrived = notifiable(
-      this.state.all.filter((email) => recent.has(email.id)),
-      this.state.preferences,
-    );
-    if (arrived.length === 0) return;
-    this.watchNotices(arrived.map((email) => email.gmailId));
-    await this.platform.notifyNewMail(arrived).catch(() => undefined);
+  /** @internal Called when a sync finds new mail. */
+  async notifyIfNew(recent: ReadonlySet<number>): Promise<void> {
+    return notificationsFeature.notifyIfNew(this, recent);
   }
 
-  /**
-   * The reply header blocks for a notification batch (see `MailBackend.replyHeads`).
-   * Never throws: a notification without inline reply beats no notification.
-   */
   async notificationReplyHeads(emails: readonly Email[]): Promise<Record<string, string>> {
-    if (!this.backend?.replyHeads || !this.state.preferences.notificationActions.reply) return {};
-    try {
-      return await this.backend.replyHeads(emails.map((email) => email.gmailId));
-    } catch {
-      return {};
-    }
+    return notificationsFeature.notificationReplyHeads(this, emails);
   }
 
-  /**
-   * Replies typed into a notification that the phone could neither send nor save
-   * (offline, signed out, or the app not running), saved to Gmail's Drafts now.
-   * Returns how many were saved; any that fail are handed back so nothing typed is lost.
-   */
   async saveKeptReplies(kept: readonly KeptReply[]): Promise<{ saved: number; failed: KeptReply[] }> {
-    const drafts = this.backend?.drafts;
-    if (!drafts) return { saved: 0, failed: [...kept] };
-    let saved = 0;
-    const failed: KeptReply[] = [];
-    for (const reply of kept) {
-      const original = this.state.all.find((email) => email.gmailId === reply.gmailId);
-      const draft = draftForKeptReply(reply, original);
-      if (!draft) {
-        failed.push(reply);
-        continue;
-      }
-      try {
-        await drafts.create(draft, original ? original.gmailId : undefined);
-        saved += 1;
-      } catch {
-        failed.push(reply);
-      }
-    }
-    if (saved > 0) void this.refreshDrafts().catch(() => undefined);
-    return { saved, failed };
+    return notificationsFeature.saveKeptReplies(this, kept);
   }
 
-  /** The OS badge: the mailbox's unread count, less mail from muted senders; 0 when turned off. */
   badgeCount(): number {
-    if (!this.state.preferences.unreadBadge) return 0;
-    const muted = this.state.preferences.mutedSenders;
-    if (muted.length === 0) return this.view.unreadCount;
-    const keys = new Set(muted.map((s) => s.toLowerCase()));
-    const blocked = new Set(this.state.preferences.blockedSenders.map((s) => s.toLowerCase()));
-    const mutedUnread = this.state.all.filter((email) => {
-      const sender = email.sender.toLowerCase();
-      return email.unread && this.isListed(email) && keys.has(sender) && !blocked.has(sender);
-    }).length;
-    return Math.max(0, this.view.unreadCount - mutedUnread);
+    return notificationsFeature.badgeCount(this);
   }
 
   /** Push badge count and sync cadence to the OS. */
@@ -1832,7 +1167,8 @@ export class WinnowStore {
   }
 
   /** Whether a message (not a draft) is in what the list draws from. */
-  private isListed(email: Email): boolean {
+  /** @internal Shared with badge notification calculations. */
+  isListed(email: Email): boolean {
     if (this.state.mailbox === "snoozed") return email.mailbox === "archive" && this.snoozedMap().has(email.gmailId);
     if (this.state.mailbox === "archive" && email.mailbox === "archive") return !this.snoozedMap().has(email.gmailId);
     return email.mailbox === this.state.mailbox;
@@ -2390,208 +1726,47 @@ export class WinnowStore {
 
   /** Take back the offered undo, if there is one. */
   undoLast(): void {
-    const action = this.undoAction;
-    if (!action) return;
-    this.dropUndo();
-    this.set({ undo: null });
-    action();
+    undoFeature.undoLast(this);
   }
 
-  /**
-   * Offer one undo, letting the previous offer go (and running its commit). `commit`
-   * runs when this offer is let go, and at the latest after `commitAfterMs`.
-   */
-  private offerUndo(
+  offerUndo(
     label: string,
     action: () => void,
-    { commit, commitAfterMs }: { commit?: () => void; commitAfterMs?: number } = {},
+    options: { commit?: () => void; commitAfterMs?: number } = {},
   ): void {
-    this.settleUndo();
-    this.undoAction = action;
-    this.undoCommit = commit ?? null;
-    // Every offer goes by itself after `UNDO_OFFER_MS` (sooner when its commit window
-    // is shorter); before, an offer with no commit stayed on the pill until dismissed.
-    const expiresAfterMs = commit && commitAfterMs !== undefined ? Math.min(commitAfterMs, UNDO_OFFER_MS) : UNDO_OFFER_MS;
-    this.undoCommitTimer = setTimeout(() => {
-      if (this.undoAction !== action) return;
-      this.settleUndo();
-      this.set({ undo: null });
-    }, expiresAfterMs);
-    this.set({ undo: { label, at: Date.now() } });
+    undoFeature.offerUndo(this, label, action, options);
   }
 
-  /** Let the offered undo go: its commit (if any) runs. The strip is the caller's. */
   private settleUndo(): void {
-    const commit = this.undoCommit;
-    this.dropUndo();
-    commit?.();
+    undoFeature.settleUndo(this);
   }
 
-  /** Forget the offered undo and its commit without running either. */
   private dropUndo(): void {
-    this.undoAction = null;
-    this.undoCommit = null;
-    if (this.undoCommitTimer) clearTimeout(this.undoCommitTimer);
-    this.undoCommitTimer = null;
+    undoFeature.dropUndo(this);
   }
 
-  /**
-   * Move a message, with Undo on the strip: the swipe's Trash, and its Restore from the
-   * Trash. A plain `move` underneath, so the optimistic update, the rollback on failure
-   * and the trash bias are the ordinary ones; Undo puts the mailbox and the unread flag
-   * back as they were and takes the sender's trash mark back if this move added it.
-   *
-   * Sent mail is restored by taking the Trash label off (Gmail keeps SENT itself and
-   * refuses it in a modify), so its undo files to "archive" at the API and to Sent here.
-   */
   moveWithUndo(id: number, mailbox: Mailbox): void {
-    const email = this.state.all.find((candidate) => candidate.id === id);
-    if (!email || email.mailbox === mailbox) return;
-    if (email.mailbox === "sent" && mailbox !== "trash") return;
-    this.movesWithUndo([{ id, to: mailbox }]);
+    undoFeature.moveWithUndo(this, id, mailbox);
   }
 
-  /**
-   * Archive with Undo: `e`, the reader's and the selection bar's Archive, the row menu.
-   * Each message goes where `archive` sends it (out of the inbox, back from the archive,
-   * nothing from Sent), and one offer takes back every one of them.
-   */
   archiveWithUndo(ids: Iterable<number>): void {
-    // In Snoozed, `e` and the bars' first button are Unsnooze: back to the Inbox now.
-    if (this.state.mailbox === "snoozed") {
-      this.unsnooze(ids);
-      return;
-    }
-    const moves: { id: number; to: Mailbox }[] = [];
-    for (const id of new Set(ids)) {
-      const email = this.state.all.find((candidate) => candidate.id === id);
-      if (!email || email.mailbox === "sent") continue;
-      moves.push({ id, to: email.mailbox === "inbox" ? "archive" : "inbox" });
-    }
-    this.movesWithUndo(moves);
+    undoFeature.archiveWithUndo(this, ids);
   }
 
-  /**
-   * Trash with Undo: `#`/Delete, the reader's and the selection bar's Trash, the row
-   * menu. What `trash` means is kept: in Drafts it discards (one draft with Undo, as the
-   * swipe does; several at once as before, without), and in the Trash it deletes for
-   * good, which nothing can take back, so it offers nothing.
-   */
   trashWithUndo(ids: Iterable<number>): void {
-    const list = [...new Set(ids)];
-    if (this.state.mailbox === "drafts") {
-      if (list.length === 1 && this.draftRow(list[0])) this.discardDraftWithUndo(list[0]);
-      else void this.discardDrafts(list);
-      return;
-    }
-    const moves: { id: number; to: Mailbox }[] = [];
-    for (const id of list) {
-      const email = this.state.all.find((candidate) => candidate.id === id);
-      if (!email) continue;
-      if (email.mailbox === "trash") this.deletePermanently(id);
-      else moves.push({ id, to: "trash" });
-    }
-    this.movesWithUndo(moves);
+    undoFeature.trashWithUndo(this, ids);
   }
 
-  /** Move to a chosen mailbox with Undo: the selection bar's and row menu's Move, Not spam. */
   moveManyWithUndo(ids: Iterable<number>, mailbox: Mailbox): void {
-    this.movesWithUndo([...new Set(ids)].map((id) => ({ id, to: mailbox })));
+    undoFeature.moveManyWithUndo(this, ids, mailbox);
   }
 
-  /**
-   * Make a set of moves and offer one Undo for all of them. Each goes through `move`;
-   * Undo puts back, per message, the mailbox and unread flag it had, and only for a
-   * message still where this action put it (one moved on since is left alone), and
-   * takes back the trash marks this action added. A newer offer lets this one go, as
-   * ever, so each Undo takes back its own action and nothing else.
-   */
-  private movesWithUndo(moves: readonly { id: number; to: Mailbox }[]): void {
-    const done: { id: number; to: Mailbox; from: Mailbox; unread: boolean }[] = [];
-    const markedSenders = new Set<string>();
-    for (const { id, to } of moves) {
-      const email = this.state.all.find((candidate) => candidate.id === id);
-      if (!email || email.mailbox === to) continue;
-      if (to === "trash" && !this.trashSenders.includes(email.sender)) markedSenders.add(email.sender);
-      done.push({ id, to, from: email.mailbox, unread: email.unread });
-      this.move(id, to);
-    }
-    if (done.length === 0) return;
-    const backend = this.backend;
-    this.offerUndo(undoLabel(done.map((move) => move.to)), () => {
-      if (this.backend !== backend) return;
-      if (markedSenders.size > 0) this.trashSenders = this.trashSenders.filter((sender) => !markedSenders.has(sender));
-      for (const move of done) {
-        const now = this.state.all.find((candidate) => candidate.id === move.id);
-        if (!now || now.mailbox !== move.to) continue;
-        this.mutate(
-          move.id,
-          () => ({ ...now, mailbox: move.from, unread: move.unread }),
-          async () => {
-            await this.backend?.moveToMailbox(move.id, move.from === "sent" ? "archive" : move.from);
-          },
-          { previousMailbox: move.to, previousUnread: now.unread },
-        );
-      }
-    });
-  }
-
-  /**
-   * Discard one draft with Undo: the row goes now, and Gmail's copy is deleted only when
-   * the offer is let go (dismissed, replaced, a mailbox change) or after
-   * `DRAFT_DISCARD_UNDO_MS`. Undo just puts the row back. Closing the app first keeps
-   * the draft, which is the safe way round.
-   */
   discardDraftWithUndo(id: number): void {
-    const row = this.draftRow(id);
-    const draftId = row?.gmailDraft?.id;
-    if (!row || !draftId) return;
-    const generation = this.draftsGeneration;
-    this.pendingDiscards.add(draftId);
-    this.set({
-      drafts: this.state.drafts.filter((email) => email.id !== id),
-      ...(this.state.selectedId === id ? { selectedId: null } : {}),
-    });
-    const restore = () => {
-      if (generation !== this.draftsGeneration) return;
-      if (this.state.drafts.some((email) => email.gmailDraft?.id === draftId)) return;
-      this.set({ drafts: [row, ...this.state.drafts].sort((a, b) => b.receivedAt - a.receivedAt) });
-    };
-    this.offerUndo(
-      "Draft discarded.",
-      () => {
-        this.pendingDiscards.delete(draftId);
-        restore();
-      },
-      {
-        commit: () => {
-          if (generation !== this.draftsGeneration) {
-            this.pendingDiscards.delete(draftId);
-            return;
-          }
-          const api = this.backend?.drafts;
-          if (!api) {
-            this.pendingDiscards.delete(draftId);
-            return;
-          }
-          api
-            .delete(draftId)
-            .catch(() => {
-              restore();
-              this.set({ notice: "Couldn't discard that draft." });
-            })
-            .finally(() => this.pendingDiscards.delete(draftId));
-        },
-        commitAfterMs: DRAFT_DISCARD_UNDO_MS,
-      },
-    );
+    undoFeature.discardDraftWithUndo(this, id);
   }
 
-  /** Drop the offered undo without taking it. */
   dismissUndo(): void {
-    if (!this.undoAction) return;
-    this.settleUndo();
-    this.set({ undo: null });
+    undoFeature.dismissUndo(this);
   }
 
   /**
@@ -2601,7 +1776,8 @@ export class WinnowStore {
    * runs it, restoring the message's mailbox, read state and position — the three
    * things a user would notice if they were wrong.
    */
-  private mutate(
+  /** @internal Shared with message and snooze feature modules. */
+  mutate(
     id: number,
     optimistic: () => Email,
     call: () => Promise<void>,
@@ -2897,196 +2073,31 @@ export class WinnowStore {
    *   re-derived, leaving the classification memo intact — see `partitionBodies`.
    */
   loadBody(id: number, priority: Priority = "high"): Promise<void> {
-    const existing = this.bodyInFlight.get(id);
-    if (existing) return existing;
-    if (this.bodyChecked.has(id)) {
-      if (priority === "high") this.prefetchAround(id);
-      return Promise.resolve();
-    }
-
-    const backend = this.backend;
-    const email = this.state.all.find((candidate) => candidate.id === id);
-    if (!backend || !email) return Promise.resolve();
-
-    // A metadata-only row needs its whole body, not just its HTML: the plain text is a
-    // snippet stand-in and the attachment list is empty until it lands.
-    const whole = !isBodyLoaded(email) && backend.loadMessage !== undefined;
-
-    this.bodyFailed.delete(id);
-    const request = (async () => {
-      try {
-        if (whole) {
-          const loaded = await this.bodyQueue.push(() => backend.loadMessage!(email.gmailId), priority);
-          // Signed out (or switched account) while it was on the wire: not ours to keep.
-          if (this.backend !== backend) return;
-          this.bodyChecked.add(id);
-          if (loaded.bodyHtml !== undefined) this.bodies.set(id, loaded.bodyHtml);
-          this.applyLoadedBody(id, loaded, priority === "high");
-        } else {
-          const bodyHtml = await this.bodyQueue.push(() => backend.fetchBody(email.gmailId), priority);
-          if (this.backend !== backend) return;
-          this.bodyChecked.add(id);
-          if (bodyHtml !== undefined) this.bodies.set(id, bodyHtml);
-        }
-      } catch (error) {
-        // A dropped prefetch (sign-out, demo) is not a failure of anything.
-        if (error instanceof TaskCancelled) return;
-        // A body that will not load is not a sync failure or an error banner: the message
-        // still opens, showing the plain text it has. Left out of `bodyChecked` so opening
-        // it again can retry. Remembered as failed so the reader stops promising a
-        // formatted version that is not coming.
-        this.bodyFailed.add(id);
-        this.notify();
-        return;
-      } finally {
-        this.bodyInFlight.delete(id);
-      }
-      this.notify();
-    })();
-
-    this.bodyInFlight.set(id, request);
-    if (priority === "high") this.prefetchAround(id);
-    return request;
+    return bodiesFeature.loadBody(this, id, priority);
   }
 
-  /**
-   * Put a loaded body into `state.all`.
-   *
-   * Unlike the HTML side-map this does change `all` — the plain text is what the
-   * classifier and search read, so a body that stayed out of `all` would leave the
-   * message classified on its snippet forever. The opened message is applied at once
-   * (the reader is waiting on it); background bodies are gathered for
-   * `BODY_APPLY_DELAY_MS` and applied together, so a prefetch burst costs one
-   * reclassification rather than one per message.
-   */
-  private applyLoadedBody(id: number, loaded: LoadedBody, now: boolean): void {
-    this.pendingBodies.set(id, loaded);
-    if (now) {
-      this.flushLoadedBodies();
-      return;
-    }
-    if (this.bodyApplyTimer !== null) return;
-    this.bodyApplyTimer = setTimeout(() => {
-      this.bodyApplyTimer = null;
-      this.flushLoadedBodies();
-    }, BODY_APPLY_DELAY_MS);
-  }
-
-  private flushLoadedBodies(): void {
-    if (this.bodyApplyTimer !== null) {
-      clearTimeout(this.bodyApplyTimer);
-      this.bodyApplyTimer = null;
-    }
-    if (this.pendingBodies.size === 0) return;
-    const pending = this.pendingBodies;
-    this.pendingBodies = new Map();
-    let changed = false;
-    const all = this.state.all.map((email) => {
-      const loaded = pending.get(email.id);
-      if (!loaded) return email;
-      changed = true;
-      // `bodyHtml` stays in the side-map; see `partitionBodies`.
-      return { ...withLoadedBody(email, loaded), bodyHtml: undefined };
-    });
-    if (changed) this.set({ all });
-  }
-
-  /**
-   * Queue background body loads, lowest priority, for messages that need one.
-   *
-   * Anything already loaded, settled, in flight or failed this session is skipped, so
-   * calling this freely (after every sync, on every open) costs nothing extra.
-   */
   prefetchBodies(ids: readonly number[]): void {
-    if (!this.backend?.loadMessage) return;
-    const byId = new Map(this.state.all.map((email) => [email.id, email]));
-    for (const id of ids) {
-      const email = byId.get(id);
-      if (!email || isBodyLoaded(email)) continue;
-      if (this.bodyChecked.has(id) || this.bodyInFlight.has(id) || this.bodyFailed.has(id)) continue;
-      void this.loadBody(id, "low");
-    }
+    bodiesFeature.prefetchBodies(this, ids);
   }
 
-  /** Forget queued body work: the account it was for is gone. */
   private dropBodyWork(): void {
-    this.stopOffline();
-    this.bodyQueue.clear();
-    this.pendingBodies.clear();
-    if (this.bodyApplyTimer !== null) clearTimeout(this.bodyApplyTimer);
-    this.bodyApplyTimer = null;
+    bodiesFeature.dropBodyWork(this);
   }
 
-  /** After a sync: unread mail among the newest `PREFETCH_UNREAD_TOP_N` in the inbox. */
-  private prefetchInbox(): void {
-    const top = this.state.all
-      .filter((email) => email.mailbox === "inbox")
-      .sort((a, b) => b.receivedAt - a.receivedAt)
-      .slice(0, PREFETCH_UNREAD_TOP_N)
-      .filter((email) => email.unread);
-    this.prefetchBodies(top.map((email) => email.id));
+  prefetchInbox(): void {
+    bodiesFeature.prefetchInbox(this);
   }
 
-  /**
-   * After an open: the rows either side in the list, and the rest of the conversation —
-   * the next things `j`/`k` or a click in the reader will want.
-   */
-  private prefetchAround(id: number): void {
-    if (!this.backend?.loadMessage) return;
-    const view = this.view;
-    const rows = view.threads.map((row) => row.representative.id);
-    const at = rows.indexOf(id);
-    const ids: number[] = [];
-    if (at >= 0) {
-      for (let step = 1; step <= PREFETCH_NEIGHBOURS; step += 1) {
-        if (rows[at + step] !== undefined) ids.push(rows[at + step]);
-        if (rows[at - step] !== undefined) ids.push(rows[at - step]);
-      }
-    }
-    const opened = this.state.all.find((email) => email.id === id);
-    if (opened?.threadId) {
-      for (const email of this.state.all) {
-        if (email.threadId === opened.threadId && email.id !== id) ids.push(email.id);
-      }
-    }
-    this.prefetchBodies(ids);
-  }
-
-  /**
-   * True once a body has been fetched, or found not to exist. Drives the reader's wait.
-   *
-   * "Loaded" also covers every case where no fetch is coming: no backend (the demo
-   * mailbox, whose messages carry their HTML already, or a signed-out store), a message
-   * that already holds its HTML, and a fetch that failed. Each of those used to leave
-   * "Loading the formatted version…" on screen forever.
-   */
-  /**
-   * Dev Options → View Original: a message's raw source, from the backend's
-   * `format=raw`, or built from the message where there is no server (the demo).
-   * Rejects when the request fails; the caller says so.
-   */
   async loadRawSource(id: number): Promise<{ raw: string; demo: boolean }> {
-    const email = this.state.all.find((candidate) => candidate.id === id);
-    if (!email) throw new Error("No such message");
-    const backend = this.backend;
-    if (backend?.fetchRaw) return { raw: await backend.fetchRaw(email.gmailId), demo: false };
-    return { raw: demoRawSource({ ...email, bodyHtml: this.bodies.get(id) ?? email.bodyHtml }), demo: true };
+    return bodiesFeature.loadRawSource(this, id);
   }
 
   hasLoadedBody(id: number): boolean {
-    if (this.bodyChecked.has(id)) return true;
-    if (!this.backend) return true;
-    if (this.bodyInFlight.has(id)) return false;
-    if (this.bodyFailed.has(id)) return true;
-    const email = this.state.all.find((candidate) => candidate.id === id);
-    return email?.bodyHtml !== undefined;
+    return bodiesFeature.hasLoadedBody(this, id);
   }
 
-  /** The body-bearing copy of a message, for the parts of the view that render one. */
-  /** @internal */
   withBody(email: Email): Email {
-    const bodyHtml = this.bodies.get(email.id);
-    return bodyHtml === undefined ? email : { ...email, bodyHtml };
+    return bodiesFeature.withBody(this, email);
   }
 
   dismissError(): void {
@@ -3463,40 +2474,6 @@ export class WinnowStore {
   }
 }
 
-/** The message shown when a sync could not download everything. */
-export function syncFailureSummary(count: number): string {
-  return `${count} message${count === 1 ? "" : "s"} failed to download this sync — refresh to retry.`;
-}
+export { accountProblem, syncFailureSummary, syncNotice } from "./features/sync";
 
-/**
- * The non-blocking half of a sync's outcome.
- *
- * A truncated view is not an error: the sync worked, the user just has more mail than
- * Winnow will walk. It went into `error` before, the wrong channel — an error banner is
- * dismissible and alarming, and "only some of your archive is here" is a permanent
- * property of the account, not something retry resolves.
- *
- * A cache that could not be persisted used to be a note here too. It is now a
- * question (`storagePrompt`), because the user's answer changes what happens next.
- */
-export function syncNotice(result: { truncated: boolean; cacheUnpersisted?: boolean }): string | null {
-  const notes: string[] = [];
-  if (result.truncated) {
-    notes.push("Some mailboxes hold more than Winnow will walk, so older messages are not listed.");
-  }
-  // `cacheUnpersisted` is not a note any more: it is a question with two answers, and
-  // lives in `storagePrompt` (see `STORAGE_PROMPT`).
-  return notes.length > 0 ? notes.join(" ") : null;
-}
-
-/**
- * A sync failure that means the account itself needs attention, as opposed to Gmail
- * being out of reach. Only these keep the blocking "Couldn't reach Gmail" screen when
- * there is cached mail to show: a session that has to be signed in again, a build or
- * client Google rejects, or a request Google answered with 401 or 403.
- */
-export function accountProblem(error: unknown): boolean {
-  const { kind, status } = (error ?? {}) as { kind?: unknown; status?: unknown };
-  if (kind === "reauth_required" || kind === "config" || kind === "invalid_client") return true;
-  return status === 401 || status === 403;
-}
+export { undoLabel } from "./features/undo";
