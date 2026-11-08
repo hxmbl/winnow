@@ -18,6 +18,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 - Shift+K selects the first message in the list, and Shift+J selects the last.
 
+### Changed
+
+- Reorganized app and store internals into smaller, feature-focused modules without changing user-facing behavior.
+
 ## [1.7.3] - 2026-11-05
 
 ### Security
