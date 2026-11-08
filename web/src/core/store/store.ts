@@ -42,14 +42,11 @@ import {
   NAVIGATION_ITEMS,
   navigationIndexFor,
   clampIndex,
-  isUnsafe,
   type EmailSignals,
   type FilterId,
   type NavigationItem,
 } from "../model/signals";
 import { type TrashRecord } from "../model/profile";
-import { classifyEmail } from "../classify/classify";
-import { matchesBuiltin } from "../classify/filters";
 import { type SortBy } from "../classify/scoring";
 import { LearningModel } from "../learn/learning";
 import type { GoogleContact } from "../contacts/google";
@@ -62,12 +59,9 @@ import {
 } from "../notify/notifications";
 import {
   FilterLearning,
-  builtInSays,
-  LEARNABLE_FILTERS,
   type LearnableFilter,
 } from "../learn/filterLearning";
-import { workDomainsFromSent } from "../learn/workDomains";
-import { explainFilters, type FilterReason } from "../learn/filterExplain";
+import { type FilterReason } from "../learn/filterExplain";
 import { DEMO_ACCOUNT, DEMO_NOW } from "../data/demo";
 import { TaskCancelled, TaskQueue, type Priority } from "../gmail/pool";
 import { keyedStorage, type KeyedStorage } from "./keyedStorage";
@@ -137,10 +131,29 @@ import { partitionBodies } from "./helpers/bodies";
 import { MailboxSelectors } from "./selectors/mailbox";
 import { SearchFacets } from "./selectors/search";
 import { readoutIndex, rowIndexOf } from "./selectors/threads";
+import {
+  builtInFilter,
+  changeSmartFilters,
+  claimFilterLearning,
+  explainSmartFilters,
+  learningModel,
+  removeFilterSenderRule,
+  resetFilterLearning,
+  smartFilterMembership,
+  type SmartFilterChange,
+} from "./features/smart-filters";
+import {
+  resetLearning,
+  scheduleReclassify,
+  setLearning,
+  setPreferences,
+  setSortBy,
+} from "./features/preferences";
 
 export * from "./state";
 export * from "./types";
 export { readoutIndex, rowIndexOf };
+export type { SmartFilterChange };
 
 /**
  * How often the list's reference clock is refreshed.
@@ -195,6 +208,8 @@ export class WinnowStore {
   private listeners = new Set<Listener>();
   private version = 0;
   private key = "0";
+  /** Increases with every "Change smart filters…" action, so each action is one batch. */
+  smartFilterBatch = 0;
 
   /**
    * The last derived view, and the version it was derived at.
@@ -280,7 +295,8 @@ export class WinnowStore {
   private pending = new Map<number, Undo>();
 
   /** Reclassify after a debounce, so a slider drag is not a reclassify per tick. */
-  private classifyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** @internal */
+  classifyTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * The offered undo's handler. On the instance rather than in `StoreState`, because a
@@ -423,7 +439,8 @@ export class WinnowStore {
    * as a coordinator rather than a thousand lines of selector logic.
    */
   private readonly facets = new SearchFacets();
-  private readonly selectors = new MailboxSelectors(this.facets);
+  /** @internal Shared with the feature modules this class delegates to. */
+  readonly selectors = new MailboxSelectors(this.facets);
 
   /** Load email nicknames for the given account. */
   public loadEmailNicknames(accountId: string | null): void {
@@ -541,7 +558,8 @@ export class WinnowStore {
    * Split out of `set` because the sync engine's progress callback needs to advance
    * state without notifying on every message it downloads.
    */
-  private notify(): void {
+  /** @internal */
+  notify(): void {
     this.version += 1;
     this.followOpenMessage();
     for (const listener of this.listeners) listener();
@@ -571,8 +589,10 @@ export class WinnowStore {
   }
 
   /** Wired by `attach`; see `StoreOptions`. */
-  private onPersist: ((patch: PersistPatch) => void) | undefined;
-  private onWeightsChanged: ((model: LearningModel) => void) | undefined;
+  /** @internal */
+  onPersist: ((patch: PersistPatch) => void) | undefined;
+  /** @internal */
+  onWeightsChanged: ((model: LearningModel) => void) | undefined;
 
   /**
    * Late-bind the store's collaborators.
@@ -1762,7 +1782,8 @@ export class WinnowStore {
   }
 
   /** Push badge count and sync cadence to the OS. */
-  private async applyPlatform(): Promise<void> {
+  /** @internal */
+  async applyPlatform(): Promise<void> {
     if (!this.platform) return;
     const { preferences } = this.state;
     await this.platform.setUnreadBadge(this.badgeCount()).catch(() => undefined);
@@ -2729,33 +2750,21 @@ export class WinnowStore {
 
   // ── Learning ──────────────────────────────────────────────────────────────
 
-  /**
-   * Adopt a new learning model and reclassify.
-   *
-   * The reclassify is debounced: a weight slider fires many times a second, and
-   * reclassifying the inbox on each tick would make dragging one visibly slow. 80ms
-   * coalesces a drag and still feels immediate.
-   */
-  private setLearning(learning: LearningModel): void {
-    // The model goes on state immediately: the settings panel reads it synchronously as
-    // a slider is dragged, and a debounce would make the numbers lag the thumb.
-    // Persistence and reclassification are the expensive parts, and those wait.
-    this.state = { ...this.state, learning };
-    this.onPersist?.({ learning: learning.toSnapshot() });
-    this.scheduleReclassify();
+  /** Adopt a new learning model and reclassify (debounced). */
+  /** @internal */
+  setLearning(learning: LearningModel): void {
+    setLearning(this, learning);
   }
 
   /** "Reset sorting": back to the shipped weights. The feedback log is kept. */
   resetLearning(): void {
-    this.setLearning(this.state.learning.resetAdjustments());
+    resetLearning(this);
   }
 
   // ── Preferences ───────────────────────────────────────────────────────────
 
   setPreferences(patch: Partial<Preferences>): void {
-    const preferences = { ...this.state.preferences, ...patch };
-    this.set({ preferences }, { preferences: patch });
-    void this.applyPlatform();
+    setPreferences(this, patch);
   }
 
   /**
@@ -2862,29 +2871,16 @@ export class WinnowStore {
   }
 
   setSortBy(sortBy: SortBy): void {
-    this.setPreferences({ sortBy });
+    setSortBy(this, sortBy);
   }
 
   setSearchQuery(searchQuery: string): void {
     this.set({ searchQuery });
   }
 
-  /**
-   * Coalesce a burst of weight changes into one reclassification.
-   *
-   * A weight slider fires many times a second, and reclassifying the inbox on each
-   * tick would make dragging one visibly slow. 80ms coalesces a drag into a single
-   * pass and still feels immediate.
-   */
+  /** Coalesce a burst of weight changes into one reclassification. */
   scheduleReclassify(): void {
-    if (this.classifyTimer) clearTimeout(this.classifyTimer);
-    this.classifyTimer = setTimeout(() => {
-      this.classifyTimer = null;
-      // Notified once: the whole derived tree is recomputed from the new weights, and
-      // every consumer sees the same new world.
-      this.notify();
-      this.onWeightsChanged?.(this.state.learning);
-    }, 80);
+    scheduleReclassify(this);
   }
 
   /**
@@ -3414,58 +3410,18 @@ export class WinnowStore {
 
   // ── Smart filters that learn ──────────────────────────────────────────────
 
-  /**
-   * Hand the corrections to the account that just connected, or drop them if they were
-   * another account's (or the demo's). Corrections made before any account owned them
-   * belong to whoever connects first.
-   */
+  /** @internal Called when an account connects, so its corrections are its own. */
   private claimFilterLearning(email: string): void {
-    const model = this.state.filterLearning;
-    const owner = email.toLowerCase();
-    if (model.owner === owner) return;
-    const next = model.owner !== null ? FilterLearning.empty(owner) : model.withOwner(owner);
-    this.setFilterLearning(next);
+    claimFilterLearning(this, email);
   }
 
-  /**
-   * The corrections as they are applied: `state.filterLearning` with the domains your
-   * Sent mail shows are yours (`workDomains.ts`), so colleagues at a work domain never
-   * share a domain rule even when the account is a personal one. Memoised on the
-   * mailbox and the model, so it keeps its identity until either changes.
-   */
-  /** @internal */
+  /** @internal Shared with the selectors and features. */
   learningModel(): FilterLearning {
-    return this.state.filterLearning.withWorkDomains(workDomainsFromSent(this.state.all));
+    return learningModel(this);
   }
 
-  private setFilterLearning(model: FilterLearning): void {
-    this.state = { ...this.state, filterLearning: model };
-    this.onPersist?.({ filterLearning: model.toSnapshot() });
-    this.notify();
-  }
-
-  /** The inbox message with this id, if the inbox has it. */
-  private inboxEmail(id: number): Email | undefined {
-    return this.state.all.find((email) => email.id === id && email.mailbox === "inbox");
-  }
-
-  /**
-   * For each learnable filter, whether all, some or none of these messages are in it
-   * now — what the picker opens with.
-   */
   smartFilterMembership(ids: readonly number[]): Map<LearnableFilter, "all" | "some" | "none"> {
-    const { profile, signals } = this.selectors.inboxAnalysis(this);
-    const emails = ids.map((id) => this.inboxEmail(id)).filter((email): email is Email => email !== undefined);
-    const out = new Map<LearnableFilter, "all" | "some" | "none">();
-    for (const filter of LEARNABLE_FILTERS) {
-      let hits = 0;
-      for (const email of emails) {
-        const signal = signals.get(email.id);
-        if (signal && matchesBuiltin(filter, email, signal, profile)) hits += 1;
-      }
-      out.set(filter, hits === 0 ? "none" : hits === emails.length ? "all" : "some");
-    }
-    return out;
+    return smartFilterMembership(this, ids);
   }
 
   /**
@@ -3481,102 +3437,31 @@ export class WinnowStore {
     ids: readonly number[],
     changes: readonly { filter: LearnableFilter; into: boolean }[],
   ): SmartFilterChange[] {
-    if (changes.length === 0) return [];
-    const { profile, signals } = this.selectors.inboxAnalysis(this);
-    let model = this.state.filterLearning;
-    if (model.owner === null) model = model.withOwner(this.state.account?.email.toLowerCase() ?? "demo");
-    const at = this.now();
-    const batch = (this.smartFilterBatch = Math.max(this.smartFilterBatch + 1, at));
-    const results: SmartFilterChange[] = [];
-    for (const { filter, into } of changes) {
-      const result: SmartFilterChange = { filter, into, moved: 0, unsafe: 0, already: 0 };
-      for (const id of ids) {
-        const email = this.inboxEmail(id);
-        const signal = email ? signals.get(email.id) : undefined;
-        if (!email || !signal) continue;
-        if (matchesBuiltin(filter, email, signal, profile) === into) {
-          result.already += 1;
-          continue;
-        }
-        if (into && isUnsafe(signal)) {
-          result.unsafe += 1;
-          continue;
-        }
-        model = model.record(email, filter, into, at, batch);
-        result.moved += 1;
-      }
-      results.push(result);
-    }
-    if (model !== this.state.filterLearning) this.setFilterLearning(model);
-    return results;
+    return changeSmartFilters(this, ids, changes);
   }
-
-  /** Increases with every "Change smart filters…" action, so each action is one batch. */
-  private smartFilterBatch = 0;
 
   /**
    * "Why it's here" for one inbox message: one line per filter it is in. `scores` is
    * Dev Options → Show filter scores: each line also carries its numbers.
    */
   explainSmartFilters(id: number, { scores = false }: { scores?: boolean } = {}): FilterReason[] {
-    const email = this.inboxEmail(id);
-    if (!email) return this.explainInMailbox(id, scores);
-    const explanation = this.selectors.explanationFor(this, email);
-    if (!explanation) return [];
-    return explainFilters(email, explanation.base, explanation.learned, explanation.profile, this.learningModel(), {
-      background: explanation.background,
-      weights: explanation.weights,
-      scores,
-    });
-  }
-
-  /**
-   * "Why it's here" for a message in another mailbox (1.3.3): the same explanation, from
-   * the classification that mailbox's smart filters use (`mailboxSignals`). Drafts have
-   * none.
-   */
-  private explainInMailbox(id: number, scores: boolean): FilterReason[] {
-    const email = this.state.all.find((candidate) => candidate.id === id);
-    if (!email || email.mailbox === "inbox") return [];
-    const { profile } = this.selectors.inboxAnalysis(this);
-    const { background, weights } = this.selectors.background(this);
-    const base = classifyEmail(email, profile, weights);
-    const learned = this.selectors.mailboxSignals(this, [email], profile).get(id) ?? base;
-    return explainFilters(email, base, learned, profile, this.learningModel(), {
-      background,
-      weights,
-      scores,
-    });
+    return explainSmartFilters(this, id, { scores });
   }
 
   /** Whether the built-in rules alone would put this message in a filter. For tests and Settings. */
   builtInFilter(id: number, filter: LearnableFilter): boolean {
-    const email = this.inboxEmail(id);
-    const base = this.selectors.baseSignal(this, id);
-    return email && base ? builtInSays(filter, email, base) : false;
+    return builtInFilter(this, id, filter);
   }
 
   removeFilterSenderRule(filter: LearnableFilter, key: string): void {
-    this.setFilterLearning(this.state.filterLearning.removeSenderRule(filter, key));
+    removeFilterSenderRule(this, filter, key);
   }
 
   /** "Reset what's learnt", for one filter or all of them. */
   resetFilterLearning(filter?: LearnableFilter): void {
-    this.setFilterLearning(this.state.filterLearning.reset(filter));
+    resetFilterLearning(this, filter);
   }
 }
-
-/** What one "Change smart filters…" change did, for the picker's status line. */
-export type SmartFilterChange = {
-  filter: LearnableFilter;
-  into: boolean;
-  /** Messages whose membership changed. */
-  moved: number;
-  /** Messages that could not be put in, because they look unsafe. */
-  unsafe: number;
-  /** Messages already where the change asked for. */
-  already: number;
-};
 
 /** The message shown when a sync could not download everything. */
 export function syncFailureSummary(count: number): string {
