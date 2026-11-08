@@ -49,6 +49,43 @@ describe("revealing the cursor's row", () => {
   });
 });
 
+describe("jumping to list boundaries", () => {
+  it("selects the first and last rows from an existing cursor", () => {
+    const store = demoStore();
+    const last = store.view.threads.length - 1;
+
+    store.moveCursor(2);
+    store.moveCursor(-store.view.threads.length);
+    expect(store.getSnapshot().cursorIndex).toBe(0);
+    expect(store.getSnapshot().selectedId).toBe(store.view.threads[0]!.representative.id);
+
+    store.moveCursor(store.view.threads.length);
+    expect(store.getSnapshot().cursorIndex).toBe(last);
+    expect(store.getSnapshot().selectedId).toBe(store.view.threads[last]!.representative.id);
+  });
+
+  it("selects the appropriate boundary when there is no cursor", () => {
+    const store = demoStore();
+    const last = store.view.threads.length - 1;
+
+    store.moveCursor(-store.view.threads.length);
+    expect(store.getSnapshot().cursorIndex).toBe(0);
+
+    store.closeReader({ dropCursor: true });
+    store.moveCursor(store.view.threads.length);
+    expect(store.getSnapshot().cursorIndex).toBe(last);
+  });
+
+  it("does nothing for an empty list", () => {
+    const store = new WinnowStore({ seed: [] });
+    const before = store.getSnapshot();
+
+    store.moveCursor(-store.view.threads.length);
+
+    expect(store.getSnapshot()).toEqual(before);
+  });
+});
+
 describe("marking the open message unread", () => {
   it("desktop: advances to the next row and leaves the message unread", () => {
     const store = demoStore();

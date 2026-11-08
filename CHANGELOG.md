@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- Shift+K selects the first message in the list, and Shift+J selects the last.
+
 ## [1.7.3] - 2026-11-05
 
 ### Security
