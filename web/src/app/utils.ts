@@ -17,7 +17,7 @@ import { isUntouchedNewDraft } from "../core/mail/compose";
  * — the very thing it is meant to survive — and a `useState` would render differently on
  * the second pass, a StrictMode warning of its own.
  */
-export let sessionRestoreStarted = false;
+export const sessionRestoreStarted = false;
 
 /** A promise and its resolver, for "once the launch has finished restoring". */
 export function deferred(): { promise: Promise<void>; resolve: () => void } {
