@@ -183,9 +183,11 @@ describe("Remote images = Never pauses remote avatar lookups (1.3.3)", () => {
     expect(l.asked).toEqual([]);
   });
 
-  it("App builds the avatar sources through the shared resolver with the image policy", () => {
+  it("App builds avatar sources through the shared resolver with the image policy", () => {
     const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
-    expect(app).toMatch(/senderPictureSources\(\{[\s\S]*imagePolicy,[\s\S]*\}\)/);
+    const hook = readFileSync(new URL("../app/hooks/useSenderPictures.ts", import.meta.url), "utf8");
+    expect(app).toMatch(/useSenderPictures\(/);
+    expect(hook).toMatch(/senderPictureSources\(\{[\s\S]*imagePolicy: preferences\.imagePolicy,[\s\S]*\}\)/);
   });
 });
 

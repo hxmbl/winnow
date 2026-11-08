@@ -22,24 +22,17 @@
 import { untilFirstMail } from "./ui/firstMail";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { censorNameTerms, sessionScrambler, setCensorActive, startCensor } from "./ui/censorDom";
-import { flushSync } from "react-dom";
 import { LogIn, RefreshCw } from "lucide-react";
 import {
   NO_CURSOR,
   readoutIndex,
-  STORAGE_PROMPT,
-  STORAGE_SAVE_FAILED,
   WinnowStore,
-  type Snapshot,
 } from "./core/store/store";
-import { commandForKey, shouldSwallow, type KeyContext } from "./core/mail/keybinds";
 import {
   badgeFilters,
   FILTER_LABELS,
-  NAVIGATION_ITEMS,
 } from "./core/model/signals";
 import { displayName, isViewMailbox, MAILBOX_LABEL, type Email, type Mailbox } from "./core/model/email";
-import { MAILBOX_ORDER } from "./ui/mailboxNav";
 import { deviceStorage } from "./core/store/storage";
 import { hashId } from "./core/model/ids";
 import { buildForward, buildReply, stripQuote, withReplyAll } from "./core/mail/reply";
@@ -51,58 +44,62 @@ import {
   lostAttachmentsMessage,
   restoreLocalDraft,
   reopenDraft,
-  type DraftSaveStatus,
   type LocalDraft,
 } from "./core/mail/drafts";
 import {
   buildNewDraft,
   draftFromMailto,
-  isUntouchedNewDraft,
   needsSubjectConfirmation,
 } from "./core/mail/compose";
 import { attentionSentence } from "./core/classify/attention";
 import { formatRelative } from "./core/mail/datetime";
 import { resolveImageConsent } from "./core/mail/imageConsent";
-import type { Draft, DrivePermissionRef, GmailId } from "./core/model/email";
+import type { Draft, DrivePermissionRef } from "./core/model/email";
 import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { DEMO_ACCOUNT_IDS, demoSecondMailbox } from "./core/data/demoSecond";
 import { demoAccounts, switcherLabel } from "./ui/accounts";
 import { AccountButton, AccountSwitcher } from "./ui/components/AccountSwitcher";
 import { AccountsPage } from "./ui/components/AccountsPage";
 import type { CategoryId } from "./ui/settingsCatalog";
+
 import { defaultFromAccount, draftFromAnotherAccount } from "./core/mail/fromAccount";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
 import { readOwnParams } from "./core/session/redirect";
 import { DelayedSend } from "./core/mail/undoSend";
-import { desktopPlatformExtras, platform, type PlatformInfo } from "./platform";
+import { platform, type PlatformInfo } from "./platform";
 import type { AppSigningInfo, BackgroundServiceStatus } from "./platform/types";
-import { POPOVER_SELECTOR, backTarget, isSheetElement, type BackState } from "./ui/backLayers";
 import { useStore } from "./ui/useStore";
+import { useKeyboard } from "./app/hooks/useKeyboard";
+import { useSelection } from "./app/hooks/useSelection";
+import { useAndroidBack } from "./app/hooks/useAndroidBack";
+import { useDerivedView } from "./app/hooks/useDerivedView";
+import { useTheme } from "./app/hooks/useTheme";
+import { useSenderPictureCaches, useSenderPictures } from "./app/hooks/useSenderPictures";
+import { useGoogleContacts } from "./app/hooks/useGoogleContacts";
+import { useActions } from "./app/hooks/useActions";
+import { AppNotices } from "./app/components/AppNotices";
+import { scrollListToTop } from "./ui/listScroll";
 import { useSettingsTransfer } from "./ui/useSettingsTransfer";
 import { useUpdates } from "./ui/useUpdates";
 import { WhatsNew } from "./ui/components/WhatsNew";
 import { offerButton } from "./core/updates/updates";
 import { useOnline } from "./ui/useOnline";
 import { syncStatus } from "./ui/syncStatus";
-import { ACCENTS, CUSTOM_ACCENT_LABEL, applyTheme, customAccentFor, paletteFor, resolveScheme } from "./ui/theme";
-import { DARK_EMAIL_PALETTE, OLED_EMAIL_PALETTE } from "./core/mail/emailDark";
+import { CUSTOM_ACCENT } from "./core/model/appearance";
 import { RawSourceSheet, type RawSourceState } from "./ui/components/RawSourceSheet";
+import { ErrorText } from "./ui/components/ErrorText";
 import { setDebugLogEnabled } from "./core/debug/debugLog";
 import { DEV_OPTIONS_KEY, hiddenDevOptions, loadDevOptions, saveDevOptions, type DevOptions } from "./ui/devOptions";
-import { ACCENT_THEMES, CUSTOM_ACCENT } from "./core/model/appearance";
 import { Masthead } from "./ui/components/Masthead";
 import { PhoneDock, PhoneTopBar } from "./ui/components/PhoneChrome";
 import { logoViewAfter, type LogoView } from "./ui/logoVersion";
 import { PullRefresh } from "./ui/components/PullRefresh";
 import { PULL_RESULT_MS } from "./ui/pullRefresh";
-import { scrollListToTop } from "./ui/listScroll";
 import { viewKey } from "./ui/inboxClear";
 import { useKeyboardInset, usePhoneLayout } from "./ui/usePhoneLayout";
 import { Sidebar, type NavProps } from "./ui/components/MailNav";
-import { buildPills } from "./ui/rail";
 import MessageList from "./ui/components/MessageList";
-import type { SwipeAction } from "./ui/swipe";
 import { Reader } from "./ui/components/Reader";
 import { ReaderSplitHandle } from "./ui/components/ReaderSplitHandle";
 import { ShortcutSheet } from "./ui/components/ShortcutSheet";
@@ -117,8 +114,6 @@ import { Settings } from "./ui/components/SettingsPanel";
 import { Tour } from "./ui/components/Tour";
 import { shouldStartTour, tourSteps } from "./ui/tour";
 import { ActionSheet, ConfirmDialog } from "./ui/components/Overlay";
-import { ErrorText } from "./ui/components/ErrorText";
-import { isSelectAll, selectAllScope } from "./ui/textSelection";
 import { SignInScreen } from "./ui/SignInScreen";
 import { GoogleSetup, SETUP_GUIDE_URL } from "./ui/components/GoogleSetup";
 import { describeFailure } from "./core/session/errors";
@@ -134,24 +129,14 @@ import { storageKey } from "./core/store/keyedStorage";
 import { SEND_LATER_NOTE } from "./ui/components/Composer";
 import {
   EMPTY_SELECTION,
-  orderedSelection,
-  pruneSelection,
   toggleId,
-  type Selection,
 } from "./ui/selection";
 import { mailtoAddress } from "./core/mail/unsubscribe";
 import { copyText } from "./ui/clipboard";
 import { CodeBar } from "./ui/components/CodeCopy";
 import { Avatar } from "./ui/components/Avatar";
-import { imageProbe, publishSenderPictures, senderPictureSources, SenderPicturesContext, type SenderPictures } from "./ui/senderPictures";
-import { GRAVATAR_STORAGE_KEY, GravatarCache } from "./core/avatars/gravatar";
-import { contactPhotoMap } from "./core/avatars/photos";
-import { defaultPictureBytesStorage, memoryPictureBytesStorage, PictureBytesCache } from "./core/avatars/pictureBytes";
+import { SenderPicturesContext } from "./ui/senderPictures";
 import { canvasCapture, canvasPictureColor } from "./ui/pictureCapture";
-import { BrandLogoCache, LOGO_STORAGE_KEY, localLogoStorage } from "./core/avatars/logoCache";
-import { keyFor } from "./core/store/accountState";
-import { dohResolver } from "./core/avatars/bimi";
-import { contactsFailureNotice } from "./core/gmail/people";
 import { cleanFilename } from "./core/mail/attachments";
 import {
   DemoDriveClient,
@@ -170,48 +155,25 @@ import {
   prepareDriveDispatch,
   prepareQueuedShare,
   queuedShareNotice,
-  type DriveDispatch,
 } from "./core/gmail/driveSend";
 import { DriveConsent } from "./ui/components/DriveConsent";
 import { DriveGrantNeeded } from "./ui/components/DriveGrantNeeded";
-import { DEMO_LOGO_SOURCE } from "./ui/demoPictures";
 import { pictureNotice } from "./ui/pictureNotice";
 import { PictureNotice } from "./ui/components/PictureNotice";
 import type { OfflineQueue } from "./core/offline/queue";
 import { useSyncIndicator } from "./ui/useSyncIndicator";
-import { CONNECTION_LOST } from "./ui/offlineStatus";
 import { ComposerAttachments, type AttachmentAdder } from "./ui/components/ComposerAttachments";
 import { attachmentBytes } from "./ui/attachmentBytes";
-import { announce, onReplyRequest, provideAccountRouter, sendTestNotification } from "./ui/notificationActions";
+import { announce, provideAccountRouter, sendTestNotification } from "./ui/notificationActions";
 import { updateButtonShown } from "./ui/updateButton";
 import { notifiable } from "./core/notify/notifications";
 import { alreadyAddedMessage } from "./ui/accounts";
 import { exitRows } from "./ui/rowExit";
-import { isEditingElement } from "./ui/sidebarOverlay";
 import { buttonClass } from "./ui/button";
 import { Icon } from "./ui/components/Icon";
-
-/** Which popover menu is open, and what it acts on. */
-type OpenMenu = {
-  kind: "sender" | "row";
-  /** The message whose sender or row was clicked. */
-  id: number;
-  /** For a row menu: the messages it acts on (the selection, or just `id`). */
-  ids: number[];
-  anchor: MenuAnchor;
-  /** Gets focus back when the menu closes by Escape or a choice. */
-  trigger: HTMLElement | null;
-};
-
-type Props = {
-  /** The one piece of global state. Everything else is derived from it. */
-  store: WinnowStore;
-  /**
-   * This device had run Winnow before this launch (any `winnow.*` key at boot), so the
-   * first-run tour does not open by itself. Read in `main.tsx` before anything is written.
-   */
-  existingInstall?: boolean;
-};
+import type { OpenMenu, Props, ComposerState, PendingSend, SendDriveAnswers, ComposerStart } from "./app/types";
+import { DriveSendHold } from "./app/types";
+import { deferred, HALF_GRANT_MESSAGE, DRAFT_NOTICE_MS, SENT_NOTICE_MS, SCHEDULED_SENT_NOTICE_MS, DUE_CHECK_MS, platformLabel, selfAddressOf, draftAccount, BLANK_INITIAL, isUntouchedDraft } from "./app/utils";
 
 /**
  * Whether the one-time session restore has already been started.
@@ -222,192 +184,10 @@ type Props = {
  */
 let sessionRestoreStarted = false;
 
-/** A promise and its resolver, for "once the launch has finished restoring". */
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve: () => void = () => undefined;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-/**
- * How stale Google contacts may get before opening the composer refreshes them.
- *
- * Fifteen minutes: an incremental refresh is one cheap request per listing, but the
- * composer opens far more often than anyone adds a contact.
- */
-const CONTACTS_REFRESH_MS = 15 * 60_000;
-
-const HALF_GRANT_MESSAGE =
-  "Google did not grant both contact permissions. Tick both boxes on Google's screen to use them.";
-
-/**
- * The composer's state, including what it is for.
- *
- * `mode` drives the title and the body-field behaviour: a forward has no recipient until
- * the user picks one, a reply's does. It also matters to the Escape/discard logic, which
- * needs to know whether there is anything worth keeping.
- */
-type ComposerState = {
-  draft: Draft;
-  sending: boolean;
-  error: string | null;
-  mode: "reply" | "forward" | "new";
-  /**
-   * A new message's recipients and subject as it opened (blank, or from a `mailto:`),
-   * so closing an untouched one does not ask. Replies and forwards judge by the body.
-   */
-  initial?: Pick<Draft, "to" | "cc" | "bcc" | "subject">;
-  /** The message a reply or forward answers: where it docks, and what it threads on. */
-  replyTo?: GmailId;
-  /** Reply all (the default) or Reply, for a reply. */
-  replyAll?: boolean;
-  /** Which draft this is, for the autosave and the device copy. See `draftContextKey`. */
-  context: string;
-  /** What the autosave last said. */
-  status: DraftSaveStatus;
-  /**
-   * Reopened from the Drafts mailbox: always a sheet (never docked, never parked by
-   * the selection moving), closing keeps it rather than asking, and `baseline` is the
-   * draft as it opened, so an untouched reopen neither re-saves nor counts as an edit.
-   */
-  fromDrafts?: { draftId: string; row: Email; baseline: Draft };
-  /** Files a restored device copy could not bring back, said by the attachment area. */
-  attachNotice?: string | null;
-  /**
-   * Drive permissions an attempt to send this message created and that are kept while it
-   * might still go (a failed send, or the share warning waiting on an answer). Taken back
-   * if the message is abandoned instead. See `core/gmail/driveSend`.
-   */
-  driveShares?: DrivePermissionRef[];
-  /**
-   * 1.4.0: the account it goes out from when that is not the open one (the From picker).
-   * Absent: the open account, which is also the one a reply's original arrived in.
-   */
-  fromAccount?: string;
-};
-
-/**
- * A sent message waiting out its undo window: the composer as it was when Send was
- * pressed, its autosave (still attached to the Gmail draft), and the message a reply
- * threads on.
- */
-type PendingSend = {
-  composer: ComposerState;
-  saver: DraftAutosaver | null;
-  inReplyTo?: GmailId;
-  /** What the user already answered about its Drive links (Send anyway on either dialog). */
-  drive?: SendDriveAnswers;
-  /** The Drive permissions this message holds once dispatch has shared (set by `deliver`). */
-  created?: DrivePermissionRef[];
-  /** The Gmail draft to send when there is no autosave to ask (a scheduled send). */
-  draftId?: string;
-  /** A scheduled send going out: what the pill says, and whether it is late. */
-  scheduled?: { sendAt: number; late: boolean };
-};
-
-/** Answers the user gave about a message's Drive links, carried into the send. */
-type SendDriveAnswers = { accepted?: boolean; waived?: boolean };
-
-/** A send stopped at dispatch for the user to answer about its Drive links. */
-class DriveSendHold extends Error {
-  constructor(readonly hold: Extract<DriveDispatch, { kind: "hold" }>) {
-    super("The Drive links need an answer before this message goes.");
-    this.name = "DriveSendHold";
-  }
-}
-
-/** What `startComposer` is given: the composer, less the state it owns itself. */
-type ComposerStart = Omit<ComposerState, "sending" | "error" | "status">;
-
-/** A blank new message's recipients and subject, the baseline for "untouched". */
-const BLANK_INITIAL: NonNullable<ComposerState["initial"]> = { to: [], cc: [], bcc: [], subject: "" };
-
-/** How long "Draft saved." stays up after a half-written reply is put away, in ms. */
-const DRAFT_NOTICE_MS = 4000;
-
-/** Where this Winnow runs, for Settings → About: "Desktop app · linux x86_64", "Browser". */
-function platformLabel(info: PlatformInfo): string {
-  if (info.kind === "web") return "Browser";
-  if (info.os === "android") return "Android app";
-  return `Desktop app · ${info.os}${info.arch && info.arch !== "unknown" ? ` ${info.arch}` : ""}`;
-}
-
-/** The user's own address, for leaving it off a reply-all: the demo's is its seeded account. */
-function selfAddressOf(snap: Pick<Snapshot, "contactsAccess" | "account">): string | undefined {
-  return snap.account?.email ?? (snap.contactsAccess === "demo" ? DEMO_ACCOUNT.email : undefined);
-}
-
-/** Whose drafts these are: the signed-in address, `demo`, or `null` before either. */
-function draftAccount(snap: Pick<Snapshot, "contactsAccess" | "account">): string | null {
-  if (snap.contactsAccess === "demo") return "demo";
-  return snap.account?.email ?? null;
-}
-
-/** How long "Message sent." stays up before it clears itself, in ms. */
-const SENT_NOTICE_MS = 6000;
-/** How long the pill says a scheduled message went, or was scheduled. */
-const SCHEDULED_SENT_NOTICE_MS = 6000;
-/** How often the open app looks for snoozes to wake and scheduled sends to go. */
-const DUE_CHECK_MS = 15_000;
-
-/**
- * Whether discarding this draft would lose anything the user wrote.
- *
- * Not "is the body empty" but "is the user's *contribution* empty": a reply's body starts
- * as the quoted original, so `stripQuote` removes an untouched quote suffix, and a
- * forward's baseline is recorded in `Draft.prefilled`.
- *
- * Getting this wrong is not cosmetic: testing the body for emptiness made *every* forward
- * "written", so opening one with `f` and pressing Escape asked whether to throw away text
- * Winnow had just put there — which trains people to click through confirmations.
- */
-function isUntouchedDraft(draft: Draft, initial?: ComposerState["initial"]): boolean {
-  if (initial) return isUntouchedNewDraft(draft, initial);
-  if ((draft.attachments?.length ?? 0) > 0) return false;
-  const written = stripQuote(draft.body, draft.quoteBlock).trim();
-  return written === (draft.prefilled ?? "").trim();
-}
-
 export function App({ store, existingInstall = true }: Props) {
   const snapshot = useStore(store);
   const { view, preferences } = snapshot;
-  /**
-   * Brand logos (BIMI) and Gravatar photos, both behind "Sender pictures". One pair per account (1.4.0): each is a list of who mails that account, so
-   * it is stored under the account's namespace and never read from another's. Cleared on
-   * sign-out and when the setting is turned off.
-   */
-  const cacheAccount = snapshot.accountId;
-  const logoCache = useMemo(
-    () =>
-      new BrandLogoCache({
-        resolve: dohResolver((input, init) => fetch(input, init)),
-        isOnline: () => globalThis.navigator?.onLine !== false,
-        storage: localLogoStorage(keyFor(LOGO_STORAGE_KEY, cacheAccount)),
-      }),
-    [cacheAccount],
-  );
-  const gravatarCache = useMemo(() => {
-    const isOnline = () => globalThis.navigator?.onLine !== false;
-    return new GravatarCache({ probe: imageProbe(isOnline), isOnline, storage: localLogoStorage(keyFor(GRAVATAR_STORAGE_KEY, cacheAccount)) });
-  }, [cacheAccount]);
-  /**
-   * The pictures themselves, as small copies on the device (`core/avatars/pictureBytes`):
-   * one IndexedDB database per account, like the offline mail, warmed into memory now so
-   * the first rows draw their senders' pictures at once. Cleared with the lookups above
-   * (sign-out, a switch going off) and with the contacts grant. No account yet (starting
-   * up, the demo, signed out): memory only, so no database is made for nobody.
-   */
-  const pictureBytes = useMemo(
-    () =>
-      new PictureBytesCache({
-        storage: cacheAccount ? defaultPictureBytesStorage(cacheAccount) : memoryPictureBytesStorage(),
-        capture: canvasCapture(),
-        isOnline: () => globalThis.navigator?.onLine !== false,
-      }),
-    [cacheAccount],
-  );
+  const { logoCache, gravatarCache, pictureBytes } = useSenderPictureCaches(snapshot.accountId);
 
   // ── Refs the keyboard handler reads ─────────────────────────────────────
   // The handler is registered once and reads through these, because
@@ -469,7 +249,7 @@ export function App({ store, existingInstall = true }: Props) {
    * rather than in the store: it is a gesture's state, never persisted, and the store's
    * single `selectedId` keeps meaning "the open message".
    */
-  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  const { selection, setSelection, selectionRef, rowOrder } = useSelection(snapshot);
   /** The phone top bar's height, which the selection bar keeps while it stands in for it. */
   const [phoneBarHeight, setPhoneBarHeight] = useState(0);
   const phoneBarObserver = useRef<ResizeObserver | null>(null);
@@ -483,9 +263,6 @@ export function App({ store, existingInstall = true }: Props) {
     observer.observe(element);
     phoneBarObserver.current = observer;
   }, []);
-  const selectionRef = useRef(selection);
-  selectionRef.current = selection;
-
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const menuRef = useRef(menu);
   menuRef.current = menu;
@@ -580,21 +357,7 @@ export function App({ store, existingInstall = true }: Props) {
   useKeyboardInset(phone && composer !== null);
 
   // ── Theme ────────────────────────────────────────────────────────────────
-  const [systemDark, setSystemDark] = useState(
-    () => globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
-  );
-
-  useEffect(() => {
-    const query = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!query) return;
-    // Subscribed rather than read once: a user who switches their system to dark
-    // at 6pm should not have to reload a mail client to see it.
-    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-
-  const themeMode = resolveScheme(preferences.appearance, systemDark);
+  const { themeMode, emailDarkPalette, accentChoices, accentCustom } = useTheme({ preferences });
 
   // Settings → Dev Options (`ui/devOptions.ts`): this device only, apart from the shared
   // preferences. Another window changing it is followed through the `storage` event.
@@ -634,36 +397,6 @@ export function App({ store, existingInstall = true }: Props) {
     globalThis.addEventListener?.("storage", onStorage);
     return () => globalThis.removeEventListener?.("storage", onStorage);
   }, []);
-  // Email dark mode: the palette a message body is drawn in, or null for its own light page.
-  const emailDarkPalette =
-    !preferences.emailDarkMode || themeMode === "light"
-      ? null
-      : themeMode === "oled"
-        ? OLED_EMAIL_PALETTE
-        : DARK_EMAIL_PALETTE;
-
-  useEffect(() => {
-    applyTheme(document.documentElement, themeMode, preferences.accent, preferences.accentCustom);
-  }, [themeMode, preferences.accent, preferences.accentCustom]);
-
-  /** The picker's swatches, drawn in the mode on screen so each one shows what it will look like. */
-  const accentChoices = useMemo(
-    () => [
-      ...ACCENT_THEMES.map((id) => ({
-        id,
-        label: ACCENTS[id].label,
-        swatch: paletteFor(themeMode, id).color.accent,
-      })),
-      { id: CUSTOM_ACCENT, label: CUSTOM_ACCENT_LABEL, swatch: customAccentFor(preferences.accentCustom).tones[themeMode].accent },
-    ],
-    [themeMode, preferences.accentCustom],
-  );
-  /** The custom colour as picked, and whether this mode had to move it for contrast. */
-  const accentCustom = useMemo(() => {
-    const derived = customAccentFor(preferences.accentCustom);
-    return { value: derived.input, adjusted: derived.adjusted[themeMode] };
-  }, [themeMode, preferences.accentCustom]);
-
   // ── What this build can do ───────────────────────────────────────────────
   // Read once from the OS. Null until it lands, and the UI treats null as "not
   // the desktop build" — the demo mailbox does not care whether there is a tray.
@@ -794,86 +527,14 @@ export function App({ store, existingInstall = true }: Props) {
 
   // ── Google contacts ──────────────────────────────────────────────────────
 
-  /**
-   * Bring the store's copy of Google's address book up to date.
-   *
-   * The stored copy is adopted first, so suggestions include it the moment a session
-   * connects, and the network refresh follows only when the last one is older than
-   * `CONTACTS_REFRESH_MS` (or `force` says so). A failed refresh keeps the stored copy:
-   * stale suggestions are still suggestions, and an error banner over the composer for a
-   * convenience feature would be out of proportion.
-   *
-   * With no grant the store is told so, which is what makes the opt-in appear.
-   */
-  /**
-   * Why contacts are connected but not arriving, when the user can fix it: today, the
-   * People API switched off in their Cloud project. Shown in Settings with a link.
-   */
-  const [contactsProblem, setContactsProblem] = useState<{ message: string; url: string | null } | null>(null);
-  const syncGoogleContacts = useCallback(async (force = false): Promise<{ message: string; url: string | null } | null> => {
-    const bridge = sessionRef.current;
-    if (!bridge || !store.getSnapshot().account) return null;
-    try {
-      const access = await bridge.contactsAccess();
-      if (access !== "granted") {
-        store.setGoogleContacts([], access);
-        return null;
-      }
-      store.setGoogleContacts(await bridge.cachedContacts(), "granted");
-      const last = await bridge.contactsSyncedAt();
-      if (!force && last !== null && Date.now() - last < CONTACTS_REFRESH_MS) return null;
-      const fresh = await bridge.refreshContacts();
-      if (fresh) store.setGoogleContacts(fresh, "granted");
-      else store.setGoogleContacts([], await bridge.contactsAccess());
-      setContactsProblem(null);
-      return null;
-    } catch (error) {
-      // A failure the user can fix is said where the switch is (Settings → Google
-      // contacts); anything else keeps the stored copy and tries again next time.
-      const notice = contactsFailureNotice(error);
-      if (notice) setContactsProblem(notice);
-      else console.warn("winnow: could not refresh Google contacts:", error);
-      return notice;
-    }
-  }, [store]);
-
-  /**
-   * The opt-in: "Improve suggestions from Google contacts".
-   *
-   * Incremental consent through the same platform flow as sign-in. On the desktop this
-   * resolves when the user comes back from the browser; on the web it navigates away and
-   * the outcome arrives through `completeWebRedirect` on reload.
-   */
-  const [contactsBusy, setContactsBusy] = useState(false);
-  const [contactsError, setContactsError] = useState<string | null>(null);
-  const improveSuggestions = useCallback(async (notify = false): Promise<void> => {
-    const bridge = sessionRef.current;
-    if (!bridge) return;
-    setContactsError(null);
-    setContactsBusy(true);
-    // From the sender menu there is no inline place for the outcome, so it is a notice.
-    const fail = (message: string) => {
-      setContactsError(message);
-      if (notify) store.setNotice(message);
-    };
-    try {
-      const access = await bridge.grantContacts();
-      if (access === "granted") {
-        const problem = await syncGoogleContacts(true);
-        if (problem && notify) store.setNotice(problem.message);
-      } else {
-        store.setGoogleContacts([], access);
-        fail(HALF_GRANT_MESSAGE);
-      }
-    } catch (error) {
-      fail(error instanceof Error ? error.message : "Google contacts were not connected.");
-    } finally {
-      setContactsBusy(false);
-    }
-  }, [store, syncGoogleContacts]);
-  const onImproveSuggestions = useCallback(() => void improveSuggestions(), [improveSuggestions]);
-
-  const onConnectContactPhotos = useCallback(() => void improveSuggestions(true), [improveSuggestions]);
+  const {
+    contactsProblem,
+    contactsBusy,
+    contactsError,
+    syncGoogleContacts,
+    onImproveSuggestions,
+    onConnectContactPhotos,
+  } = useGoogleContacts({ store, sessionRef });
 
   const [restoringSession, setRestoringSession] = useState(false);
   /** Set beside the drafts code below; `signOut` is declared before it. */
@@ -1247,60 +908,7 @@ export function App({ store, existingInstall = true }: Props) {
     })();
   }, [store, applySharedLink, syncGoogleContacts]);
 
-  // ── Derived view ─────────────────────────────────────────────────────────
-
-  /**
-   * The rail's data, from the store's counts over the open mailbox (1.3.3): a pill's
-   * number is how many messages in this mailbox it would show. With a filter on or a
-   * search running (1.4.0) the numbers are faceted on the active set and the search
-   * (`railFacets`): what the list would show with that pill also on. Computed in the store, the only place that
-   * knows which set the rail was ranked against; `railFacets` keeps its identity while
-   * nothing it reads changed, so this memo holds across renders.
-   */
-  const pills = useMemo(
-    () =>
-      buildPills(
-        view.rail,
-        view.railCounts,
-        view.profile.topSenders,
-        view.railSenderCounts,
-        snapshot.activeFilters,
-        view.railFacets,
-      ),
-    [view.rail, view.railCounts, view.profile.topSenders, view.railSenderCounts, snapshot.activeFilters, view.railFacets],
-  );
-
-  // What the list's empty state needs to tell a clear Inbox from an empty folder.
-  const emptyContext = useMemo(
-    () => ({ mailbox: snapshot.mailbox, filters: snapshot.activeFilters }),
-    [snapshot.mailbox, snapshot.activeFilters],
-  );
-
-  const unreadIds = useMemo(
-    () => new Set(view.emails.filter((email) => email.unread).map((email) => email.id)),
-    [view.emails],
-  );
-
-  // `MAILBOX_ORDER` rather than a second list of the same names: the drawer's rows were
-  // written out here, so a mailbox added to the model and to the `!` palette was
-  // invisible in the drawer — which is how "Sent" could have shipped with no way to open
-  // it on a phone, where the drawer *is* the navigation.
-  const mailboxes = useMemo(
-    () =>
-      MAILBOX_ORDER.map((id) => ({
-        id,
-        label: MAILBOX_LABEL[id],
-        // The two views count what they hold (snoozed conversations, messages waiting to
-        // go), not unread mail, as Gmail's Snoozed and Scheduled do.
-        unread:
-          id === "snoozed"
-            ? snapshot.snoozes.snoozed.filter((record) => record.account === store.accountKey()).length
-            : id === "scheduled"
-              ? snapshot.scheduled.filter((send) => send.account === store.accountKey()).length
-              : snapshot.all.filter((email) => email.mailbox === id && email.unread).length,
-      })),
-    [snapshot.all, snapshot.snoozes, snapshot.scheduled, store],
-  );
+  const { pills, emptyContext, unreadIds, mailboxes, paletteUnread } = useDerivedView({ snapshot, store });
 
   /**
    * Whether the sidebar is open.
@@ -1412,14 +1020,6 @@ export function App({ store, existingInstall = true }: Props) {
     accountButton,
   };
 
-  const paletteUnread = useMemo(
-    () =>
-      Object.fromEntries(
-        mailboxes.map((mailbox) => [mailbox.id, mailbox.unread]),
-      ) as Partial<Record<Mailbox, number>>,
-    [mailboxes],
-  );
-
   // ── Actions ──────────────────────────────────────────────────────────────
 
   const selected = view.selected;
@@ -1459,171 +1059,18 @@ export function App({ store, existingInstall = true }: Props) {
         .join(" — ")
     : "";
 
-  /**
-   * Wrap a store mutation that needs the *current* snapshot.
-   *
-   * The handler closes over nothing and reads through `snapshotRef` when it runs, which
-   * keeps its identity stable — and every one of these is passed to a `memo`'d component,
-   * where a new function per render would defeat the memo.
-   */
-  const act = useCallback(
-    (fn: (store: WinnowStore, snapshot: Snapshot) => void) => () =>
-      fn(storeRef.current, snapshotRef.current),
-    [],
-  );
-
-  /**
-   * Open a message by click.
-   *
-   * A click both moves the cursor and opens; `j` only moves — the difference that makes
-   * keyboard navigation and clicking feel like different actions even though they select
-   * the same message.
-   */
-  /**
-   * Leave the open message.
-   *
-   * On a phone this is Back: the list returns with no current row (the cursor goes with
-   * the reader — see `listSelectedId`) and at the scroll position it was left at, which
-   * `MessageList` keeps across the reader covering it. Focus goes back to the row that
-   * was opened, so a screen reader resumes where it was rather than at the top of the
-   * document; `preventScroll` because the list is already where the user left it, and a
-   * focus after a tap draws no `focus-visible` ring, so nothing on screen marks the row.
-   */
-  /**
-   * The message a swipe on the phone reader's pill stepped to, and which way (STRM-324):
-   * its pane slides in from that side. Keyed on the id, so opening any other way (a
-   * row, a notification, Back) never replays it.
-   */
-  const [stepEnter, setStepEnter] = useState<{ id: number; dir: "next" | "prev" } | null>(null);
-  const stepFromPill = useCallback((step: 1 | -1) => {
-    const s = storeRef.current;
-    s.moveCursor(step);
-    const id = s.getSnapshot().view.selected?.id;
-    setStepEnter(id === undefined ? null : { id, dir: step === 1 ? "next" : "prev" });
-  }, []);
-
-  const closeReader = useCallback(() => {
-    const s = storeRef.current;
-    if (!phoneRef.current) {
-      s.closeReader();
-      return;
-    }
-    const openedId = snapshotRef.current.view.selected?.id;
-    s.closeReader({ dropCursor: true });
-    if (openedId === undefined) return;
-    requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>(`[data-row-count] button[data-message-id="${openedId}"]`)
-        ?.focus({ preventScroll: true });
-    });
-  }, []);
-
-  /**
-   * Read/unread for a message, with the exit that marking unread implies.
-   *
-   * Marking the *open* message unread moves on — the next row on the desktop, the list on
-   * a phone (see `store.markUnreadAndMoveOn`); on a phone focus goes back to the row, as
-   * Back does. Marking read, or toggling a message that is not open, is a plain toggle.
-   */
-  const toggleReadFor = useCallback((id: number) => {
-    const s = storeRef.current;
-    const email = s.getSnapshot().all.find((candidate) => candidate.id === id);
-    if (!email) return;
-    if (email.unread) {
-      s.setRead(id, true);
-      return;
-    }
-    const phoneNow = phoneRef.current;
-    const wasOpen = snapshotRef.current.view.selected?.id === id;
-    s.markUnreadAndMoveOn(id, { phone: phoneNow });
-    if (phoneNow && wasOpen) {
-      requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLElement>(`[data-row-count] button[data-message-id="${id}"]`)
-          ?.focus({ preventScroll: true });
-      });
-    }
-  }, []);
-  const toggleReadRef = useRef(toggleReadFor);
-  toggleReadRef.current = toggleReadFor;
-
   // ── Multi-select and the two menus ─────────────────────────────────────────
 
-  /** Rows in list order, for ranges and for running a batch top to bottom. */
-  const rowOrder = useMemo(() => view.threads.map((row) => row.representative.id), [view.threads]);
+  // Menus are scoped to one mailbox; a menu for a row that just left the view closes.
+  useEffect(() => setMenu(null), [snapshot.mailbox]);
 
-  // A row that leaves the list (filed, filtered out, synced away) leaves the selection.
-  useEffect(() => {
-    setSelection((current) => pruneSelection(current, rowOrder));
-  }, [rowOrder]);
-
-  // A selection belongs to one mailbox.
-  useEffect(() => {
-    setSelection(EMPTY_SELECTION);
-    setMenu(null);
-  }, [snapshot.mailbox]);
-
-  /** Contact photos by lowercased address, from the user's Google contacts, avatar-sized. */
-  const photos = useMemo(() => contactPhotoMap(snapshot.googleContacts), [snapshot.googleContacts]);
-
-  // Signed out by any route (the button, an expired session): who mailed that account
-  // is the account's data. Turning the setting off forgets the lookups too.
-  useEffect(() => {
-    if (snapshot.status === "signed_out" || !preferences.senderPictures) {
-      logoCache.clear();
-      gravatarCache.clear();
-    }
-  }, [snapshot.status, preferences.senderPictures, logoCache, gravatarCache]);
-  // The kept picture copies follow the same switch, one source at a time; signed out,
-  // the account's whole picture database goes. Contact photos go when the contacts grant
-  // does ("not_granted": declined or revoked), not while it is still being checked.
-  useEffect(() => {
-    if (snapshot.status === "signed_out") void pictureBytes.clear();
-  }, [snapshot.status, pictureBytes]);
-  useEffect(() => {
-    if (preferences.senderPictures) return;
-    void pictureBytes.clearKind("logo");
-    void pictureBytes.clearKind("gravatar");
-  }, [preferences.senderPictures, pictureBytes]);
-  useEffect(() => {
-    if (snapshot.contactsAccess === "not_granted") void pictureBytes.clearKind("contact");
-  }, [snapshot.contactsAccess, pictureBytes]);
-
-  // Back online: logos that could not be looked up while offline are asked for again.
-  useEffect(() => {
-    const retry = () => {
-      logoCache.retryFailed();
-      gravatarCache.retryFailed();
-    };
-    window.addEventListener("online", retry);
-    return () => window.removeEventListener("online", retry);
-  }, [logoCache, gravatarCache]);
-
-  // The demo answers brand logos from bundled images and never touches the network.
-  // Gravatar is the real lookup even there, once switched on: the demo's addresses are
-  // fictional, so their hashes say nothing about anyone, and the switch is the thing to
-  // try out.
+  const { photos, senderPictures } = useSenderPictures({
+    snapshot,
+    caches: { logoCache, gravatarCache, pictureBytes },
+  });
+  // The demo answers brand logos from bundled images; the real Gravatar lookup remains
+  // available for its fictional addresses when Sender pictures is on.
   const isDemo = snapshot.contactsAccess === "demo";
-  // One switch, "Sender pictures", turns both remote sources on or off together.
-  const remotePictures = preferences.senderPictures;
-  // Remote images = Never pauses both remote lookups (`senderPictureSources`).
-  const imagePolicy = preferences.imagePolicy;
-  const senderPictures = useMemo<SenderPictures>(
-    () =>
-      senderPictureSources({
-        photos,
-        gravatars: remotePictures ? gravatarCache : null,
-        logos: remotePictures ? (isDemo ? DEMO_LOGO_SOURCE : logoCache) : null,
-        imagePolicy,
-        // The demo's pictures are bundled; nothing of it is kept.
-        bytes: isDemo ? null : pictureBytes,
-      }),
-    [photos, remotePictures, gravatarCache, isDemo, logoCache, imagePolicy, pictureBytes],
-  );
-  // The same sources for a new-mail notification's sender picture (`announce`).
-  useEffect(() => {
-    publishSenderPictures(senderPictures);
-  }, [senderPictures]);
 
   /**
    * A phone's second chance before something that cannot be taken back: deleting from
@@ -1638,123 +1085,35 @@ export function App({ store, existingInstall = true }: Props) {
     action: string;
     run: () => void;
   } | null>(null);
-  /** Run `run`, or on a phone in the Trash ask first: it deletes `count` messages forever. */
-  const guardForever = useCallback((count: number, run: () => void) => {
-    if (!phoneRef.current || snapshotRef.current.mailbox !== "trash") {
-      run();
-      return;
-    }
-    const many = count > 1;
-    setPhoneConfirm({
-      label: many ? `Delete ${count} messages forever?` : "Delete this message forever?",
-      message: many
-        ? `These ${count} messages will be deleted permanently. This can't be undone.`
-        : "This message will be deleted permanently. This can't be undone.",
-      action: many ? `Delete ${count} Messages` : "Delete Message",
-      run,
-    });
-  }, []);
-
-  const runBatch = useCallback((fn: (s: WinnowStore, ids: number[]) => void, keep = false) => {
-    const ids = orderedSelection(
-      selectionRef.current,
-      snapshotRef.current.view.threads.map((row) => row.representative.id),
-    );
-    if (ids.length === 0) return;
-    fn(storeRef.current, ids);
-    if (!keep) setSelection(EMPTY_SELECTION);
-  }, []);
-
-  /**
-   * One-time codes: copy from a row chip, the reader's bar, or `c`.
-   *
-   * `copiedCodeId` is the message just copied, so whichever surface shows its code says
-   * "Copied" for a moment, keyboard copies included; the sr-only line says it aloud.
-   */
-  const [copiedCodeId, setCopiedCodeId] = useState<number | null>(null);
-  const [codeAnnouncement, setCodeAnnouncement] = useState("");
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (copiedTimer.current) clearTimeout(copiedTimer.current);
-  }, []);
-  const copyCode = useCallback(
-    (id: number) => {
-      const code = store.getSnapshot().all.find((email) => email.id === id)?.code;
-      if (!code) return;
-      void copyText(code).then((ok) => {
-        if (!ok) {
-          store.setError("Couldn't reach the clipboard. Select the code in the message to copy it.");
-          return;
-        }
-        setCopiedCodeId(id);
-        setCodeAnnouncement(`Copied code ${code}`);
-        if (copiedTimer.current) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => {
-          setCopiedCodeId(null);
-          setCodeAnnouncement("");
-        }, 1_600);
-      });
-    },
-    [store],
-  );
-  const copyCodeRef = useRef(copyCode);
-  copyCodeRef.current = copyCode;
-
-  const openSenderMenu = useCallback((id: number, trigger: HTMLElement) => {
-    setMenu({ kind: "sender", id, ids: [id], anchor: anchorFromElement(trigger), trigger });
-  }, []);
-
-  const openRowMenu = useCallback((id: number, anchor: MenuAnchor, trigger: HTMLElement) => {
-    const batch = selectionRef.current;
-    const ids =
-      batch.has(id) && batch.size > 1
-        ? orderedSelection(batch, snapshotRef.current.view.threads.map((row) => row.representative.id))
-        : [id];
-    setMenu({ kind: "row", id, ids, anchor, trigger });
-  }, []);
-
-  const handleSelectRow = useCallback((messageId: number) => {
-    const s = storeRef.current;
-    const index = snapshotRef.current.view.threads.findIndex(
-      (row) => row.representative.id === messageId,
-    );
-    if (index < 0) return;
-    s.openRow(index);
-  }, []);
-
-  /**
-   * A row swiped past its commit line (phone only; see `ui/swipe.ts`). Trash and Restore
-   * offer Undo on the strip; a draft is discarded with Undo; read and unread are a plain
-   * toggle, which the row shows as it snaps back.
-   */
-  const handleSwipe = useCallback((id: number, action: SwipeAction) => {
-    const s = storeRef.current;
-    switch (action) {
-      case "trash":
-        s.moveWithUndo(id, "trash");
-        break;
-      case "restore":
-        s.moveWithUndo(id, "inbox");
-        break;
-      case "discard":
-        s.discardDraftWithUndo(id);
-        break;
-      case "markRead":
-        s.setRead(id, true);
-        break;
-      case "markUnread":
-        s.setRead(id, false);
-        break;
-    }
-  }, []);
-  const swipeConfig = useMemo(
-    () => ({ mailbox: snapshot.mailbox, onAction: handleSwipe }),
-    [snapshot.mailbox, handleSwipe],
-  );
-
-  const handleToggleStar = useCallback((messageId: number) => {
-    storeRef.current.toggleStar(messageId);
-  }, []);
+  const {
+    act,
+    stepEnter,
+    stepFromPill,
+    closeReader,
+    toggleReadFor,
+    toggleReadRef,
+    guardForever,
+    runBatch,
+    copiedCodeId,
+    codeAnnouncement,
+    copyCode,
+    copyCodeRef,
+    openSenderMenu,
+    openRowMenu,
+    handleSelectRow,
+    swipeConfig,
+    handleToggleStar,
+  } = useActions({
+    store,
+    storeRef,
+    snapshotRef,
+    mailbox: snapshot.mailbox,
+    phoneRef,
+    selectionRef,
+    setSelection,
+    setMenu,
+    setPhoneConfirm,
+  });
 
   /** The autosave for the open composer. One at a time, like the composer itself. */
   const saverRef = useRef<DraftAutosaver | null>(null);
@@ -2671,7 +2030,7 @@ export function App({ store, existingInstall = true }: Props) {
     const s = storeRef.current;
     exitRows([...ids], () => s.snooze(ids, at));
     setSelection(EMPTY_SELECTION);
-  }, []);
+  }, [setSelection]);
 
   /** Open the snooze choices for `ids`, beside `trigger` (or mid-screen, for `b`). */
   const openSnoozeMenu = useCallback((ids: readonly number[], trigger: HTMLElement | null) => {
@@ -3572,405 +2931,32 @@ export function App({ store, existingInstall = true }: Props) {
     }
   }, [loadAttachment]);
 
-  // ── The keyboard ─────────────────────────────────────────────────────────
+  useKeyboard({
+    storeRef,
+    snapshotRef,
+    composerRef,
+    pills,
+    selectionRef,
+    menuRef,
+    scheduleModalRef,
+    sidebarOpenRef,
+    setSidebarOpen,
+    setSelection,
+    openReply,
+    openForward,
+    openCompose,
+    closeComposer,
+    searchRef,
+    setScrollStep,
+    phoneRef,
+    dockedRef,
+    openSnoozeMenuRef,
+    toggleReadRef,
+    copyCodeRef,
+    setLogoView,
+  });
 
-  /*
-    Refs for everything the handler reads.
-
-    The handler is registered once and never re-registered, so it must not close over
-    render values: a closure over `composer` would be frozen at mount and Escape would
-    never see the composer. Each ref is written on every render and read at keypress time.
-    A stable listener, current values, no churn.
-
-    Declared here rather than beside the state they mirror, because `pills` and the
-    openers are computed below, and a `useRef` initialised from a not-yet-declared `const`
-    is a temporal-dead-zone error.
-  */
-  const pillsRef = useRef(pills);
-  pillsRef.current = pills;
-  const openReplyRef = useRef(openReply);
-  openReplyRef.current = openReply;
-  // A notification's Reply on the desktop: the message is already open, so the composer
-  // opens on it exactly as R would (`ui/notificationActions.ts`).
-  useEffect(() => onReplyRequest(() => openReplyRef.current()), []);
-  const openForwardRef = useRef(openForward);
-  openForwardRef.current = openForward;
-  const openComposeRef = useRef(openCompose);
-  openComposeRef.current = openCompose;
-  const closeComposerRef = useRef(closeComposer);
-  closeComposerRef.current = closeComposer;
-
-  /** The element last pressed, for ⌘A to find the region the user is working in. */
-  const lastPressRef = useRef<Element | null>(null);
-  useEffect(() => {
-    const onPress = (event: PointerEvent) => {
-      lastPressRef.current = event.target instanceof Element ? event.target : null;
-    };
-    window.addEventListener("pointerdown", onPress, true);
-    return () => window.removeEventListener("pointerdown", onPress, true);
-  }, []);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const s = storeRef.current;
-      const snap = snapshotRef.current;
-      const open = composerRef.current;
-      const rail = pillsRef.current;
-      const batch = selectionRef.current;
-
-      // An open menu owns the keyboard; its own handler has already acted. So do the
-      // snooze menu, the date and time picker and an opened scheduled send.
-      if (menuRef.current || scheduleModalRef.current) return;
-
-      /*
-        ⌘A / Ctrl+A outside a text field selects the region the user is in — the
-        reader, the Settings sheet — rather than the browser's whole document, which in
-        an app whose chrome is unselectable means every scrap of selectable text at
-        once: the banner, the status line and the open message run together. With no
-        region to answer (the list has focus), it does nothing. A field keeps the
-        platform's own select-all.
-      */
-      if (isSelectAll(event) && !isEditingTarget(event.target)) {
-        event.preventDefault();
-        selectRegion(
-          selectAllScope([
-            document.activeElement === document.body ? null : document.activeElement,
-            // Focus on a control beside the scope in the same sheet (Settings' category
-            // list): the sheet answers with the one scope it holds.
-            document.activeElement?.closest('[role="dialog"]') ?? null,
-            lastPressRef.current,
-            document.getSelection()?.anchorNode?.parentElement ?? null,
-          ]) as Element | null,
-        );
-        return;
-      }
-
-      // The open sidebar is modal: the app behind it is inert, so no shortcut reaches
-      // it. Escape from outside the sidebar (focus fell to the body) still closes it.
-      if (sidebarOpenRef.current) {
-        // `[` closes it as it opened it, unless someone is typing in the sidebar.
-        const sidebarToggleKey =
-          (event.key === "[" || event.code === "BracketLeft") && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey &&
-          !isEditingElement(event.target instanceof Element ? event.target : null);
-        if (event.key === "Escape" || sidebarToggleKey) {
-          event.preventDefault();
-          setSidebarOpen(false);
-        }
-        return;
-      }
-
-      // Enter or Space on a control that is not a row (an avatar, a star, a toolbar
-      // button) is that button's click, not "open the message at the cursor".
-      if (
-        (event.key === "Enter" || event.key === " ") &&
-        event.target instanceof HTMLButtonElement &&
-        !event.target.hasAttribute("data-message-id")
-      ) {
-        return;
-      }
-
-      // Escape ends a multi-selection before it means anything else.
-      if (
-        event.key === "Escape" &&
-        batch.size > 0 &&
-        open === null &&
-        snap.overlay === "none" &&
-        !event.ctrlKey && !event.metaKey && !event.altKey
-      ) {
-        event.preventDefault();
-        setSelection(EMPTY_SELECTION);
-        return;
-      }
-
-      /*
-        A `select` is not one of `INPUT`/`TEXTAREA`/`contentEditable`, so it falls through
-        as "not text editing" and the canvas handler eats its arrow keys. It gets its own
-        check.
-      */
-      const target = event.target as HTMLElement | null;
-      const inDock = target instanceof Element && target.closest("[data-composer-dock]") !== null;
-      const textEditing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT" ||
-        // `isContentEditable` is checked alongside the tag names because a
-        // `contenteditable` div is a text field with no `type` attribute.
-        target?.isContentEditable === true;
-
-      const keyContext: KeyContext = {
-        // Before sign-in there is nothing to route. `composerOpen` is separate from
-        // `ready` because the composer is a text field *and* a modal: its Escape closes
-        // the sheet, where a plain field's blurs, and the two need to be
-        // distinguishable for that to work.
-        // A docked reply is not modal: with focus outside it the reader's shortcuts work
-        // as usual; inside it, it owns the keyboard like the sheet does.
-        ready: snap.status === "ready" && (open === null || (dockedRef.current && !inDock)),
-        composerOpen: open !== null && (!dockedRef.current || inDock),
-        // `textEditing` deliberately excludes "the composer is open": it means *this
-        // keypress landed in a field*, while the composer's own state is `composerOpen`.
-        // With the composer open and focus on its body, both are true — and the router
-        // checks `composerOpen` first, so the composer's Escape wins.
-        textEditing,
-        viewerOpen: snap.view.selected !== null,
-        // `c` copies an open message's code and composes everywhere else.
-        codeAvailable: Boolean(snap.view.selected?.code),
-        overlayVisible: snap.overlay === "shortcuts" || snap.overlay === "settings" || snap.overlay === "accounts",
-        navigationVisible: snap.overlay === "navigation",
-        filtersActive: snap.activeFilters.length > 0,
-        hasActionTarget:
-          snap.view.selected !== null || snap.cursorIndex !== NO_CURSOR || batch.size > 0,
-        // The rail as the *pills* see it, not the store's ranked bucket list: sender
-        // pills take digits too. Counting the store's list would make `7` address a pill
-        // that is not there.
-        railCount: rail.length,
-        undoAvailable: snap.undo !== null,
-      };
-
-      const command = commandForKey(event.key, keyContext, {
-        shiftKey: event.shiftKey,
-        altKey: event.altKey,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        code: event.code,
-      });
-
-      if (!command) {
-        // An unbound key is swallowed outside a text field, so the OS does not
-        // beep. This app is keyboard-first and a beep reads as broken. `Tab` is
-        // exempt inside `shouldSwallow` and must stay exempt here: it is how focus
-        // reaches every control that draws a `focus-visible` ring.
-        if (shouldSwallow(keyContext, event)) event.preventDefault();
-        return;
-      }
-
-      event.preventDefault();
-      const selectedId = snap.view.selected?.id;
-
-      // With rows selected, the message verbs act on all of them.
-      if (batch.size > 0 && command.type === "snooze") {
-        if (canSnooze(snap.mailbox)) {
-          const bar = document.querySelector<HTMLElement>("[data-selection-snooze]");
-          openSnoozeMenuRef.current(orderedSelection(batch, snap.view.threads.map((row) => row.representative.id)), bar);
-        }
-        return;
-      }
-      if (batch.size > 0 && (command.type === "archive" || command.type === "trash" || command.type === "toggleRead")) {
-        const ids = orderedSelection(batch, snap.view.threads.map((row) => row.representative.id));
-        if (command.type === "archive") s.archiveWithUndo(ids);
-        else if (command.type === "trash") s.trashWithUndo(ids);
-        else s.setReadMany(ids, snap.all.some((email) => batch.has(email.id) && email.unread));
-        if (command.type !== "toggleRead") setSelection(EMPTY_SELECTION);
-        return;
-      }
-
-      switch (command.type) {
-        case "moveSelection":
-          s.moveCursor(command.delta);
-          break;
-        case "scrollReader":
-          setScrollStep((step) => step + command.delta);
-          break;
-        case "openSelected":
-          s.openCursor();
-          break;
-        case "listTop":
-          scrollListToTop();
-          break;
-        case "selectFirst":
-          if (snap.view.threads.length > 0) {
-            s.moveCursor(snap.cursorIndex === NO_CURSOR ? snap.view.threads.length : -snap.view.threads.length);
-          }
-          break;
-        case "selectLast":
-          if (snap.view.threads.length > 0) {
-            s.moveCursor(snap.cursorIndex === NO_CURSOR ? -snap.view.threads.length : snap.view.threads.length);
-          }
-          break;
-        case "closeViewer":
-          // On a phone, leaving the message leaves the list with no current row.
-          s.closeReader({ dropCursor: phoneRef.current });
-          break;
-        case "closeComposer":
-          // Escape, in a composer. Goes through `closeComposer` rather than straight
-          // to `setComposer(null)` so it asks before discarding a written draft — the
-          // same path the close button and the backdrop take.
-          closeComposerRef.current();
-          break;
-        case "dismissOverlay":
-          s.setOverlay("none");
-          break;
-        case "dismissNavigation":
-          s.setOverlay("none");
-          break;
-        case "toggleStar":
-          if (selectedId !== undefined) s.toggleStar(selectedId);
-          break;
-        case "copyCode":
-          if (snap.view.selected?.code) copyCodeRef.current(snap.view.selected.id);
-          break;
-        case "archive":
-          // Context-sensitive in the store, not here: the same key archives from the
-          // inbox, unarchives from the archive and restores from the bin, and doing
-          // that in one place is what keeps the optimistic update, the undo and the
-          // server call agreeing about what happened.
-          if (selectedId !== undefined) exitRows([selectedId], () => s.archiveWithUndo([selectedId]));
-          break;
-        case "trash":
-          if (selectedId !== undefined) exitRows([selectedId], () => s.trashWithUndo([selectedId]));
-          break;
-        case "snooze":
-          // Gmail's `b`: the open message's snooze choices, beside the reader's button.
-          if (selectedId !== undefined && canSnooze(snap.mailbox)) {
-            const button = document.querySelector<HTMLElement>(
-              '[data-reader-action="snooze"], [data-reader-pill-snooze]',
-            );
-            openSnoozeMenuRef.current([selectedId], button);
-          }
-          break;
-        case "toggleRead":
-          if (selectedId !== undefined) toggleReadRef.current(selectedId);
-          break;
-        case "focusReply":
-          openReplyRef.current();
-          break;
-        case "forward":
-          openForwardRef.current();
-          break;
-        case "compose":
-          openComposeRef.current();
-          break;
-        case "focusSearch":
-          // Search first, synchronously, if the logo had swapped it for the version: a
-          // hidden field cannot take focus.
-          flushSync(() => setLogoView((view) => logoViewAfter(view, "focusSearch")));
-          searchRef.current?.focus();
-          // `select()` as well as focus, so a second `/` re-selects an existing
-          // query rather than appending to it.
-          searchRef.current?.select();
-          break;
-        case "toggleFilter": {
-          // Addressed by *pill position*, not by the store's ranked bucket list: the pills
-          // interleave sender pills, so index `3` is a different bucket in each.
-          const pill = rail[command.railIndex];
-          if (pill) s.toggleFilter(pill.id);
-          break;
-        }
-        case "clearFilters":
-          s.clearFilters();
-          break;
-        case "toggleNavigation":
-          s.setOverlay(snap.overlay === "navigation" ? "none" : "navigation");
-          break;
-        case "moveNavigation":
-          s.moveNavigation(command.delta);
-          break;
-        case "activateNavigation":
-          // Through the store's own handler, so the keyboard and the mouse agree rather
-          // than duplicating the palette's item list here.
-          s.activateNavigation(NAVIGATION_ITEMS[snap.navigationIndex]?.id ?? "inbox");
-          break;
-        case "toggleShortcutsOverlay":
-          s.setOverlay(snap.overlay === "shortcuts" ? "none" : "shortcuts");
-          break;
-        case "toggleSidebar":
-          setSidebarOpen((open) => !open);
-          break;
-        case "undo":
-          // The pill's newest offer, exactly as its Undo button takes it.
-          s.undoLast();
-          break;
-        case "openSettings":
-          s.setOverlay(snap.overlay === "settings" ? "none" : "settings");
-          break;
-        case "blurText":
-          (event.target as HTMLElement | null)?.blur();
-          break;
-      }
-    }
-
-    // Registered once and never re-registered.
-    //
-    // Every value the handler needs is read through a ref — `snapshotRef`, `storeRef`,
-    // `pillsRef`, `composerRef` — so the dependency list is empty and the listener is
-    // installed for the life of the app.
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  // ── Android Back ─────────────────────────────────────────────────────────
-
-  /**
-   * One press of Android's Back: close the topmost layer (`ui/backLayers.ts` has the
-   * order and the reasons). Popovers and sheets are found in the DOM and closed with
-   * the Escape they already answer, so a sheet added later is covered without being
-   * listed here; the composer, sidebar, Settings and the reader are this component's
-   * state and are closed directly. The composer is parked — kept as a draft, like a
-   * docked reply the selection leaves — never discarded and never asked about.
-   */
-  const backRef = useRef<() => void>(() => {});
-  backRef.current = () => {
-    const s = storeRef.current;
-    const snap = s.getSnapshot();
-    const popover = document.querySelector(POPOVER_SELECTOR);
-    const sheets = [...document.querySelectorAll('[aria-modal="true"]')].filter(isSheetElement);
-    const sheet = sheets[sheets.length - 1] ?? null;
-    const state: BackState = {
-      popover: menu !== null || popover !== null,
-      sheet: sheet !== null,
-      composer: composerRef.current !== null,
-      sidebar: sidebarOpen,
-      settings: snap.overlay === "settings",
-      message: snap.selectedId !== null,
-    };
-    /** Escape on the element (or what has focus inside it), where its own handler is. */
-    const escapeIn = (element: Element) => {
-      const active = document.activeElement;
-      const target = active && element.contains(active) ? active : element;
-      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-    };
-    switch (backTarget(state)) {
-      case "popover":
-        if (menu) setMenu(null);
-        else if (popover) escapeIn(popover);
-        return;
-      case "sheet":
-        if (sheet) escapeIn(sheet);
-        return;
-      case "composer": {
-        const current = composerRef.current;
-        if (!current || current.sending) return;
-        retireComposer(current, "park");
-        composerRef.current = null;
-        setComposer(null);
-        return;
-      }
-      case "sidebar":
-        setSidebarOpen(false);
-        return;
-      case "settings": {
-        // A phone's category page steps back to the category list first, like its arrow.
-        const back = document.querySelector<HTMLButtonElement>(
-          '[data-settings-page="category"] button[aria-label="Back to Settings"]',
-        );
-        if (back) back.click();
-        else s.setOverlay("none");
-        return;
-      }
-      case "message":
-        s.closeReader({ dropCursor: phoneRef.current });
-        return;
-      case "exit":
-        // Only reached when a press lands between the last layer closing and Back being
-        // handed back to Android below.
-        void desktopPlatformExtras.exitApp();
-    }
-  };
-
-  /**
-   * Whether anything is open that Back should close. At the bare list Back belongs to
-   * Android, which leaves the app the way every other app does (to the background,
-   * rather than killing it), so the handler is only registered while this is true.
-   */
+  // Only register Android Back while there is something for it to close.
   const backHasWork =
     menu !== null ||
     composer !== null ||
@@ -3989,10 +2975,19 @@ export function App({ store, existingInstall = true }: Props) {
     whenPicker !== null ||
     scheduledOpen !== null;
   const android = info?.os === "android";
-  useEffect(() => {
-    if (!android || !backHasWork) return;
-    return desktopPlatformExtras.onBackButton(() => backRef.current());
-  }, [android, backHasWork]);
+  useAndroidBack({
+    android,
+    hasWork: backHasWork,
+    storeRef,
+    composerRef,
+    phoneRef,
+    menuOpen: menu !== null,
+    sidebarOpen,
+    retireComposer,
+    setMenu,
+    setComposer,
+    setSidebarOpen,
+  });
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -4057,7 +3052,7 @@ export function App({ store, existingInstall = true }: Props) {
     setSelection(EMPTY_SELECTION);
     if (store.getSnapshot().view.selected) closeReader();
     setTourOpen(true);
-  }, [store, closeReader]);
+  }, [store, closeReader, setSelection]);
 
   if (snapshot.status === "signed_out") {
     return (
@@ -4403,104 +3398,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
         stays usable, changes wait in the offline queue, and the bar goes by itself on
         the first sync that gets through.
       */}
-      {snapshot.account !== null && (snapshot.connectionLost || !online) && (
-        <div
-          role="status"
-          data-connection-lost=""
-          className="flex items-center justify-center gap-2 bg-danger px-4 py-1.5 text-center text-meta font-semibold text-canvas"
-        >
-          <span className="min-w-0">{CONNECTION_LOST}</span>
-        </div>
-      )}
-
-      {snapshot.error && (
-        <div
-          role="alert"
-          data-error-banner=""
-          className="flex items-start justify-between gap-3 border-b border-hairline bg-danger-wash px-4 py-1.5 text-meta font-medium text-ink-body"
-        >
-          {/*
-            The whole error, selectable and with a Copy button: this is the text a user
-            pastes into a search or a bug report, and a truncated line cannot be copied
-            past its ellipsis.
-          */}
-          <ErrorText text={snapshot.error} className="min-w-0 flex-1" />
-          <button
-            type="button"
-            onClick={store.dismissError.bind(store)}
-            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/*
-        The notice strip.
-
-        For what a sync told the user without it being a failure — a mailbox that hit its
-        cap, so the view is a triage set rather than an export — which must not wear the
-        alarming, dismissible banner of an error.
-      */}
-      {snapshot.notice && (
-        <div className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body">
-          <span data-notice-text="" className="selectable min-w-0 truncate">{snapshot.notice}</span>
-          <button
-            type="button"
-            onClick={store.dismissNotice.bind(store)}
-            className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/*
-        The offline-storage question.
-
-        A prompt, not a notice: the last sync could not write the offline cache, and the
-        answer decides what happens — "Save" asks for persistent storage and retries the
-        write, "Not now" keeps re-downloading on launch for the rest of this session.
-      */}
-      {snapshot.storagePrompt !== null && (
-        <div
-          role={snapshot.storagePrompt === "failed" ? "status" : "alertdialog"}
-          aria-label="Save this mailbox offline"
-          className="flex items-center justify-between gap-3 border-b border-hairline-soft bg-notice px-4 py-1.5 text-meta font-medium text-ink-body"
-        >
-          <span className="selectable min-w-0">
-            {snapshot.storagePrompt === "failed" ? STORAGE_SAVE_FAILED : STORAGE_PROMPT}
-          </span>
-          {snapshot.storagePrompt === "failed" ? (
-            <button
-              type="button"
-              onClick={store.dismissStoragePrompt.bind(store)}
-              className="shrink-0 font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
-            >
-              Dismiss
-            </button>
-          ) : (
-            <span className="flex shrink-0 items-center gap-3">
-              <button
-                type="button"
-                disabled={snapshot.storagePrompt === "saving"}
-                onClick={() => void store.saveMailboxOffline()}
-                className="font-semibold text-ink hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
-              >
-                {snapshot.storagePrompt === "saving" ? "Saving…" : "Save"}
-              </button>
-              <button
-                type="button"
-                disabled={snapshot.storagePrompt === "saving"}
-                onClick={store.declineMailboxStorage.bind(store)}
-                className="font-semibold text-ink-subtle hover:text-ink focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60"
-              >
-                Not now
-              </button>
-            </span>
-          )}
-        </div>
-      )}
+      <AppNotices snapshot={snapshot} online={online} store={store} />
 
       {filterPicker && (
         <SmartFilterPicker
@@ -5729,27 +4627,6 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
     )}
     </SenderPicturesContext.Provider>
   );
-}
-
-/** A keypress that landed in a text field, which owns its own select-all. */
-function isEditingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT" ||
-    target.isContentEditable
-  );
-}
-
-/** Select a region's text. With no region, the selection is left as it was. */
-function selectRegion(scope: Element | null): void {
-  const selection = document.getSelection();
-  if (!selection || !scope) return;
-  selection.removeAllRanges();
-  const range = document.createRange();
-  range.selectNodeContents(scope);
-  selection.addRange(range);
 }
 
 /**
