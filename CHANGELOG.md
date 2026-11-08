@@ -20,7 +20,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Changed
 
-- Reorganized app and store internals into smaller, feature-focused modules without changing user-facing behavior.
+- Refactor of app internals into smaller, feature-focused modules without changing user-facing behavior.
 
 ## [1.7.3] - 2026-11-05
 
