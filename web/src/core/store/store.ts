@@ -1354,9 +1354,7 @@ export class WinnowStore {
   public setNicknameForAddress(address: string, nickname: string | null): void {
     const accountNicknames = getEmailNicknames(this.state.accountId ?? null);
     const updated = setNickname(accountNicknames, address, nickname);
-    let storage = null;
-    try { storage = globalThis.localStorage; } catch { return; }
-    persistEmailNicknames(storage, this.state.accountId ?? null, updated);
+    try { persistEmailNicknames(globalThis.localStorage, this.state.accountId ?? null, updated); } catch { return; }
 
     // Also update the local cache
     this.emailNicknames = updated;

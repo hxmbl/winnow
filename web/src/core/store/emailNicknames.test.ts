@@ -11,6 +11,16 @@ import {
   persistEmailNicknames,
   setNickname,
 } from "./emailNicknames";
+import type { KeyValueStorage } from "../session/accounts";
+
+function createStorage(): KeyValueStorage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+    removeItem: (key) => { values.delete(key); },
+  };
+}
 
 describe("emailNicknames", () => {
   describe("normalizeAddress", () => {
@@ -19,7 +29,7 @@ describe("emailNicknames", () => {
       expect(normalizeAddress("Ada@EXAMPLE.COM")).toBe("ada@example.com");
       expect(normalizeAddress("Ada@Example.com; Grace@example.com")).toBe("ada@example.com");
       expect(normalizeAddress("Tomás@ Example.com")).toBe("tomas@example.com");
-      expect(normalizeAddress("Déborah@Example.com")).toBe("debora@example.com");
+      expect(normalizeAddress("Déborah@Example.com")).toBe("deborah@example.com");
     });
 
     it("strips whitespace", () => {
@@ -128,7 +138,7 @@ describe("emailNicknames", () => {
         "ada@example.com": "Personal",
         "work@gmail.com": "Work",
       };
-      const storage: any = {};
+      const storage = createStorage();
       persistEmailNicknames(storage, "account123", testNicknames);
       const loaded = loadEmailNicknames(storage, "account123");
       expect(loaded).toEqual(testNicknames);
@@ -140,7 +150,7 @@ describe("emailNicknames", () => {
         setItem: () => {
           throw new Error("Quota exceeded");
         },
-        getItem: () => null,
+        getItem: () => JSON.stringify({ "ada@example.com": "Personal" }),
         removeItem: () => {},
         clear: () => {},
       };
@@ -152,7 +162,7 @@ describe("emailNicknames", () => {
     });
 
     it("correctly handles empty string nicknames", () => {
-      const storage: any = {};
+      const storage = createStorage();
       persistEmailNicknames(storage, "account123", {
         "ada@example.com": "",
         "work@gmail.com": "Work",
@@ -165,7 +175,7 @@ describe("emailNicknames", () => {
     });
 
     it("replaces on write", () => {
-      const storage: any = {};
+      const storage = createStorage();
       persistEmailNicknames(storage, "account123", { "ada@example.com": "Old" });
       persistEmailNicknames(storage, "account123", { "ada@example.com": "New" });
       const loaded = loadEmailNicknames(storage, "account123");

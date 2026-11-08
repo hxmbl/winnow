@@ -58,9 +58,7 @@ export function persistEmailNicknames(
 
 /** Load nicknames from the browser's device storage. */
 export function getEmailNicknames(accountId: string | null): EmailNicknames {
-  let storage: KeyValueStorage | null = null;
-  try { storage = globalThis.localStorage; } catch { return {}; }
-  return loadEmailNicknames(storage, accountId);
+  try { return loadEmailNicknames(globalThis.localStorage, accountId); } catch { return {}; }
 }
 
 /**
@@ -95,9 +93,7 @@ export function setNickname(
 /** Save through the browser's device storage. */
 export function setNicknameForAddress(accountId: string | null, address: string, nickname: string | null): void {
   const nicknames = getEmailNicknames(accountId);
-  let storage: KeyValueStorage | null = null;
-  try { storage = globalThis.localStorage; } catch { return; }
-  persistEmailNicknames(storage, accountId, setNickname(nicknames, address, nickname));
+  try { persistEmailNicknames(globalThis.localStorage, accountId, setNickname(nicknames, address, nickname)); } catch { return; }
 }
 
 function extractAddress(value: string): string {
@@ -110,7 +106,7 @@ function extractAddress(value: string): string {
  * Case- and accent-insensitive folding to ensure consistent lookups.
  */
 export function normalizeAddress(address: string): string {
-  const normalized = address.trim().toLowerCase();
+  const normalized = address.split(/[;,]/, 1)[0].replace(/\s+/g, "").toLowerCase();
   return normalized.normalize("NFD").replace(/\p{Diacritic}/gu, "");
 }
 
