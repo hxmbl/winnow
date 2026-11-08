@@ -46,25 +46,24 @@ import {
   lostAttachmentsMessage,
   restoreLocalDraft,
   reopenDraft,
-  type DraftSaveStatus,
   type LocalDraft,
 } from "./core/mail/drafts";
 import {
   buildNewDraft,
   draftFromMailto,
-  isUntouchedNewDraft,
   needsSubjectConfirmation,
 } from "./core/mail/compose";
 import { attentionSentence } from "./core/classify/attention";
 import { formatRelative } from "./core/mail/datetime";
 import { resolveImageConsent } from "./core/mail/imageConsent";
-import type { Draft, DrivePermissionRef, GmailId } from "./core/model/email";
+import type { Draft, DrivePermissionRef } from "./core/model/email";
 import { DEMO_ACCOUNT, demoMailbox } from "./core/data/demo";
 import { DEMO_ACCOUNT_IDS, demoSecondMailbox } from "./core/data/demoSecond";
 import { demoAccounts, switcherLabel } from "./ui/accounts";
 import { AccountButton, AccountSwitcher } from "./ui/components/AccountSwitcher";
 import { AccountsPage } from "./ui/components/AccountsPage";
 import type { CategoryId } from "./ui/settingsCatalog";
+
 import { defaultFromAccount, draftFromAnotherAccount } from "./core/mail/fromAccount";
 import { createSessionBridge, type SessionBridge } from "./core/session/bridge";
 import type { DraftsAccess } from "./core/session/session";
@@ -165,7 +164,6 @@ import {
   prepareDriveDispatch,
   prepareQueuedShare,
   queuedShareNotice,
-  type DriveDispatch,
 } from "./core/gmail/driveSend";
 import { DriveConsent } from "./ui/components/DriveConsent";
 import { DriveGrantNeeded } from "./ui/components/DriveGrantNeeded";
@@ -183,28 +181,9 @@ import { alreadyAddedMessage } from "./ui/accounts";
 import { exitRows } from "./ui/rowExit";
 import { buttonClass } from "./ui/button";
 import { Icon } from "./ui/components/Icon";
-
-/** Which popover menu is open, and what it acts on. */
-type OpenMenu = {
-  kind: "sender" | "row";
-  /** The message whose sender or row was clicked. */
-  id: number;
-  /** For a row menu: the messages it acts on (the selection, or just `id`). */
-  ids: number[];
-  anchor: MenuAnchor;
-  /** Gets focus back when the menu closes by Escape or a choice. */
-  trigger: HTMLElement | null;
-};
-
-type Props = {
-  /** The one piece of global state. Everything else is derived from it. */
-  store: WinnowStore;
-  /**
-   * This device had run Winnow before this launch (any `winnow.*` key at boot), so the
-   * first-run tour does not open by itself. Read in `main.tsx` before anything is written.
-   */
-  existingInstall?: boolean;
-};
+import type { OpenMenu, Props, ComposerState, PendingSend, SendDriveAnswers, ComposerStart } from "./app/types";
+import { DriveSendHold } from "./app/types";
+import { deferred, CONTACTS_REFRESH_MS, HALF_GRANT_MESSAGE, DRAFT_NOTICE_MS, SENT_NOTICE_MS, SCHEDULED_SENT_NOTICE_MS, DUE_CHECK_MS, platformLabel, selfAddressOf, draftAccount, BLANK_INITIAL, isUntouchedDraft } from "./app/utils";
 
 /**
  * Whether the one-time session restore has already been started.
@@ -214,154 +193,6 @@ type Props = {
  * the second pass, a StrictMode warning of its own.
  */
 let sessionRestoreStarted = false;
-
-/** A promise and its resolver, for "once the launch has finished restoring". */
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve: () => void = () => undefined;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-/**
- * How stale Google contacts may get before opening the composer refreshes them.
- *
- * Fifteen minutes: an incremental refresh is one cheap request per listing, but the
- * composer opens far more often than anyone adds a contact.
- */
-const CONTACTS_REFRESH_MS = 15 * 60_000;
-
-const HALF_GRANT_MESSAGE =
-  "Google did not grant both contact permissions. Tick both boxes on Google's screen to use them.";
-
-/**
- * The composer's state, including what it is for.
- *
- * `mode` drives the title and the body-field behaviour: a forward has no recipient until
- * the user picks one, a reply's does. It also matters to the Escape/discard logic, which
- * needs to know whether there is anything worth keeping.
- */
-type ComposerState = {
-  draft: Draft;
-  sending: boolean;
-  error: string | null;
-  mode: "reply" | "forward" | "new";
-  /**
-   * A new message's recipients and subject as it opened (blank, or from a `mailto:`),
-   * so closing an untouched one does not ask. Replies and forwards judge by the body.
-   */
-  initial?: Pick<Draft, "to" | "cc" | "bcc" | "subject">;
-  /** The message a reply or forward answers: where it docks, and what it threads on. */
-  replyTo?: GmailId;
-  /** Reply all (the default) or Reply, for a reply. */
-  replyAll?: boolean;
-  /** Which draft this is, for the autosave and the device copy. See `draftContextKey`. */
-  context: string;
-  /** What the autosave last said. */
-  status: DraftSaveStatus;
-  /**
-   * Reopened from the Drafts mailbox: always a sheet (never docked, never parked by
-   * the selection moving), closing keeps it rather than asking, and `baseline` is the
-   * draft as it opened, so an untouched reopen neither re-saves nor counts as an edit.
-   */
-  fromDrafts?: { draftId: string; row: Email; baseline: Draft };
-  /** Files a restored device copy could not bring back, said by the attachment area. */
-  attachNotice?: string | null;
-  /**
-   * Drive permissions an attempt to send this message created and that are kept while it
-   * might still go (a failed send, or the share warning waiting on an answer). Taken back
-   * if the message is abandoned instead. See `core/gmail/driveSend`.
-   */
-  driveShares?: DrivePermissionRef[];
-  /**
-   * 1.4.0: the account it goes out from when that is not the open one (the From picker).
-   * Absent: the open account, which is also the one a reply's original arrived in.
-   */
-  fromAccount?: string;
-};
-
-/**
- * A sent message waiting out its undo window: the composer as it was when Send was
- * pressed, its autosave (still attached to the Gmail draft), and the message a reply
- * threads on.
- */
-type PendingSend = {
-  composer: ComposerState;
-  saver: DraftAutosaver | null;
-  inReplyTo?: GmailId;
-  /** What the user already answered about its Drive links (Send anyway on either dialog). */
-  drive?: SendDriveAnswers;
-  /** The Drive permissions this message holds once dispatch has shared (set by `deliver`). */
-  created?: DrivePermissionRef[];
-  /** The Gmail draft to send when there is no autosave to ask (a scheduled send). */
-  draftId?: string;
-  /** A scheduled send going out: what the pill says, and whether it is late. */
-  scheduled?: { sendAt: number; late: boolean };
-};
-
-/** Answers the user gave about a message's Drive links, carried into the send. */
-type SendDriveAnswers = { accepted?: boolean; waived?: boolean };
-
-/** A send stopped at dispatch for the user to answer about its Drive links. */
-class DriveSendHold extends Error {
-  constructor(readonly hold: Extract<DriveDispatch, { kind: "hold" }>) {
-    super("The Drive links need an answer before this message goes.");
-    this.name = "DriveSendHold";
-  }
-}
-
-/** What `startComposer` is given: the composer, less the state it owns itself. */
-type ComposerStart = Omit<ComposerState, "sending" | "error" | "status">;
-
-/** A blank new message's recipients and subject, the baseline for "untouched". */
-const BLANK_INITIAL: NonNullable<ComposerState["initial"]> = { to: [], cc: [], bcc: [], subject: "" };
-
-/** How long "Draft saved." stays up after a half-written reply is put away, in ms. */
-const DRAFT_NOTICE_MS = 4000;
-
-/** Where this Winnow runs, for Settings → About: "Desktop app · linux x86_64", "Browser". */
-function platformLabel(info: PlatformInfo): string {
-  if (info.kind === "web") return "Browser";
-  if (info.os === "android") return "Android app";
-  return `Desktop app · ${info.os}${info.arch && info.arch !== "unknown" ? ` ${info.arch}` : ""}`;
-}
-
-/** The user's own address, for leaving it off a reply-all: the demo's is its seeded account. */
-function selfAddressOf(snap: Pick<Snapshot, "contactsAccess" | "account">): string | undefined {
-  return snap.account?.email ?? (snap.contactsAccess === "demo" ? DEMO_ACCOUNT.email : undefined);
-}
-
-/** Whose drafts these are: the signed-in address, `demo`, or `null` before either. */
-function draftAccount(snap: Pick<Snapshot, "contactsAccess" | "account">): string | null {
-  if (snap.contactsAccess === "demo") return "demo";
-  return snap.account?.email ?? null;
-}
-
-/** How long "Message sent." stays up before it clears itself, in ms. */
-const SENT_NOTICE_MS = 6000;
-/** How long the pill says a scheduled message went, or was scheduled. */
-const SCHEDULED_SENT_NOTICE_MS = 6000;
-/** How often the open app looks for snoozes to wake and scheduled sends to go. */
-const DUE_CHECK_MS = 15_000;
-
-/**
- * Whether discarding this draft would lose anything the user wrote.
- *
- * Not "is the body empty" but "is the user's *contribution* empty": a reply's body starts
- * as the quoted original, so `stripQuote` removes an untouched quote suffix, and a
- * forward's baseline is recorded in `Draft.prefilled`.
- *
- * Getting this wrong is not cosmetic: testing the body for emptiness made *every* forward
- * "written", so opening one with `f` and pressing Escape asked whether to throw away text
- * Winnow had just put there — which trains people to click through confirmations.
- */
-function isUntouchedDraft(draft: Draft, initial?: ComposerState["initial"]): boolean {
-  if (initial) return isUntouchedNewDraft(draft, initial);
-  if ((draft.attachments?.length ?? 0) > 0) return false;
-  const written = stripQuote(draft.body, draft.quoteBlock).trim();
-  return written === (draft.prefilled ?? "").trim();
-}
 
 export function App({ store, existingInstall = true }: Props) {
   const snapshot = useStore(store);
