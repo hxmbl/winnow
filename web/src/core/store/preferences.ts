@@ -96,6 +96,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   else if (typeof source.censorEmails === "boolean") out.censorLevel = source.censorEmails ? "emails" : "off";
   if (typeof source.emailDarkMode === "boolean") out.emailDarkMode = source.emailDarkMode;
   if (typeof source.driveLinks === "boolean") out.driveLinks = source.driveLinks;
+  if (typeof source.removeLinkTrackers === "boolean") out.removeLinkTrackers = source.removeLinkTrackers;
   // Only a delay Settings offers (or the retired 30 s, read as 20 s): anything else (a
   // newer build's choice, a hand edit) falls back to the default rather than being
   // rounded to a neighbour.

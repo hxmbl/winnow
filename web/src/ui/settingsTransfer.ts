@@ -44,6 +44,7 @@ export const EXPORTED_PREFERENCE_KEYS = [
   "imagePolicy",
   "senderPictures",
   "censorLevel",
+  "removeLinkTrackers",
   "notificationsEnabled",
   "notificationActions",
   "notificationHidePreview",
@@ -293,6 +294,8 @@ export function settingLabel(key: ExportedKey): string {
       return SETTINGS.senderPictures.label;
     case "censorLevel":
       return SETTINGS.censorLevel.label;
+    case "removeLinkTrackers":
+      return SETTINGS.removeLinkTrackers.label;
     case "notificationsEnabled":
       return SETTINGS.notifications.label;
     case "notificationActions":

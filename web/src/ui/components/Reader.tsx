@@ -748,6 +748,8 @@ type Props = {
   emailDark?: DarkPalette | null;
   /** Dev Options → Pure Plain Text: the Plain text form shows the text exactly as sent. See `MessageBody`. */
   purePlainText?: boolean;
+  /** Settings → Privacy → Remove link trackers. On by default. See `MessageBody`. */
+  removeLinkTrackers?: boolean;
   email: Email | null;
   conversation: readonly Email[];
   signals: EmailSignals | null;
@@ -844,6 +846,7 @@ export function Reader({
   leftHanded = false,
   emailDark = null,
   purePlainText = false,
+  removeLinkTrackers = true,
   stepReach,
   onStep,
 }: Props) {
@@ -1107,6 +1110,7 @@ export function Reader({
             view={view}
             emailDark={emailDark}
             purePlainText={purePlainText}
+            removeLinkTrackers={removeLinkTrackers}
           />
 
           {/*

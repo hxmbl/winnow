@@ -146,6 +146,13 @@ export type Preferences = {
    */
   driveLinks: boolean;
   /**
+   * Remove link trackers (Settings → Privacy, STRM-471): strip known click-tracking
+   * parameters (`utm_*`, `fbclid`, …) from the links in a message as it is rendered.
+   * On by default. Signed, redirecting and account-flow links are left whole; see
+   * `core/mail/trackers.ts`. Display only: the stored message is never changed.
+   */
+  removeLinkTrackers: boolean;
+  /**
    * How long Send waits before the message goes out, so Undo can bring it back. `0` is
    * Off. See `core/mail/undoSend`: closing the app in the wait keeps it as a draft.
    */
@@ -210,6 +217,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   leftHanded: false,
   censorLevel: "off",
   driveLinks: true,
+  removeLinkTrackers: true,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
   notificationActions: DEFAULT_NOTIFICATION_ACTIONS,

@@ -3768,6 +3768,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               leftHanded={preferences.leftHanded}
               emailDark={emailDarkPalette}
               purePlainText={devOptions.purePlainText}
+              removeLinkTrackers={preferences.removeLinkTrackers}
               email={selected}
               conversation={view.conversation}
               signals={selected ? (view.signals.get(selected.id) ?? null) : null}
@@ -4025,6 +4026,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           senderPictures={preferences.senderPictures}
           // Changing the switch here is an answer too, so the inbox notice stays gone.
           onSenderPictures={(value) => store.setPreferences({ senderPictures: value, pictureNoticeDismissed: true })}
+          removeLinkTrackers={preferences.removeLinkTrackers}
+          onRemoveLinkTrackers={(value) => store.setPreferences({ removeLinkTrackers: value })}
           notificationsEnabled={preferences.notificationsEnabled}
           onNotifications={(notificationsEnabled) => {
             store.setPreferences({ notificationsEnabled });

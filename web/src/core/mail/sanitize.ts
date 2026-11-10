@@ -18,6 +18,7 @@
  */
 
 import { decodeEntities } from "./html.ts";
+import { stripTrackingParams } from "./trackers.ts";
 import { parseColor, recolourAttribute, recolourDeclarations, type DarkPalette, type Rgba } from "./emailDark.ts";
 
 // ── The allowlists ──────────────────────────────────────────────────────────
@@ -245,6 +246,7 @@ function resolveUrl(
   allowRemote: boolean,
   inlineParts: Record<string, string> | undefined,
   rewrite: ReadonlyMap<string, string> | undefined,
+  stripTrackers = false,
 ): { url: string | null; blocked: boolean } {
   // Decoded first, stripped second, so the scheme test sees what the browser will.
   // Escaping the result is the caller's job — see `escapeAttribute`.
@@ -279,7 +281,9 @@ function resolveUrl(
   // Protocol-relative resolves against the document, which in the app is *this
   // app* — remote by definition.
   if (decoded.startsWith("//")) {
-    return allowRemote ? { url: `https:${decoded}`, blocked: false } : { url: null, blocked: true };
+    if (!allowRemote) return { url: null, blocked: true };
+    const absolute = `https:${decoded}`;
+    return { url: kind === "link" && stripTrackers ? stripTrackingParams(absolute) : absolute, blocked: false };
   }
 
   const scheme = /^([a-z][a-z0-9+.-]*:)/i.exec(decoded);
@@ -301,6 +305,12 @@ function resolveUrl(
   if (isHttp && kind === "fetch") {
     if (rewrite !== undefined) return { url: null, blocked: true };
     if (!allowRemote) return { url: null, blocked: true };
+  }
+  // Remove link trackers (STRM-471): links only, and only `http(s)`. Done here rather
+  // than in the reader's click handler, because a modified click (new tab, copy link)
+  // never reaches that handler; the cleaned address is the one in the document.
+  if (isHttp && kind === "link" && stripTrackers) {
+    return { url: stripTrackingParams(decoded), blocked: false };
   }
   return { url: decoded, blocked: false };
 }
@@ -928,6 +938,13 @@ export type SanitizeOptions = {
    * "as sent" document get the sender's text untouched.
    */
   markLongTokens?: boolean;
+  /**
+   * Remove known click-tracking parameters (`utm_*`, `fbclid`, `gclid`, …) from `http(s)`
+   * link `href`s, leaving signed, redirecting and account-flow links whole
+   * (`trackers.ts`). Settings → Privacy → Remove link trackers. Off by default here, so a
+   * caller that does not ask gets the sender's addresses untouched.
+   */
+  stripLinkTrackers?: boolean;
 };
 
 /** A token this long (no whitespace) may break anywhere under `markLongTokens`. */
@@ -999,6 +1016,7 @@ const DEFAULTS: SanitizeOptions = { allowRemote: false };
 export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions> = {}): SanitizedMail {
   const settings = { ...DEFAULTS, ...options };
   const { allowRemote, inlineParts, rewriteUrls, recolour } = settings;
+  const stripTrackers = settings.stripLinkTrackers === true;
   const text = settings.markLongTokens ? escapeTextMarkingLong : escapeText;
 
   // One lowercased copy of the body, for the element-boundary search: lowercasing
@@ -1170,7 +1188,7 @@ export function sanitizeMailHtml(html: string, options: Partial<SanitizeOptions>
 
       switch (attribute.name) {
         case "href": {
-          const resolved = resolveUrl(value, "link", allowRemote, inlineParts, rewriteUrls);
+          const resolved = resolveUrl(value, "link", allowRemote, inlineParts, rewriteUrls, stripTrackers);
           if (resolved.url) {
             attrs.push(`href="${escapeAttribute(resolved.url)}"`);
             href = true;
