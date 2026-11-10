@@ -1,5 +1,7 @@
 package app.winnow.android
 
+import android.util.Log
+
 /**
  * When [MainActivity] should ask its WebView to draw again (STRM-568).
  *
@@ -18,21 +20,34 @@ package app.winnow.android
 class ResumeRepaint {
   private var stopped = false
 
+  companion object {
+    private const val TAG = "STRM-584"
+  }
+
   /** The activity went out of sight (`onStop`). */
   fun onStop() {
+    Log.d(TAG, "ResumeRepaint.onStop: stopped = true")
     stopped = true
   }
 
   /** `onResume`: true when the WebView should be invalidated now. */
-  fun onResume(): Boolean = stopped
+  fun onResume(): Boolean {
+    Log.d(TAG, "ResumeRepaint.onResume: stopped = $stopped, shouldRedraw = $stopped")
+    return stopped
+  }
 
   /**
    * `onWindowFocusChanged`: true when the WebView should be invalidated now. Focus back
    * is the last step of coming back to the front, so it ends the redraw.
    */
   fun onFocus(hasFocus: Boolean): Boolean {
-    if (!hasFocus || !stopped) return false
-    stopped = false
-    return true
+    val shouldRedraw = hasFocus && stopped
+    if (shouldRedraw) {
+      Log.d(TAG, "ResumeRepaint.onFocus: hasFocus = $hasFocus, stopped = $stopped, clearing stopped flag")
+      stopped = false
+    } else {
+      Log.d(TAG, "ResumeRepaint.onFocus: hasFocus = $hasFocus, stopped = $stopped, shouldRedraw = $shouldRedraw")
+    }
+    return shouldRedraw
   }
 }
