@@ -3,12 +3,21 @@ package app.winnow.android
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import app.winnow.android.notify.LaunchLinks
 
 class MainActivity : TauriActivity() {
+  private var webView: WebView? = null
+  private val repaint = ResumeRepaint()
+
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    this.webView = webView
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // A notification's tap that had to start this activity: kept for the web layer to
     // take once it listens (notify/LaunchLinks.kt explains why the deep-link plugin
@@ -43,5 +52,31 @@ class MainActivity : TauriActivity() {
     setIntent(intent)
     LaunchLinks.offerNew(intent.action, intent.dataString)
     super.onNewIntent(intent)
+  }
+
+  /**
+   * Back from a link opened in the browser, the WebView showed a blank screen until a
+   * tap (STRM-568): `ResumeRepaint.kt` says why. Ask it to draw again once in front.
+   */
+  override fun onStop() {
+    super.onStop()
+    repaint.onStop()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    if (repaint.onResume()) redraw()
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (repaint.onFocus(hasFocus)) redraw()
+  }
+
+  private fun redraw() {
+    val view = webView ?: return
+    view.invalidate()
+    // And on the next frame, when the window's new surface is sure to be there.
+    view.postOnAnimation { view.invalidate() }
   }
 }

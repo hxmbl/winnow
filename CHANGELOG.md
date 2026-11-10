@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Fixed
+
+- Android: coming back from a link opened in the browser no longer shows a blank screen until you tap.
+
 ## [1.8.0] - 2026-11-08
 
 ### Added
