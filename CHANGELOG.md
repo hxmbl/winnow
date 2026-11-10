@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Privacy → Remove link trackers, on by default: well-known tracking tags such as `utm_source`, `fbclid` and `gclid` are taken off the links in a message as it is shown, so the site you open is not told which email you came from. Links that look signed or tied to your account, link shorteners and redirect links, and sign-in, verify, reset and unsubscribe links are left exactly as sent (STRM-471).
+
 ### Fixed
 
 - Android: coming back from a link opened in the browser no longer shows a blank screen until you tap.

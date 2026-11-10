@@ -80,6 +80,7 @@ function useSanitised(
   imagesAllowed: boolean,
   inlineParts: Record<string, string> | undefined,
   recolour: DarkPalette | undefined,
+  stripLinkTrackers: boolean,
 ) {
   return useMemo(
     () =>
@@ -97,8 +98,11 @@ function useSanitised(
         // column never shrinks below its longest word and a too-wide message is zoomed
         // to fit instead of squeezed (STRM-318).
         markLongTokens: true,
+        // Remove link trackers (STRM-471), in the markup itself so every way of opening
+        // a link, modified clicks included, gets the cleaned address.
+        stripLinkTrackers,
       }),
-    [email.bodyHtml, imagesAllowed, inlineParts, recolour],
+    [email.bodyHtml, imagesAllowed, inlineParts, recolour, stripLinkTrackers],
   );
 }
 
@@ -399,7 +403,7 @@ function RichBody({
  * The frame is a fixed height: measuring it would require the frame to script, and
  * granting `allow-scripts` to save the reader a scrollbar is a bad trade.
  */
-function AsSent({ email, imagesAllowed }: { email: Email; imagesAllowed: boolean }) {
+function AsSent({ email, imagesAllowed, stripLinkTrackers }: { email: Email; imagesAllowed: boolean; stripLinkTrackers: boolean }) {
   const document = useMemo(() => {
     const sanitised = sanitizeMailHtml(email.bodyHtml ?? "", {
       allowRemote: imagesAllowed,
@@ -407,9 +411,10 @@ function AsSent({ email, imagesAllowed }: { email: Email; imagesAllowed: boolean
       // cannot reach the reader. Sanitised first — no `@import`, no fetching `url()`, no
       // `expression()`.
       collectStyles: true,
+      stripLinkTrackers,
     });
     return emailDocument(sanitised.html, sanitised.stylesheets);
-  }, [email.bodyHtml, imagesAllowed]);
+  }, [email.bodyHtml, imagesAllowed, stripLinkTrackers]);
   // The frame's opaque origin is out of the document watcher's reach: censor the srcdoc.
   const censor = useCensorActive();
   const shown = useMemo(() => (censor ? censorHtmlDocument(document) : document), [censor, document]);
@@ -488,6 +493,13 @@ type Props = {
   emailDark?: DarkPalette | null;
   /** Dev Options → Pure Plain Text: the Plain text form shows the text exactly as sent. */
   purePlainText?: boolean;
+  /**
+   * Settings → Privacy → Remove link trackers (STRM-471): strip known tracking
+   * parameters from the message's links while sanitising (`core/mail/trackers.ts`). On by
+   * default. Applied to the rich and "as sent" forms alike, and in the document rather
+   * than the click handler, so a modified click (new tab, copy link) gets the clean link too.
+   */
+  removeLinkTrackers?: boolean;
 };
 
 /**
@@ -529,6 +541,7 @@ export function MessageBody({
   view,
   emailDark = null,
   purePlainText = false,
+  removeLinkTrackers = true,
 }: Props) {
   const bodyHtml = email.bodyHtml;
 
@@ -541,7 +554,7 @@ export function MessageBody({
   const own = useMemo(() => (bodyHtml ? detectOwnDarkStyles(bodyHtml, []) : null), [bodyHtml]);
   const mode = emailDarkMode(emailDark !== null && !original, own);
   const darkFor = emailDark && mode !== "off" ? { mode, palette: emailDark } : null;
-  const sanitised = useSanitised(email, imagesAllowed, inlineParts, mode === "adaptive" && emailDark ? emailDark : undefined);
+  const sanitised = useSanitised(email, imagesAllowed, inlineParts, mode === "adaptive" && emailDark ? emailDark : undefined, removeLinkTrackers);
 
   /**
    * The proxy's document, fetched when this form is on screen.
@@ -585,7 +598,7 @@ export function MessageBody({
       )}
       {shown === "rich" && <RichBody html={sanitised.html} stylesheets={sanitised.stylesheets} onOpenLink={onOpenLink} dark={darkFor} />}
       {shown === "plain" && <PlainText email={email} pure={purePlainText} />}
-      {shown === "sent" && <AsSent email={email} imagesAllowed={imagesAllowed} />}
+      {shown === "sent" && <AsSent email={email} imagesAllowed={imagesAllowed} stripLinkTrackers={removeLinkTrackers} />}
       {shown === "proxied" &&
         (proxied === undefined ? (
           <p className="text-meta text-ink-subtle" role="status" aria-live="polite">

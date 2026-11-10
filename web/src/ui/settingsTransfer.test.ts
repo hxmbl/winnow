@@ -50,6 +50,7 @@ describe("the export allowlist", () => {
       "imagePolicy",
       "senderPictures",
       "censorLevel",
+      "removeLinkTrackers",
       "notificationsEnabled",
       "notificationActions",
       "notificationHidePreview",

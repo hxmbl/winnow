@@ -6874,7 +6874,7 @@ try {
     check("keyboard focus entering a setting explains it", (await explain.getAttribute("data-explains")) === "senderPictures");
     await s.keyboard.press("Tab");
     await s.waitForTimeout(80);
-    check("and Tab to the next setting moves the explanation", (await explain.getAttribute("data-explains")) === "driveLinks");
+    check("and Tab to the next setting moves the explanation", (await explain.getAttribute("data-explains")) === "removeLinkTrackers");
 
     // Choosing another category starts on its intro.
     await openSettingsCategory(s, "reading");
@@ -6919,7 +6919,7 @@ try {
     check(
       "every setting has a (?) named for it",
       JSON.stringify(labels) ===
-        JSON.stringify(["About Blur sensitive info", "About Remote images", "About Sender pictures", "About Big files as Drive links"]),
+        JSON.stringify(["About Blur sensitive info", "About Remote images", "About Sender pictures", "About Remove link trackers", "About Big files as Drive links"]),
       JSON.stringify(labels),
     );
     check("and the explanations are not printed under the rows", !((await dialog.innerText()).includes("Cloudflare")));
@@ -7026,7 +7026,7 @@ try {
       backGlyph.chevron && backGlyph.glyph <= 24 && backGlyph.tap >= 44 && backGlyph.ink,
       JSON.stringify(backGlyph),
     );
-    check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 4 && !((await dialog.innerText()).includes("Cloudflare")));
+    check("its settings carry (?) buttons, not helper text", (await dialog.locator("[data-setting-info]").count()) === 5 && !((await dialog.innerText()).includes("Cloudflare")));
     await dialog.locator('[data-setting-info="senderPictures"]').tap();
     await s.waitForTimeout(150);
     const tip = s.locator('[data-setting-popover="senderPictures"]');

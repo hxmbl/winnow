@@ -206,6 +206,9 @@ export type SettingsProps = {
   /** Gravatar photos and brand logos in avatars. Off by default; see `Preferences.senderPictures`. */
   senderPictures: boolean;
   onSenderPictures: (value: boolean) => void;
+  /** Strip click trackers from message links. On by default; see `Preferences.removeLinkTrackers`. */
+  removeLinkTrackers: boolean;
+  onRemoveLinkTrackers: (value: boolean) => void;
   notificationsEnabled: boolean;
   onNotifications: (value: boolean) => void;
   /** Which buttons a notification offers, and the lock-screen privacy switch. */
@@ -807,6 +810,9 @@ function CategoryContent({ category, props }: { category: CategoryId; props: Set
           </Row>
           <Row setting="senderPictures" hint={remotePicturesPaused(props.imagePolicy) && props.senderPictures ? REMOTE_PAUSED_HINT : undefined}>
             <Toggle checked={props.senderPictures} onChange={props.onSenderPictures} label={SETTINGS.senderPictures.label} />
+          </Row>
+          <Row setting="removeLinkTrackers">
+            <Toggle checked={props.removeLinkTrackers} onChange={props.onRemoveLinkTrackers} label={SETTINGS.removeLinkTrackers.label} />
           </Row>
           <DriveLinksRow props={props} />
         </Section>

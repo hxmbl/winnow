@@ -220,6 +220,14 @@ describe("the Drive links preference", () => {
   });
 });
 
+describe("the Remove link trackers preference", () => {
+  it("is on by default, survives a restart as a boolean and is dropped otherwise", () => {
+    expect(DEFAULT_PREFERENCES.removeLinkTrackers).toBe(true);
+    expect(revivePreferences({ removeLinkTrackers: false })?.removeLinkTrackers).toBe(false);
+    expect(revivePreferences({ removeLinkTrackers: "no" })?.removeLinkTrackers).toBeUndefined();
+  });
+});
+
 describe("preferences storage", () => {
   it("merges a partial patch into the whole stored blob", () => {
     const storage = memoryBacking();

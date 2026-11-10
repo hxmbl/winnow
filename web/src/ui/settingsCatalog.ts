@@ -209,6 +209,12 @@ export const SETTINGS = {
     explanation:
       "Shows a sender's Gravatar picture when they are not in your contacts, and a company's logo from the one it publishes for email (BIMI). For every sender in your list, opened or not, Winnow sends Gravatar a hashed copy of the address (a hash of a common address can be guessed, so Gravatar can still learn who mails you) and looks up the sender's domain with Cloudflare's DNS-over-HTTPS resolver, then loads any logo from the sender's own site. Off by default for that reason, and paused while Remote images is set to Never; logos are not certificate-verified. Contact photos and initials always show.",
   },
+  removeLinkTrackers: {
+    category: "privacy",
+    label: "Remove link trackers",
+    explanation:
+      "Takes well-known tracking tags, such as utm_source, fbclid and gclid, off the links in a message, so the site you open is not told which email or campaign you came from. Links that look signed or tied to your account, link shorteners, redirect links, and sign-in, verify, reset and unsubscribe links are left exactly as sent, because changing them could break them. It happens on this device as the message is shown, and the mail itself is never changed. Off shows every link as the sender wrote it.",
+  },
   driveLinks: {
     category: "privacy",
     label: "Big files as Drive links",
