@@ -12,7 +12,9 @@ import app.winnow.android.notify.LaunchLinks
 
 class MainActivity : TauriActivity() {
   private var webView: WebView? = null
-  private val repaint = ResumeRepaint()
+  private val repaint = ResumeRepaint { message ->
+    Log.d(TAG, message)
+  }
   private var webViewInstanceId: Int = 0
 
   companion object {

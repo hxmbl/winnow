@@ -1,7 +1,5 @@
 package app.winnow.android
 
-import android.util.Log
-
 /**
  * When [MainActivity] should ask its WebView to draw again (STRM-568).
  *
@@ -17,37 +15,31 @@ import android.util.Log
  * the surface and its picture, so there is nothing to redraw. Pure Kotlin, so the JVM
  * tests can pin it.
  */
-class ResumeRepaint {
+class ResumeRepaint(
+  private val log: (String) -> Unit = {},
+) {
   private var stopped = false
 
-  companion object {
-    private const val TAG = "STRM-584"
-  }
-
-  /** The activity went out of sight (`onStop`). */
   fun onStop() {
-    Log.d(TAG, "ResumeRepaint.onStop: stopped = true")
+    log("ResumeRepaint.onStop: stopped = true")
     stopped = true
   }
 
-  /** `onResume`: true when the WebView should be invalidated now. */
   fun onResume(): Boolean {
-    Log.d(TAG, "ResumeRepaint.onResume: stopped = $stopped, shouldRedraw = $stopped")
+    log("ResumeRepaint.onResume: stopped = $stopped")
     return stopped
   }
 
-  /**
-   * `onWindowFocusChanged`: true when the WebView should be invalidated now. Focus back
-   * is the last step of coming back to the front, so it ends the redraw.
-   */
   fun onFocus(hasFocus: Boolean): Boolean {
     val shouldRedraw = hasFocus && stopped
+
     if (shouldRedraw) {
-      Log.d(TAG, "ResumeRepaint.onFocus: hasFocus = $hasFocus, stopped = $stopped, clearing stopped flag")
+      log("ResumeRepaint.onFocus: clearing stopped flag")
       stopped = false
     } else {
-      Log.d(TAG, "ResumeRepaint.onFocus: hasFocus = $hasFocus, stopped = $stopped, shouldRedraw = $shouldRedraw")
+      log("ResumeRepaint.onFocus: hasFocus = $hasFocus, stopped = $stopped")
     }
+
     return shouldRedraw
   }
 }
