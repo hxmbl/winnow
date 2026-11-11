@@ -15,24 +15,31 @@ package app.winnow.android
  * the surface and its picture, so there is nothing to redraw. Pure Kotlin, so the JVM
  * tests can pin it.
  */
-class ResumeRepaint {
+class ResumeRepaint(
+  private val log: (String) -> Unit = {},
+) {
   private var stopped = false
 
-  /** The activity went out of sight (`onStop`). */
   fun onStop() {
+    log("ResumeRepaint.onStop: stopped = true")
     stopped = true
   }
 
-  /** `onResume`: true when the WebView should be invalidated now. */
-  fun onResume(): Boolean = stopped
+  fun onResume(): Boolean {
+    log("ResumeRepaint.onResume: stopped = $stopped")
+    return stopped
+  }
 
-  /**
-   * `onWindowFocusChanged`: true when the WebView should be invalidated now. Focus back
-   * is the last step of coming back to the front, so it ends the redraw.
-   */
   fun onFocus(hasFocus: Boolean): Boolean {
-    if (!hasFocus || !stopped) return false
-    stopped = false
-    return true
+    val shouldRedraw = hasFocus && stopped
+
+    if (shouldRedraw) {
+      log("ResumeRepaint.onFocus: clearing stopped flag")
+      stopped = false
+    } else {
+      log("ResumeRepaint.onFocus: hasFocus = $hasFocus, stopped = $stopped")
+    }
+
+    return shouldRedraw
   }
 }

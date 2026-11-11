@@ -404,6 +404,7 @@ pub fn request_notification_permission(app: AppHandle) -> Result<bool> {
 pub fn open_external(app: AppHandle, url: String) -> Result<()> {
     use tauri_plugin_opener::OpenerExt;
 
+    crate::dlog!("android", "open_external", url = &url);
     let parsed = url::Url::parse(&url).map_err(|_| "that is not a valid URL".to_string())?;
     if parsed.scheme() != "https" {
         return Err("Winnow only opens https links outside the app".into());
