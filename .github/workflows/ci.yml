@@ -458,6 +458,16 @@ jobs:
         working-directory: native
         run: cargo tauri android build --debug --apk --target aarch64
 
+      # STRM-584 (temporary): keep the instrumented debug APK as a run artifact
+      # so the on-device investigation does not need a local Android toolchain.
+      # Remove this step when the investigation branch is merged or closed.
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: strm-584-android-debug-apk
+          path: native/src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
+          retention-days: 7
+
       - name: Android unit tests
         working-directory: native/src-tauri/gen/android
         run: ./gradlew --no-daemon :app:testUniversalDebugUnitTest
