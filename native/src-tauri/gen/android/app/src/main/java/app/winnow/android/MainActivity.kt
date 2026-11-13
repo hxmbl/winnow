@@ -19,6 +19,7 @@ class MainActivity : TauriActivity() {
 
   companion object {
     private const val TAG = "STRM-584"
+    private const val LATE_REDRAW_MS = 150L
   }
 
   override fun onWebViewCreate(webView: WebView) {
@@ -68,8 +69,21 @@ class MainActivity : TauriActivity() {
 
   /**
    * Back from a link opened in the browser, the WebView showed a blank screen until a
-   * tap (STRM-568): `ResumeRepaint.kt` says why. Ask it to draw again once in front.
+   * tap (STRM-568): `ResumeRepaint.kt` says why. Ask it to draw again once in front, on
+   * whichever of restart, resume and focus the return path actually delivers.
    */
+  override fun onPause() {
+    Log.d(TAG, "onPause: WebView instance ID = $webViewInstanceId")
+    super.onPause()
+    repaint.onPause()
+  }
+
+  override fun onRestart() {
+    Log.d(TAG, "onRestart: WebView instance ID = $webViewInstanceId")
+    super.onRestart()
+    if (repaint.onRestart()) redraw()
+  }
+
   override fun onStop() {
     Log.d(TAG, "onStop: WebView instance ID = $webViewInstanceId")
     super.onStop()
@@ -94,5 +108,15 @@ class MainActivity : TauriActivity() {
     view.invalidate()
     // And on the next frame, when the window's new surface is sure to be there.
     view.postOnAnimation { view.invalidate() }
+    // And once more a little later from the decor view, for a surface that is still not
+    // ready by the next frame. Replaced, not stacked, when several callbacks redraw.
+    val decor = window.decorView
+    decor.removeCallbacks(lateRedraw)
+    decor.postDelayed(lateRedraw, LATE_REDRAW_MS)
+  }
+
+  private val lateRedraw = Runnable {
+    Log.d(TAG, "redraw (late): invalidating WebView instance ID = $webViewInstanceId")
+    webView?.invalidate()
   }
 }

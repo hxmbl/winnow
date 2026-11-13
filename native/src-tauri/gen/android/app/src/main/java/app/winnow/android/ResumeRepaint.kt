@@ -11,35 +11,55 @@ package app.winnow.android
  * WebView once it is back in front: on resume and again when the window has focus,
  * since the surface may not be ready at the first.
  *
- * Only after a stop. A plain pause (a permission dialog, the notification shade) keeps
- * the surface and its picture, so there is nothing to redraw. Pure Kotlin, so the JVM
+ * After any way out of sight, not only a stop (STRM-568 return paths): Back or Recents
+ * from the browser does not always stop the activity first, focus can come back before
+ * `onResume` or not come back at all, and `onRestart` can arrive without a recorded stop.
+ * So a pause, a stop or a restart marks the activity away; `onResume` and focus regained
+ * each redraw while it is away, and the redraw ends only once it is both resumed and
+ * focused. An extra invalidate costs one frame, so erring towards redrawing is fine. A
+ * first start has nothing to come back to and does not redraw. Pure Kotlin, so the JVM
  * tests can pin it.
  */
 class ResumeRepaint(
   private val log: (String) -> Unit = {},
 ) {
-  private var stopped = false
+  private var away = false
+  private var resumed = false
+
+  /** `onPause`: out of front, possibly without a stop to follow. */
+  fun onPause() {
+    log("ResumeRepaint.onPause: away = true")
+    away = true
+    resumed = false
+  }
 
   fun onStop() {
-    log("ResumeRepaint.onStop: stopped = true")
-    stopped = true
+    log("ResumeRepaint.onStop: away = true")
+    away = true
+    resumed = false
+  }
+
+  /** `onRestart` only follows a stop, so it always asks for a redraw. */
+  fun onRestart(): Boolean {
+    log("ResumeRepaint.onRestart: away = true")
+    away = true
+    return true
   }
 
   fun onResume(): Boolean {
-    log("ResumeRepaint.onResume: stopped = $stopped")
-    return stopped
+    log("ResumeRepaint.onResume: away = $away")
+    resumed = true
+    return away
   }
 
   fun onFocus(hasFocus: Boolean): Boolean {
-    val shouldRedraw = hasFocus && stopped
-
-    if (shouldRedraw) {
-      log("ResumeRepaint.onFocus: clearing stopped flag")
-      stopped = false
+    val shouldRedraw = hasFocus && away
+    if (shouldRedraw && resumed) {
+      log("ResumeRepaint.onFocus: resumed and focused, clearing away")
+      away = false
     } else {
-      log("ResumeRepaint.onFocus: hasFocus = $hasFocus, stopped = $stopped")
+      log("ResumeRepaint.onFocus: hasFocus = $hasFocus, away = $away, resumed = $resumed")
     }
-
     return shouldRedraw
   }
 }
