@@ -213,7 +213,7 @@ export const SETTINGS = {
     category: "privacy",
     label: "Remove link trackers",
     explanation:
-      "Takes well-known tracking tags, such as utm_source, fbclid and gclid, off the links in a message, so the site you open is not told which email or campaign you came from. Links that look signed or tied to your account, link shorteners, redirect links, and sign-in, verify, reset and unsubscribe links are left exactly as sent, because changing them could break them. It happens on this device as the message is shown, and the mail itself is never changed. Off shows every link as the sender wrote it.",
+      "Removes a known set of tracking tags, such as utm_source, fbclid and gclid, from message links before you open them. Winnow leaves links that appear signed, authenticated or designed to redirect you untouched, and keeps unfamiliar parameters; some tracking may therefore remain. This is a local, best-effort cleanup of the displayed link only: the original message is never changed, and no VPN or proxy is involved. Off shows every link as the sender wrote it.",
   },
   driveLinks: {
     category: "privacy",
