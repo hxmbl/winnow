@@ -30,6 +30,50 @@ export const DOCK_TABS = ["inbox", "sent"] as const satisfies readonly Mailbox[]
 /** The Expand button's accessible name. Its state is `aria-expanded`. */
 export const EXPAND_LABEL = "More mailboxes";
 
+/**
+ * What the Expand cell shows (STRM-616, after Linear's mobile tab bar): the switcher
+ * slot. While the current mailbox is one of the panel's (Archive, Trash, Spam, Drafts,
+ * Snoozed, Scheduled) the cell is the selected one: it widens and shows that mailbox's
+ * icon beside a small up/down chevron, on the current tab's fill. On Inbox or Sent it is
+ * just the chevron, as before. While the panel is open it is always the plain chevron in
+ * its equal third, so it closes the panel from the place it opened and the panel's
+ * Settings gear stays centred over it (`MailNav`'s account row is the pill's own grid);
+ * while Settings covers the list no mailbox is the current page, so it is plain too.
+ */
+export type SwitcherSlot = { kind: "chevron" } | { kind: "mailbox"; mailbox: Mailbox };
+
+export function switcherSlot(
+  mailbox: Mailbox,
+  { menuOpen, settingsOpen }: { menuOpen: boolean; settingsOpen: boolean },
+): SwitcherSlot {
+  if (menuOpen || settingsOpen) return { kind: "chevron" };
+  if ((DOCK_TABS as readonly Mailbox[]).includes(mailbox)) return { kind: "chevron" };
+  return { kind: "mailbox", mailbox };
+}
+
+/**
+ * The Expand button's accessible name for a slot: the plain "More mailboxes", or, with
+ * a mailbox in the slot, that mailbox first ("Archive, more mailboxes") so a screen
+ * reader hears where you are. Its open/closed state stays `aria-expanded`.
+ */
+export function expandLabel(slot: SwitcherSlot, label: (mailbox: Mailbox) => string): string {
+  return slot.kind === "mailbox" ? `${label(slot.mailbox)}, more mailboxes` : EXPAND_LABEL;
+}
+
+/** How much wider than a tab cell the slot grows with a mailbox in it. */
+export const SWITCHER_WIDE_FR = 1.5;
+
+/**
+ * The pill's three columns, inline on the grid so the change animates: equal thirds
+ * (the same as `grid-cols-3`) or the slot widened. The pill itself keeps its width, so
+ * the panel that grows out of it (anchored at `--wn-dock-pill-w`) never moves; the two
+ * tab cells give up the room.
+ */
+export function pillColumns(slot: SwitcherSlot): string {
+  const last = slot.kind === "mailbox" ? SWITCHER_WIDE_FR : 1;
+  return `minmax(0, 1fr) minmax(0, 1fr) minmax(0, ${last}fr)`;
+}
+
 /** What a tap on a tab does now. */
 export type TabAction = "select" | "clear-filters" | "scroll-top";
 

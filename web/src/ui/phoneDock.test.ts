@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAILBOX_ORDER } from "./mailboxNav";
+import { expandLabel, pillColumns, switcherSlot, SWITCHER_WIDE_FR } from "./phoneDock";
+import { MAILBOX_LABEL, type Mailbox } from "../core/model/email";
 import { BACK_TO_TOP_LABEL, BACK_TO_TOP_SCREENS, backToTopVisible, DOCK_TABS, EXPAND_LABEL, badgeText, PANEL_ORDER, panelOrder, tabAction, tabLabel } from "./phoneDock";
 
 describe("the phone dock", () => {
@@ -84,5 +86,45 @@ describe("the phone dock", () => {
       expect(at(2000, { allowed: false })).toBe(false);
       expect(at(2000, { viewportHeight: 0 })).toBe(false);
     });
+  });
+});
+
+describe("the dock's switcher slot (STRM-616)", () => {
+  const closed = { menuOpen: false, settingsOpen: false };
+  const label = (id: Mailbox) => MAILBOX_LABEL[id];
+
+  it("is the plain chevron on Inbox and Sent", () => {
+    for (const id of DOCK_TABS) expect(switcherSlot(id, closed)).toEqual({ kind: "chevron" });
+  });
+
+  it("shows the current mailbox for every mailbox that lives in the panel", () => {
+    const panel = MAILBOX_ORDER.filter((id) => !(DOCK_TABS as readonly Mailbox[]).includes(id));
+    expect(panel).toEqual(expect.arrayContaining(["archive", "trash", "spam", "drafts"]));
+    for (const id of panel) expect(switcherSlot(id, closed)).toEqual({ kind: "mailbox", mailbox: id });
+  });
+
+  it("is the plain chevron while the panel is open, so the gear stays over it", () => {
+    expect(switcherSlot("archive", { menuOpen: true, settingsOpen: false })).toEqual({ kind: "chevron" });
+    expect(pillColumns(switcherSlot("archive", { menuOpen: true, settingsOpen: false }))).toBe(
+      "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
+    );
+  });
+
+  it("is the plain chevron while Settings covers the list", () => {
+    expect(switcherSlot("trash", { menuOpen: false, settingsOpen: true })).toEqual({ kind: "chevron" });
+  });
+
+  it("widens only the last column; the pill keeps its width", () => {
+    expect(pillColumns({ kind: "chevron" })).toBe("minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)");
+    expect(pillColumns({ kind: "mailbox", mailbox: "spam" })).toBe(
+      `minmax(0, 1fr) minmax(0, 1fr) minmax(0, ${SWITCHER_WIDE_FR}fr)`,
+    );
+    expect(SWITCHER_WIDE_FR).toBeGreaterThan(1);
+  });
+
+  it("names the current mailbox first, and stays More mailboxes otherwise", () => {
+    expect(expandLabel({ kind: "chevron" }, label)).toBe(EXPAND_LABEL);
+    expect(expandLabel(switcherSlot("archive", closed), label)).toBe("Archive, more mailboxes");
+    expect(expandLabel(switcherSlot("drafts", closed), label)).toBe("Drafts, more mailboxes");
   });
 });

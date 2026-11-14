@@ -23,6 +23,13 @@ describe("the phone panel's Settings gear, over the Expand chevron", () => {
     expect(nav).toMatch(/h-12 w-12 justify-self-center rounded-ctl/);
   });
 
+  it("the switcher slot (STRM-616) is a plain equal third whenever the panel is open", () => {
+    // The pill's columns are inline (`pillColumns`), so the widened slot never reaches the
+    // panel: open, `switcherSlot` is always the plain chevron.
+    expect(dock).toContain("style={{ gridTemplateColumns: pillColumns(slot) }}");
+    expect(dock).toContain("switcherSlot(mailbox, { menuOpen, settingsOpen })");
+  });
+
   it("the gear keeps its name and a 48px round target", () => {
     expect(nav).toMatch(/aria-label="Settings"[\s\S]{0,500}h-12 w-12/);
   });

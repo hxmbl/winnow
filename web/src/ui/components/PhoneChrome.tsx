@@ -5,7 +5,8 @@
  * — narrowing by a smart filter, switching mailbox, opening the menu, composing — is at
  * the bottom of the screen, floating over the list rather than taking a bar from it
  * (after Linear's Android app): a rounded glass pill of icon-only tabs (Inbox, Sent)
- * ending in an Expand chevron, the compose button as its own circle beside it, and the
+ * ending in an Expand chevron (the switcher slot: on a panel mailbox such as Archive it
+ * widens to show that mailbox's icon, STRM-616), the compose button as its own circle beside it, and the
  * smart-filter chips floating one by one just above, and, once the list is a screen
  * down, a small "Top" pill centred above those. Expand grows the pill upward into
  * the menu panel (`MailNav.tsx`: every folder and the account, whose gear is the way
@@ -36,15 +37,19 @@ import { VERSION_TOGGLE_LABEL, logoHaptic, logoPressed, versionText, type LogoVi
 import {
   BACK_TO_TOP_LABEL,
   DOCK_TABS,
-  EXPAND_LABEL,
   PHONE_DOCK_VAR,
   PHONE_TABS_VAR,
   backToTopVisible,
   badgeText,
+  expandLabel,
+  pillColumns,
+  switcherSlot,
   tabLabel,
   tapTab,
 } from "../phoneDock";
 import { Icon } from "./Icon";
+import { MAILBOX_ICON } from "../menus";
+import { MAILBOX_LABEL } from "../../core/model/email";
 
 /** The canvas-toned sheet the reader's bottom bar sits on. */
 export const DOCK_SURFACE =
@@ -323,6 +328,10 @@ export function PhoneDock({
 
   const scrollToTop = scrollListToTop;
 
+  // STRM-616: the Expand cell is the switcher slot (`switcherSlot`).
+  const slot = switcherSlot(mailbox, { menuOpen, settingsOpen });
+  const SlotGlyph = slot.kind === "mailbox" ? MAILBOX_ICON[slot.mailbox] : null;
+
   // The clearance follows the pill showing and hiding.
   useLayoutEffect(() => {
     measureRef.current();
@@ -396,10 +405,14 @@ export function PhoneDock({
           aria-label="Primary"
           data-phone-pill=""
           data-expanded={menuOpen ? "" : undefined}
+          data-switcher={slot.kind === "mailbox" ? slot.mailbox : undefined}
+          // The columns are inline so the slot's widening animates (`pillColumns`); the
+          // pill keeps its width, so the panel anchored at `--wn-dock-pill-w` never moves.
+          style={{ gridTemplateColumns: pillColumns(slot) }}
           // Open, the pill is see-through and sits above the panel (z 55 over 50), on the
           // panel's Inbox row: it must not take that row's taps. Only Expand, which keeps
           // its own `pointer-events-auto`, stays live on it.
-          className={`wn-glass wn-liquid grid h-(--wn-dock-h) min-w-0 flex-1 grid-cols-3 items-stretch rounded-ctl px-1.5 transition-[background-color,box-shadow,border-color] duration-200 ${
+          className={`wn-glass wn-liquid grid h-(--wn-dock-h) min-w-0 flex-1 grid-cols-3 items-stretch rounded-ctl px-1.5 transition-[background-color,box-shadow,border-color,grid-template-columns] duration-200 ${
             menuOpen ? "pointer-events-none" : "pointer-events-auto"
           }`}
         >
@@ -429,7 +442,7 @@ export function PhoneDock({
                 }`}
               >
                 <span
-                  className={`relative flex h-12 w-16 items-center justify-center rounded-ctl transition-colors ${
+                  className={`relative flex h-12 w-16 max-w-full items-center justify-center rounded-ctl transition-colors ${
                     current ? `${HIGHLIGHT} text-ink` : "text-ink-muted group-active:bg-sheen"
                   }`}
                 >
@@ -452,21 +465,35 @@ export function PhoneDock({
           <button
             type="button"
             data-dock-expand=""
+            data-switcher-slot={slot.kind}
             // Where focus goes back to when the menu closes (see `Sidebar`).
             data-sidebar-toggle=""
-            aria-label={EXPAND_LABEL}
+            aria-label={expandLabel(slot, (id) => MAILBOX_LABEL[id])}
+            aria-current={slot.kind === "mailbox" ? "page" : undefined}
             aria-haspopup="dialog"
             aria-expanded={menuOpen}
             aria-controls="winnow-sidebar"
             onClick={menuOpen ? onCloseMenu : onOpenMenu}
-            className="group pointer-events-auto flex min-h-12 items-center justify-center rounded-ctl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="group pointer-events-auto flex min-h-12 min-w-0 items-center justify-center rounded-ctl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
+            {/*
+              The slot: the plain chevron in a 48px circle, or, with a panel mailbox
+              current, that mailbox's icon (the panel row's) and a small chevron on the
+              current tab's fill, as wide as the cell. The width eases with the grid's
+              columns; reduced motion makes both instant (the global rule).
+            */}
             <span
-              className={`flex h-12 w-12 items-center justify-center rounded-ctl transition-colors ${
-                menuOpen ? `${HIGHLIGHT} text-ink` : "text-ink-muted group-active:bg-sheen"
-              }`}
+              data-switcher-face=""
+              className={`flex h-12 items-center justify-center gap-1 overflow-hidden rounded-ctl transition-[width,background-color,color] duration-200 ${
+                slot.kind === "mailbox" ? "w-full max-w-28 px-3" : "w-12"
+              } ${menuOpen || slot.kind === "mailbox" ? `${HIGHLIGHT} text-ink` : "text-ink-muted group-active:bg-sheen"}`}
             >
-              {menuOpen ? (
+              {SlotGlyph ? (
+                <>
+                  <Icon icon={SlotGlyph} size={24} className="shrink-0" />
+                  <Icon icon={ChevronsUpDown} size={16} className="shrink-0 text-ink-muted" />
+                </>
+              ) : menuOpen ? (
                 <Icon icon={ChevronsDownUp} size={24} />
               ) : (
                 <Icon icon={ChevronsUpDown} size={24} />
