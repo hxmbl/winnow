@@ -25,7 +25,7 @@ class ResumeRepaintTest {
   }
 
   @Test
-  fun `a pause that never stopped the activity keeps its picture`() {
+  fun `a first start has nothing to redraw`() {
     val repaint = ResumeRepaint()
     assertFalse(repaint.onResume())
     assertFalse(repaint.onFocus(false))
@@ -39,5 +39,41 @@ class ResumeRepaintTest {
     assertFalse(repaint.onFocus(false))
     assertTrue(repaint.onResume())
     assertTrue(repaint.onFocus(true))
+  }
+
+  @Test
+  fun `a pause without a stop still redraws on the way back`() {
+    val repaint = ResumeRepaint()
+    repaint.onPause()
+    assertTrue(repaint.onResume())
+    assertTrue(repaint.onFocus(true))
+    assertFalse(repaint.onResume())
+  }
+
+  @Test
+  fun `focus back before resume does not end the redraw`() {
+    val repaint = ResumeRepaint()
+    repaint.onPause()
+    repaint.onStop()
+    assertTrue(repaint.onFocus(true))
+    assertTrue(repaint.onResume())
+    assertTrue(repaint.onFocus(true))
+    assertFalse(repaint.onResume())
+  }
+
+  @Test
+  fun `a resume whose focus never comes back still redraws`() {
+    val repaint = ResumeRepaint()
+    repaint.onPause()
+    repaint.onStop()
+    assertTrue(repaint.onRestart())
+    assertTrue(repaint.onResume())
+  }
+
+  @Test
+  fun `a restart redraws even without a recorded stop`() {
+    val repaint = ResumeRepaint()
+    assertTrue(repaint.onRestart())
+    assertTrue(repaint.onResume())
   }
 }
