@@ -37,7 +37,7 @@ case $kind in
     # The sanitiser and what it imports. The release workflow starts the bundled
     # proxy and asks it for /health, so a new import missing here fails the release
     # rather than a container.
-    for file in sanitize.ts html.ts emailDark.ts; do
+    for file in sanitize.ts html.ts emailDark.ts trackers.ts; do
       cp "$root/web/src/core/mail/$file" "$out/web/src/core/mail/"
     done
     ;;
