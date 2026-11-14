@@ -14,6 +14,12 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-14
+
+### Changed
+
+- Phone: when you're in a mailbox from the menu, such as Archive, Trash, Spam or Drafts, the dock's menu button widens to show that mailbox's icon beside the chevron, so you can see where you are (STRM-616).
+
 ## [1.9.0] - 2026-11-14
 
 ### Added
@@ -526,7 +532,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/hxmbl/winnow/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/hxmbl/winnow/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/hxmbl/winnow/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/hxmbl/winnow/compare/v1.7.2...v1.7.3
