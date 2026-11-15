@@ -439,9 +439,15 @@ export class GmailSyncEngine {
     for (const id of deleted) touched.delete(id);
     if (deleted.size > 0) await this.options.cache.remove([...deleted]);
 
-    const previous = touched.size > 0
-      ? new Map((await this.options.cache.all()).map((email) => [email.gmailId, email]))
-      : new Map<string, Email>();
+    const needsAll = deleted.size > 0 || touched.size > 0;
+    let current: Map<string, Email> | null = null;
+    let previous = new Map<string, Email>();
+    if (needsAll) {
+      const all = await this.options.cache.all();
+      current = new Map(all.map((email) => [email.gmailId, email]));
+      for (const id of deleted) current.delete(id);
+      if (touched.size > 0) previous = current;
+    }
 
     let failed = 0;
     let fetched = 0;
@@ -457,6 +463,7 @@ export class GmailSyncEngine {
         if (outcome.kind === "success") {
           fetched += 1;
           batch.push(outcome.email);
+          current?.set(id, outcome.email);
           if (batch.length >= BATCH_SIZE) {
             const rows = batch;
             batch = [];
@@ -464,6 +471,7 @@ export class GmailSyncEngine {
           }
         } else if (outcome.kind === "missing") {
           gone.push(id);
+          current?.delete(id);
         } else {
           failed += 1;
         }
@@ -477,7 +485,9 @@ export class GmailSyncEngine {
 
     if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(latestHistoryId);
 
-    const emails = await this.options.cache.all();
+    const emails = current
+      ? [...current.values()].sort((a, b) => b.receivedAt - a.receivedAt)
+      : await this.options.cache.all();
     report({ phase: "idle", fraction: 1, fetched, failed, total });
 
     return { emails, failed, truncated: false, cacheUnpersisted, durationMs: this.now() - started, mode: "incremental" };
