@@ -242,6 +242,10 @@ export class GmailSyncEngine {
     let truncated = false;
     let total = 0;
     let batch: Email[] = [];
+    let snapshotCache: Email[] | null = null;
+    const markSnapshotDirty = (): void => {
+      snapshotCache = null;
+    };
 
     const flushBatch = async (): Promise<void> => {
       if (batch.length === 0) return;
@@ -250,7 +254,10 @@ export class GmailSyncEngine {
       await this.options.cache.upsert(rows);
     };
 
-    const snapshot = (): Email[] => [...current.values()].sort((a, b) => b.receivedAt - a.receivedAt);
+    const snapshot = (): Email[] => {
+      if (!snapshotCache) snapshotCache = [...current.values()].sort((a, b) => b.receivedAt - a.receivedAt);
+      return snapshotCache;
+    };
 
     // Inbox-first publishing. `lastPartial` is null until the first screen has gone out.
     let lastPartial: number | null = null;
@@ -311,6 +318,7 @@ export class GmailSyncEngine {
             fetched.add(id);
             seen.add(id);
             current.set(id, outcome.email);
+            markSnapshotDirty();
             batch.push(outcome.email);
             if (batch.length >= BATCH_SIZE) await flushBatch();
             if (stage === "inbox") inboxFetched += 1;
@@ -359,6 +367,7 @@ export class GmailSyncEngine {
           if (outcome.kind === "success") {
             seen.add(id);
             current.set(id, outcome.email);
+            markSnapshotDirty();
             batch.push(outcome.email);
             if (batch.length >= BATCH_SIZE) await flushBatch();
           } else if (outcome.kind === "failed") {
@@ -381,9 +390,7 @@ export class GmailSyncEngine {
     // The cursor is only trustworthy when the cache is a faithful copy.
     if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(profile.historyId);
 
-    const emails = [...current.values()]
-      .filter((email) => seen.has(email.gmailId))
-      .sort((a, b) => b.receivedAt - a.receivedAt);
+    const emails = snapshot().filter((email) => seen.has(email.gmailId));
     report({ phase: "idle", fraction: 1, fetched: seen.size, failed, total });
 
     return { emails, failed, truncated, cacheUnpersisted, durationMs: this.now() - started, mode: "full" };
@@ -485,9 +492,7 @@ export class GmailSyncEngine {
 
     if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(latestHistoryId);
 
-    const emails = current
-      ? [...current.values()].sort((a, b) => b.receivedAt - a.receivedAt)
-      : await this.options.cache.all();
+    const emails = current ? [...current.values()].sort((a, b) => b.receivedAt - a.receivedAt) : await this.options.cache.all();
     report({ phase: "idle", fraction: 1, fetched, failed, total });
 
     return { emails, failed, truncated: false, cacheUnpersisted, durationMs: this.now() - started, mode: "incremental" };
@@ -694,26 +699,26 @@ function emailsEqual(a: Email, b: Email): boolean {
       a.gmailId === b.gmailId &&
       a.threadId === b.threadId &&
       a.messageId === b.messageId &&
+      a.mailbox === b.mailbox &&
+      a.unread === b.unread &&
+      a.starred === b.starred &&
+      a.category === b.category &&
+      a.bulk === b.bulk &&
+      a.attachmentHint === b.attachmentHint &&
+      a.bodyLoaded === b.bodyLoaded &&
+      a.receivedAt === b.receivedAt &&
+      a.sizeEstimate === b.sizeEstimate &&
+      a.spamScore === b.spamScore &&
+      a.urgent === b.urgent &&
+      a.code === b.code &&
+      a.snoozedUntil === b.snoozedUntil &&
       a.sender === b.sender &&
       a.address === b.address &&
       a.name === b.name &&
-      a.mailbox === b.mailbox &&
-      a.receivedAt === b.receivedAt &&
       a.subject === b.subject &&
       a.body === b.body &&
       a.bodySource === b.bodySource &&
       a.bodyHtml === b.bodyHtml &&
-      a.category === b.category &&
-      a.starred === b.starred &&
-      a.unread === b.unread &&
-      a.spamScore === b.spamScore &&
-      a.urgent === b.urgent &&
-      a.bodyLoaded === b.bodyLoaded &&
-      a.sizeEstimate === b.sizeEstimate &&
-      a.bulk === b.bulk &&
-      a.attachmentHint === b.attachmentHint &&
-      a.code === b.code &&
-      a.snoozedUntil === b.snoozedUntil &&
       a.gmailDraft?.id === b.gmailDraft?.id &&
       a.gmailDraft?.inReplyTo === b.gmailDraft?.inReplyTo &&
       a.gmailDraft?.references === b.gmailDraft?.references &&

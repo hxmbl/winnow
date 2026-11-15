@@ -155,19 +155,19 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
     rows = rows.filter((email) => !isUnsafe(signalFor(signals, email)));
   }
 
-  // 3. Sort. `rows` is already a fresh array at this point (filter/search copies), so sort in place.
+  // 3. Sort. `rows` is a fresh array when search/filtering ran; copy only if it's still the input.
   let scores: Map<number, number> | null = null;
-  let ordered = rows as Email[];
+  let ordered: Email[];
   if (sortBy === "date") {
-    ordered = (Array.isArray(rows) ? rows : [...rows]).sort((a, b) => b.receivedAt - a.receivedAt);
+    ordered = (rows === emails ? [...rows] : (rows as Email[])).sort((a, b) => b.receivedAt - a.receivedAt);
   } else if (sortBy === "sender") {
-    ordered = (Array.isArray(rows) ? rows : [...rows]).sort((a, b) => a.sender.localeCompare(b.sender));
+    ordered = (rows === emails ? [...rows] : (rows as Email[])).sort((a, b) => a.sender.localeCompare(b.sender));
   } else {
     // Scored only now, and only over what survived the filter. The recency
     // window is that same set, so "new" means new relative to the mail it is
     // actually ranked among.
     scores = new Map();
-    const list = Array.isArray(rows) ? rows : [...rows];
+    const list = rows === emails ? [...rows] : (rows as Email[]);
     const recency = recencyWindow(list.map((email) => email.receivedAt));
     for (const email of list) {
       scores.set(email.id, calculateWinnowScore(email, signalFor(signals, email), profile, recency));

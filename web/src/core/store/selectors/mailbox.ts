@@ -315,14 +315,20 @@ export class MailboxSelectors {
         ? countAllFilters(inboxForProfile, inboxSignals, profile, this.filterHits, "conversations")
         : countAllFilters(railEmails, signals, profile, this.filterHits, "conversations");
     // Conversations, like every other pill number (`countAllFilters`).
+    const railSenderCounts = new Map<string, number>();
     const railSenderThreads = new Map<string, Set<string>>();
     for (const email of railEmails) {
-      const seen = railSenderThreads.get(email.sender);
-      if (seen) seen.add(threadKey(email));
-      else railSenderThreads.set(email.sender, new Set([threadKey(email)]));
+      const key = threadKey(email);
+      let seen = railSenderThreads.get(email.sender);
+      if (!seen) {
+        seen = new Set<string>();
+        railSenderThreads.set(email.sender, seen);
+      }
+      if (!seen.has(key)) {
+        seen.add(key);
+        railSenderCounts.set(email.sender, (railSenderCounts.get(email.sender) ?? 0) + 1);
+      }
     }
-    const railSenderCounts = new Map<string, number>();
-    for (const [sender, keys] of railSenderThreads) railSenderCounts.set(sender, keys.size);
     // Faceted on the active filters and, while a search runs (1.4.0), on the search: a
     // chip's number is then what tapping it lists under that query. Which chips stay is
     // still `rail` / `railCounts` (the plain mailbox ranking), so typing never reshuffles
@@ -342,19 +348,14 @@ export class MailboxSelectors {
 
     const attention: AttentionSummary = summarizeAttention(inboxForProfile, inboxSignals, state.now);
 
-    const inboxThreadCount = new Set(
-      inboxForProfile
-        .filter((email) => {
-          const signal = inboxSignals.get(email.id);
-          return !signal || !isUnsafe(signal);
-        })
-        .map((email) => email.threadId ?? email.gmailId),
-    ).size;
-
     const inboxSenderCounts = new Map<string, number>();
+    const inboxThreads = new Set<string>();
     for (const email of inboxForProfile) {
       inboxSenderCounts.set(email.sender, (inboxSenderCounts.get(email.sender) ?? 0) + 1);
+      const signal = inboxSignals.get(email.id);
+      if (!signal || !isUnsafe(signal)) inboxThreads.add(email.threadId ?? email.gmailId);
     }
+    const inboxThreadCount = inboxThreads.size;
 
     /*
      * The open message, resolved from the *result* first and from the mailbox second.

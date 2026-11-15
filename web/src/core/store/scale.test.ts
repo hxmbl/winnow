@@ -169,12 +169,13 @@ describe("scale: a clock tick", () => {
 describe("scale: the inbox analysis", () => {
   it("a full derive of 5,000 messages stays interactive", () => {
     const store = new WinnowStore({ seed: synth(5000) });
-    void store.view; // warm the JIT, so this measures steady state
+    void store.view; // prime the view and classifier memos
 
-    // ~271ms for a cold 5,000-message derive before the memo; a ceiling this loose still
-    // catches the order-of-magnitude regression while surviving a loaded box.
+    // A real clock update synchronously invalidates and recomputes the derived view.
+    // ~271ms was the cold 5,000-message derive before memoization; this guards the
+    // warmed path without measuring the 80ms debounce in scheduleReclassify.
     const ms = timed(3, () => {
-      store.scheduleReclassify();
+      store.set({ now: store.getSnapshot().now + 1 });
       void store.view;
     });
 
