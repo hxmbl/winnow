@@ -194,6 +194,8 @@ export function localCache(
   let mirror: Map<GmailId, Email> | null = null;
   /** The read that fills `mirror`, shared by every caller that arrives while it runs. */
   let loading: Promise<Map<GmailId, Email>> | null = null;
+  /** Sorted snapshot of `mirror`, cached until the next mutation. */
+  let allCache: Email[] | null = null;
   /** The last persistence failure, or `null`. Reported by `flush()`. */
   let flushError: unknown = null;
   /** The newest write to the offline store, which `flush()` waits for. */
@@ -214,6 +216,10 @@ export function localCache(
     }
   };
 
+  const invalidateAll = (): void => {
+    allCache = null;
+  };
+
   const load = (): Promise<Map<GmailId, Email>> => {
     if (mirror) return Promise.resolve(mirror);
     loading ??= (async () => {
@@ -232,10 +238,13 @@ export function localCache(
         loaded = new Map();
       }
       // A write that happened while this read was on the way wins over what was read.
-      mirror ??= loaded;
+      if (!mirror) {
+        mirror = loaded;
+        invalidateAll();
+      }
       if (legacyPending) scheduleFlush();
       loading = null;
-      return mirror;
+      return mirror!;
     })();
     return loading;
   };
@@ -308,7 +317,9 @@ export function localCache(
   return {
     offline,
     async all() {
-      return [...(await load()).values()].sort((a, b) => b.receivedAt - a.receivedAt);
+      const rows = await load();
+      if (!allCache) allCache = [...rows.values()].sort((a, b) => b.receivedAt - a.receivedAt);
+      return allCache.slice();
     },
     async getByGmailId(gmailId: GmailId) {
       return (await load()).get(gmailId);
@@ -324,11 +335,14 @@ export function localCache(
       // change a message's content, and the reader may have loaded this one while the
       // sync that is now writing its metadata was still running.
       for (const email of emails) rows.set(email.gmailId, keepLoadedBody(email, rows.get(email.gmailId)));
+      invalidateAll();
       scheduleFlush();
     },
     async remove(gmailIds) {
       const rows = await load();
-      for (const gmailId of gmailIds) rows.delete(gmailId);
+      let changed = false;
+      for (const gmailId of gmailIds) if (rows.delete(gmailId)) changed = true;
+      if (changed) invalidateAll();
       scheduleFlush();
       await forgetOffline((store) => store.remove(gmailIds));
     },
@@ -341,20 +355,27 @@ export function localCache(
       // usually *most* of the mailbox.
       const keep = new Set(gmailIds);
       const rows = await load();
+      let changed = false;
       for (const gmailId of [...rows.keys()]) {
-        if (!keep.has(gmailId)) rows.delete(gmailId);
+        if (!keep.has(gmailId)) {
+          rows.delete(gmailId);
+          changed = true;
+        }
       }
+      if (changed) invalidateAll();
       scheduleFlush();
       await forgetOffline((store) => store.keepOnly([...rows.keys()]));
     },
     async replace(emails) {
       mirror = new Map(emails.map((email) => [email.gmailId, email]));
+      invalidateAll();
       scheduleFlush();
       await forgetOffline((store) => store.keepOnly([...mirror!.keys()]));
     },
     async clear() {
       writer.cancel();
       mirror = new Map();
+      allCache = [];
       flushError = null;
       legacyPending = false;
       try {
@@ -412,6 +433,7 @@ export function localCache(
     release() {
       if (!writer.flushNow() && mirror) commit(JSON.stringify([...mirror.values()]));
       mirror = null;
+      allCache = null;
     },
   } as LocalCache;
 }
