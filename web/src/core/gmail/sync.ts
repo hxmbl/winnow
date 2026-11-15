@@ -26,7 +26,7 @@
  * rebuild (cursor expired).
  */
 
-import { keepLoadedBody, type Email } from "../model/email";
+import { keepLoadedBody, type Attachment, type Contact, type Email } from "../model/email";
 import type { GmailClient, MessageFormat } from "./client";
 import { MAX_PAGE_SIZE } from "./client";
 import { GmailHttpError, LABEL, type GmailMessage } from "./dto";
@@ -230,7 +230,11 @@ export class GmailSyncEngine {
     const profile = await this.options.client.profile();
 
     // What the cache holds now, so a re-fetched message keeps a body it already has.
-    const previous = new Map((await this.options.cache.all()).map((email) => [email.gmailId, email]));
+    const previousRows = await this.options.cache.all();
+    const previous = new Map(previousRows.map((email) => [email.gmailId, email]));
+    // Mirrors the cache in memory: partials and the final result read from here instead
+    // of re-parsing storage on every publish (cache.all() can be an expensive full read).
+    const current = new Map(previous);
 
     const seen = new Set<string>();
     const fetched = new Set<string>();
@@ -246,13 +250,15 @@ export class GmailSyncEngine {
       await this.options.cache.upsert(rows);
     };
 
+    const snapshot = (): Email[] => [...current.values()].sort((a, b) => b.receivedAt - a.receivedAt);
+
     // Inbox-first publishing. `lastPartial` is null until the first screen has gone out.
     let lastPartial: number | null = null;
     const publish = async (): Promise<void> => {
       if (!onPartial) return;
       await flushBatch();
       lastPartial = this.now();
-      onPartial(await this.options.cache.all());
+      onPartial(snapshot());
     };
 
     for (const [index, view] of VIEWS.entries()) {
@@ -304,6 +310,7 @@ export class GmailSyncEngine {
           if (outcome.kind === "success") {
             fetched.add(id);
             seen.add(id);
+            current.set(id, outcome.email);
             batch.push(outcome.email);
             if (batch.length >= BATCH_SIZE) await flushBatch();
             if (stage === "inbox") inboxFetched += 1;
@@ -343,7 +350,7 @@ export class GmailSyncEngine {
     // Anything a view could not walk needs an individual fetch, or it would
     // fall out of `seen` and be deleted as if it had been removed.
     if (truncated) {
-      const leftovers = (await this.options.cache.gmailIds()).filter((id) => !fetched.has(id));
+      const leftovers = [...current.keys()].filter((id) => !fetched.has(id));
       await mapPool(
         leftovers,
         this.concurrency,
@@ -351,6 +358,7 @@ export class GmailSyncEngine {
         async (outcome, id) => {
           if (outcome.kind === "success") {
             seen.add(id);
+            current.set(id, outcome.email);
             batch.push(outcome.email);
             if (batch.length >= BATCH_SIZE) await flushBatch();
           } else if (outcome.kind === "failed") {
@@ -373,7 +381,9 @@ export class GmailSyncEngine {
     // The cursor is only trustworthy when the cache is a faithful copy.
     if (failed === 0 && !cacheUnpersisted) await this.options.cursor.write(profile.historyId);
 
-    const emails = await this.options.cache.all();
+    const emails = [...current.values()]
+      .filter((email) => seen.has(email.gmailId))
+      .sort((a, b) => b.receivedAt - a.receivedAt);
     report({ phase: "idle", fraction: 1, fetched: seen.size, failed, total });
 
     return { emails, failed, truncated, cacheUnpersisted, durationMs: this.now() - started, mode: "full" };
@@ -586,7 +596,11 @@ export class GmailSyncEngine {
 
     // `mailboxFor` reads the labels, so a message that arrived in the archived
     // view with an INBOX label mid-move still lands correctly.
-    return { kind: "success", email: keepLoadedBody({ ...email, mailbox: mailboxFor(labels) }, cached) };
+    const next = keepLoadedBody({ ...email, mailbox: mailboxFor(labels) }, cached);
+    // Preserve object identity when nothing changed so per-email memoisation (classify,
+    // filter, search bags) remains valid across syncs.
+    if (cached && emailsEqual(cached, next)) return { kind: "success", email: cached };
+    return { kind: "success", email: next };
   }
 }
 
@@ -613,4 +627,93 @@ function collectRecord(
   for (const entry of record.messagesAdded ?? []) touched.add(entry.message.id);
   for (const entry of record.labelsAdded ?? []) touched.add(entry.message.id);
   for (const entry of record.labelsRemoved ?? []) touched.add(entry.message.id);
+}
+
+function sameContacts(a?: readonly Contact[], b?: readonly Contact[]): boolean {
+  if (a === b) return true;
+  if (!a || !b) return !a && !b;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i]!.address !== b[i]!.address || a[i]!.name !== b[i]!.name) return false;
+  }
+  return true;
+}
+
+function sameAttachments(a: readonly Attachment[], b: readonly Attachment[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.id !== y.id ||
+      x.partId !== y.partId ||
+      x.filename !== y.filename ||
+      x.mimeType !== y.mimeType ||
+      x.size !== y.size ||
+      x.inline !== y.inline
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameUnsubscribe(a: Email["unsubscribe"], b: Email["unsubscribe"]): boolean {
+  if (a === b) return true;
+  if (!a || !b) return !a && !b;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "one-click" && b.kind === "one-click") {
+    return a.url === b.url && a.post === b.post && a.mailto === b.mailto;
+  }
+  if (a.kind === "mailto" && b.kind === "mailto") {
+    return a.address === b.address && a.subject === b.subject && a.body === b.body;
+  }
+  if (a.kind === "http" && b.kind === "http") {
+    return a.url === b.url;
+  }
+  return false;
+}
+
+
+
+function emailsEqual(a: Email, b: Email): boolean {
+  return (
+    a === b ||
+    (a.id === b.id &&
+      a.gmailId === b.gmailId &&
+      a.threadId === b.threadId &&
+      a.messageId === b.messageId &&
+      a.sender === b.sender &&
+      a.address === b.address &&
+      a.name === b.name &&
+      a.mailbox === b.mailbox &&
+      a.receivedAt === b.receivedAt &&
+      a.subject === b.subject &&
+      a.body === b.body &&
+      a.bodySource === b.bodySource &&
+      a.bodyHtml === b.bodyHtml &&
+      a.category === b.category &&
+      a.starred === b.starred &&
+      a.unread === b.unread &&
+      a.spamScore === b.spamScore &&
+      a.urgent === b.urgent &&
+      a.bodyLoaded === b.bodyLoaded &&
+      a.sizeEstimate === b.sizeEstimate &&
+      a.bulk === b.bulk &&
+      a.attachmentHint === b.attachmentHint &&
+      a.code === b.code &&
+      a.snoozedUntil === b.snoozedUntil &&
+      a.gmailDraft?.id === b.gmailDraft?.id &&
+      a.gmailDraft?.inReplyTo === b.gmailDraft?.inReplyTo &&
+      a.gmailDraft?.references === b.gmailDraft?.references &&
+      a.scheduled?.id === b.scheduled?.id &&
+      a.scheduled?.sendAt === b.scheduled?.sendAt &&
+      a.scheduled?.problem === b.scheduled?.problem &&
+      sameContacts(a.to, b.to) &&
+      sameContacts(a.cc, b.cc) &&
+      sameContacts(a.bcc, b.bcc) &&
+      sameAttachments(a.attachments, b.attachments) &&
+      sameUnsubscribe(a.unsubscribe, b.unsubscribe))
+  );
 }

@@ -310,6 +310,14 @@ export function localCache(
     async all() {
       return [...(await load()).values()].sort((a, b) => b.receivedAt - a.receivedAt);
     },
+    async getByGmailId(gmailId: GmailId) {
+      return (await load()).get(gmailId);
+    },
+    async getById(id: number) {
+      const rows = await load();
+      for (const email of rows.values()) if (email.id === id) return email;
+      return undefined;
+    },
     async upsert(emails) {
       const rows = await load();
       // A metadata-only copy never overwrites a body already held: Gmail does not
@@ -416,6 +424,9 @@ export type LocalCache = MailboxCache &
     release(): void;
     /** The account's offline store, or `null` on a host without IndexedDB. */
     readonly offline: OfflineStore | null;
+    /** Fast lookups that avoid sorting/copying the whole mailbox. */
+    getByGmailId(gmailId: GmailId): Promise<Email | undefined>;
+    getById(id: number): Promise<Email | undefined>;
   };
 
 /**
@@ -1541,9 +1552,11 @@ export class GmailSession {
     /** The account's offline store (bodies and attachments saved for offline), if the host has one. */
     const offline = (this.rawCache as { offline?: OfflineStore | null }).offline ?? null;
 
+    const cacheLookup = cache as MailboxCache & { getById?: (id: number) => Promise<Email | undefined>; getByGmailId?: (gmailId: string) => Promise<Email | undefined> };
+
     /** The gmail id for a numeric id — the API speaks ids, the UI does not. */
     const gmailIdFor = async (id: number): Promise<string> => {
-      const cached = (await cache.all()).find((email) => email.id === id);
+      const cached = cacheLookup.getById ? await cacheLookup.getById(id) : (await cache.all()).find((email) => email.id === id);
       if (!cached) {
         // A message the cache does not have cannot be acted on server-side
         // either: there is no id to send. A refresh is the fix.
@@ -1840,7 +1853,9 @@ export class GmailSession {
         // Saved offline already (the background download): read it from disk, no request.
         const stored = offline ? await offline.getBody(gmailId).catch(() => null) : null;
         const loaded = stored ? loadedFromStored(stored) : loadedBodyOf(await client.message(gmailId, "full"));
-        const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
+        const cached = cacheLookup.getByGmailId
+          ? await cacheLookup.getByGmailId(gmailId)
+          : (await cache.all()).find((email) => email.gmailId === gmailId);
         if (cached) await cache.upsert([withLoadedBody(cached, loaded)]);
         return loaded;
       },
@@ -1878,7 +1893,9 @@ export class GmailSession {
               // Opened before (the reader or a prefetch put its body in the cache): no
               // second download. Otherwise one `format=full`, *not* written into the cache
               // mirror — the offline store holds it, and the mirror stays metadata.
-              const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
+              const cached = cacheLookup.getByGmailId
+                ? await cacheLookup.getByGmailId(gmailId)
+                : (await cache.all()).find((email) => email.gmailId === gmailId);
               if (cached && isBodyLoaded(cached)) {
                 return {
                   body: cached.body,

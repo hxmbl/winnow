@@ -55,11 +55,12 @@ const PROGRESS_NOTIFY_MS = 500;
             syncFetched: progress.fetched,
           };
           // The count on the status line ("Syncing inbox, 340 of 1,200") is worth a
-          // re-render twice a second, not once per message.
+          // re-render twice a second, not once per message. Progress fields don't affect
+          // the derived mailbox view, so skip recomputing it.
           const now = Date.now();
           if (changed || now - lastProgressNotify >= PROGRESS_NOTIFY_MS) {
             lastProgressNotify = now;
-            store.notify();
+            store.notify({ viewChanged: false });
           }
         },
       });

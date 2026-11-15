@@ -245,11 +245,15 @@ export class MailboxSelectors {
 
   derive(store: WinnowStore): MailboxView {
     const state = store.state;
-    const blocked = new Set(state.preferences.blockedSenders.map((s) => s.toLowerCase()));
+    const blockedList = state.preferences.blockedSenders;
 
     // Blocked senders are hidden from every view, and before the profile is built, or
     // their volume would still push them up the engagement ranking.
-    const visible = state.all.filter((email) => !blocked.has(email.sender.toLowerCase()));
+    let visible: readonly Email[] = state.all;
+    if (blockedList.length > 0) {
+      const blocked = new Set(blockedList.map((s) => s.toLowerCase()));
+      visible = state.all.filter((email) => !blocked.has(email.sender.toLowerCase()));
+    }
     // Drafts are their own list (see `StoreState.drafts`), never filtered by sender: the
     // sender of every draft is the user.
     const mailboxEmails = store.listedIn(visible);
@@ -258,7 +262,8 @@ export class MailboxSelectors {
     // read" from an archive or a bin would teach it the wrong thing. Memoised; see
     // `inboxAnalysis`.
     const { profile, signals: inboxSignals } = this.inboxAnalysis(store);
-    const inboxForProfile = visible.filter((email) => email.mailbox === "inbox");
+    const inboxForProfile =
+      state.mailbox === "inbox" ? mailboxEmails : visible.filter((email) => email.mailbox === "inbox");
 
     // Smart filters apply to whichever mailbox is open (1.3.3), classified with the
     // inbox's profile and what has been learned: the inbox's signals are reused there,
@@ -292,7 +297,7 @@ export class MailboxSelectors {
     // leads, whatever the sort setting says about mail.
     const result =
       state.mailbox === "snoozed" || state.mailbox === "scheduled"
-        ? { ...queried, emails: [...queried.emails].sort((a, b) => timedAt(a) - timedAt(b)) }
+        ? { ...queried, emails: (queried.emails as Email[]).sort((a, b) => timedAt(a) - timedAt(b)) }
         : queried;
 
     const threads = groupThreads(result.emails);

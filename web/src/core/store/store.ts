@@ -524,11 +524,23 @@ export class WinnowStore {
    *
    * Split out of `set` because the sync engine's progress callback needs to advance
    * state without notifying on every message it downloads.
+   *
+   * Pass `{ viewChanged: false }` when only non-view state moved (e.g. sync progress
+   * counters): listeners still fire so the UI can re-render status, but the derived
+   * mailbox view is not recomputed.
    */
   /** @internal */
-  notify(): void {
+  notify(options: { viewChanged?: boolean } = {}): void {
+    const viewChanged = options.viewChanged ?? true;
     this.version += 1;
-    this.followOpenMessage();
+    if (viewChanged) {
+      this.followOpenMessage();
+    } else if (this.derived) {
+      // Keep the cached view aligned with the new version so a progress-only render
+      // does not force an unnecessary full derive.
+      this.derived = { version: this.version, view: this.derived.view };
+    }
+    this.key = String(this.version);
     for (const listener of this.listeners) listener();
   }
 
