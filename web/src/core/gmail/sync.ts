@@ -677,17 +677,7 @@ function sameAttachments(a: readonly Attachment[], b: readonly Attachment[]): bo
 function sameUnsubscribe(a: Email["unsubscribe"], b: Email["unsubscribe"]): boolean {
   if (a === b) return true;
   if (!a || !b) return !a && !b;
-  if (a.kind !== b.kind) return false;
-  if (a.kind === "one-click" && b.kind === "one-click") {
-    return a.url === b.url && a.post === b.post && a.mailto === b.mailto;
-  }
-  if (a.kind === "mailto" && b.kind === "mailto") {
-    return a.address === b.address && a.subject === b.subject && a.body === b.body;
-  }
-  if (a.kind === "http" && b.kind === "http") {
-    return a.url === b.url;
-  }
-  return false;
+  return a.url === b.url && a.mailto === b.mailto && a.oneClick === b.oneClick;
 }
 
 

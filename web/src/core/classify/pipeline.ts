@@ -242,17 +242,16 @@ export function groupThreads(emails: readonly Email[]): ThreadRow[] {
       const only = messages[0]!;
       return { key, representative: only, messageCount: 1, unread: only.unread };
     }
-    messages.sort((a, b) => a.receivedAt - b.receivedAt);
-    let unread = false;
-    for (let i = 0; i < messages.length; i += 1) {
-      if (messages[i]!.unread) {
-        unread = true;
-        break;
-      }
+    let representative = messages[0]!;
+    let unread = representative.unread;
+    for (let i = 1; i < messages.length; i += 1) {
+      const message = messages[i]!;
+      if (message.unread) unread = true;
+      if (message.receivedAt > representative.receivedAt) representative = message;
     }
     return {
       key,
-      representative: messages[messages.length - 1]!,
+      representative,
       messageCount: messages.length,
       unread,
     };
