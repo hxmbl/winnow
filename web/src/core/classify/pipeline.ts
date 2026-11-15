@@ -155,25 +155,27 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
     rows = rows.filter((email) => !isUnsafe(signalFor(signals, email)));
   }
 
-  // 3. Sort.
+  // 3. Sort. `rows` is a fresh array when search/filtering ran; copy only if it's still the input.
   let scores: Map<number, number> | null = null;
+  let ordered: Email[];
   if (sortBy === "date") {
-    rows = [...rows].sort((a, b) => b.receivedAt - a.receivedAt);
+    ordered = (rows === emails ? [...rows] : (rows as Email[])).sort((a, b) => b.receivedAt - a.receivedAt);
   } else if (sortBy === "sender") {
-    rows = [...rows].sort((a, b) => a.sender.localeCompare(b.sender));
+    ordered = (rows === emails ? [...rows] : (rows as Email[])).sort((a, b) => a.sender.localeCompare(b.sender));
   } else {
     // Scored only now, and only over what survived the filter. The recency
     // window is that same set, so "new" means new relative to the mail it is
     // actually ranked among.
     scores = new Map();
-    const recency = recencyWindow(rows.map((email) => email.receivedAt));
-    for (const email of rows) {
+    const list = rows === emails ? [...rows] : (rows as Email[]);
+    const recency = recencyWindow(list.map((email) => email.receivedAt));
+    for (const email of list) {
       scores.set(email.id, calculateWinnowScore(email, signalFor(signals, email), profile, recency));
     }
-    rows = [...rows].sort((a, b) => (scores!.get(b.id) ?? 0) - (scores!.get(a.id) ?? 0));
+    ordered = list.sort((a, b) => (scores!.get(b.id) ?? 0) - (scores!.get(a.id) ?? 0));
   }
 
-  const out = [...rows];
+  const out = ordered;
 
   // The count is the length of the list, with no second pass over the mailbox.
   const matchCount = out.length;
@@ -235,12 +237,23 @@ export function groupThreads(emails: readonly Email[]): ThreadRow[] {
   }
 
   return order.map((key) => {
-    const messages = grouped.get(key)!.slice().sort((a, b) => a.receivedAt - b.receivedAt);
+    const messages = grouped.get(key)!;
+    if (messages.length === 1) {
+      const only = messages[0]!;
+      return { key, representative: only, messageCount: 1, unread: only.unread };
+    }
+    let representative = messages[0]!;
+    let unread = representative.unread;
+    for (let i = 1; i < messages.length; i += 1) {
+      const message = messages[i]!;
+      if (message.unread) unread = true;
+      if (message.receivedAt > representative.receivedAt) representative = message;
+    }
     return {
       key,
-      representative: messages[messages.length - 1],
+      representative,
       messageCount: messages.length,
-      unread: messages.some((message) => message.unread),
+      unread,
     };
   });
 }

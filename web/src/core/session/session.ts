@@ -194,6 +194,8 @@ export function localCache(
   let mirror: Map<GmailId, Email> | null = null;
   /** The read that fills `mirror`, shared by every caller that arrives while it runs. */
   let loading: Promise<Map<GmailId, Email>> | null = null;
+  /** Sorted snapshot of `mirror`, cached until the next mutation. */
+  let allCache: Email[] | null = null;
   /** The last persistence failure, or `null`. Reported by `flush()`. */
   let flushError: unknown = null;
   /** The newest write to the offline store, which `flush()` waits for. */
@@ -214,6 +216,10 @@ export function localCache(
     }
   };
 
+  const invalidateAll = (): void => {
+    allCache = null;
+  };
+
   const load = (): Promise<Map<GmailId, Email>> => {
     if (mirror) return Promise.resolve(mirror);
     loading ??= (async () => {
@@ -232,10 +238,13 @@ export function localCache(
         loaded = new Map();
       }
       // A write that happened while this read was on the way wins over what was read.
-      mirror ??= loaded;
+      if (!mirror) {
+        mirror = loaded;
+        invalidateAll();
+      }
       if (legacyPending) scheduleFlush();
       loading = null;
-      return mirror;
+      return mirror!;
     })();
     return loading;
   };
@@ -308,7 +317,17 @@ export function localCache(
   return {
     offline,
     async all() {
-      return [...(await load()).values()].sort((a, b) => b.receivedAt - a.receivedAt);
+      const rows = await load();
+      if (!allCache) allCache = [...rows.values()].sort((a, b) => b.receivedAt - a.receivedAt);
+      return allCache.slice();
+    },
+    async getByGmailId(gmailId: GmailId) {
+      return (await load()).get(gmailId);
+    },
+    async getById(id: number) {
+      const rows = await load();
+      for (const email of rows.values()) if (email.id === id) return email;
+      return undefined;
     },
     async upsert(emails) {
       const rows = await load();
@@ -316,11 +335,14 @@ export function localCache(
       // change a message's content, and the reader may have loaded this one while the
       // sync that is now writing its metadata was still running.
       for (const email of emails) rows.set(email.gmailId, keepLoadedBody(email, rows.get(email.gmailId)));
+      invalidateAll();
       scheduleFlush();
     },
     async remove(gmailIds) {
       const rows = await load();
-      for (const gmailId of gmailIds) rows.delete(gmailId);
+      let changed = false;
+      for (const gmailId of gmailIds) if (rows.delete(gmailId)) changed = true;
+      if (changed) invalidateAll();
       scheduleFlush();
       await forgetOffline((store) => store.remove(gmailIds));
     },
@@ -333,20 +355,27 @@ export function localCache(
       // usually *most* of the mailbox.
       const keep = new Set(gmailIds);
       const rows = await load();
+      let changed = false;
       for (const gmailId of [...rows.keys()]) {
-        if (!keep.has(gmailId)) rows.delete(gmailId);
+        if (!keep.has(gmailId)) {
+          rows.delete(gmailId);
+          changed = true;
+        }
       }
+      if (changed) invalidateAll();
       scheduleFlush();
       await forgetOffline((store) => store.keepOnly([...rows.keys()]));
     },
     async replace(emails) {
       mirror = new Map(emails.map((email) => [email.gmailId, email]));
+      invalidateAll();
       scheduleFlush();
       await forgetOffline((store) => store.keepOnly([...mirror!.keys()]));
     },
     async clear() {
       writer.cancel();
       mirror = new Map();
+      allCache = [];
       flushError = null;
       legacyPending = false;
       try {
@@ -404,6 +433,7 @@ export function localCache(
     release() {
       if (!writer.flushNow() && mirror) commit(JSON.stringify([...mirror.values()]));
       mirror = null;
+      allCache = null;
     },
   } as LocalCache;
 }
@@ -416,6 +446,9 @@ export type LocalCache = MailboxCache &
     release(): void;
     /** The account's offline store, or `null` on a host without IndexedDB. */
     readonly offline: OfflineStore | null;
+    /** Fast lookups that avoid sorting/copying the whole mailbox. */
+    getByGmailId(gmailId: GmailId): Promise<Email | undefined>;
+    getById(id: number): Promise<Email | undefined>;
   };
 
 /**
@@ -1541,9 +1574,11 @@ export class GmailSession {
     /** The account's offline store (bodies and attachments saved for offline), if the host has one. */
     const offline = (this.rawCache as { offline?: OfflineStore | null }).offline ?? null;
 
+    const cacheLookup = cache as MailboxCache & { getById?: (id: number) => Promise<Email | undefined>; getByGmailId?: (gmailId: string) => Promise<Email | undefined> };
+
     /** The gmail id for a numeric id — the API speaks ids, the UI does not. */
     const gmailIdFor = async (id: number): Promise<string> => {
-      const cached = (await cache.all()).find((email) => email.id === id);
+      const cached = cacheLookup.getById ? await cacheLookup.getById(id) : (await cache.all()).find((email) => email.id === id);
       if (!cached) {
         // A message the cache does not have cannot be acted on server-side
         // either: there is no id to send. A refresh is the fix.
@@ -1840,7 +1875,9 @@ export class GmailSession {
         // Saved offline already (the background download): read it from disk, no request.
         const stored = offline ? await offline.getBody(gmailId).catch(() => null) : null;
         const loaded = stored ? loadedFromStored(stored) : loadedBodyOf(await client.message(gmailId, "full"));
-        const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
+        const cached = cacheLookup.getByGmailId
+          ? await cacheLookup.getByGmailId(gmailId)
+          : (await cache.all()).find((email) => email.gmailId === gmailId);
         if (cached) await cache.upsert([withLoadedBody(cached, loaded)]);
         return loaded;
       },
@@ -1878,7 +1915,9 @@ export class GmailSession {
               // Opened before (the reader or a prefetch put its body in the cache): no
               // second download. Otherwise one `format=full`, *not* written into the cache
               // mirror — the offline store holds it, and the mirror stays metadata.
-              const cached = (await cache.all()).find((email) => email.gmailId === gmailId);
+              const cached = cacheLookup.getByGmailId
+                ? await cacheLookup.getByGmailId(gmailId)
+                : (await cache.all()).find((email) => email.gmailId === gmailId);
               if (cached && isBodyLoaded(cached)) {
                 return {
                   body: cached.body,

@@ -38,30 +38,50 @@ export function partitionBodies(emails: readonly Email[]): {
   /** Messages whose body question is settled — resident, or known to have no HTML. */
   checked: Set<number>;
 } {
-  const byRecency = [...emails].sort((a, b) => b.receivedAt - a.receivedAt);
   const bodies = new Map<number, string>();
   const checked = new Set<number>();
-  let changed = false;
 
-  for (const email of byRecency.slice(0, BODY_RETENTION)) {
-    // Every loaded message in the window counts as settled, not just the ones with
-    // HTML: recording that stops the reader asking again for a plain-text message it
-    // opens. A metadata-only row is not settled — its body has never been fetched.
-    if (!isBodyLoaded(email)) continue;
-    checked.add(email.id);
-    if (email.bodyHtml !== undefined) bodies.set(email.id, email.bodyHtml);
+  // Identify resident HTML bodies among the BODY_RETENTION most recent messages.
+  // Only messages with a loaded body can contribute; if none are loaded we can skip
+  // the recency selection entirely (common for metadata-only sync results).
+  let hasLoaded = false;
+  for (let i = 0; i < emails.length; i += 1) {
+    if (isBodyLoaded(emails[i]!)) {
+      hasLoaded = true;
+      break;
+    }
+  }
+  if (hasLoaded) {
+    const byRecency =
+      emails.length <= BODY_RETENTION
+        ? emails
+        : [...emails].sort((a, b) => b.receivedAt - a.receivedAt);
+    const window = emails.length <= BODY_RETENTION ? byRecency : byRecency.slice(0, BODY_RETENTION);
+    for (let i = 0; i < window.length; i += 1) {
+      const email = window[i]!;
+      // Every loaded message in the window counts as settled, not just the ones with
+      // HTML: recording that stops the reader asking again for a plain-text message it
+      // opens. A metadata-only row is not settled — its body has never been fetched.
+      if (!isBodyLoaded(email)) continue;
+      checked.add(email.id);
+      if (email.bodyHtml !== undefined) bodies.set(email.id, email.bodyHtml);
+    }
   }
 
-  const stripped = emails.map((email) => {
+  // Strip resident HTML/codes only when needed, avoiding a full copy when nothing changes.
+  let stripped: Email[] | undefined;
+  for (let i = 0; i < emails.length; i += 1) {
+    const email = emails[i]!;
     // Rows cached before codes existed are looked at once, on the way in.
     const coded = withCode(email);
-    if (coded !== email) changed = true;
-    if (coded.bodyHtml === undefined) return coded;
-    changed = true;
-    return { ...coded, bodyHtml: undefined };
-  });
+    const result = coded.bodyHtml === undefined ? coded : { ...coded, bodyHtml: undefined };
+    if (result !== email) {
+      if (!stripped) stripped = emails.slice(0, i) as Email[];
+    }
+    if (stripped) stripped.push(result);
+  }
 
   // The same array when nothing had a body, so the demo seed keeps the identity
   // `inboxAnalysis` is keyed on.
-  return { emails: changed ? stripped : (emails as Email[]), bodies, checked };
+  return { emails: stripped ?? (emails as Email[]), bodies, checked };
 }

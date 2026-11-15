@@ -201,10 +201,10 @@ export function countAllFilters(
 
 /** Every built-in filter one message is in. An unsafe message is in Unsafe only. */
 export function filtersFor(email: Email, signal: EmailSignals, profile: UserProfile): BuiltinSmartFilter[] {
-  const safe = !isUnsafe(signal);
+  if (isUnsafe(signal)) return ["unsafe"];
   const ids: BuiltinSmartFilter[] = [];
   for (const id of ALL_FILTER_IDS) {
-    if (!safe && id !== "unsafe") continue;
+    if (id === "unsafe") continue;
     if (matchesBuiltin(id, email, signal, profile)) ids.push(id);
   }
   return ids;
