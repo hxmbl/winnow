@@ -490,6 +490,8 @@ export function PhoneDock({
             >
               {SlotGlyph ? (
                 <>
+                  {/* STRM-617: a spacer as wide as the chevron keeps the mailbox icon centred. */}
+                  <span aria-hidden="true" className="w-4 shrink-0" />
                   <Icon icon={SlotGlyph} size={24} className="shrink-0" />
                   <Icon icon={ChevronsUpDown} size={16} className="shrink-0 text-ink-muted" />
                 </>

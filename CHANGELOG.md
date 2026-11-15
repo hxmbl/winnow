@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Changed
+
+- Phone: in a mailbox from the menu, the dock's menu button now centres that mailbox's icon, with the chevron beside it (STRM-617).
+
 ## [1.9.1] - 2026-11-14
 
 ### Changed
