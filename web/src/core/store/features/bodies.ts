@@ -131,12 +131,38 @@ const BODY_APPLY_DELAY_MS = 400;
   /** After a sync: unread mail among the newest `PREFETCH_UNREAD_TOP_N` in the inbox. */
   /** @internal Starts low-priority body downloads after sync. */
   export function prefetchInbox(store: WinnowStore): void {
-    const top = store.state.all
-      .filter((email) => email.mailbox === "inbox")
-      .sort((a, b) => b.receivedAt - a.receivedAt)
-      .slice(0, PREFETCH_UNREAD_TOP_N)
-      .filter((email) => email.unread);
-    store.prefetchBodies(top.map((email) => email.id));
+    const limit = PREFETCH_UNREAD_TOP_N;
+    const newest: Email[] = [];
+    let minIdx = -1;
+    let minAt = 0;
+
+    const recomputeMin = (): void => {
+      minIdx = 0;
+      minAt = newest[0]!.receivedAt;
+      for (let i = 1; i < newest.length; i += 1) {
+        const at = newest[i]!.receivedAt;
+        if (at < minAt) {
+          minAt = at;
+          minIdx = i;
+        }
+      }
+    };
+
+    for (const email of store.state.all) {
+      if (email.mailbox !== "inbox") continue;
+      if (newest.length < limit) {
+        newest.push(email);
+        if (newest.length === limit) recomputeMin();
+        continue;
+      }
+      if (email.receivedAt <= minAt) continue;
+      newest[minIdx] = email;
+      recomputeMin();
+    }
+
+    const ids: number[] = [];
+    for (const email of newest) if (email.unread) ids.push(email.id);
+    if (ids.length > 0) store.prefetchBodies(ids);
   }
 
   /**
