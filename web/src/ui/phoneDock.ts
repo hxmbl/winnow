@@ -4,7 +4,7 @@
  * The dock is a floating pill of icon-only tabs (Inbox, Sent) and an Expand button,
  * with the compose button as a separate circle beside it. Expand morphs the pill into
  * the menu panel (`Sidebar` in `MailNav.tsx`); the Inbox tab is only ever the inbox; a
- * tap on it while it is already the current tab takes the list back to its top.
+ * tap on it while it is already the current tab takes the list back to its start.
  */
 
 import type { Mailbox } from "../core/model/email";
@@ -80,7 +80,8 @@ export type TabAction = "select" | "clear-filters" | "scroll-start";
 /**
  * A tab that is already the current page is the mailbox's "home" gesture: with a smart
  * filter on, the first tap clears it and the list goes back to All (the same as the All
- * chip, Hxmbl, 2026-10-28); with none on, it takes the list back to its top. Any other
+ * chip, Hxmbl, 2026-10-28); with none on, it takes the list back to its starting edge.
+ * Any other
  * tab switches to its mailbox, which drops the filters as switching always has. The menu
  * has its own button now, so no tab ever opens it.
  */

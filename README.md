@@ -217,7 +217,7 @@ It's a keyboard application first; the mouse is the fallback. `?` opens this lis
 | Keys | Does |
 | --- | --- |
 | `j` / `k`, `↓` / `↑` | Next / previous message; the arrows scroll an open message instead |
-| `Home` | Back to the top of the list |
+| `Home` | Back to the start of the list |
 | `o` or `⏎` | Open the highlighted message |
 | `Esc` | Close the message, a sheet, or the filters |
 | `s` | Star or unstar |

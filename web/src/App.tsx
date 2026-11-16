@@ -79,7 +79,7 @@ import { useSenderPictureCaches, useSenderPictures } from "./app/hooks/useSender
 import { useGoogleContacts } from "./app/hooks/useGoogleContacts";
 import { useActions } from "./app/hooks/useActions";
 import { AppNotices } from "./app/components/AppNotices";
-import { scrollListToTop } from "./ui/listScroll";
+import { scrollListToBottom, scrollListToTop } from "./ui/listScroll";
 import { useSettingsTransfer } from "./ui/useSettingsTransfer";
 import { useUpdates } from "./ui/useUpdates";
 import { WhatsNew } from "./ui/components/WhatsNew";
@@ -975,12 +975,15 @@ export function App({ store, existingInstall = true }: Props) {
     filtering: snapshot.activeFilters.length > 0,
     onInbox: () => {
       // On a phone, the panel's Inbox row on the plain inbox is the dock tab's "home"
-      // gesture: nothing to switch to, so the list goes back to its top instead.
+      // gesture: nothing to switch to, so the list goes back to its starting edge instead.
       const already = snapshot.mailbox === "inbox" && snapshot.activeFilters.length === 0 && snapshot.overlay === "none";
       store.setOverlay("none");
       store.setMailbox("inbox");
       store.clearFilters();
-      if (already && phoneRef.current) scrollListToTop();
+      if (already && phoneRef.current) {
+        if (preferences.sortFromBottom) scrollListToBottom();
+        else scrollListToTop();
+      }
     },
     onSelectMailbox: (mailbox) => {
       store.setOverlay("none");
