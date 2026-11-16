@@ -182,7 +182,7 @@ export type Preferences = {
    */
   emailDarkMode: boolean;
   /**
-   * On a phone, show the sorted list from bottom to top for ergonomics. Off by default.
+   * Show the sorted list from bottom to top, starting at its bottom. Off by default.
    */
   sortFromBottom: boolean;
   /** Keep syncing while the window is closed. Desktop only. */

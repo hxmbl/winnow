@@ -3664,7 +3664,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             emptyReason={view.result.emptyReason}
             emptyContext={emptyContext}
             sortBy={preferences.sortBy}
-            sortFromBottom={phone && preferences.sortFromBottom}
+            sortFromBottom={preferences.sortFromBottom}
             onSelect={handleSelectRow}
             onToggleStar={handleToggleStar}
             onClearFilters={store.clearFilters.bind(store)}
@@ -3699,7 +3699,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // The desktop's floating header covers the list's top, and the briefing
             // scrolls with the list under it.
             topInset={phone ? (selected ? 0 : phoneBarHeight) : listChromeHeight}
-            listView={`${viewKey(emptyContext)}|${preferences.sortBy}|${phone && preferences.sortFromBottom ? "bottom" : "top"}|${snapshot.searchQuery.trim()}`}
+            listView={`${viewKey(emptyContext)}|${preferences.sortBy}|${preferences.sortFromBottom ? "bottom" : "top"}|${snapshot.searchQuery.trim()}`}
             switchView={viewKey(emptyContext)}
             lead={
               phone ? (
@@ -3993,7 +3993,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onMarkReadOnOpen={(value) => store.setPreferences({ markReadOnOpen: value })}
           swipeActions={phone ? preferences.swipeActions : null}
           onSwipeActions={(value) => store.setPreferences({ swipeActions: value })}
-          sortFromBottom={phone ? preferences.sortFromBottom : null}
+          sortFromBottom={preferences.sortFromBottom}
           onSortFromBottom={(value) => store.setPreferences({ sortFromBottom: value })}
           leftHanded={phone ? preferences.leftHanded : null}
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}

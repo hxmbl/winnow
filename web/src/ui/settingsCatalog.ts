@@ -135,7 +135,7 @@ export const SETTINGS = {
     category: "reading",
     label: "Sort from bottom",
     explanation:
-      "On a phone, shows the list from bottom to top for easier reach, so the top of the sorted list sits nearer your thumb. Off by default.",
+      "Shows messages in reverse of the selected sort, with the first results at the bottom. New views start at the bottom; turn it off for the usual top-first order.",
   },
   markReadOnOpen: {
     category: "reading",

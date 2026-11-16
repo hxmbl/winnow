@@ -97,7 +97,7 @@ export type InboxQuery = {
    * hiding it there is how those lists once showed nothing.
    */
   hideUnsafe?: boolean;
-  /** Reverse the final order (bottom-to-top ergonomics on mobile). */
+  /** Reverse the final order for bottom-to-top ergonomics. */
   reverse?: boolean;
 };
 

@@ -833,7 +833,7 @@ type Props = {
    * through the list, and Back should land where they went. Defaults to `cursorIndex`.
    */
   revealIndex?: number;
-  /** Start at the bottom of the list (mobile "sort from bottom"). */
+  /** Start at the bottom of the list when sorting from bottom. */
   sortFromBottom?: boolean;
   /**
    * In-flow content at the top of the scroll, above the first day: the desktop's
@@ -1122,12 +1122,13 @@ function MessageList({
       : 0;
 
   /**
-   * A new view (another mailbox or label, other smart filters, a new search, another sort)
-   * starts at its top — or, in bottom-to-top mode on mobile, at its bottom. Before, the
-   * scroller kept the old view's offset, so switching a filter from halfway down the Inbox
-   * opened the filtered list halfway down too. Layout effect, so the old offset is never painted.
+   * The first view and every new view (another mailbox or label, other smart filters, a
+   * new search, another sort) start at their first result: at the top normally, or at the
+   * bottom when sorted from bottom. Before, the scroller kept the old view's offset, so
+   * switching a filter from halfway down the Inbox opened it halfway down too. Layout
+   * effect, so the old offset is never painted.
    */
-  const shownView = useRef(listView);
+  const shownView = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (shownView.current === listView) return;
     shownView.current = listView;

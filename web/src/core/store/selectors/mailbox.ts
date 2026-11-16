@@ -294,8 +294,8 @@ export class MailboxSelectors {
       hideUnsafe: state.mailbox === "inbox",
       reverse: state.preferences.sortFromBottom,
     });
-    // Snoozed and Scheduled are lists of times: whatever comes back (or goes) soonest
-    // leads, whatever the sort setting says about mail.
+    // Snoozed and Scheduled are ordered by their next time. Reversing them puts the
+    // soonest item at the bottom, where the bottom-to-top list starts.
     const timedEmails =
       state.mailbox === "snoozed" || state.mailbox === "scheduled"
         ? (queried.emails as Email[]).sort((a, b) => timedAt(a) - timedAt(b))
