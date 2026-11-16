@@ -2,7 +2,19 @@ import { describe, expect, it } from "vitest";
 import { MAILBOX_ORDER } from "./mailboxNav";
 import { expandLabel, pillColumns, switcherSlot, SWITCHER_WIDE_FR } from "./phoneDock";
 import { MAILBOX_LABEL, type Mailbox } from "../core/model/email";
-import { BACK_TO_TOP_LABEL, BACK_TO_TOP_SCREENS, backToTopVisible, DOCK_TABS, EXPAND_LABEL, badgeText, PANEL_ORDER, panelOrder, tabAction, tabLabel } from "./phoneDock";
+import {
+  BACK_TO_BOTTOM_LABEL,
+  BACK_TO_EDGE_SCREENS,
+  BACK_TO_TOP_LABEL,
+  backToEdgeVisible,
+  DOCK_TABS,
+  EXPAND_LABEL,
+  badgeText,
+  PANEL_ORDER,
+  panelOrder,
+  tabAction,
+  tabLabel,
+} from "./phoneDock";
 
 describe("the phone dock", () => {
   it("has two tabs, Inbox then Sent; Archive and the rest are behind Expand", () => {
@@ -10,10 +22,10 @@ describe("the phone dock", () => {
     expect(EXPAND_LABEL).toBe("More mailboxes");
   });
 
-  it("switches mailbox on a tap, and scrolls to the top on a tap of the current tab", () => {
+  it("switches mailbox on a tap, and returns to the start on a tap of the current tab", () => {
     expect(tabAction(false)).toBe("select");
-    expect(tabAction(true)).toBe("scroll-top");
-    expect(tabAction(true, false)).toBe("scroll-top");
+    expect(tabAction(true)).toBe("scroll-start");
+    expect(tabAction(true, false)).toBe("scroll-start");
   });
 
   it("clears an active smart filter on a tap of the current tab, back to All", () => {
@@ -31,7 +43,7 @@ describe("the phone dock", () => {
   it("never opens the menu from a tab", () => {
     for (const current of [true, false]) {
       for (const filtering of [true, false]) {
-        expect(["select", "clear-filters", "scroll-top"]).toContain(tabAction(current, filtering));
+        expect(["select", "clear-filters", "scroll-start"]).toContain(tabAction(current, filtering));
       }
     }
   });
@@ -64,13 +76,24 @@ describe("the phone dock", () => {
     expect(folders[0].id).toBe("archive");
   });
 
-  describe("the back-to-top pill", () => {
-    const at = (scrollTop: number, extra: Partial<Parameters<typeof backToTopVisible>[0]> = {}) =>
-      backToTopVisible({ scrollTop, viewportHeight: 700, allowed: true, menuOpen: false, ...extra });
+  describe("the list-edge pill", () => {
+    const at = (
+      scrollTop: number,
+      extra: Partial<Parameters<typeof backToEdgeVisible>[0]> = {},
+    ) =>
+      backToEdgeVisible({
+        scrollTop,
+        scrollHeight: 5000,
+        viewportHeight: 700,
+        allowed: true,
+        menuOpen: false,
+        ...extra,
+      });
 
-    it("is named for what it does, and waits for a screen's worth of scrolling", () => {
+    it("uses the active edge for its label, and waits for a screen's worth of scrolling", () => {
       expect(BACK_TO_TOP_LABEL).toBe("Back to top");
-      expect(BACK_TO_TOP_SCREENS).toBe(1);
+      expect(BACK_TO_BOTTOM_LABEL).toBe("Back to bottom");
+      expect(BACK_TO_EDGE_SCREENS).toBe(1);
     });
 
     it("hides at the top and within the first screen, shows past it", () => {
@@ -79,6 +102,13 @@ describe("the phone dock", () => {
       expect(at(700)).toBe(false);
       expect(at(701)).toBe(true);
       expect(at(5000)).toBe(true);
+    });
+
+    it("shows a return-to-bottom control only when more than a screen from the bottom", () => {
+      expect(at(4300, { sortFromBottom: true })).toBe(false);
+      expect(at(3600, { sortFromBottom: true })).toBe(false);
+      expect(at(3599, { sortFromBottom: true })).toBe(true);
+      expect(at(0, { sortFromBottom: true })).toBe(true);
     });
 
     it("never shows over the expanded panel, a selection or an overlay, or for a hidden list", () => {

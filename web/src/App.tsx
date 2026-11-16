@@ -3935,6 +3935,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           // The Accounts page covers the mail like Settings, so the dock treats it the same.
           settingsOpen={snapshot.overlay === "settings" || snapshot.overlay === "accounts"}
           menuOpen={sidebarOpen}
+          sortFromBottom={preferences.sortFromBottom}
           onOpenMenu={openSidebar}
           onCloseMenu={closeSidebar}
           // Compose is offered over the list and nothing else: not under the composer,
@@ -3949,8 +3950,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               ? () => openCompose()
               : null
           }
-          // Back to top, likewise, only over the plain list.
-          backToTopAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !filterPicker}
+          // The list-edge control, likewise, only over the plain list.
+          edgeControlAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !filterPicker}
         />
       )}
 

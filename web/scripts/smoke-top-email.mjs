@@ -123,7 +123,7 @@ export async function topEmail({ browser, url, check, section, shots = null }) {
       // Back to the top: the phone's Top pill, the desktop's Home key.
       await scrollList(900);
       if (phone) {
-        const pill = p.locator("[data-phone-dock] button[data-back-to-top]");
+        const pill = p.locator("[data-phone-dock] button[data-list-edge]");
         await pill.click({ timeout: 3_000 }).catch(() => undefined);
       } else {
         await p.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
