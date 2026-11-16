@@ -135,7 +135,7 @@ export const SETTINGS = {
     category: "reading",
     label: "Sort from bottom",
     explanation:
-      "Shows messages in reverse of the selected sort, with the first results at the bottom. New views start at the bottom; turn it off for the usual top-first order.",
+      "Shows messages in reverse of the selected sort, with the first results at the bottom. The first and each new view start there; turn it off for the usual top-first order.",
   },
   markReadOnOpen: {
     category: "reading",

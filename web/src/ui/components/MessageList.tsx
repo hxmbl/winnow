@@ -1148,8 +1148,8 @@ function MessageList({
 
   /**
    * Whether the mounted rows are the ones the scroll position calls for, which after a
-   * switch's jump to the top takes one more commit. The switch motion measures the new
-   * rows only then. Same test the scroll listener uses to decide whether to re-render.
+   * switch's jump to its starting edge takes one more commit. The switch motion measures
+   * the new rows only then. Same test the scroll listener uses to decide whether to re-render.
    */
   const windowSettled = useCallback((): boolean => {
     if (!scroller) return false;
@@ -1158,7 +1158,7 @@ function MessageList({
     const key = (at: number) => windowKey(w.offsets, isHeader, at, w.contentTop, w.viewportHeight, w.topInset);
     return key(scroller.scrollTop) === key(w.scrollTop);
   }, [scroller]);
-  // After the jump to the top above, so the first commit it sees has already asked for it.
+  // After the jump to the starting edge above, so the first commit it sees has already asked for it.
   useFilterSwitchMotion(scroller, switchView, topInset, windowSettled);
 
   /**

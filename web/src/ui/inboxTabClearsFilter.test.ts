@@ -67,7 +67,7 @@ describe("the Inbox tab clears the smart filter (STRM-441)", () => {
     expect(store.getSnapshot().activeFilters).toEqual([]);
   });
 
-  it("in Inbox with no filter, a tap scrolls the list to the top and changes nothing else", () => {
+  it("in Inbox with no filter, a tap returns the list to its start and changes nothing else", () => {
     const store = demoStore();
     const before = store.getSnapshot();
     const scroll = vi.fn();

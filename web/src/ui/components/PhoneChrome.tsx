@@ -206,6 +206,8 @@ const TAB_ICON: Record<(typeof DOCK_TABS)[number], { label: string; Icon: Lucide
 const HIGHLIGHT = "bg-surface-active";
 
 export type PhoneDockProps = {
+  /** The visible mailbox, filters, search and sort; used to refresh the edge shortcut. */
+  listView: string;
   pills: PillItem[];
   activeFilters: FilterId[];
   onToggleFilter: (id: FilterId) => void;
@@ -234,6 +236,7 @@ export type PhoneDockProps = {
 
 
 export function PhoneDock({
+  listView,
   pills,
   activeFilters,
   onToggleFilter,
@@ -257,14 +260,13 @@ export function PhoneDock({
   /*
     The list-edge pill follows the list's scroll. One capturing listener on the
     document rather than one on the scroller, because the scroller is replaced whenever
-    the empty state comes and goes; re-read when the mailbox or filters change the list
-    under it, and when the window resizes.
+    the empty state comes and goes; re-read when the mailbox, filters, search or sort
+    change the list under it, and when the window resizes.
   */
   const [awayFromStart, setAwayFromStart] = useState(false);
   const showEdge = awayFromStart && edgeControlAllowed && !menuOpen && !settingsOpen;
   const showEdgeRef = useRef(showEdge);
   showEdgeRef.current = showEdge;
-  const filterSignature = activeFilters.join("|");
   useEffect(() => {
     const read = () => {
       const scroller = listScroller();
@@ -290,7 +292,7 @@ export function PhoneDock({
       document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("resize", read);
     };
-  }, [mailbox, filterSignature, sortFromBottom]);
+  }, [listView, sortFromBottom]);
   const measureRef = useRef<() => void>(() => undefined);
 
   // Publish, measured from the window's bottom edge: where the pill starts (Settings'

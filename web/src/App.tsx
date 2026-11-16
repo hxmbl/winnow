@@ -3141,6 +3141,7 @@ const listSelectedId = phone
   ? null
   : (view.threads[view.selectedIndex]?.representative.id ?? snapshot.selectedId);
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
+const listView = `${viewKey(emptyContext)}|${preferences.sortBy}|${preferences.sortFromBottom ? "bottom" : "top"}|${snapshot.searchQuery.trim()}`;
   /**
    * Smart filters sort the inbox, so the list offers "Change smart filters…" there only.
    * The reader goes by the message itself.
@@ -3699,7 +3700,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // The desktop's floating header covers the list's top, and the briefing
             // scrolls with the list under it.
             topInset={phone ? (selected ? 0 : phoneBarHeight) : listChromeHeight}
-            listView={`${viewKey(emptyContext)}|${preferences.sortBy}|${preferences.sortFromBottom ? "bottom" : "top"}|${snapshot.searchQuery.trim()}`}
+            listView={listView}
             switchView={viewKey(emptyContext)}
             lead={
               phone ? (
@@ -3936,6 +3937,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           settingsOpen={snapshot.overlay === "settings" || snapshot.overlay === "accounts"}
           menuOpen={sidebarOpen}
           sortFromBottom={preferences.sortFromBottom}
+          listView={listView}
           onOpenMenu={openSidebar}
           onCloseMenu={closeSidebar}
           // Compose is offered over the list and nothing else: not under the composer,
