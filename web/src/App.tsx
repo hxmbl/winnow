@@ -3632,8 +3632,9 @@ const listView = `${viewKey(emptyContext)}|${preferences.sortBy}|${preferences.s
           */}
           {/*
             On a phone with an account there is no strip: a pull down from the top syncs
-            (`PullRefresh`), and what is waiting on you rides along in its result. The demo
-            keeps one compact line, so Connect Gmail stays in reach.
+            (`PullRefresh`), and what is waiting on you rides along in its result. A list
+            sorted from the bottom never pulls — that top is the oldest end — so the Inbox
+            tab is its way back. The demo keeps one compact line, so Connect Gmail stays in reach.
           */}
           {phone && snapshot.account !== null && (
             <PullRefresh
@@ -3643,6 +3644,7 @@ const listView = `${viewKey(emptyContext)}|${preferences.sortBy}|${preferences.s
                 menuOpen: sidebarOpen,
                 selecting: selection.size > 0,
                 overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || filterPicker !== null,
+                sortedFromBottom: preferences.sortFromBottom,
               }}
               syncing={sync.busy}
               top={phoneBarHeight}

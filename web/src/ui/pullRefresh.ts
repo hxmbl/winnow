@@ -7,7 +7,9 @@
  * here, with no DOM, so they are unit-tested rather than found on a real phone:
  *
  *   - **Only from the top.** A pull starts only when the list is at `scrollTop` 0 and
- *     nothing else has the screen (`pullAllowed`).
+ *     nothing else has the screen (`pullAllowed`). A bottom-sorted list never pulls:
+ *     it opens at the bottom, so its visual top is the oldest end and a pull there is
+ *     just a scroll; the dock's Inbox tab is the way back to its start edge.
  *   - **Axis lock.** The same lock as the swipes (`swipe.ts` `lockAxis`, the same
  *     distance from the same touch start): a touch that locks horizontal is a swipe and
  *     never a pull, and one that locks vertical is a scroll or a pull and never a swipe.
@@ -42,12 +44,15 @@ export type PullContext = {
   overlay: boolean;
   /** A sync is already running. */
   syncing: boolean;
+  /** The list is sorted from the bottom, so its visual top is the oldest end. */
+  sortedFromBottom: boolean;
 };
 
 /** Whether a touch on the list may become a pull. */
 export function pullAllowed(context: PullContext): boolean {
   return (
     context.connected &&
+    !context.sortedFromBottom &&
     context.scrollTop <= 0 &&
     !context.menuOpen &&
     !context.selecting &&

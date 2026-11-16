@@ -151,7 +151,7 @@ export function panelOrder<T extends { id: Mailbox }>(folders: readonly T[]): T[
 
 /** The floating list control's accessible name and visible label. */
 export const BACK_TO_TOP_LABEL = "Back to top";
-export const BACK_TO_BOTTOM_LABEL = "Back to bottom";
+export const BACK_TO_BOTTOM_LABEL = "Go to bottom";
 
 /** How far from the active starting edge, in screens, before the floating control appears. */
 export const BACK_TO_EDGE_SCREENS = 1;

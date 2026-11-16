@@ -92,7 +92,7 @@ describe("the phone dock", () => {
 
     it("uses the active edge for its label, and waits for a screen's worth of scrolling", () => {
       expect(BACK_TO_TOP_LABEL).toBe("Back to top");
-      expect(BACK_TO_BOTTOM_LABEL).toBe("Back to bottom");
+      expect(BACK_TO_BOTTOM_LABEL).toBe("Go to bottom");
       expect(BACK_TO_EDGE_SCREENS).toBe(1);
     });
 
