@@ -833,6 +833,8 @@ type Props = {
    * through the list, and Back should land where they went. Defaults to `cursorIndex`.
    */
   revealIndex?: number;
+  /** Start at the bottom of the list (mobile "sort from bottom"). */
+  sortFromBottom?: boolean;
   /**
    * In-flow content at the top of the scroll, above the first day: the desktop's
    * briefing ("3 waiting on you…", the sync line, Connect Gmail). It scrolls away with
@@ -874,6 +876,7 @@ function MessageList({
   listView = "",
   switchView = "",
   revealIndex,
+  sortFromBottom = false,
   lead,
   className = "",
 }: Props) {
@@ -1120,20 +1123,27 @@ function MessageList({
 
   /**
    * A new view (another mailbox or label, other smart filters, a new search, another sort)
-   * starts at its top. Before, the scroller kept the old view's offset, so switching a
-   * filter from halfway down the Inbox opened the filtered list halfway down too, its top
-   * email out of sight above the chrome. Layout effect, so the old offset is never painted.
+   * starts at its top — or, in bottom-to-top mode on mobile, at its bottom. Before, the
+   * scroller kept the old view's offset, so switching a filter from halfway down the Inbox
+   * opened the filtered list halfway down too. Layout effect, so the old offset is never painted.
    */
   const shownView = useRef(listView);
   useLayoutEffect(() => {
     if (shownView.current === listView) return;
     shownView.current = listView;
     stopSmoothScroll(scroller);
-    if (scroller && scroller.scrollTop !== 0) {
+    if (!scroller) return;
+    if (sortFromBottom) {
+      const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      if (scroller.scrollTop !== bottom) {
+        scroller.scrollTop = bottom;
+        setScrollTop(bottom);
+      }
+    } else if (scroller.scrollTop !== 0) {
       scroller.scrollTop = 0;
       setScrollTop(0);
     }
-  }, [listView, scroller]);
+  }, [listView, scroller, sortFromBottom]);
 
   /**
    * Whether the mounted rows are the ones the scroll position calls for, which after a

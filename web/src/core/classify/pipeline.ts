@@ -97,6 +97,8 @@ export type InboxQuery = {
    * hiding it there is how those lists once showed nothing.
    */
   hideUnsafe?: boolean;
+  /** Reverse the final order (bottom-to-top ergonomics on mobile). */
+  reverse?: boolean;
 };
 
 export type InboxResult = {
@@ -175,6 +177,7 @@ export function runInboxQuery(query: InboxQuery): InboxResult {
     ordered = list.sort((a, b) => (scores!.get(b.id) ?? 0) - (scores!.get(a.id) ?? 0));
   }
 
+  if (query.reverse) ordered = ordered.reverse();
   const out = ordered;
 
   // The count is the length of the list, with no second pass over the mailbox.

@@ -37,6 +37,7 @@ export const EXPORTED_PREFERENCE_KEYS = [
   "emailDarkMode",
   "leftHanded",
   "sortBy",
+  "sortFromBottom",
   "markReadOnOpen",
   "swipeActions",
   "undoSendSeconds",
@@ -280,6 +281,8 @@ export function settingLabel(key: ExportedKey): string {
       return SETTINGS.leftHanded.label;
     case "sortBy":
       return SETTINGS.sortBy.label;
+    case "sortFromBottom":
+      return SETTINGS.sortFromBottom.label;
     case "markReadOnOpen":
       return SETTINGS.markReadOnOpen.label;
     case "swipeActions":

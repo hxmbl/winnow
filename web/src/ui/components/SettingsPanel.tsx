@@ -189,6 +189,9 @@ export type SettingsProps = {
   /** Left-handed phone layout. Null hides the row (only the phone layout has thumb controls). */
   leftHanded: boolean | null;
   onLeftHanded: (value: boolean) => void;
+  /** Sort list from bottom to top on a phone. Null hides the row (mobile-only). */
+  sortFromBottom: boolean | null;
+  onSortFromBottom: (value: boolean) => void;
   /** Blur sensitive info on screen. See `Preferences.censorLevel`. */
   censorLevel: CensorLevel;
   onCensorLevel: (value: CensorLevel) => void;
@@ -1258,6 +1261,11 @@ function ReadingSettings({ props }: { props: SettingsProps }) {
         <Row setting="markReadOnOpen">
           <Toggle checked={props.markReadOnOpen} onChange={props.onMarkReadOnOpen} label="Mark as read when opened" />
         </Row>
+        {props.sortFromBottom !== null && (
+          <Row setting="sortFromBottom">
+            <Toggle checked={props.sortFromBottom} onChange={props.onSortFromBottom} label="Sort from bottom" />
+          </Row>
+        )}
         {props.swipeActions !== null && (
           <Row setting="swipeActions">
             <Toggle checked={props.swipeActions} onChange={props.onSwipeActions} label="Swipe actions" />

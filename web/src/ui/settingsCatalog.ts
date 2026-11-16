@@ -131,6 +131,12 @@ export const SETTINGS = {
     explanation:
       "Date shows the newest mail first, Sender groups mail by who sent it, and Smart Score puts what Winnow thinks matters most at the top. Smart Score is worked out on this device from what you star and hide; nothing is sent anywhere to rank your mail.",
   },
+  sortFromBottom: {
+    category: "reading",
+    label: "Sort from bottom",
+    explanation:
+      "On a phone, shows the list from bottom to top for easier reach, so the top of the sorted list sits nearer your thumb. Off by default.",
+  },
   markReadOnOpen: {
     category: "reading",
     label: "Mark as read when opened",
