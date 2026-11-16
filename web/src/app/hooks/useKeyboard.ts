@@ -5,7 +5,7 @@ import { NAVIGATION_ITEMS } from "../../core/model/signals";
 import { NO_CURSOR, type Snapshot, type WinnowStore } from "../../core/store/store";
 import { exitRows } from "../../ui/rowExit";
 import { isEditingElement } from "../../ui/sidebarOverlay";
-import { scrollListToTop } from "../../ui/listScroll";
+import { scrollListToBottom, scrollListToTop } from "../../ui/listScroll";
 import { isSelectAll, selectAllScope } from "../../ui/textSelection";
 import { canSnooze } from "../../ui/menus";
 import { onReplyRequest } from "../../ui/notificationActions";
@@ -253,7 +253,8 @@ export function useKeyboard(context: KeyboardContext): void {
           s.openCursor();
           break;
         case "listTop":
-          scrollListToTop();
+          // The list's start: the top, or the bottom when it is sorted from bottom.
+          (snap.preferences.sortFromBottom ? scrollListToBottom : scrollListToTop)();
           break;
         case "selectFirst":
           if (snap.view.threads.length > 0) {

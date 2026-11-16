@@ -79,7 +79,7 @@ import { useSenderPictureCaches, useSenderPictures } from "./app/hooks/useSender
 import { useGoogleContacts } from "./app/hooks/useGoogleContacts";
 import { useActions } from "./app/hooks/useActions";
 import { AppNotices } from "./app/components/AppNotices";
-import { scrollListToTop } from "./ui/listScroll";
+import { scrollListToBottom, scrollListToTop } from "./ui/listScroll";
 import { useSettingsTransfer } from "./ui/useSettingsTransfer";
 import { useUpdates } from "./ui/useUpdates";
 import { WhatsNew } from "./ui/components/WhatsNew";
@@ -975,12 +975,15 @@ export function App({ store, existingInstall = true }: Props) {
     filtering: snapshot.activeFilters.length > 0,
     onInbox: () => {
       // On a phone, the panel's Inbox row on the plain inbox is the dock tab's "home"
-      // gesture: nothing to switch to, so the list goes back to its top instead.
+      // gesture: nothing to switch to, so the list goes back to its starting edge instead.
       const already = snapshot.mailbox === "inbox" && snapshot.activeFilters.length === 0 && snapshot.overlay === "none";
       store.setOverlay("none");
       store.setMailbox("inbox");
       store.clearFilters();
-      if (already && phoneRef.current) scrollListToTop();
+      if (already && phoneRef.current) {
+        if (preferences.sortFromBottom) scrollListToBottom();
+        else scrollListToTop();
+      }
     },
     onSelectMailbox: (mailbox) => {
       store.setOverlay("none");
@@ -3141,6 +3144,7 @@ const listSelectedId = phone
   ? null
   : (view.threads[view.selectedIndex]?.representative.id ?? snapshot.selectedId);
 const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
+const listView = `${viewKey(emptyContext)}|${preferences.sortBy}|${preferences.sortFromBottom ? "bottom" : "top"}|${snapshot.searchQuery.trim()}`;
   /**
    * Smart filters sort the inbox, so the list offers "Change smart filters…" there only.
    * The reader goes by the message itself.
@@ -3628,8 +3632,9 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           */}
           {/*
             On a phone with an account there is no strip: a pull down from the top syncs
-            (`PullRefresh`), and what is waiting on you rides along in its result. The demo
-            keeps one compact line, so Connect Gmail stays in reach.
+            (`PullRefresh`), and what is waiting on you rides along in its result. A list
+            sorted from the bottom never pulls — that top is the oldest end — so the Inbox
+            tab is its way back. The demo keeps one compact line, so Connect Gmail stays in reach.
           */}
           {phone && snapshot.account !== null && (
             <PullRefresh
@@ -3639,6 +3644,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
                 menuOpen: sidebarOpen,
                 selecting: selection.size > 0,
                 overlay: snapshot.overlay !== "none" || composer !== null || menu !== null || filterPicker !== null,
+                sortedFromBottom: preferences.sortFromBottom,
               }}
               syncing={sync.busy}
               top={phoneBarHeight}
@@ -3664,6 +3670,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             emptyReason={view.result.emptyReason}
             emptyContext={emptyContext}
             sortBy={preferences.sortBy}
+            sortFromBottom={preferences.sortFromBottom}
             onSelect={handleSelectRow}
             onToggleStar={handleToggleStar}
             onClearFilters={store.clearFilters.bind(store)}
@@ -3698,7 +3705,7 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
             // The desktop's floating header covers the list's top, and the briefing
             // scrolls with the list under it.
             topInset={phone ? (selected ? 0 : phoneBarHeight) : listChromeHeight}
-            listView={`${viewKey(emptyContext)}|${preferences.sortBy}|${snapshot.searchQuery.trim()}`}
+            listView={listView}
             switchView={viewKey(emptyContext)}
             lead={
               phone ? (
@@ -3934,6 +3941,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           // The Accounts page covers the mail like Settings, so the dock treats it the same.
           settingsOpen={snapshot.overlay === "settings" || snapshot.overlay === "accounts"}
           menuOpen={sidebarOpen}
+          sortFromBottom={preferences.sortFromBottom}
+          listView={listView}
           onOpenMenu={openSidebar}
           onCloseMenu={closeSidebar}
           // Compose is offered over the list and nothing else: not under the composer,
@@ -3948,8 +3957,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
               ? () => openCompose()
               : null
           }
-          // Back to top, likewise, only over the plain list.
-          backToTopAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !filterPicker}
+          // The list-edge control, likewise, only over the plain list.
+          edgeControlAllowed={composer === null && snapshot.overlay === "none" && selection.size === 0 && !menu && !filterPicker}
         />
       )}
 
@@ -3991,6 +4000,8 @@ const listCursor = phone ? NO_CURSOR : snapshot.cursorIndex;
           onMarkReadOnOpen={(value) => store.setPreferences({ markReadOnOpen: value })}
           swipeActions={phone ? preferences.swipeActions : null}
           onSwipeActions={(value) => store.setPreferences({ swipeActions: value })}
+          sortFromBottom={preferences.sortFromBottom}
+          onSortFromBottom={(value) => store.setPreferences({ sortFromBottom: value })}
           leftHanded={phone ? preferences.leftHanded : null}
           onLeftHanded={(value) => store.setPreferences({ leftHanded: value })}
           emailDarkMode={preferences.emailDarkMode}

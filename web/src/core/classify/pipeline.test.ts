@@ -457,6 +457,16 @@ describe("runInboxQuery — sort", () => {
     expect(gmailIds(result)).toEqual(["g2", "g3", "g1"]);
   });
 
+  it("reverses the selected order when sort-from-bottom is enabled", () => {
+    const messages = mailbox([
+      { receivedAt: 1_000, subject: "Oldest" },
+      { receivedAt: 3_000, subject: "Newest" },
+      { receivedAt: 2_000, subject: "Middle" },
+    ]);
+    const result = runInboxQuery(query({ emails: messages, sortBy: "date", reverse: true }));
+    expect(gmailIds(result)).toEqual(["g1", "g3", "g2"]);
+  });
+
   it("orders ascending by sender, address included", () => {
     // The whole address, not a display name: the address is the identity key
     // everywhere else, and sorting on a name would put two colleagues from one

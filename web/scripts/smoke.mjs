@@ -7198,7 +7198,7 @@ try {
   {
     /*
       Back to top: a small glass pill centred above the chips, shown only once the list
-      is more than a screen down, never over the expanded panel, a selection or Settings,
+      is more than a screen from its starting edge, never over the expanded panel, a selection or Settings,
       taking no taps while hidden, and the last row still clears it.
     */
     for (const reduced of [false, true]) {
@@ -7212,7 +7212,7 @@ try {
       b.on("pageerror", (error) => errors.push(String(error)));
       await b.goto(URL, { waitUntil: "networkidle" });
       await b.waitForSelector("[data-row-count] [data-row-id]");
-      const pill = b.locator("[data-phone-dock] button[data-back-to-top]");
+      const pill = b.locator("[data-phone-dock] button[data-list-edge]");
       const scrollTo = async (y) => {
         await b.evaluate((top) => {
           const scroller = document.querySelector("[data-row-count]");
@@ -7222,7 +7222,7 @@ try {
       };
       const state = () =>
         b.evaluate(() => {
-          const button = document.querySelector("[data-phone-dock] button[data-back-to-top]");
+          const button = document.querySelector("[data-phone-dock] button[data-list-edge]");
           const rect = button.getBoundingClientRect();
           const style = getComputedStyle(button);
           const under = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -7237,7 +7237,7 @@ try {
             shown: button.hasAttribute("data-shown"),
             visibility: style.visibility,
             events: style.pointerEvents,
-            takesTap: Boolean(under?.closest("[data-back-to-top]")),
+            takesTap: Boolean(under?.closest("[data-list-edge]")),
             name: button.getAttribute("aria-label"),
             label: button.textContent.trim(),
             centre: Math.round(rect.left + rect.width / 2),

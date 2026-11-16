@@ -254,10 +254,11 @@ export const BINDINGS: readonly Binding[] = [
     },
   },
   {
-    // Back to the top of the list, the first email clear of the chrome. Scrolls only:
-    // the cursor and the open message stay where they are.
+    // Back to the start of the list, the first email clear of the chrome: the top, or the
+    // bottom when sorting from bottom. Scrolls only: the cursor and the open message stay
+    // where they are.
     keys: "Home",
-    help: "Back to the top of the list",
+    help: "Back to the start of the list",
     matches: { keys: ["Home"] },
     command: { type: "listTop" },
   },

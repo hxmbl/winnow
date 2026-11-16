@@ -8,7 +8,8 @@
  * ending in an Expand chevron (the switcher slot: on a panel mailbox such as Archive it
  * widens to show that mailbox's icon, STRM-616), the compose button as its own circle beside it, and the
  * smart-filter chips floating one by one just above, and, once the list is a screen
- * down, a small "Top" pill centred above those. Expand grows the pill upward into
+ * from its starting edge, a small "Top" or "Bottom" pill centred above those. Expand
+ * grows the pill upward into
  * the menu panel (`MailNav.tsx`: every folder and the account, whose gear is the way
  * into Settings).
  * The top is one row: the mark and, beside it, search, whose placeholder names the list
@@ -22,7 +23,7 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, ChevronsDownUp, ChevronsUpDown, Inbox, Search, Send } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, Inbox, Search, Send } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppMark } from "../AppMark";
 import { FilterStrip, type PillItem } from "./FilterStrip";
@@ -30,16 +31,17 @@ import { PositionReadout } from "./Masthead";
 import type { FilterId } from "../../core/model/signals";
 import type { Mailbox } from "../../core/model/email";
 import { ComposeButton } from "./ComposeFab";
-import { listScroller, scrollListToTop, scrollRailToStart } from "../listScroll";
+import { listScroller, scrollListToBottom, scrollListToTop, scrollRailToStart } from "../listScroll";
 import { UpdateButton } from "./UpdateButton";
 import type { UpdatesController } from "../useUpdates";
 import { VERSION_TOGGLE_LABEL, logoHaptic, logoPressed, versionText, type LogoView } from "../logoVersion";
 import {
+  BACK_TO_BOTTOM_LABEL,
   BACK_TO_TOP_LABEL,
   DOCK_TABS,
   PHONE_DOCK_VAR,
   PHONE_TABS_VAR,
-  backToTopVisible,
+  backToEdgeVisible,
   badgeText,
   expandLabel,
   pillColumns,
@@ -204,6 +206,8 @@ const TAB_ICON: Record<(typeof DOCK_TABS)[number], { label: string; Icon: Lucide
 const HIGHLIGHT = "bg-surface-active";
 
 export type PhoneDockProps = {
+  /** The visible mailbox, filters, search and sort; used to refresh the edge shortcut. */
+  listView: string;
   pills: PillItem[];
   activeFilters: FilterId[];
   onToggleFilter: (id: FilterId) => void;
@@ -220,16 +224,19 @@ export type PhoneDockProps = {
   onCloseMenu: () => void;
   /** Compose, or null while composing makes no sense (a selection, Settings, a sheet). */
   onCompose: (() => void) | null;
+  /** Sort direction for the list control, which returns to the list's starting edge. */
+  sortFromBottom?: boolean;
   /**
-   * Whether the back-to-top pill may show at all: not during a multi-selection, an
+   * Whether the list-edge pill may show at all: not during a multi-selection, an
    * overlay (Settings, the palette, the shortcut sheet) or the composer. The panel being
    * expanded is the dock's own `menuOpen`.
    */
-  backToTopAllowed?: boolean;
+  edgeControlAllowed?: boolean;
 };
 
 
 export function PhoneDock({
+  listView,
   pills,
   activeFilters,
   onToggleFilter,
@@ -242,30 +249,37 @@ export function PhoneDock({
   onOpenMenu,
   onCloseMenu,
   onCompose,
-  backToTopAllowed = true,
+  edgeControlAllowed = true,
+  sortFromBottom = false,
 }: PhoneDockProps) {
   const dockRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLElement>(null);
   const chipsRef = useRef<HTMLDivElement>(null);
-  const topSlotRef = useRef<HTMLDivElement>(null);
+  const edgeSlotRef = useRef<HTMLDivElement>(null);
 
   /*
-    The back-to-top pill follows the list's scroll. One capturing listener on the
+    The list-edge pill follows the list's scroll. One capturing listener on the
     document rather than one on the scroller, because the scroller is replaced whenever
-    the empty state comes and goes; re-read when the mailbox or filters change the list
-    under it, and when the window resizes.
+    the empty state comes and goes; re-read when the mailbox, filters, search or sort
+    change the list under it, and when the window resizes.
   */
-  const [listDown, setListDown] = useState(false);
-  const showTop = listDown && backToTopAllowed && !menuOpen && !settingsOpen;
-  const showTopRef = useRef(showTop);
-  showTopRef.current = showTop;
-  const filterSignature = activeFilters.join("|");
+  const [awayFromStart, setAwayFromStart] = useState(false);
+  const showEdge = awayFromStart && edgeControlAllowed && !menuOpen && !settingsOpen;
+  const showEdgeRef = useRef(showEdge);
+  showEdgeRef.current = showEdge;
   useEffect(() => {
     const read = () => {
       const scroller = listScroller();
-      setListDown(
+      setAwayFromStart(
         scroller !== null &&
-          backToTopVisible({ scrollTop: scroller.scrollTop, viewportHeight: scroller.clientHeight, allowed: true, menuOpen: false }),
+          backToEdgeVisible({
+            scrollTop: scroller.scrollTop,
+            scrollHeight: scroller.scrollHeight,
+            viewportHeight: scroller.clientHeight,
+            sortFromBottom,
+            allowed: true,
+            menuOpen: false,
+          }),
       );
     };
     const onScroll = (event: Event) => {
@@ -278,7 +292,7 @@ export function PhoneDock({
       document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("resize", read);
     };
-  }, [mailbox, filterSignature]);
+  }, [listView, sortFromBottom]);
   const measureRef = useRef<() => void>(() => undefined);
 
   // Publish, measured from the window's bottom edge: where the pill starts (Settings'
@@ -295,11 +309,11 @@ export function PhoneDock({
       const height = window.innerHeight;
       const pillTop = pill.getBoundingClientRect().top;
       const chips = chipsRef.current;
-      // While the back-to-top pill shows, the floating chrome starts at its slot, so the
+      // While the list-edge pill shows, the floating chrome starts at its slot, so the
       // last row scrolls clear of it too; hidden, it covers nothing and counts for nothing.
-      const slot = topSlotRef.current;
+      const slot = edgeSlotRef.current;
       const chromeTop =
-        showTopRef.current && slot
+        showEdgeRef.current && slot
           ? slot.getBoundingClientRect().top
           : chips && chips.getClientRects().length > 0
             ? chips.getBoundingClientRect().top
@@ -326,7 +340,9 @@ export function PhoneDock({
     };
   }, []);
 
-  const scrollToTop = scrollListToTop;
+  const scrollToEdge = sortFromBottom ? scrollListToBottom : scrollListToTop;
+  const edgeLabel = sortFromBottom ? BACK_TO_BOTTOM_LABEL : BACK_TO_TOP_LABEL;
+  const EdgeIcon = sortFromBottom ? ArrowDown : ArrowUp;
 
   // STRM-616: the Expand cell is the switcher slot (`switcherSlot`).
   const slot = switcherSlot(mailbox, { menuOpen, settingsOpen });
@@ -335,7 +351,7 @@ export function PhoneDock({
   // The clearance follows the pill showing and hiding.
   useLayoutEffect(() => {
     measureRef.current();
-  }, [showTop]);
+  }, [showEdge]);
 
   return (
     /*
@@ -361,24 +377,24 @@ export function PhoneDock({
       style={menuOpen || settingsOpen ? { zIndex: 55 } : undefined}
     >
       {/*
-        Back to top: a small glass pill centred above the chips, once the list is a screen
-        down. The slot always holds its place (so showing it never nudges the chips) but
+        A small glass pill centred above the chips once the list is a screen from its starting
+        edge. The slot always holds its place (so showing it never nudges the chips) but
         takes no taps; hidden, the pill is `visibility: hidden` and out of the tab order,
-        and it fades and rises in (`.wn-back-to-top`, instant under reduced motion).
+        and it fades and rises in (`.wn-list-edge`, instant under reduced motion).
       */}
-      <div ref={topSlotRef} data-back-to-top-slot="" className="flex justify-center pb-1.5">
+      <div ref={edgeSlotRef} data-list-edge-slot="" className="flex justify-center pb-1.5">
         <button
           type="button"
-          data-back-to-top=""
-          data-shown={showTop ? "" : undefined}
-          aria-label={BACK_TO_TOP_LABEL}
-          title={BACK_TO_TOP_LABEL}
-          tabIndex={showTop ? undefined : -1}
-          onClick={scrollToTop}
-          className="wn-glass wn-back-to-top flex h-9 items-center gap-1.5 rounded-ctl pl-3 pr-3.5 text-ui font-semibold text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
+          data-list-edge=""
+          data-shown={showEdge ? "" : undefined}
+          aria-label={edgeLabel}
+          title={edgeLabel}
+          tabIndex={showEdge ? undefined : -1}
+          onClick={scrollToEdge}
+          className="wn-glass wn-list-edge flex h-9 items-center gap-1.5 rounded-ctl pl-3 pr-3.5 text-ui font-semibold text-ink-body focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
-          <Icon icon={ArrowUp} size={16} />
-          <span aria-hidden="true">Top</span>
+          <Icon icon={EdgeIcon} size={16} />
+          <span aria-hidden="true">{sortFromBottom ? "Bottom" : "Top"}</span>
         </button>
       </div>
 
@@ -425,7 +441,12 @@ export function PhoneDock({
               tapTab(
                 id,
                 { current, filtering: activeFilters.length > 0 },
-                { onClearFilters, scrollToTop, onSelectMailbox, scrollRailToStart: () => scrollRailToStart() },
+                {
+                  onClearFilters,
+                  scrollToStart: scrollToEdge,
+                  onSelectMailbox,
+                  scrollRailToStart: () => scrollRailToStart(),
+                },
               );
             };
             return (

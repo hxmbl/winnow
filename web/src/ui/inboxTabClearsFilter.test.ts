@@ -1,6 +1,6 @@
 /**
  * STRM-441: the phone dock's Inbox tab, tapped while Inbox is already open, undoes a
- * smart filter and goes back to All; with no filter on it takes the list to its top; from
+ * smart filter and goes back to All; with no filter on it takes the list to its start; from
  * another mailbox it switches to Inbox as before. Driven through the real store with the
  * dock's own tap wiring (`tapTab`), the way `PhoneDock` calls it.
  */
@@ -26,14 +26,14 @@ function someFilter(store: WinnowStore): BuiltinSmartFilter {
 }
 
 /** Tap a dock tab the way `PhoneDock` does, against the store, as `App` wires it. */
-function tap(store: WinnowStore, mailbox: Mailbox, scrollToTop: () => void) {
+function tap(store: WinnowStore, mailbox: Mailbox, scrollToStart: () => void) {
   const snapshot = store.getSnapshot();
   return tapTab(
     mailbox,
     { current: snapshot.mailbox === mailbox, filtering: snapshot.activeFilters.length > 0 },
     {
       onClearFilters: () => store.clearFilters(),
-      scrollToTop,
+      scrollToStart,
       onSelectMailbox: (next) => {
         store.setOverlay("none");
         store.setMailbox(next);
@@ -67,11 +67,11 @@ describe("the Inbox tab clears the smart filter (STRM-441)", () => {
     expect(store.getSnapshot().activeFilters).toEqual([]);
   });
 
-  it("in Inbox with no filter, a tap scrolls the list to the top and changes nothing else", () => {
+  it("in Inbox with no filter, a tap returns the list to its start and changes nothing else", () => {
     const store = demoStore();
     const before = store.getSnapshot();
     const scroll = vi.fn();
-    expect(tap(store, "inbox", scroll)).toBe("scroll-top");
+    expect(tap(store, "inbox", scroll)).toBe("scroll-start");
     expect(scroll).toHaveBeenCalledTimes(1);
     expect(store.getSnapshot().mailbox).toBe("inbox");
     expect(store.getSnapshot().activeFilters).toEqual(before.activeFilters);
@@ -82,7 +82,7 @@ describe("the Inbox tab clears the smart filter (STRM-441)", () => {
     store.toggleFilter(builtinFilter(someFilter(store)));
     const scroll = vi.fn();
     expect(tap(store, "inbox", scroll)).toBe("clear-filters");
-    expect(tap(store, "inbox", scroll)).toBe("scroll-top");
+    expect(tap(store, "inbox", scroll)).toBe("scroll-start");
     expect(scroll).toHaveBeenCalledTimes(1);
   });
 

@@ -1,7 +1,7 @@
 /**
  * STRM-452: on a phone, a tap on the dock's Inbox tab also takes the smart-filter rail
  * back to its first pill (`scrollLeft` 0), whatever else the tap does (clear a filter,
- * scroll the list to the top, or switch to Inbox). Smooth, or a jump under reduced
+ * return the list to its starting edge, or switch to Inbox). Smooth, or a jump under reduced
  * motion. Driven through `tapTab`, the way `PhoneDock` calls it, without a DOM.
  */
 
@@ -12,7 +12,7 @@ import { scrollRailToStart } from "./listScroll";
 function handlers() {
   return {
     onClearFilters: vi.fn(),
-    scrollToTop: vi.fn(),
+    scrollToStart: vi.fn(),
     onSelectMailbox: vi.fn(),
     scrollRailToStart: vi.fn(),
   };
@@ -26,10 +26,10 @@ describe("the Inbox tab takes the smart-filter rail back to its start (STRM-452)
     expect(h.scrollRailToStart).toHaveBeenCalledTimes(1);
   });
 
-  it("with no filter: scrolls the list to the top and resets the rail", () => {
+  it("with no filter: returns the list to its start and resets the rail", () => {
     const h = handlers();
-    expect(tapTab("inbox", { current: true, filtering: false }, h)).toBe("scroll-top");
-    expect(h.scrollToTop).toHaveBeenCalledTimes(1);
+    expect(tapTab("inbox", { current: true, filtering: false }, h)).toBe("scroll-start");
+    expect(h.scrollToStart).toHaveBeenCalledTimes(1);
     expect(h.scrollRailToStart).toHaveBeenCalledTimes(1);
   });
 
@@ -48,10 +48,10 @@ describe("the Inbox tab takes the smart-filter rail back to its start (STRM-452)
   });
 
   it("still works when the dock passes no rail handler", () => {
-    const scrollToTop = vi.fn();
-    const plain = { onClearFilters: vi.fn(), scrollToTop, onSelectMailbox: vi.fn() };
-    expect(tapTab("inbox", { current: true, filtering: false }, plain)).toBe("scroll-top");
-    expect(scrollToTop).toHaveBeenCalledTimes(1);
+    const scrollToStart = vi.fn();
+    const plain = { onClearFilters: vi.fn(), scrollToStart, onSelectMailbox: vi.fn() };
+    expect(tapTab("inbox", { current: true, filtering: false }, plain)).toBe("scroll-start");
+    expect(scrollToStart).toHaveBeenCalledTimes(1);
   });
 });
 

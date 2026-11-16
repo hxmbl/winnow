@@ -12,7 +12,15 @@ import {
 } from "./pullRefresh";
 import { AXIS_LOCK_PX, lockAxis } from "./swipe";
 
-const ready = { connected: true, scrollTop: 0, menuOpen: false, selecting: false, overlay: false, syncing: false };
+const ready = {
+  connected: true,
+  scrollTop: 0,
+  menuOpen: false,
+  selecting: false,
+  overlay: false,
+  syncing: false,
+  sortedFromBottom: false,
+};
 
 describe("pull to refresh", () => {
   it("has a ~70px threshold and a ceiling above it", () => {
@@ -75,5 +83,12 @@ describe("pull to refresh", () => {
     expect(pullAllowed({ ...ready, selecting: true })).toBe(false);
     expect(pullAllowed({ ...ready, overlay: true })).toBe(false);
     expect(pullAllowed({ ...ready, syncing: true })).toBe(false);
+  });
+
+  it("never pulls a bottom-sorted list: its visual top is the oldest end", () => {
+    // Sorted from the bottom, the list starts at its newest mail and the top is the
+    // far end, so a pull there is a scroll, not a refresh. The Inbox tab is the way back.
+    expect(pullAllowed({ ...ready, sortedFromBottom: true })).toBe(false);
+    expect(pullAllowed({ ...ready, sortedFromBottom: true, scrollTop: 1 })).toBe(false);
   });
 });

@@ -833,6 +833,8 @@ type Props = {
    * through the list, and Back should land where they went. Defaults to `cursorIndex`.
    */
   revealIndex?: number;
+  /** Start at the bottom of the list when sorting from bottom. */
+  sortFromBottom?: boolean;
   /**
    * In-flow content at the top of the scroll, above the first day: the desktop's
    * briefing ("3 waiting on you…", the sync line, Connect Gmail). It scrolls away with
@@ -874,6 +876,7 @@ function MessageList({
   listView = "",
   switchView = "",
   revealIndex,
+  sortFromBottom = false,
   lead,
   className = "",
 }: Props) {
@@ -1119,26 +1122,81 @@ function MessageList({
       : 0;
 
   /**
-   * A new view (another mailbox or label, other smart filters, a new search, another sort)
-   * starts at its top. Before, the scroller kept the old view's offset, so switching a
-   * filter from halfway down the Inbox opened the filtered list halfway down too, its top
-   * email out of sight above the chrome. Layout effect, so the old offset is never painted.
+   * The first view and every new view (another mailbox or label, other smart filters, a
+   * new search, another sort) start at their first result: at the top normally, or at the
+   * bottom when sorted from bottom. Before, the scroller kept the old view's offset, so
+   * switching a filter from halfway down the Inbox opened it halfway down too. Layout
+   * effect, so the old offset is never painted.
    */
-  const shownView = useRef(listView);
+  /**
+   * Hold the list at its bottom for a few frames while the first window of rows is
+   * measured. Rows are estimated at 53px until they mount, and a few pixels apiece add
+   * up: without this, a list opened at the bottom stopped a row or two short of the
+   * newest mail. Stops on its own once the height is steady, and at once on any input.
+   */
+  const pinFrame = useRef<number | null>(null);
+  const cancelPin = useCallback(() => {
+    if (pinFrame.current !== null) {
+      cancelAnimationFrame(pinFrame.current);
+      pinFrame.current = null;
+    }
+  }, []);
+  useEffect(() => cancelPin, [cancelPin]);
+  const pinToBottom = useCallback(
+    (element: HTMLDivElement) => {
+      cancelPin();
+      let last = -1;
+      let steady = 0;
+      let frames = 0;
+      const tick = () => {
+        pinFrame.current = null;
+        const bottom = Math.max(0, element.scrollHeight - element.clientHeight);
+        if (Math.abs(element.scrollTop - bottom) >= 1) {
+          element.scrollTop = bottom;
+          setScrollTop(bottom);
+        }
+        frames += 1;
+        steady = bottom === last ? steady + 1 : 0;
+        last = bottom;
+        // Two steady frames: the window's rows have measured and nothing else moved.
+        if (steady < 2 && frames < 30) pinFrame.current = requestAnimationFrame(tick);
+      };
+      pinFrame.current = requestAnimationFrame(tick);
+    },
+    [cancelPin],
+  );
+
+  const shownEdge = useRef<{ view: string | null; scroller: HTMLDivElement | null }>({
+    view: null,
+    scroller: null,
+  });
   useLayoutEffect(() => {
-    if (shownView.current === listView) return;
-    shownView.current = listView;
+    const shown = shownEdge.current;
+    // Already applied for this view on this scroller. The scroller is part of the key
+    // because the first rows may arrive after the view does (an empty mailbox syncing
+    // in, the empty state being replaced), and the new scroller starts at the top.
+    if (shown.view === listView && shown.scroller === scroller) return;
+    shownEdge.current = { view: listView, scroller };
     stopSmoothScroll(scroller);
-    if (scroller && scroller.scrollTop !== 0) {
+    if (!scroller) return;
+    cancelPin();
+    if (sortFromBottom) {
+      const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      if (scroller.scrollTop !== bottom) {
+        scroller.scrollTop = bottom;
+        setScrollTop(bottom);
+      }
+      pinToBottom(scroller);
+    } else if (scroller.scrollTop !== 0) {
       scroller.scrollTop = 0;
       setScrollTop(0);
     }
-  }, [listView, scroller]);
+  }, [listView, scroller, sortFromBottom, cancelPin, pinToBottom]);
 
   /**
    * Whether the mounted rows are the ones the scroll position calls for, which after a
-   * switch's jump to the top takes one more commit. The switch motion measures the new
-   * rows only then. Same test the scroll listener uses to decide whether to re-render.
+   * switch's jump to its starting edge takes one more commit. The switch motion measures
+   * the new rows only then. Same test the scroll listener uses to decide whether to re-render.
    */
   const windowSettled = useCallback((): boolean => {
     if (!scroller) return false;
@@ -1147,7 +1205,7 @@ function MessageList({
     const key = (at: number) => windowKey(w.offsets, isHeader, at, w.contentTop, w.viewportHeight, w.topInset);
     return key(scroller.scrollTop) === key(w.scrollTop);
   }, [scroller]);
-  // After the jump to the top above, so the first commit it sees has already asked for it.
+  // After the jump to the starting edge above, so the first commit it sees has already asked for it.
   useFilterSwitchMotion(scroller, switchView, topInset, windowSettled);
 
   /**
@@ -1961,15 +2019,23 @@ function MessageList({
         // the mounted window, so counting those elements measures the viewport.
         data-row-count={rowCount}
         data-select-mode={selectMode ? "" : undefined}
-        onPointerDown={onPointerDown}
+        // Any way a reader can take over the scroll ends the opening pin at once.
+        onPointerDown={(event) => {
+          cancelPin();
+          onPointerDown(event);
+        }}
         onPointerMove={onPointerMove}
         onPointerUp={endPointer}
         onPointerCancel={endPointer}
         onLostPointerCapture={onLostPointerCapture}
+        onWheel={cancelPin}
         onDragStart={(event) => event.preventDefault()}
         onClickCapture={onClickCapture}
         onContextMenu={onContextMenu}
-        onKeyDown={onKeyDownList}
+        onKeyDown={(event) => {
+          cancelPin();
+          onKeyDownList(event);
+        }}
         // No scroll anchoring: the list places its own window (spacer + measured rows), and
         // the browser's anchoring fought it, snapping a programmatic or flung scroll back by
         // a few hundred px and, with reduced motion, flip-flopping between two offsets.

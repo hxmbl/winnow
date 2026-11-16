@@ -43,6 +43,7 @@ describe("the export allowlist", () => {
       "emailDarkMode",
       "leftHanded",
       "sortBy",
+      "sortFromBottom",
       "markReadOnOpen",
       "swipeActions",
       "undoSendSeconds",

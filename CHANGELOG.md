@@ -14,6 +14,10 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Reading → Sort from bottom, off by default: lists messages from the bottom up, so the first result sits nearest your thumb. The first and every new view open there, and Home, the dock's Inbox tab and the floating shortcut return to whichever edge the list starts from. On the phone, pull-to-refresh is off in this mode — its visual top is the oldest end, so the Inbox tab is the way back (STRM-663).
+
 ### Changed
 
 - Phone: in a mailbox from the menu, the dock's menu button now centres that mailbox's icon, with the chevron beside it (STRM-617).

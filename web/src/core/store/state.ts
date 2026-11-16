@@ -181,6 +181,10 @@ export type Preferences = {
    * colours without changing this.
    */
   emailDarkMode: boolean;
+  /**
+   * Show the sorted list from bottom to top, starting at its bottom. Off by default.
+   */
+  sortFromBottom: boolean;
   /** Keep syncing while the window is closed. Desktop only. */
   backgroundSync: boolean;
   /** How often, in seconds. */
@@ -218,6 +222,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   censorLevel: "off",
   driveLinks: true,
   removeLinkTrackers: true,
+  emailDarkMode: true,
+  sortFromBottom: false,
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
   notificationsEnabled: false,
   notificationActions: DEFAULT_NOTIFICATION_ACTIONS,
@@ -226,7 +232,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   appearance: DEFAULT_APPEARANCE,
   accent: DEFAULT_ACCENT_THEME,
   accentCustom: DEFAULT_ACCENT_CUSTOM,
-  emailDarkMode: true,
   backgroundSync: true,
   backgroundSyncInterval: 300,
   gmailListener: false,

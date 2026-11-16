@@ -1266,11 +1266,11 @@
    * The list scrolls under the floating chrome, so its end is padded by the chrome's
    * height (`--wn-phone-dock`, published by the dock) and its last row can scroll clear
    * of the chips, the pill and the compose button. `div[...]` to outrank the scroller's
-   * own `pb-4` utility; with no dock on screen the variable is unset and this is that 1rem.
+   * own `pb-4` utility; with no dock on screen the variable is unset and this is that 1.25rem.
    */
   div[data-row-count] {
-    padding-bottom: calc(var(--wn-phone-dock, 0px) + 1rem);
-    scroll-padding-bottom: calc(var(--wn-phone-dock, 0px) + 0.5rem);
+    padding-bottom: calc(var(--wn-phone-dock, 0px) + 1.25rem);
+    scroll-padding-bottom: calc(var(--wn-phone-dock, 0px) + 0.75rem);
   }
 
   /*
@@ -1333,11 +1333,11 @@
   }
 
   /*
-   * The phone's back-to-top pill, centred above the chips. Hidden it takes no taps and is
+   * The phone's list-edge pill, centred above the chips. Hidden it takes no taps and is
    * out of the paint and the tab order (`visibility` flips after the fade); shown it fades
    * in and rises 8px. Reduced motion: no slide, and the global rule makes the fade instant.
    */
-  .wn-back-to-top {
+  .wn-list-edge {
     opacity: 0;
     transform: translateY(8px);
     visibility: hidden;
@@ -1347,10 +1347,10 @@
       transform 180ms ease-in,
       visibility 0s linear 180ms;
   }
-  .wn-back-to-top[data-shown]:active {
+  .wn-list-edge[data-shown]:active {
     transform: scale(0.97);
   }
-  .wn-back-to-top[data-shown] {
+  .wn-list-edge[data-shown] {
     opacity: 1;
     transform: none;
     visibility: visible;
@@ -1361,9 +1361,9 @@
       visibility 0s;
   }
   @media (prefers-reduced-motion: reduce) {
-    .wn-back-to-top,
-    .wn-back-to-top[data-shown],
-    .wn-back-to-top[data-shown]:active {
+    .wn-list-edge,
+    .wn-list-edge[data-shown],
+    .wn-list-edge[data-shown]:active {
       transform: none;
       transition: none;
     }

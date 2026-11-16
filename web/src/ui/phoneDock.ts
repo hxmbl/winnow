@@ -4,7 +4,7 @@
  * The dock is a floating pill of icon-only tabs (Inbox, Sent) and an Expand button,
  * with the compose button as a separate circle beside it. Expand morphs the pill into
  * the menu panel (`Sidebar` in `MailNav.tsx`); the Inbox tab is only ever the inbox; a
- * tap on it while it is already the current tab takes the list back to its top.
+ * tap on it while it is already the current tab takes the list back to its start.
  */
 
 import type { Mailbox } from "../core/model/email";
@@ -75,24 +75,25 @@ export function pillColumns(slot: SwitcherSlot): string {
 }
 
 /** What a tap on a tab does now. */
-export type TabAction = "select" | "clear-filters" | "scroll-top";
+export type TabAction = "select" | "clear-filters" | "scroll-start";
 
 /**
  * A tab that is already the current page is the mailbox's "home" gesture: with a smart
  * filter on, the first tap clears it and the list goes back to All (the same as the All
- * chip, Hxmbl, 2026-10-28); with none on, it takes the list back to its top. Any other
+ * chip, Hxmbl, 2026-10-28); with none on, it takes the list back to its starting edge.
+ * Any other
  * tab switches to its mailbox, which drops the filters as switching always has. The menu
  * has its own button now, so no tab ever opens it.
  */
 export function tabAction(current: boolean, filtering = false): TabAction {
   if (!current) return "select";
-  return filtering ? "clear-filters" : "scroll-top";
+  return filtering ? "clear-filters" : "scroll-start";
 }
 
 /** What a tab tap can do, for `tapTab`: the dock's own handlers. */
 export type TabTapHandlers = {
   onClearFilters: () => void;
-  scrollToTop: () => void;
+  scrollToStart: () => void;
   onSelectMailbox: (mailbox: Mailbox) => void;
   /**
    * Take the smart-filter rail back to its first pill. Every Inbox tap does this as well
@@ -114,7 +115,7 @@ export function tapTab(
 ): TabAction {
   const action = tabAction(current, filtering);
   if (action === "clear-filters") handlers.onClearFilters();
-  else if (action === "scroll-top") handlers.scrollToTop();
+  else if (action === "scroll-start") handlers.scrollToStart();
   else handlers.onSelectMailbox(mailbox);
   if (mailbox === "inbox") handlers.scrollRailToStart?.();
   return action;
@@ -148,17 +149,22 @@ export function panelOrder<T extends { id: Mailbox }>(folders: readonly T[]): T[
   return [...other, ...named];
 }
 
-/** The back-to-top pill's accessible name; its visible label is "Top". */
+/** The floating list control's accessible name and visible label. */
 export const BACK_TO_TOP_LABEL = "Back to top";
+export const BACK_TO_BOTTOM_LABEL = "Go to bottom";
 
-/** How far down, in screens of the list, before the back-to-top pill appears. */
-export const BACK_TO_TOP_SCREENS = 1;
+/** How far from the active starting edge, in screens, before the floating control appears. */
+export const BACK_TO_EDGE_SCREENS = 1;
 
-/** What decides whether the back-to-top pill shows. */
-export type BackToTopState = {
+/** What decides whether the floating list control shows. */
+export type BackToEdgeState = {
   /** The list's scroll offset and its own visible height, in px. */
   scrollTop: number;
+  /** The scrollable list's full height, in px. */
+  scrollHeight: number;
   viewportHeight: number;
+  /** The list starts at its bottom and the control returns there. */
+  sortFromBottom?: boolean;
   /** Nothing else has the screen: no multi-selection, overlay, sheet or composer. */
   allowed: boolean;
   /** The dock's panel is expanded (the chips are set aside then too). */
@@ -166,11 +172,20 @@ export type BackToTopState = {
 };
 
 /**
- * Whether the back-to-top pill shows: only once the list is more than a screen down,
+ * Whether the floating control shows: only once the list is more than a screen from its
+ * starting edge (top by default, bottom when sorted from bottom),
  * and never over the expanded panel, a selection, Settings or a sheet. A list with no
  * height (hidden behind the reader) has nowhere to go back to.
  */
-export function backToTopVisible({ scrollTop, viewportHeight, allowed, menuOpen }: BackToTopState): boolean {
+export function backToEdgeVisible({
+  scrollTop,
+  scrollHeight,
+  viewportHeight,
+  sortFromBottom = false,
+  allowed,
+  menuOpen,
+}: BackToEdgeState): boolean {
   if (!allowed || menuOpen || viewportHeight <= 0) return false;
-  return scrollTop > viewportHeight * BACK_TO_TOP_SCREENS;
+  const distance = sortFromBottom ? Math.max(0, scrollHeight - viewportHeight - scrollTop) : scrollTop;
+  return distance > viewportHeight * BACK_TO_EDGE_SCREENS;
 }

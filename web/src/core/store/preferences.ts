@@ -90,6 +90,7 @@ export function revivePreferences(raw: unknown): Partial<Preferences> | null {
   if (typeof source.markReadOnOpen === "boolean") out.markReadOnOpen = source.markReadOnOpen;
   if (typeof source.swipeActions === "boolean") out.swipeActions = source.swipeActions;
   if (typeof source.leftHanded === "boolean") out.leftHanded = source.leftHanded;
+  if (typeof source.sortFromBottom === "boolean") out.sortFromBottom = source.sortFromBottom;
   // Blur sensitive info, with the old on/off "Censor email addresses" read as its first
   // step: on meant email addresses, which is exactly what "emails" blurs.
   if (isCensorLevel(source.censorLevel)) out.censorLevel = source.censorLevel;

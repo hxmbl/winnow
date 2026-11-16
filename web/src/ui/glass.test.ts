@@ -406,7 +406,7 @@ describe("a held chip stays a pill (1.3.3)", () => {
   });
 
   it("the shared glass press scale excludes the rail's items", () => {
-    // The shared glass press (other controls, like back-to-top, keep their own scale).
+    // The shared glass press (other controls, like the list-edge pill, keep their own scale).
     const scale = [...css.matchAll(/([^{}]+)\{\s*transform:\s*scale\(0\.97\);?\s*\}/g)]
       .map(([, selector]) => selector)
       .filter((selector) => /wn-glass|wn-chip-glass/.test(selector));
