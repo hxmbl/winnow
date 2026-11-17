@@ -15,7 +15,7 @@
 # ── Build: the same `vite build` as any web deployment, with no render proxy baked in.
 # On the build machine's own platform: the output is plain files, the same for every
 # architecture.
-FROM --platform=$BUILDPLATFORM node:24-slim AS build
+FROM --platform=$BUILDPLATFORM node:26-slim AS build
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
