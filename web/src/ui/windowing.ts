@@ -121,10 +121,23 @@ export function revealScrollTop(rowTop: number, covered: number, scrollHeight: n
  * to the viewport's top (`top` / `bottom`, in px): negative scrolls up so it clears the
  * `covered` band under floating chrome, positive scrolls down so its bottom is on
  * screen (but never so far its top goes under the band), 0 when it is already in view.
+ *
+ * `marginTop`/`marginBottom` keep extra space at the edges so the next row is hinted
+ * (e.g. while extending a selection). The bottom margin is honoured only when the row
+ * can still clear the top band.
  */
-export function rowClearance(top: number, bottom: number, covered: number, clientHeight: number): number {
-  if (top < covered) return top - covered;
-  if (bottom > clientHeight) return Math.min(bottom - clientHeight, top - covered);
+export function rowClearance(
+  top: number,
+  bottom: number,
+  covered: number,
+  clientHeight: number,
+  marginTop = 0,
+  marginBottom = 0,
+): number {
+  const topEdge = covered + marginTop;
+  const bottomEdge = Math.max(topEdge, clientHeight - marginBottom);
+  if (top < topEdge) return top - topEdge;
+  if (bottom > bottomEdge) return Math.min(bottom - bottomEdge, top - topEdge);
   return 0;
 }
 
@@ -134,22 +147,37 @@ export function rowClearance(top: number, bottom: number, covered: number, clien
  * `base` is where the list is judged from: the destination of a glide in flight, or the
  * scroll top when still. Judging from the destination is what lets `j` pressed mid-glide
  * aim for the next row instead of re-revealing the one already on its way.
- * `block: "nearest"` semantics for the in-view test; an off-screen row goes to the top,
- * below the covered band when there is floating chrome (`contentTop > 0`).
+ * `block: "nearest"` semantics for the in-view test; an off-screen row goes to the
+ * nearest edge, keeping `marginTop`/`marginBottom` of space so neighbouring rows stay
+ * hinted. When there is no floating chrome (`contentTop === 0`) and no margins, this
+ * falls back to the top-aligned index target.
  */
 export function revealTarget(
   offsets: Float64Array,
   rowIndex: number,
   base: number,
-  view: { contentTop: number; coveredTop: number; clientHeight: number; scrollHeight: number },
+  view: {
+    contentTop: number;
+    coveredTop: number;
+    clientHeight: number;
+    scrollHeight: number;
+    marginTop?: number;
+    marginBottom?: number;
+  },
 ): number | null {
-  const { contentTop, coveredTop, clientHeight, scrollHeight } = view;
+  const { contentTop, coveredTop, clientHeight, scrollHeight, marginTop = 0, marginBottom = 0 } = view;
   const rowTop = contentTop + (offsets[rowIndex] ?? 0);
   const rowBottom = contentTop + (offsets[rowIndex + 1] ?? 0);
-  if (rowTop >= base + coveredTop && rowBottom <= base + clientHeight) return null;
-  return contentTop > 0
-    ? revealScrollTop(rowTop, coveredTop, scrollHeight, clientHeight)
-    : scrollTopForIndex(offsets, rowIndex, clientHeight);
+  const topEdge = coveredTop + marginTop;
+  const bottomEdge = Math.max(topEdge, clientHeight - marginBottom);
+  if (rowTop >= base + topEdge && rowBottom <= base + bottomEdge) return null;
+  const delta = rowClearance(rowTop - base, rowBottom - base, coveredTop, clientHeight, marginTop, marginBottom);
+  if (Math.abs(delta) < 1) return null;
+  if (contentTop > 0 || marginTop > 0 || marginBottom > 0) {
+    const max = Math.max(scrollHeight - clientHeight, 0);
+    return Math.min(Math.max(base + delta, 0), max);
+  }
+  return scrollTopForIndex(offsets, rowIndex, clientHeight);
 }
 
 /**
