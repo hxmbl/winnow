@@ -246,6 +246,7 @@ export function useKeyboard(context: KeyboardContext): void {
       switch (command.type) {
         case "moveSelection":
           extendAnchorRef.current = null;
+          if (selectionRef.current.size > 0) setSelection(EMPTY_SELECTION);
           s.moveCursor(command.delta);
           break;
         case "scrollReader":
