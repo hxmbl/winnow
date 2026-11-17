@@ -25,8 +25,7 @@ export type Command =
   | { type: "scrollReader"; delta: number }
   | { type: "openSelected" }
   | { type: "listTop" }
-  | { type: "selectFirst" }
-  | { type: "selectLast" }
+  | { type: "extendSelection"; delta: number }
   | { type: "closeViewer" }
   | { type: "closeComposer" }
   | { type: "dismissOverlay" }
@@ -264,15 +263,15 @@ export const BINDINGS: readonly Binding[] = [
   },
   {
     keys: "⇧K",
-    help: "Select the first message",
+    help: "Extend selection up",
     matches: { keys: ["K"], shift: true },
-    command: { type: "selectFirst" },
+    command: { type: "extendSelection", delta: -1 },
   },
   {
     keys: "⇧J",
-    help: "Select the last message",
+    help: "Extend selection down",
     matches: { keys: ["J"], shift: true },
-    command: { type: "selectLast" },
+    command: { type: "extendSelection", delta: 1 },
   },
   {
     keys: "o / ⏎",

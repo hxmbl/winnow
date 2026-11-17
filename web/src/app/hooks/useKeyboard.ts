@@ -10,7 +10,7 @@ import { isSelectAll, selectAllScope } from "../../ui/textSelection";
 import { canSnooze } from "../../ui/menus";
 import { onReplyRequest } from "../../ui/notificationActions";
 import type { PillItem } from "../../ui/rail";
-import { EMPTY_SELECTION, orderedSelection, type Selection } from "../../ui/selection";
+import { EMPTY_SELECTION, orderedSelection, rangeBetween, type Selection } from "../../ui/selection";
 import { logoViewAfter, type LogoView } from "../../ui/logoVersion";
 
 type Mutable<T> = { current: T };
@@ -75,6 +75,7 @@ export function useKeyboard(context: KeyboardContext): void {
   openComposeRef.current = openCompose;
   const closeComposerRef = useRef(closeComposer);
   closeComposerRef.current = closeComposer;
+  const extendAnchorRef = useRef<number | null>(null);
 
   /** The element last pressed, for ⌘A to find the region the user is working in. */
   const lastPressRef = useRef<Element | null>(null);
@@ -244,6 +245,7 @@ export function useKeyboard(context: KeyboardContext): void {
 
       switch (command.type) {
         case "moveSelection":
+          extendAnchorRef.current = null;
           s.moveCursor(command.delta);
           break;
         case "scrollReader":
@@ -256,16 +258,37 @@ export function useKeyboard(context: KeyboardContext): void {
           // The list's start: the top, or the bottom when it is sorted from bottom.
           (snap.preferences.sortFromBottom ? scrollListToBottom : scrollListToTop)();
           break;
-        case "selectFirst":
-          if (snap.view.threads.length > 0) {
-            s.moveCursor(snap.cursorIndex === NO_CURSOR ? snap.view.threads.length : -snap.view.threads.length);
+        case "extendSelection": {
+          const threads = snap.view.threads;
+          if (threads.length === 0) break;
+          const order = threads.map((row) => row.representative.id);
+          const orderSet = new Set(order);
+          const cursor = snap.cursorIndex;
+          const selectedId = snap.view.selected?.id ?? null;
+          const selectedAt = selectedId === null ? -1 : order.indexOf(selectedId);
+          const currentIdx =
+            cursor >= 0 && cursor < threads.length ? cursor : selectedAt >= 0 ? selectedAt : command.delta > 0 ? -1 : threads.length;
+          const targetIdx = Math.max(0, Math.min(threads.length - 1, currentIdx + command.delta));
+          const currentId =
+            cursor >= 0 && cursor < threads.length
+              ? threads[cursor]!.representative.id
+              : selectedAt >= 0
+                ? selectedId!
+                : threads[targetIdx]!.representative.id;
+          const batch = selectionRef.current;
+          let anchor = extendAnchorRef.current;
+          if (batch.size === 0 || anchor === null || !orderSet.has(anchor)) {
+            anchor = currentId;
           }
+          extendAnchorRef.current = anchor;
+          const targetId = threads[targetIdx]!.representative.id;
+          setSelection(new Set(rangeBetween(order, anchor, targetId)));
+          (s as unknown as { set: (patch: Record<string, unknown>) => void }).set({
+            cursorIndex: targetIdx,
+            revealSeq: (snap.revealSeq ?? 0) + 1,
+          });
           break;
-        case "selectLast":
-          if (snap.view.threads.length > 0) {
-            s.moveCursor(snap.cursorIndex === NO_CURSOR ? -snap.view.threads.length : snap.view.threads.length);
-          }
-          break;
+        }
         case "closeViewer":
           // On a phone, leaving the message leaves the list with no current row.
           s.closeReader({ dropCursor: phoneRef.current });

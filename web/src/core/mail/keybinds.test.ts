@@ -262,8 +262,8 @@ describe("commandForKey — the canvas", () => {
   });
 
   it("scrolls to the list boundaries with Shift+J/K", () => {
-    expect(commandForKey("K", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "selectFirst" });
-    expect(commandForKey("J", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "selectLast" });
+    expect(commandForKey("K", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "extendSelection", delta: -1 });
+    expect(commandForKey("J", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "extendSelection", delta: 1 });
     expect(commandForKey("j", DEFAULT_CONTEXT)).toEqual({ type: "moveSelection", delta: 1 });
     expect(commandForKey("k", DEFAULT_CONTEXT)).toEqual({ type: "moveSelection", delta: -1 });
   });
@@ -502,8 +502,7 @@ describe("the cheat sheet", () => {
       "scrollReader",
       "openSelected",
       "listTop",
-      "selectFirst",
-      "selectLast",
+      "extendSelection",
       "closeViewer",
       "closeComposer",
       "dismissOverlay",
