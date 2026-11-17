@@ -42,13 +42,13 @@ jobs:
       updater: ${{ steps.updater.outputs.updater }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
@@ -193,13 +193,13 @@ jobs:
         shell: bash
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -211,7 +211,7 @@ jobs:
           targets: ${{ matrix.rust-targets }}
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: native/src-tauri -> target
           key: release-${{ matrix.slug }}
@@ -238,6 +238,7 @@ jobs:
           set -euo pipefail
           ok() { actool --version --output-format=human-readable-text | grep -Eq 'short-bundle-version: (2[6-9]|[3-9][0-9])'; }
           if ! ok; then
+            # shellcheck disable=SC2010
             XCODE="$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | grep -vi beta | sort -V | tail -n 1 || true)"
             if [ -z "$XCODE" ]; then
               echo "::error::No Xcode 26+ on this runner; the Liquid Glass icon needs it."
@@ -250,7 +251,7 @@ jobs:
 
       - name: Install cargo-binstall
         if: runner.os != 'macOS'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-binstall
 
@@ -376,7 +377,7 @@ jobs:
           ls -la "$OUT"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: winnow-${{ needs.prepare.outputs.version }}-${{ matrix.slug }}
           path: ${{ runner.temp }}/bundles
@@ -407,13 +408,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -468,7 +469,7 @@ jobs:
           exit 1
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: winnow-${{ needs.prepare.outputs.version }}-docker-bundles
           path: ${{ runner.temp }}/docker-bundles
@@ -500,26 +501,26 @@ jobs:
       NDK_VERSION: "27.2.12479018"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           # The default also asks for `tools`, which the SDK no longer ships, and
           # sdkmanager then fails the step. The NDK is installed below.
@@ -537,13 +538,13 @@ jobs:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: native/src-tauri -> target
           key: release-android
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-binstall
 
@@ -713,7 +714,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: winnow-${{ needs.prepare.outputs.version }}-android
           path: ${{ runner.temp }}/android
@@ -740,13 +741,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
@@ -817,14 +818,14 @@ jobs:
     steps:
       - name: Checkout code
         if: needs.prepare.outputs.updater == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Setup Node.js
         if: needs.prepare.outputs.updater == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
