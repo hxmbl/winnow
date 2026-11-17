@@ -296,6 +296,7 @@ export function useKeyboard(context: KeyboardContext): void {
           setSelection(new Set(rangeBetween(order, anchor, targetId)));
           (s as unknown as { set: (patch: Record<string, unknown>) => void }).set({
             cursorIndex: targetIdx,
+            selectedId: targetId,
             revealSeq: (snap.revealSeq ?? 0) + 1,
           });
           break;
