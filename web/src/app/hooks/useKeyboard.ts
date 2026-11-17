@@ -10,7 +10,7 @@ import { isSelectAll, selectAllScope } from "../../ui/textSelection";
 import { canSnooze } from "../../ui/menus";
 import { onReplyRequest } from "../../ui/notificationActions";
 import type { PillItem } from "../../ui/rail";
-import { EMPTY_SELECTION, orderedSelection, type Selection } from "../../ui/selection";
+import { EMPTY_SELECTION, orderedSelection, rangeBetween, type Selection } from "../../ui/selection";
 import { logoViewAfter, type LogoView } from "../../ui/logoVersion";
 
 type Mutable<T> = { current: T };
@@ -75,6 +75,7 @@ export function useKeyboard(context: KeyboardContext): void {
   openComposeRef.current = openCompose;
   const closeComposerRef = useRef(closeComposer);
   closeComposerRef.current = closeComposer;
+  const extendAnchorRef = useRef<number | null>(null);
 
   /** The element last pressed, for ⌘A to find the region the user is working in. */
   const lastPressRef = useRef<Element | null>(null);
@@ -244,6 +245,8 @@ export function useKeyboard(context: KeyboardContext): void {
 
       switch (command.type) {
         case "moveSelection":
+          extendAnchorRef.current = null;
+          if (selectionRef.current.size > 0) setSelection(EMPTY_SELECTION);
           s.moveCursor(command.delta);
           break;
         case "scrollReader":
@@ -257,15 +260,64 @@ export function useKeyboard(context: KeyboardContext): void {
           (snap.preferences.sortFromBottom ? scrollListToBottom : scrollListToTop)();
           break;
         case "selectFirst":
+          extendAnchorRef.current = null;
+          if (selectionRef.current.size > 0) setSelection(EMPTY_SELECTION);
           if (snap.view.threads.length > 0) {
             s.moveCursor(snap.cursorIndex === NO_CURSOR ? snap.view.threads.length : -snap.view.threads.length);
           }
           break;
         case "selectLast":
+          extendAnchorRef.current = null;
+          if (selectionRef.current.size > 0) setSelection(EMPTY_SELECTION);
           if (snap.view.threads.length > 0) {
             s.moveCursor(snap.cursorIndex === NO_CURSOR ? -snap.view.threads.length : snap.view.threads.length);
           }
           break;
+        case "extendSelection": {
+          const threads = snap.view.threads;
+          if (threads.length === 0) break;
+          const order = threads.map((row) => row.representative.id);
+          const orderSet = new Set(order);
+          const cursor = snap.cursorIndex;
+          const selectedId = snap.view.selected?.id ?? null;
+          const selectedAt = selectedId === null ? -1 : order.indexOf(selectedId);
+          const fallbackIdx =
+            cursor >= 0 && cursor < threads.length ? cursor : selectedAt >= 0 ? selectedAt : command.delta > 0 ? 0 : threads.length - 1;
+          const batch = selectionRef.current;
+          let anchor = extendAnchorRef.current;
+          let baseIdx = fallbackIdx;
+          if (batch.size === 0 || anchor === null || !orderSet.has(anchor)) {
+            anchor = order[fallbackIdx]!;
+          } else {
+            const anchorIdx = order.indexOf(anchor);
+            let lo = -1;
+            let hi = -1;
+            for (let i = 0; i < order.length; i++) {
+              if (batch.has(order[i]!)) {
+                if (lo === -1) lo = i;
+                hi = i;
+              }
+            }
+            if (lo !== -1 && hi !== -1 && lo <= anchorIdx && anchorIdx <= hi) {
+              baseIdx = anchorIdx === lo ? hi : anchorIdx === hi ? lo : anchorIdx;
+            } else {
+              baseIdx = fallbackIdx;
+            }
+          }
+          extendAnchorRef.current = anchor;
+          const targetIdx = Math.max(0, Math.min(threads.length - 1, baseIdx + command.delta));
+          const targetId = threads[targetIdx]!.representative.id;
+          setSelection(new Set(rangeBetween(order, anchor, targetId)));
+          const current = (s as unknown as { getSnapshot?: () => { revealSeq?: number }; state?: { revealSeq?: number } }).getSnapshot?.() ??
+            (s as unknown as { state?: { revealSeq?: number } }).state ??
+            snap;
+          (s as unknown as { set: (patch: Record<string, unknown>) => void }).set({
+            cursorIndex: targetIdx,
+            selectedId: targetId,
+            revealSeq: ((current as { revealSeq?: number }).revealSeq ?? 0) + 1,
+          });
+          break;
+        }
         case "closeViewer":
           // On a phone, leaving the message leaves the list with no current row.
           s.closeReader({ dropCursor: phoneRef.current });

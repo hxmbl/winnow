@@ -27,6 +27,7 @@ export type Command =
   | { type: "listTop" }
   | { type: "selectFirst" }
   | { type: "selectLast" }
+  | { type: "extendSelection"; delta: number }
   | { type: "closeViewer" }
   | { type: "closeComposer" }
   | { type: "dismissOverlay" }
@@ -264,15 +265,15 @@ export const BINDINGS: readonly Binding[] = [
   },
   {
     keys: "⇧K",
-    help: "Select the first message",
+    help: "Extend selection up",
     matches: { keys: ["K"], shift: true },
-    command: { type: "selectFirst" },
+    command: { type: "extendSelection", delta: -1 },
   },
   {
     keys: "⇧J",
-    help: "Select the last message",
+    help: "Extend selection down",
     matches: { keys: ["J"], shift: true },
-    command: { type: "selectLast" },
+    command: { type: "extendSelection", delta: 1 },
   },
   {
     keys: "o / ⏎",
@@ -520,6 +521,19 @@ function isUndoChord(key: string, event: KeyModifiers): boolean {
 }
 
 /**
+ * Cmd+J/K on macOS or Ctrl+J/K elsewhere: jump to the last or first message.
+ * Requires exactly one of Ctrl/Meta, with no Shift or Alt, so it reads as
+ * "cmd/ctrl" and never collides with plain j/k, Shift+J/K, or system chords.
+ */
+function jumpChordCommand(key: string, event: KeyModifiers): Command | null {
+  if (event.shiftKey || event.altKey) return null;
+  if ((event.ctrlKey ?? false) === (event.metaKey ?? false)) return null;
+  if (key === "j" || key === "J") return { type: "selectLast" };
+  if (key === "k" || key === "K") return { type: "selectFirst" };
+  return null;
+}
+
+/**
  * Resolve a key event to a command, or `null` to let it through. Every table
  * lives in this file, so the cheat sheet, toolbar hints and router cannot drift.
  */
@@ -531,14 +545,20 @@ export function commandForKey(
   // 1. Nothing is routed before the app is ready.
   if (!context.ready) return null;
 
-  // 2. Never intercept a system shortcut — with one exception: Ctrl+Z / ⌘Z takes the
-  //    pill's Undo, but only outside every text field, the composer and the modals, and
-  //    only while an Undo is on offer. Anywhere else it is left to the platform, so
-  //    typing's own undo is never taken over, and with nothing to undo it passes through.
+  // 2. Never intercept a system shortcut — with exceptions for app chords that own
+  //    Ctrl/⌘: Ctrl+Z / ⌘Z takes Undo when offered, and Ctrl/Cmd+J/K jump to the
+  //    first/last message, but only outside every text field, the composer and the
+  //    modals. Anywhere else they are left to the platform or the field.
   if (isUndoChord(key, event)) {
     const free =
       !context.composerOpen && !context.textEditing && !context.overlayVisible && !context.navigationVisible;
     return free && context.undoAvailable === true ? { type: "undo" } : null;
+  }
+  const jump = jumpChordCommand(key, event);
+  if (jump) {
+    const free =
+      !context.composerOpen && !context.textEditing && !context.overlayVisible && !context.navigationVisible;
+    return free ? jump : null;
   }
   if (event.ctrlKey || event.altKey || event.metaKey) return null;
 

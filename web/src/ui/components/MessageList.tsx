@@ -1300,15 +1300,24 @@ function MessageList({
     // one brought into view lands just below it.
     // Under floating chrome a mounted row is judged by where it really is: the offsets
     // of rows above it may still be estimates, and a few pixels off is under the glass.
-    // Its box is shifted by what the glide in flight still has to go.
+    // Its box is shifted by what the glide in flight still has to go. Keep a 10% edge
+    // margin so the next row stays hinted while navigating/extending a selection.
     const key = items[rowIndex]?.key;
+    const revealMargin = Math.floor(element.clientHeight * 0.1);
     if (contentTop > 0 && key) {
       const mounted = element.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(key)}"]`);
       if (mounted) {
         const box = element.getBoundingClientRect();
         const rect = mounted.getBoundingClientRect();
         const ahead = base - element.scrollTop;
-        const delta = rowClearance(rect.top - box.top - ahead, rect.bottom - box.top - ahead, coveredTop, element.clientHeight);
+        const delta = rowClearance(
+          rect.top - box.top - ahead,
+          rect.bottom - box.top - ahead,
+          coveredTop,
+          element.clientHeight,
+          revealMargin,
+          revealMargin,
+        );
         if (Math.abs(delta) >= 1) scrollTo(base + delta);
         return;
       }
@@ -1318,6 +1327,8 @@ function MessageList({
       coveredTop,
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
+      marginTop: revealMargin,
+      marginBottom: revealMargin,
     });
     if (target === null) return;
 
@@ -1340,7 +1351,14 @@ function MessageList({
         }
         const box = element.getBoundingClientRect();
         const rect = row.getBoundingClientRect();
-        const delta = rowClearance(rect.top - box.top, rect.bottom - box.top, coveredTop, element.clientHeight);
+        const delta = rowClearance(
+          rect.top - box.top,
+          rect.bottom - box.top,
+          coveredTop,
+          element.clientHeight,
+          revealMargin,
+          revealMargin,
+        );
         if (Math.abs(delta) >= 1) {
           element.scrollTop += delta;
           setScrollTop(element.scrollTop);

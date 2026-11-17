@@ -111,13 +111,20 @@ describe("commandForKey — not ready", () => {
 });
 
 describe("commandForKey — system modifiers", () => {
-  it("never intercepts a command shortcut", () => {
-    // ⌘R, ⌘W, ⌘Q belong to the app and the OS, not to a message list.
+  it("never intercepts unrelated system shortcuts", () => {
+    // ⌘R, ⌘W, ⌘Q belong to the app and the OS, not to a message list. Cmd/Ctrl+J/K
+    // are the only app-owned chords among Ctrl/⌘ on the canvas.
     for (const key of ["j", "s", "e", "/"]) {
-      expect(commandForKey(key, DEFAULT_CONTEXT, { metaKey: true })).toBeNull();
-      expect(commandForKey(key, DEFAULT_CONTEXT, { ctrlKey: true })).toBeNull();
-      expect(commandForKey(key, DEFAULT_CONTEXT, { altKey: true })).toBeNull();
+      if (key !== "j") {
+        expect(commandForKey(key, DEFAULT_CONTEXT, { metaKey: true }), `${key} meta`).toBeNull();
+        expect(commandForKey(key, DEFAULT_CONTEXT, { ctrlKey: true }), `${key} ctrl`).toBeNull();
+      }
+      expect(commandForKey(key, DEFAULT_CONTEXT, { altKey: true }), `${key} alt`).toBeNull();
     }
+    expect(commandForKey("j", DEFAULT_CONTEXT, { metaKey: true })).toEqual({ type: "selectLast" });
+    expect(commandForKey("j", DEFAULT_CONTEXT, { ctrlKey: true })).toEqual({ type: "selectLast" });
+    expect(commandForKey("k", DEFAULT_CONTEXT, { metaKey: true })).toEqual({ type: "selectFirst" });
+    expect(commandForKey("k", DEFAULT_CONTEXT, { ctrlKey: true })).toEqual({ type: "selectFirst" });
   });
 
   it("treats shift as noise, so Shift+J still selects", () => {
@@ -261,11 +268,26 @@ describe("commandForKey — the canvas", () => {
     expect(commandForKey("Home", context({ viewerOpen: true }))).toEqual({ type: "listTop" });
   });
 
-  it("scrolls to the list boundaries with Shift+J/K", () => {
-    expect(commandForKey("K", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "selectFirst" });
-    expect(commandForKey("J", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "selectLast" });
+  it("extends the selection with Shift+J/K without breaking plain j/k", () => {
+    expect(commandForKey("K", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "extendSelection", delta: -1 });
+    expect(commandForKey("J", DEFAULT_CONTEXT, { shiftKey: true })).toEqual({ type: "extendSelection", delta: 1 });
     expect(commandForKey("j", DEFAULT_CONTEXT)).toEqual({ type: "moveSelection", delta: 1 });
     expect(commandForKey("k", DEFAULT_CONTEXT)).toEqual({ type: "moveSelection", delta: -1 });
+  });
+
+  it("jumps to the first or last message with Cmd/Ctrl+J/K", () => {
+    expect(commandForKey("k", DEFAULT_CONTEXT, { metaKey: true })).toEqual({ type: "selectFirst" });
+    expect(commandForKey("j", DEFAULT_CONTEXT, { metaKey: true })).toEqual({ type: "selectLast" });
+    expect(commandForKey("k", DEFAULT_CONTEXT, { ctrlKey: true })).toEqual({ type: "selectFirst" });
+    expect(commandForKey("j", DEFAULT_CONTEXT, { ctrlKey: true })).toEqual({ type: "selectLast" });
+    expect(commandForKey("K", DEFAULT_CONTEXT, { metaKey: true })).toEqual({ type: "selectFirst" });
+  });
+
+  it("does not hijack jump chords while typing, composing, or in a modal", () => {
+    expect(commandForKey("j", context({ textEditing: true }), { metaKey: true })).toBeNull();
+    expect(commandForKey("k", context({ composerOpen: true }), { ctrlKey: true })).toBeNull();
+    expect(commandForKey("j", context({ overlayVisible: true }), { metaKey: true })).toBeNull();
+    expect(commandForKey("k", context({ navigationVisible: true }), { ctrlKey: true })).toBeNull();
   });
 
   it("opens with o, and stops doing so once something is open", () => {
@@ -504,6 +526,7 @@ describe("the cheat sheet", () => {
       "listTop",
       "selectFirst",
       "selectLast",
+      "extendSelection",
       "closeViewer",
       "closeComposer",
       "dismissOverlay",
