@@ -259,6 +259,20 @@ export function useKeyboard(context: KeyboardContext): void {
           // The list's start: the top, or the bottom when it is sorted from bottom.
           (snap.preferences.sortFromBottom ? scrollListToBottom : scrollListToTop)();
           break;
+        case "selectFirst":
+          extendAnchorRef.current = null;
+          if (selectionRef.current.size > 0) setSelection(EMPTY_SELECTION);
+          if (snap.view.threads.length > 0) {
+            s.moveCursor(snap.cursorIndex === NO_CURSOR ? snap.view.threads.length : -snap.view.threads.length);
+          }
+          break;
+        case "selectLast":
+          extendAnchorRef.current = null;
+          if (selectionRef.current.size > 0) setSelection(EMPTY_SELECTION);
+          if (snap.view.threads.length > 0) {
+            s.moveCursor(snap.cursorIndex === NO_CURSOR ? -snap.view.threads.length : snap.view.threads.length);
+          }
+          break;
         case "extendSelection": {
           const threads = snap.view.threads;
           if (threads.length === 0) break;
