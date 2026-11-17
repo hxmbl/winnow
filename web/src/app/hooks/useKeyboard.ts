@@ -308,10 +308,13 @@ export function useKeyboard(context: KeyboardContext): void {
           const targetIdx = Math.max(0, Math.min(threads.length - 1, baseIdx + command.delta));
           const targetId = threads[targetIdx]!.representative.id;
           setSelection(new Set(rangeBetween(order, anchor, targetId)));
+          const current = (s as unknown as { getSnapshot?: () => { revealSeq?: number }; state?: { revealSeq?: number } }).getSnapshot?.() ??
+            (s as unknown as { state?: { revealSeq?: number } }).state ??
+            snap;
           (s as unknown as { set: (patch: Record<string, unknown>) => void }).set({
             cursorIndex: targetIdx,
             selectedId: targetId,
-            revealSeq: (snap.revealSeq ?? 0) + 1,
+            revealSeq: ((current as { revealSeq?: number }).revealSeq ?? 0) + 1,
           });
           break;
         }
