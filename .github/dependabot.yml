@@ -3,7 +3,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     groups:
       github-actions:
         patterns:
@@ -12,7 +12,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     groups:
       npm-minor-patch:
         update-types:
@@ -22,7 +22,7 @@ updates:
   - package-ecosystem: "cargo"
     directory: "/native/src-tauri"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     groups:
       cargo-minor-patch:
         update-types:
