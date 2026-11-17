@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 20
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 20
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "cargo"
+    directory: "/native/src-tauri"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 20
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

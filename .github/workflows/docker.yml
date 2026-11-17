@@ -88,16 +88,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.meta.outputs.ref }}
           persist-credentials: false
 
       - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build the web image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -107,7 +107,7 @@ jobs:
           cache-to: type=gha,scope=winnow,mode=max
 
       - name: Build the proxy image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: proxy/Dockerfile
@@ -122,10 +122,13 @@ jobs:
           HARDEN="--read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --health-interval 3s"
           docker network create winnow-smoke
           # The baked copy only: deterministic, no GitHub.
+          # shellcheck disable=SC2086
           docker run -d --name web-baked -p 8081:8080 $HARDEN -e WINNOW_AUTO_UPDATE=false winnow:smoke
           # As docker-compose.proxy.yml runs them, auto-update on: asks GitHub on start
           # and falls back to the baked copy when the release has no bundle yet.
+          # shellcheck disable=SC2086
           docker run -d --name proxy --network winnow-smoke $HARDEN winnow-proxy:smoke
+          # shellcheck disable=SC2086
           docker run -d --name web --network winnow-smoke -p 8080:8080 $HARDEN \
             -e WINNOW_PROXY_UPSTREAM=http://proxy:8787 winnow:smoke
 
@@ -228,20 +231,20 @@ jobs:
             file: proxy/Dockerfile
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.meta.outputs.ref }}
           persist-credentials: false
 
       - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to ghcr.io
         if: needs.meta.outputs.push == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -249,7 +252,7 @@ jobs:
 
       - name: Tags and labels
         id: tags
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           flavor: latest=false
@@ -260,7 +263,7 @@ jobs:
             type=ref,event=pr
 
       - name: Build${{ needs.meta.outputs.push == 'true' && ' and push' || '' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.file }}
