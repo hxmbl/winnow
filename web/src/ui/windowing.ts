@@ -171,13 +171,15 @@ export function revealTarget(
   const topEdge = coveredTop + marginTop;
   const bottomEdge = Math.max(topEdge, clientHeight - marginBottom);
   if (rowTop >= base + topEdge && rowBottom <= base + bottomEdge) return null;
+  if (marginTop === 0 && marginBottom === 0) {
+    return contentTop > 0
+      ? revealScrollTop(rowTop, coveredTop, scrollHeight, clientHeight)
+      : scrollTopForIndex(offsets, rowIndex, clientHeight);
+  }
   const delta = rowClearance(rowTop - base, rowBottom - base, coveredTop, clientHeight, marginTop, marginBottom);
   if (Math.abs(delta) < 1) return null;
-  if (contentTop > 0 || marginTop > 0 || marginBottom > 0) {
-    const max = Math.max(scrollHeight - clientHeight, 0);
-    return Math.min(Math.max(base + delta, 0), max);
-  }
-  return scrollTopForIndex(offsets, rowIndex, clientHeight);
+  const max = Math.max(scrollHeight - clientHeight, 0);
+  return Math.min(Math.max(base + delta, 0), max);
 }
 
 /**
