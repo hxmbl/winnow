@@ -266,21 +266,31 @@ export function useKeyboard(context: KeyboardContext): void {
           const cursor = snap.cursorIndex;
           const selectedId = snap.view.selected?.id ?? null;
           const selectedAt = selectedId === null ? -1 : order.indexOf(selectedId);
-          const currentIdx =
-            cursor >= 0 && cursor < threads.length ? cursor : selectedAt >= 0 ? selectedAt : command.delta > 0 ? -1 : threads.length;
-          const targetIdx = Math.max(0, Math.min(threads.length - 1, currentIdx + command.delta));
-          const currentId =
-            cursor >= 0 && cursor < threads.length
-              ? threads[cursor]!.representative.id
-              : selectedAt >= 0
-                ? selectedId!
-                : threads[targetIdx]!.representative.id;
+          const fallbackIdx =
+            cursor >= 0 && cursor < threads.length ? cursor : selectedAt >= 0 ? selectedAt : command.delta > 0 ? 0 : threads.length - 1;
           const batch = selectionRef.current;
           let anchor = extendAnchorRef.current;
+          let baseIdx = fallbackIdx;
           if (batch.size === 0 || anchor === null || !orderSet.has(anchor)) {
-            anchor = currentId;
+            anchor = order[fallbackIdx]!;
+          } else {
+            const anchorIdx = order.indexOf(anchor);
+            let lo = -1;
+            let hi = -1;
+            for (let i = 0; i < order.length; i++) {
+              if (batch.has(order[i]!)) {
+                if (lo === -1) lo = i;
+                hi = i;
+              }
+            }
+            if (lo !== -1 && hi !== -1 && lo <= anchorIdx && anchorIdx <= hi) {
+              baseIdx = anchorIdx === lo ? hi : anchorIdx === hi ? lo : anchorIdx;
+            } else {
+              baseIdx = fallbackIdx;
+            }
           }
           extendAnchorRef.current = anchor;
+          const targetIdx = Math.max(0, Math.min(threads.length - 1, baseIdx + command.delta));
           const targetId = threads[targetIdx]!.representative.id;
           setSelection(new Set(rangeBetween(order, anchor, targetId)));
           (s as unknown as { set: (patch: Record<string, unknown>) => void }).set({
