@@ -14,7 +14,7 @@
 # it. Do not publish its port: put it behind the app (docker-compose.proxy.yml does),
 # or, if it must be reached directly, set ALLOWED_ORIGINS (see the README).
 
-FROM node:24-alpine AS bundle
+FROM node:26-alpine AS bundle
 WORKDIR /src
 COPY web/package.json web/package.json
 COPY web/src/core/mail web/src/core/mail
@@ -22,7 +22,7 @@ COPY proxy proxy
 COPY docker/bundle.sh docker/bundle.sh
 RUN sh docker/bundle.sh proxy /src /out
 
-FROM node:24-alpine
+FROM node:26-alpine
 LABEL org.opencontainers.image.title="Winnow render proxy" \
       org.opencontainers.image.description="Fetches a message's images server-side so the sender never sees the reader" \
       org.opencontainers.image.source="https://github.com/hxmbl/winnow" \
