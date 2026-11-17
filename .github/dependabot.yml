@@ -31,3 +31,54 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  - package-ecosystem: "gradle"
+    directory: "/native/src-tauri/gen/android"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 20
+    groups:
+      gradle-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 20
+    groups:
+      docker:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/proxy"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 20
+    groups:
+      docker-proxy:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 20
+    groups:
+      docker-compose:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "rust-toolchain"
+    directory: "/native/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      rust-toolchain:
+        patterns:
+          - "*"
