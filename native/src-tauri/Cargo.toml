@@ -39,7 +39,7 @@ base64 = "0.23"
 tiny_http = "0.12"
 tokio = { version = "1", features = ["sync", "rt", "time"] }
 url = "2"
-parking_lot = "0.12"
+parking_lot = "0.13"
 
 # `tauri-plugin-os` and `tauri-plugin-store` were both listed here and neither was
 # called: the frontend reports its own platform facts through `app_info`, and
