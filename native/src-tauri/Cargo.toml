@@ -111,7 +111,7 @@ objc2 = "0.6"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Checking a downloaded `.deb` against the release's SHA256SUMS before it opens.
-sha2 = "0.10"
+sha2 = "0.11"
 
 [dev-dependencies]
 tempfile = "3"
