@@ -21,7 +21,12 @@ export function ComposeButton({ onCompose }: { onCompose: () => void }) {
     <button
       type="button"
       data-compose-fab=""
-      onClick={onCompose}
+      onClick={() => {
+        // A brief tick on the phones that have it, like the dock's tabs and the list's
+        // swipes; a no-op where `navigator.vibrate` does not exist.
+        navigator.vibrate?.(8);
+        onCompose();
+      }}
       aria-label="Compose"
       title={shortcutHint("Compose", "compose")}
       className="wn-liquid wn-liquid-accent pointer-events-auto flex h-(--wn-dock-h) w-(--wn-dock-h) shrink-0 items-center justify-center rounded-ctl border border-hairline bg-accent text-on-accent transition-transform active:scale-95 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2"
