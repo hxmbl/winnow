@@ -301,8 +301,14 @@ const Row = memo(function Row({
          * 1.4.0), so the unread dot stays the list's one spot of accent and the two are
          * never confused. A row in the multi-selection gets the same fill; the check in
          * the avatar slot is what tells it from the open message.
+         *
+         * A pressed row takes the pressed fill (`surface-active`), the same step between
+         * hover and selected the buttons use, so a tap on a row answers the finger even
+         * before the reader arrives.
          */
-        selected || checked ? "bg-surface-selected" : "hover:bg-surface-hover"
+        selected || checked
+          ? "bg-surface-selected"
+          : "hover:bg-surface-hover active:bg-surface-active"
       }`}
     >
       {/*
@@ -416,12 +422,13 @@ const Row = memo(function Row({
             <span className="flex min-w-0 items-baseline gap-1.5">
               {/*
                 Weight means unread, and only unread. A read row is regular weight
-                throughout; its hierarchy is carried by colour (ink-body for the sender
-                and subject, ink-subtle for the preview and count).
+                throughout; its hierarchy is carried by colour, in three steps: the
+                sender in ink (the name leads the scan of a row you have read), the
+                subject in ink-body, the preview and count in ink-subtle.
               */}
               <span
                 data-row-sender=""
-                className={`truncate text-ui ${unread ? "font-semibold text-ink" : "font-normal text-ink-body"}`}
+                className={`truncate text-ui ${unread ? "font-semibold text-ink" : "font-normal text-ink"}`}
               >
                 {name}
               </span>
@@ -455,7 +462,7 @@ const Row = memo(function Row({
               >
                 {email.subject || "(no subject)"}
               </span>
-              {email.body && <span className="ml-2 text-ink-subtle">{email.body}</span>}
+              {email.body && <span className="ml-3 text-ink-subtle">{email.body}</span>}
             </span>
             {chipCode && <CodeChipRoom code={chipCode} />}
           </span>

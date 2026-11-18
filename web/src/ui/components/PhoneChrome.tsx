@@ -438,6 +438,9 @@ export function PhoneDock({
             const count = unread[id] ?? 0;
             const badge = badgeText(count);
             const onClick = () => {
+              // The tab answers the thumb with a brief tick, where the platform has one
+              // (the same guarded call the compose button and the swipes use).
+              navigator.vibrate?.(8);
               tapTab(
                 id,
                 { current, filtering: activeFilters.length > 0 },
