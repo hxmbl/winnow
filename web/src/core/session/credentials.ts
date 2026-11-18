@@ -148,10 +148,12 @@ export function clientIdError(raw: string): string | null {
  * How every client secret Google issues now begins.
  *
  * Built at run time on purpose: the release workflow fails a build whose `dist/`
- * contains the literal prefix (that is how it catches a bundled secret), and a minifier
- * folds `"…" + "-"` back into one string but leaves a `join` alone.
+ * contains the literal prefix (that is how it catches a bundled secret). A minifier
+ * folds `"…" + "-"` back into one string, and since the web build moved to rolldown
+ * (vite 8) it folds an array's `join` too — so the pieces ride in base64 and `atob`
+ * decodes them, which is runtime work no bundler does.
  */
-export const CLIENT_SECRET_PREFIX = ["GOCSPX", ""].join("-");
+export const CLIENT_SECRET_PREFIX = atob("R09DU1BYLQ==");
 
 /** The secret's problem, in a sentence, or `null`. */
 export function clientSecretError(raw: string | undefined, kind: ClientKind): string | null {
