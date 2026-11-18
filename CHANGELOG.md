@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-11-18
+
 ### Added
 
 - Settings → Reading → Sort from bottom, off by default: lists messages from the bottom up, so the first result sits nearest your thumb. The first and every new view open there, and Home, the dock's Inbox tab and the floating shortcut return to whichever edge the list starts from. On the phone, pull-to-refresh is off in this mode — its visual top is the oldest end, so the Inbox tab is the way back (STRM-663).
@@ -23,6 +25,7 @@ adds. See `native/README.md`, "Cutting a release".
 - Shift+K/Shift+J now extend the selection up and down (STRM-665). They no longer jump to the first or last message.
 - Cmd/Ctrl+K jumps to the first message and Cmd/Ctrl+J jumps to the last (STRM-666).
 - Phone: in a mailbox from the menu, the dock's menu button now centres that mailbox's icon, with the chevron beside it (STRM-617).
+- Liquid Glass polish, without changing the identity: a read row's sender now leads the scan in full ink (weight still means unread, and only unread), the subject and preview keep a wider gap, buttons and list rows answer a press — the fill deepens one step and the button gives a little, none under reduced motion — compose and dock taps tick where the platform has haptics, and the split divider marks the boundary between list and reader at rest (STRM-664).
 
 ## [1.9.1] - 2026-11-14
 
@@ -542,7 +545,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/hxmbl/winnow/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/hxmbl/winnow/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/hxmbl/winnow/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/hxmbl/winnow/compare/v1.7.3...v1.8.0
