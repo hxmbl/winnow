@@ -604,7 +604,7 @@ fn serve(
         let on_callback = config
             .callback_path
             .as_deref()
-            .map_or(true, |callback| callback == path);
+            .is_none_or(|callback| callback == path);
         if !on_callback {
             let sent = answer_text(request, 404, "Not found");
             crate::dlog!(

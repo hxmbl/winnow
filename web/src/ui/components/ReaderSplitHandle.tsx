@@ -190,7 +190,11 @@ export function ReaderSplitHandle({ containerRef }: { containerRef: RefObject<HT
       >
         <span
           aria-hidden="true"
-          className="h-full w-px bg-hairline-soft transition-colors duration-150 group-hover:bg-divider group-focus-visible:w-0.5 group-focus-visible:bg-focus-ring group-data-dragging:w-0.5 group-data-dragging:bg-accent"
+          // The boundary between the planes at rest: a `hairline`, one step up from the
+          // `hairline-soft` it used to be, so the list and the reader read as two places
+          // without a rule shouting between them. Hover and the drag still announce
+          // themselves (`divider`, then the accent).
+          className="h-full w-px bg-hairline transition-colors duration-150 group-hover:bg-divider group-focus-visible:w-0.5 group-focus-visible:bg-focus-ring group-data-dragging:w-0.5 group-data-dragging:bg-accent"
         />
       </div>
     </div>

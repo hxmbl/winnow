@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -77,12 +77,12 @@ jobs:
         working-directory: web
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -117,13 +117,13 @@ jobs:
       android: ${{ steps.filter.outputs.android }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Filter paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             native:
@@ -151,7 +151,7 @@ jobs:
         working-directory: web
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -161,7 +161,7 @@ jobs:
       # job-level container.
       - name: Prepare checkout for pwuser
         run: |
-          PWUSER_UID="$(docker run --rm --entrypoint id mcr.microsoft.com/playwright:v1.65.0-noble -u pwuser)"
+          PWUSER_UID="$(docker run --rm --entrypoint id mcr.microsoft.com/playwright:v1.65.1-noble -u pwuser)"
           sudo chown -R "$PWUSER_UID" "$GITHUB_WORKSPACE"
 
       - name: Install, build, and run smoke shard
@@ -175,7 +175,7 @@ jobs:
             --security-opt "seccomp=$GITHUB_WORKSPACE/.github/playwright-seccomp.json" \
             --volume "$GITHUB_WORKSPACE:/workspace" \
             --workdir /workspace/web \
-            mcr.microsoft.com/playwright:v1.65.0-noble \
+            mcr.microsoft.com/playwright:v1.65.1-noble \
             bash -euo pipefail -c '
               npm ci
               npx vite build --logLevel warn
@@ -199,29 +199,29 @@ jobs:
           echo "smoke shards: $RESULT"
           test "$RESULT" = success
 
-  # The Rust side's own gate: formatting, clippy with warnings as errors, and the
-  # unit tests in commands/deep_link/files/oauth/scheduler. Runs on every event, so
-  # a tag can't be released past a Rust test failure.
+  # The Rust side's own gate on the selected current stable toolchain: formatting,
+  # clippy with warnings as errors, and unit tests. Runs on every event, so a tag
+  # can't be released past a Rust test failure.
   rust-checks:
     name: Rust fmt, clippy and test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup Rust
+      - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: native/src-tauri -> target
-          key: checks
+          key: checks-stable
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install Linux dependencies
@@ -248,6 +248,51 @@ jobs:
         working-directory: native/src-tauri
         run: cargo test --locked
 
+  # Verify the declared Rust MSRV (Cargo.toml rust-version) remains supported.
+  rust-msrv:
+    name: Rust MSRV
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Read MSRV
+        id: msrv
+        run: |
+          set -euo pipefail
+          MSRV="$(sed -n 's/^rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' native/src-tauri/Cargo.toml | head -n1)"
+          if [ -z "$MSRV" ]; then echo "::error::Could not read rust-version from native/src-tauri/Cargo.toml"; exit 1; fi
+          echo "version=$MSRV" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust (MSRV)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: native/src-tauri -> target
+          key: checks-msrv-${{ steps.msrv.outputs.version }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf pkg-config wget
+
+      - name: Stub the frontend
+        run: mkdir -p web/dist && echo '<!doctype html>' > web/dist/index.html
+
+      - name: Test (MSRV)
+        working-directory: native/src-tauri
+        run: cargo test --locked
+
   # Known advisories in the two locked graphs: `npm audit` on web/package-lock.json
   # (full tree and --omit=dev) and `cargo audit` on native/src-tauri/Cargo.lock. Fails
   # only on a new high/critical advisory in what ships; dev-only, moderate/low and
@@ -262,19 +307,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       # A pinned scanner: a new cargo-audit release can change what is reported, so it
       # moves only in a reviewed commit. The advisory databases themselves are live.
       - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-audit@0.22.2
 
@@ -301,22 +346,22 @@ jobs:
         working-directory: web
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Setup Rust
+      - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: native/src-tauri -> target
           # PR caches are only visible to that PR; master's are visible to every PR.
@@ -334,7 +379,7 @@ jobs:
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-binstall
 
@@ -362,17 +407,17 @@ jobs:
         working-directory: native/src-tauri
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup Rust
+      - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: native/src-tauri -> target
           key: android-check
@@ -401,25 +446,25 @@ jobs:
       NDK_VERSION: "27.2.12479018"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           packages: platform-tools
 
@@ -429,20 +474,20 @@ jobs:
           sdkmanager --install "ndk;${NDK_VERSION}" > /dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Setup Rust
+      - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: native/src-tauri -> target
           key: android-build
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-binstall
 
@@ -475,22 +520,22 @@ jobs:
         working-directory: web
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Setup Rust
+      - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: native/src-tauri -> target
           # PR caches are only visible to that PR; master's are visible to every PR.
@@ -508,7 +553,7 @@ jobs:
 
       # Prebuilt binary instead of compiling the CLI from source on every run.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-binstall
 
@@ -528,7 +573,7 @@ jobs:
     # `release` is deliberately absent: it is branch-only, so naming it here would
     # skip this job on the one push it exists for.
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/tags/v')
-    needs: [minesweep, npm-checks, smoke, rust-checks]
+    needs: [minesweep, npm-checks, smoke, rust-checks, rust-msrv]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Dispatching a workflow is an Actions write; job-level permissions zero every

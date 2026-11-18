@@ -120,17 +120,17 @@ rust {
 
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
-    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.appcompat:appcompat:1.8.0")
     implementation("androidx.activity:activity-ktx:1.10.1")
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
     // Native Google sign-in (signin/GoogleSignInPlugin.kt): Play services'
     // AuthorizationClient, and AndroidX Custom Tabs for the browser fallback.
     implementation("com.google.android.gms:play-services-auth:22.0.0")
-    implementation("androidx.browser:browser:1.9.0")
+    implementation("androidx.browser:browser:1.10.0")
     testImplementation("junit:junit:4.13.2")
     // The real org.json for JVM unit tests: android.jar's copy is stubs that throw.
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }

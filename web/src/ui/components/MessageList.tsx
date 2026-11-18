@@ -301,8 +301,14 @@ const Row = memo(function Row({
          * 1.4.0), so the unread dot stays the list's one spot of accent and the two are
          * never confused. A row in the multi-selection gets the same fill; the check in
          * the avatar slot is what tells it from the open message.
+         *
+         * A pressed row takes the pressed fill (`surface-active`), the same step between
+         * hover and selected the buttons use, so a tap on a row answers the finger even
+         * before the reader arrives.
          */
-        selected || checked ? "bg-surface-selected" : "hover:bg-surface-hover"
+        selected || checked
+          ? "bg-surface-selected"
+          : "hover:bg-surface-hover active:bg-surface-active"
       }`}
     >
       {/*
@@ -416,12 +422,13 @@ const Row = memo(function Row({
             <span className="flex min-w-0 items-baseline gap-1.5">
               {/*
                 Weight means unread, and only unread. A read row is regular weight
-                throughout; its hierarchy is carried by colour (ink-body for the sender
-                and subject, ink-subtle for the preview and count).
+                throughout; its hierarchy is carried by colour, in three steps: the
+                sender in ink (the name leads the scan of a row you have read), the
+                subject in ink-body, the preview and count in ink-subtle.
               */}
               <span
                 data-row-sender=""
-                className={`truncate text-ui ${unread ? "font-semibold text-ink" : "font-normal text-ink-body"}`}
+                className={`truncate text-ui ${unread ? "font-semibold text-ink" : "font-normal text-ink"}`}
               >
                 {name}
               </span>
@@ -455,7 +462,7 @@ const Row = memo(function Row({
               >
                 {email.subject || "(no subject)"}
               </span>
-              {email.body && <span className="ml-2 text-ink-subtle">{email.body}</span>}
+              {email.body && <span className="ml-3 text-ink-subtle">{email.body}</span>}
             </span>
             {chipCode && <CodeChipRoom code={chipCode} />}
           </span>
@@ -1300,15 +1307,24 @@ function MessageList({
     // one brought into view lands just below it.
     // Under floating chrome a mounted row is judged by where it really is: the offsets
     // of rows above it may still be estimates, and a few pixels off is under the glass.
-    // Its box is shifted by what the glide in flight still has to go.
+    // Its box is shifted by what the glide in flight still has to go. Keep a 10% edge
+    // margin so the next row stays hinted while navigating/extending a selection.
     const key = items[rowIndex]?.key;
+    const revealMargin = Math.floor(element.clientHeight * 0.1);
     if (contentTop > 0 && key) {
       const mounted = element.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(key)}"]`);
       if (mounted) {
         const box = element.getBoundingClientRect();
         const rect = mounted.getBoundingClientRect();
         const ahead = base - element.scrollTop;
-        const delta = rowClearance(rect.top - box.top - ahead, rect.bottom - box.top - ahead, coveredTop, element.clientHeight);
+        const delta = rowClearance(
+          rect.top - box.top - ahead,
+          rect.bottom - box.top - ahead,
+          coveredTop,
+          element.clientHeight,
+          revealMargin,
+          revealMargin,
+        );
         if (Math.abs(delta) >= 1) scrollTo(base + delta);
         return;
       }
@@ -1318,6 +1334,8 @@ function MessageList({
       coveredTop,
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
+      marginTop: revealMargin,
+      marginBottom: revealMargin,
     });
     if (target === null) return;
 
@@ -1340,7 +1358,14 @@ function MessageList({
         }
         const box = element.getBoundingClientRect();
         const rect = row.getBoundingClientRect();
-        const delta = rowClearance(rect.top - box.top, rect.bottom - box.top, coveredTop, element.clientHeight);
+        const delta = rowClearance(
+          rect.top - box.top,
+          rect.bottom - box.top,
+          coveredTop,
+          element.clientHeight,
+          revealMargin,
+          revealMargin,
+        );
         if (Math.abs(delta) >= 1) {
           element.scrollTop += delta;
           setScrollTop(element.scrollTop);
