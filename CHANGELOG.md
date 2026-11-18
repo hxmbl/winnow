@@ -22,6 +22,7 @@ adds. See `native/README.md`, "Cutting a release".
 
 ### Changed
 
+- A large mailbox feels quicker again. Catching up after time offline and each batch of arriving mail do less repeated work — messages that haven't changed are recognised instead of rebuilt, views hold still while a sync is in progress and refresh once at the end, and sorted lists are remembered between updates — so the inbox is ready sooner after a sync (STRM-581).
 - Shift+K/Shift+J now extend the selection up and down (STRM-665). They no longer jump to the first or last message.
 - Cmd/Ctrl+K jumps to the first message and Cmd/Ctrl+J jumps to the last (STRM-666).
 - Phone: in a mailbox from the menu, the dock's menu button now centres that mailbox's icon, with the chevron beside it (STRM-617).
