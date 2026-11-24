@@ -251,7 +251,7 @@ jobs:
 
       - name: Install cargo-binstall
         if: runner.os != 'macOS'
-        uses: taiki-e/install-action@v2.90.6
+        uses: taiki-e/install-action@v2.90.7
         with:
           tool: cargo-binstall
 
@@ -544,7 +544,7 @@ jobs:
           key: release-android
 
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@v2.90.6
+        uses: taiki-e/install-action@v2.90.7
         with:
           tool: cargo-binstall
 
