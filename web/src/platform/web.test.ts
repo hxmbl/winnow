@@ -120,7 +120,9 @@ describe("webPlatform notifications", () => {
         const entry: Shown = { title, options, onclick: null, closed: false };
         shown.push(entry);
         Object.defineProperty(this, "onclick", {
-          set: (handler: () => void) => void (entry.onclick = handler),
+          set: (handler: () => void) => {
+            entry.onclick = handler;
+          },
           get: () => entry.onclick,
         });
       }

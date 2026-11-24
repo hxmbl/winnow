@@ -162,7 +162,7 @@ export function StatusPill(props: Props) {
     const timer = window.setTimeout(() => setBeat((current) => (current === at ? null : current)), SYNC_RETURN_MS);
     return () => window.clearTimeout(timer);
     // `live` is rebuilt every render; its identity is its key.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [live === null ? null : noticeKey(live)]);
 
   const shown: PillNotice | null =

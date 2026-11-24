@@ -435,7 +435,7 @@ export function useKeyboard(context: KeyboardContext): void {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // All render values above are refs updated on every render; this listener is intentionally stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 

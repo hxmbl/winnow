@@ -111,7 +111,7 @@ export function Menu({ items, anchor, label, onClose, returnFocus, side = "below
     const first = enabled[0];
     if (first) itemRefs.current.get(first.id)?.focus({ preventScroll: true });
     // Only on first placement.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [position === null]);
 
   const close = useCallback(

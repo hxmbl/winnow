@@ -253,7 +253,7 @@ describe("the autosave's request sequence", () => {
     ]);
     // Threaded: the thread id on every request, and the reply headers in the raw text.
     for (const request of requests) {
-      expect((request.body?.message as { threadId?: string }).threadId).toBe("t-1");
+      expect((request.body?.message as { threadId?: string } | undefined)?.threadId).toBe("t-1");
     }
     expect(rawOf(requests[0])).toContain("In-Reply-To: <orig@example.com>");
     expect(rawOf(requests[0])).toContain("References: <orig@example.com>");
