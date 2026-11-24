@@ -14,6 +14,8 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-11-24
+
 ### Added
 
 - Playwright visual-audit scripts and before/after screenshots for the inbox, reader, filters, sidebar, phone panels and pressed interaction states across desktop and phone viewports, in light and dark themes.
@@ -21,7 +23,6 @@ adds. See `native/README.md`, "Cutting a release".
 ### Changed
 
 - Migrated web linting from ESLint to Oxlint and upgraded TypeScript to 7, keeping the existing TypeScript, React Hooks and React Refresh rule coverage. Updated the affected assertions; the full 4,297-test suite, typecheck and both lint passes are green.
-
 
 ## [1.10.0] - 2026-11-18
 
@@ -555,7 +556,8 @@ The first release of Winnow rebuilt as a React and Tauri desktop app, with the w
 - Multi-select, a sender menu and a Gmail-style context menu.
 - A phone layout, a floating sidebar over a soft blur, and light, dark and OLED themes with several accents.
 
-[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/hxmbl/winnow/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/hxmbl/winnow/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/hxmbl/winnow/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/hxmbl/winnow/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/hxmbl/winnow/compare/v1.8.0...v1.9.0
