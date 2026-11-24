@@ -14,6 +14,15 @@ adds. See `native/README.md`, "Cutting a release".
 
 ## [Unreleased]
 
+### Added
+
+- Playwright visual-audit scripts and before/after screenshots for the inbox, reader, filters, sidebar, phone panels and pressed interaction states across desktop and phone viewports, in light and dark themes.
+
+### Changed
+
+- Migrated web linting from ESLint to Oxlint and upgraded TypeScript to 7, keeping the existing TypeScript, React Hooks and React Refresh rule coverage. Updated the affected assertions; the full 4,297-test suite, typecheck and both lint passes are green.
+
+
 ## [1.10.0] - 2026-11-18
 
 ### Added
