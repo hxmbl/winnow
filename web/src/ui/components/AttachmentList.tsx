@@ -109,7 +109,7 @@ export function AttachmentList({
       for (const url of made) URL.revokeObjectURL(url);
     };
     // `load` is a fresh closure every render; the pictures are what decide the fetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [pictures]);
 
   if (attachments.length === 0) return null;

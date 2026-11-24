@@ -968,7 +968,7 @@ function MessageList({
       ),
     // `measureVersion` is the dependency that matters: `heightsRef` is a ref, so mutating
     // it does not invalidate this memo on its own.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
     [items, measureVersion],
   );
 

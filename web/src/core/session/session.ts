@@ -1569,7 +1569,7 @@ export class GmailSession {
      */
     const loadCache = (): Promise<Email[]> => cache.all();
     const platform = this.platform;
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the backend's methods are an object literal's
+    // oxlint-disable-next-line @typescript-eslint/no-this-alias -- the backend's methods are an object literal's
     const session = this;
     /** The account's offline store (bodies and attachments saved for offline), if the host has one. */
     const offline = (this.rawCache as { offline?: OfflineStore | null }).offline ?? null;

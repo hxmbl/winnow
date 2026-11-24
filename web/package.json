@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "oxlint --config .oxlintrc.json .",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,7 +19,7 @@
     "tauri:dev": "cd ../native && cargo tauri dev",
     "tauri:build": "node scripts/bundle.mjs",
     "proxy": "node --experimental-strip-types ../proxy/server.ts",
-    "lint:proxy": "cd .. && web/node_modules/.bin/eslint --config web/eslint.proxy.config.mjs proxy"
+    "lint:proxy": "cd .. && web/node_modules/.bin/oxlint --config .oxlintrc.proxy.json proxy"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -28,7 +28,6 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
@@ -36,17 +35,13 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
-    "eslint": "^10.14.0",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.7",
     "fake-indexeddb": "^6.2.6",
-    "globals": "^17.14.0",
     "jsdom": "^31.0.1",
+    "oxlint": "^1.95.0",
     "playwright": "^1.65.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",
-    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.8",
     "vitest": "^5.1.1"
   },
